@@ -180,8 +180,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             name=name,
             spec=WmmaFmhaFwdSpec(
                 head_size=args.head_size,
-                num_query_heads=args.heads,
-                num_kv_heads=args.kv_heads or args.heads,
                 mask_mode="causal" if args.causal else "none",
                 v_lds_stage=name == "vlds",
             ),

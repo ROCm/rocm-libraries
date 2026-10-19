@@ -45,6 +45,9 @@ class Type:
 
 
 I1 = Type("i1")
+I4 = Type("i4")
+U4 = Type("u4")
+U8 = Type("u8")
 I8 = Type("i8")
 I16 = Type("i16")
 I32 = Type("i32")
@@ -71,6 +74,9 @@ def dtype_to_ir_type(dtype: str) -> Type:
     info = dtype_info(dtype)
     types = {
         "i1": I1,
+        "i4": I4,
+        "u4": U4,
+        "u8": U8,
         "i8": I8,
         "i16": I16,
         "i32": I32,
@@ -139,6 +145,99 @@ def require_streaming_arch(op_name: str, gfx: str) -> None:
         )
 
 
+def dpp_ctrl_attr(op: "Op", key: str = "ctrl") -> int:
+    """Return the validated int attribute ``key`` of a one-operand i32 DPP op.
+
+    Shared by both Python lowerers for ``tile.quad_perm`` (``key="ctrl"``)
+    and ``tile.dpp_xor`` (``key="xor_mask"``, through :func:`dpp_xor_ctrl`).
+    The builders already guarantee all of this; the lowerers check again
+    because IR can reach them without a builder (hand-built, deserialized, or
+    rewritten by a pass). The checks, in order:
+
+    * anything but exactly one operand and one result is a ``ValueError``;
+    * non-i32 data or a non-i32 result is a ``ValueError`` (the DPP move is
+      32-bit, f32 callers bitcast first, and HIP would otherwise convert
+      between ``int`` and ``float`` silently);
+    * a missing ``key`` is a ``KeyError``;
+    * a ``key`` value that is not exactly ``int`` (``bool``, ``float``,
+      ``str``) is a ``TypeError``; it is never coerced into a control word.
+
+    The per-op range check stays with each lowerer. Mirrored in the C++
+    lowerers (``lower_llvm/crosslane.cpp``, ``lower_hip/lower_hip_mma.cpp``),
+    which return ``ROCKE_ERR_VALUE`` / ``ROCKE_ERR_KEY`` / ``ROCKE_ERR_TYPE``.
+    """
+    if len(op.operands) != 1 or len(op.results) != 1:
+        raise ValueError(
+            f"{op.name} expects one operand and one result, got "
+            f"{len(op.operands)} and {len(op.results)}"
+        )
+    (data,) = op.operands
+    if data.type.name != "i32":
+        raise ValueError(f"{op.name} requires i32 data, got {data.type.name}")
+    if op.result.type.name != "i32":
+        raise ValueError(f"{op.name} requires an i32 result, got {op.result.type.name}")
+    if key not in op.attrs:
+        raise KeyError(f"{op.name}: missing '{key}'")
+    value = op.attrs[key]
+    if type(value) is not int:
+        raise TypeError(f"{op.name}: {key} must be an int, got {type(value).__name__}")
+    return value
+
+
+# DPP control word of each XOR mask that has a register-only (VALU) encoding
+# on a target without ``row_xmask`` -- the gfx9 CDNA family (gfx90a, gfx942,
+# gfx950). Each entry makes lane ``i`` of every 16-lane row read lane
+# ``i ^ mask`` of the same row, exactly, for any data:
+#
+# * 1, 2, 3: ``quad_perm`` (lane ``4q + j`` reads ``4q + (j ^ mask)``);
+# * 7: ``row_half_mirror`` (lane ``j`` of an 8-lane half-row reads ``7 - j``,
+#   and ``7 - j == j ^ 7`` for ``j`` in 0..7);
+# * 8: ``row_ror:8`` (rotating 16 lanes by 8 flips lane bit 3);
+# * 15: ``row_mirror`` (``15 - j == j ^ 15`` for ``j`` in 0..15).
+#
+# Every other mask in 1..15 needs ``row_xmask`` (gfx10 and later) or the LDS
+# path (``ds_swizzle``), so it is rejected on these targets. Mirrored in C++
+# (``rocke_i_dpp_xor_ctrl`` in ``core/ir/ir_flow.cpp``).
+DPP_XOR_CTRL_NO_ROW_XMASK = {
+    1: 0xB1,  # quad_perm [1, 0, 3, 2]
+    2: 0x4E,  # quad_perm [2, 3, 0, 1]
+    3: 0x1B,  # quad_perm [3, 2, 1, 0]
+    7: 0x141,  # row_half_mirror
+    8: 0x128,  # row_ror:8
+    15: 0x140,  # row_mirror
+}
+
+
+def dpp_xor_ctrl(op: "Op", arch) -> int:
+    """Return the DPP control word that lowers ``tile.dpp_xor`` on ``arch``.
+
+    Shared by both Python lowerers. ``arch`` is the
+    :class:`~rocke.core.arch.target.ArchTarget` being lowered for. The op is
+    validated as in :func:`dpp_ctrl_attr` (``xor_mask`` in place of
+    ``ctrl``), and ``xor_mask`` outside 1..15 is a ``ValueError``: the
+    partner would leave the 16-lane row. Then:
+
+    * with ``row_xmask`` (gfx10 and later, gfx1250 included) the control is
+      ``0x160 | xor_mask``, for every mask;
+    * without it (gfx9 CDNA) the control comes from
+      :data:`DPP_XOR_CTRL_NO_ROW_XMASK`; any other mask is a ``ValueError``
+      that names the supported masks and points at ``warp_shuffle_xor``.
+    """
+    mask = dpp_ctrl_attr(op, "xor_mask")
+    if not 1 <= mask <= 15:
+        raise ValueError(f"{op.name}: xor_mask must be in 1..15, got {mask}")
+    if arch.has_dpp_row_xmask:
+        return 0x160 | mask
+    ctrl = DPP_XOR_CTRL_NO_ROW_XMASK.get(mask)
+    if ctrl is None:
+        raise ValueError(
+            f"{op.name}: xor_mask {mask} has no register-only DPP encoding on "
+            f"{arch.gfx} (no row_xmask); masks 1, 2, 3, 7, 8 and 15 do. Use "
+            f"warp_shuffle_xor (ds_swizzle) for this mask"
+        )
+    return ctrl
+
+
 def _streaming(temporal_hint: TemporalHint) -> bool:
     """True for STREAMING; any value that is not a TemporalHint is rejected."""
     if not isinstance(temporal_hint, TemporalHint):
@@ -152,6 +251,30 @@ _FENCE_SCOPES = ("workgroup", "agent", "system")
 # Orderings each op accepts; the verifier checks serialized IR against these.
 _FENCE_ORDERINGS = ("acquire", "release", "acq_rel", "seq_cst")
 _FLAG_STORE_ORDERINGS = ("monotonic", "release", "seq_cst")
+
+# Element types an LDS vector access (``smem_load_vN`` and ``smem_store_vN``)
+# admits, in the order its refusal lists them. One list for both directions
+# keeps the pair symmetric: whatever one stores as a vector can be loaded back.
+_SMEM_VECTOR_ELEMENTS = (
+    "f16",
+    "bf16",
+    "i16",
+    "f32",
+    "i32",
+    "tf32",
+    "f64",
+    "fp8e4m3",
+    "bf8e5m2",
+    "i8",
+)
+
+
+def _require_smem_vector_element(access: str, elem_name: str) -> None:
+    """Refuse an LDS vector ``access`` of an element outside ``_SMEM_VECTOR_ELEMENTS``."""
+    if elem_name not in _SMEM_VECTOR_ELEMENTS:
+        raise ValueError(
+            f"{access} supports {' / '.join(_SMEM_VECTOR_ELEMENTS)}, got {elem_name}"
+        )
 
 
 def _is_flag_ptr(t: "Type") -> bool:
@@ -167,6 +290,73 @@ def _is_flag_ptr(t: "Type") -> bool:
 def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
     if not _is_flag_ptr(ptr.type):
         raise ValueError(f"{op_name} expects a global i32 pointer, got {ptr.type.name}")
+
+
+# I4 and U4 are packed-only: their values only ever live packed in 32-bit
+# words, so no IR value, scalar or vector, and no LDS tile has either element
+# type. IRBuilder enforces it for every op result and kernel parameter through
+# _refuse_packed_only_value, the one home of that rule; the lowerers' type
+# tables have no entry for a packed-only type.
+_PACKED_ONLY_SCALARS = ("i4", "u4")
+
+
+def is_packed_only(t: "Type") -> bool:
+    """Whether ``t``'s elements are packed-only (i4, u4): ``t`` is such a
+    scalar, a vector of one, or an LDS tile of one. An untyped placeholder
+    (``None``) has no elements and is not."""
+    elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
+    return elem is not None and elem.name in _PACKED_ONLY_SCALARS
+
+
+def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
+    """Refuse an ``op_name`` result or parameter of type ``t`` whose elements
+    are packed-only (:func:`is_packed_only`)."""
+    if is_packed_only(t):
+        elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
+        raise TypeError(
+            f"{op_name}: {elem.name} values travel packed in 32-bit words and have "
+            "no scalar or vector form -- keep them in i32 storage and unpack "
+            "explicitly"
+        )
+
+
+# U8 and U4 hold unsigned integers. LLVM integers carry no sign, so u8 renders
+# as i8 and every op whose result depends on signedness asks _is_unsigned which
+# form to emit: unsigned division, remainder and ordered compares, zero rather
+# than sign extension, and no signed-overflow flag on add / sub / mul. Ops that
+# are signed by definition (smax, smin, sext and their vector forms) refuse an
+# unsigned operand through _refuse_unsigned when they are built, and again
+# through _refuse_unsigned_operands when they are lowered. U4 is packed-only
+# (above), so only U8 values ever reach an op.
+_UNSIGNED_SCALARS = ("u4", "u8")
+
+
+def _is_unsigned(t: "Type") -> bool:
+    """True when ``t``, or the element of a vector ``t``, is an unsigned integer."""
+    elem = t.elem if isinstance(t, VectorType) else t
+    return elem.name in _UNSIGNED_SCALARS
+
+
+def _refuse_unsigned(op_name: str, t: "Type", instead: Optional[str] = None) -> None:
+    """Refuse an unsigned operand of type ``t`` to ``op_name``, an op that treats
+    its operands as signed; ``instead`` names the unsigned op to use, if any."""
+    if _is_unsigned(t):
+        elem = t.elem if isinstance(t, VectorType) else t
+        message = (
+            f"{op_name} treats its operands as signed, but {elem.name} is unsigned"
+        )
+        if instead is not None:
+            message += f" -- use {instead}"
+        raise TypeError(message)
+
+
+def _refuse_unsigned_operands(op: "Op", instead: Optional[str] = None) -> None:
+    """_refuse_unsigned for every operand of ``op``, a signed op, under the op's
+    dotted name. IRBuilder refuses such an op when it is built; the lowerings
+    call this for IR that did not come through it (hand-assembled or
+    deserialized), so no signed op lowers on unsigned data."""
+    for operand in op.operands:
+        _refuse_unsigned(op.name, operand.type, instead)
 
 
 def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
@@ -324,27 +514,28 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
-    ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
-    the strictness callers relied on.
+    Resolved through ``core/arch/target._frag_info`` -- ``_MMA_FRAGMENT_INFO``,
+    or for an emulated atom the physical atom it expands into; ir.py holds no
+    private copy. Unknown op_ids (frag length 0) raise, matching the strictness
+    callers relied on.
     """
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
+        known = {*_arch._MMA_FRAGMENT_INFO, *_arch._op_id_physical_op_id()}
         raise ValueError(
-            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
-            f"{sorted(_arch._MMA_FRAGMENT_INFO)}"
+            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of {sorted(known)}"
         )
     return frag_len
 
 
-def _mma_c_is_int(op_id: str) -> bool:
-    """True when ``op_id`` accumulates in i32 (integer WMMA).
+def _mma_c_dtype(op_id: str) -> str:
+    """The accumulator dtype of ``op_id``, from the arch catalog.
 
-    Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
-    Op_ids absent from the catalog default to the f32 accumulator.
+    Sourced from ``core/arch/data/arch_specs.json`` via
+    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
+    fp32.
     """
-    return _arch._op_id_c_dtype().get(op_id) == "i32"
+    return _arch._op_id_c_dtype().get(op_id, "fp32")
 
 
 @dataclass(frozen=True)
@@ -389,6 +580,43 @@ class SmemType(Type):
         object.__setattr__(self, "elem", elem)
         object.__setattr__(self, "shape", shape)
         object.__setattr__(self, "exclusive", exclusive)
+
+
+# Pointer widths by address space, as the AMDGPU data layout states them
+# (p3 is 32 bits; global, constant and flat pointers are 64).
+_POINTER_BITS = {"lds": 32}
+_DEFAULT_POINTER_BITS = 64
+
+
+def type_bits(t: Type) -> int:
+    """The number of bits a value of IR type ``t`` occupies.
+
+    A scalar's width comes from its format (``dtype_info``); a vector's is its
+    element width times its count; a pointer's comes from its address space.
+    An LDS allocation is memory, not a value, and raises ``TypeError``.
+    """
+    if isinstance(t, VectorType):
+        return t.count * type_bits(t.elem)
+    if isinstance(t, PtrType):
+        return _POINTER_BITS.get(t.space, _DEFAULT_POINTER_BITS)
+    if isinstance(t, SmemType):
+        raise TypeError(f"{t.name} is an LDS allocation, not a value with a bit width")
+    return dtype_info(t.name).encoded_bits
+
+
+def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
+    if isinstance(source, PtrType) or isinstance(target, PtrType):
+        raise TypeError(
+            f"{verb} of {source.name} to {target.name}: a bitcast does not convert "
+            "pointers"
+        )
+    source_bits, target_bits = type_bits(source), type_bits(target)
+    if source_bits != target_bits:
+        raise ValueError(
+            f"{verb} of {source.name} ({source_bits} bits) to {target.name} "
+            f"({target_bits} bits) changes the bit width -- a bitcast keeps every "
+            f"bit; {hint}"
+        )
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -737,6 +965,7 @@ class IRBuilder:
         """
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
+        _refuse_packed_only_value("param", t)
         v = Value(name=f"%{name}", type=t)
         self._param_values[name] = v
         self._params.append(Param(name=name, type=t, attrs=dict(attrs)))
@@ -787,6 +1016,8 @@ class IRBuilder:
         result_name_hint: str = "v",
         loc: Optional[str] = None,
     ) -> Op:
+        for t in result_types:
+            _refuse_packed_only_value(name, t)
         results = [Value(self._fresh(result_name_hint), t) for t in result_types]
         op = Op(
             name=name,
@@ -1039,15 +1270,41 @@ class IRBuilder:
         return self._op("arith.not", [a], [a.type], result_name_hint="not").result
 
     def smax(self, a: Value, b: Value) -> Value:
+        """Signed maximum; an unsigned operand is refused (use :meth:`umax`)."""
+        _refuse_unsigned("smax", a.type, "umax")
+        _refuse_unsigned("smax", b.type, "umax")
         return self._op("arith.smax", [a, b], [a.type], result_name_hint="smax").result
 
     def smin(self, a: Value, b: Value) -> Value:
+        """Signed minimum; an unsigned operand is refused (use :meth:`umin`)."""
+        _refuse_unsigned("smin", a.type, "umin")
+        _refuse_unsigned("smin", b.type, "umin")
         return self._op("arith.smin", [a, b], [a.type], result_name_hint="smin").result
+
+    def _require_unsigned_pair(self, op_name: str, a: Value, b: Value) -> None:
+        scalar = not isinstance(a.type, VectorType)
+        if not (scalar and _is_unsigned(a.type) and a.type == b.type):
+            raise ValueError(
+                f"{op_name} expects two operands of one unsigned integer type, "
+                f"got {a.type.name} and {b.type.name}"
+            )
+
+    def umax(self, a: Value, b: Value) -> Value:
+        """Unsigned maximum of two u8 values. Lowers to ``llvm.umax``."""
+        self._require_unsigned_pair("umax", a, b)
+        return self._op("arith.umax", [a, b], [a.type], result_name_hint="umax").result
+
+    def umin(self, a: Value, b: Value) -> Value:
+        """Unsigned minimum of two u8 values. Lowers to ``llvm.umin``."""
+        self._require_unsigned_pair("umin", a, b)
+        return self._op("arith.umin", [a, b], [a.type], result_name_hint="umin").result
 
     def zext(self, v: Value, target: Type) -> Value:
         return self._op("arith.zext", [v], [target], result_name_hint="zx").result
 
     def sext(self, v: Value, target: Type) -> Value:
+        """Sign-extend; an unsigned source is refused (use :meth:`zext`)."""
+        _refuse_unsigned("sext", v.type, "zext")
         return self._op("arith.sext", [v], [target], result_name_hint="sx").result
 
     def trunc(self, v: Value, target: Type) -> Value:
@@ -1157,6 +1414,36 @@ class IRBuilder:
         if v.type.name != "i32":
             raise ValueError(f"sitofp_f32 expects i32 input, got {v.type.name}")
         return self._op("arith.sitofp_f32", [v], [F32], result_name_hint="sitof").result
+
+    def uitofp_f32(self, v: Value) -> Value:
+        """Unsigned-integer to f32 conversion (LLVM uitofp) of a u8 value. Exact."""
+        if isinstance(v.type, VectorType) or not _is_unsigned(v.type):
+            raise ValueError(
+                f"uitofp_f32 expects an unsigned integer input, got {v.type.name}"
+            )
+        return self._op("arith.uitofp_f32", [v], [F32], result_name_hint="uitof").result
+
+    # f32 <-> f64 has its own opcode per direction rather than riding on
+    # cast_to_f32 / cast_f32_to: those two are the f16/bf16 <-> f32 hub and
+    # keep rejecting f64, so no caller widens or narrows a double by accident.
+    def cvt_f32_to_f64(self, v: Value) -> Value:
+        """Convert an f32 to f64. Exact; lowers to one ``fpext float to double``."""
+        if v.type != F32:
+            raise ValueError(f"cvt_f32_to_f64 expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_f64", [v], [F64], result_name_hint="f64"
+        ).result
+
+    def cvt_f64_to_f32(self, v: Value) -> Value:
+        """Convert an f64 to f32, rounding to nearest even.
+
+        Lowers to one ``fptrunc double to float``.
+        """
+        if v.type != F64:
+            raise ValueError(f"cvt_f64_to_f32 expects f64 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f64_to_f32", [v], [F32], result_name_hint="f32"
+        ).result
 
     def cvt_fp8_to_f32(self, v: Value) -> Value:
         """Convert one fp8e4m3 element to f32.
@@ -1417,6 +1704,18 @@ class IRBuilder:
             raise ValueError(f"cvt_f32_to_i8_sat expects f32 input, got {v.type.name}")
         return self._op(
             "arith.cvt_f32_to_i8_sat", [v], [I8], result_name_hint="qi8"
+        ).result
+
+    def cvt_f32_to_u8_sat(self, v: Value) -> Value:
+        """Round + saturate one f32 element to u8 (round-to-nearest-even).
+
+        ``(uint8_t) min(255, max(0, rintf(v)))``; a NaN gives 0. The unsigned
+        twin of :meth:`cvt_f32_to_i8_sat`.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"cvt_f32_to_u8_sat expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_u8_sat", [v], [U8], result_name_hint="qu8"
         ).result
 
     def clamp_f32(self, v: Value, lo: Value, hi: Value) -> Value:
@@ -1699,9 +1998,10 @@ class IRBuilder:
         ).result
 
     def zero_vec(self, elem: Type, n: int) -> Value:
+        _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -2003,8 +2303,12 @@ class IRBuilder:
         ).result
 
     def vector_binary(self, op_name: str, a: Value, b: Value) -> Value:
+        """Lane-wise ``vector.<op_name>`` of two matching vectors. The signed ops
+        (``smax``, ``smin``) refuse an unsigned element type."""
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_binary expects matching vector operands")
+        if op_name in ("smax", "smin"):
+            _refuse_unsigned(f"vector_{op_name}", a.type)
         return self._op(
             f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
         ).result
@@ -2076,6 +2380,19 @@ class IRBuilder:
             result_name_hint="splat",
         ).result
 
+    def undef_vec(self, elem: Type, n: int) -> Value:
+        """Freeze-poison base for a `<n x elem>` vector that will be fully
+        overwritten by subsequent inserts (never a zero substitute). Port of
+        the pinned PR9710 ``vector.undef`` op; lowers to ``freeze <nxtype>
+        poison``.
+        """
+        return self._op(
+            "vector.undef",
+            result_types=[VectorType(elem, n)],
+            attrs={"elem": elem.name, "vec": n},
+            result_name_hint=f"udf{n}",
+        ).result
+
     def vector_select(self, mask: Value, lhs: Value, rhs: Value) -> Value:
         if lhs.type != rhs.type:
             raise ValueError("vector_select lhs/rhs type mismatch")
@@ -2112,6 +2429,7 @@ class IRBuilder:
         (``v_pk_max_i16`` etc.) can consume it."""
         if not isinstance(v.type, VectorType):
             raise ValueError("vector_sext expects vector input")
+        _refuse_unsigned("vector_sext", v.type)
         return self._op(
             "vector.sext",
             [v],
@@ -2144,9 +2462,10 @@ class IRBuilder:
     ) -> None:
         """Vectorised LDS store of N consecutive values.
 
-        Supports scalar stores (`n=1`) plus vector stores for the element types
-        accepted by :meth:`smem_load_vN`. For 8-bit element types, ``n=16`` maps
-        to a 16-byte LDS transaction, which is the native-int WMMA staging shape.
+        Supports scalar stores (`n=1`) of any element type, plus vector stores
+        of the element types :meth:`smem_load_vN` accepts (the shared
+        ``_SMEM_VECTOR_ELEMENTS``). For 8-bit element types, ``n=16`` maps to a
+        16-byte LDS transaction, which is the native-int WMMA staging shape.
         """
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
@@ -2159,6 +2478,7 @@ class IRBuilder:
         if not isinstance(value.type, VectorType):
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
+        _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
             elem_bytes = 1
@@ -2204,30 +2524,16 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16), 32-bit (f32 / i32) and 64-bit (f64, ``n in
-        {1, 2}``) element types; loads exactly N elements. In addition to
+        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64,
+        ``n in {1, 2}``) element types; loads exactly N elements. In addition to
         power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
         or three words), using element alignment. The target and alignment
         determine instruction selection.
         """
-        if dtype.name not in (
-            "f16",
-            "bf16",
-            "f32",
-            "i32",
-            "tf32",
-            "f64",
-            "fp8e4m3",
-            "bf8e5m2",
-            "i8",
-        ):
-            raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
-                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
-            )
+        _require_smem_vector_element("smem_load_vN", dtype.name)
         if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             allowed_n = (1, 2, 4, 8, 12, 16)
-        elif dtype.name in ("f16", "bf16"):
+        elif dtype.name in ("f16", "bf16", "i16"):
             allowed_n = (1, 2, 4, 6, 8)
         elif dtype.name == "f64":
             allowed_n = (1, 2)
@@ -2268,9 +2574,12 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x float>`` (the per-lane
-        accumulator length the atom produces). When ``op`` is an ``op_id``
-        string the frag length is resolved from the static MMA fragment table.
+        The result vector type is ``<c_frag_len x C>``: the per-lane
+        accumulator length the atom produces, with C the instruction's
+        accumulator dtype from the arch catalog. When ``op`` is an ``op_id``
+        string the frag length is resolved from the static MMA fragment table;
+        an emulated atom's op_id resolves through the physical atom it expands
+        into.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
@@ -2283,7 +2592,11 @@ class IRBuilder:
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
-        error = tf32_mma_error(op_id, [a, b, c, *extra])
+        from .arch.mfma_scale import scaled_mfma_error
+
+        error = scaled_mfma_error(op_id, [a, b, c, *extra]) or tf32_mma_error(
+            op_id, [a, b, c, *extra]
+        )
         if error:
             raise ValueError(error)
         c_frag_len = (
@@ -2291,15 +2604,13 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
-        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
-        # is an MmaOp, else resolve from the arch SSOT via op_id.
-        c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
-        c_elem = I32 if is_int_acc else F32
+        # Accumulator element type: the atom's own c_dtype when ``op`` is an
+        # MmaOp, else the catalog's accumulator dtype for the op_id.
+        c_dtype = getattr(op, "c_dtype", None) or _mma_c_dtype(op_id)
+        c_elem = dtype_to_ir_type(c_dtype)
         hint = (
             "mxacc"
-            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
         return self._op(
@@ -2662,17 +2973,16 @@ class IRBuilder:
         a_scale: Value,
         b_scale: Value,
     ) -> Value:
-        """MX-MFMA with in-instruction scales (P15).
+        """Existing gfx950 16x16x128 MFMA with in-instruction scales (P15).
 
-        ``mfma_scale_f32_16x16x128_f8f6f4`` is the gfx950 MX MFMA
-        instruction family. Operands are 16-byte packed mantissa
-        vectors (fp8/fp6/fp4) plus per-warp E8M0 scales applied
-        in-instruction. The scale broadcast inside the instruction is
-        per-output-row (vs per-input-row), which is what fixes the
-        B_MX1 row-aware correctness gap that the post-hoc
-        scale-apply chain has.
+        This fixed-operation wrapper delegates to ``mma``. LLVM lowering
+        uses two ``<8 x i32>`` payloads, a ``<4 x float>`` accumulator and
+        separate i32 scale operands; A/B format selectors are fixed to zero.
+        It lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
 
-        Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        For 32x32x64 with independently selected A/B formats and K32 E8M0
+        scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
+        with that atom and both scales. See ``reference/mma_metadata.md``.
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
 
@@ -2788,8 +3098,11 @@ class IRBuilder:
         `buffer_load_dwordxN`) and `<2N x f16>` (the form the MFMA wants),
         or `<N x i32>` (raw 32-bit dwords) and `<N x float>`. The LLVM
         lowering emits an `addrspacecast`-less `bitcast`; the gfx
-        backend folds it away.
+        backend folds it away. A target of a different bit width raises.
         """
+        _check_bitcast_width(
+            "vec_bitcast", v.type, target, "slice or concatenate the vector first"
+        )
         return self._op(
             "vector.bitcast",
             [v],
@@ -3354,23 +3667,34 @@ class IRBuilder:
         ).result
 
     def dpp_xor(self, data: Value, xor_mask: int) -> Value:
-        """``v_mov_b32_dpp`` ``row_xmask`` — cross-lane XOR permute on the
-        **VALU** (NOT the LDS port).
+        """Cross-lane XOR permute within each 16-lane DPP row, on the
+        **VALU** (NOT the LDS port). Low-level op behind
+        :meth:`warp_shuffle_xor_dpp`; kernels should call that.
 
         Lane ``L`` reads ``data`` from lane ``(L & ~0xF) | ((L & 0xF) ^
         xor_mask)`` — i.e. an XOR butterfly *within* each 16-lane DPP row.
-        ``xor_mask`` must be in 1..15 so the partner stays in the same row.
+        ``xor_mask`` must be an ``int`` in 1..15 so the partner stays in the
+        same row. Data must be ``i32``.
 
-        This is the RDNA (gfx11/gfx12) replacement for the gfx9/gfx95
-        :meth:`ds_swizzle_xor` softmax-reduction butterfly. ``ds_swizzle``
-        is an LDS-bus op that costs ``lgkmcnt`` and serialises on the LDS
-        port; ``row_xmask`` runs entirely in the VALU pipeline, and LLVM's
-        DPP-combine folds a single-use ``update.dpp`` + ``fmax``/``fadd``
-        into one ``v_max_f32_dpp`` / ``v_add_f32_dpp``. Lowered through
-        ``llvm.amdgcn.update.dpp.i32`` with ``dpp_ctrl = 0x160 | mask``
-        (the AMDGPU ``DPP_ROW_XMASK`` encoding). Data must be ``i32``."""
+        The IR op ``tile.dpp_xor`` carries only the mask; the lowerer picks
+        the DPP control word for the target (:func:`dpp_xor_ctrl`), always
+        through ``llvm.amdgcn.update.dpp.i32`` with row/bank masks ``15, 15``
+        and ``bound_ctrl`` set:
+
+        * targets with ``row_xmask`` (gfx11, gfx12, gfx1250): ``0x160 |
+          mask`` (the AMDGPU ``DPP_ROW_XMASK`` encoding), for every mask;
+        * gfx9 CDNA (gfx90a, gfx942, gfx950), which has no ``row_xmask``:
+          1, 2, 3 -> ``quad_perm``; 7 -> ``row_half_mirror``; 8 ->
+          ``row_ror:8``; 15 -> ``row_mirror``. Each is exactly XOR with that
+          mask. Any other mask fails to lower with a ``ValueError``; use
+          :meth:`warp_shuffle_xor` (``ds_swizzle``) for it.
+
+        ``ds_swizzle`` is an LDS-bus op that costs ``lgkmcnt`` and
+        serialises on the LDS port; DPP runs in the VALU pipeline."""
         if data.type.name != "i32":
             raise ValueError("dpp_xor requires i32 data")
+        if type(xor_mask) is not int:
+            raise TypeError(f"dpp_xor xor_mask must be an int, got {xor_mask!r}")
         if not (1 <= xor_mask <= 15):
             raise ValueError(
                 f"dpp_xor xor_mask must be 1..15 (intra-16-lane row), got {xor_mask}"
@@ -3399,8 +3723,7 @@ class IRBuilder:
 
         That is a property of the quad, not a claim about every target:
         the op still requires DPP-capable hardware. Base-DPP
-        ``quad_perm`` is available on CDNA, where the RDNA-only
-        ``row_xmask`` of :meth:`dpp_xor` is not.
+        ``quad_perm`` is available on CDNA, where ``row_xmask`` is not.
 
         The op carries no lane targeting -- the control word is broadcast
         to every quad in the wave, with row and bank masks fixed at
@@ -3424,8 +3747,9 @@ class IRBuilder:
     def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
         """XOR shuffle within a four-lane quad.
 
-        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
-        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. For
+        other masks use :meth:`warp_shuffle_xor_dpp` (VALU) or
+        :meth:`warp_shuffle_xor` (``ds_swizzle``).
         """
         if xor_mask == 1:
             perm = [1, 0, 3, 2]
@@ -3583,7 +3907,10 @@ class IRBuilder:
         return self._op("tile.lane_id", [], [I32], result_name_hint="lane").result
 
     def bitcast(self, v: Value, target: Type) -> Value:
-        """Bitcast a scalar to another type of the same size."""
+        """Bitcast a scalar to a type of the same bit width; another width raises."""
+        _check_bitcast_width(
+            "bitcast", v.type, target, "convert the value to change its width"
+        )
         return self._op(
             "arith.bitcast",
             [v],
@@ -3694,17 +4021,47 @@ class IRBuilder:
         )
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
-        """VALU XOR shuffle (lane ``l`` gets ``v`` from lane ``l ^ lane_xor``)
-        via :meth:`dpp_xor` ``row_xmask`` — the RDNA replacement for the
-        :meth:`warp_shuffle_xor` ``ds_swizzle`` path.
+        """VALU XOR shuffle: lane ``l`` gets ``v`` from lane ``l ^ lane_xor``
+        (CUDA ``__shfl_xor_sync`` within a 16-lane row), on registers only,
+        with no LDS (``ds_swizzle``) traffic.
 
-        ``lane_xor`` must be in 1..15 (the XOR partner stays inside the
-        16-lane DPP row, which is exactly the WMMA 16-lane softmax
-        row-group). Runs on the VALU (no LDS port / ``lgkmcnt``); LLVM's
-        DPP-combine folds the single-use result into the consuming
-        ``v_max_f32``/``v_add_f32`` to give one ``v_*_f32_dpp`` per stage.
+        Emits one :meth:`dpp_xor` (``tile.dpp_xor``); the lowerer picks the
+        register-only DPP encoding of the mask for the target:
+
+        ============  ==========================  ======================
+        ``lane_xor``  gfx9 CDNA (gfx90a, gfx942,  gfx11, gfx12, gfx1250
+                      gfx950)
+        ============  ==========================  ======================
+        1             ``quad_perm [1,0,3,2]``     ``row_xmask:1``
+        2             ``quad_perm [2,3,0,1]``     ``row_xmask:2``
+        3             ``quad_perm [3,2,1,0]``     ``row_xmask:3``
+        7             ``row_half_mirror``         ``row_xmask:7``
+        8             ``row_ror:8``               ``row_xmask:8``
+        15            ``row_mirror``              ``row_xmask:15``
+        other 1..15   rejected at lowering        ``row_xmask:<mask>``
+        ============  ==========================  ======================
+
+        Every entry is exactly XOR with the mask, for any data. On gfx9 CDNA
+        a mask outside the table raises ``ValueError`` when the kernel is
+        lowered (the builder does not know the target); use
+        :meth:`warp_shuffle_xor` there, which goes through ``ds_swizzle``.
+
+        The shuffle works per 16-lane DPP row (4 rows in wave64, 2 in
+        wave32) and never crosses a row, so ``lane_xor`` must be an ``int``
+        in 1..15. A 16-lane all-reduce is ``v = v + shuffle(v, m)`` for ``m``
+        in ``1, 2, 7, 15`` (those masks span all four lane-index bits) or
+        ``1, 2, 4, 8`` on targets with ``row_xmask``. As in any butterfly,
+        every lane of the row must be active: each lane relays its
+        partners' partial results, so one inactive lane leaves wrong totals
+        in the active lanes (``bound_ctrl`` only makes a disabled source
+        lane read ``0``).
+
         Handles f32 by bitcasting through i32 (matching
         :meth:`warp_shuffle_xor`)."""
+        if type(lane_xor) is not int:
+            raise TypeError(
+                f"warp_shuffle_xor_dpp lane_xor must be an int, got {lane_xor!r}"
+            )
         if not (1 <= lane_xor <= 15):
             raise ValueError(
                 f"warp_shuffle_xor_dpp lane_xor must be 1..15, got {lane_xor}"
@@ -4558,6 +4915,11 @@ class IRBuilder:
         eb = _elem_bytes.get(dtype.name)
         if eb is None:
             raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
+        if n <= 0 or (n * eb) % 4 != 0:
+            raise ValueError(
+                f"buffer_load_vN: n={n} dtype={dtype.name} is not a whole number "
+                "of dwords"
+            )
         dwords = (n * eb) // 4
         if dwords not in (1, 2, 4):
             raise ValueError(
@@ -4621,6 +4983,18 @@ class IRBuilder:
             [rsrc, voffset, soffset],
             [F16],
             result_name_hint="bl1",
+        ).result
+
+    def buffer_load_f16_d16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
+        """D16-form scalar half buffer load: ``raw_ptr_buffer_load.f16``
+        returns `half` directly (no i16 + bitcast round-trip). Port of the
+        pinned PR9710 ``tile.buffer_load_f16_d16`` op.
+        """
+        return self._op(
+            "tile.buffer_load_f16_d16",
+            [rsrc, voffset, soffset],
+            [F16],
+            result_name_hint="bld16",
         ).result
 
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
@@ -5229,7 +5603,13 @@ PURE_OP_NAMES = {
     "arith.cast_to_f32",
     "arith.cast_f32_to",
     "arith.sitofp_f32",
+    "arith.cvt_f32_to_f64",
+    "arith.cvt_f64_to_f32",
     "arith.cvt_fp8_to_f32",
+    "arith.umax",
+    "arith.umin",
+    "arith.uitofp_f32",
+    "arith.cvt_f32_to_u8_sat",
     "math.exp2",
     "math.exp2_fast",
     "math.log2",
