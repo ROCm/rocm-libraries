@@ -52,9 +52,7 @@
 #include <thrust/detail/complex/math_private.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace complex
+namespace detail::complex
 {
 using thrust::complex;
 
@@ -196,8 +194,7 @@ THRUST_HOST_DEVICE inline complex<float> clogf(const complex<float>& z)
   }
   return (complex<float>(0.5f * log1pf(hm1), atan2(y, x)));
 }
-} // namespace complex
-} // namespace detail
+} // namespace detail::complex
 
 template <>
 THRUST_HOST_DEVICE inline complex<float> log(const complex<float>& z)
