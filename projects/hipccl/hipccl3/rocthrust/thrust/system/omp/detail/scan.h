@@ -73,7 +73,8 @@ OutputIterator scan_impl(
   const int num_threads = omp_get_max_threads();
 
   // Use serial scan for small arrays where parallel overhead dominates
-  if (static_cast<size_t>(n) < parallel_scan_threshold || num_threads <= 1)
+  if (static_cast<size_t>(n) < _THRUST_STD::max(parallel_scan_threshold, static_cast<size_t>(num_threads))
+      || num_threads <= 1)
   {
     if constexpr (IsInclusive)
     {
@@ -92,6 +93,8 @@ OutputIterator scan_impl(
     }
   }
 
+  // Parallel scan requires multiple threads (num_threads > 1 is guaranteed above).
+
   temporary_array<accum_t, DerivedPolicy> block_sums(exec, num_threads);
 
   // Step 1: Reduce each block (N reads)
@@ -104,7 +107,9 @@ OutputIterator scan_impl(
 
     if (start < n)
     {
-      block_sums[tid] = _THRUST_STD::reduce(first + start, first + end, accum_t{}, wrapped_binary_op);
+      // For both has_init and no-init cases: reduce each block using first element as init
+      accum_t first_elem = *(first + start);
+      block_sums[tid]    = _THRUST_STD::reduce(first + start + 1, first + end, first_elem, wrapped_binary_op);
     }
   }
 
@@ -115,7 +120,10 @@ OutputIterator scan_impl(
   }
   else
   {
-    _THRUST_STD::exclusive_scan(block_sums.begin(), block_sums.end(), block_sums.begin(), accum_t{}, wrapped_binary_op);
+    // For no init inclusive scan: exclusive_scan starting at second element with first element as init
+    accum_t first_block_sum = block_sums[0];
+    _THRUST_STD::exclusive_scan(
+      block_sums.begin() + 1, block_sums.end(), block_sums.begin() + 1, first_block_sum, wrapped_binary_op);
   }
 
   // Step 3: Scan each block with offset (N reads/writes)
@@ -128,13 +136,30 @@ OutputIterator scan_impl(
 
     if (start < n)
     {
-      const accum_t prefix = block_sums[tid];
       if constexpr (IsInclusive)
       {
-        _THRUST_STD::inclusive_scan(first + start, first + end, result + start, wrapped_binary_op, prefix);
+        if constexpr (has_init)
+        {
+          const accum_t prefix = block_sums[tid];
+          _THRUST_STD::inclusive_scan(first + start, first + end, result + start, wrapped_binary_op, prefix);
+        }
+        else
+        {
+          // For no init: thread 0 has no prefix, others use block_sums
+          if (tid == 0)
+          {
+            _THRUST_STD::inclusive_scan(first + start, first + end, result + start, wrapped_binary_op);
+          }
+          else
+          {
+            const accum_t prefix = block_sums[tid];
+            _THRUST_STD::inclusive_scan(first + start, first + end, result + start, wrapped_binary_op, prefix);
+          }
+        }
       }
       else
       {
+        const accum_t prefix = block_sums[tid];
         _THRUST_STD::exclusive_scan(first + start, first + end, result + start, prefix, wrapped_binary_op);
       }
     }

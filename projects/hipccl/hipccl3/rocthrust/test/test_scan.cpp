@@ -25,6 +25,7 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/scan.h>
+#include <thrust/tabulate.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -38,6 +39,8 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <cstddef>
 #endif
+
+#include <numeric>
 
 TESTS_DEFINE(ScanTests, FullTestsParams);
 
@@ -880,24 +883,39 @@ struct Int
   THRUST_HOST_DEVICE explicit Int(int num)
       : i(num)
   {}
-  THRUST_HOST_DEVICE Int()
-      : i{}
-  {}
-  THRUST_HOST_DEVICE Int operator+(Int const& o) const
+
+  Int() = default;
+
+  THRUST_HOST_DEVICE friend Int operator+(Int const& a, Int const& b)
   {
-    return Int{this->i + o.i};
+    return Int{a.i + b.i};
+  }
+
+  THRUST_HOST_DEVICE friend bool operator==(Int const& a, Int const& b)
+  {
+    return a.i == b.i;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, Int const& a)
+  {
+    return os << "Int{" << a.i << "}";
   }
 };
 
-TEST(ScanTests, TestInclusiveScanWithUserDefinedType)
+TEST(ScanTests, TestScanWithUserDefinedTypeAndInit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<Int> vec(5, Int{1});
-
-  thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin());
-
-  ASSERT_EQ(static_cast<Int>(vec.back()).i, 5);
+  {
+    thrust::device_vector<Int> vec(5, Int{1});
+    thrust::exclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin(), Int{100}, _THRUST_STD::plus<Int>());
+    ASSERT_EQ(vec, (thrust::device_vector<Int>{Int{100}, Int{101}, Int{102}, Int{103}, Int{104}}));
+  }
+  {
+    thrust::device_vector<Int> vec(5, Int{1});
+    thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin(), Int{100}, _THRUST_STD::plus<Int>());
+    ASSERT_EQ(vec, (thrust::device_vector<Int>{Int{101}, Int{102}, Int{103}, Int{104}, Int{105}}));
+  }
 }
 
 // Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
@@ -1005,4 +1023,88 @@ TEST(ScanTests, TestInclusiveScanWithNonCommutativeOp)
       {3, 2, 0, 1, 4},
       {0, 1, 4, 2, 3},
       {4, 0, 2, 1, 3}}));
+}
+
+// Adapted from issue: https://github.com/NVIDIA/cccl/issues/6317
+TEST(ScanTests, TestScanBug6317)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using T     = unsigned int;
+  const int n = 1729;
+  for (auto seed : get_seeds())
+  {
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    {
+      thrust::host_vector<T> h_s = get_random_data<T>(n, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> s = h_s;
+      thrust::device_vector<T> d(n);
+      const auto r = thrust::inclusive_scan(s.cbegin(), s.cend(), d.begin(), _THRUST_STD::multiplies<>{});
+      ASSERT_EQ((d.end() == r), true);
+      std::partial_sum(h_s.cbegin(), h_s.cend(), h_s.begin(), std::multiplies<>{});
+      ASSERT_EQ(h_s, d);
+    }
+    {
+      thrust::host_vector<T> h_s = get_random_data<T>(n, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> s = h_s;
+      thrust::device_vector<T> d(n);
+      const auto r = thrust::exclusive_scan(s.cbegin(), s.cend(), d.begin(), 42, _THRUST_STD::multiplies<>{});
+      ASSERT_EQ((d.end() == r), true);
+      thrust::exclusive_scan(h_s.cbegin(), h_s.cend(), h_s.begin(), 42, _THRUST_STD::multiplies<>{});
+      ASSERT_EQ(h_s, d);
+    }
+  }
+}
+
+// Test edge cases for parallel scan with non-additive operations
+TEST(ScanTests, TestScanEdgeCases)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using thrust::placeholders::_1;
+
+  // Large array, at, and below the OMP parallel_scan_threshold (1024)
+  auto check = [](int n, auto gen, int init, bool inclusive) {
+    thrust::device_vector<int> d_input(n);
+    thrust::tabulate(d_input.begin(), d_input.end(), gen);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = inclusive
+             ? thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), init, _THRUST_STD::multiplies<>{})
+             : thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), init, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    if (inclusive)
+    {
+      thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), init, _THRUST_STD::multiplies<>{});
+    }
+    else
+    {
+      thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), init, _THRUST_STD::multiplies<>{});
+    }
+    ASSERT_EQ(d_output, h_output);
+  };
+  check(10000, (_1 % 5) + 1, 2, true);
+  check(1024, _1 + 1, 10, true);
+  check(1023, (_1 % 3) + 1, 5, true);
+  check(10000, (_1 % 3) + 1, 5, false);
+  check(1024, (_1 % 5) + 1, 3, false);
+
+  // Very small arrays (edge case for block distribution)
+  {
+    thrust::device_vector<int> d_input = {3, 7};
+    thrust::device_vector<int> d_output(2);
+    auto r = thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 2, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+    ASSERT_EQ(d_output, (thrust::device_vector<int>{6, 42}));
+  }
+  {
+    thrust::device_vector<int> d_input = {2, 4};
+    thrust::device_vector<int> d_output(2);
+    auto r = thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 3, _THRUST_STD::multiplies<>{});
+    ASSERT_EQ((d_output.end() == r), true);
+    ASSERT_EQ(d_output, (thrust::device_vector<int>{3, 6}));
+  }
 }
