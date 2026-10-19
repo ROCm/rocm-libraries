@@ -33,10 +33,13 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _paged_reference(q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, softcap):
+def _paged_reference(
+    q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, softcap, sliding_window=0
+):
     """FP32 O and natural-log LSE with the unified bottom-right causal mask
-    (key k visible to query p iff k <= p + kv_len - q_len). Rows with no key
-    get O = 0 and LSE = -inf."""
+    (key k visible to query p iff k <= diag, diag = p + kv_len - q_len) and, when
+    ``sliding_window`` > 0, diag - k < sliding_window. Rows with no key get
+    O = 0 and LSE = -inf."""
     hq, d = q.shape[1], q.shape[2]
     hkv, bs = k_cache.shape[2], k_cache.shape[1]
     outs, lses, start = [], [], 0
@@ -53,7 +56,11 @@ def _paged_reference(q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, s
             s = softcap * torch.tanh(s / softcap)
         p = torch.arange(ql, device=q.device).view(-1, 1)
         kk = torch.arange(kl, device=q.device).view(1, -1)
-        s = s.masked_fill(~(kk <= p + (kl - ql)), float("-inf"))
+        diag = p + (kl - ql)
+        visible = kk <= diag
+        if sliding_window > 0:
+            visible = visible & (diag - kk < sliding_window)
+        s = s.masked_fill(~visible, float("-inf"))
         lse = torch.logsumexp(s, dim=-1)  # [hq, ql]
         has = torch.isfinite(lse)
         prob = torch.exp(s - torch.where(has, lse, 0.0).unsqueeze(-1))
@@ -65,7 +72,17 @@ def _paged_reference(q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, s
 
 
 def _case(
-    q_lens, kv_lens, *, hq=32, hkv=8, d=128, dtype="bf16", bs=16, softcap=0.0, seed=0
+    q_lens,
+    kv_lens,
+    *,
+    hq=32,
+    hkv=8,
+    d=128,
+    dtype="bf16",
+    bs=16,
+    softcap=0.0,
+    sliding_window=0,
+    seed=0,
 ):
     g = torch.Generator(device="cuda").manual_seed(seed)
     tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
@@ -95,6 +112,7 @@ def _case(
         max_seqlen_k=max(max(kv_lens), 1),
         dtype=dtype,
         softcap=softcap,
+        sliding_window=sliding_window,
         num_kv_blocks=num_blocks,
         emit_lse=True,
     )
@@ -176,6 +194,99 @@ def test_split_kv_lse_with_softcap():
         q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(128), 30.0
     )
     assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+
+
+def _assert_matches_reference(out, lse, o_ref, lse_ref, tol):
+    assert torch.isfinite(out).all(), "non-finite O"
+    assert (out.float() - o_ref).abs().max().item() < tol
+    assert not torch.isnan(lse).any(), "an LSE row was left unwritten"
+    assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+    finite = torch.isfinite(lse_ref)
+    assert (lse[finite] - lse_ref[finite]).abs().max().item() < tol
+
+
+def _nan_lse(problem):
+    return torch.full(
+        (problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda"
+    )
+
+
+# Decode with ragged KV and spec-decode: the shapes the split-KV path serves.
+_DECODE_SHAPES = [([1, 1, 1, 1], [4096, 777, 1500, 2049]), ([4, 2], [3000, 1029])]
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("q_lens,kv_lens", _DECODE_SHAPES)
+def test_split_kv_lse_with_one_query_head_per_kv_head(q_lens, kv_lens):
+    """qpk = 1 (Hq == Hkv): a different query-head-to-row layout than GQA."""
+    problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, hq=8, hkv=8)
+    lse = _nan_lse(problem)
+    out = _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=0.0)
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(128), 0.0
+    )
+    _assert_matches_reference(out, lse, o_ref, lse_ref, _tolerance("bf16"))
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("window", [128, 1000])
+@pytest.mark.parametrize("q_lens,kv_lens", _DECODE_SHAPES)
+def test_split_kv_lse_with_sliding_window(q_lens, kv_lens, window):
+    """Sliding window empties the segments left of the window for every row."""
+    problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, sliding_window=window)
+    lse = _nan_lse(problem)
+    out = _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=0.0)
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(128), 0.0, window
+    )
+    _assert_matches_reference(out, lse, o_ref, lse_ref, _tolerance("bf16"))
+
+
+_PINNED_SPLIT_KV_SPEC = {
+    "gfx942": "gfx942_u3d_splitkv_seg16_t1xb",
+    "gfx950": "gfx950_u3d_splitkv_seg16_t1xb",
+}
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+def test_pinned_split_kv_spec_end_to_end():
+    """The dispatcher route: a request pinned to a split-KV tuning spec with an
+    explicit segment count, bound to real tensors and launched."""
+    from dispatch.attention import AttentionRequest, dispatch_attention
+
+    q_lens, kv_lens = [1, 1, 1, 1], [4096, 777, 1500, 2049]
+    problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens)
+    request = AttentionRequest(
+        batch=4,
+        nhead_q=32,
+        nhead_k=8,
+        seqlen_q=1,
+        seqlen_k=4096,
+        hdim_q=128,
+        hdim_v=128,
+        arch=_arch(),
+        mask_type=2,  # bottom-right causal, as in _paged_reference
+        dtype="bf16",
+        emit_lse=True,
+        algorithm="unified_tuning",
+        spec_id=_PINNED_SPLIT_KV_SPEC[_arch()],
+    )
+    result = dispatch_attention(request)
+    assert result.spec.reduce_spec.emit_lse is True
+    assert result.spec.reduce_spec.num_segments == 16
+    out, lse = torch.empty_like(q), _nan_lse(problem)
+    tensors = dict(
+        q=q, k=kc, v=vc, out=out, cu_seqlens_q=cu, seqused_k=su, block_table=bt, lse=lse
+    )
+    result.bind_torch(tensors).launch()
+    torch.cuda.synchronize()
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(128), 0.0
+    )
+    _assert_matches_reference(out, lse, o_ref, lse_ref, _tolerance("bf16"))
 
 
 # (q_len, kv_len): the last KV tile holds only keys row 0 cannot see (bottom-right
