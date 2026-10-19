@@ -79,45 +79,160 @@ def test_get_version_no_match_raises(monkeypatch):
         C._getVersion("amdclang++", "--version", r"version\s+([\d.]+)")
 
 
-def test_get_rocm_version_uses_hipconfig(monkeypatch):
-    seen = {}
-
-    def _fake(exe, flag, regex):
-        seen["exe"], seen["flag"] = exe, flag
-        return SemanticVersion(6, 4, 0)
-
-    monkeypatch.setattr(C, "_getVersion", _fake)
+def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
+    """ROCM_VERSION env var takes priority over all other sources."""
+    monkeypatch.setenv("ROCM_VERSION", "6.4.0")
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
-    assert seen["flag"] == "--version"
-    assert seen["exe"] == C.ToolchainDefaults.HIP_CONFIG
+
+
+def test_get_rocm_version_rejects_info_version_only(monkeypatch, tmp_path):
+    """get_rocm_version raises when only .info/version exists.
+
+    .info/version contains the ROCm release version (e.g. 6.4.0) which lacks
+    the HIP build number needed for feature gating. It is intentionally excluded
+    from the discovery chain; callers must set ROCM_VERSION or provide a ROCm
+    install that includes share/hip/version or include/hip/hip_version.h.
+    """
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("6.4.0")
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: None)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
 
 
 @pytest.mark.parametrize(
-    "hipconfig_output, expected_version",
+    "exe_depth, version_str, expected_version",
     [
         pytest.param(
-            b"7.1.25424-4179531dcd",
-            SemanticVersion(7, 1, 25424),
-            id="rocm_7_1_build_suffix",
+            1,
+            "#define HIP_VERSION_MAJOR 10\n#define HIP_VERSION_MINOR 1\n#define HIP_VERSION_PATCH 0\n",
+            SemanticVersion(10, 1, 0),
+            id="dist_bin_layout",
         ),
         pytest.param(
-            b"7.2.26015-fc0010cf6a",
-            SemanticVersion(7, 2, 26015),
-            id="rocm_7_2_build_suffix",
+            3,
+            "#define HIP_VERSION_MAJOR 7\n#define HIP_VERSION_MINOR 2\n#define HIP_VERSION_PATCH 53211\n",
+            SemanticVersion(7, 2, 53211),
+            id="dist_lib_llvm_bin_layout",
         ),
     ],
 )
-def test_get_rocm_version_parses_hipconfig_build_suffix(
-    monkeypatch, hipconfig_output, expected_version
+def test_get_rocm_version_path_fallback_hip_version_h(
+    monkeypatch, tmp_path, exe_depth, version_str, expected_version
 ):
-    monkeypatch.setattr(C, "validateToolchain", lambda x: x)
+    """PATH fallback parses hip_version.h when ROCM_PATH/HIP_PATH are absent.
 
-    class _R:
-        stdout = hipconfig_output
+    In TheRock CI builds ROCm tools such as amdclang++ are on PATH but
+    ROCM_PATH is not set and /opt/rocm does not exist. get_rocm_version()
+    walks up from the found executable's directory (up to 5 levels) looking
+    for share/hip/version then include/hip/hip_version.h then .info/version.
+    Two typical layouts are exercised: dist/bin/ (1 level up to dist/) and
+    dist/lib/llvm/bin/ (3 levels up to dist/).
+    """
+    # Build a fake executable nested exe_depth directories under tmp_path.
+    parts = ["sub"] * exe_depth + ["bin"]
+    bin_dir = tmp_path
+    for p in parts:
+        bin_dir = bin_dir / p
+    bin_dir.mkdir(parents=True)
+    exe = bin_dir / "amdclang++"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
 
-    monkeypatch.setattr(C, "run", lambda *a, **k: _R())
+    # Place hip_version.h at the root of tmp_path (the "dist" level).
+    hip_dir = tmp_path / "include" / "hip"
+    hip_dir.mkdir(parents=True)
+    (hip_dir / "hip_version.h").write_text(version_str)
+
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    # Redirect the default /opt/rocm root so the prefix loop falls through
+    # to the PATH walk without reading from the real system installation.
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: str(exe) if name == "amdclang++" else None)
 
     assert C.get_rocm_version() == expected_version
+
+
+# ---------------------------------------------------------------------------
+# get_rocm_version — error and edge-case branches
+# ---------------------------------------------------------------------------
+
+def test_parse_hip_version_invalid_raises():
+    """_parse_hip_version raises RuntimeError for non-version strings."""
+    with pytest.raises(RuntimeError, match="Invalid HIP version"):
+        C._parse_hip_version("not-a-version")
+
+
+def test_read_hip_build_version_malformed_raises(tmp_path):
+    """_read_hip_build_version raises RuntimeError when version fields are missing."""
+    malformed = tmp_path / "hip_version.h"
+    malformed.write_text("HIP_VERSION_MAJOR = 7\n")  # MINOR and PATCH missing
+    with pytest.raises(RuntimeError, match="Invalid HIP version file"):
+        C._read_hip_build_version(malformed)
+
+
+def test_get_rocm_version_raises_when_no_exe_found(monkeypatch, tmp_path):
+    """get_rocm_version raises RuntimeError when no ROCm exe is on PATH.
+
+    Exercises the continue branch (shutil.which returns None for all exes)
+    and the final raise RuntimeError.
+    """
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: None)
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
+
+
+def test_get_rocm_version_raises_when_walk_finds_nothing(monkeypatch, tmp_path):
+    """get_rocm_version raises RuntimeError when exe is found but walk finds no version.
+
+    Exercises the inner-loop-exhausted branch (walk completes 5 iterations
+    without finding a version) and the final raise RuntimeError.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "amdclang++"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: str(exe) if name == "amdclang++" else None)
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
+
+
+def test_get_rocm_version_walk_breaks_at_filesystem_root(monkeypatch, tmp_path):
+    """get_rocm_version breaks the walk when parent == candidate (filesystem root).
+
+    Exercises the parent == candidate guard by using an exe path whose
+    immediate parent is the filesystem root /.
+    """
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")
+    import shutil as _shutil
+    # Return a path at the filesystem root so parent == candidate on the first iteration.
+    monkeypatch.setattr(_shutil, "which", lambda name: "/amdclang++" if name == "amdclang++" else None)
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
 
 
 # ---------------------------------------------------------------------------
