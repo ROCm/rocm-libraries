@@ -65,6 +65,7 @@ class Shape {
         return m_dimensions[dimension];
     }
 
+    // Requires dimension < rank().
     size_t operator[](size_t dimension) const noexcept {
         return m_dimensions[dimension];
     }
