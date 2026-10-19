@@ -76,14 +76,14 @@ try
     }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftZ = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftZ = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
     rocblas_stride strideZ = 0;
 
-    rocblas_int const max_batch_count = 64 * 1024;
+    rocblas_int const max_batch_count = 64 * 1024 - 1;
     rocblas_int const nsweep = ceildiv(batch_count_arg, max_batch_count);
     rocblas_int const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
