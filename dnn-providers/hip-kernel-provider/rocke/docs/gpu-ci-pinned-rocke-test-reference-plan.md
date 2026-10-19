@@ -20,14 +20,18 @@ SDPA DVC delivery and architecture-specific packaging were validated in CI for
 gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
 verification, installed Python reference tests, and fresh-cache DVC download checks.
 The gfx1201 replacement compiles for `gfx12-generic` and passed qualification,
-source verification, and installed tests; its DVC upload and fresh-cache download
-check remain pending. The gfx1200 adapter uses the same compiler target but
+source verification, installed tests, and anonymous download authentication
+against its published DVC pointer and committed lock.
+The gfx1200 adapter uses the same compiler target but
 awaits its own GPU qualification and installation enrollment. On a gfx1200
 runner requesting both gfx120X targets, the gfx1201 pinned CTest skips with code
 77; that result is not gfx1200 pinned coverage. See
 [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
-Native provider execution and final TheRock artifact splitting remain unvalidated
-for those three targets.
+Local packaging checks used TheRock's artifact descriptor, splitter, archive
+compression, and downloader selection to verify processor-specific payload routing
+and file-hash preservation for all five published pairs. These checks used the
+Python reference installation harness and local archive transport; native provider
+execution needs separate coverage.
 Further architectures, convolution gradients, KDA, and GDN remain future work.
 
 Offline qualification compares a pinned rocKE implementation with an independent

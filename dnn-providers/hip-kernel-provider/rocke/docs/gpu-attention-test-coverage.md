@@ -14,9 +14,10 @@ The full source inventory below is historical; newer gfx950 tests for scale
 variation, sliding windows, and output-store equality are not included in its
 counts. The gfx950 and standalone WMMA pinned cohorts are summarized separately below.
 
-Source inventory: commit `270fab13c2c`, reviewed 2026-10-02. The latest supplied
-gfx942 CI log executed on 2026-10-01: all eight reference cases and three negative
-checks passed; the wider library GPU suite reported 84 passes and 134 skips.
+Source inventory: commit `270fab13c2c`, reviewed 2026-10-02. The historical
+gfx942 CI log used for this inventory executed on 2026-10-01: all eight reference
+cases and three negative checks passed; the wider library GPU suite reported
+84 passes and 134 skips.
 Published artifact packaging was separately verified at run `36897764926`.
 A source-declared shape is not necessarily selected, executed, or passed in CI.
 
@@ -49,9 +50,9 @@ listed separately in the inventory, not added to the eight workload rows.
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
 | gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Seven base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
-| gfx1151 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1151 CI artifact-splitting validation |
+| gfx1151 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; local artifact routing checked |
 | gfx1200 standalone WMMA attention compiled for gfx12-generic | 8 adapter configurations | Pending GPU qualification; host selection, ABI, and contract tests only | No installed pinned CTest |
-| gfx1201 standalone WMMA attention compiled for gfx12-generic | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1201 CI artifact-splitting validation |
+| gfx1201 standalone WMMA attention compiled for gfx12-generic | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; local artifact routing checked |
 | gfx1250 WMMA attention | 2 | No | Device-gated; verifier uses NumPy/HIP |
 | Extended FMHA/Sage/sparse harness | 15 named cases | No | Outer test skips; per-case hardware guards also apply |
 | KDA/GDN prefill and decode | See separate matrix | No: recurrent operators | Torch/device-gated |

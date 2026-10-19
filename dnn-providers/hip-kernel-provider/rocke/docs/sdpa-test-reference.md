@@ -362,9 +362,11 @@ ctest --test-dir <install-prefix>/bin/hip_kernel_provider \
   -R '^rocke_sdpa_gpu_gfx1201_pytest$' --output-on-failure
 ```
 
-The GPU entry is installed when a qualified bundle is configured. In that required
-lane, a missing bundle, missing GPU, or failed qualification check is an error;
-unqualified GPU architectures remain outside this pilot and skip its cases.
+The GPU entry is installed when a published bundle is configured. On matching
+hardware, a missing bundle or failed qualification check is an error. Other
+processors skip only when allowed by the
+[processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs);
+a missing GPU or a processor outside the requested targets fails a requested suite.
 
 Further SDPA cohorts, runtime-shape reuse, sliding windows, and non-default
 scales need their own qualification and retained structural assertions. The
@@ -392,12 +394,13 @@ These options select what pytest reads; they do not change what CMake installs.
 CMake packages the standard archives for all operation/architecture pairs in
 `platform/cmake/PublishedGpuReferences.cmake`, and pytest finds the installed target
 bundle by default.
-There is no separate architecture-selection option or unqualified bundle alias.
-Other detected, unenrolled GPU architectures remain outside the required cohort.
+CMake has no per-architecture reference-install option; its publication lists
+determine which pairs are installed. The pytest options select execution from
+those suites or verify an explicit candidate bundle and lock.
 
 ## Bundle contents and provenance
 
-The DVC pointer is
+The gfx942 DVC pointer is
 [`reference_bundles/sdpa/gfx942.tar.gz.dvc`](../library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc).
 Its schema-2 bundle contains:
 
@@ -415,7 +418,7 @@ identity, Python/NumPy versions, and payload hashes. The source lock authenticat
 the manifest; the bundled lock alone is not the trust anchor. Temporary NPZ files
 can be used for worker transport, but tensor files are rejected from the archive.
 
-The current baseline source revision is
+The gfx942 baseline source revision is
 `dd77374194a3ea1a7258cd54f87af6747b6362a5`; manifest SHA-256 is
 `e73b01b9aacb8c7586e914fbeb8844f804287c09422c57e8364026d4b47d5be1`.
 The archive's DVC MD5 is `77741d920b443a6a5537085755bafc65`.
