@@ -89,11 +89,11 @@ TEST(Result, PayloadConstructionExceptionsPropagate) {
         }
     };
     const Payload payload;
-    EXPECT_THROW((Expected<Payload, TestFailure>(payload)), PayloadFailure);
+    EXPECT_THROW(static_cast<void>(Expected<Payload, TestFailure>(payload)), PayloadFailure);
     static_assert(!std::is_nothrow_constructible_v<Expected<Payload, TestFailure>, const Payload&>);
     static_assert(std::is_nothrow_constructible_v<Expected<int, TestFailure>, int>);
     const Unexpected<Payload> error(std::in_place);
-    EXPECT_THROW((Expected<int, Payload>(error)), PayloadFailure);
+    EXPECT_THROW(static_cast<void>(Expected<int, Payload>(error)), PayloadFailure);
     static_assert(
         !std::is_nothrow_constructible_v<Expected<int, Payload>, const Unexpected<Payload>&>);
 }
