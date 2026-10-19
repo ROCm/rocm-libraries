@@ -4,11 +4,12 @@
 > emitter that serves GDN and KDA, plus chunkwise **prefill** kernels where GDN
 > ships as a mode of the existing KDA implementation.
 > This document specifies *what* the kernels compute and *why they are shaped the way they are*.
-> It is a specification, not a tuning history, and it carries **no latency measurements** — latency
-> is recorded in the internal perf repository per repository compliance.
+> It is a specification, not a tuning history, and it carries **no measurements** — latency is
+> recorded in the internal perf repository per repository compliance.
 >
 > **This file is the entry point for the family.** Its sibling `README.md` covers the host-side
-> tools — driver, benchmark, retuning, exit codes — and nothing about what the kernels compute.
+> tools — driver, benchmark, retuning, exit codes — and nothing about what the kernels compute;
+> `CASE_STUDY.md` keeps the compiler-dependent per-tile register counts of the decode load order.
 
 ---
 
@@ -403,41 +404,18 @@ where the parent order did: each row's `v` inputs and its conv in the step-8 row
 chunk at step 7, and `out_gate` / `norm_weight` at the norm. Their `q`, `k` and gate inputs still
 load first. The exception is keyed on the wave count only. A multi-wave `fuse_conv` tile hoists
 everything, and its per-lane cap is `512 / ceil(NW / 4)` VGPRs, so tiles with a small `WTK` (wide
-`q`/`k` slices with their taps and weights) or many waves can still spill; the Cost list below
-names the ones that start to.
+`q`/`k` slices with their taps and weights) or many waves can still spill; `CASE_STUDY.md` lists
+the ones that do, per compiler.
 
 Cost: holding the raw state, `q`, `k` and `v` (and, fused, their taps and weights) live at once
 changes the register count, up for some tiles and down for others. Where that crosses a
-register-allocation granule it costs or gains one wave per SIMD, or changes a spill. VGPR and
-scratch counts are read from the gfx950 code object; waves per SIMD are modeled from the VGPR
-count (512 per SIMD lane, 8-register allocation granule), not measured with a hardware counter.
-Against the interleaved order (Python lowerer, ROCm 7.13 comgr, bf16 I/O, `DK = DV = 128`; GDN at
-`Hk/Hv = 16/32`, KDA at `32/32`, the fused tiles at `16/16`; bf16 state unless marked `f32`):
-
-- one wave per SIMD lost: GDN `(1,16,2)`, `(1,16,4)`, `(2,16,1)`, `(2,16,2)`, `(4,8,1)`, `(4,16,1)`,
-  `(8,8,1)`; the KDA tuned tile `(2,16,1)`; at `(4,16,1)`, `fuse_conv` alone (GDN and KDA) and with
-  the norm (GDN), and the KDA norm alone (bf16 and `f32` state);
-- one wave per SIMD gained: GDN `(1,16,16)` and the default `(2,16,8)`;
-- spill grows: GDN `(1,1,1)` and `(1,1,2)`, which already spill at `DK = 128`;
-- spill, fused tiles (`DK = DV = 128`, 16/16 heads, `BPV = 1`, every legal `(NW, WTK)`; ROCm 10
-  comgr from the kernel-factory image, `llvm23`): starts on five `(4,4,1)` `fuse_conv` tiles — GDN
-  bf16 state with and without the norm, KDA bf16 state with and without the norm, KDA `f32` state
-  without the norm; ends on three norm-only tiles — `(1,2,1)` GDN and KDA bf16 state, `(2,1,1)` KDA
-  `f32` state. 102 of the 228 legal fused tiles spill here and 100 in the interleaved order; the
-  rest grow or shrink. The single-wave `fuse_conv` tile `(1,16,1)` stays at 0 B; `(1,1,1)` to
-  `(1,8,1)` either stay at 0 B or already spilled in the interleaved order. Which tiles start to
-  spill depends on the compiler: ROCm 7.13 starts ten (on `(2,4,1)`, `(4,4,1)`, `(8,8,1)` and
-  `(16,16,1)`) and ROCm 7.1 eleven. Every compiler keeps these fused tiles at 0 B, and
-  `test_lowers_and_compiles_without_scratch` holds them there: every mode on `(1,16,1)`, `(2,8,1)`,
-  `(2,16,1)`, `(4,8,1)`, `(4,16,1)` and `(8,16,1)`, and norm-only on every legal tile except
-  `(1,1,1)` and `(1,2,1)`. At `DK = DV = 64` and `256`, which no target model uses (§1.4), seven
-  and eighteen fused tiles start to spill. The registry never builds a fused spec (§4.9), so this
-  list matters to callers who pick a fused tile themselves;
-- unchanged: every other registered GDN tile, the other KDA tuned tiles, the default `(2,16,8)`
-  with `f32` state; `(1,1,1)` at `DK` 64 (no spill) and 192 (its spill
-  shrinks), where it is the auto route because `(2,16,8)` is illegal (§4.6).
-
-These counts depend on the compiler and the lowering; re-measure them when either changes.
+register-allocation granule a tile gains or loses waves per SIMD, or starts, stops or changes a
+spill. Which tiles move, and in which direction, depends on the compiler: the same tile can gain
+waves under one comgr and lose them under another. No dispatcher candidate starts to spill; some
+multi-wave `fuse_conv` tiles do, and `test_lowers_and_compiles_without_scratch` holds at 0 B the
+fused cases that every measured compiler keeps there. `CASE_STUDY.md` has the per-tile counts for
+each measured compiler and the command that regenerates them; re-run it when the compiler or the
+lowering changes.
 
 Tile defaults (§4.6) were measured on the interleaved order and are re-measured when the defaults
 are re-picked.
@@ -591,9 +569,9 @@ implementation that rounds `o` to bf16 first differs by up to one bf16 step).
 
 **Cost.** `fuse_conv` with a single wave owns all `DV` rows plus their taps and weights, so it is a
 register-heavy (legal) tile, like the unfused `(1,1,1)`; it keeps part of the interleaved order so
-that `(1,16,1)` does not spill, while multi-wave conv tiles hoist every load and some of them start
-to spill (§4.3, Cost); some `(4,16,1)` conv tiles also run one wave per SIMD lower than with
-an interleaved order (§4.3, Cost). The fused modes are an enablement path and recompute shared work
+that `(1,16,1)` does not spill, while multi-wave conv tiles hoist every load; some of them start
+to spill or run fewer waves per SIMD than with the interleaved order, and which ones depends on
+the compiler (`CASE_STUDY.md`). The fused modes are an enablement path and recompute shared work
 instead of sharing it. A q/k conv channel depends only on its k-lane, so every `(wave, v-lane)`
 pair of the workgroup recomputes it: `NW × WTV = NW × 64 / WTK` times per head, each time
 re-loading its taps and weights (16 times at the `(4, 16, 1)` tile). A V channel's conv and an

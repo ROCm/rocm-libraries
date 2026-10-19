@@ -214,12 +214,12 @@ _FLAGS = ((True, False), (False, True), (True, True))
 
 # Fused (NW, WTK) tiles at DK = DV = 128, 16/16 heads, BPV = 1 that compile
 # with 0 B scratch in every gate kind, state dtype and fusion mode under ROCm
-# 7.1, ROCm 7.13 and ROCm 10 (ALGORITHM.md section 4.3). Norm-only also fits on
-# every legal tile except _NORM_ONLY_SPILL_TILES. Every other fused tile spills
-# in some mode under at least one of those compilers, and which modes is
-# compiler-dependent, so the held set is per tile, not per mode: a few
-# individual modes on those tiles (8 of them) also stay at 0 B but are only
-# required to lower.
+# 7.1, ROCm 7.13 and ROCm 10 (builders/gfx950/gdn/CASE_STUDY.md). Norm-only
+# also fits on every legal tile except _NORM_ONLY_SPILL_TILES. Every other
+# fused tile spills in some mode under at least one of those compilers, and
+# which modes is compiler-dependent, so the held set is per tile, not per
+# mode: a few individual modes on those tiles (8 of them) also stay at 0 B but
+# are only required to lower.
 _NO_SPILL_TILES = ((1, 16), (2, 8), (2, 16), (4, 8), (4, 16), (8, 16))
 _NORM_ONLY_SPILL_TILES = ((1, 1), (1, 2))
 
