@@ -1343,7 +1343,7 @@ struct CommRCCLAllToAll : public MultiPlanItem
         hipEvent_wrapper_t event;
     };
 
-    // _agents must be indexed by NCCL rank (sorted world locations).
+    // _agents must be indexed by NCCL rank (rccl.get_locations() order).
     // Remote ranks may have empty buffers; events are allocated only
     // for local locations.
     CommRCCLAllToAll(const rocfft_rccl_comm_t& _rccl,
