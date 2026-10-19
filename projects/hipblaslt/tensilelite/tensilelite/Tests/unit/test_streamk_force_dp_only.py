@@ -22,8 +22,6 @@
 #
 ################################################################################
 
-from types import SimpleNamespace
-
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.ValidParameters import validParameters
@@ -95,23 +93,6 @@ def minimal_size_mapping_state():
     }
 
 
-def size_mapping_from_state(state):
-    """Size mapping of one solution state, read back from solution_from_state."""
-    import importlib.util
-
-    import pytest
-
-    if importlib.util.find_spec("tensilelite_write") is None:
-        pytest.skip("tensilelite_write extension was not built")
-    import tensilelite_write
-    from test_msgpack_writer import _small_solution_state
-
-    full = _small_solution_state()
-    full.update(state)
-    record = tensilelite_write.solution_from_state(full)
-    return SimpleNamespace(**record["sizeMapping"])
-
-
 def test_streamk_force_dp_only_is_valid_tuning_parameter():
     assert validParameters["StreamKForceDPOnly"] == [0, 1]
     assert "StreamKForceDPOnly" not in defaultSolution
@@ -127,7 +108,7 @@ def test_streamk_force_dp_only_type_is_checked_as_int():
 
 def test_streamk_force_dp_only_defaults_in_size_mapping():
     state = minimal_size_mapping_state()
-    size_mapping = size_mapping_from_state(state)
+    size_mapping = SizeMapping.FromOriginalState(state)
 
     assert "streamKForceDPOnly" not in SizeMapping.StateKeys
     assert "tileProcessingStrategy" in SizeMapping.StateKeys
@@ -139,7 +120,7 @@ def test_streamk_force_dp_only_round_trips_to_size_mapping():
     state = minimal_size_mapping_state()
     state["StreamKForceDPOnly"] = 1
 
-    size_mapping = size_mapping_from_state(state)
+    size_mapping = SizeMapping.FromOriginalState(state)
 
     assert size_mapping.tileProcessingStrategy == "DataParallel"
     assert size_mapping.workAssignment == "StaticGrid"

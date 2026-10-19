@@ -434,19 +434,17 @@ def _minimal_size_mapping_state():
 
 
 def test_size_mapping_data_parallel_round_trips():
-    from test_streamk_force_dp_only import size_mapping_from_state
-
     assert "tileProcessingStrategy" in SizeMapping.StateKeys
 
     state = _minimal_size_mapping_state()
     state["TileProcessingStrategy"] = "DataParallel"
     state["WorkAssignment"] = "StaticGrid"
-    assert size_mapping_from_state(state).tileProcessingStrategy == "DataParallel"
+    assert SizeMapping.FromOriginalState(state).tileProcessingStrategy == "DataParallel"
 
     state_off = _minimal_size_mapping_state()
     state_off["TileProcessingStrategy"] = "StreamK"
     state_off["WorkAssignment"] = "StaticGrid"
-    assert size_mapping_from_state(state_off).tileProcessingStrategy == "StreamK"
+    assert SizeMapping.FromOriginalState(state_off).tileProcessingStrategy == "StreamK"
 
 
 # ---------------------------------------------------------------------------

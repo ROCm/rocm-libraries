@@ -222,12 +222,6 @@ class HardwarePredicate(Properties.Predicate):
 
         return supportedChipIds
 
-    def state(self):
-        record = getattr(self, "_record", None)
-        if record is not None:
-            return copy.deepcopy(record)
-        return super().state()
-
     def __lt__(self, other):
         # Use superclass logic for TruePreds
         if other.tag == 'TruePred' or self.tag == 'TruePred':
