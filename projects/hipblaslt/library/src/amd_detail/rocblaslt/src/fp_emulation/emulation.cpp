@@ -1014,7 +1014,7 @@ namespace FixedPointEmulation
                                                T*                                 D,
                                                int64_t                            ldd,
                                                hipStream_t                        stream,
-                                               const FixedPointEmulationSettings& settings,
+                                               const FixedPointEmulationDecision& decision,
                                                ProfileAccum*                      prof)
     {
         static_assert(std::is_same_v<T, double> || std::is_same_v<T, float>,
@@ -1028,7 +1028,7 @@ namespace FixedPointEmulation
         /* Workspace budget: use max_num_moduli<T>() because ADP selects effective_s
          * at runtime — the workspace must accommodate up to that many moduli. */
         const size_t ws_budget
-            = compute_budget_from_ws(m, n, k, num_moduli, settings.workspace_bytes);
+            = compute_budget_from_ws(m, n, k, num_moduli, decision.workspace_bytes);
 
         {
             const unsigned chunk_sz = compute_chunk_size(m, n, k, num_moduli, ws_budget);
@@ -1063,8 +1063,8 @@ namespace FixedPointEmulation
                 /* ADP-aware performance model s: use the minimum s that satisfies the
                  * precision target instead of S_MAX, to avoid overestimating emulation
                  * cost in dynamic mode.                                               */
-                const int      adp_bits_impl = (settings.adp_mantissa_bits > 0)
-                                                   ? static_cast<int>(settings.adp_mantissa_bits)
+                const int      adp_bits_impl = (decision.adp_mantissa_bits > 0)
+                                                   ? static_cast<int>(decision.adp_mantissa_bits)
                                                    : fixedPointEmulationAdpMantissaBits(type_a_perf);
                 const unsigned pm_s_impl     = adp_expected_num_moduli(adp_bits_impl, num_moduli);
                 const double   t_mono
@@ -1084,7 +1084,7 @@ namespace FixedPointEmulation
                                                                      k,
                                                                      pm_s_impl,
                                                                      device,
-                                                                     settings.workspace_bytes,
+                                                                     decision.workspace_bytes,
                                                                      type_a_perf);
 
                 if(force_split || t_split < t_mono)
@@ -1107,7 +1107,7 @@ namespace FixedPointEmulation
                                                                     D,
                                                                     ldd,
                                                                     stream,
-                                                                    settings,
+                                                                    decision,
                                                                     prof);
                         if(st != rocblaslt_status_success)
                             return st;
@@ -1134,7 +1134,7 @@ namespace FixedPointEmulation
                                                                        D2,
                                                                        ldd,
                                                                        stream,
-                                                                       settings,
+                                                                       decision,
                                                                        prof);
                     if(st2 != rocblaslt_status_success)
                     {
@@ -1223,7 +1223,7 @@ namespace FixedPointEmulation
         const size_t szRowMax     = cola8i;
         const size_t szColMax     = padn;
 
-        char* const ws = static_cast<char*>(settings.workspace);
+        char* const ws = static_cast<char*>(decision.workspace);
 
         int8_t* const    A8i        = reinterpret_cast<int8_t*>(ws);
         int8_t* const    B8i        = A8i + szA8i;
@@ -1249,7 +1249,7 @@ namespace FixedPointEmulation
         /* Translate hipblasltEmulationSpecialValuesSupport_t enum to bitmask:
          * DEFAULT(0)=both(0x3), NONE(1)=0x0, INFINITY(2)=0x1, NAN(3)=0x2 */
         uint32_t svmask;
-        switch(settings.sv_support)
+        switch(decision.sv_support)
         {
         case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     svmask = 0x0u; break;
         case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: svmask = 0x1u; break;
@@ -1496,8 +1496,8 @@ namespace FixedPointEmulation
             (void)hipMemsetAsync(adp_buf, 0, 2 * sizeof(float), stream);
             /* Resolve ADP target precision: settings sentinel 0 → env var default (52). */
             const float adp_bits
-                = static_cast<float>((settings.adp_mantissa_bits > 0)
-                                         ? settings.adp_mantissa_bits
+                = static_cast<float>((decision.adp_mantissa_bits > 0)
+                                         ? decision.adp_mantissa_bits
                                          : fixedPointEmulationAdpMantissaBits(
                                                std::is_same_v<T, double> ? HIP_R_64F : HIP_R_32F));
 
@@ -1853,9 +1853,20 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
      * value", disabling the env-var fallback for that setting.               */
     using namespace FixedPointEmulation;
     FixedPointEmulationDecision result{};
-    result.status  = rocblaslt_status_success;
-    result.apply   = false;
-    result.sv_mask = fixedPointEmulationSpecialValuesMask();
+    result.status    = rocblaslt_status_success;
+    result.apply     = false;
+    result.workspace = nullptr;
+    /* Resolve sv_support from env var (default: both Inf+NaN). */
+    {
+        const uint32_t env_mask = fixedPointEmulationSpecialValuesMask();
+        switch(env_mask)
+        {
+        case 0x0u: result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;     break;
+        case 0x1u: result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; break;
+        case 0x2u: result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;      break;
+        default:   result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;  break;
+        }
+    }
 
     /* Type and batch-count pre-checks (no env-var validation needed). */
     if((type_a != HIP_R_64F && type_a != HIP_R_32F) || batch_count != 1)
@@ -1878,24 +1889,9 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
     if(!get_perf_model_params(dev))
         return result;
 
-    /* Resolve special_values_mask.
-     * When desc is present, all 4 enum values are concrete (DEFAULT=both Inf+NaN=0x3).
-     * When desc is nullptr, fall back to the env var (default 0x3).
-     * hipblasltEmulationSpecialValuesSupport_t → bitmask:
-     *   DEFAULT (0) -> 0x3 (detect both Inf and NaN)
-     *   NONE    (1) -> 0x0 (skip detection)
-     *   INFINITY(2) -> 0x1 (bit 0 = Inf)
-     *   NAN     (3) -> 0x2 (bit 1 = NaN) */
+    /* Resolve sv_support from descriptor (overrides env var when descriptor is present). */
     if(ed)
-    {
-        switch(ed->emulation_sv_support)
-        {
-        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     result.sv_mask = 0x0u; break;
-        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: result.sv_mask = 0x1u; break;
-        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:      result.sv_mask = 0x2u; break;
-        default: result.sv_mask = 0x3u; break; /* DEFAULT: both Inf+NaN */
-        }
-    }
+        result.sv_support = ed->emulation_sv_support;
 
     /* ADP target precision.
      * Priority: desc->emulation_fixedpoint_max_mantissa_bits (> 0) > type-specific env var. */
@@ -1911,19 +1907,17 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
     {
         const hipblasLtEmulationStrategy_t desc_strat
             = ed ? ed->emulation_strategy : HIPBLASLT_EMULATION_STRATEGY_DEFAULT;
-        const bool eager
-            = (desc_strat == HIPBLASLT_EMULATION_STRATEGY_EAGER)
-              || (desc_strat == HIPBLASLT_EMULATION_STRATEGY_DEFAULT && fixedPointEmulationIsEager());
-        if(eager
+        result.strategy
+            = (desc_strat == HIPBLASLT_EMULATION_STRATEGY_EAGER
+               || (desc_strat == HIPBLASLT_EMULATION_STRATEGY_DEFAULT && fixedPointEmulationIsEager()))
+                  ? HIPBLASLT_EMULATION_STRATEGY_EAGER
+                  : HIPBLASLT_EMULATION_STRATEGY_PERFORMANT;
+        result.workspace_bytes = workspace_bytes;
+        if(result.strategy == HIPBLASLT_EMULATION_STRATEGY_EAGER
            || fixedPointEmulationPerformanceCheck(
                h, desc, type_a, opA, opB, m, n, k, workspace_bytes))
         {
             result.apply = true;
-            /* Store the caller's workspace preference so fixedPointEmulationWorkspaceSize
-         * can cap the returned size at min(optimal, workspace_cap).  This
-         * ensures the library never reports a workspace larger than the user
-         * allocated.                                       */
-            result.workspace_cap = workspace_bytes;
         }
     } /* end strategy block */
 
@@ -1972,7 +1966,7 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
           + padn * sizeof(int32_t) /* col_max[n] — precomputed by partial kernel */
           + 2 * sizeof(float) /* ADP float buffer: adp_buf[0..1] (bias ±200) */
           + OZ2_INT8_GEMM_WS_BYTES; /* INT8 GEMM workspace (preliminary + batch)  */
-    return std::min(optimal, decision.workspace_cap);
+    return std::min(optimal, decision.workspace_bytes);
 }
 
 unsigned fixedPointEmulationNumModuli()
@@ -2031,23 +2025,21 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                   double*                            D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationSettings& settings)
+                                  const FixedPointEmulationDecision& decision)
 {
     using namespace FixedPointEmulation;
     /* ── Change 4: Workspace Graceful Degradation ────────────────────────────
      * No internal hipMalloc.  The caller must provide workspace via
-     * settings.workspace / settings.workspace_bytes.  If none is provided
+     * decision.workspace / decision.workspace_bytes.  If none is provided
      * or the budget makes emulation slower than native, fall back to native. */
     const _rocblaslt_handle* h = reinterpret_cast<const _rocblaslt_handle*>(handle);
     /* Always ADP mode: layout uses max_num_moduli<double>() moduli. */
     const unsigned num_moduli = max_num_moduli<double>();
     const int      device     = h->device;
 
-    const FixedPointEmulationSettings& effectiveSettings = settings;
-
     {
-        const size_t W = settings.workspace_bytes;
-        const void*  P = settings.workspace;
+        const size_t W = decision.workspace_bytes;
+        const void*  P = decision.workspace;
 
         static std::atomic<int> s_ws_absent_warns{0};
         static std::atomic<int> s_ws_small_warns{0};
@@ -2091,11 +2083,11 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
 
         /* EAGER strategy means "always emulate, bypass the performance model".
          * Only apply the performance gate in PERFORMANT mode.                */
-        const bool is_eager_g = settings.eager;
+        const bool is_eager_g = (decision.strategy == HIPBLASLT_EMULATION_STRATEGY_EAGER);
 
         /* ADP-aware performance model s. */
-        const int      adp_bits_g = (settings.adp_mantissa_bits > 0)
-                                        ? static_cast<int>(settings.adp_mantissa_bits)
+        const int      adp_bits_g = (decision.adp_mantissa_bits > 0)
+                                        ? static_cast<int>(decision.adp_mantissa_bits)
                                         : fixedPointEmulationAdpMantissaBits(HIP_R_64F);
         const unsigned pm_s_g     = adp_expected_num_moduli(adp_bits_g, num_moduli);
 
@@ -2115,7 +2107,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                && s_ws_small_warns.fetch_add(1, std::memory_order_relaxed) < 5)
             {
                 FixedPointEmulationDecision ws_dec{};
-                ws_dec.workspace_cap = ~size_t{0};
+                ws_dec.workspace_bytes = ~size_t{0};
                 const size_t opt_ws
                     = fixedPointEmulationWorkspaceSize(h, HIP_R_64F, opA, opB, m, n, k, ws_dec);
                 hipblaslt_cerr << "[hipBLASLt WARNING] FP64 emulation workspace (" << (W >> 20)
@@ -2157,7 +2149,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                                            D,
                                                            ldd,
                                                            stream,
-                                                           effectiveSettings,
+                                                           decision,
                                                            _prof ? &accum : nullptr);
 
     if(_prof)
@@ -2172,8 +2164,8 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
         const unsigned       scale_chunk_size = chunk_size;
         const bool           tA               = (opA != HIPBLAS_OP_N);
         const bool           tB               = (opB != HIPBLAS_OP_N);
-        const int            adp_bits_prof_64 = (settings.adp_mantissa_bits > 0)
-                                                    ? static_cast<int>(settings.adp_mantissa_bits)
+        const int            adp_bits_prof_64 = (decision.adp_mantissa_bits > 0)
+                                                    ? static_cast<int>(decision.adp_mantissa_bits)
                                                     : fixedPointEmulationAdpMantissaBits(HIP_R_64F);
         const PerfModelTimes pm
             = effective_perf_model_times(tA,
@@ -2216,7 +2208,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                          accum.effective_s_used,
                          scale_chunk_size,
                          chunk_size,
-                         (unsigned long long)settings.workspace_bytes,
+                         (unsigned long long)decision.workspace_bytes,
                          accum.n_sub_gemms,
                          accum.t_prelim,
                          accum.t_prelim_gemm,
@@ -2418,7 +2410,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                   float*                             D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationSettings& settings)
+                                  const FixedPointEmulationDecision& decision)
 {
     using namespace FixedPointEmulation;
 
@@ -2427,11 +2419,9 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
     const unsigned num_moduli = max_num_moduli<float>();
     const int      device     = h->device;
 
-    const FixedPointEmulationSettings& effectiveSettings = settings;
-
     {
-        const size_t W = settings.workspace_bytes;
-        const void*  P = settings.workspace;
+        const size_t W = decision.workspace_bytes;
+        const void*  P = decision.workspace;
 
         static std::atomic<int> s_ws_absent_warns{0};
         static std::atomic<int> s_ws_small_warns{0};
@@ -2467,11 +2457,11 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
             W_var = W_var1;
         }
 
-        const bool is_eager_g = settings.eager;
+        const bool is_eager_g = (decision.strategy == HIPBLASLT_EMULATION_STRATEGY_EAGER);
 
         /* ADP-aware performance model s. */
-        const int      adp_bits_g = (settings.adp_mantissa_bits > 0)
-                                        ? static_cast<int>(settings.adp_mantissa_bits)
+        const int      adp_bits_g = (decision.adp_mantissa_bits > 0)
+                                        ? static_cast<int>(decision.adp_mantissa_bits)
                                         : fixedPointEmulationAdpMantissaBits(HIP_R_32F);
         const unsigned pm_s_g     = adp_expected_num_moduli(adp_bits_g, num_moduli);
 
@@ -2492,7 +2482,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                && s_ws_small_warns.fetch_add(1, std::memory_order_relaxed) < 5)
             {
                 FixedPointEmulationDecision ws_dec{};
-                ws_dec.workspace_cap = ~size_t{0};
+                ws_dec.workspace_bytes = ~size_t{0};
                 const size_t opt_ws
                     = fixedPointEmulationWorkspaceSize(h, HIP_R_32F, opA, opB, m, n, k, ws_dec);
                 hipblaslt_cerr << "[hipBLASLt WARNING] FP32 emulation workspace (" << (W >> 20)
@@ -2537,7 +2527,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                                           D,
                                                           ldd,
                                                           stream,
-                                                          effectiveSettings,
+                                                          decision,
                                                           _prof ? &accum : nullptr);
 
     if(_prof)
@@ -2552,8 +2542,8 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
         const unsigned       scale_chunk_size = chunk_size;
         const bool           tA               = (opA != HIPBLAS_OP_N);
         const bool           tB               = (opB != HIPBLAS_OP_N);
-        const int            adp_bits_prof_32 = (settings.adp_mantissa_bits > 0)
-                                                    ? static_cast<int>(settings.adp_mantissa_bits)
+        const int            adp_bits_prof_32 = (decision.adp_mantissa_bits > 0)
+                                                    ? static_cast<int>(decision.adp_mantissa_bits)
                                                     : fixedPointEmulationAdpMantissaBits(HIP_R_32F);
         const PerfModelTimes pm
             = effective_perf_model_times(tA,
@@ -2596,7 +2586,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                          accum.effective_s_used,
                          scale_chunk_size,
                          chunk_size,
-                         (unsigned long long)settings.workspace_bytes,
+                         (unsigned long long)decision.workspace_bytes,
                          accum.n_sub_gemms,
                          accum.t_prelim,
                          accum.t_prelim_gemm,

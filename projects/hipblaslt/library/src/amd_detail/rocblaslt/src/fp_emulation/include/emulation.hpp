@@ -149,18 +149,23 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a);
 /* =========================================================================
  * Decision struct and gate function -- status-propagating
  * ========================================================================= */
+
+/* Resolved emulation gate-result and per-call execution settings.
+ * Produced by fixedPointEmulationDecision(); passed directly to fp{32,64}EmulatedGemm().
+ * All fields carry fully resolved concrete values once status == rocblaslt_status_success. */
 struct FixedPointEmulationDecision
 {
-    rocblaslt_status status; /* rocblaslt_status_invalid_value on bad env   */
-    bool             apply; /* true -> use emulation; false -> native path */
-    unsigned int     sv_mask; /* resolved special-values mask                */
-    size_t           workspace_cap; /* caller workspace limit; ~size_t{0} = none  */
+    rocblaslt_status                         status;      /* invalid_value on bad env            */
+    bool                                     apply;       /* true -> use emulation; false -> native path */
+    hipblasltEmulationSpecialValuesSupport_t sv_support;  /* resolved special-values handling    */
+    hipblasLtEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env; never DEFAULT) */
+    void*                                    workspace;   /* caller workspace ptr; nullptr until filled before GEMM dispatch */
+    size_t                                   workspace_bytes; /* caller workspace size; ~size_t{0} = no budget constraint */
     /* ADP target precision in mantissa bits.
      * 52 = full IEEE 754 FP64 precision; 23 = full IEEE 754 FP32 precision.
      * Derived from the per-matmul desc attribute, then from the type-specific
-     * env var (FP64/FP32_MANTISSA_BIT_COUNT or FP64/FP32_TOLERANCE).
-     * Only consulted when dynamic_mode = true.                              */
-    int adp_mantissa_bits; /* [1..52]; type default = full precision */
+     * env var (FP64/FP32_MANTISSA_BIT_COUNT or FP64/FP32_TOLERANCE).       */
+    int adp_mantissa_bits; /* [1..52] for FP64, [1..23] for FP32; type default = full precision */
 };
 
 /* Status-returning emulation gate.  Invalid env-var values return
@@ -171,7 +176,7 @@ struct FixedPointEmulationDecision
  * Setting precedence (highest to lowest):
  *   1. Per-matmul descriptor fields (desc->emulation_*; sentinel = inherit)
  *   2. Environment variables (read once, process-wide)
- *   3. Built-in defaults (ADP mode, S_MAX moduli, sv_mask = 0x3)
+ *   3. Built-in defaults (ADP mode, S_MAX moduli, sv_support = DEFAULT)
  *
  * desc may be nullptr when called from code that has no matmul desc
  * (e.g. workspace size query with no attached desc).
@@ -202,8 +207,8 @@ bool fixedPointEmulationWouldApply(const _rocblaslt_handle*      h,
 
 /* Returns the workspace size in bytes for the given problem and input type.
  * Always uses S_MAX (= 20) moduli for the layout (always ADP mode).
- * When decision.workspace_cap != ~size_t{0}, the returned size is capped at
- * min(optimal, decision.workspace_cap).  This ensures the library never
+ * When decision.workspace_bytes != ~size_t{0}, the returned size is capped at
+ * min(optimal, decision.workspace_bytes).  This ensures the library never
  * reports a workspace larger than the user's allocation.                   */
 size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
                                         hipDataType                        type_a,
@@ -214,23 +219,6 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
                                         int64_t                            k,
                                         const FixedPointEmulationDecision& decision);
 
-/* Per-call emulation settings.
- * All fields are resolved concrete values; there are no sentinels.
- * Callers must resolve any env-var defaults before populating this struct. */
-struct FixedPointEmulationSettings
-{
-    hipblasltEmulationSpecialValuesSupport_t sv_support; /* DEFAULT=both Inf+NaN, NONE=skip, INFINITY=Inf only, NAN=NaN only */
-    bool         eager; /* true -> skip workspace performance gate  */
-    void*        workspace; /* caller workspace; nullptr = no workspace */
-    size_t       workspace_bytes; /* size of caller workspace                 */
-    /* ADP target precision in mantissa bits.
-     * For FP64: [1..52]; 52 = full FP64 precision.
-     * For FP32: [1..23]; 23 = full FP32 precision.
-     * 0 = sentinel: derive from env var (FP64/FP32_MANTISSA_BIT_COUNT
-     *   or FP64/FP32_TOLERANCE) or type default.                            */
-    int adp_mantissa_bits; /* 0 = env var default                    */
-};
-
 /* Run an emulated FP64 GEMM using Ozaki Scheme II (accurate mode).
  *
  * Computes D = alpha * op(A) * op(B) + beta * C  where A, B, C, D are
@@ -239,7 +227,7 @@ struct FixedPointEmulationSettings
  *
  * Returns rocblaslt_status_success on success,
  *         rocblaslt_status_memory_error if no workspace is provided or too small,
- *         rocblaslt_status_invalid_value if Inf/NaN is detected (sv_mask) or
+ *         rocblaslt_status_invalid_value if Inf/NaN is detected (sv_support) or
  *             if ADP determines s=20 is insufficient for the input's range.
  * In invalid_value cases the caller should fall back to native FP64.       */
 rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
@@ -259,7 +247,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                   double*                            D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationSettings& settings);
+                                  const FixedPointEmulationDecision& decision);
 
 /* Run an emulated FP32 GEMM using Ozaki Scheme II (accurate mode).
  *
@@ -269,7 +257,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
  *
  * Returns rocblaslt_status_success on success,
  *         rocblaslt_status_memory_error if no workspace is provided or too small,
- *         rocblaslt_status_invalid_value if Inf/NaN is detected (sv_mask) or
+ *         rocblaslt_status_invalid_value if Inf/NaN is detected (sv_support) or
  *             if ADP determines s=12 is insufficient for the input's range.
  * In invalid_value cases the caller should fall back to native FP32.       */
 rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
@@ -289,4 +277,4 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                   float*                             D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationSettings& settings);
+                                  const FixedPointEmulationDecision& decision);

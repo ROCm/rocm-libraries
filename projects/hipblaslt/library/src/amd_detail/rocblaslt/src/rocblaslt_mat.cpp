@@ -155,31 +155,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && !matmul_descr->pointermode
        && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT)
     {
-        const FixedPointEmulationDecision emulDecision =
+        FixedPointEmulationDecision emulDecision =
             fixedPointEmulationDecision(handle, matmul_descr, type_a, opA, opB, m, n, k, num_batches_a, workspaceSizeInBytes);
         if(emulDecision.status != rocblaslt_status_success)
             return emulDecision.status;
         if(emulDecision.apply)
         {
-            /* Build per-call settings from matmul desc attributes + env var fallbacks. */
-            const int desc_strat = (matmul_descr && matmul_descr->emulation_desc)
-                                       ? matmul_descr->emulation_desc->emulation_strategy
-                                       : -1;
-            const bool emul_eager = (desc_strat == 2) || (desc_strat != 1 && fixedPointEmulationIsEager());
-            FixedPointEmulationSettings emulSettings{};
-            /* Translate resolved bitmask → hipblasltEmulationSpecialValuesSupport_t enum:
-             * 0x0=NONE, 0x1=INFINITY, 0x2=NAN, 0x3(or other)=DEFAULT(both) */
-            switch(emulDecision.sv_mask)
-            {
-            case 0x0u: emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;     break;
-            case 0x1u: emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; break;
-            case 0x2u: emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;      break;
-            default:   emulSettings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;  break;
-            }
-            emulSettings.eager             = emul_eager;
-            emulSettings.adp_mantissa_bits = emulDecision.adp_mantissa_bits;
-            emulSettings.workspace         = workspace;
-            emulSettings.workspace_bytes   = workspaceSizeInBytes;
+            /* Fill in the caller workspace pointer; all other fields are
+             * already resolved by fixedPointEmulationDecision(). */
+            emulDecision.workspace = workspace;
 
             /* Dispatch to the type-appropriate emulation entry point. */
             rocblaslt_status emulSt;
@@ -192,7 +176,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                           static_cast<const float*>(beta),
                                           static_cast<const float*>(C), ldc,
                                           static_cast<float*>(D), ldd,
-                                          stream, emulSettings);
+                                          stream, emulDecision);
             }
             else /* HIP_R_64F */
             {
@@ -203,7 +187,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                           static_cast<const double*>(beta),
                                           static_cast<const double*>(C), ldc,
                                           static_cast<double*>(D), ldd,
-                                          stream, emulSettings);
+                                          stream, emulDecision);
             }
             if(emulSt == rocblaslt_status_success)
                 return rocblaslt_status_success;
