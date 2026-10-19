@@ -155,12 +155,6 @@ public:
     super_t::operator=(nullptr);
     return *this;
   }
-
-#ifdef THRUST_DOXYGEN_INVOKED
-  /*! \brief Return the raw pointer that this \c device_ptr points to.
-   */
-  THRUST_HOST_DEVICE T* get() const;
-#endif
 };
 
 #ifdef THRUST_DOXYGEN_INVOKED
