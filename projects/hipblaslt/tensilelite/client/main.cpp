@@ -786,7 +786,29 @@ int main(int argc, const char* argv[])
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
+    auto const mainStart     = TimingClock::now();
+    auto const mainStartWall = std::chrono::system_clock::now();
+
+    // Declared first => destroyed last among main()'s locals. Stamps the wall clock once
+    // every local (dataInit, library, hip buffers, ...) has been destroyed so the Python
+    // side can separate "locals destruction" from "static destruction / process exit".
+    struct LocalsDestroyedStamp
+    {
+        ~LocalsDestroyedStamp()
+        {
+            if(g_timingInstrumentationEnabled)
+            {
+                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+                std::clog << "TIMING_TS:main_locals_destroyed:" << ns << "\n";
+                std::clog.flush();
+            }
+        }
+    } localsDestroyedStamp;
+
     auto args = parse_args(argc, argv);
+    auto const argsParsed = TimingClock::now();
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
@@ -800,10 +822,27 @@ int main(int argc, const char* argv[])
     std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
     srand(seed);
 
-    ClientProblemFactory problemFactory(args);
-
+    // Timing buffer is initialized before the problem factory so timers inside it work.
+    auto const preCalibration = TimingClock::now();
     initTimingBuffer();
     calibrateTimingOverhead();
+    auto const calibrated = TimingClock::now();
+
+    ClientProblemFactory problemFactory(args);
+    auto const factoryDone = TimingClock::now();
+    // These happen before the timing buffer exists; record them now.
+    if(g_timingInstrumentationEnabled)
+    {
+        g_timingBuffer.push_back(TimingRec{
+            "main_parse_args",
+            std::chrono::duration<double, std::milli>(argsParsed - mainStart).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_timing_calibration",
+            std::chrono::duration<double, std::milli>(calibrated - preCalibration).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_problem_factory",
+            std::chrono::duration<double, std::milli>(factoryDone - calibrated).count()});
+    }
 
     bool                                        fusedA2A = args["fused-gemm-a2a"].as<bool>();
     std::shared_ptr<Hardware>                   hardware;
@@ -1015,11 +1054,18 @@ int main(int argc, const char* argv[])
             size_t rotationLaunchIdx = 0;
             for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
             {
+                // Declared first => destroyed last: problem_total covers the whole body,
+                // problem_teardown covers destruction of the body's locals (see mark() below).
+                ScopedTimer          problemTotalTimer("problem_total");
+                ScopeTeardownTimer   problemTeardownTimer("problem_teardown");
                 auto problem = problems[problemIdx].get();
 
-                reporters->report(ResultKey::ProblemIndex, problemIdx);
-                reporters->report(ResultKey::ProblemProgress,
-                                  concatenate(problemIdx, "/", lastProblemIdx));
+                {
+                    ScopedTimer timer("problem_report_index");
+                    reporters->report(ResultKey::ProblemIndex, problemIdx);
+                    reporters->report(ResultKey::ProblemProgress,
+                                      concatenate(problemIdx, "/", lastProblemIdx));
+                }
 
                 auto* gemm = dynamic_cast<ContractionProblemGemm*>(problem);
                 if(fusedA2A)
@@ -1153,6 +1199,8 @@ int main(int argc, const char* argv[])
                 bool resetInput = true;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
+                    ScopedTimer        solutionTotalTimer("solution_total");
+                    ScopeTeardownTimer solutionTeardownTimer("solution_teardown");
                     std::shared_ptr<ContractionSolution> solution;
                     {
                         ScopedTimer timer("solution_selection");
@@ -1166,7 +1214,12 @@ int main(int argc, const char* argv[])
                         listeners.preSolution(solution.get());
                     }
                     bool deviceLost = false;
-                    if(solutionIterator->runCurrentSolution() && runKernels)
+                    bool runThisSolution = false;
+                    {
+                        ScopedTimer timer("run_current_solution_check");
+                        runThisSolution = solutionIterator->runCurrentSolution() && runKernels;
+                    }
+                    if(runThisSolution)
                     {
                         try
                         {
@@ -1176,9 +1229,16 @@ int main(int argc, const char* argv[])
                                     *hardware, *gemm, *solution, devices);
                             while(listeners.needMoreRunsInSolution())
                             {
+                                ScopedTimer        runIterTotalTimer("run_iteration_total");
+                                ScopeTeardownTimer runIterTeardownTimer("run_iteration_teardown");
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
+                                    struct ResetScope
+                                    {
+                                        ResetScope() { g_inGpuInputReset = true; }
+                                        ~ResetScope() { g_inGpuInputReset = false; }
+                                    } resetScope;
                                     forEachDevice(devices, [&](DeviceContext& ctx) {
                                         ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(problem);
                                     });
@@ -1218,12 +1278,14 @@ int main(int argc, const char* argv[])
                                     }
                                 }
 
+                                auto const   warmupSetupStart  = TimingClock::now();
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
                                 size_t       warmupEventCount  = kernels[0][0].size();
                                 TimingEvents warmupStartEvents(
                                     devices, warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(
                                     devices, warmupInvocations, warmupEventCount);
+                                recordTimingSince("warmup_events_setup", warmupSetupStart);
 
                                 // I-cache rotation counter: increments per launchKernels call
                                 // and selects which hipModule_t copy services the next launch.
@@ -1338,6 +1400,7 @@ int main(int argc, const char* argv[])
                                 {
                                     solution->relaseDeviceUserArgs(dUA, dUAHost);
                                 }
+                                runIterTeardownTimer.mark();
                             }
                         }
                         catch(std::runtime_error const& err)
@@ -1368,6 +1431,7 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("post_solution");
                         listeners.postSolution();
                     }
+                    solutionTeardownTimer.mark();
 
                     if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
@@ -1381,6 +1445,7 @@ int main(int argc, const char* argv[])
                     ScopedTimer timer("post_problem");
                     listeners.postProblem();
                 }
+                problemTeardownTimer.mark();
             }
         }
 
@@ -1398,10 +1463,22 @@ int main(int argc, const char* argv[])
     // has already drained and cleared it, so the record would be lost.
     {
         auto flushStart = TimingClock::now();
+        recordTimingSince("main_total", mainStart);
         flushTimingBuffer();
         auto flushMs = std::chrono::duration<double, std::milli>(
             TimingClock::now() - flushStart).count();
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+        if(g_timingInstrumentationEnabled)
+        {
+            // Wall-clock stamps so the Python side can split process startup / teardown.
+            auto toNs = [](std::chrono::system_clock::time_point t) {
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch())
+                    .count();
+            };
+            std::clog << "TIMING_TS:main_start:" << toNs(mainStartWall) << "\n"
+                      << "TIMING_TS:main_end:" << toNs(std::chrono::system_clock::now()) << "\n";
+            std::clog.flush();
+        }
     }
 
     // error range in shell is [0-255]
