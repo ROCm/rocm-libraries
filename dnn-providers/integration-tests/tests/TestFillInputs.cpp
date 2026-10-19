@@ -17,7 +17,9 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include "common/SdpaCommon.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -696,6 +698,105 @@ void verifyFullyMaskedRows(const SdpaBwdGraphOptions& opts)
     }
 }
 
+class TestSdpaBwdDerivedOAndStats
+    : public ::testing::TestWithParam<test_sdpa_common::SdpaBwdTestCase>
+{
+protected:
+    void runTest(bool useGpuReference
+                 = false) // NOLINT(readability-convert-member-functions-to-static)
+    {
+        using namespace hipdnn_data_sdk::utilities;
+        using namespace hipdnn_test_sdk::utilities;
+
+        const auto& tc = GetParam();
+
+        SdpaBwdGraphOptions opts;
+        opts.qDims = tc.qDims;
+        opts.kDims = tc.kDims;
+
+        if(tc.attnScaleValue.has_value())
+        {
+            opts.scaleSource = SdpaBwdGraphOptions::ScaleSource::ATTRIBUTE;
+            opts.attnScaleValue = tc.attnScaleValue;
+        }
+
+        if(tc.leftBound >= 0)
+        {
+            opts.leftBound = tc.leftBound;
+        }
+        if(tc.rightBound >= 0)
+        {
+            opts.rightBound = tc.rightBound;
+        }
+        opts.topLeft = tc.topLeftAlignment;
+
+        const auto gr = buildSdpaBwdStandaloneGraph(opts);
+        const auto leafUids = gr.leafInputUids({7, 8, 9});
+        auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+
+        InputFillRecipes recipes;
+        recipes.setRange(1, -1.0f, 1.0f).setRange(2, -1.0f, 1.0f).setRange(3, -1.0f, 1.0f);
+
+        const auto result
+            = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, useGpuReference);
+        ASSERT_TRUE(result.filled) << result.reason;
+
+        auto& q = static_cast<TensorBase<float>&>(*inputs.at(1));
+        auto& k = static_cast<TensorBase<float>&>(*inputs.at(2));
+        auto& v = static_cast<TensorBase<float>&>(*inputs.at(3));
+        auto& o = static_cast<TensorBase<float>&>(*inputs.at(4));
+        auto& stats = static_cast<TensorBase<float>&>(*inputs.at(6));
+
+        Tensor<float> oRef(o.dims());
+        Tensor<float> statsRef(
+            useGpuReference
+                ? std::vector<int64_t>({stats.dims()[0], stats.dims()[1], stats.dims()[2]})
+                : stats.dims());
+
+        if(useGpuReference)
+        {
+            hipdnn_gpu_ref::GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
+                q,
+                k,
+                v,
+                oRef,
+                opts.scale(),
+                nullptr,
+                tc.leftBound,
+                tc.rightBound,
+                opts.topLeft,
+                &statsRef);
+        }
+        else
+        {
+            CpuFpReferenceSdpa::forward<float, float, float, float, float>(q,
+                                                                           k,
+                                                                           v,
+                                                                           oRef,
+                                                                           opts.scale(),
+                                                                           nullptr,
+                                                                           tc.leftBound,
+                                                                           tc.rightBound,
+                                                                           opts.topLeft,
+                                                                           &statsRef);
+        }
+
+        const auto oData = static_cast<const float*>(o.rawHostData());
+        const auto oRefData = static_cast<const float*>(oRef.rawHostData());
+        for(size_t i = 0; i < o.elementCount(); ++i)
+        {
+            EXPECT_NEAR(oData[i], oRefData[i], 1e-5f) << "Mismatch at index " << i;
+        }
+
+        const auto statsData = static_cast<const float*>(stats.rawHostData());
+        const auto statsRefData = static_cast<const float*>(statsRef.rawHostData());
+        for(size_t i = 0; i < stats.elementCount(); ++i)
+        {
+            EXPECT_NEAR(statsData[i], statsRefData[i], 1e-5f) << "Mismatch at index " << i;
+        }
+    }
+};
+
 // ── SDPA fwd+bwd fused ─────────────────────────────────────────────────────
 // O (uid 10) and stats (uid 11) are virtual inter-node tensors.
 // Leaf inputs: Q(1), K(2), V(3) from fwd + dO(5) from bwd.
@@ -1260,6 +1361,21 @@ TEST(TestFillInputs, SdpaBwdFullyMaskedRowsTopLeftCausal)
     opts.topLeft = true;
     verifyFullyMaskedRows(opts);
 }
+
+TEST_P(TestSdpaBwdDerivedOAndStats, MatchesCpuReference)
+{
+    this->runTest(false);
+}
+
+TEST_P(TestSdpaBwdDerivedOAndStats, MatchesGpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    this->runTest(true);
+}
+
+INSTANTIATE_TEST_SUITE_P(TestFillInputs,
+                         TestSdpaBwdDerivedOAndStats,
+                         ::testing::ValuesIn(test_sdpa_common::getSdpaBwdTestCases()));
 
 TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
 {
