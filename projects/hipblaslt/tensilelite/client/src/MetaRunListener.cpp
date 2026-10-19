@@ -32,13 +32,45 @@
 #include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "RunListener.hpp"
+#include "TimingInstrumentation.hpp"
 
+#include <cxxabi.h>
 #include <cstddef>
+#include <cstdlib>
+#include <string>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
 
 namespace TensileLite
 {
     namespace Client
     {
+        namespace
+        {
+            // Returns a stable "pre_solution_listener.<ListenerType>" category string (ScopedTimer needs
+            // storage that outlives the timing buffer). Only called when timing is enabled.
+            const char* preSolutionCategory(RunListener const& listener)
+            {
+                static std::unordered_map<std::type_index, std::string> names;
+                auto idx = std::type_index(typeid(listener));
+                auto it  = names.find(idx);
+                if(it == names.end())
+                {
+                    int         status = 0;
+                    char*       dem    = abi::__cxa_demangle(idx.name(), nullptr, nullptr, &status);
+                    std::string name   = (status == 0 && dem) ? dem : idx.name();
+                    std::free(dem);
+                    // Strip the namespace: ':' is the field separator of the TIMING: lines.
+                    auto pos = name.rfind("::");
+                    if(pos != std::string::npos)
+                        name = name.substr(pos + 2);
+                    it = names.emplace(idx, "pre_solution_listener." + name).first;
+                }
+                return it->second.c_str();
+            }
+        }
+
         void MetaRunListener::addListener(std::shared_ptr<RunListener> listener)
         {
             if(!m_firstProblem)
@@ -99,7 +131,15 @@ namespace TensileLite
         void MetaRunListener::preSolution(ContractionSolution* const solution)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->preSolution(solution);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(preSolutionCategory(**iter));
+                    (*iter)->preSolution(solution);
+                }
+                else
+                    (*iter)->preSolution(solution);
+            }
         }
 
         void MetaRunListener::postSolution()

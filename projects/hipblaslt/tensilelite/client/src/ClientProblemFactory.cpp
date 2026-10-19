@@ -27,6 +27,8 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 
+#include "TimingInstrumentation.hpp"
+
 #include <cstddef>
 #include <stdexcept>
 
@@ -126,7 +128,10 @@ namespace TensileLite
             {
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
-                HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
+                {
+                    ScopedTimer timer("factory_hip_get_device_properties");
+                    HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
+                }
                 std::string archName(prop.gcnArchName);
                 m_padMXScaleTensorFreeDim = (archName.find("gfx950") != std::string::npos);
             }

@@ -149,6 +149,11 @@ namespace TensileLite
                 if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
+                struct PerSolutionScope
+                {
+                    PerSolutionScope() { g_inPerSolutionReference = true; }
+                    ~PerSolutionScope() { g_inPerSolutionReference = false; }
+                } perSolutionScope;
                 SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
             }
         }

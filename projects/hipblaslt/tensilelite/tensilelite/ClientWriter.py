@@ -27,6 +27,8 @@ import os
 import subprocess
 import shlex
 import shutil
+import sys
+import time
 
 from pathlib import Path
 from enum import Enum
@@ -298,11 +300,19 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
       return 0
 
     # Original single-GPU path
-    runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+    with timing_context("python_client_write_run_script"):
+      runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
     with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-      process = subprocess.Popen(runScriptName, cwd=buildPath)
-      process.communicate()
+      with timing_context("python_client_subprocess"):
+        if timingEnabled:
+          # Wall-clock stamps (ns since epoch) so analyze_timing.py can split the
+          # subprocess time into process startup / client main() / teardown.
+          print(f"TIMING_TS:py_popen_start:{time.time_ns()}", file=sys.stderr, flush=True)
+        process = subprocess.Popen(runScriptName, cwd=buildPath)
+        process.communicate()
+        if timingEnabled:
+          print(f"TIMING_TS:py_communicate_end:{time.time_ns()}", file=sys.stderr, flush=True)
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
