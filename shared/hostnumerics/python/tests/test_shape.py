@@ -80,22 +80,6 @@ class ShapeTests(unittest.TestCase):
                             selected = shape.from_dimensions(axes)
                             self.assertEqual(selected.dimensions, extents)
                             self.assertEqual(selected.element_count, expected)
-            for selection in (
-                slice(None),
-                slice(None, None, -1),
-                slice(0, 2),
-                slice(1, None),
-            ):
-                extents = dimensions[selection]
-                if math.prod(extents) > SIZE_MAX:
-                    with self.assertRaisesRegex(
-                        RuntimeError, "element count exceeds size_t"
-                    ):
-                        shape[selection]
-                else:
-                    sliced = shape[selection]
-                    self.assertEqual(sliced.dimensions, list(extents))
-                    self.assertEqual(sliced.element_count, math.prod(extents))
 
     def test_descriptive_bounds_errors(self):
         shape = hn.Shape([2, 3, 4])
@@ -286,7 +270,6 @@ class ShapeTests(unittest.TestCase):
         for dimensions in ([0, SIZE_MAX, 2], [SIZE_MAX, 0, 2], [SIZE_MAX, 2, 0]):
             empty = hn.Shape(dimensions)
             self.assertEqual(empty.element_count, 0)
-            self.assertEqual(empty[::-1].element_count, 0)
             nonzero = [axis for axis, extent in enumerate(dimensions) if extent]
             with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
                 empty.from_dimensions(nonzero)
@@ -294,7 +277,7 @@ class ShapeTests(unittest.TestCase):
                 empty.coordinates(0)
         empty = hn.Shape([SIZE_MAX, 2, 0])
         with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
-            empty[:2]
+            empty.from_dimensions([0, 1])
         self.assertEqual(empty.from_dimensions([2, 0, 0]).element_count, 0)
         with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
             hn.Shape([SIZE_MAX]).from_dimensions([0, 0])
@@ -344,7 +327,7 @@ class ShapeTests(unittest.TestCase):
                         else:
                             self.assertEqual(shape.index(value, *bounds), expected)
 
-    def test_tuple_integer_and_slice_indexing(self):
+    def test_tuple_integer_indexing(self):
         class LastIndex:
             def __index__(self):
                 return -1
@@ -360,24 +343,10 @@ class ShapeTests(unittest.TestCase):
                             shape[key]
                     else:
                         self.assertEqual(shape[key], expected)
-            for start, stop, step in itertools.product(
-                (None, -30, -1, 0, 2, 30, 10**100),
-                (None, -30, -1, 0, 2, 30, 10**100),
-                (None, -3, -1, 1, 2, 5, 10**100, -(10**100)),
-            ):
-                key = slice(start, stop, step)
-                with self.subTest(extents=extents, key=key):
-                    result = shape[key]
-                    self.assertIsInstance(result, hn.Shape)
-                    self.assertEqual(tuple(result), extents[key])
-            self.assertEqual(shape[:][::-1][::2], hn.Shape(extents[::-1][::2]))
-        self.assertEqual(hn.Shape(range(20))[0:16:5], hn.Shape([0, 5, 10, 15]))
         shape = hn.Shape([2, 3, 5])
         for key in (None, Ellipsis, (slice(None), slice(None)), [0], 1.5):
             with self.assertRaises(TypeError):
                 shape[key]
-        with self.assertRaises(ValueError):
-            shape[::0]
 
         class InvalidIndex:
             def __index__(self):
@@ -385,6 +354,21 @@ class ShapeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "index conversion failed"):
             shape[InvalidIndex()]
+
+    def test_slices_are_rejected(self):
+        for extents in ((), (0,), (2, 3, 5)):
+            shape = hn.Shape(extents)
+            for key in (
+                slice(None),
+                slice(1, None),
+                slice(None, None, -1),
+                slice(0, 3, 2),
+                slice(None, None, 0),
+            ):
+                with self.subTest(extents=extents, key=key), self.assertRaisesRegex(
+                    TypeError, "Shape slicing is not supported; use from_dimensions"
+                ):
+                    shape[key]
 
     def test_tuple_hash_and_immutability(self):
         for extents in ((), (0,), (2, 3, 5), (SIZE_MAX, 1)):

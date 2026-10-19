@@ -25,33 +25,30 @@ void registerShapeBindings(nb::module_& module) {
     nb::class_<Shape>(module, "Shape", R"doc(
 Immutable tuple-like sequence of nonnegative extents, independent of storage.
 
-Integer indexing returns an extent and accepts negative positions. Slicing
-selects dimensions and returns a new Shape, rather than selecting positions
-within each dimension. Length, iteration, membership, count, index, and hashing
-follow tuple semantics. Shapes compare equal to other Shapes with the same
-extents; they do not compare equal to tuples or lists. Mutation, concatenation,
-repetition, and ordering comparisons are not supported.
+Integer indexing returns an extent and accepts negative positions. Select
+dimensions with from_dimensions. Length, iteration, membership, count, index,
+and hashing follow tuple semantics. Shapes compare equal to other Shapes with
+the same extents; they do not compare equal to tuples or lists. Mutation, concatenation,
+repetition, slicing, and ordering comparisons are not supported.
 
 Examples:
     >>> shape = Shape([2, 3, 5])
     >>> shape[-1]
     5
-    >>> shape[1:]
+    >>> shape.from_dimensions([1, 2])
     Shape((3, 5))
-    >>> shape[::-1]
+    >>> shape.from_dimensions([2, 1, 0])
     Shape((5, 3, 2))
     >>> tuple(shape)
     (2, 3, 5)
     >>> len(shape)
     3
-    >>> Shape(range(20))[0:16:5]
-    Shape((0, 5, 10, 15))
 
 Shape() has rank zero and represents one scalar. A zero extent describes a shape
 with no elements, so both index conversions reject it. Otherwise the product of
 extents must fit size_t. If SIZE_MAX denotes the maximum size_t value,
 [SIZE_MAX, 2] fails construction, while [SIZE_MAX, 2, 0] has zero elements.
-Selecting dimensions or slicing can fail if the resulting nonempty shape is too
+Selecting dimensions can fail if the resulting nonempty shape is too
 large, even when the original shape is empty.
 
 Named methods use nonnegative axes and coordinates. Unlike tuple indexing,
@@ -76,10 +73,9 @@ size_t raise TypeError.
         .def(
             "__getitem__",
             [](const Shape& shape, nb::handle key) -> nb::object {
-                nb::object result = shapeTuple(shape).attr("__getitem__")(key);
                 if (nb::isinstance<nb::slice>(key))
-                    return nb::cast(Shape(nb::cast<std::vector<size_t>>(result)));
-                return result;
+                    throw nb::type_error("Shape slicing is not supported; use from_dimensions.");
+                return shapeTuple(shape).attr("__getitem__")(key);
             },
             "key"_a.none())
         .def(
