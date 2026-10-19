@@ -5007,24 +5007,13 @@ namespace TensileLite
         // Whether a Stream-K workgroup can stop part-way through a tile, which
         // is the only thing the partial-tile workspace ever holds.
         //
-        // Stream-K splits a flattened iteration space of tiles * itersPerTile.
-        // At itersPerTile == 1 one iteration is one whole tile, so no range can
-        // straddle a tile boundary however the grid divides the space: the
-        // kernel computes StreamKLocalStart = PersistentIteration - tileStart
-        // (always 0) and StreamKLocalEnd = min(PersistentIterationEnd, tileEnd)
-        // - tileStart (always ItersPerTile), so "does wg start tile?" always
-        // holds and "does wg finish tile?" always takes the regular store
-        // (StreamK.py). The store-partials and fixup paths are both
-        // unreachable, so reserving for them would reserve bytes nothing ever
-        // writes.
-        //
         // itersPerTile must be the same value makeArgs() packs into the
         // ItersPerTile kernarg -- getItersPerTile() clamped to at least 1 --
         // or host and device disagree about which branch the kernel takes.
         //
         // This covers tile straddling only. Parallel reduction writes partials
         // unconditionally through its own path at any itersPerTile, so every
-        // caller keeps that as a separate disjunct.
+        // caller keeps that as a separate check.
         inline bool streamKStraddlesTiles(size_t itersPerTile, size_t skGrid, size_t tiles)
         {
             return skGrid > 0 && itersPerTile > 1 && (tiles % skGrid) != 0;
