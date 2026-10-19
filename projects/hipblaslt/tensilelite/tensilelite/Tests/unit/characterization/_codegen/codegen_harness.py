@@ -146,6 +146,9 @@ def _init_rocisa_for(kernel):
     return ri
 
 
+# The gfx942/gfx950 basename fixtures include non-default StreamKAtomic and
+# MbskPrefetchMethod tags because these controls change the emitted assembly.
+# Compiler context: AMD clang 23.0.0git, ROCm llvm-project aa451e1fe6a7.
 # --- solution / kernel emit -------------------------------------------------
 
 
@@ -172,7 +175,6 @@ def _prepare_kernel(kernel, splitGSU=False):
     from Tensile.SolutionStructs.Naming import getKernelFileBase
 
     base = getKernelFileBase(splitGSU, kernel)
-    kernel.duplicate = False
     kernel["BaseName"] = base
     return base
 

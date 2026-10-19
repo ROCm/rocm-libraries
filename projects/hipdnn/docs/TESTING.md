@@ -18,7 +18,7 @@ Core unit and API tests use test plugins from this repository. You can test core
 
 Production provider plugins live under `dnn-providers/`.
 Changes to plugin loading, graph execution, operation support, or provider-facing behavior must be tested with the affected provider. Prefer the superbuild; you can also test an installed standalone provider.
-See [Plugin Development](./PluginDevelopment.md) for the plugin boundary and the [provider integration README](../../../dnn-providers/integration-tests/README.md) for provider test setup and categories.
+See [Plugin Development](./PluginDevelopment.md) for the plugin boundary and the [integration test documentation](../../../dnn-providers/integration-tests/docs/README.md) for provider test setup ([running the tests](../../../dnn-providers/integration-tests/docs/running-tests.md)) and categories ([test tiers](../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers)).
 
 ## Development Workflow
 
@@ -81,7 +81,7 @@ Each provider runs the shared `hipdnn_integration_tests` graph set separately wi
 
 hipDNN owns API, graph, routing, serialization, and plugin-lifecycle tests.
 Each provider owns its operation results and supported GPU coverage. Passing core tests does not prove that a provider works correctly.
-See [Testing Strategy](./testing/TESTING_STRATEGY.md) for ownership details and the [provider integration README](../../../dnn-providers/integration-tests/README.md) for provider test setup.
+See [Testing Strategy](./testing/TESTING_STRATEGY.md) for ownership details and [Running the Tests](../../../dnn-providers/integration-tests/docs/running-tests.md) for provider test setup.
 
 ## Performance & Benchmarking
 

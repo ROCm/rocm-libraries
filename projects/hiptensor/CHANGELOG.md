@@ -2,7 +2,7 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## hipTensor 2.5.0
+## hipTensor 2.5.0 for ROCm 10.2
 
 ### Added
 * Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
