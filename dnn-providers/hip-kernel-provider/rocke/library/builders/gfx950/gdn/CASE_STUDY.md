@@ -44,9 +44,10 @@ Tiles are `(num_warps, warp_threads_k, blocks_per_v_dim)`. bf16 I/O, bf16 and
 - **Fused tiles (228):** GDN and KDA at `16/16`, `BPV = 1`, every legal
   `(NW, WTK)` with `NW` in 1–16 and `WTK` in 1–32, with `fuse_conv`,
   `fuse_out_norm` (`rn` below) or both (`cv+rn`). This table was collected
-  before dispatch had fusion request fields, so these were built as specs
-  directly. Dispatch can now request fusion, but `auto` only routes the interim
-  `(4,16,1)` fused tile; the wider tile sweep remains spec-only.
+  before dispatch had fusion request fields, so the measurements used
+  hand-built specs. Dispatch can now request fusion; `auto` routes the interim
+  `(4,16,1)` fused tile, and the other registered legal `BPV = 1` tiles remain
+  selectable by explicit `spec_id`.
 
 The merge base is `153bf493555`, the interleaved order; the head is the
 load-first emitter.
