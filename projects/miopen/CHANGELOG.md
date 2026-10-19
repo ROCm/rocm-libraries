@@ -58,6 +58,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   LightGBM ranker selects the solver and a per-solver model selects its performance config,
   extending data-driven selection to the Navi architectures.
 * [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
+* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
+  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
+  filters up to 7x7 and is selected through Find mode.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors

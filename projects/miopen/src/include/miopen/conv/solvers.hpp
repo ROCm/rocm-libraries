@@ -4629,7 +4629,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
-    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
 };
