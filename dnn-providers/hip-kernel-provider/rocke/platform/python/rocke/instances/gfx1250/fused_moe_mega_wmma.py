@@ -60,6 +60,7 @@ from ...core.ir import (
     PtrType,
     Type,
     Value,
+    type_bytes,
 )
 from ...helpers.schedule import SchedulePolicy, WmmaHotLoopInstList
 from ...helpers.spec import choose_load_vec
@@ -71,7 +72,6 @@ from ...helpers.tensor_view import (
 )
 from ..common._moe_fused_mega_lds import (
     LdsAlloc,
-    lds_elem_bytes,
     validate_mega_lds_budget,
 )
 from ..common.gemm_universal import (
@@ -1115,7 +1115,7 @@ def _lds_allocs(spec: FusedMegaWmmaSpec) -> Tuple[LdsAlloc, ...]:
     """
     t = spec.gate_up_tile()
     td = spec.down_tile()
-    eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+    eb = type_bytes(_storage_dtype(spec.gate_up_universal_spec()))
     nbuf = 2 if spec.double_buffer else 1
     return (
         LdsAlloc("A_smem", eb, nbuf * t.tile_m * t.tile_k),

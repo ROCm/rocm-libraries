@@ -9,7 +9,6 @@
  *   ----------------------------------   -------------------------------------
  *   class LdsAlloc (NamedTuple)          rocke_mega_lds_alloc_t
  *     LdsAlloc.nbytes  (@property)       rocke_mega_lds_alloc_nbytes()
- *   lds_elem_bytes(dtype)                rocke_mega_lds_elem_bytes()
  *   mega_lds_pool_bytes(allocs)          rocke_mega_lds_pool_bytes()
  *   validate_mega_lds_budget(allocs,arch)  rocke_validate_mega_lds_budget()
  *
@@ -23,7 +22,7 @@
  * module that only surfaces as a kernel-load failure on the device instead of a
  * spec rejection.
  *
- * WHY A PLAIN SUM IS EXACT HERE, NOT CONSERVATIVE. core/lower_llvm packs every
+ * WHY A PLAIN SUM IS A SAFE BOUND HERE. core/lower_llvm packs every
  * smem_alloc into one @smem_pool global with a liveness-driven linear scan, so
  * an allocation *may* be placed on top of a dead one (the cshuffle epilogue in
  * gemm_universal relies on exactly that). It cannot happen for the megas: a live
@@ -31,8 +30,14 @@
  * in the prologue, before any of them is first used. All pairs therefore
  * interfere by construction and the packer gives each a disjoint range, so the
  * down GEMM's Bd_smem does NOT alias the by-then-dead Bg_smem / Bu_smem.
- * Summing the aligned segments reproduces rocke_ll_compute_smem_layout's
- * L->smem_pool_size byte for byte.
+ *
+ * The packer aligns each segment to the larger of its element rule and the
+ * widest alignment its accesses claim, never more than the pool alignment
+ * (ROCKE_SMEM_POOL_ALIGN, rocke/lower_llvm.h). The accesses are not known here,
+ * so every segment is aligned to the pool alignment: the sum is then never
+ * below rocke_ll_compute_smem_layout's L->smem_pool_size, whatever the accesses
+ * claim. For the shipped megas every segment is a multiple of it, so the bound
+ * is exact (the mega tests assert that equality against the lowered IR).
  *
  * Allocations the emitter declares but never references are dead-stripped by the
  * packer and must be left out of the sequence passed here (the fp8 mega's
@@ -57,7 +62,8 @@ extern "C" {
 /* One smem_alloc as the LDS budget sees it (Python LdsAlloc).
  *
  * `name` is the emitter's name_hint (it names the buffer in the rejection
- * message); `elem_bytes` and `elem_count` give the segment size. Plain value
+ * message); `elem_bytes` (the element type's rocke_i_type_bytes) and
+ * `elem_count` give the segment size. Plain value
  * type: the caller owns the array, the strings are static literals. */
 typedef struct rocke_mega_lds_alloc
 {
@@ -69,17 +75,14 @@ typedef struct rocke_mega_lds_alloc
 /* LdsAlloc.nbytes: elem_bytes * elem_count. */
 long rocke_mega_lds_alloc_nbytes(const rocke_mega_lds_alloc_t* alloc);
 
-/* lds_elem_bytes(dtype): bytes per element of an IR scalar type, as the smem
- * packer measures it (the width-2 fallback included). Mirrors the _elem_bytes
- * map of lower_llvm's _seg_size so the accounting cannot disagree with the
- * packer. */
-int rocke_mega_lds_elem_bytes(const rocke_type_t* dtype);
-
-/* mega_lds_pool_bytes(allocs): bytes the @smem_pool global occupies for
- * `allocs`. Replays the packer's placement for the all-interfering mega case:
- * each segment starts at the next multiple of its alignment past the previous
- * one, and the pool is rounded up to 16 B. `allocs` must be in emitter
- * declaration order. */
+/* mega_lds_pool_bytes(allocs): an upper bound on the bytes the @smem_pool
+ * global occupies for `allocs`. Replays the packer's placement for the
+ * all-interfering mega case with every segment aligned to ROCKE_SMEM_POOL_ALIGN
+ * (the most the packer ever aligns one): each segment starts at the next
+ * multiple of it past the previous one, and the pool is rounded up to it. A
+ * segment whose size is not a multiple of ROCKE_SMEM_POOL_ALIGN can be counted
+ * up to ROCKE_SMEM_POOL_ALIGN - 1 bytes above what the packer places. `allocs`
+ * must be in emitter declaration order. */
 long rocke_mega_lds_pool_bytes(const rocke_mega_lds_alloc_t* allocs, size_t num_allocs);
 
 /* validate_mega_lds_budget(allocs, arch) -> (ok, reason).

@@ -6,19 +6,19 @@
  * accounting shared by the fused-MoE mega-kernel family.
  *
  * See rocke/helper_rocke.instances.common._moe_fused_mega_lds.h for the symbol
- * map and for why summing the aligned segments is EXACT (not conservative) for
- * the megas. None of these routines emit IR; each mega's build entry calls
- * rocke_validate_mega_lds_budget with the alloc sequence its own _lds_allocs
- * produces, in emitter declaration order.
+ * map and for why summing the pool-aligned segments is a bound the packer
+ * never exceeds for the megas. None of these routines emit IR; each mega's
+ * build entry calls rocke_validate_mega_lds_budget with the alloc sequence its
+ * own _lds_allocs produces, in emitter declaration order.
  */
 #include "rocke/helper_rocke.instances.common._moe_fused_mega_lds.h"
 
 #include <stdio.h>
-#include <string.h>
 
 #include "rocke/arena.h" /* rocke_arena_printf (reason strings)                */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_* (ArchTarget)   */
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* validate_arch_and_block_size */
+#include "rocke/lower_llvm.h" /* ROCKE_SMEM_POOL_ALIGN                    */
 
 /* Longest reject breakdown the shipped megas produce is ~110 chars (five/six
  * buffers); the assembled message is then bounded again by ROCKE_ERR_MSG_CAP at
@@ -35,39 +35,11 @@ long rocke_mega_lds_alloc_nbytes(const rocke_mega_lds_alloc_t* alloc)
     return (long)alloc->elem_bytes * (long)alloc->elem_count;
 }
 
-int rocke_mega_lds_elem_bytes(const rocke_type_t* dtype)
+/* Python _round_up_to_pool_align: `offset` rounded up to the next multiple
+ * of ROCKE_SMEM_POOL_ALIGN. */
+static long rocke_mega_lds_round_up_to_pool_align(long offset)
 {
-    /* Mirror of lower_llvm's _elem_bytes map (and its width-2 fallback) so the
-     * accounting cannot disagree with the packer. */
-    const char* n = (dtype != NULL) ? dtype->name : NULL;
-    if(n == NULL)
-    {
-        return 2;
-    }
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
-    {
-        return 1;
-    }
-    if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
-    {
-        return 2;
-    }
-    if(strcmp(n, "i32") == 0 || strcmp(n, "f32") == 0)
-    {
-        return 4;
-    }
-    if(strcmp(n, "i64") == 0)
-    {
-        return 8;
-    }
-    return 2;
-}
-
-/* _seg_align(elem_bytes): the segment alignment the packer applies -- 16 B for
- * byte-element types, else 4. */
-static long rocke_mega_lds_seg_align(int elem_bytes)
-{
-    return (elem_bytes == 1) ? 16 : 4;
+    return (offset + ROCKE_SMEM_POOL_ALIGN - 1) & ~(long)(ROCKE_SMEM_POOL_ALIGN - 1);
 }
 
 long rocke_mega_lds_pool_bytes(const rocke_mega_lds_alloc_t* allocs, size_t num_allocs)
@@ -81,10 +53,9 @@ long rocke_mega_lds_pool_bytes(const rocke_mega_lds_alloc_t* allocs, size_t num_
     }
     for(i = 0; i < num_allocs; ++i)
     {
-        long aln = rocke_mega_lds_seg_align(allocs[i].elem_bytes);
-        end = ((end + aln - 1) & ~(aln - 1)) + rocke_mega_lds_alloc_nbytes(&allocs[i]);
+        end = rocke_mega_lds_round_up_to_pool_align(end) + rocke_mega_lds_alloc_nbytes(&allocs[i]);
     }
-    return (end + 15) & ~15L;
+    return rocke_mega_lds_round_up_to_pool_align(end);
 }
 
 bool rocke_validate_mega_lds_budget(rocke_ir_builder_t* b,

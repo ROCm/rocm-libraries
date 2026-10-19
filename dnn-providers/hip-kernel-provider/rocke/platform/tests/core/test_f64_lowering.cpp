@@ -6,7 +6,10 @@
  * tests/core/test_amdgpu_lowering_ops.py, and the C++ builder side of
  * tests/core/test_f64_conversions.py (the explicit f32 <-> f64 conversions)
  * and tests/core/test_zero_vec_and_lds_element_types.py (zero_vec of f64 and
- * i16, LDS loads of i16).
+ * i16, LDS loads of i16). The LDS pool layout cases at the end also cover
+ * the segment alignment of tests/core/test_smem_access_alignment.py through
+ * the C API: a vector access moves its segment to the vector alignment, and
+ * a store alignment that is not an integer power of two is refused.
  */
 
 #include "rocke/error.hpp"
@@ -419,6 +422,113 @@ static int test_lds_allocation_is_8_byte_aligned()
     return 0;
 }
 
+/* A one-element f16 buffer, then an f32 buffer written and read as
+ * <4 x float>. Both are live together (the f16 store comes before and after
+ * the vector traffic), so the f32 buffer cannot share offset 0. When
+ * `overwrite_align` is given it rewrites the vector store's `align`
+ * attribute, as serialized or hand-written IR may carry it. Mirrors
+ * _f16_then_f32x4 in tests/core/test_smem_access_alignment.py. */
+using align_overwrite_fn = void (*)(rocke_ir_builder_t*, rocke_attr_map_t*);
+
+static rocke_status_t
+    lower_f16_then_f32x4(align_overwrite_fn overwrite_align, char** llvm_text, char* err)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "lds_align_f16_f32x4") != ROCKE_OK)
+        return ROCKE_ERR_OOM;
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int half_shape[] = {1};
+    const int float_shape[] = {8};
+    rocke_value_t* half_buf = rocke_b_smem_alloc(&b, rocke_f16(), half_shape, 1, "h");
+    rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
+    rocke_value_t* h = rocke_b_trunc_f32_to_f16(&b, rocke_b_const_f32(&b, 1.0));
+    rocke_value_t* const at_zero[] = {zero};
+    rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, h);
+    rocke_value_t* v = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), 4, 16);
+    rocke_value_t* const at_four[] = {rocke_b_const_i32(&b, 4)};
+    rocke_b_smem_store_vN(&b, float_buf, at_four, 1, v, 4);
+    rocke_value_t* w = rocke_b_smem_load_vN(&b, float_buf, at_zero, 1, rocke_f32(), 4);
+    rocke_b_global_store_vN(&b, out, zero, w, 4, 16);
+    rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, h);
+    rocke_b_ret(&b);
+    if(overwrite_align != nullptr)
+    {
+        rocke_region_t* body = b.kernel->body;
+        for(int i = 0; i < body->num_ops; i++)
+        {
+            if(body->ops[i]->opcode == ROCKE_OP_TILE_SMEM_STORE_VN)
+                overwrite_align(&b, &body->ops[i]->attrs);
+        }
+    }
+    rocke_status_t st
+        = rocke_ir_builder_ok(&b)
+              ? rocke_lower_kernel_to_llvm_ex(
+                    b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", llvm_text, err, ROCKE_ERR_MSG_CAP)
+              : ROCKE_ERR_VALUE;
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+/* The f32 segment after a 2-byte f16 buffer lands at byte 16, not 4, so the
+ * <4 x float> store's `align 16` holds. */
+static int test_vector_access_moves_its_segment_to_the_vector_alignment()
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    char* llvm_text = NULL;
+    CHECK(lower_f16_then_f32x4(nullptr, &llvm_text, err) == ROCKE_OK);
+    CHECK(std::strstr(llvm_text,
+                      "= getelementptr inbounds i8, ptr addrspace(3) "
+                      "@smem_pool.lds_align_f16_f32x4, i32 16\n")
+          != NULL);
+    const char* store = std::strstr(llvm_text, "store <4 x float> %");
+    CHECK(store != NULL);
+    const std::string store_line(store, std::strchr(store, '\n'));
+    CHECK(store_line.find("ptr addrspace(3)") != std::string::npos);
+    CHECK(store_line.size() > 10
+          && store_line.compare(store_line.size() - 10, 10, ", align 16") == 0);
+    std::free(llvm_text);
+    return 0;
+}
+
+/* A store `align` that is not a positive power of two is refused, not capped
+ * to the 16-byte pool alignment (24 would otherwise print as a valid 16). */
+static int test_store_alignment_not_a_power_of_two_is_refused()
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    char* llvm_text = NULL;
+    const align_overwrite_fn align_24 = [](rocke_ir_builder_t* b, rocke_attr_map_t* attrs) {
+        rocke_attr_set_int(b, attrs, "align", 24);
+    };
+    CHECK(lower_f16_then_f32x4(align_24, &llvm_text, err) == ROCKE_ERR_VALUE);
+    CHECK(llvm_text == NULL);
+    CHECK(std::strstr(err, "tile.smem_store_vN failed - align=24, expected a positive power of two")
+          != NULL);
+    return 0;
+}
+
+/* A store `align` that is not an integer is the wrong kind of value: it is
+ * refused with ROCKE_ERR_TYPE, never read as a missing attribute (which would
+ * fall back to the vector width). */
+static int test_store_alignment_not_an_integer_is_refused()
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    char* llvm_text = NULL;
+    const align_overwrite_fn align_true = [](rocke_ir_builder_t* b, rocke_attr_map_t* attrs) {
+        rocke_attr_set_bool(b, attrs, "align", true);
+    };
+    CHECK(lower_f16_then_f32x4(align_true, &llvm_text, err) == ROCKE_ERR_TYPE);
+    CHECK(llvm_text == NULL);
+    CHECK(std::strstr(err, "tile.smem_store_vN failed - align=bool, expected an integer") != NULL);
+    const align_overwrite_fn align_float = [](rocke_ir_builder_t* b, rocke_attr_map_t* attrs) {
+        rocke_attr_set_float(b, attrs, "align", 24.0);
+    };
+    CHECK(lower_f16_then_f32x4(align_float, &llvm_text, err) == ROCKE_ERR_TYPE);
+    CHECK(llvm_text == NULL);
+    CHECK(std::strstr(err, "tile.smem_store_vN failed - align=float, expected an integer") != NULL);
+    return 0;
+}
+
 int main()
 {
     if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
@@ -427,7 +537,10 @@ int main()
        || test_conversions_reject_the_wrong_source_type()
        || test_zero_vec_and_lds_load_admit_f64_and_i16()
        || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n()
-       || test_lds_allocation_is_8_byte_aligned())
+       || test_lds_allocation_is_8_byte_aligned()
+       || test_vector_access_moves_its_segment_to_the_vector_alignment()
+       || test_store_alignment_not_a_power_of_two_is_refused()
+       || test_store_alignment_not_an_integer_is_refused())
     {
         std::fprintf(stderr, "f64 lowering contract failed\n");
         return 1;
