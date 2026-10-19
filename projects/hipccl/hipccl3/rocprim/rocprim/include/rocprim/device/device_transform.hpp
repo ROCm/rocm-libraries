@@ -220,6 +220,7 @@ inline hipError_t transform(InputIterator     input,
 ///
 /// transform function selectively performs a device-wide transformation operation
 /// using unary \p transform_op operator on elements for which \p predicate is true.
+/// When \p predicate is false, the output elements are not written.
 ///
 /// \par Overview
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
@@ -229,6 +230,7 @@ inline hipError_t transform(InputIterator     input,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Predicate type of the predicate function used for selection in transform.
 /// \tparam UnaryFunction type of unary function used for transform.
 ///
 /// \param [in] input iterator to the first element in the range to transform.
@@ -277,7 +279,7 @@ inline hipError_t transform(InputIterator     input,
 /// rocprim::transform(
 ///     input, output, input_size, predicate, transform_op
 /// );
-/// // output: [0, 2, 0, 4, 0, 6, 0, 8]
+/// // output: [0, 7, 0, 9, 0, 11, 0, 13]
 /// \endcode
 /// \endparblock
 template<class Config = default_config,
@@ -392,7 +394,7 @@ inline hipError_t transform(InputIterator1    input1,
 /// \brief Parallel device-level transform primitive for an arbitrary amount of inputs.
 ///
 /// transform function performs a device-wide transformation operation
-/// on n input ranges using binary \p transform_op operator.
+/// on n input ranges using n-ary \p transform_op operator.
 ///
 /// \par Overview
 /// * Ranges specified by \p output and all iterators in \p input_iters must have at least \p size elements.
@@ -402,9 +404,9 @@ inline hipError_t transform(InputIterator1    input1,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction type of binary function used for transform.
+/// \tparam TransformOp type of n-ary function used for transform.
 ///
-/// \param [in] input_iters a tuple of iterators to the input sequences where num_items elements are read from each.
+/// \param [in] input_iters a tuple of iterators to the input sequences where \p size elements are read from each.
 /// \param [out] output iterator to the first element in the output range.
 /// \param [in] size number of element in the input range.
 /// \param [in] transform_op an n-ary function object used for the transform, where n is the number of input sequences.
@@ -467,8 +469,9 @@ inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
 /// \brief Parallel device-level transform primitive for an arbitrary amount of inputs.
 ///
 /// transform function selectively performs a device-wide transformation operation
-/// on n input ranges using binary \p transform_op operator on tuple elements for
-/// which \p predicate is true.
+/// on n input ranges using n-ary \p transform_op operator on tuple elements for
+/// which \p predicate is true. When \p predicate is false, the output elements are
+/// not written.
 ///
 /// \par Overview
 /// * Ranges specified by \p output and all iterators in \p input_iters must have at least \p size elements.
@@ -478,9 +481,10 @@ inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction type of binary function used for transform.
+/// \tparam Predicate type of the predicate function used for selection in transform.
+/// \tparam TransformOp type of n-ary function used for transform.
 ///
-/// \param [in] input_iters a tuple of iterators to the input sequences where num_items elements are read from each.
+/// \param [in] input_iters a tuple of iterators to the input sequences where \p size elements are read from each.
 /// \param [out] output iterator to the first element in the output range.
 /// \param [in] size number of element in the input range.
 /// \param [in] predicate n-ary selection function object used to select input values to transform, where n is
@@ -525,7 +529,7 @@ inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
 /// rocprim::transform(
 ///     rocprim::tuple(input1, input2, input3), output, input1.size(), predicate, transform_op
 /// );
-/// // output: [0, 4, 0, 8, 0, 12, 0, 16]
+/// // output: [0, 6, 0, 12, 0, 18, 0, 24]
 /// \endcode
 /// \endparblock
 template<class Config = default_config,
