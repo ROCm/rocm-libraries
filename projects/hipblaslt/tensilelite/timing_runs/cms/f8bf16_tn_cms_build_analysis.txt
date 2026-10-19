@@ -1,0 +1,8 @@
+========================================================================================================================
+TIMING ANALYSIS SUMMARY
+========================================================================================================================
+
+No timing data found!
+
+Make sure you ran with --global-parameters "TimingInstrumentation=True"
+and captured stderr output (2>&1).

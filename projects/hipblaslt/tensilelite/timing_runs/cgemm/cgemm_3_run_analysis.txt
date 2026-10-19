@@ -1,0 +1,173 @@
+========================================================================================================================
+TIMING ANALYSIS SUMMARY
+========================================================================================================================
+
+TIMING BY PHASE
+------------------------------------------------------------------------------------------------------------------------
+  Category                                      Count     Total (ms)      Mean (ms) % of Parent     % of Wall
+------------------------------------------------------------------------------------------------------------------------
+  python_benchmark_problems                         1      41,022.07      41,022.07                     99.8%
+    --------------------------------------------------------------------------------------------------------------------
+    python_client_execution                         9      40,589.17       4,509.91       98.9%         98.7%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      C++ Client Setup                                     12,560.29                      30.9%         30.6%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        listener_setup                              9       4,784.49         531.61       38.1%         11.6%
+        hip_initialization                          9       3,647.34         405.26       29.0%          8.9%
+        library_loading                             9       2,901.38         322.38       23.1%          7.1%
+        code_object_loading                         9         694.46          77.16        5.5%          1.7%
+        data_init_setup                             9         501.74          55.75        4.0%          1.2%
+        lazy_loading_init                           9          29.58           3.29        0.2%          0.1%
+        reporter_setup                              9           1.14           0.13        0.0%          0.0%
+        solution_iterator_setup                     9           0.16           0.02        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Data Preparation                                     10,631.87                      26.2%         25.9%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        pre_problem                                54      10,407.95         192.74       97.9%         25.3%
+          cpu_reference_gemm                       54      10,378.99         192.20       99.7%         25.2%
+            solve_cpu_slow                         54      10,378.80         192.20      100.0%         25.2%
+            (untracked)                                         0.18                       0.0%          0.0%
+          cpu_data_init                            54          27.34           0.51        0.3%          0.1%
+          (untracked)                                           1.62                       0.0%          0.0%
+        gpu_input_reset                        45,792         214.59           0.00        2.0%          0.5%
+        gpu_input_preparation                      54           7.80           0.14        0.1%          0.0%
+        rotating_buffer_preparation                54           1.53           0.03        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Reference Computation                                 5,199.40                      12.8%         12.6%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        validate_warmups                       45,792       5,199.40           0.11      100.0%         12.6%
+          validate_gpu_readback                45,792       3,537.91           0.08       68.0%          8.6%
+          validate_element_comparison          45,792       1,560.88           0.03       30.0%          3.8%
+          (untracked)                                          72.72                       1.4%          0.2%
+          validate_gpu_sync                    45,792          27.88           0.00        0.5%          0.1%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Kernel Execution                                      4,731.00                      11.7%         11.5%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        post_solution                         122,112       1,937.84           0.02       41.0%          4.7%
+          post_solution_log                   122,112       1,604.87           0.01       82.8%          3.9%
+          post_solution_reporting             122,112         259.89           0.00       13.4%          0.6%
+          post_solution_perf_calc             122,112          46.18           0.00        2.4%          0.1%
+          post_solution_validation            122,112          25.99           0.00        1.3%          0.1%
+          post_solution_result_file           122,112           3.30           0.00        0.2%          0.0%
+          post_solution_sol_advance           122,112           3.22           0.00        0.2%          0.0%
+          post_solution_perf_reset            122,112           3.17           0.00        0.2%          0.0%
+        pre_solution                          122,112       1,251.00           0.01       26.4%          3.0%
+        warmup_runs                            91,584       1,090.34           0.01       23.0%          2.7%
+        kernel_solving                         45,792         272.51           0.01        5.8%          0.7%
+        post_problem                               54         102.96           1.91        2.2%          0.3%
+        solution_selection                    122,112          70.89           0.00        1.5%          0.2%
+        benchmark_runs                         45,792           5.45           0.00        0.1%          0.0%
+          (untracked)                                           5.45                     100.0%          0.0%
+        finalize_report                             9           0.01           0.00        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Timing Overhead                                       4,006.26                       9.9%          9.7%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        flush_timing_buffer                         9       3,917.83         435.31       97.8%          9.5%
+        timing_overhead                             9          88.43           9.83        2.2%          0.2%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked C++ overhead)                              3,460.37                       8.5%          8.4%
+    --------------------------------------------------------------------------------------------------------------------
+    (untracked)                                               411.37                       1.0%          1.0%
+    --------------------------------------------------------------------------------------------------------------------
+    python_cache_check                              9          19.90           2.21        0.0%          0.0%
+    --------------------------------------------------------------------------------------------------------------------
+    python_write_solutions                          9           1.62           0.18        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_prepare                           9           1.10           0.12       67.6%          0.0%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_wsol_prepare_cache                   9           1.05           0.12       96.3%          0.0%
+        (untracked)                                             0.04                       3.7%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_header                            9           0.42           0.05       25.8%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                               0.11                       6.6%          0.0%
+
+------------------------------------------------------------------------------------------------------------------------
+  ESTIMATED WALL CLOCK TIME: 41.11s
+
+HIERARCHY VALIDATION: OK (all child phases fit within their parents)
+
+TIME BREAKDOWN (visual, % of wall clock)
+------------------------------------------------------------------------------------------------------------------------
+  python_benchmark_problems                  99.8% #################################################
+    python_client_execution                  98.7% #################################################
+      C++ Client Setup                       30.6% ###############
+        listener_setup                       11.6% #####
+        hip_initialization                    8.9% ####
+        library_loading                       7.1% ###
+        code_object_loading                   1.7% 
+        data_init_setup                       1.2% 
+        lazy_loading_init                     0.1% 
+        reporter_setup                        0.0% 
+        solution_iterator_setup               0.0% 
+      Data Preparation                       25.9% ############
+        pre_problem                          25.3% ############
+          cpu_reference_gemm                 25.2% ############
+            solve_cpu_slow                   25.2% ############
+            (untracked)                       0.0% 
+          cpu_data_init                       0.1% 
+          (untracked)                         0.0% 
+        gpu_input_reset                       0.5% 
+        gpu_input_preparation                 0.0% 
+        rotating_buffer_preparation           0.0% 
+      Reference Computation                  12.6% ######
+        validate_warmups                     12.6% ######
+          validate_gpu_readback               8.6% ####
+          validate_element_comparison         3.8% #
+          (untracked)                         0.2% 
+          validate_gpu_sync                   0.1% 
+      Kernel Execution                       11.5% #####
+        post_solution                         4.7% ##
+          post_solution_log                   3.9% #
+          post_solution_reporting             0.6% 
+          post_solution_perf_calc             0.1% 
+          post_solution_validation            0.1% 
+          post_solution_result_file           0.0% 
+          post_solution_sol_advance           0.0% 
+          post_solution_perf_reset            0.0% 
+        pre_solution                          3.0% #
+        warmup_runs                           2.7% #
+        kernel_solving                        0.7% 
+        post_problem                          0.3% 
+        solution_selection                    0.2% 
+        benchmark_runs                        0.0% 
+          (untracked)                         0.0% 
+        finalize_report                       0.0% 
+      Timing Overhead                         9.7% ####
+        flush_timing_buffer                   9.5% ####
+        timing_overhead                       0.2% 
+      (untracked C++ overhead)                8.4% ####
+    (untracked)                               1.0% 
+    python_cache_check                        0.0% 
+    python_write_solutions                    0.0% 
+      python_wsol_prepare                     0.0% 
+        python_wsol_prepare_cache             0.0% 
+        (untracked)                           0.0% 
+      python_wsol_header                      0.0% 
+      (untracked)                             0.0% 
+
+KEY INSIGHTS (% of wall clock)
+------------------------------------------------------------------------------------------------------------------------
+  Python phases (code gen, compilation):  0.00s (0.0%)
+  Python I/O overhead (cache, YAML):      0.02s (0.1%)
+  C++ client setup (library loading):     12.56s (30.6%)
+  Data preparation (CPU init, GPU prep):  10.63s (25.9%)
+  Reference computation (CPU GEMM):       5.21s (12.7%)
+  Kernel execution (warmup, benchmark):   4.78s (11.6%)
+
+
+TOP 10 SLOWEST PROBLEMS (by CPU reference time)
+------------------------------------------------------------------------------------------------------------------------
+         M        N        K    Batch      TypeA      TypeD CPU Ref (ms)   GPU (ms)
+  ----------------------------------------------------------------------------------------------------------------------
+       128      128       63        2 ComplexFloat ComplexFloat       359.12       0.00
+       127      127       63        2 ComplexFloat ComplexFloat       318.96       0.00
+       129      129       63        2 ComplexFloat ComplexFloat       265.68       0.00
+       127      127       64        2 ComplexFloat ComplexFloat       265.15       0.00
+       127      127       64        2 ComplexFloat ComplexFloat       259.98       0.00
+       127      127       63        2 ComplexFloat ComplexFloat       254.31       0.00
+       129      129       63        2 ComplexFloat ComplexFloat       253.06       0.00
+       129      129       63        2 ComplexFloat ComplexFloat       251.09       0.00
+       129      129       64        2 ComplexFloat ComplexFloat       247.91       0.00
+       129      129       63        2 ComplexFloat ComplexFloat       243.50       0.00
+
