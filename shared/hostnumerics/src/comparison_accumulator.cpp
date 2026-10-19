@@ -187,7 +187,9 @@ void ComparisonAccumulator::observe(size_t logicalIndex, ptrdiff_t observedOffse
         m_result.reportedMismatches.size() < m_options.maxReportedMismatches;
     if (reportComparison || reportMismatch) {
         std::vector<size_t> coordinates =
-            m_shape->coordinates(logicalIndex, m_options.selection.indexOrder());
+            m_options.selection.indexOrder().empty()
+                ? m_shape->coordinates(logicalIndex)
+                : m_shape->coordinates(logicalIndex, m_options.selection.indexOrder());
         const Mismatch sample{
             logicalIndex,
             std::move(coordinates),
