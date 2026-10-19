@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   standalone:
-    name: GCC, Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
+    name: GCC, Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}, GTest ${{ matrix.gtest }}
     runs-on: ubuntu-24.04
     env:
       CXX: g++
@@ -36,9 +36,13 @@ jobs:
           - python: "ON"
             testing: "ON"
             generator: "Ninja Multi-Config"
+            gtest: "installed"
+            fetch: "OFF"
           - python: "OFF"
             testing: "OFF"
             generator: "Ninja"
+            gtest: "fetched"
+            fetch: "ON"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -53,6 +57,12 @@ jobs:
         if: matrix.python == 'ON'
         run: python -m pip install nanobind==3.0.1
 
+      - name: Install GoogleTest
+        if: matrix.gtest == 'installed'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgtest-dev
+
       - name: Configure and build
         run: |
           if [[ "${{ matrix.python }}" == ON ]]; then
@@ -61,13 +71,17 @@ jobs:
             python_options=(-DCMAKE_DISABLE_FIND_PACKAGE_Python=TRUE
                             -DCMAKE_DISABLE_FIND_PACKAGE_nanobind=TRUE)
           fi
+          gtest_options=()
+          if [[ "${{ matrix.testing }}" == ON ]]; then
+            gtest_options=(-DHOSTNUMERICS_ENABLE_FETCH=${{ matrix.fetch }})
+          fi
           cmake -S shared/hostnumerics \
             -B "${RUNNER_TEMP}/hostnumerics-build" \
             -G "${{ matrix.generator }}" \
             -DHOSTNUMERICS_BUILD_TESTING=${{ matrix.testing }} \
             -DHOSTNUMERICS_BUILD_PYTHON=${{ matrix.python }} \
             -DCMAKE_BUILD_TYPE=Release \
-            "${python_options[@]}"
+            "${python_options[@]}" "${gtest_options[@]}"
           cmake --build "${RUNNER_TEMP}/hostnumerics-build" \
             --config Release --parallel "$(nproc)"
 
@@ -89,6 +103,8 @@ jobs:
           cmake -S shared/hostnumerics/tests/package \
             -B "${RUNNER_TEMP}/hostnumerics-package-test" \
             -G Ninja \
+            -DHOSTNUMERICS_SOURCE_DIR="${GITHUB_WORKSPACE}/shared/hostnumerics" \
+            -DHOSTNUMERICS_ENABLE_FETCH=${{ matrix.fetch }} \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/hostnumerics-install"
           cmake --build "${RUNNER_TEMP}/hostnumerics-package-test" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-package-test" \
@@ -106,6 +122,7 @@ jobs:
         run: |
           cmake -S shared/hostnumerics/tests/embedded \
             -B "${RUNNER_TEMP}/hostnumerics-embedded-test" \
+            -DHOSTNUMERICS_SOURCE_DIR="${GITHUB_WORKSPACE}/shared/hostnumerics" \
             -G Ninja
           cmake --build "${RUNNER_TEMP}/hostnumerics-embedded-test" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \

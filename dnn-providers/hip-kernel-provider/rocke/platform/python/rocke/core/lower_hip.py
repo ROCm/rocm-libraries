@@ -32,6 +32,8 @@ from .ir import (
     Value,
     VectorType,
     _sync_attr,
+    dpp_ctrl_attr,
+    dpp_xor_ctrl,
     require_streaming_arch,
 )
 
@@ -631,6 +633,26 @@ class _Lowerer:
         from .tf32 import TF32_MMA
 
         op_id = op.attrs["op_id"]
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+        )
+
+        atom = gfx950_scaled_mfma(op_id)
+        if atom is not None:
+            if self.arch.gfx != "gfx950":
+                raise NotImplementedError("scaled MFMA requires gfx950")
+            error = scaled_mfma_error(op_id, op.operands, op.results)
+            if error:
+                raise ValueError(error)
+            a, b, c, sa, sb = op.operands
+            self._emit(
+                f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4("
+                f"{_name(a)}, {_name(b)}, {_name(c)}, {MATRIX_FORMATS[atom.a_dtype]}, {MATRIX_FORMATS[atom.b_dtype]}, "
+                f"0, {_name(sa)}, 0, {_name(sb)});"
+            )
+            return
         if op_id in TF32_MMA:
             if self.arch.gfx != "gfx942":
                 raise ValueError("XF32 MMA requires gfx942")
@@ -641,7 +663,16 @@ class _Lowerer:
                 f"__builtin_bit_cast(f32x2, {_name(b)}), {_name(c)}, 0, 0, 0);"
             )
             return
-        op_id = op.attrs["op_id"]
+        atom = self.arch.mma.by_op_id(op_id)
+        if atom is not None and not atom.is_native:
+            # The expansion exists only in the LLVM lowerer. Without this the op
+            # would reach the generic dispatcher below as ``tile.<op_id>`` and fail
+            # as though the HIP backend had merely forgotten a hardware atom.
+            raise NotImplementedError(
+                f"tile.mma {op_id}: an emulated atom ({atom.emulation.recipe} over "
+                f"{atom.emulation.physical_op_id}) has no HIP lowering; lower it "
+                f"through the LLVM path"
+            )
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -2133,14 +2164,13 @@ class _Lowerer:
         )
 
     def _op_tile_dpp_xor(self, op: Op) -> None:
-        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+        """In-row XOR shuffle as one ``v_mov_b32_dpp`` (VALU, not LDS).
 
-        ``dpp_ctrl = 0x160 | mask`` (AMDGPU ``DPP_ROW_XMASK``). See
-        :meth:`_op_tile_dpp_xor` in ``lower_llvm.py`` for the rationale.
+        :func:`~rocke.core.ir.dpp_xor_ctrl` picks the DPP control word for
+        the target. See :meth:`_op_tile_dpp_xor` in ``lower_llvm.py``.
         """
+        dpp_ctrl = dpp_xor_ctrl(op, self.arch)
         (data,) = op.operands
-        mask = int(op.attrs["xor_mask"])
-        dpp_ctrl = 0x160 | (mask & 0xF)
         self._emit(
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
@@ -2151,10 +2181,12 @@ class _Lowerer:
 
         See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
         packs four two-bit lane selectors, so ``0..255`` is the whole
-        legal range and out-of-range values are malformed IR.
+        legal range and out-of-range values are malformed IR. The data and
+        the result must be i32: HIP would convert between ``int`` and
+        ``float`` without a word.
         """
+        ctrl = dpp_ctrl_attr(op)
         (data,) = op.operands
-        ctrl = int(op.attrs["ctrl"])
         if not 0 <= ctrl <= 255:
             raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
         self._emit(
