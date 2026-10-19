@@ -80,7 +80,7 @@ try
     // extra requirements for calling ORMQR/ORMLQ and to copy B
     size_t size_ipiv_savedB;
 
-    I const max_batch_count = 64 * 1024;
+    I const max_batch_count = 64 * 1024 - 1;
     I const nsweep = ceildiv(batch_count_arg, max_batch_count);
     I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
