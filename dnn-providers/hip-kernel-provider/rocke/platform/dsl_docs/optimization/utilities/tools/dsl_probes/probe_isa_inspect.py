@@ -2,19 +2,26 @@
 # SPDX-License-Identifier: MIT
 """Categorize the AMDGPU ISA for a compiled CK DSL kernel.
 
-Builds each (label, KernelDef) pair, runs ``llvm-objdump -d --mcpu=<arch>``
-on the produced HSACO, and tallies opcodes by category:
+Builds each (label, KernelDef) pair for ``mcpu``, runs
+``llvm-objdump -d --mcpu=<arch>`` on the produced HSACO, and tallies opcodes by
+category:
 
-- ``mfma``           — matrix-multiply-accumulate (``v_mfma_*``)
-- ``ds_read`` / ``ds_write`` (+ ``_tr`` transpose variants)
+- ``mfma`` / ``wmma`` — matrix-core ops (``v_mfma_*`` on CDNA, ``v_wmma_*`` /
+  ``v_swmmac_*`` on RDNA and gfx12)
+- ``ds_read`` / ``ds_write`` — LDS reads/writes (``ds_read_*`` / ``ds_write_*``
+  on CDNA, ``ds_load_*`` / ``ds_store_*`` on gfx11+), ``ds_read_tr`` for
+  transpose reads
 - ``vmem_load`` / ``vmem_store`` (``buffer_*``, ``global_*``)
-- ``waitcnt``        — with the most-common encoded operands
-- ``barrier``        — ``s_barrier`` count
+- ``scratch_load`` / ``scratch_store`` — register spills
+- ``waitcnt`` — memory waits (``s_waitcnt*`` and gfx12 ``s_wait_*cnt``), with
+  the most-common encoded operands; ``s_wait_alu`` (gfx12 ALU dependency wait)
+  separately
+- ``barrier`` — barriers (gfx12 ``s_barrier_signal`` + ``s_barrier_wait`` = 1)
 - ``valu`` and ``salu`` — VALU/SALU instruction families (with sub-buckets)
 
-The classification follows ``rocke.analysis.isa.parse_isa`` but adds
-VALU/SALU sub-buckets that surface the difference between a
-scalar-heavy kernel and a tiled matmul.
+The headline counts come from ``rocke.analysis.isa.parse_isa``; this probe
+adds VALU/SALU sub-buckets that surface the difference between a
+scalar-heavy kernel and a tiled matmul. Categories that are zero are omitted.
 
 Programmatic use (import the framework; drive it from the library-side
 attention driver ``dsl_probe_attention_demos.py`` for attention specs):
@@ -61,11 +68,14 @@ def _bootstrap_rocke() -> None:
 
 _bootstrap_rocke()
 
+from rocke.analysis.isa import parse_isa
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
 _VALU_SUBS = (
     "v_mfma_",
+    "v_wmma_",
+    "v_swmmac_",
     "v_exp_",
     "v_rcp_",
     "v_cvt_",
@@ -158,13 +168,46 @@ def disassemble_hsaco(hsaco_bytes: bytes, mcpu: str = "gfx950") -> str:
 
 _OPCODE_RE = re.compile(
     r"^([sv]_[a-z0-9_]+|ds_[a-z0-9_]+|buffer_[a-z0-9_]+"
-    r"|global_[a-z0-9_]+|flat_[a-z0-9_]+|image_[a-z0-9_]+)\b"
+    r"|global_[a-z0-9_]+|flat_[a-z0-9_]+|image_[a-z0-9_]+|scratch_[a-z0-9_]+)\b"
+)
+# Memory-op prefixes that parse_isa already counts as a headline category.
+_COUNTED_MEM_PREFIXES = (
+    "ds_read",
+    "ds_load",
+    "ds_write",
+    "ds_store",
+    "buffer_load",
+    "buffer_store",
+    "global_load",
+    "global_store",
+    "scratch_load",
+    "scratch_store",
 )
 
 
 def categorize_isa(isa: str) -> tuple[Counter, Counter]:
     """Return ``(category_counts, waitcnt_pattern_counts)``."""
-    cats: Counter = Counter()
+    st = parse_isa(isa)
+    cats: Counter = Counter(
+        {
+            "mfma": st.mfma,
+            "wmma": st.wmma,
+            "ds_read": st.ds_read,
+            "ds_write": st.ds_write,
+            "waitcnt": st.s_waitcnt,
+            "s_wait_alu": st.s_wait_alu,
+            "barrier": st.s_barrier,
+            "vmem_load": st.buffer_load
+            + st.buffer_load_lds
+            + st.global_load
+            + st.global_load_lds,
+            "vmem_store": st.buffer_store + st.global_store,
+            "scratch_load": st.scratch_load,
+            "scratch_store": st.scratch_store,
+            "valu": st.valu,
+            "salu": st.salu,
+        }
+    )
     waitcnt_patterns: Counter = Counter()
     for raw in isa.split("\n"):
         line = raw.strip()
@@ -184,38 +227,24 @@ def categorize_isa(isa: str) -> tuple[Counter, Counter]:
             else:
                 cats["  v_other"] += 1
         # Sub-bucket SALU.
-        if opcode.startswith("s_"):
+        elif opcode.startswith("s_"):
             for sub in _SALU_SUBS:
                 if opcode.startswith(sub):
                     cats[f"  {sub.rstrip('_')}"] += 1
                     break
-
-        if opcode.startswith("v_mfma_"):
-            cats["mfma"] += 1
-        elif opcode.startswith("ds_read"):
-            cats["ds_read"] += 1
-            if "_tr" in opcode:
-                cats["ds_read_tr"] += 1
-        elif opcode.startswith("ds_write"):
-            cats["ds_write"] += 1
-        elif opcode.startswith("s_waitcnt"):
-            cats["waitcnt"] += 1
-            mm = re.search(r"s_waitcnt\s+(.+)$", raw)
-            if mm:
-                waitcnt_patterns[mm.group(1).strip()[:48]] += 1
-        elif opcode.startswith("s_barrier"):
-            cats["barrier"] += 1
-        elif opcode.startswith("buffer_load") or opcode.startswith("global_load"):
-            cats["vmem_load"] += 1
-        elif opcode.startswith("buffer_store") or opcode.startswith("global_store"):
-            cats["vmem_store"] += 1
-        elif opcode.startswith("v_"):
-            cats["valu"] += 1
-        elif opcode.startswith("s_"):
-            cats["salu"] += 1
-        else:
+            if opcode.startswith("s_waitcnt"):
+                mm = re.search(r"s_waitcnt\s+(.+)$", raw)
+                if mm:
+                    waitcnt_patterns[mm.group(1).strip()[:48]] += 1
+            elif opcode.startswith("s_wait_") and opcode.endswith("cnt"):
+                # gfx12 split waits: keep the counter name, drop the comment.
+                operand = raw.split(opcode, 1)[1].split("//", 1)[0].strip()
+                waitcnt_patterns[f"{opcode} {operand}"[:48]] += 1
+        elif opcode.startswith(("ds_read", "ds_load")) and "_tr" in opcode:
+            cats["ds_read_tr"] += 1
+        elif not opcode.startswith(_COUNTED_MEM_PREFIXES):
             cats["other"] += 1
-    return cats, waitcnt_patterns
+    return +cats, waitcnt_patterns
 
 
 def probe_isa_inspect(
@@ -228,7 +257,7 @@ def probe_isa_inspect(
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            artifact = compile_kernel(kdef, capture_ir_text=False)
+            artifact = compile_kernel(kdef, arch=mcpu, capture_ir_text=False)
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === BUILD-FAIL: {type(e).__name__}: {e}")
             continue

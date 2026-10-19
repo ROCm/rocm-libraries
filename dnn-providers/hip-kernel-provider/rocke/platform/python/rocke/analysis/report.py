@@ -88,6 +88,13 @@ def compare_variant_reports(reports: Sequence[VariantReport]) -> List[Dict[str, 
                 "vgpr": r.resources.vgpr_count if r.resources else None,
                 "sgpr": r.resources.sgpr_count if r.resources else None,
                 "lds_bytes": r.resources.lds_bytes if r.resources else None,
+                # Launch size vs the size the compiler budgeted for. A
+                # compiled value larger than the launch value means a
+                # smaller register budget than the kernel needs.
+                "wg_launch": r.artifact.kernel.max_workgroup_size,
+                "wg_compiled": (
+                    r.resources.max_flat_workgroup_size if r.resources else None
+                ),
             }
         )
     return sorted(

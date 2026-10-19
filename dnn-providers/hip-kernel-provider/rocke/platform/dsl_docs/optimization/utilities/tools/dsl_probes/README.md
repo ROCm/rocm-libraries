@@ -80,15 +80,18 @@ block/CU, or that the `ds_read/mfma` ratio moved after a swizzle change.
 
 ### `probe_isa_inspect.py`
 **Input**: list of `(label, KernelDef)`.
-**Output**: per-variant ISA opcode histogram (MFMA, `ds_read{_tr}`,
-`ds_write`, `vmem_load`, `vmem_store`, `waitcnt`, `barrier`, VALU /
-SALU sub-buckets), plus the most frequent `s_waitcnt` operand patterns.
+**Output**: per-variant ISA opcode histogram (`mfma` / `wmma`,
+`ds_read{_tr}`, `ds_write`, `vmem_load`, `vmem_store`, `scratch_load` /
+`scratch_store`, `waitcnt`, `s_wait_alu`, `barrier`, VALU / SALU
+sub-buckets), plus the most frequent memory-wait operand patterns. Zero
+categories are omitted.
 
-How it works: compiles via `compile_kernel`, runs
-`llvm-objdump -d --mcpu=gfx950`, parses the output with the same opcode
-regex `analysis/isa.py` uses internally. Adds the SALU/VALU
-sub-buckets that are missing from `parse_isa` because they only matter
-during optimization, not at runtime.
+How it works: compiles via `compile_kernel(kdef, arch=mcpu)`, runs
+`llvm-objdump -d --mcpu=<mcpu>`, and takes the headline counts from
+`rocke.analysis.isa.parse_isa`, so CDNA and RDNA/gfx12 spellings are both
+recognized (`ds_load` = `ds_read`, gfx12 split barriers and `s_wait_*cnt`
+waits). Adds the SALU/VALU sub-buckets that are missing from `parse_isa`
+because they only matter during optimization, not at runtime.
 
 Useful for: confirming that an MFMA-atom switch actually emitted the
 new shape, that the cshuffle epilogue uses wide `buffer_store_dwordx{2,4}`
