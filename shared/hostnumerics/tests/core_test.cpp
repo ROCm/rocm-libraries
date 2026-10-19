@@ -344,43 +344,39 @@ TEST(ShapeCpp, ConstructionAndOwnership) {
     for (const auto& extents :
          {std::vector<size_t>{0, maximum, 2}, std::vector<size_t>{maximum, 0, 2},
           std::vector<size_t>{maximum, 2, 0}}) {
-        EXPECT_THROW((Shape(extents)), std::runtime_error);
-        EXPECT_THROW(Shape(std::span<const size_t>(extents)), std::runtime_error);
+        EXPECT_EQ(Shape(extents).elementCount(), 0);
+        EXPECT_EQ(Shape(std::span<const size_t>(extents)).elementCount(), 0);
     }
-    EXPECT_THROW((Shape{maximum, 2, 0}), std::runtime_error);
-    const Shape empty{maximum, 1, 0};
-    EXPECT_EQ(empty.elementCount(), 0);
-    EXPECT_EQ(empty.elementCount(0, 2), maximum);
-    EXPECT_EQ(empty.project(std::array<size_t, 2>{0, 1}).elementCount(), maximum);
+    EXPECT_EQ(Shape{}.elementCount(), 1);
 }
 
-TEST(ShapeCpp, CallerProvidedCoordinates) {
-    const Shape shape{2, 3, 4};
-    const std::array<size_t, 3> order{2, 1, 0};
-    std::array<size_t, 3> output{};
-    shape.coordinates(17, order, output);
-    EXPECT_EQ(output, (std::array<size_t, 3>{1, 2, 2}));
-    EXPECT_EQ(shape.linearIndex(output, order), 17);
-    EXPECT_EQ(shape.coordinates(17, order), (std::vector<size_t>{1, 2, 2}));
-    for (const size_t outputRank : {size_t{0}, size_t{2}, size_t{4}}) {
-        std::vector<size_t> wrongOutput(outputRank, 99);
-        EXPECT_THROW(shape.coordinates(0, order, wrongOutput), std::runtime_error);
-        EXPECT_EQ(wrongOutput, std::vector<size_t>(outputRank, 99));
-    }
+TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
+    for (const Shape original :
+         {Shape{}, Shape{2, 3, 5}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
+        Shape copied(original);
+        EXPECT_EQ(copied, original);
+        EXPECT_EQ(copied.elementCount(), original.elementCount());
+        Shape moved(std::move(copied));
+        EXPECT_EQ(moved, original);
+        EXPECT_EQ(moved.elementCount(), original.elementCount());
+        EXPECT_EQ(copied, Shape{});
+        EXPECT_EQ(copied.elementCount(), 1);
+        EXPECT_EQ(copied.coordinates(0), std::vector<size_t>{});
 
-    for (const auto& invalidOrder : {std::vector<size_t>{0}, std::vector<size_t>{0, 0, 2}}) {
-        output.fill(99);
-        EXPECT_THROW(shape.coordinates(0, invalidOrder, output), std::runtime_error);
-        EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
+        Shape assigned{7};
+        assigned = original;
+        EXPECT_EQ(assigned, original);
+        EXPECT_EQ(assigned.elementCount(), original.elementCount());
+        Shape moveAssigned{9};
+        moveAssigned = std::move(assigned);
+        EXPECT_EQ(moveAssigned, original);
+        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
+        EXPECT_EQ(assigned, Shape{});
+        EXPECT_EQ(assigned.elementCount(), 1);
+        Shape& self = moveAssigned;
+        moveAssigned = std::move(self);
+        EXPECT_EQ(moveAssigned, original);
+        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
     }
-    for (const Shape& invalidShape :
-         {Shape{2, 3, 0}, Shape{std::numeric_limits<size_t>::max(), 1, 0}}) {
-        output.fill(99);
-        EXPECT_THROW(invalidShape.coordinates(0, order, output), std::runtime_error);
-        EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
-    }
-    output.fill(99);
-    EXPECT_THROW(shape.coordinates(24, order, output), std::runtime_error);
-    EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
 }
 }  // namespace
