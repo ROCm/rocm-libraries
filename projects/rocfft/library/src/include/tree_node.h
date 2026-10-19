@@ -1331,7 +1331,7 @@ private:
 struct CommRCCLAllToAll : public MultiPlanItem
 {
     // per-rank state for one all-to-all participant. Caller fills
-    // sendBuffer/recvBuffer for every world rank; only local ranks
+    // sendBuffer/recvBuffer for every NCCL rank; only local participants
     // have real buffers and a completion event. The collective runs
     // on the comm-owned stream; the event is recorded on it after
     // ncclGroupEnd so Wait() can sync on events like every other
