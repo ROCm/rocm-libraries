@@ -52,7 +52,8 @@
 #                uninterpreted, so their meaning belongs to the lowerer, not to
 #                the recipe format. A lowerer that silently ignores an attribute
 #                it does not understand is a real hazard and this version number
-#                cannot catch it.
+#                cannot catch it. Kernel-attr value TAGS are the exception: the
+#                VM itself drops tags it does not know (KERNEL_ATTR_TAGS).
 #
 # So the genuinely dangerous change -- one an old engine ACCEPTS and gets wrong
 # -- is the one a human has to notice and bump for. `stamp` refuses to stamp a
@@ -67,14 +68,14 @@ from typing import Any, Dict, List, Optional
 #: cpp/include/rocke/abi.h; a test pins the two together against the built
 #: engine, because a Python generator that believed it was newer than the C
 #: engine would stamp artifacts that engine then refuses.
-RECIPE_ABI = 1
+RECIPE_ABI = 2
 
 #: Binary ABI the ctypes bindings in online.py are written against. MUST equal
 #: ROCKE_ABI_VERSION in cpp/include/rocke/abi.h. Unlike the wire level, this one
 #: is checked at library load: ctypes argtypes are a hand-written mirror of the C
 #: signatures, and calling a mismatched library with them is memory-unsafe rather
 #: than merely wrong.
-BINARY_ABI = 1
+BINARY_ABI = 3
 
 
 class AbiError(RuntimeError):
@@ -118,6 +119,12 @@ INTEXPR_NODES: Dict[str, int] = {
     "le": 1,
     "gt": 1,
     "ge": 1,
+}
+
+# Kernel-attr value tags above level 1. A level-1 engine silently drops a
+# list-tagged kernel attr, so a cluster_dims kernel would launch unclustered.
+KERNEL_ATTR_TAGS: Dict[str, int] = {
+    "l": 2,
 }
 
 # Nested instruction lists, by the key that holds them.
@@ -177,6 +184,9 @@ def recipe_min_reader(recipe: Dict[str, Any], *, strict: bool = True) -> int:
             for key in node:
                 if key in INTEXPR_NODES:
                     level = max(level, INTEXPR_NODES[key])
+    for tv in (recipe.get("attrs") or {}).values():
+        if isinstance(tv, dict):
+            level = max(level, KERNEL_ATTR_TAGS.get(tv.get("t"), 1))
     return level
 
 

@@ -43,8 +43,11 @@ params). Correctness rests entirely on the key.
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
 | 3 | `attention_gfx950_dense_persist_widedma` | gfx950 | `gfx950_dense.py` | persistent body + wide DMA, D128 (`algorithm=attention_dense_persist`, opt-in) |
+| 4 | `attention_rdna_wmma_decode` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 split-KV GQA-packed decode (+ merge kernel); unpinned only when `rdna_attention_use_decode` picks it (`algorithm=wmma_fmha_decode`) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942_unified.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950_unified.py` | bf16 D256 2D prefill |
+| 5 | `attention_rdna_wmma_prefill` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 multi-wave prefill: dense/ragged/paged, score features, bias and OCP FP8 KV (`algorithm=wmma_fmha_fwd_v2`) |
+| 5 | `attention_{arch}_wmma_{prefill,decode}` | one RDNA arch each | `gfx1151.py` | tuned RDNA WMMA knob spaces (`wmma` / `wmma_decode` paths); opt-in |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
 | 5 | `attention_d256_decode` | gfx942, gfx950 | `generic.py` | bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
@@ -260,6 +263,22 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 4. **Register** it from that module's `register(route, execution)`. A new arch module
    also needs one line in `__init__.py` to join the assembly loop.
 
+   Attention has two registries; see
+   [Two registries](attention/README.md#two-registries) for which one a
+   candidate goes on. Route-only registration hides a candidate from the
+   sweeps (`registered_attention_combos` / `attention_sweep_space` /
+   `dispatch_attention_all`); `dispatch_attention` and the live benches still
+   see it. Give a sweep-only candidate `opt_in=True` and a `sweep_space` that
+   returns every variant.
+
+   A new operator family (not a new attention candidate) also exposes the three
+   sweep entry points over its registry: `registered_<family>_combos`,
+   `<family>_sweep_space`, and `dispatch_<family>_all`, each short-circuiting on
+   request errors before delegating to `CandidateRegistry.combos` /
+   `sweep_space` / `dispatch_all`. Copy
+   `platform/python/rocke/dispatch/families/norm.py`. This is a
+   [Definition of Done](../../KERNEL_AUTHORING.md#a-new-kernel-family) item.
+
    Point `build` at the real builder if the candidate has one. The unified
    paths do not: they return an `AttentionSpec` naming a *path*, and no builder
    consumes that. A standalone kernel like `attention_gfx1250_wmma` returns its
@@ -269,7 +288,9 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 5. **Add CPU-only dispatch tests** in
    `tests/dispatch/attention/test_<name>_wiring.py`. Cover: registration,
    spec_id, algorithm, priority ordering, rejection gates (wrong arch/dtype/
-   cohort/path), and routing for each target arch. Use `_PinnedArch` context
+   cohort/path), routing for each target arch, and sweep visibility — an
+   opt-in candidate shows up in `registered_attention_combos(req)` but not in
+   `dispatch_attention(req)` under `algorithm="auto"`. Use `_PinnedArch` context
    manager to avoid GPU dependency. Call `candidate.admits(req)`, not
    `candidate._supports(req)` — the latter skips the capability prefilter and is
    no longer a complete verdict, which is what the underscore is there to say.

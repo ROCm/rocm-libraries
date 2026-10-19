@@ -581,6 +581,11 @@ def build_interleaved_gemm(
         _store_buf(_prefetch_load(tk_c), tile_m_c, tile_n_c)  # tile 1 -> buf 1
         b.sync_lds_only()
         a0, b0 = _read_buf(zero, zero)  # tile 0 registers -> reg_cur
+        # Trip 0 stores tile 2 into buf 0 while other waves may still be reading tile 0 from it (the
+        # stores are cooperative, so a wave overwrites cells other waves read). The lgkmcnt wait
+        # before trip 0's MFMA only drains THIS wave's read. Fence every wave's tile-0 read here;
+        # later trips are covered by the barrier at the end of the previous trip.
+        b.sync_lds_only()
         outer = b.scf_for_iter(
             b.const_i32(0),
             b.const_i32(K_LEN - tile_k),
@@ -597,8 +602,10 @@ def build_interleaved_gemm(
             a_nx, b_nx = _read_buf(
                 nxt_ra, nxt_rb
             )  # read tile ki+1 (in LDS) -> reg_next
-            # MFMA on reg_cur (tile ki) -- forces the lgkmcnt wait on reg_cur's read, which drains the
-            # tile-ki ds_read from buf[cur] BEFORE the store below overwrites it (WAR-safe).
+            # MFMA on reg_cur (tile ki) -- forces the lgkmcnt wait on reg_cur's read, which drains
+            # this wave's tile-ki ds_read from buf[cur] before the store below overwrites it. Other
+            # waves' reads of buf[cur] are fenced by the previous trip's barrier (trip 0: the
+            # barrier after the prologue read).
             acc = _mma_prio(
                 make_fragment(a_desc, F16, acur),
                 make_fragment(b_desc, F16, bcur),

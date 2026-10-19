@@ -20,7 +20,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `core/ir.py` | Typed SSA IR. `Type`, `VectorType`, `PtrType`, `SmemType`; singletons (`I1`, `I8`, `I32`, `I64`, `F16`, `BF16`, `F32`, `FP8E4M3`, `BF8E5M2`); cache-hint constants (`CACHE_ALL`, `CACHE_GLOBAL`, `CACHE_STREAM`, `NON_TEMPORAL`); `Value`, `Op`, `Region`, `Param`, `KernelDef`; `IRBuilder`. IRBuilder methods added in : `cvt_bf8_to_f32`, `cvt_f32_to_{fp8, bf8, i8_sat}`, `clamp_f32`, `global_atomic_add`, `lds_atomic_add`. |
 | `core/ir_print.py` | `print_ir(kernel)` — MLIR-style textual IR dump. |
 | `core/passes.py` | `optimize_kernel`, `canonicalize_region`, `eliminate_dead_pure_ops`, `PassStats`. Conservative constant fold + CSE + DCE. |
-| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
+| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel, *, arch) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
 | `core/backend.py` | `resolve_backend`, dual-engine lowering chokepoint (`python` native lowerer, `cpp` C++ engine, `both` differential assert). Default backend is `cpp` (`ROCKE_BACKEND`), auto-falling back to the native Python lowerer when the `rocke_engine` extension is not built. |
 | `core/ir_serialize.py` | `serialize` / round-trip of the `ck.dsl.ir/v1` artifact — the family-agnostic interchange the C++ engine lowers from. |
 | `core/arch/` | `ArchTarget`, `MmaOp`, `LayoutMap`, `known_arches`, the per-arch spec table (`arch_specs.json`), and the MFMA/WMMA layout-map SSOT. Supported targets: `gfx942`, `gfx950` (CDNA, wave64) and `gfx1151`, `gfx1201` (RDNA, wave32). |
@@ -155,6 +155,8 @@ prefix for brevity).
 | `instances/common/fmha_arch.py` / `attention_arch.py` | `validate_fmha_mfma_atom`, `FMHA_MFMA_ATTN_BLOCK`; `validate_tiled_attention_arch`, `require_tiled_attention_arch`. Attention arch-validity gates. |
 | `instances/gfx1151/wmma_gemm.py` | `WmmaGemmSpec`, `build_wmma_gemm`, `is_valid_spec`, `wmma_gemm_grid`. RDNA wave32/WMMA GEMM. |
 | `instances/gfx1151/wmma_fmha_fwd.py` | `WmmaFmhaFwdSpec`, `build_wmma_fmha_fwd`, `is_valid_spec`, `wmma_fmha_fwd_grid`. RDNA wave32/WMMA FMHA-forward adapter. |
+| `kernels/gfx1151/wmma_fmha_fwd_v2.py` | `WmmaFmhaFwdV2Spec`, `build_wmma_fmha_fwd_v2`, `is_valid_spec`, `wmma_fmha_fwd_v2_grid`, `wmma_fmha_fwd_v2_signature`. gfx11/gfx12 multi-wave WMMA FMHA prefill (body in `rocke/helpers/rdna_attention.py`). |
+| `kernels/gfx1151/wmma_fmha_decode.py` | `WmmaFmhaDecodeSpec`, `build_wmma_fmha_decode`, `build_wmma_fmha_decode_module`, split/grid/workspace host helpers. gfx11/gfx12 split-KV, GQA-packed WMMA decode plus merge. |
 
 ## `examples/`
 

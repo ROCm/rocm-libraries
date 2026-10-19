@@ -26,6 +26,24 @@ The bf16 16x16x16 path uses the `_1k` variant (`mfma.f32.16x16x16bf16.1k` with `
 
 The wide-K / MX atoms (`fp8_16x16x128`, `fp4_16x16x128`, `fp6_16x16x96`) are gfx950-only — they map onto the `f8f6f4` / MX-scaled MFMA instructions that only the CDNA4 target exposes.
 
+## Native gfx950 32x32x64 Scaled MFMA
+
+The `helpers.atoms.MfmaAtom` table above is separate from the target catalog's
+`mfma_scaled` family. On gfx950, that family exposes 32x32x64 operations for
+all 25 ordered FP8/BF8/FP6/BF6/FP4 pairs, with independent A/B E8M0 scales
+over K32 and 16 FP32 accumulator values per lane. Select the complete contract
+with `ArchTarget.mma.op_for_shape(...)`, then emit it with `IRBuilder.mma(...)`.
+
+`MfmaAtom.emit_scaled()` remains a fixed 16x16x128 wrapper; it does not select
+the 32x32x64 operation. The existing `fp8_16x16x128` atom uses `emit()` and
+the scaled intrinsic with constant in-instruction scales. The gfx950 FP8
+fused-MoE dispatcher uses that atom and applies its FP32 block scales outside
+the MFMA. The 32x32x64 family currently has direct GEMM examples.
+
+See [MMA selection, emission and dispatcher paths](mma_metadata.md#selection-ir-emission-and-dispatch),
+the [gfx950 GEMM contract](../instances/gfx950_block_scaled_gemm.md), and
+[runnable scaled-GEMM examples](../../python/rocke/examples/gfx950/gemm/README.md).
+
 ## Lane Layouts (Output)
 
 The kernel epilogue must agree with `MfmaAtom.lane_to_output(b, lane, i)`. The layouts below come from `helpers/atoms.py`.
@@ -144,3 +162,10 @@ stored as two I32 words; accumulator sizes are four and sixteen FP32 values.
 The [numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 demonstrates raw input transport and explicit RNE preparation. These atoms do
 not alter ordinary FP32 selection or enable TF32 production GEMM dispatch.
+
+On gfx950, which has no native XF32 instruction, logical `tf32` selects two emulated
+atoms, `mfma_f32_16x16x32_xf32` and `mfma_f32_32x32x16_xf32`. They take the same TF32
+operands (`vec<tf32x8>`, one I32 word per element) and FP32 accumulators (four and
+sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
+`mfma_f32_32x32x16_bf16`; see the
+[emulation description](../architecture/xf32_bf16x3_emulation.md).
