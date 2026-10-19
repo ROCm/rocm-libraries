@@ -153,6 +153,12 @@ _THRUST_STD_NAMESPACE_BEGIN
 THRUST_NAMESPACE_BEGIN
 #endif
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+template <class... Ts>
+inline constexpr bool
+  __is_tuple_of_iterator_references_v<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> = true;
+#endif
+
 // define tuple_size, tuple_element, etc.
 template <class... Ts>
 struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
