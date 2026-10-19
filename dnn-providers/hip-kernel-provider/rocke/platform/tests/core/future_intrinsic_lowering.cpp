@@ -2904,6 +2904,91 @@ void case_buffer_load_lds_async()
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
+/* ---- dtype-generic buffer_load_vN (Python IRBuilder.buffer_load_vN) ---- */
+void case_buffer_load_vN_generic()
+{
+    const std::string ir = lower_one("buf_vn", [](rocke_ir_builder_t* b) {
+        rocke_value_t* X = global_ptr_param(b, "X", rocke_f16());
+        rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, rocke_b_const_i32(b, 256));
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* i32x4 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i32(), 4);
+        rocke_value_t* bf16x8 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_bf16(), 8);
+        rocke_value_t* f32x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f32(), 1);
+        if(i32x4 == nullptr || bf16x8 == nullptr || f32x1 == nullptr)
+        {
+            fail("buffer_load_vN returned NULL", __LINE__);
+            return;
+        }
+        /* Result type <n x dtype>, hint bl{n}, attrs dwords + elem_type. */
+        const rocke_value_t* want[] = {i32x4, bf16x8, f32x1};
+        const int lanes[] = {4, 8, 1};
+        const int64_t dwords[] = {4, 4, 1};
+        const char* elems[] = {"i32", "bf16", "f32"};
+        for(int i = 0; i < 3; ++i)
+        {
+            const rocke_value_t* v = want[i];
+            const rocke_attr_value_t* dw = rocke_attr_get(&v->op->attrs, "dwords");
+            const rocke_attr_value_t* et = rocke_attr_get(&v->op->attrs, "elem_type");
+            char hint[16];
+            snprintf(hint, sizeof(hint), "%%bl%d", lanes[i]);
+            if(v->type->kind != ROCKE_TYPE_VECTOR || v->type->count != lanes[i]
+               || v->op->opcode != ROCKE_OP_TILE_BUFFER_LOAD_VN || dw == nullptr
+               || dw->u.i != dwords[i] || et == nullptr || strcmp(et->u.s, elems[i]) != 0
+               || strncmp(v->name, hint, strlen(hint)) != 0)
+                fail(elems[i], __LINE__);
+        }
+    });
+    EXPECT_IR(ir, "call <4 x i32> @llvm.amdgcn.raw.ptr.buffer.load.v4i32(");
+    EXPECT_IR(ir, " to <4 x i32>");
+    EXPECT_IR(ir, " to <8 x bfloat>");
+    EXPECT_IR(ir, "call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32(");
+    EXPECT_IR(ir, "bitcast i32 ");
+
+    struct Reject
+    {
+        const char* want;
+        const rocke_type_t* (*dtype)(void);
+        int n;
+    };
+    static const Reject rejects[] = {
+        {"buffer_load_vN: unsupported dtype 'f64'", rocke_f64, 2},
+        {"buffer_load_vN: n=16 dtype=f16 -> dwords=8 must be 1, 2, or 4", rocke_f16, 16},
+        {"buffer_load_vN: n=3 dtype=f32 -> dwords=3 must be 1, 2, or 4", rocke_f32, 3},
+        {"buffer_load_vN: n=3 dtype=bf16 is not a whole number of dwords", rocke_bf16, 3},
+        {"buffer_load_vN: n=5 dtype=f16 is not a whole number of dwords", rocke_f16, 5},
+        {"buffer_load_vN: n=0 dtype=f32 is not a whole number of dwords", rocke_f32, 0},
+    };
+    for(const Reject& r : rejects)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "buf_vn_bad");
+        bool rejected = false;
+        std::string err;
+        try
+        {
+            rocke_value_t* X = global_ptr_param(&b, "X", rocke_f16());
+            rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
+            rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+            rocke_value_t* v = rocke_b_buffer_load_vN(&b, rsrc, zero, zero, r.dtype(), r.n);
+            rejected = v == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "";
+        }
+        catch(const std::exception& e)
+        {
+            rejected = true;
+            err = e.what();
+        }
+        if(!rejected || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
+            fail(msg, __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
+}
+
 void case_global_load_async_to_lds_b8()
 {
     /* width_bytes=1 selects the LLVM 23 `.b8` async copy. The opcode is a
@@ -3262,6 +3347,7 @@ const TestCase k_cases[] = {
     {"gfx1250_cluster_dims_rejects", case_gfx1250_cluster_dims_rejects},
     {"memory_caps", case_memory_caps},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
+    {"buffer_load_vN_generic", case_buffer_load_vN_generic},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},

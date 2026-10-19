@@ -43,9 +43,11 @@ params). Correctness rests entirely on the key.
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
 | 3 | `attention_gfx950_dense_persist_widedma` | gfx950 | `gfx950_dense.py` | persistent body + wide DMA, D128 (`algorithm=attention_dense_persist`, opt-in) |
+| 4 | `attention_rdna_wmma_decode` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 split-KV GQA-packed decode (+ merge kernel); unpinned only when `rdna_attention_use_decode` picks it (`algorithm=wmma_fmha_decode`) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942_unified.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950_unified.py` | bf16 D256 2D prefill |
-| 5 | `attention_gfx1151_wmma` | gfx1151 | `gfx1151.py` | FP16/BF16 dense/ragged/paged inference, score features and OCP FP8 KV (auto and explicit selection) |
+| 5 | `attention_rdna_wmma_prefill` | gfx11-generic, gfx1151, gfx12-generic, gfx1201 | `gfx1151.py` | FP16/BF16 multi-wave prefill: dense/ragged/paged, score features, bias and OCP FP8 KV (`algorithm=wmma_fmha_fwd_v2`) |
+| 5 | `attention_{arch}_wmma_{prefill,decode}` | one RDNA arch each | `gfx1151.py` | tuned RDNA WMMA knob spaces (`wmma` / `wmma_decode` paths); opt-in |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
 | 5 | `attention_d256_decode` | gfx942, gfx950 | `generic.py` | bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
