@@ -265,4 +265,32 @@ TEST(LibcxxIteratorTests, TestLibcxxTransformIterator)
   }
 }
 
+TEST(LibcxxIteratorTests, TestLibcxxZipIterator)
+{
+  _THRUST_LIBCXX::zip_function<_THRUST_STD::plus<void>> fun{};
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    auto iter = _THRUST_LIBCXX::make_transform_iterator(_THRUST_LIBCXX::make_zip_iterator(vec.begin(), _THRUST_LIBCXX::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::device_vector<int> expected{3, 4, 5, 6};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    auto iter = _THRUST_LIBCXX::make_transform_iterator(_THRUST_LIBCXX::make_zip_iterator(vec.begin(), _THRUST_LIBCXX::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::host_vector<int> expected{3, 4, 5, 6};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1};
+    auto iter = _THRUST_LIBCXX::make_transform_iterator(_THRUST_LIBCXX::make_zip_iterator(vec.begin(), _THRUST_LIBCXX::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    std::vector<int> expected{3, 4, 5, 6};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+}
+
 #endif
