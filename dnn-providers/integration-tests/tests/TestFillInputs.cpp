@@ -370,7 +370,8 @@ struct SdpaBwdGraphOptions
     };
 
     std::vector<int64_t> qDims; // [B, H, Sq, D]
-    std::optional<std::vector<int64_t>> kDims = std::nullopt; // defaults to qDims
+    std::optional<std::vector<int64_t>> vDims
+        = std::nullopt; // [B, Hkv, Skv, Dv] (defaults to qDims)
 
     ScaleSource scaleSource = ScaleSource::ATTRIBUTE;
     std::optional<float> attnScaleValue = std::nullopt;
@@ -381,15 +382,15 @@ struct SdpaBwdGraphOptions
 
     std::vector<int64_t> k() const
     {
-        return kDims.value_or(qDims);
+        return {qDims[0], vDims.value_or(qDims)[1], vDims.value_or(qDims)[2], qDims[3]};
     }
     std::vector<int64_t> v() const
     {
-        return k();
+        return vDims.value_or(qDims);
     }
     std::vector<int64_t> o() const
     {
-        return qDims;
+        return {qDims[0], qDims[1], qDims[2], vDims.value_or(qDims)[3]};
     }
 
     float scale() const
@@ -702,8 +703,8 @@ class TestSdpaBwdDerivedOAndStats
     : public ::testing::TestWithParam<test_sdpa_common::SdpaBwdTestCase>
 {
 protected:
-    void runTest(bool useGpuReference
-                 = false) // NOLINT(readability-convert-member-functions-to-static)
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    void runTest(bool useGpuReference = false)
     {
         using namespace hipdnn_data_sdk::utilities;
         using namespace hipdnn_test_sdk::utilities;
@@ -712,7 +713,7 @@ protected:
 
         SdpaBwdGraphOptions opts;
         opts.qDims = tc.qDims;
-        opts.kDims = tc.kDims;
+        opts.vDims = tc.vDims;
 
         if(tc.attnScaleValue.has_value())
         {
@@ -1303,7 +1304,7 @@ TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneNoMask)
 {
     SdpaBwdGraphOptions opts;
     opts.qDims = {2, 4, 8, 16};
-    opts.kDims = {2, 4, 12, 16};
+    opts.vDims = {2, 4, 12, 16};
     expectDerivedAttentionRowsSumToOne(opts);
 }
 
@@ -1311,7 +1312,7 @@ TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneCausalTopLeft)
 {
     SdpaBwdGraphOptions opts;
     opts.qDims = {2, 4, 8, 16};
-    opts.kDims = {2, 4, 12, 16};
+    opts.vDims = {2, 4, 12, 16};
     opts.rightBound = 0;
     opts.topLeft = true;
     expectDerivedAttentionRowsSumToOne(opts);
@@ -1321,7 +1322,7 @@ TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneCausalBottomRight)
 {
     SdpaBwdGraphOptions opts;
     opts.qDims = {2, 4, 8, 16};
-    opts.kDims = {2, 4, 12, 16};
+    opts.vDims = {2, 4, 12, 16};
     opts.leftBound = 0;
     opts.topLeft = false;
     expectDerivedAttentionRowsSumToOne(opts);
@@ -1333,7 +1334,7 @@ TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneSlidingWindow)
     {
         SdpaBwdGraphOptions opts;
         opts.qDims = {2, 4, 8, 16};
-        opts.kDims = {2, 4, 12, 16};
+        opts.vDims = {2, 4, 12, 16};
         opts.leftBound = 2;
         opts.rightBound = 1;
         opts.topLeft = topLeft;
@@ -1345,7 +1346,7 @@ TEST(TestFillInputs, SdpaBwdFullyMaskedRowsBottomRightCausal)
 {
     SdpaBwdGraphOptions opts;
     opts.qDims = {2, 4, 12, 16}; // Sq > Skv to produce fully masked rows
-    opts.kDims = {2, 4, 8, 16};
+    opts.vDims = {2, 4, 8, 16};
     opts.rightBound = 0;
     opts.topLeft = false;
     verifyFullyMaskedRows(opts);
@@ -1355,7 +1356,7 @@ TEST(TestFillInputs, SdpaBwdFullyMaskedRowsTopLeftCausal)
 {
     SdpaBwdGraphOptions opts;
     opts.qDims = {2, 4, 12, 16}; // Sq > Skv to produce fully masked rows
-    opts.kDims = {2, 4, 8, 16};
+    opts.vDims = {2, 4, 8, 16};
     opts.rightBound = 0;
     opts.leftBound = 1;
     opts.topLeft = true;
