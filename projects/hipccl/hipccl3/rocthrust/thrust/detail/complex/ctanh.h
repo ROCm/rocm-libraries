@@ -95,9 +95,7 @@
 #include _THRUST_STD_INCLUDE(cmath)
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace complex
+namespace detail::complex
 {
 using thrust::complex;
 
@@ -174,8 +172,7 @@ THRUST_HOST_DEVICE inline complex<double> ctan(complex<double> z)
   z = ctanh(complex<double>(-z.imag(), z.real()));
   return (complex<double>(z.imag(), -z.real()));
 }
-} // namespace complex
-} // namespace detail
+} // namespace detail::complex
 
 template <typename ValueType>
 THRUST_HOST_DEVICE inline complex<ValueType> tan(const complex<ValueType>& z)

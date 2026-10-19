@@ -47,9 +47,7 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace functional
+namespace detail::functional
 {
 // An actor is a node in an expression template
 template <typename Eval>
@@ -227,6 +225,5 @@ THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr1& subexpr1, const SubExpr2
   return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
     {{_THRUST_STD::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
 }
-} // namespace functional
-} // namespace detail
+} // namespace detail::functional
 THRUST_NAMESPACE_END
