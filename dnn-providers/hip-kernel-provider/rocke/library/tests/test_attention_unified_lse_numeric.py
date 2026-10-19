@@ -267,7 +267,16 @@ def _aliases_last_lse_element(lse, like):
 @pytest.mark.gpu
 @pytest.mark.parametrize(
     "case",
-    ["rows", "heads", "dtype", "strided", "host", "seqused_k", "block_table"],
+    [
+        "rows",
+        "heads",
+        "dtype",
+        "strided",
+        "host",
+        "cu_seqlens_q",
+        "seqused_k",
+        "block_table",
+    ],
 )
 def test_malformed_lse_buffer_is_refused_before_launch(case):
     problem, q, kc, vc, cu, su, bt = _case([4, 2], [3000, 1029])
@@ -283,6 +292,8 @@ def test_malformed_lse_buffer_is_refused_before_launch(case):
         lse = torch.full((tq, hq, 2), float("nan"), device="cuda")[..., :1]
     elif case == "host":
         lse = lse.cpu()
+    elif case == "cu_seqlens_q":
+        lse, cu = _aliases_last_lse_element(lse, cu)
     elif case == "seqused_k":
         lse, su = _aliases_last_lse_element(lse, su)
     elif case == "block_table":
