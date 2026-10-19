@@ -20,6 +20,18 @@ on:
         description: Maximum test processes per component on both GPU types
         type: string
         default: "5"
+      build_runner:
+        description: CPU runner used to build rocJITsu
+        type: string
+        default: "aws-linux-scale-rocm-large"
+      build_parallel:
+        description: Maximum compiler processes
+        type: string
+        default: "32"
+      native_baseline_run:
+        description: Optional completed native baseline run to reuse with the same version and test settings
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -74,14 +86,16 @@ jobs:
           path: discovery/
 
   build:
-    name: Build rocJITsu with PRs 13749, 13750, 13751
-    runs-on: aws-linux-scale-rocm-prod
-    timeout-minutes: 90
+    name: Build rocJITsu with PRs 13749, 13750, 13751 (${{ inputs.build_runner }})
+    runs-on: ${{ inputs.build_runner }}
+    timeout-minutes: 180
     container:
       image: ubuntu:24.04
     defaults:
       run:
         shell: bash
+    env:
+      BUILD_PARALLEL: ${{ inputs.build_parallel }}
     steps:
       - name: Install build tools
         run: |
@@ -99,7 +113,8 @@ jobs:
           cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DRJ_LOG_GROUPS=OFF \
             -DROCJITSU_HOST_CPU_BASELINE=x86-64
-          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared rocjitsu_hooks -j"$(nproc)"
+          case "$BUILD_PARALLEL" in ''|*[!0-9]*|0) echo 'build_parallel must be a positive integer' >&2; exit 2;; esac
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared rocjitsu_hooks -j"$BUILD_PARALLEL"
           test -x rj-build/tools/rocjitsu/rocjitsu
           find rj-build -name 'librocjitsu_hooks.so' -print | grep .
           mkdir -p build-artifact
@@ -168,6 +183,7 @@ jobs:
 
   native-suites:
     name: Native gfx950 / ${{ matrix.test.component }}
+    if: inputs.native_baseline_run == ''
     needs: discover
     strategy:
       fail-fast: false
@@ -224,7 +240,17 @@ jobs:
         with:
           pattern: pilot-*
           path: measurements
+      - name: Reuse completed native gfx950 measurements
+        if: inputs.native_baseline_run != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.native_baseline_run }}
+          pattern: pilot-native-gfx950-*
+          path: measurements
       - name: Generate measured runtime comparison
+        env:
+          NATIVE_BASELINE_RUN: ${{ inputs.native_baseline_run }}
         run: python3 .github/scripts/compare_gfx950_rdna4.py measurements comparison
       - uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:

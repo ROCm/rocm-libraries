@@ -33,6 +33,9 @@ def compare(source: Path, destination: Path) -> str:
         '| Component | Native gfx950 | RDNA4 wait on | Delta | RDNA4 wait off | Delta |',
         '| --- | --- | --- | --- | --- | --- |',
     ]
+    if os.environ.get('NATIVE_BASELINE_RUN'):
+        baseline = os.environ['NATIVE_BASELINE_RUN']
+        lines[2:2] = [f'Native gfx950 measurements reused from [run {baseline}](https://github.com/ROCm/rocm-libraries/actions/runs/{baseline}); native suites were not rerun.', '']
     rows = []
 
     def cell(result):
@@ -42,16 +45,19 @@ def compare(source: Path, destination: Path) -> str:
         return f"{result['seconds']:.1f}s; {counts['passed']}/{result['total']} pass, {counts['failed']} fail, {counts['skipped']} skip"
 
     for component in components:
-        _, native = measurements.get((component, 'native-gfx950', 'native'), (None, None))
+        native_manifest, native = measurements.get((component, 'native-gfx950', 'native'), (None, None))
         row = {'component': component, 'native_seconds': native['seconds'] if native else None}
         cells = [component, cell(native)]
         for wait in ('on', 'off'):
-            _, translated = measurements.get((component, 'rdna4-dbt', wait), (None, None))
+            translated_manifest, translated = measurements.get((component, 'rdna4-dbt', wait), (None, None))
             delta = None
             if native and translated:
                 native_status = {test['name']: test['status'] for test in native['tests']}
                 translated_status = {test['name']: test['status'] for test in translated['tests']}
-                comparable = (native_status == translated_status and
+                same_settings = all(native_manifest.get(key) == translated_manifest.get(key)
+                                    for key in ('rocm_version', 'label_regex', 'parallel'))
+                comparable = (same_settings and native_status == translated_status and
+                              native.get('effective_parallel') == translated.get('effective_parallel') and
                               all(status in ('passed', 'skipped') for status in native_status.values()) and
                               any(status == 'passed' for status in native_status.values()))
                 if comparable and native['seconds'] > 0:
@@ -63,7 +69,7 @@ def compare(source: Path, destination: Path) -> str:
         rows.append(row)
     if not components:
         lines.extend(['', 'No component measurements were produced. Inspect discovery/build/preflight logs.'])
-    lines.extend(['', 'A percentage is shown only when both legs selected the same test names and all statuses match as passing/skipped, with at least one passing test. This checks CTest entry outcomes; it does not establish per-case numerical parity.'])
+    lines.extend(['', 'A percentage is shown only when both legs use the same nightly, label, requested/effective concurrency and test names, and all statuses match as passing/skipped, with at least one passing test. This checks CTest entry outcomes; it does not establish per-case numerical parity.'])
     text = '\n'.join(lines) + '\n'
     (destination / 'comparison.md').write_text(text)
     (destination / 'comparison.json').write_text(json.dumps(rows, indent=2) + '\n')
