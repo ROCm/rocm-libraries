@@ -69,7 +69,7 @@ private:
 };
 
 // value-semantic handle to an RCCL communicator whose ranks are
-// sorted rocfft_location_t values (comm_rank, then device).
+// sorted rocfft_location_t values (MPI_COMM_WORLD rank, then device).
 //
 // Single-process create(devices) is the special case where every
 // location has comm_rank 0. Multi-process create(mpi_comm, ...)
