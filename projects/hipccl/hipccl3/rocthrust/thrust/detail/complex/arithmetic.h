@@ -21,7 +21,6 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
-#include <thrust/detail/complex/c99math.h>
 #include <thrust/detail/type_traits.h>
 
 #include _THRUST_STD_INCLUDE(cfloat)
@@ -98,11 +97,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const complex<T1>& y)
 {
   using T = ::internal::common_type_t<T0, T1>;
-
-  // Find `abs` by ADL.
-  using std::abs;
-
-  T s = abs(y.real()) + abs(y.imag());
+  T s     = _THRUST_STD::abs(y.real()) + _THRUST_STD::abs(y.imag());
 
   T oos = T(1.0) / s;
 
@@ -153,41 +148,13 @@ THRUST_HOST_DEVICE complex<T> operator-(const complex<T>& y)
 template <typename T>
 THRUST_HOST_DEVICE T abs(const complex<T>& z)
 {
-  return hypot(z.real(), z.imag());
-}
-
-// XXX Why are we specializing here?
-namespace detail::complex
-{
-THRUST_HOST_DEVICE inline float abs(const thrust::complex<float>& z)
-{
-  return hypotf(z.real(), z.imag());
-}
-
-THRUST_HOST_DEVICE inline double abs(const thrust::complex<double>& z)
-{
-  return hypot(z.real(), z.imag());
-}
-} // end namespace detail::complex
-
-template <>
-THRUST_HOST_DEVICE inline float abs(const complex<float>& z)
-{
-  return detail::complex::abs(z);
-}
-
-template <>
-THRUST_HOST_DEVICE inline double abs(const complex<double>& z)
-{
-  return detail::complex::abs(z);
+  return _THRUST_STD::hypot(z.real(), z.imag());
 }
 
 template <typename T>
 THRUST_HOST_DEVICE T arg(const complex<T>& z)
 {
-  // Find `atan2` by ADL.
-  using std::atan2;
-  return atan2(z.imag(), z.real());
+  return _THRUST_STD::atan2(z.imag(), z.real());
 }
 
 template <typename T>
@@ -206,11 +173,8 @@ THRUST_HOST_DEVICE T norm(const complex<T>& z)
 template <>
 THRUST_HOST_DEVICE inline float norm(const complex<float>& z)
 {
-  // Find `abs` and `sqrt` by ADL.
-  using std::abs;
-  using std::sqrt;
-
-  if (abs(z.real()) < sqrt(FLT_MIN) && abs(z.imag()) < sqrt(FLT_MIN))
+  if (_THRUST_STD::abs(z.real()) < _THRUST_STD::sqrt(FLT_MIN)
+      && _THRUST_STD::abs(z.imag()) < _THRUST_STD::sqrt(FLT_MIN))
   {
     float a = z.real() * 4.0f;
     float b = z.imag() * 4.0f;
@@ -223,11 +187,8 @@ THRUST_HOST_DEVICE inline float norm(const complex<float>& z)
 template <>
 THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
 {
-  // Find `abs` and `sqrt` by ADL.
-  using std::abs;
-  using std::sqrt;
-
-  if (abs(z.real()) < sqrt(DBL_MIN) && abs(z.imag()) < sqrt(DBL_MIN))
+  if (_THRUST_STD::abs(z.real()) < _THRUST_STD::sqrt(DBL_MIN)
+      && _THRUST_STD::abs(z.imag()) < _THRUST_STD::sqrt(DBL_MIN))
   {
     double a = z.real() * 4.0;
     double b = z.imag() * 4.0;
@@ -241,12 +202,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> polar(const T0& m, const T1& theta)
 {
   using T = ::internal::common_type_t<T0, T1>;
-
-  // Find `cos` and `sin` by ADL.
-  using std::cos;
-  using std::sin;
-
-  return complex<T>(m * cos(theta), m * sin(theta));
+  return complex<T>(m * _THRUST_STD::cos(theta), m * _THRUST_STD::sin(theta));
 }
 
 THRUST_NAMESPACE_END

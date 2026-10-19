@@ -51,6 +51,8 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
+#include _THRUST_STD_INCLUDE(cmath)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail::complex
 {
@@ -81,11 +83,11 @@ THRUST_HOST_DEVICE inline complex<double> clog(const complex<double>& z)
   /* Handle NaNs using the general formula to mix them right. */
   if (x != x || y != y)
   {
-    return (complex<double>(std::log(norm(z)), std::atan2(y, x)));
+    return (complex<double>(_THRUST_STD::log(norm(z)), _THRUST_STD::atan2(y, x)));
   }
 
-  ax = std::abs(x);
-  ay = std::abs(y);
+  ax = _THRUST_STD::abs(x);
+  ay = _THRUST_STD::abs(y);
   if (ax < ay)
   {
     t  = ax;
@@ -105,15 +107,15 @@ THRUST_HOST_DEVICE inline complex<double> clog(const complex<double>& z)
   // We expect that for values at or below ay = 5e307 this should not happen
   if (ay > 5e307)
   {
-    return (complex<double>(std::log(hypot(x / e, y / e)) + 1.0, std::atan2(y, x)));
+    return (complex<double>(_THRUST_STD::log(_THRUST_STD::hypot(x / e, y / e)) + 1.0, _THRUST_STD::atan2(y, x)));
   }
   if (ax == 1.)
   {
     if (ay < 1e-150)
     {
-      return (complex<double>((ay * 0.5) * ay, std::atan2(y, x)));
+      return (complex<double>((ay * 0.5) * ay, _THRUST_STD::atan2(y, x)));
     }
-    return (complex<double>(log1p(ay * ay) * 0.5, std::atan2(y, x)));
+    return (complex<double>(_THRUST_STD::log1p(ay * ay) * 0.5, _THRUST_STD::atan2(y, x)));
   }
 
   /*
@@ -122,7 +124,7 @@ THRUST_HOST_DEVICE inline complex<double> clog(const complex<double>& z)
    */
   if (ax < 1e-50 || ay < 1e-50 || ax > 1e50 || ay > 1e50)
   {
-    return (complex<double>(std::log(hypot(x, y)), std::atan2(y, x)));
+    return (complex<double>(_THRUST_STD::log(_THRUST_STD::hypot(x, y)), _THRUST_STD::atan2(y, x)));
   }
 
   /*
@@ -134,12 +136,12 @@ THRUST_HOST_DEVICE inline complex<double> clog(const complex<double>& z)
 
   if (ax >= 1.0)
   {
-    return (complex<double>(log1p((ax - 1) * (ax + 1) + ay * ay) * 0.5, atan2(y, x)));
+    return (complex<double>(_THRUST_STD::log1p((ax - 1) * (ax + 1) + ay * ay) * 0.5, _THRUST_STD::atan2(y, x)));
   }
 
   if (ax * ax + ay * ay <= 0.7)
   {
-    return (complex<double>(std::log(ax * ax + ay * ay) * 0.5, std::atan2(y, x)));
+    return (complex<double>(_THRUST_STD::log(ax * ax + ay * ay) * 0.5, _THRUST_STD::atan2(y, x)));
   }
 
   /*
@@ -191,14 +193,14 @@ THRUST_HOST_DEVICE inline complex<double> clog(const complex<double>& z)
   {
     hm1 += val[i];
   }
-  return (complex<double>(0.5 * log1p(hm1), atan2(y, x)));
+  return (complex<double>(0.5 * _THRUST_STD::log1p(hm1), _THRUST_STD::atan2(y, x)));
 }
 } // namespace detail::complex
 
 template <typename ValueType>
 THRUST_HOST_DEVICE inline complex<ValueType> log(const complex<ValueType>& z)
 {
-  return complex<ValueType>(std::log(thrust::abs(z)), thrust::arg(z));
+  return complex<ValueType>(_THRUST_STD::log(thrust::abs(z)), thrust::arg(z));
 }
 
 template <>

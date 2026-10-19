@@ -53,7 +53,6 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include _THRUST_STD_INCLUDE(cfloat)
 #include _THRUST_STD_INCLUDE(cmath)
 #include _THRUST_STD_INCLUDE(limits)
 
@@ -110,8 +109,8 @@ do_hard_work(float x, float y, float* rx, int* B_is_usable, float* B, float* sqr
   const float FOUR_SQRT_MIN = 4.336808689942017736029811e-19f;
   ; /* =0x1p-61; >= 4 * sqrt(FLT_MIN) */
   const float B_crossover = 0.6417f; /* suggested by Hull et al */
-  R                       = hypotf(x, y + 1);
-  S                       = hypotf(x, y - 1);
+  R                       = _THRUST_STD::hypotf(x, y + 1);
+  S                       = _THRUST_STD::hypotf(x, y - 1);
 
   A = (R + S) / 2;
   if (A < 1)
@@ -123,25 +122,25 @@ do_hard_work(float x, float y, float* rx, int* B_is_usable, float* B, float* sqr
   {
     if (y == 1 && x < FLT_EPSILON * FLT_EPSILON / 128)
     {
-      *rx = sqrtf(x);
+      *rx = _THRUST_STD::sqrtf(x);
     }
-    else if (x >= FLT_EPSILON * fabsf(y - 1))
+    else if (x >= FLT_EPSILON * _THRUST_STD::fabsf(y - 1))
     {
       Am1 = f(x, 1 + y, R) + f(x, 1 - y, S);
-      *rx = log1pf(Am1 + sqrtf(Am1 * (A + 1)));
+      *rx = _THRUST_STD::log1pf(Am1 + _THRUST_STD::sqrtf(Am1 * (A + 1)));
     }
     else if (y < 1)
     {
-      *rx = x / sqrtf((1 - y) * (1 + y));
+      *rx = x / _THRUST_STD::sqrtf((1 - y) * (1 + y));
     }
     else
     {
-      *rx = log1pf((y - 1) + sqrtf((y - 1) * (y + 1)));
+      *rx = _THRUST_STD::log1pf((y - 1) + _THRUST_STD::sqrtf((y - 1) * (y + 1)));
     }
   }
   else
   {
-    *rx = logf(A + sqrtf(A * A - 1));
+    *rx = _THRUST_STD::logf(A + _THRUST_STD::sqrtf(A * A - 1));
   }
 
   *new_y = y;
@@ -162,21 +161,21 @@ do_hard_work(float x, float y, float* rx, int* B_is_usable, float* B, float* sqr
     *B_is_usable = 0;
     if (y == 1 && x < FLT_EPSILON / 128)
     {
-      *sqrt_A2my2 = sqrtf(x) * sqrtf((A + y) / 2);
+      *sqrt_A2my2 = _THRUST_STD::sqrtf(x) * _THRUST_STD::sqrtf((A + y) / 2);
     }
-    else if (x >= FLT_EPSILON * fabsf(y - 1))
+    else if (x >= FLT_EPSILON * _THRUST_STD::fabsf(y - 1))
     {
       Amy         = f(x, y + 1, R) + f(x, y - 1, S);
-      *sqrt_A2my2 = sqrtf(Amy * (A + y));
+      *sqrt_A2my2 = _THRUST_STD::sqrtf(Amy * (A + y));
     }
     else if (y > 1)
     {
-      *sqrt_A2my2 = x * (4 / FLT_EPSILON / FLT_EPSILON) * y / sqrtf((y + 1) * (y - 1));
+      *sqrt_A2my2 = x * (4 / FLT_EPSILON / FLT_EPSILON) * y / _THRUST_STD::sqrtf((y + 1) * (y - 1));
       *new_y      = y * (4 / FLT_EPSILON / FLT_EPSILON);
     }
     else
     {
-      *sqrt_A2my2 = sqrtf((1 - y) * (1 + y));
+      *sqrt_A2my2 = _THRUST_STD::sqrtf((1 - y) * (1 + y));
     }
   }
 }
@@ -190,16 +189,16 @@ THRUST_HOST_DEVICE inline complex<float> casinhf(complex<float> z)
   const float m_ln2         = 6.9314718055994531e-1f; /*  0x162e42fefa39ef.0p-53 */
   x                         = z.real();
   y                         = z.imag();
-  ax                        = fabsf(x);
-  ay                        = fabsf(y);
+  ax                        = _THRUST_STD::fabsf(x);
+  ay                        = _THRUST_STD::fabsf(y);
 
-  if (isnan(x) || isnan(y))
+  if (_THRUST_STD::isnan(x) || _THRUST_STD::isnan(y))
   {
-    if (isinf(x))
+    if (_THRUST_STD::isinf(x))
     {
       return (complex<float>(x, y + y));
     }
-    if (isinf(y))
+    if (_THRUST_STD::isinf(y))
     {
       return (complex<float>(y, x + x));
     }
@@ -212,7 +211,7 @@ THRUST_HOST_DEVICE inline complex<float> casinhf(complex<float> z)
 
   if (ax > RECIP_EPSILON || ay > RECIP_EPSILON)
   {
-    if (signbit(x) == 0)
+    if (_THRUST_STD::signbit(x) == 0)
     {
       w = clog_for_large_values(z) + m_ln2;
     }
@@ -220,7 +219,7 @@ THRUST_HOST_DEVICE inline complex<float> casinhf(complex<float> z)
     {
       w = clog_for_large_values(-z) + m_ln2;
     }
-    return (complex<float>(copysignf(w.real(), x), copysignf(w.imag(), y)));
+    return (complex<float>(_THRUST_STD::copysignf(w.real(), x), _THRUST_STD::copysignf(w.imag(), y)));
   }
 
   if (x == 0 && y == 0)
@@ -239,13 +238,13 @@ THRUST_HOST_DEVICE inline complex<float> casinhf(complex<float> z)
   do_hard_work(ax, ay, &rx, &B_is_usable, &B, &sqrt_A2my2, &new_y);
   if (B_is_usable)
   {
-    ry = asinf(B);
+    ry = _THRUST_STD::asinf(B);
   }
   else
   {
-    ry = atan2f(new_y, sqrt_A2my2);
+    ry = _THRUST_STD::atan2f(new_y, sqrt_A2my2);
   }
-  return (complex<float>(copysignf(rx, x), copysignf(ry, y)));
+  return (complex<float>(_THRUST_STD::copysignf(rx, x), _THRUST_STD::copysignf(ry, y)));
 }
 
 THRUST_HOST_DEVICE inline complex<float> casinf(complex<float> z)
@@ -267,18 +266,18 @@ THRUST_HOST_DEVICE inline complex<float> cacosf(complex<float> z)
 
   x  = z.real();
   y  = z.imag();
-  sx = signbit(x);
-  sy = signbit(y);
-  ax = fabsf(x);
-  ay = fabsf(y);
+  sx = _THRUST_STD::signbit(x);
+  sy = _THRUST_STD::signbit(y);
+  ax = _THRUST_STD::fabsf(x);
+  ay = _THRUST_STD::fabsf(y);
 
-  if (isnan(x) || isnan(y))
+  if (_THRUST_STD::isnan(x) || _THRUST_STD::isnan(y))
   {
-    if (isinf(x))
+    if (_THRUST_STD::isinf(x))
     {
       return (complex<float>(y + y, -_THRUST_STD::numeric_limits<float>::infinity()));
     }
-    if (isinf(y))
+    if (_THRUST_STD::isinf(y))
     {
       return (complex<float>(x + x, -y));
     }
@@ -293,7 +292,7 @@ THRUST_HOST_DEVICE inline complex<float> cacosf(complex<float> z)
   if (ax > RECIP_EPSILON || ay > RECIP_EPSILON)
   {
     w  = clog_for_large_values(z);
-    rx = fabsf(w.imag());
+    rx = _THRUST_STD::fabsf(w.imag());
     ry = w.real() + m_ln2;
     if (sy == 0)
     {
@@ -320,22 +319,22 @@ THRUST_HOST_DEVICE inline complex<float> cacosf(complex<float> z)
   {
     if (sx == 0)
     {
-      rx = acosf(B);
+      rx = _THRUST_STD::acosf(B);
     }
     else
     {
-      rx = acosf(-B);
+      rx = _THRUST_STD::acosf(-B);
     }
   }
   else
   {
     if (sx == 0)
     {
-      rx = atan2f(sqrt_A2mx2, new_x);
+      rx = _THRUST_STD::atan2f(sqrt_A2mx2, new_x);
     }
     else
     {
-      rx = atan2f(sqrt_A2mx2, -new_x);
+      rx = _THRUST_STD::atan2f(sqrt_A2mx2, -new_x);
     }
   }
   if (sy == 0)
@@ -354,22 +353,22 @@ THRUST_HOST_DEVICE inline complex<float> cacoshf(complex<float> z)
   rx = w.real();
   ry = w.imag();
   /* cacosh(NaN + I*NaN) = NaN + I*NaN */
-  if (isnan(rx) && isnan(ry))
+  if (_THRUST_STD::isnan(rx) && _THRUST_STD::isnan(ry))
   {
     return (complex<float>(ry, rx));
   }
   /* cacosh(NaN + I*+-Inf) = +Inf + I*NaN */
   /* cacosh(+-Inf + I*NaN) = +Inf + I*NaN */
-  if (isnan(rx))
+  if (_THRUST_STD::isnan(rx))
   {
-    return (complex<float>(fabsf(ry), rx));
+    return (complex<float>(_THRUST_STD::fabsf(ry), rx));
   }
   /* cacosh(0 + I*NaN) = NaN + I*NaN */
-  if (isnan(ry))
+  if (_THRUST_STD::isnan(ry))
   {
     return (complex<float>(ry, ry));
   }
-  return (complex<float>(fabsf(ry), copysignf(rx, z.imag())));
+  return (complex<float>(_THRUST_STD::fabsf(ry), _THRUST_STD::copysignf(rx, z.imag())));
 }
 
 /*
@@ -383,8 +382,8 @@ THRUST_HOST_DEVICE inline complex<float> clog_for_large_values(complex<float> z)
 
   x  = z.real();
   y  = z.imag();
-  ax = fabsf(x);
-  ay = fabsf(y);
+  ax = _THRUST_STD::fabsf(x);
+  ay = _THRUST_STD::fabsf(y);
   if (ax < ay)
   {
     t  = ax;
@@ -394,17 +393,17 @@ THRUST_HOST_DEVICE inline complex<float> clog_for_large_values(complex<float> z)
 
   if (ax > FLT_MAX / 2)
   {
-    return (complex<float>(logf(hypotf(x / m_e, y / m_e)) + 1, atan2f(y, x)));
+    return (complex<float>(_THRUST_STD::logf(_THRUST_STD::hypotf(x / m_e, y / m_e)) + 1, _THRUST_STD::atan2f(y, x)));
   }
 
   const float QUARTER_SQRT_MAX = 2.3058430092136939520000000e+18f; /* = 0x1p61; <= sqrt(FLT_MAX) / 4 */
   const float SQRT_MIN         = 1.084202172485504434007453e-19f; /* 0x1p-63; >= sqrt(FLT_MIN) */
   if (ax > QUARTER_SQRT_MAX || ay < SQRT_MIN)
   {
-    return (complex<float>(logf(hypotf(x, y)), atan2f(y, x)));
+    return (complex<float>(_THRUST_STD::logf(_THRUST_STD::hypotf(x, y)), _THRUST_STD::atan2f(y, x)));
   }
 
-  return (complex<float>(logf(ax * ax + ay * ay) / 2, atan2f(y, x)));
+  return (complex<float>(_THRUST_STD::logf(ax * ax + ay * ay) / 2, _THRUST_STD::atan2f(y, x)));
 }
 
 /*
@@ -446,7 +445,7 @@ THRUST_HOST_DEVICE inline float real_part_reciprocal(float x, float y)
   const int BIAS = FLT_MAX_EXP - 1;
   // #define  CUTOFF  (FLT_MANT_DIG / 2 + 1)
   const int CUTOFF = (FLT_MANT_DIG / 2 + 1);
-  if (ix - iy >= CUTOFF << 23 || isinf(x))
+  if (ix - iy >= CUTOFF << 23 || _THRUST_STD::isinf(x))
   {
     return (1 / x);
   }
@@ -472,28 +471,28 @@ THRUST_HOST_DEVICE inline complex<float> catanhf(complex<float> z)
 
   x  = z.real();
   y  = z.imag();
-  ax = fabsf(x);
-  ay = fabsf(y);
+  ax = _THRUST_STD::fabsf(x);
+  ay = _THRUST_STD::fabsf(y);
 
   if (y == 0 && ax <= 1)
   {
-    return (complex<float>(atanhf(x), y));
+    return (complex<float>(_THRUST_STD::atanhf(x), y));
   }
 
   if (x == 0)
   {
-    return (complex<float>(x, atanf(y)));
+    return (complex<float>(x, _THRUST_STD::atanf(y)));
   }
 
-  if (isnan(x) || isnan(y))
+  if (_THRUST_STD::isnan(x) || _THRUST_STD::isnan(y))
   {
-    if (isinf(x))
+    if (_THRUST_STD::isinf(x))
     {
-      return (complex<float>(copysignf(0, x), y + y));
+      return (complex<float>(_THRUST_STD::copysignf(0, x), y + y));
     }
-    if (isinf(y))
+    if (_THRUST_STD::isinf(y))
     {
-      return (complex<float>(copysignf(0, x), copysignf(pio2_hi + pio2_lo, y)));
+      return (complex<float>(_THRUST_STD::copysignf(0, x), _THRUST_STD::copysignf(pio2_hi + pio2_lo, y)));
     }
     return (complex<float>(x + 0.0f + (y + 0.0f), x + 0.0f + (y + 0.0f)));
   }
@@ -501,7 +500,7 @@ THRUST_HOST_DEVICE inline complex<float> catanhf(complex<float> z)
   const float RECIP_EPSILON = 1.0f / FLT_EPSILON;
   if (ax > RECIP_EPSILON || ay > RECIP_EPSILON)
   {
-    return (complex<float>(real_part_reciprocal(x, y), copysignf(pio2_hi + pio2_lo, y)));
+    return (complex<float>(real_part_reciprocal(x, y), _THRUST_STD::copysignf(pio2_hi + pio2_lo, y)));
   }
 
   const float SQRT_3_EPSILON = 5.9801995673e-4f; /*  0x9cc471.0p-34 */
@@ -514,27 +513,27 @@ THRUST_HOST_DEVICE inline complex<float> catanhf(complex<float> z)
   const float m_ln2 = 6.9314718056e-1f; /*  0xb17218.0p-24 */
   if (ax == 1 && ay < FLT_EPSILON)
   {
-    rx = (m_ln2 - logf(ay)) / 2;
+    rx = (m_ln2 - _THRUST_STD::logf(ay)) / 2;
   }
   else
   {
-    rx = log1pf(4 * ax / sum_squares(ax - 1, ay)) / 4;
+    rx = _THRUST_STD::log1pf(4 * ax / sum_squares(ax - 1, ay)) / 4;
   }
 
   if (ax == 1)
   {
-    ry = atan2f(2, -ay) / 2;
+    ry = _THRUST_STD::atan2f(2, -ay) / 2;
   }
   else if (ay < FLT_EPSILON)
   {
-    ry = atan2f(2 * ay, (1 - ax) * (1 + ax)) / 2;
+    ry = _THRUST_STD::atan2f(2 * ay, (1 - ax) * (1 + ax)) / 2;
   }
   else
   {
-    ry = atan2f(2 * ay, (1 - ax) * (1 + ax) - ay * ay) / 2;
+    ry = _THRUST_STD::atan2f(2 * ay, (1 - ax) * (1 + ax) - ay * ay) / 2;
   }
 
-  return (complex<float>(copysignf(rx, x), copysignf(ry, y)));
+  return (complex<float>(_THRUST_STD::copysignf(rx, x), _THRUST_STD::copysignf(ry, y)));
 }
 
 THRUST_HOST_DEVICE inline complex<float> catanf(complex<float> z)

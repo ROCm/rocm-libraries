@@ -54,6 +54,8 @@
 #include <thrust/detail/complex/cexpf.h>
 #include <thrust/detail/complex/math_private.h>
 
+#include _THRUST_STD_INCLUDE(cmath)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail::complex
 {
@@ -77,45 +79,46 @@ THRUST_HOST_DEVICE inline complex<float> ccoshf(const complex<float>& z)
   {
     if (iy == 0)
     {
-      return (complex<float>(coshf(x), x * y));
+      return (complex<float>(_THRUST_STD::coshf(x), x * y));
     }
     if (ix < 0x41100000)
     { /* small x: normal case */
-      return (complex<float>(coshf(x) * cosf(y), sinhf(x) * sinf(y)));
+      return (
+        complex<float>(_THRUST_STD::coshf(x) * _THRUST_STD::cosf(y), _THRUST_STD::sinhf(x) * _THRUST_STD::sinf(y)));
     }
     /* |x| >= 9, so cosh(x) ~= exp(|x|) */
     if (ix < 0x42b17218)
     {
       /* x < 88.7: expf(|x|) won't overflow */
-      h = expf(fabsf(x)) * 0.5f;
-      return (complex<float>(h * cosf(y), copysignf(h, x) * sinf(y)));
+      h = _THRUST_STD::expf(_THRUST_STD::fabsf(x)) * 0.5f;
+      return (complex<float>(h * _THRUST_STD::cosf(y), _THRUST_STD::copysignf(h, x) * _THRUST_STD::sinf(y)));
     }
     else if (ix < 0x4340b1e7)
     {
       /* x < 192.7: scale to avoid overflow */
       thrust::complex<float> z_;
-      z_ = ldexp_cexpf(complex<float>(fabsf(x), y), -1);
-      return (complex<float>(z_.real(), z_.imag() * copysignf(1.0f, x)));
+      z_ = ldexp_cexpf(complex<float>(_THRUST_STD::fabsf(x), y), -1);
+      return (complex<float>(z_.real(), z_.imag() * _THRUST_STD::copysignf(1.0f, x)));
     }
     else
     {
       /* x >= 192.7: the result always overflows */
       h = huge * x;
-      return (complex<float>(h * h * cosf(y), h * sinf(y)));
+      return (complex<float>(h * h * _THRUST_STD::cosf(y), h * _THRUST_STD::sinf(y)));
     }
   }
 
   if (ix == 0 && iy >= 0x7f800000)
   {
-    return (complex<float>(y - y, copysignf(0.0f, x * (y - y))));
+    return (complex<float>(y - y, _THRUST_STD::copysignf(0.0f, x * (y - y))));
   }
   if (iy == 0 && ix >= 0x7f800000)
   {
     if ((hx & 0x7fffff) == 0)
     {
-      return (complex<float>(x * x, copysignf(0.0f, x) * y));
+      return (complex<float>(x * x, _THRUST_STD::copysignf(0.0f, x) * y));
     }
-    return (complex<float>(x * x, copysignf(0.0f, (x + x) * y)));
+    return (complex<float>(x * x, _THRUST_STD::copysignf(0.0f, (x + x) * y)));
   }
 
   if (ix < 0x7f800000 && iy >= 0x7f800000)
@@ -129,7 +132,7 @@ THRUST_HOST_DEVICE inline complex<float> ccoshf(const complex<float>& z)
     {
       return (complex<float>(x * x, x * (y - y)));
     }
-    return (complex<float>((x * x) * cosf(y), x * sinf(y)));
+    return (complex<float>((x * x) * _THRUST_STD::cosf(y), x * _THRUST_STD::sinf(y)));
   }
   return (complex<float>((x * x) * (y - y), (x + x) * (y - y)));
 }

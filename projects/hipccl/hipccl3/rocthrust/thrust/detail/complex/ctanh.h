@@ -134,14 +134,15 @@ THRUST_HOST_DEVICE inline complex<double> ctanh(const complex<double>& z)
       return (complex<double>(x, (y == 0 ? y : x * y)));
     }
     set_high_word(x, hx - 0x40000000); /* x = copysign(1, x) */
-    return (complex<double>(x, copysign(0.0, isinf(y) ? y : sin(y) * cos(y))));
+    return (complex<double>(
+      x, _THRUST_STD::copysign(0.0, _THRUST_STD::isinf(y) ? y : _THRUST_STD::sin(y) * _THRUST_STD::cos(y))));
   }
 
   /*
    * ctanh(x + i NAN) = NaN + i NaN
    * ctanh(x +- i Inf) = NaN + i NaN
    */
-  if (!isfinite(y))
+  if (!_THRUST_STD::isfinite(y))
   {
     return (complex<double>(y - y, y - y));
   }
@@ -153,15 +154,16 @@ THRUST_HOST_DEVICE inline complex<double> ctanh(const complex<double>& z)
    */
   if (ix >= 0x40360000)
   { /* x >= 22 */
-    double exp_mx = exp(-fabs(x));
-    return (complex<double>(copysign(1.0, x), 4.0 * sin(y) * cos(y) * exp_mx * exp_mx));
+    double exp_mx = _THRUST_STD::exp(-fabs(x));
+    return (complex<double>(_THRUST_STD::copysign(1.0, x),
+                            4.0 * _THRUST_STD::sin(y) * _THRUST_STD::cos(y) * exp_mx * exp_mx));
   }
 
   /* Kahan's algorithm */
-  t     = tan(y);
+  t     = _THRUST_STD::tan(y);
   beta  = 1.0 + t * t; /* = 1 / cos^2(y) */
-  s     = sinh(x);
-  rho   = sqrt(1.0 + s * s); /* = cosh(x) */
+  s     = _THRUST_STD::sinh(x);
+  rho   = _THRUST_STD::sqrt(1.0 + s * s); /* = cosh(x) */
   denom = 1.0 + beta * s * s;
   return (complex<double>((beta * rho * s) / denom, t / denom));
 }
