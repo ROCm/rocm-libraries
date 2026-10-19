@@ -1835,14 +1835,15 @@ FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* val
 FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*      h,
                                                         const _rocblaslt_matmul_desc* desc,
                                                         hipDataType                   type_a,
-                                                        hipblasOperation_t            opA,
-                                                        hipblasOperation_t            opB,
                                                         int64_t                       m,
                                                         int64_t                       n,
                                                         int64_t                       k,
                                                         int32_t                       batch_count,
                                                         size_t workspace_bytes)
 {
+    /* Derive transpose flags from the descriptor (or default to OP_N when nullptr). */
+    const hipblasOperation_t opA = desc ? desc->op_A : HIPBLAS_OP_N;
+    const hipblasOperation_t opB = desc ? desc->op_B : HIPBLAS_OP_N;
     /* Setting Precedence (highest to lowest):
      *   1. Per-matmul descriptor fields (desc->emulation_*; sentinel = inherit).
      *   2. Environment variable — read once at first use, process-wide default.
@@ -2335,8 +2336,6 @@ bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
 bool fixedPointEmulationWouldApply(const _rocblaslt_handle*      h,
                                    const _rocblaslt_matmul_desc* desc,
                                    hipDataType                   type_a,
-                                   hipblasOperation_t            opA,
-                                   hipblasOperation_t            opB,
                                    int64_t                       m,
                                    int64_t                       n,
                                    int64_t                       k,
@@ -2345,8 +2344,6 @@ bool fixedPointEmulationWouldApply(const _rocblaslt_handle*      h,
     return fixedPointEmulationDecision(h,
                                        desc,
                                        type_a,
-                                       opA,
-                                       opB,
                                        m,
                                        n,
                                        k,

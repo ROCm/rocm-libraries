@@ -1167,7 +1167,7 @@ try
         const hipDataType type_a      = A_layout->type;
 
         const FixedPointEmulationSettings emulDecision =
-            fixedPointEmulationDecision(h, desc_ptr, type_a, desc_ptr->op_A, desc_ptr->op_B, m, n, k, batch_count,
+            fixedPointEmulationDecision(h, desc_ptr, type_a, m, n, k, batch_count,
                                           reinterpret_cast<const _rocblaslt_matmul_preference*>(pref)->max_workspace_bytes);
         if(emulDecision.status != rocblaslt_status_success)
             return RocBlasLtStatusToHIPStatus(emulDecision.status);
@@ -1554,7 +1554,7 @@ try
     const hipblasOperation_t opA = desc ? desc->op_A : HIPBLAS_OP_N;
     const hipblasOperation_t opB = desc ? desc->op_B : HIPBLAS_OP_N;
     const FixedPointEmulationSettings d = fixedPointEmulationDecision(
-        h, desc, computeInputType, opA, opB, m, n, k, 1, ~size_t{0});
+        h, desc, computeInputType, m, n, k, 1, ~size_t{0});
     if(d.status != rocblaslt_status_success || !d.apply) return 0;
     return fixedPointEmulationWorkspaceSize(h, computeInputType, opA, opB, m, n, k, d);
 }

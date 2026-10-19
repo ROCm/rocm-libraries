@@ -1078,7 +1078,6 @@ namespace hipblaslt_ext
             const auto* h = reinterpret_cast<const _rocblaslt_handle*>(m_handle);
             const FixedPointEmulationSettings emulDecision =
                 fixedPointEmulationDecision(h, nullptr, problemtype.getTypeA(),
-                                      problemtype.getOpA(), problemtype.getOpB(),
                                       m, n, k, batch_count, ~size_t{0});
             m_emul_workspace_bytes = emulDecision.apply
                 ? fixedPointEmulationWorkspaceSize(h, problemtype.getTypeA(),
@@ -1136,7 +1135,6 @@ namespace hipblaslt_ext
             const int32_t batch = A_layout->batch_count;
             const FixedPointEmulationSettings emulDecision =
                 fixedPointEmulationDecision(h, desc_ptr, A_layout->type,
-                                      desc_ptr->op_A, desc_ptr->op_B,
                                       m_sz, n_sz, k_sz, batch, ~size_t{0});
             m_emul_workspace_bytes = emulDecision.apply
                 ? fixedPointEmulationWorkspaceSize(h, A_layout->type,

@@ -69,7 +69,7 @@ namespace
         const _rocblaslt_matmul_desc* _dp
             = reinterpret_cast<const _rocblaslt_matmul_desc*>(_tmpDesc);
         const FixedPointEmulationSettings d = fixedPointEmulationDecision(
-            _h, _dp, HIP_R_64F, HIPBLAS_OP_N, HIPBLAS_OP_N, 16, 16, 16, 1, ~size_t{0});
+            _h, _dp, HIP_R_64F, 16, 16, 16, 1, ~size_t{0});
         hipblasLtEmulationDescDestroy(_ed);
         hipblasLtMatmulDescDestroy(_tmpDesc);
         hipblasLtDestroy(h);
@@ -196,8 +196,6 @@ namespace
                 m_roc,
                 reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc),
                 t,
-                HIPBLAS_OP_N,
-                HIPBLAS_OP_N,
                 m,
                 n,
                 k,
@@ -2927,8 +2925,6 @@ namespace
             h,
             reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc),
             HIP_R_32F,
-            HIPBLAS_OP_N,
-            HIPBLAS_OP_N,
             128,
             128,
             128,
