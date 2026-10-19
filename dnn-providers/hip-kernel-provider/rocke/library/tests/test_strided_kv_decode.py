@@ -36,7 +36,7 @@ def test_attention_strided_kv_golden(flavor):
             str(tests.parent),
         ]
     )
-    assert set(golden[flavor]) == {str(i) for i in range(12)}
+    assert set(golden[flavor]) == {str(i) for i in range(14)}
     for idx, expected in golden[flavor].items():
         data = subprocess.check_output(
             [
