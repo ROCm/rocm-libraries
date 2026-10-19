@@ -61,6 +61,8 @@ The following table lists the operations currently executable through the GPU gr
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
+| Resample Forward | FP16, BFP16, FP32 | NCHW/NHWC/NCDHW/NDHWC | GPU Reference | 2D and 3D spatial; FP32 compute; see [Resample Restrictions](#resample-restrictions) |
+| Resample Backward | FP16, BFP16, FP32 | NCHW/NHWC/NCDHW/NDHWC | GPU Reference | 2D and 3D spatial; FP32 compute; MAXPOOL requires the INT32 index input |
 | SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
@@ -75,8 +77,6 @@ The following table lists the operations currently executable through the GPU gr
 | BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
 | SDPA Backward | `ReferenceCapabilityError` | None |
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
-| Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
-| Resample Backward | "Unsupported node type" error | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
 | Pointwise ternary (`BINARY_SELECT`), `MAX`, `MIN`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
 | Custom operations | `ReferenceCapabilityError` | None |
@@ -110,11 +110,13 @@ but are not reachable through graph-level verification.
 | RMSNorm Forward | `GpuRMSNormFwdPlanBuilder` | `GpuRMSNormFwdSignatureKey` | RMS normalization forward pass |
 | RMSNorm Backward | `GpuRMSNormBwdPlanBuilder` | `GpuRMSNormBwdSignatureKey` | RMS normalization gradients |
 
-### Reduction and SDPA Operations
+### Reduction, Resample and SDPA Operations
 
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
 | Reduction | `GpuReductionPlanBuilder` | `GpuReductionSignatureKey` | Reduction over the requested dimensions |
+| Resample Forward | `GpuResampleFwdPlanBuilder` | `GpuResampleFwdSignatureKey` | Pooling forward pass, with an optional INT32 index output |
+| Resample Backward | `GpuResampleBwdPlanBuilder` | `GpuResampleBwdSignatureKey` | Pooling gradients, with an INT32 index input for MAXPOOL |
 | SDPA Forward (dense) | `GpuSdpaFwdPlanBuilder` | `GpuSdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
 | SDPA Forward (ragged) | `GpuSdpaRaggedFwdPlanBuilder` | `GpuSdpaRaggedFwdSignatureKey` | Packed (ragged) attention forward pass |
 
@@ -143,6 +145,20 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 ### Reduction Modes
 
 `ADD`, `AVG`, `AMAX`, `NORM1`, `NORM2`, `MUL`, `MUL_NO_ZEROS`, `MIN_OP`, `MAX_OP`. Compute type is `FP32` or `FP64`.
+
+### Resample Restrictions
+
+| Feature | Resample Forward | Resample Backward |
+|---------|------------------|-------------------|
+| Resample modes | MAXPOOL, AVGPOOL_EXCLUDE_PADDING, AVGPOOL_INCLUDE_PADDING | Same |
+| Padding modes | ZERO_PAD, NEG_INF_PAD | Same |
+| Tensor ranks | 4D and 5D, channel-first or channel-last, consistent between the IO tensors | Same |
+| Index tensor | INT32, dims and strides matching the `y` tensor; MAXPOOL only | INT32, required for MAXPOOL, rejected otherwise |
+| Padding size | Must be smaller than the window in every spatial dimension | Unconstrained beyond the window fitting the padded `dx` |
+| Compute type | FP32 | FP32 |
+
+Nodes outside these constraints are reported as not applicable, so the harness falls back to the next
+oracle instead of failing.
 
 ### SDPA Restrictions
 
@@ -192,8 +208,8 @@ host validator.
 | Layernorm Forward / Backward | Yes | Yes |
 | RMSNorm Forward / Backward | Yes | Yes |
 | Reduction | Yes | Yes |
-| Resample Forward | Yes | No (library only) |
-| Resample Backward | Yes | No |
+| Resample Forward | Yes | Yes |
+| Resample Backward | Yes | Yes |
 | SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | No |
 | BlockScale Quantize / Dequantize | Yes | No |
