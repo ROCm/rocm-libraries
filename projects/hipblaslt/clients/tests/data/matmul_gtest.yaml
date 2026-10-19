@@ -3249,7 +3249,9 @@ Tests:
   requested_solution_num: -1
   initialization: integer_exact
   unit_check: 1
-  gpu_arch: '1201|1250'
+  # Not on gfx1250: the all-solutions find returns "NO solution found!" for this fp32 NN
+  # shape on gfx1250-strict (hardware run on PR #13504).
+  gpu_arch: '1201'
 
 ###############################################################################
 # fast_check: verification without a host reference GEMM.
