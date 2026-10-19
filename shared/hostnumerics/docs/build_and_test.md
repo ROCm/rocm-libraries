@@ -1,28 +1,19 @@
-# Building and testing HostNumerics
+# Building and using HostNumerics
 
-## Requirements
+## Build and test
 
-The standalone build requires CMake 3.25.2 or newer and a C++20 compiler. The
-commands below use Ninja. The Python module requires Python 3.10 or newer with
-development headers and nanobind; CI uses nanobind 3.0.1. The Python test suite
-also requires NumPy. C++ tests require
-GoogleTest 1.12.1 or newer. See [test dependencies](#test-dependencies) for
-installed and fetched dependency options.
 
-Test numerical behavior primarily through the Python API, using independent
-expected results. Native tests cover contracts that Python cannot exercise,
-such as C++ construction, ownership, and integer conversion templates.
-
-## Standalone build
-
-From the repository root, create a virtual environment and build directory
+The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
+The Python module also needs Python 3.10 or newer with development headers and
+nanobind. The Python test suite also requires NumPy and `ml_dtypes`. From the
+repository root, the following creates a virtual environment and build directory
 outside the source tree:
 
 ```shell
 hostnumerics_venv="$PWD/../venvs/hostnumerics"
 hostnumerics_build="$PWD/../builds/hostnumerics"
 python3 -m venv "$hostnumerics_venv"
-"$hostnumerics_venv/bin/python" -m pip install nanobind==3.0.1 numpy
+"$hostnumerics_venv/bin/python" -m pip install nanobind==3.0.1 numpy ml_dtypes
 
 cmake -S shared/hostnumerics -B "$hostnumerics_build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
@@ -30,75 +21,45 @@ cmake -S shared/hostnumerics -B "$hostnumerics_build" -G Ninja \
   -DHOSTNUMERICS_BUILD_TESTING=ON \
   -DHOSTNUMERICS_BUILD_PYTHON=ON
 cmake --build "$hostnumerics_build" --parallel 4
-ctest --test-dir "$hostnumerics_build" --no-tests=error --output-on-failure
+ctest --test-dir "$hostnumerics_build" --output-on-failure
 ```
 
 For a C++-only build, set `HOSTNUMERICS_BUILD_PYTHON=OFF`; Python and nanobind
-are then unnecessary. `HOSTNUMERICS_BUILD_TESTING` and
-`HOSTNUMERICS_BUILD_PYTHON` default to `ON` for a standalone build and `OFF`
-when a parent includes HostNumerics with `add_subdirectory`. For a multi-config
-generator such as Ninja Multi-Config, select the same configuration with
-`--config Release` when building or installing and `-C Release` with CTest.
+are then unnecessary.
 
-## Test dependencies
+`HOSTNUMERICS_BUILD_TESTING` and `HOSTNUMERICS_BUILD_PYTHON` both default to `ON`
+when building HostNumerics standalone and `OFF` when another project includes it
+with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF with
+Ninja, including installation and an external C++ consumer for both. It also
+checks the embedded defaults.
 
-When no compatible installed GoogleTest package or existing target is
-available, standalone test builds fetch GoogleTest 1.17.0. Set
-`HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing dependency instead.
-Fetching defaults to `OFF` when HostNumerics is embedded in another project;
-provide a compatible package or target, or explicitly enable fetching.
-
-An existing `GTest::gtest_main` target must expose its version through its
-`VERSION` property or `GTest_VERSION`. GoogleTest is a test dependency and is
-not installed or exported with HostNumerics. The dependency lookup and version
-checks are defined in
-[HostNumericsTestDependencies.cmake](../cmake/HostNumericsTestDependencies.cmake).
-
-## Installation and CMake integration
-
-Install into a local prefix:
+Install into a local prefix with:
 
 ```shell
 cmake --install "$hostnumerics_build" --prefix "$hostnumerics_build/install"
 ```
 
-Add the install prefix to the consuming project's `CMAKE_PREFIX_PATH`, then
-load and link the package:
+## CMake integration
+
+Installed consumers normally request the operations component:
 
 ```cmake
 find_package(HostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
-The installed package exports `roc::hostnumerics-core` and
-`roc::hostnumerics`. Both are currently `INTERFACE` libraries exposing the
-header-only core APIs. The operations target
-links core transitively. Their intended responsibilities as implementation
-lands are:
+`roc::hostnumerics-core` is a static library containing scalar types and
+conversions, plus the tensor model (shape, layout, and storage). It can be used
+independently of numerical operations. `roc::hostnumerics` is a static library
+that adds generation, reference operations, and comparison, and links core
+transitively. The single Python `hostnumerics` package exposes both layers.
+`roc::hostnumerics-blas` adds the optional CBLAS GEMM backend, and
+`roc::hostnumerics-amd-gpu-layout` provides the independent CPU transforms for
+physical MX scale layouts. Build options and their defaults are documented next
+to their declarations in CMake.
 
-| Target | Responsibility |
-| --- | --- |
-| `roc::hostnumerics-core` | Scalar types and conversions, plus shape, layout, and tensor storage. |
-| `roc::hostnumerics` | Input generation, reference operations, and numerical comparison. |
+C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics. When configuring a package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test sources and CMake helper.
 
-The Python package installs under the prefix's library directory in
-`python<major>.<minor>/site-packages`. Add that directory to `PYTHONPATH` to
-import the installed module with the Python interpreter used for the build.
-
-## CI and package validation
-
-The [standalone workflow](../../../.github/workflows/hostnumerics-ci.yml) covers
-Python/tests ON with Ninja Multi-Config and OFF with Ninja, installation,
-external C++ consumers, installed Python imports, embedded defaults,
-ASan/UBSan, and clang-tidy. These jobs run on Ubuntu.
-
-CI also builds and tests native C++ on Windows with MSVC and Ninja, installs
-HostNumerics, and builds and tests an external consumer of the installed package.
-Python bindings are disabled in this Windows job; Linux covers binding builds
-and installed imports, with Windows Python coverage left for a follow-up.
-
-The [package test project](../tests/package/CMakeLists.txt) and
-[embedded test project](../tests/embedded/CMakeLists.txt) can also be configured
-directly. Pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so they can find
-the shared test source and dependency helper. The package test project also
-needs the install prefix in `CMAKE_PREFIX_PATH`.
+Test numerical behavior primarily through the Python API, using independent
+expected results. Native tests cover contracts that Python cannot exercise,
+such as C++ construction, ownership, and integer conversion templates.
