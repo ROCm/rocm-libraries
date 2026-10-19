@@ -638,6 +638,10 @@ exclude_gpu:
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
       - "Full/GPU_reduce_custom_fp32*"
+      # Flaky on Windows gfx110X (ALMIOPEN-1926): intermittent CPU/GPU mismatch at rnn_seq_api.hpp:272,
+      # bias-enabled cases only, a different index set on every attempt (88 of 4,316 executions failed in
+      # PR #13107 runs 38815363944 and 38983909810). FP16 and Linux gfx94X passed every execution.
+      - "Full/GPU_LstmMSRnn_FP32*"
     labels:
       - "quick"
       - "standard"
