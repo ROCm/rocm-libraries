@@ -25,9 +25,9 @@ performance claim; tuning is a separate piece of work.
 ## What this records
 
 That the decode kernel family computes the weight-absorbed MLA decode op
-correctly on gfx942, at the tolerance below, for both supported head counts
-(64, a Kimi-K2-shaped layer, and 128, DeepSeek-V3-shaped), across ragged key
-lengths, split-KV segment counts, and the benchmark shape file. It also records
+correctly on gfx942, at the tolerance below, for the two head counts dispatch
+admits (64, a Kimi-K2-shaped layer, and 128, DeepSeek-V3-shaped), across ragged
+key lengths, split-KV segment counts, and the benchmark shape file. It also records
 the design that was built, which refines
 [`builders/mla/DESIGN.md`](../../../builders/mla/DESIGN.md) §4–§5 in the ways
 listed below.
@@ -41,9 +41,9 @@ every staged key tile.
 
 | Choice | As built | Why |
 |---|---|---|
-| Absorb | two-stage, outside the kernel: `Qa = [Q_nope @ W_UK_nopeᵀ \| Q_rope]` | DESIGN §4's materialized `W_abs` reads 192 MiB per step; the two-stage form 16 MiB of `W_UK` here |
+| Absorb | two-stage, outside the kernel: `Qa = [Q_nope @ W_UK_nopeᵀ \| Q_rope]` | DESIGN §4's materialized `W_abs` reads 192 MiB per step; the two-stage form reads 16 MiB of `W_UK` (128 heads, bf16) |
 | `W_UV` | after the combine, outside the kernel | heads on the MFMA axis make `W_UV` vary along that axis, so it cannot be an in-wave operand; it then runs once per head row, not once per segment |
-| Head layout | 16 heads per wave on the MFMA n axis, 4 waves, 64 heads per workgroup | the latent is the score's K axis and the PV's N axis; splitting it across waves would turn the score into a split-K with a combine per tile |
+| Head layout | 16 heads per wave on the MFMA n axis, 4 waves, 64 heads per workgroup | the latent is the score's K axis and the PV's m axis (`accᵀ`); splitting it across waves would turn the score into a split-K with a combine per tile |
 | Score | `Sᵀ = [C \| K_rope] · Qaᵀ`, `mfma_f32_16x16x16_bf16`, K = 576 | the prefill one-wave-per-head pipeline with its n axis relabelled from query to head |
 | PV | `accᵀ += Cᵀ · Pᵀ`, latent operand gathered from the natural `kv_lds` tile | gfx942 has no transpose LDS read |
 | Mask | the last, partial page only | at `S_q = 1` the bottom-right causal mask admits every key |
@@ -60,27 +60,59 @@ caller absorbs `W_UK_nope` into the query and applies `W_UV` to the latent.
 The prefill kernel serves `max_seqlen_q >= 2` with a different contract (the
 projected query plus `W_UK` in, the attention output out), so it is never
 substituted for decode: a one-query request that decode cannot serve -- a
-head count that is not a multiple of 64 -- is refused.
+head count other than 64 or 128 -- is refused.
 
-| Tensor | Shape | |
+| Argument | Shape | |
 |---|---|---|
-| `qa` | `[total_q, H, 576]` bf16 | the absorbed query |
-| `c_kv`, `k_rope` | `[pages, 16, 512]`, `[pages, 16, 64]` bf16 | paged latent cache, head-shared RoPE keys |
+| `qa` | `[total_q, H, 576]` bf16 | the absorbed query, `[Q_nope @ W_UK_nopeᵀ \| Q_rope]` |
+| `c_kv`, `k_rope` | `[pages, 16, 512]`, `[pages, 16, 64]` bf16 | paged latent cache, head-shared RoPE keys; the same page count |
 | `cu_seqlens_q`, `cu_seqlens_k` | `[B + 1]` i32 | a sequence may have no query (`total_q <= B`) |
-| `block_table` | `[B, max_pages]` i32 | row pitch is its stride |
+| `block_table` | `[≥ B, ≥ max(1, ⌈max_seqlen_k / 16⌉)]` i32 | unit column stride; the row pitch is its stride |
 | `scale` | f32 | the host's softmax scale, never derived in-kernel |
-| `out`, `lse` | `[total_q, H, 512]` bf16, `[total_q, H]` f32 | normalized latent; natural-log LSE |
+| `num_seqs`, `block_table_stride`, `max_k` | i32 | `B`, the block table's row stride, `max_seqlen_k` (unused, kept for the shared pack) |
+| `out`, `lse` | `[total_q, H, 512]` bf16, `[total_q, H]` f32 | normalized latent; natural-log LSE (single pass) |
+| `part_acc`, `part_ml` | `[total_q, num_seg, H, 512]`, `[total_q, num_seg, H, 2]` f32 | split-KV workspace instead of `out` / `lse`, then the combine's input; no initialization needed |
+| `num_seg` | i32 | split-KV only; the count dispatch chose |
 
-A sequence with `S_k = 0` gets a zero latent and `lse = -inf`. No sequence may
-carry more than one query: the kernel computes each sequence's first token
-only. The single-pass argument list is the prefill `absorbed_query` kernel's,
-argument for argument, which is what lets that kernel serve as an independent
-GPU oracle on the same buffers. A split-KV selection is two launches;
-[`mla_decode_launch`](../../../dispatch/mla/decode.py) describes the combine
-and the fp32 workspace between them.
+`W_UK` is the fused per-head `[H, 512, d_nope + d_v]` weight (`[in, out]` per
+head): `W_UK_nope = W_UK[:, :, :d_nope]`, `W_UV = W_UK[:, :, d_nope:]`.
+
+Preconditions the kernel cannot check (the runner checks the shapes, and the
+contents on request):
+
+- at most one query per sequence -- the kernel computes each sequence's first
+  token only -- and `cu_seqlens_q` within `total_q`;
+- every page id a sequence uses is inside the cache; slots past a sequence's
+  last page are never read, and a sequence with `S_k = 0` reads no page;
+- the latent launch and the combine run in order on one stream, with the
+  workspace sized for this request's `total_q` and `num_seg`: `num_seg` comes
+  from `max_seqlen_k` and the batch, so re-dispatch whenever they change.
+
+A sequence with `S_k = 0` gets a zero latent and `lse = -inf`. The single-pass
+argument list is the prefill `absorbed_query` kernel's, argument for argument,
+which is what lets that kernel serve as an independent GPU oracle on the same
+buffers. A split-KV selection is two launches;
+[`mla_decode_launch`](../../../dispatch/mla/decode.py) describes the combine and
+the fp32 workspace between them.
 [`MlaDecodeRunner`](../../../builders/mla/mla_decode_runner.py) composes the
 whole op (`torch.bmm` absorb, latent, combine, `torch.bmm` `W_UV`) and checks the
-caller's tensors against the dispatched request before launching.
+caller's tensors against the dispatched request before launching:
+
+```python
+from builders.mla.mla_decode_runner import MlaDecodeRunner
+from dispatch.mla import MLARequest, dispatch_mla
+
+req = MLARequest(num_heads=128, total_q=T, num_seqs=B, max_seqlen_q=1,
+                 max_seqlen_k=max_k, arch="gfx942", num_kv_blocks=c_kv.shape[0])
+runner = MlaDecodeRunner(dispatch_mla(req))           # compiles once per request shape
+out, lse = runner.forward(q_nope=q_nope, q_rope=q_rope, w_uk=w_uk, c_kv=c_kv,
+                          k_rope=k_rope, cu_seqlens_q=cu_q, cu_seqlens_k=cu_k,
+                          block_table=block_table, scale=scale)
+```
+
+`runner.latent(qa=..., ...)` runs the kernel(s) alone on a caller-absorbed
+`qa`; a caller driving its own launcher reads the grid, signature and workspace
+from `mla_decode_launch(dispatch_mla(req))`.
 
 ## The correctness gate
 
@@ -88,12 +120,17 @@ caller's tensors against the dispatched request before launching.
   fed the same bf16 inputs as the device. Its own tests tie it to the expanded
   (per-head `K_nope`/`V`) form, to the prefill oracle at one query per sequence,
   and to a single-pass softmax for the split merge.
-- **Tolerance:** elementwise `|got − ref| ≤ 4e-2 + 2e-2·|ref|` on the bf16
-  output (DESIGN §8.1's absolute bound plus the MLA prefill harness's relative
-  one), `|got − ref| ≤ 4e-2` on the fp32 LSE. The relative term is needed:
-  outputs of the whole op peak at 6–10 here, where one bf16 ulp alone is 3–6e-2,
-  and exact math with only the required bf16 roundings already used about 78%
-  of an absolute-only budget.
+- **Tolerance:** three bars, all on every live row:
+  - elementwise `|got − ref| ≤ 4e-2 + 2e-2·|ref|` on the bf16 output (DESIGN
+    §8.1's absolute bound plus a relative term). The relative term is needed:
+    outputs of the whole op peak at 6–10 here, where one bf16 ulp alone is
+    3–6e-2, and exact math with only the required bf16 roundings already used
+    about 78% of an absolute-only budget.
+  - per sequence, `max_abs / peak(|ref|) ≤ 2e-2`: the MLA prefill harness's
+    bar. The output shrinks as `S_k` grows, so without it a lost key tile could
+    hide under a bound that has grown with the output.
+  - `|got − ref| ≤ 1.7e-2` on the fp32 LSE, also the prefill harness's:
+    dropping one page of a long sequence moves the LSE by about 2e-2.
 - **Traps the gate cannot miss:** output buffers and the split workspace are
   NaN-seeded, and every cache row no sequence owns (including each sequence's
   partial last page) is NaN, so an unwritten slot or a key read past `S_k` fails.
@@ -104,9 +141,13 @@ caller's tensors against the dispatched request before launching.
 
 ## Reproducing
 
-From `rocke/library`, on a gfx942 node, with ROCm torch:
+From `rocke/library`, on a gfx942 node, with ROCm 7.2 or later torch: decode
+needs the llvm22 or llvm23 IR flavor (llvm20 is refused), and torch's bundled
+comgr must match the flavor -- a ROCm 7.1 torch loads an llvm20 comgr and the
+compile fails with a flavor mismatch.
 
 ```bash
+export ROCKE_LLVM_FLAVOR=llvm22
 python -m builders.mla.verify_mla_decode --num-seg auto 1 2 7 16 64     # latent, every scenario
 python -m builders.mla.verify_mla_decode --mode full --num-seg auto 1 7  # whole op
 python -m builders.mla.verify_mla_decode --mode oracle                  # vs the prefill kernel
@@ -125,68 +166,68 @@ empty and the combine must weigh them to zero.
 
 ## Results
 
-Run on a gfx942 device (ROCm 7.2 torch, `ROCKE_LLVM_FLAVOR=llvm22`), seed 0, at the gate above. Every row also passed its NaN, `S_k = 0` and LSE checks. `num_seg` marked `*` is the count dispatch chose for this device; the others are forced. "max_abs / peak" is reported for scale, not gated. The numeric CI lane ([`tests/test_mla_decode_numeric.py`](../../../tests/test_mla_decode_numeric.py), three seeds for the whole op) passed on the same device.
+Run on a gfx942 device (ROCm 7.2 torch, `ROCKE_LLVM_FLAVOR=llvm22`), seed 0, at the gate above. Every row also passed its NaN, `S_k = 0` and LSE checks. `num_seg` marked `*` is the count dispatch chose for this device; the others are forced. "worst max_abs / peak" is over the whole batch and reported for scale; "worst per-sequence max_abs / peak" is the gated bar (≤ 2e-2), and the LSE column is gated at 1.7e-2. The numeric CI lane ([`tests/test_mla_decode_numeric.py`](../../../tests/test_mla_decode_numeric.py), three seeds for the whole op) passed on the same device, 20/20.
 
 **Latent kernel vs fp64 reference** (10/10 scenarios pass)
 
-| scenario | `num_seg` run (* = dispatched) | peak \|ref\| | worst max_abs | worst max_abs / peak | worst LSE max_abs | gate |
-|---|---|---|---|---|---|---|
-| `long_h128` | 64*, 1, 2, 7, 16, 64 | 0.74 | 2.28e-03 | 3.07e-03 | 2.80e-06 | pass |
-| `long_h64` | 64*, 1, 2, 7, 16, 64 | 0.55 | 2.37e-03 | 4.28e-03 | 2.35e-06 | pass |
-| `no_query_h128` | 4*, 1, 2, 7, 16, 64 | 3.63 | 8.53e-03 | 2.35e-03 | 1.57e-06 | pass |
-| `no_query_h64` | 4*, 1, 2, 7, 16, 64 | 2.84 | 1.24e-02 | 4.38e-03 | 2.07e-06 | pass |
-| `ragged_h128` | 8*, 1, 2, 7, 16, 64 | 4.02 | 1.29e-02 | 3.21e-03 | 1.84e-06 | pass |
-| `ragged_h64` | 8*, 1, 2, 7, 16, 64 | 3.25 | 8.27e-03 | 2.55e-03 | 2.53e-06 | pass |
-| `spike_h128` | 8*, 1, 2, 7, 16, 64 | 3.58 | 1.12e-02 | 3.12e-03 | 1.33e-05 | pass |
-| `spike_h64` | 8*, 1, 2, 7, 16, 64 | 3.58 | 8.07e-03 | 2.26e-03 | 1.01e-05 | pass |
-| `zero_keys_h128` | 1*, 1, 2, 7, 16, 64 | 2.93 | 1.12e-02 | 3.82e-03 | 1.90e-06 | pass |
-| `zero_keys_h64` | 1*, 1, 2, 7, 16, 64 | 3.37 | 7.71e-03 | 2.29e-03 | 2.35e-06 | pass |
+| scenario | `num_seg` run (* = dispatched) | peak \|ref\| | worst max_abs | worst max_abs / peak | worst per-sequence max_abs / peak | worst LSE max_abs | gate |
+|---|---|---|---|---|---|---|---|
+| `long_h128` | 64*, 1, 2, 7, 16, 64 | 0.74 | 2.28e-03 | 3.07e-03 | 3.07e-03 | 2.80e-06 | pass |
+| `long_h64` | 64*, 1, 2, 7, 16, 64 | 0.55 | 2.37e-03 | 4.28e-03 | 4.28e-03 | 2.35e-06 | pass |
+| `no_query_h128` | 4*, 1, 2, 7, 16, 64 | 3.63 | 8.53e-03 | 2.35e-03 | 4.73e-03 | 1.57e-06 | pass |
+| `no_query_h64` | 4*, 1, 2, 7, 16, 64 | 2.84 | 1.24e-02 | 4.38e-03 | 4.38e-03 | 2.07e-06 | pass |
+| `ragged_h128` | 8*, 1, 2, 7, 16, 64 | 4.02 | 1.29e-02 | 3.21e-03 | 4.68e-03 | 1.84e-06 | pass |
+| `ragged_h64` | 8*, 1, 2, 7, 16, 64 | 3.25 | 8.27e-03 | 2.55e-03 | 5.09e-03 | 2.53e-06 | pass |
+| `spike_h128` | 8*, 1, 2, 7, 16, 64 | 3.58 | 1.12e-02 | 3.12e-03 | 3.55e-03 | 1.33e-05 | pass |
+| `spike_h64` | 8*, 1, 2, 7, 16, 64 | 3.58 | 8.07e-03 | 2.26e-03 | 2.57e-03 | 1.01e-05 | pass |
+| `zero_keys_h128` | 1*, 1, 2, 7, 16, 64 | 2.93 | 1.12e-02 | 3.82e-03 | 3.82e-03 | 1.90e-06 | pass |
+| `zero_keys_h64` | 1*, 1, 2, 7, 16, 64 | 3.37 | 7.71e-03 | 2.29e-03 | 4.38e-03 | 2.35e-06 | pass |
 
 **Whole op ([A] bmm, kernel, [D] bmm) vs fp64 reference** (10/10 scenarios pass)
 
-| scenario | `num_seg` run (* = dispatched) | peak \|ref\| | worst max_abs | worst max_abs / peak | worst LSE max_abs | gate |
-|---|---|---|---|---|---|---|
-| `long_h128` | 64*, 1, 7 | 1.55 | 8.11e-03 | 5.22e-03 | 1.71e-03 | pass |
-| `long_h64` | 64*, 1, 7 | 1.17 | 5.16e-03 | 4.42e-03 | 1.63e-03 | pass |
-| `no_query_h128` | 4*, 1, 7 | 6.32 | 3.71e-02 | 5.87e-03 | 4.66e-03 | pass |
-| `no_query_h64` | 4*, 1, 7 | 5.77 | 2.85e-02 | 4.94e-03 | 5.08e-03 | pass |
-| `ragged_h128` | 8*, 1, 7 | 9.16 | 3.02e-02 | 3.29e-03 | 1.12e-02 | pass |
-| `ragged_h64` | 8*, 1, 7 | 10.20 | 2.64e-02 | 2.59e-03 | 7.91e-03 | pass |
-| `spike_h128` | 8*, 1, 7 | 9.10 | 2.80e-02 | 3.08e-03 | 1.03e-02 | pass |
-| `spike_h64` | 8*, 1, 7 | 9.69 | 3.05e-02 | 3.14e-03 | 9.58e-03 | pass |
-| `zero_keys_h128` | 1*, 1, 7 | 6.90 | 2.27e-02 | 3.29e-03 | 5.06e-03 | pass |
-| `zero_keys_h64` | 1*, 1, 7 | 7.02 | 2.23e-02 | 3.18e-03 | 5.86e-03 | pass |
+| scenario | `num_seg` run (* = dispatched) | peak \|ref\| | worst max_abs | worst max_abs / peak | worst per-sequence max_abs / peak | worst LSE max_abs | gate |
+|---|---|---|---|---|---|---|---|
+| `long_h128` | 64*, 1, 7 | 1.55 | 8.11e-03 | 5.22e-03 | 5.22e-03 | 1.71e-03 | pass |
+| `long_h64` | 64*, 1, 7 | 1.17 | 5.16e-03 | 4.42e-03 | 4.88e-03 | 1.63e-03 | pass |
+| `no_query_h128` | 4*, 1, 7 | 6.32 | 3.71e-02 | 5.87e-03 | 6.73e-03 | 4.66e-03 | pass |
+| `no_query_h64` | 4*, 1, 7 | 5.77 | 2.85e-02 | 4.94e-03 | 5.41e-03 | 5.08e-03 | pass |
+| `ragged_h128` | 8*, 1, 7 | 9.16 | 3.02e-02 | 3.29e-03 | 8.78e-03 | 1.12e-02 | pass |
+| `ragged_h64` | 8*, 1, 7 | 10.20 | 2.64e-02 | 2.59e-03 | 6.45e-03 | 7.91e-03 | pass |
+| `spike_h128` | 8*, 1, 7 | 9.10 | 2.80e-02 | 3.08e-03 | 3.08e-03 | 1.03e-02 | pass |
+| `spike_h64` | 8*, 1, 7 | 9.69 | 3.05e-02 | 3.14e-03 | 3.44e-03 | 9.58e-03 | pass |
+| `zero_keys_h128` | 1*, 1, 7 | 6.90 | 2.27e-02 | 3.29e-03 | 5.49e-03 | 5.06e-03 | pass |
+| `zero_keys_h64` | 1*, 1, 7 | 7.02 | 2.23e-02 | 3.18e-03 | 5.47e-03 | 5.86e-03 | pass |
 
 **Whole op over the bf16 decode shape file** (26/26 shapes pass)
 
-| shape | `num_seg` run (* = dispatched) | peak \|ref\| | worst max_abs | worst max_abs / peak | worst LSE max_abs | gate |
-|---|---|---|---|---|---|---|
-| `DeepSeek-V3-R1/ds_v3_b1_kv512/b1_q1k512_h128_bf16` | 1* | 3.37 | 2.08e-02 | 6.16e-03 | 5.88e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b1_kv1024/b1_q1k1024_h128_bf16` | 2* | 4.93 | 1.03e-02 | 2.09e-03 | 1.58e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b1_kv2048/b1_q1k2048_h128_bf16` | 4* | 1.99 | 1.13e-02 | 5.68e-03 | 2.00e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b1_kv4096/b1_q1k4096_h128_bf16` | 8* | 1.82 | 1.27e-02 | 6.95e-03 | 1.63e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b1_kv8192/b1_q1k8192_h128_bf16` | 16* | 3.81 | 1.27e-02 | 3.35e-03 | 2.39e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b1_kv16384/b1_q1k16384_h128_bf16` | 32* | 0.90 | 4.37e-03 | 4.84e-03 | 1.29e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b1_kv32768/b1_q1k32768_h128_bf16` | 64* | 0.90 | 3.71e-03 | 4.11e-03 | 1.49e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b4_kv2048/b4_q1k2048_h128_bf16` | 4* | 2.71 | 1.88e-02 | 6.96e-03 | 2.33e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b8_kv2048/b8_q1k2048_h128_bf16` | 4* | 4.18 | 1.75e-02 | 4.18e-03 | 2.37e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b4_kv8192/b4_q1k8192_h128_bf16` | 16* | 2.76 | 8.81e-03 | 3.19e-03 | 1.77e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b8_kv8192/b8_q1k8192_h128_bf16` | 16* | 2.86 | 1.83e-02 | 6.40e-03 | 2.25e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b32_kv2048/b32_q1k2048_h128_bf16` | 4* | 4.32 | 1.83e-02 | 4.23e-03 | 3.66e-03 | pass |
-| `DeepSeek-V3-R1/ds_v3_b32_kv8192/b32_q1k8192_h128_bf16` | 10* | 2.86 | 2.11e-02 | 7.40e-03 | 2.42e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv512/b1_q1k512_h64_bf16` | 1* | 4.06 | 1.30e-02 | 3.21e-03 | 2.58e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv1024/b1_q1k1024_h64_bf16` | 2* | 2.81 | 1.32e-02 | 4.70e-03 | 1.95e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv2048/b1_q1k2048_h64_bf16` | 4* | 2.13 | 8.79e-03 | 4.12e-03 | 1.36e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv4096/b1_q1k4096_h64_bf16` | 8* | 1.51 | 9.42e-03 | 6.25e-03 | 1.48e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv8192/b1_q1k8192_h64_bf16` | 16* | 1.11 | 4.64e-03 | 4.17e-03 | 1.24e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv16384/b1_q1k16384_h64_bf16` | 32* | 1.13 | 6.83e-03 | 6.05e-03 | 1.28e-03 | pass |
-| `Kimi-K2/kimi_k2_b1_kv32768/b1_q1k32768_h64_bf16` | 64* | 0.90 | 3.40e-03 | 3.80e-03 | 1.19e-03 | pass |
-| `Kimi-K2/kimi_k2_b4_kv2048/b4_q1k2048_h64_bf16` | 4* | 2.44 | 1.93e-02 | 7.91e-03 | 2.31e-03 | pass |
-| `Kimi-K2/kimi_k2_b8_kv2048/b8_q1k2048_h64_bf16` | 4* | 4.26 | 1.75e-02 | 4.12e-03 | 4.98e-03 | pass |
-| `Kimi-K2/kimi_k2_b4_kv8192/b4_q1k8192_h64_bf16` | 16* | 2.00 | 9.66e-03 | 4.82e-03 | 1.73e-03 | pass |
-| `Kimi-K2/kimi_k2_b8_kv8192/b8_q1k8192_h64_bf16` | 16* | 2.56 | 2.38e-02 | 9.27e-03 | 2.38e-03 | pass |
-| `Kimi-K2/kimi_k2_b32_kv2048/b32_q1k2048_h64_bf16` | 4* | 5.35 | 2.84e-02 | 5.31e-03 | 3.61e-03 | pass |
-| `Kimi-K2/kimi_k2_b32_kv8192/b32_q1k8192_h64_bf16` | 16* | 2.95 | 1.19e-02 | 4.04e-03 | 1.96e-03 | pass |
+| shape | `num_seg` run (* = dispatched) | peak \|ref\| | worst max_abs | worst max_abs / peak | worst per-sequence max_abs / peak | worst LSE max_abs | gate |
+|---|---|---|---|---|---|---|---|
+| `DeepSeek-V3-R1/ds_v3_b1_kv512/b1_q1k512_h128_bf16` | 1* | 3.37 | 2.08e-02 | 6.16e-03 | 6.16e-03 | 5.88e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b1_kv1024/b1_q1k1024_h128_bf16` | 2* | 4.93 | 1.03e-02 | 2.09e-03 | 2.09e-03 | 1.58e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b1_kv2048/b1_q1k2048_h128_bf16` | 4* | 1.99 | 1.13e-02 | 5.68e-03 | 5.68e-03 | 2.00e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b1_kv4096/b1_q1k4096_h128_bf16` | 8* | 1.82 | 1.27e-02 | 6.95e-03 | 6.95e-03 | 1.63e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b1_kv8192/b1_q1k8192_h128_bf16` | 16* | 3.81 | 1.27e-02 | 3.35e-03 | 3.35e-03 | 2.39e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b1_kv16384/b1_q1k16384_h128_bf16` | 32* | 0.90 | 4.37e-03 | 4.84e-03 | 4.84e-03 | 1.29e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b1_kv32768/b1_q1k32768_h128_bf16` | 64* | 0.90 | 3.71e-03 | 4.11e-03 | 4.11e-03 | 1.49e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b4_kv2048/b4_q1k2048_h128_bf16` | 4* | 2.71 | 1.88e-02 | 6.96e-03 | 6.96e-03 | 2.33e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b8_kv2048/b8_q1k2048_h128_bf16` | 4* | 4.18 | 1.75e-02 | 4.18e-03 | 6.18e-03 | 2.37e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b4_kv8192/b4_q1k8192_h128_bf16` | 16* | 2.76 | 8.81e-03 | 3.19e-03 | 5.81e-03 | 1.77e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b8_kv8192/b8_q1k8192_h128_bf16` | 16* | 2.86 | 1.83e-02 | 6.40e-03 | 6.40e-03 | 2.25e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b32_kv2048/b32_q1k2048_h128_bf16` | 4* | 4.32 | 1.83e-02 | 4.23e-03 | 7.58e-03 | 3.66e-03 | pass |
+| `DeepSeek-V3-R1/ds_v3_b32_kv8192/b32_q1k8192_h128_bf16` | 10* | 2.86 | 2.11e-02 | 7.40e-03 | 8.82e-03 | 2.42e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv512/b1_q1k512_h64_bf16` | 1* | 4.06 | 1.30e-02 | 3.21e-03 | 3.21e-03 | 2.58e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv1024/b1_q1k1024_h64_bf16` | 2* | 2.81 | 1.32e-02 | 4.70e-03 | 4.70e-03 | 1.95e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv2048/b1_q1k2048_h64_bf16` | 4* | 2.13 | 8.79e-03 | 4.12e-03 | 4.12e-03 | 1.36e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv4096/b1_q1k4096_h64_bf16` | 8* | 1.51 | 9.42e-03 | 6.25e-03 | 6.25e-03 | 1.48e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv8192/b1_q1k8192_h64_bf16` | 16* | 1.11 | 4.64e-03 | 4.17e-03 | 4.17e-03 | 1.24e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv16384/b1_q1k16384_h64_bf16` | 32* | 1.13 | 6.83e-03 | 6.05e-03 | 6.05e-03 | 1.28e-03 | pass |
+| `Kimi-K2/kimi_k2_b1_kv32768/b1_q1k32768_h64_bf16` | 64* | 0.90 | 3.40e-03 | 3.80e-03 | 3.80e-03 | 1.19e-03 | pass |
+| `Kimi-K2/kimi_k2_b4_kv2048/b4_q1k2048_h64_bf16` | 4* | 2.44 | 1.93e-02 | 7.91e-03 | 7.91e-03 | 2.31e-03 | pass |
+| `Kimi-K2/kimi_k2_b8_kv2048/b8_q1k2048_h64_bf16` | 4* | 4.26 | 1.75e-02 | 4.12e-03 | 6.60e-03 | 4.98e-03 | pass |
+| `Kimi-K2/kimi_k2_b4_kv8192/b4_q1k8192_h64_bf16` | 16* | 2.00 | 9.66e-03 | 4.82e-03 | 8.04e-03 | 1.73e-03 | pass |
+| `Kimi-K2/kimi_k2_b8_kv8192/b8_q1k8192_h64_bf16` | 16* | 2.56 | 2.38e-02 | 9.27e-03 | 9.27e-03 | 2.38e-03 | pass |
+| `Kimi-K2/kimi_k2_b32_kv2048/b32_q1k2048_h64_bf16` | 4* | 5.35 | 2.84e-02 | 5.31e-03 | 7.19e-03 | 3.61e-03 | pass |
+| `Kimi-K2/kimi_k2_b32_kv8192/b32_q1k8192_h64_bf16` | 16* | 2.95 | 1.19e-02 | 4.04e-03 | 6.04e-03 | 1.96e-03 | pass |
 
 
 **vs the prefill `absorbed_query` kernel on the same device buffers** (10/10 scenarios,
@@ -217,8 +258,16 @@ Compiled through comgr (llvm22) and read from the code object. Zero scratch, and
 
 ## Limits
 
-- bf16 only; `page_block_size == 16`; `d_rope = 64`, `r_kv = 512`; head counts
-  that are multiples of 64.
+- bf16 only; `page_block_size == 16`; `d_nope = 128`, `d_v = 128`,
+  `d_rope = 64`, `r_kv = 512`.
+- 64 or 128 heads. Larger multiples of 64 lower but have no GPU evidence yet,
+  so dispatch refuses them. Fewer than 64 heads -- a tensor-parallel rank, such
+  as 16 heads per device for DeepSeek-V3 at 8-way or 8 for Kimi-K2 -- needs a
+  smaller per-workgroup head group and is refused; the shape files keep two
+  16-head rows so `--mode resolve` shows the refusal.
+- Decode is `max_seqlen_q == 1` only. Multi-token decode steps (speculative or
+  multi-token prediction, `max_seqlen_q` 2–4) route to prefill, with prefill's
+  input contract.
 - `qa`, `out` and the split workspace use 32-bit element offsets: dispatch
   refuses batches that would overflow them (about 29K tokens at 128 heads) and
   caps the segment count to fit the workspace. The key cache is 64-bit
@@ -232,7 +281,10 @@ Compiled through comgr (llvm22) and read from the code object. Zero scratch, and
     the kernel takes the absorbed `qa`, and `W_UV` runs once, after the
     combine, outside it.
   - §8.1's reference `ref_mla_decode_absorb(c_q, …, W_abs, W_rope_proj, W_UV,
-    …)` is [`ref_mla_decode`](../../../builders/mla/ref_mla_decode.py), over
-    the projected query and the fused per-head `W_UK`.
-- LLVM 22 or later: llvm20 ignores the kernel's `agpr_alloc`, the kernel then
-  spills, and dispatch refuses it.
+    …)` exists in
+    [`ref_mla_decode`](../../../builders/mla/ref_mla_decode.py) under the same
+    name with different arguments: `ref_mla_decode_absorb(q_nope, q_rope, c_kv,
+    k_rope, w_uk, block_table, cu_seqlens_q, cu_seqlens_k, scale)`, over the
+    projected query and the fused per-head `W_UK`.
+- The llvm22 or llvm23 IR flavor: llvm20 ignores the kernel's `agpr_alloc`, the
+  kernel then spills, and dispatch refuses it.
