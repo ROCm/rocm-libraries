@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <complex>
 #include <initializer_list>
 #include <memory>
@@ -13,6 +14,7 @@
 #include <type_traits>
 #include <typeindex>
 #include <utility>
+#include <vector>
 
 TEST(Core, ScalarTypes) {
     using namespace roc::hostnumerics;
@@ -129,6 +131,39 @@ TEST(Core, ScalarTypes) {
 
 namespace {
 using namespace roc::hostnumerics;
+
+template <typename Tag, typename T>
+void sqrtElements(std::vector<T>& elements) {
+    // Only Float32 and Float64 store native floating-point values. Other
+    // floating-point formats need decoding before arithmetic.
+    if constexpr (std::is_floating_point_v<typename Tag::Storage> &&
+                  std::is_same_v<typename Tag::Storage, T>) {
+        for (auto& element : elements) element = std::sqrt(element);
+    } else {
+        throw std::runtime_error("Expected matching native floating-point elements.");
+    }
+}
+
+TEST(Core, ScalarDispatchSqrt) {
+    auto squareRoots = []<typename Tag>(auto& elements) { sqrtElements<Tag>(elements); };
+
+    std::vector<float> floats{0.0f, 0.25f, 4.0f, 9.0f};
+    visitScalarType(ScalarType::Float32, squareRoots, floats);
+    EXPECT_EQ(floats, (std::vector<float>{0.0f, 0.5f, 2.0f, 3.0f}));
+
+    std::vector<double> doubles{0.0, 0.25, 4.0, 9.0};
+    visitScalarType(ScalarType::Float64, squareRoots, doubles);
+    EXPECT_EQ(doubles, (std::vector<double>{0.0, 0.5, 2.0, 3.0}));
+
+    std::vector<int> integers{4, 9};
+    EXPECT_THROW(visitScalarType(ScalarType::Int32, squareRoots, integers), std::runtime_error);
+    EXPECT_EQ(integers, (std::vector<int>{4, 9}));
+    // Half-precision storage contains encoded bits, not native arithmetic values.
+    std::vector<uint16_t> halfBits{0x4400, 0x4880};
+    EXPECT_THROW(visitScalarType(ScalarType::Float16, squareRoots, halfBits), std::runtime_error);
+    EXPECT_EQ(halfBits, (std::vector<uint16_t>{0x4400, 0x4880}));
+    EXPECT_THROW(visitScalarType(ScalarType::Float64, squareRoots, floats), std::runtime_error);
+}
 
 TEST(Core, ScalarDispatchTags) {
     for (size_t i = 0; i < scalarTypeCount; ++i) {

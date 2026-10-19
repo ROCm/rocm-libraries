@@ -253,8 +253,9 @@ namespace detail {
 // The C++ type that holds one encoded value of Type. Signed integers, float,
 // double and complex values use their native type. Every other whole-byte
 // encoding, including bool, half, bfloat16 and the 8-bit floating-point and
-// scale formats, uses an unsigned integer of the same width. Sub-byte encodings
-// use void because one element cannot occupy a C++ object.
+// scale formats, uses an unsigned integer of the same width. If the storage
+// width is not divisible by 8 bits, ScalarTag::Storage is void: elements must
+// be accessed as packed bits rather than individual C++ objects.
 template <ScalarType Type>
 constexpr auto scalarStorageIdentity() {
     constexpr uint16_t bits = scalarTypeInfo(Type).storageBits;
@@ -288,7 +289,7 @@ constexpr auto scalarStorageIdentity() {
     }
 }
 
-// Compile-time description of one encoding, not a customization point.
+// Compile-time description of one encoding.
 // visitScalarType passes ScalarTag<type>; HostNumerics code that knows its
 // encoding at compile time names the same type, such as ScalarTag<ScalarType::UInt8>.
 template <ScalarType TypeValue>
@@ -300,30 +301,12 @@ struct ScalarTag {
 };
 }  // namespace detail
 
-// Calls visitor.template operator()<Tag>(args...) with the tag for a runtime
-// ScalarType. Tag::type is the encoding, Tag::storageBits its width in bits, and
-// Tag::Storage the C++ type holding its encoded bits (void for sub-byte encodings).
-// Encodings that share Storage, such as Float16 and BFloat16, have distinct tags.
-//
-// Tag cannot be deduced from the arguments, so the visitor names it explicitly,
-// as in a lambda written []<typename Tag>(). Every tag must produce the same
-// return type; an explicit return type on the visitor gives clearer errors.
-// The visitor and arguments keep their value categories, and reference and void
-// returns are preserved. ScalarType::Count and values outside the enum throw
-// std::runtime_error before the visitor is called.
-//
-// Dispatch once per operation and run the element loop inside the typed code:
-//
-//   visitScalarType(type, [&]<typename Tag>() {
-//       if constexpr (std::is_void_v<typename Tag::Storage>) {
-//           // Sub-byte encoding: read and write packed bits.
-//       } else {
-//           // Whole-byte encoding: access elements as typename Tag::Storage.
-//       }
-//   });
-//
-// To prepare an operation and run it later, return a pointer to a function
-// template specialized for the tag instead, such as `return &copyElements<Tag>;`.
+// Dispatches a type-templated operation on a runtime ScalarType by calling
+// visitor.template operator()<Tag>(args...). Tag supplies type, storageBits,
+// and Storage (void when the storage width is not divisible by 8 bits).
+// The visitor must accept every tag and return the same type for each.
+// Visitors, arguments, and return values preserve their value categories.
+// Invalid types throw std::runtime_error before invoking the visitor.
 template <typename Visitor, typename... Args>
 decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
     auto dispatch = [&]<ScalarType TypeValue>() -> decltype(auto) {
