@@ -86,7 +86,7 @@ namespace TensileLite::Client
             case DescriptorError::NullStorage:
                 return "Nonempty tensor storage is null.";
             case DescriptorError::ElementCountOverflow:
-                return "Tensor shape product of nonzero extents exceeds size_t.";
+                return "Tensor shape element count exceeds size_t.";
             case DescriptorError::PrimeStrideOverflow:
                 return "Prime-stride output selection overflow.";
             }

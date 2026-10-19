@@ -130,7 +130,7 @@ TEST(HostNumericsComparisonAdapter, PreservesTensileRawFp8SpecialValues)
 TEST(HostNumericsBridge, SamplingAndLayoutRejectUnrepresentableShapeAsAResult)
 {
     const size_t maximum = std::numeric_limits<size_t>::max();
-    for(const auto& sizes : {std::vector<size_t>{maximum, 2}, std::vector<size_t>{maximum, 2, 0}})
+    for(const auto& sizes : {std::vector<size_t>{maximum, 2}, std::vector<size_t>{2, maximum}})
     {
         const std::vector<size_t>           strides(sizes.size(), 0);
         const TensileLite::TensorDescriptor descriptor("oversized",
@@ -142,14 +142,37 @@ TEST(HostNumericsBridge, SamplingAndLayoutRejectUnrepresentableShapeAsAResult)
         const auto selection = TensileLite::Client::tryReferenceOutputSelection(descriptor, 1);
         ASSERT_FALSE(selection.has_value());
         EXPECT_NE(std::string(TensileLite::Client::hostnumerics::detail::message(selection.error()))
-                      .find("product of nonzero extents exceeds size_t"),
+                      .find("element count exceeds size_t"),
                   std::string::npos);
         const auto layout = TensileLite::Client::tryHostnumericsLayout(descriptor);
         ASSERT_FALSE(layout.has_value());
         EXPECT_NE(std::string(TensileLite::Client::hostnumerics::detail::message(layout.error()))
-                      .find("product of nonzero extents exceeds size_t"),
+                      .find("element count exceeds size_t"),
                   std::string::npos);
         EXPECT_THROW(TensileLite::Client::referenceOutputSelection(descriptor, 1),
                      std::runtime_error);
+    }
+}
+
+TEST(HostNumericsBridge, SamplingAndLayoutAcceptOversizedEmptyShapes)
+{
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    for(const auto& sizes : {std::vector<size_t>{maximum, 2, 0},
+                             std::vector<size_t>{0, maximum, 2},
+                             std::vector<size_t>{maximum, 0, 2}})
+    {
+        const std::vector<size_t>           strides(sizes.size(), 0);
+        const TensileLite::TensorDescriptor descriptor("empty",
+                                                       rocisa::DataType::Float,
+                                                       sizes.begin(),
+                                                       sizes.end(),
+                                                       strides.begin(),
+                                                       strides.end());
+        const auto selection = TensileLite::Client::tryReferenceOutputSelection(descriptor, 1);
+        ASSERT_TRUE(selection.has_value());
+        const auto layout = TensileLite::Client::tryHostnumericsLayout(descriptor);
+        ASSERT_TRUE(layout.has_value());
+        EXPECT_EQ(layout->shape().elementCount(), 0);
+        EXPECT_NO_THROW(TensileLite::Client::referenceOutputSelection(descriptor, 1));
     }
 }
