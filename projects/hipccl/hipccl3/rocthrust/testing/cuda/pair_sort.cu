@@ -16,8 +16,9 @@
  */
 
 #include <thrust/execution_policy.h>
-#include <thrust/pair.h>
 #include <thrust/sort.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include <unittest/unittest.h>
 
@@ -31,9 +32,9 @@ __global__ void stable_sort_kernel(ExecutionPolicy exec, Iterator first, Iterato
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  _CCCL_HOST_DEVICE cuda::std::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
-    return thrust::make_pair(x, y);
+    return cuda::std::make_pair(x, y);
   } // end operator()()
 }; // end make_pair_functor
 
@@ -41,7 +42,7 @@ template <typename ExecutionPolicy>
 void TestPairStableSortDevice(ExecutionPolicy exec)
 {
   size_t n = 10000;
-  using P  = thrust::pair<int, int>;
+  using P  = cuda::std::pair<int, int>;
 
   thrust::host_vector<int> h_p1 = unittest::random_integers<int>(n);
   thrust::host_vector<int> h_p2 = unittest::random_integers<int>(n);
