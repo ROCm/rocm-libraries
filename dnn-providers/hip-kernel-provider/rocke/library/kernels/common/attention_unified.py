@@ -3692,6 +3692,11 @@ def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> 
     ):
         if getattr(reduce, name) != getattr(segment, name):
             raise ValueError(f"strided reduce_spec.{name} disagrees with segment")
+    # Strided decode writes no LSE (the runner refuses problem.emit_lse first),
+    # and this branch returns before the paged LSE agreement check: a reduce
+    # built with lse_ptr would not match the LSE-off launch signature.
+    if getattr(reduce, "emit_lse", False):
+        raise ValueError("strided reduce_spec cannot emit LSE")
     _validate_strided_3d_lds(segment, reduce, arch=tuning_spec.arch)
 
 
@@ -4896,7 +4901,8 @@ def _get_3d_pipeline(
         hsaco=red_hsaco,
         kernel_name=red_kname,
         # problem.emit_lse matches the built reduce: an explicit tuning spec
-        # must agree with it (checked in run_unified_attention_torch).
+        # must agree with it (paged: run_unified_attention_torch; strided:
+        # _validate_strided_3d_spec refuses an LSE reduce).
         signature=_reduce_signature(problem.dtype, emit_lse=problem.emit_lse),
         cache_key=("3d_red",) + cache_key,
     )

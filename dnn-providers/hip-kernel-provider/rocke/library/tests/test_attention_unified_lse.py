@@ -311,3 +311,17 @@ def test_runner_rejects_a_tuning_spec_that_disagrees_on_lse(
             tuning_spec=_tuning_spec(reduce_emit_lse=spec_lse),
         )
     assert runner.red_vals is None
+
+
+def test_runner_rejects_a_strided_tuning_spec_whose_reduce_emits_lse(runner):
+    """The strided branch returns before the paged LSE agreement check: an
+    LSE-off strided launch with a reduce built to take lse_ptr must be refused,
+    not launched with an argument list one pointer short."""
+    problem = _problem()
+    segment, reduce = au._strided_3d_specs_from_problem(problem, arch="gfx942")
+    spec = _tuning_spec(reduce_emit_lse=False)
+    spec.kernel_spec = segment
+    spec.reduce_spec = replace(reduce, emit_lse=True)
+    with pytest.raises(ValueError, match="strided reduce_spec cannot emit LSE"):
+        _run(problem, kv_layout="strided", block_table=None, tuning_spec=spec)
+    assert runner.red_vals is None
