@@ -78,6 +78,8 @@ TIMING_HIERARCHY = {
             "python_wsol_dump": {},
         },
         "python_client_execution": {
+            "python_client_write_run_script": {},
+            "process_startup": {},
             "hip_initialization": {},
             "library_loading": {},
             "code_object_loading": {},
@@ -86,6 +88,11 @@ TIMING_HIERARCHY = {
             "solution_iterator_setup": {},
             "listener_setup": {},
             "reporter_setup": {},
+            "main_parse_args": {},
+            "main_timing_calibration": {},
+            "main_problem_factory": {
+                "factory_hip_get_device_properties": {},
+            },
             "pre_problem": {
                 "cpu_data_init": {},
                 "cpu_reference_gemm": {
@@ -99,12 +106,56 @@ TIMING_HIERARCHY = {
                 "validate_element_comparison": {},
                 "validate_mismatch_printing": {},
             },
-            "gpu_input_preparation": {},
-            "gpu_input_reset": {},
+            "gpu_input_preparation": {
+                "gpu_input_prep_fast_reset_output": {},
+                "gpu_input_prep_slow_path": {},
+                "gpu_input_prep_init_cpu_inputs": {},
+                "gpu_input_prep_copy_valid_to_gpu": {},
+                "gpu_input_prep_copy_swizzled": {},
+                "gpu_input_prep_copy_inputs_d2d": {},
+                "gpu_input_prep_rotating_init": {},
+                "gpu_input_prep_batched_inputs": {},
+                "gpu_input_prep_constant_inputs": {},
+                "gpu_input_prep_convert_to_inputs": {},
+            },
+            "gpu_input_reset": {
+                "gpu_input_reset_fast_reset_output": {},
+                "gpu_input_reset_slow_path": {},
+                "gpu_input_reset_init_cpu_inputs": {},
+                "gpu_input_reset_copy_valid_to_gpu": {},
+                "gpu_input_reset_copy_swizzled": {},
+                "gpu_input_reset_copy_inputs_d2d": {},
+                "gpu_input_reset_rotating_init": {},
+                "gpu_input_reset_batched_inputs": {},
+                "gpu_input_reset_constant_inputs": {},
+                "gpu_input_reset_convert_to_inputs": {},
+            },
             "rotating_buffer_preparation": {},
             "solution_selection": {},
-            "pre_solution": {},
+            "pre_solution": {
+                "pre_solution_listener.ReferenceValidator": {
+                    "cpu_reference_gemm_per_solution": {
+                        "solve_cpu_fast_per_solution": {},
+                        "solve_cpu_slow_per_solution": {},
+                    },
+                },
+                "pre_solution_listener.DataInitialization": {
+                    "pre_solution_mx_check": {},
+                    "pre_solution_mx_init_data": {},
+                    "pre_solution_mx_copy_valid_to_gpu": {},
+                    "pre_solution_mx_copy_inputs_d2d": {},
+                    "pre_solution_mx_cpu_sync": {},
+                },
+                "pre_solution_listener.BenchmarkTimer": {},
+                "pre_solution_listener.MetaResultReporter": {},
+                "pre_solution_listener.AllSolutionsIterator": {},
+                "pre_solution_listener.ProgressListener": {},
+                "pre_solution_listener.SynchronizerValidator": {},
+                "pre_solution_listener.HardwareMonitorListener": {},
+            },
+            "run_current_solution_check": {},
             "kernel_solving": {},
+            "warmup_events_setup": {},
             "warmup_runs": {},
             "benchmark_runs": {
                 "gpu_kernel_execution": {},
@@ -120,9 +171,15 @@ TIMING_HIERARCHY = {
                 "post_solution_sol_advance": {},
             },
             "post_problem": {},
+            "problem_report_index": {},
+            "problem_teardown": {},
+            "solution_teardown": {},
+            "run_iteration_teardown": {},
             "finalize_report": {},
             "timing_overhead": {},
             "flush_timing_buffer": {},
+            "main_teardown_locals": {},
+            "process_exit": {},
         },
     },
     "python_library_logic": {
@@ -137,7 +194,16 @@ TIMING_HIERARCHY = {
 # Under python_client_execution, children are grouped into these display
 # categories instead of being shown individually.
 CPP_PHASE_GROUPS = {
+    "Process Startup/Exit (outside client main())": [
+        "python_client_write_run_script",
+        "process_startup",
+        "main_teardown_locals",
+        "process_exit",
+    ],
     "C++ Client Setup": [
+        "main_parse_args",
+        "main_timing_calibration",
+        "main_problem_factory",
         "hip_initialization",
         "library_loading",
         "code_object_loading",
@@ -159,11 +225,17 @@ CPP_PHASE_GROUPS = {
     "Kernel Execution": [
         "solution_selection",
         "pre_solution",
+        "run_current_solution_check",
         "kernel_solving",
+        "warmup_events_setup",
         "warmup_runs",
         "benchmark_runs",
         "post_solution",
         "post_problem",
+        "problem_report_index",
+        "problem_teardown",
+        "solution_teardown",
+        "run_iteration_teardown",
         "finalize_report",
     ],
     "Timing Overhead": [
@@ -187,6 +259,20 @@ def _walk_hierarchy(d):
 
 ALL_KNOWN_CATEGORIES = set(_walk_hierarchy(TIMING_HIERARCHY))
 
+# Timers that wrap other timers (diagnostics added to localize untracked time).
+# python_client_subprocess = process_startup + main_total + flush + main_teardown_locals + process_exit
+# main_total              = parse_args + calibration + factory + setup + problem_total + finalize
+# problem_total           = problem children + solution_total
+# solution_total          = solution children + run_iteration_total
+OVERLAPPING_TOTALS_ORDER = [
+    "python_client_subprocess",
+    "main_total",
+    "problem_total",
+    "solution_total",
+    "run_iteration_total",
+]
+OVERLAPPING_TOTALS = set(OVERLAPPING_TOTALS_ORDER)
+
 # Named constants for commonly-referenced hierarchy points (used in tests)
 SOLUTION_GENERATION_PARENT = "python_solution_generation"
 BENCH_POSTPROCESS_PARENT = "python_kernel_bench_postprocess"
@@ -198,13 +284,51 @@ BENCH_POSTPROCESS_PHASES = list(
     ["python_kernel_bench_postprocess"].keys()
 )
 
-TABLE_WIDTH = 120
+# Minimum table width; print_summary widens TABLE_WIDTH when category labels need more room.
+TABLE_WIDTH_MIN = 120
+TABLE_WIDTH = TABLE_WIDTH_MIN
 BAR_CHART_WIDTH = 50
 
 
 def as_percentage(ms: float, total: float) -> float:
     """Return ms as a percentage of total, or 0 if total is non-positive."""
     return (ms / total * 100) if total > 0 else 0
+
+
+# Fixed numeric columns of the phase table (see print_summary).
+COL_CAT_MIN = 44
+COL_CNT = 8
+COL_TOT = 14
+COL_MEAN = 14
+COL_WALL = 11
+COL_PAR = 11
+
+
+def _label_len(depth: int, name: str) -> int:
+    """Width of a row label as rendered: 2 leading spaces + 2 per depth level + name."""
+    return 2 + 2 * depth + len(name)
+
+
+def _max_label_len(nodes: List['PhaseNode'], extra_names: List[str]) -> int:
+    """Longest row label over every tree row (plain and display-grouped) and extra_names."""
+    longest = max((_label_len(0, n) for n in extra_names), default=0)
+
+    def walk(node: 'PhaseNode', depth: int):
+        nonlocal longest
+        longest = max(longest, _label_len(depth, node.name))
+        for child in list(node.children) + list(_get_display_children(node)):
+            walk(child, depth + 1)
+
+    for node in nodes:
+        walk(node, 0)
+    return longest
+
+
+def _table_layout(nodes: List['PhaseNode'], extra_names: List[str]):
+    """Return (col_cat, table_width) wide enough that no category label runs into the numbers."""
+    col_cat = max(COL_CAT_MIN, _max_label_len(nodes, extra_names) + 1)
+    numeric = 1 + COL_CNT + 1 + COL_TOT + 1 + COL_MEAN + 1 + COL_WALL + 3 + COL_PAR
+    return col_cat, max(TABLE_WIDTH_MIN, col_cat + numeric)
 
 
 @dataclass
@@ -389,10 +513,16 @@ def analyze_timing_file(filepath: str) -> Tuple[Dict[str, List[float]], List[Pro
     timings = defaultdict(list)
     problem_timings = []
     current_problem = None
+    ts = {}  # wall-clock stamps (ns) of the current client invocation
 
     with open(filepath, 'r') as f:
         for line in f:
             line = line.strip()
+
+            stamp = parse_timestamp_line(line)
+            if stamp:
+                _handle_timestamp(stamp[0], stamp[1], ts, timings)
+                continue
 
             context = parse_context_line(line)
             if context:
@@ -419,6 +549,37 @@ def analyze_timing_file(filepath: str) -> Tuple[Dict[str, List[float]], List[Pro
     return timings, problem_timings
 
 
+def parse_timestamp_line(line: str) -> Optional[Tuple[str, int]]:
+    """Parse a TIMING_TS:<name>:<epoch_ns> line."""
+    sentinel = 'TIMING_TS:'
+    if not line.startswith(sentinel):
+        return None
+    parts = line.split(':', 2)
+    if len(parts) != 3:
+        return None
+    try:
+        return parts[1], int(parts[2])
+    except ValueError:
+        return None
+
+
+def _handle_timestamp(name: str, ns: int, ts: Dict[str, int], timings: Dict[str, List[float]]):
+    """Turn the per-invocation wall-clock stamps into process-level durations.
+
+    Sequence per client invocation:
+      py_popen_start -> main_start -> ... -> main_end -> main_locals_destroyed -> py_communicate_end
+    """
+    ts[name] = ns
+    ms = lambda a, b: (ts[b] - ts[a]) / 1e6
+    if name == 'main_start' and 'py_popen_start' in ts:
+        timings['process_startup'].append(ms('py_popen_start', 'main_start'))
+    elif name == 'main_locals_destroyed' and 'main_end' in ts:
+        timings['main_teardown_locals'].append(ms('main_end', 'main_locals_destroyed'))
+    elif name == 'py_communicate_end' and 'main_locals_destroyed' in ts:
+        timings['process_exit'].append(ms('main_locals_destroyed', 'py_communicate_end'))
+        ts.clear()
+
+
 # ---------------------------------------------------------------------------
 # Hierarchical visual bar chart
 # ---------------------------------------------------------------------------
@@ -431,7 +592,7 @@ def print_visual_breakdown(nodes: List[PhaseNode], wall_clock_ms: float):
     print("TIME BREAKDOWN (visual, % of wall clock)")
     print("-" * TABLE_WIDTH)
 
-    label_width = 42
+    label_width = max(42, _max_label_len(nodes, []) + 1)
 
     def bar_line(indent: int, name: str, ms: float):
         pct = ms / wall_clock_ms * 100
@@ -498,6 +659,13 @@ def print_hierarchy_validation(totals: Dict[str, float]):
 
 def print_summary(timings: Dict[str, List[float]], problem_timings: List[ProblemTiming]):
     """Print a summary of timing data."""
+    global TABLE_WIDTH
+    nodes = build_hierarchy(timings) if timings else []
+    extra = [c for c in timings
+             if c not in ALL_KNOWN_CATEGORIES] if timings else []
+    COL_CAT, TABLE_WIDTH = _table_layout(
+        nodes, extra + ["(untracked C++ overhead)", "Overlapping Totals"])
+
     print("=" * TABLE_WIDTH)
     print("TIMING ANALYSIS SUMMARY")
     print("=" * TABLE_WIDTH)
@@ -518,13 +686,6 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     wall_clock_s = wall_clock_ms / 1000.0
 
     # -- Hierarchical table --------------------------------------------------
-
-    COL_CAT = 44
-    COL_CNT = 8
-    COL_TOT = 14
-    COL_MEAN = 14
-    COL_WALL = 11
-    COL_PAR = 11
 
     def fmt_row(indent, name, count, total_ms, mean_ms, pct_parent, pct_wall):
         prefix = "  " * indent
@@ -582,8 +743,6 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         for i, child in enumerate(_get_display_children(node)):
             render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
-    nodes = build_hierarchy(timings)
-
     for top_idx, node in enumerate(nodes):
         if top_idx > 0:
             sep_top()
@@ -594,7 +753,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
             render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
     # Unknown categories
-    unknown_cats = set(timings.keys()) - ALL_KNOWN_CATEGORIES
+    unknown_cats = set(timings.keys()) - ALL_KNOWN_CATEGORIES - OVERLAPPING_TOTALS
     if unknown_cats:
         print()
         print("  Unknown Categories")
@@ -605,6 +764,19 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
             total_ms = sum(values)
             mean_ms = total_ms / count if count > 0 else 0
             fmt_row(0, cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms), None)
+
+    # Overlapping totals: wrap other timers, so they are not part of the tree (they would be
+    # double counted) but are useful to check that the tree accounts for all the time.
+    present_totals = [c for c in OVERLAPPING_TOTALS_ORDER if c in timings]
+    if present_totals:
+        print()
+        print("  Overlapping Totals (wrap other timers; not summed into the tree)")
+        print(f"  {'-' * (TABLE_WIDTH - 2)}")
+        for cat in present_totals:
+            values = timings[cat]
+            total_ms = sum(values)
+            fmt_row(0, cat, len(values), total_ms, total_ms / len(values),
+                    as_percentage(total_ms, wall_clock_ms), None)
 
     print()
     print("-" * TABLE_WIDTH)
