@@ -716,9 +716,8 @@ Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201
 and the gfx942 convolution bundle. Fetch all five DVC archives before configuring;
 missing published archives fail configuration.
 
-The generic gfx1201 replacement currently awaits DVC publication. Its updated
-pointer requires that upload before the fetch below or CI source preparation
-can succeed. From the rocm-libraries root:
+The generic gfx1201 replacement is published. A fresh anonymous download matches
+its committed DVC pointer and baseline lock. From the rocm-libraries root:
 
 ```bash
 dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles

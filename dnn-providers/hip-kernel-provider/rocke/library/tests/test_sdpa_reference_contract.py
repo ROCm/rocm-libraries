@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -79,22 +79,28 @@ def test_gfx950_cohort_preserves_existing_sdpa_parameterizations():
 
 
 @pytest.mark.parametrize("case", get_architecture("gfx950").CASES, ids=lambda c: c.id)
-def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case):
+@pytest.mark.parametrize("causal", [False, True], ids=["full", "causal"])
+def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
     import kernels
     from kernels.gfx950.attention_dense import attention_dense_signature
 
     target = get_architecture("gfx950")
     library_root = Path(kernels.__file__).resolve().parent.parent
+    # Exercise both mask branches without expanding the pinned GPU cohort.
+    case = replace(case, causal=causal)
     spec = target.prepare(case, str(library_root))
     assert spec.persistent is case.persistent
-    assert spec.wide_lds_dma is (case.persistent and case.head_dim == 128)
+    assert spec.wide_lds_dma is (
+        case.persistent and case.head_dim == 128 and case.causal
+    )
     assert spec.dtype == case.dtype
     assert spec.head_size == case.head_dim
     assert (spec.num_query_heads, spec.num_kv_heads) == (
         case.query_heads,
         case.kv_heads,
     )
-    assert spec.causal and not spec.use_sinks and not spec.sliding_window
+    assert spec.causal is case.causal
+    assert not spec.use_sinks and not spec.sliding_window
     assert spec.runtime_shape is (not case.persistent)
     # Replay supplies shape scalars only for the runtime-shape members of this cohort.
     signature = attention_dense_signature(spec)

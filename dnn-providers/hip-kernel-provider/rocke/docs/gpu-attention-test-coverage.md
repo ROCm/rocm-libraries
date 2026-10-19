@@ -83,7 +83,8 @@ The 54 host tests similarly validate the harness, not 54 GPU shapes.
 Seven configurations now have a separate gfx950 reference bundle: FP16 and BF16
 D128 Hq16/Hkv4 with default and persistent grids; FP16 D64 Hq16/Hkv16 default;
 FP16 D128 Hq16/Hkv16 persistent; and BF16 D64 Hq16/Hkv4 persistent. All use
-B1/Sq512/Sk512 and causal masking. Persistent D128 selects wide DMA.
+B1/Sq512/Sk512 and causal masking. The adapter selects wide DMA for persistent,
+causal D128 cases.
 See the [SDPA guide](sdpa-test-reference.md#gfx950-base-dense-cohort) for exact
 candidates, qualification evidence, and publication status.
 
@@ -101,8 +102,8 @@ Hq4/Hkv4 or Hq4/Hkv1 × full/causal, with B2/Sq64/Sk64 and a nonpersistent
 `(4,4,2)` grid. All eight comparisons and three failure controls passed in source
 and installed Torch-free runs on each target, with no selected GPU skips.
 These use the standalone WMMA builders, not automatic unified attention dispatch.
-The gfx1201 replacement compiles for `gfx12-generic`; its DVC publication remains
-pending. The gfx1200 adapter uses the same compile target but has no qualified
+The gfx1201 replacement compiles for `gfx12-generic` and is published in DVC.
+The gfx1200 adapter uses the same compile target but has no qualified
 archive or installed pinned suite yet. On gfx1200, a gfx120X family job skips
 the gfx1201 pinned suite with code 77. That skip does not count as gfx1200
 numerical coverage; see [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).

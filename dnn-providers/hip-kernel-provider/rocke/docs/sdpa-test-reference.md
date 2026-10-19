@@ -59,7 +59,8 @@ Sq=Sk=512, Hq=16, with the default softmax scale:
 | BF16 | 64 | 4 | Persistent / `gfx950_dense_persist` |
 
 The adapter uses named production tuning candidates, matching the original
-numeric tests. Grid kernels take runtime shape scalars; persistent kernels bake
+numeric tests. It selects wide DMA only for persistent, causal D128 cases.
+Grid kernels take runtime shape scalars; persistent kernels bake
 the shape. The existing replay worker supports both ABIs for this cohort.
 The input recipe, independent oracle, absolute tolerances, and margins below
 apply to both architectures. Error bounds and output identities are qualified
@@ -138,7 +139,7 @@ for qualification and publication.
 |---|---|---|
 | gfx1151 | gfx1151 | Existing eight-case archive published and enrolled |
 | gfx1200 | gfx12-generic | Adapter and host tests ready; GPU qualification, archive, and installation enrollment pending |
-| gfx1201 | gfx12-generic | Replacement eight-case archive qualified locally; DVC publication pending |
+| gfx1201 | gfx12-generic | Replacement eight-case archive qualified, published, and enrolled |
 
 The gfx1201 replacement uses committed baseline
 `32bcaf47b7482ef815ce997808979e50cfa36323`, which contains generic WMMA support.
@@ -157,10 +158,10 @@ Installation used the lightweight Python CMake harness described in the testing
 guide. This qualification does not establish execution on gfx1200, automatic
 unified attention dispatch, or native provider execution.
 
-The local replacement archive has MD5 `8635f6cf21e20ef3bba89054f54ce952`
-and size 2,596,336 bytes. Upload the archive before running CI with its updated
-DVC pointer; committing the pointer and lock does not upload the payload.
-A fresh-cache anonymous download check is required before merging. The previous
+The published replacement archive has MD5 `8635f6cf21e20ef3bba89054f54ce952`
+and size 2,596,336 bytes. A fresh anonymous download matched the committed DVC
+pointer and authenticated against the baseline lock, including all payload
+digests and the eight-case cohort. The previous
 gfx1201 archive (`0373b7f4cea9cdfc0e718440d9e6226c`) contains processor-specific
 binaries and cannot satisfy the generic compiler-target contract.
 
