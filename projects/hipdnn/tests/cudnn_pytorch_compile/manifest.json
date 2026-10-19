@@ -1,0 +1,140 @@
+{
+  "scan_dirs": [
+    "aten/src/ATen/native/cudnn",
+    "aten/src/ATen/native/quantized/cudnn"
+  ],
+  "entries": [
+    {
+      "id": "conv_v8",
+      "source": "aten/src/ATen/native/cudnn/Conv_v8.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/Conv_v8.cpp",
+      "tier": "COMPILE",
+      "canary": "at::native::run_single_conv"
+    },
+    {
+      "id": "q_conv",
+      "source": "aten/src/ATen/native/quantized/cudnn/Conv.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/Conv.cpp",
+      "tier": "COMPILE",
+      "canary": "::getConvDescriptor"
+    },
+    {
+      "id": "q_linear",
+      "source": "aten/src/ATen/native/quantized/cudnn/Linear.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/Linear.cpp",
+      "tier": "COMPILE",
+      "canary": "::setLinearParams"
+    },
+    {
+      "id": "q_binaryops",
+      "source": "aten/src/ATen/native/quantized/cudnn/BinaryOps.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/BinaryOps.cpp",
+      "tier": "COMPILE",
+      "canary": "at::native::setAddParams"
+    },
+    {
+      "id": "q_conv_prepack",
+      "source": "aten/src/ATen/native/quantized/cudnn/ConvPrepack.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/ConvPrepack.cpp",
+      "tier": "COMPILE",
+      "canary": "PackedConvWeightCudnn<2>::prepack"
+    },
+    {
+      "id": "q_linear_prepack",
+      "source": "aten/src/ATen/native/quantized/cudnn/LinearPrepack.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/LinearPrepack.cpp",
+      "tier": "COMPILE",
+      "canary": "PackedLinearWeightCudnn::prepack"
+    },
+    {
+      "id": "q_conv_unpack",
+      "source": "aten/src/ATen/native/quantized/cudnn/ConvUnpackImpl.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/ConvUnpackImpl.cpp",
+      "tier": "COMPILE",
+      "canary": "PackedConvWeightCudnn<2>::unpack"
+    },
+    {
+      "id": "q_linear_unpack",
+      "source": "aten/src/ATen/native/quantized/cudnn/LinearUnpackImpl.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/LinearUnpackImpl.cpp",
+      "tier": "COMPILE",
+      "canary": "PackedLinearWeightCudnn::unpack"
+    },
+    {
+      "id": "mha",
+      "source": "aten/src/ATen/native/cudnn/MHA.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/MHA.cpp",
+      "tier": "COMPILE_ASIS",
+      "requires_sdpa": true
+    },
+    {
+      "id": "hipdnn_handle",
+      "source": "aten/src/ATen/hipdnn/Handle.cpp",
+      "compiled": "aten/src/ATen/hipdnn/Handle.cpp",
+      "tier": "COMPILE_ASIS"
+    },
+    {
+      "id": "conv_v7",
+      "source": "aten/src/ATen/native/cudnn/Conv_v7.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/Conv_v7.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 C API, not part of the shim"
+    },
+    {
+      "id": "batchnorm",
+      "source": "aten/src/ATen/native/cudnn/BatchNorm.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/BatchNorm.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 C API, not part of the shim"
+    },
+    {
+      "id": "rnn",
+      "source": "aten/src/ATen/native/cudnn/RNN.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/RNN.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 C API, not part of the shim"
+    },
+    {
+      "id": "lossctc",
+      "source": "aten/src/ATen/native/cudnn/LossCTC.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/LossCTC.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 C API, not part of the shim"
+    },
+    {
+      "id": "gridsampler",
+      "source": "aten/src/ATen/native/cudnn/GridSampler.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/GridSampler.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 C API, not part of the shim"
+    },
+    {
+      "id": "affinegrid",
+      "source": "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/AffineGridGenerator.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 C API, not part of the shim"
+    },
+    {
+      "id": "convshared",
+      "source": "aten/src/ATen/native/cudnn/ConvShared.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/ConvShared.cpp",
+      "tier": "EXCLUDED",
+      "reason": "no cudnn_frontend use (op wrappers)"
+    },
+    {
+      "id": "convplaceholders",
+      "source": "aten/src/ATen/native/cudnn/ConvPlaceholders.cpp",
+      "compiled": "aten/src/ATen/native/cudnn/hip/ConvPlaceholders.cpp",
+      "tier": "EXCLUDED",
+      "reason": "no cudnn_frontend use (!AT_CUDNN_ENABLED() stubs)"
+    },
+    {
+      "id": "q_pooling",
+      "source": "aten/src/ATen/native/quantized/cudnn/Pooling.cpp",
+      "compiled": "aten/src/ATen/native/quantized/cudnn/hip/Pooling.cpp",
+      "tier": "EXCLUDED",
+      "reason": "legacy v7 pooling API"
+    }
+  ]
+}
