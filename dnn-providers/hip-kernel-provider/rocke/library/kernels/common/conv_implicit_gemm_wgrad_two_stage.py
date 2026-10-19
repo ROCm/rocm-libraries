@@ -236,6 +236,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
             # group count is the real CTA multiplier. Equal at gm == 1.
             groups=spec.grid_groups,
             block_size=spec.block_size,
+            dtype_d=spec.data.dtype_d,
         ).split_k
         spec = dc_replace(spec, split_k=resolved)
 

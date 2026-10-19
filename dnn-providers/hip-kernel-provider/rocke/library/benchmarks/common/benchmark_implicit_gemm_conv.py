@@ -2040,15 +2040,24 @@ def _build_wgrad_one(args_tuple):
         from rocke.helpers.split_k import select_split_k_wgrad
 
         resolved_split_k = select_split_k_wgrad(
+            # Same extents dispatch and the builder size the degree from (Z and
+            # Do included), so a 3-D sweep measures the degree that ships.
             wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
+            wg_N=(problem.Z if problem.is_3d else 1)
+            * problem.Y
+            * problem.X
+            * problem.cpg,
+            wg_K=problem.N
+            * (problem.Do if problem.is_3d else 1)
+            * problem.Ho
+            * problem.Wo,
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
             groups=problem.groups,
             block_size=warp_m * warp_n * target.wave_size,
+            dtype_d=dtype,
         ).split_k
     else:
         # split_k=1 (no split) or > 1 (split-K, degree chosen at launch).
@@ -2175,15 +2184,24 @@ def _build_wgrad_two_stage_one(args_tuple):
         from rocke.helpers.split_k import select_split_k_wgrad
 
         resolved_split_k = select_split_k_wgrad(
+            # Same extents dispatch and the builder size the degree from (Z and
+            # Do included), so a 3-D sweep measures the degree that ships.
             wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
+            wg_N=(problem.Z if problem.is_3d else 1)
+            * problem.Y
+            * problem.X
+            * problem.cpg,
+            wg_K=problem.N
+            * (problem.Do if problem.is_3d else 1)
+            * problem.Ho
+            * problem.Wo,
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
             groups=problem.groups,
             block_size=warp_m * warp_n * target.wave_size,
+            dtype_d=dtype,
         ).split_k
     else:
         resolved_split_k = split_k
@@ -4696,7 +4714,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # (the degree is a kernarg), so --split-k decides whether it
                 # is timed at one degree or at each degree it can use.
                 if direction == "wgrad" and ident.split_k > 1:
-                    degrees = _runtime_split_ks(problem, ident, args.split_k)
+                    degrees = _runtime_split_ks(
+                        problem, ident, args.split_k, dtype_d=case_dtype
+                    )
                     if not degrees:
                         print(
                             f"  [skip] {ident.label()}: "
@@ -5262,7 +5282,9 @@ def _split_k_degrees(
     )
 
 
-def _runtime_split_ks(problem, ident, requested: int = 0) -> tuple:
+def _runtime_split_ks(
+    problem, ident, requested: int = 0, dtype_d: "str | None" = None
+) -> tuple:
     """Degrees to launch a cached split-K wgrad binary at.
 
     ``requested`` is ``--split-k``, with the same meaning it has on the JIT
@@ -5304,6 +5326,7 @@ def _runtime_split_ks(problem, ident, requested: int = 0) -> tuple:
             arch=ident.arch,
             groups=problem.groups,
             block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+            dtype_d=dtype_d,
         ).split_k
         # Same clamp the JIT path applies after resolving: groups * degree has
         # to fit gridDim.z.

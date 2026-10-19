@@ -157,6 +157,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     _GROUP_MERGE_DEGREES,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
     wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
+    wgrad_two_stage_available as _wgrad_two_stage_available,
 )
 from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
@@ -261,6 +262,11 @@ _GFX1250_WARP_M = 2
 _GFX1250_WARP_N = 2
 _GFX1250_WARP_TILE_MN = 16
 _GFX1250_WARP_TILE_K = 32
+# gfx1250 wgrad tile. Wider than the forward tile: split-K supplies the CTA
+# count, so the tile is sized for per-CTA efficiency, and a 32x32 tile leaves
+# each split K-slice dominated by load overhead.
+_GFX1250_WGRAD_TILE_MN = 64
+_GFX1250_WGRAD_TILE_K = 64
 
 _PIPELINE = "mem"
 
@@ -349,6 +355,11 @@ class ConvGroupedRequest(OperatorRequest):
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _ceil_to(value: int, multiple: int) -> int:
+    """``value`` rounded up to a multiple of ``multiple``."""
+    return -(-value // multiple) * multiple
 
 
 def _problem(req: ConvGroupedRequest) -> ConvProblem:
@@ -469,8 +480,9 @@ def _wgrad_grouped_overrides(req: ConvGroupedRequest) -> Tuple[str, int]:
     ``k_out += group*kpg`` into the dW store, and when split_k>1 the group rides
     block_id_z alongside the K-slice (z = groups*split_k).  So grouped uses the
     same vec-derived epilogue and auto split-K formula (split_k=-1) as ungrouped.
-    (WMMA grouped is handled by its own candidate, which forces
-    default@split_k=1 -- WMMA has neither a cshuffle nor a split-K path.)
+    (WMMA is handled by its own candidate, which forces the 'default'
+    epilogue -- WMMA has no cshuffle -- and splits through the WMMA packed
+    atomic.)
     """
     return _epilogue_for(req), -1
 
@@ -688,11 +700,12 @@ def _resolve_wgrad_split_k(
     """Resolve wgrad split_k and two-stage eligibility; returns
     ``(split_k, two_stage, requested_split_k)``.
 
-    Honors a concrete split-K fixed by the candidate (WMMA forces 1 -- it has
-    no split-K path); otherwise auto-resolves via the CK formula on the
-    per-group GEMM dims (== full dims when groups==1). Grouped rides the group
-    on block_id_z alongside the K-slice (z = groups*split_k), so grouped
-    split-K is valid on MFMA.
+    Honors a concrete split-K fixed by the candidate; otherwise auto-resolves
+    via the CK formula on the per-group GEMM dims (== full dims when
+    groups==1). Grouped rides the group on block_id_z alongside the K-slice
+    (z = groups*split_k), so grouped split-K is valid on MFMA and WMMA alike.
+    On a target with no two-stage path (WMMA), a problem that would need it
+    keeps the reduction whole (split_k=1) instead.
 
     The result is then held under the scratch cap: when it bites, split_k
     falls back to 1 (a plain store, no scratch needed). Shared by
@@ -743,6 +756,7 @@ def _resolve_wgrad_split_k(
             arch=spec.arch,
             groups=grid_groups,
             block_size=_block(spec)[0],
+            dtype_d=spec.dtype.lower(),
         ).split_k
     # The helper already keeps groups*split_k inside the z limit on the auto
     # path; this clamp still has to run for an explicitly requested split_k.
@@ -773,6 +787,12 @@ def _resolve_wgrad_split_k(
     # means. ``test_merged_split_k_never_takes_the_packed_atomic`` asserts the
     # subsumption explicitly, so it reports when it lifts.
     two_stage = ((not _atomic_ok) or gm > 1) and split_k > 1
+    # No two-stage path on this target (WMMA): a problem the packed atomic
+    # cannot represent keeps the reduction whole rather than handing the
+    # builder a two-stage spec it rejects.
+    if two_stage and not _wgrad_two_stage_available(spec.arch):
+        two_stage = False
+        split_k = 1
     # The scratch carries no split_k factor, but it does carry the replica
     # factor -- R copies of dW per group. Use the same R this module hands the
     # spec in to_wgrad_spec, or the cap bounds an allocation nobody makes.
@@ -1728,26 +1748,68 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
 
 
 def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
-    """Backward-weight conv for gfx1250: 32x32x32, 2x2, 16x16x32 WMMA (wave32).
+    """Backward-weight conv for gfx1250: 2x2 warps, 16x16x32 WMMA (wave32).
 
     gfx1250's only fp16/bf16 atom is 16x16x32 (there is no 16x16x16). WMMA wgrad
-    requires split_k=1 and the direct-store ('default') epilogue, so both are
-    forced here regardless of the request. Grouped convolution is supported and
-    runs grid-per-group (the kernel is validated dual-engine by
+    has only the direct-store ('default') epilogue, so it is forced here.
+
+    Split-K (``_splits``): a problem the packed atomic can represent follows the
+    gfx950 candidate -- the degree is auto-resolved (split_k=-1) by
+    _resolve_wgrad_split_k and accumulated with the WMMA packed atomic. A problem
+    it cannot represent keeps split_k=1, since WMMA has no two-stage epilogue.
+    Grouped convolution runs grid-per-group, with the group riding block_id_z
+    alongside the K-slice (validated dual-engine by
     test_gfx1250_grouped_wgrad_dual_engine). Group merging (``group_merge > 1``)
-    is MFMA-only and additionally needs split_k > 1 on the two-stage path, so it
-    is unreachable here on both counts: is_valid_wgrad_spec rejects it for
-    wave32 and for the split_k=1 this candidate forces.
+    is MFMA-only, so is_valid_wgrad_spec rejects it for wave32.
     """
     name = "implicit_gemm_conv_wgrad_gfx1250"
     spec_id = "igemm_conv_wgrad_gfx1250_32x32"
     algorithm = "implicit_gemm_wgrad_gfx1250"
 
+    def _splits(req: ConvGroupedRequest) -> bool:
+        atomic_ok, _ = _wgrad_atomic_epilogue_available(
+            _problem(req), req.dtype.lower(), None
+        )
+        return atomic_ok
+
+    def _wide_tile(p: ConvProblem) -> Tuple[int, int, int]:
+        # The M extent is the output-channel count. When a half-height tile
+        # covers it with fewer padded rows, take it: padded rows are MMA work
+        # that is thrown away, and split-K restores the CTA count.
+        half = _GFX1250_WGRAD_TILE_MN // 2
+        tm = _GFX1250_WGRAD_TILE_MN
+        if _ceil_to(p.K, half) < _ceil_to(p.K, tm):
+            tm = half
+        return tm, _GFX1250_WGRAD_TILE_MN, _GFX1250_WGRAD_TILE_K
+
     def _tile(req: ConvGroupedRequest):
+        # The wide tile pays off only when split-K supplies the CTAs; unsplit, it
+        # would only shrink the grid, so a problem whose degree resolves to 1
+        # keeps the forward tile. Grouped problems keep it too: their per-group
+        # GEMM is small, and the group axis already multiplies the grid.
+        p = _problem(req)
+        tm = tn = _GFX1250_TILE_M
+        tk = _GFX1250_TILE_K
+        if _splits(req) and p.groups == 1:
+            from rocke.helpers.split_k import select_split_k_wgrad
+
+            wtm, wtn, wtk = _wide_tile(p)
+            degree = select_split_k_wgrad(
+                wg_M=p.K,
+                wg_N=(p.Z if p.is_3d else 1) * p.Y * p.X * p.C,
+                wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
+                tile_m=wtm,
+                tile_n=wtn,
+                tile_k=wtk,
+                arch=req.arch,
+                dtype_d=req.dtype.lower(),
+            ).split_k
+            if degree > 1:
+                tm, tn, tk = wtm, wtn, wtk
         return (
-            _GFX1250_TILE_M,
-            _GFX1250_TILE_N,
-            _GFX1250_TILE_K,
+            tm,
+            tn,
+            tk,
             _GFX1250_WARP_M,
             _GFX1250_WARP_N,
             _GFX1250_WARP_TILE_MN,
@@ -1771,7 +1833,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             wave_size=32,
             pipeline=_PIPELINE,
             epilogue="default",
-            split_k=1,
+            split_k=-1 if _splits(req) else 1,
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
         )
 
@@ -1811,7 +1873,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             epilogue="default",
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=1,
+            split_k=-1 if _splits(req) else 1,
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             name=name,
         )

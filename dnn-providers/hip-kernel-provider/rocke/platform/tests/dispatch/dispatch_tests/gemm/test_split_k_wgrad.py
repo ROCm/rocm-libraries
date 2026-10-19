@@ -202,5 +202,99 @@ class TestGroupedPath(unittest.TestCase):
         self.assertIn("multiple of 1", d.reason)
 
 
+class TestGfx1250Policy(unittest.TestCase):
+    """gfx1250's wgrad degree: CTA fill, slice depth and a per-dtype cap."""
+
+    @staticmethod
+    def _pick(wg_M, wg_N, wg_K, tile=64, groups=1, dtype_d="bf16"):
+        return select_split_k_wgrad(
+            wg_M=wg_M,
+            wg_N=wg_N,
+            wg_K=wg_K,
+            tile_m=tile,
+            tile_n=tile,
+            tile_k=tile,
+            arch="gfx1250",
+            groups=groups,
+            dtype_d=dtype_d,
+        )
+
+    def test_fill_term_binds(self):
+        # base grid 2 x 18 = 36 tiles; a 2048-CTA target gives 56, under every
+        # other bound when the dtype cap is the fp32 one (128).
+        d = self._pick(128, 9 * 128, 42 * 120 * 160, dtype_d="fp32")
+        self.assertEqual(d.base_grid, 36)
+        self.assertEqual(d.split_k, 56)
+
+    def test_slice_depth_term_binds(self):
+        # 50400-deep reduction: slices may not go below 2048 elements -> 24.
+        d = self._pick(128, 9 * 128, 42 * 30 * 40, dtype_d="fp32")
+        self.assertEqual(d.split_k, 24)
+
+    def test_dtype_caps(self):
+        # A 4-tile grid on a long reduction asks for far more than any cap:
+        # bf16 takes the general cap, as the CK formula does on gfx950, and
+        # fp16 its own lower one.
+        args = (24, 9 * 24, 42 * 240 * 320)
+        self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 128)
+        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 8)
+        self.assertEqual(self._pick(*args, dtype_d="fp32").split_k, 128)
+
+    def test_fill_boundary(self):
+        # 2048 // 127 = 2048 // 128 = 16; one tile more drops the fill to 15.
+        for tiles, expected in ((127, 16), (128, 16), (129, 15)):
+            d = self._pick(64, 64 * tiles, 1 << 24, dtype_d="bf16")
+            self.assertEqual((d.base_grid, d.split_k), (tiles, expected))
+
+    def test_tiny_reduction_does_not_split(self):
+        self.assertEqual(self._pick(128, 9 * 128, 1024).split_k, 1)
+
+    def test_grouped_fill_target(self):
+        # 4096-CTA grouped target over 2 tiles x 32 groups = 64 CTAs -> 64,
+        # then the fp32 cap does not bind.
+        d = self._pick(4, 36, 128 * 56 * 56, tile=32, groups=32, dtype_d="fp32")
+        self.assertEqual((d.base_grid, d.split_k), (2, 64))
+
+    def test_grouped_slice_floor_is_not_rounded_up(self):
+        # 6272-deep reduction over an odd 9-tile grid: the slice term gives 3,
+        # and nothing after it may lift the degree past that (no XCD snap).
+        d = self._pick(32, 288, 8 * 28 * 28, tile=32, groups=2)
+        self.assertEqual((d.base_grid, d.split_k), (9, 3))
+        d = self._pick(1, 9, 196, tile=32, groups=256)
+        self.assertEqual(d.split_k, 1)
+
+    def test_no_dtype_keeps_the_ck_formula(self):
+        # dgrad calls without a dW dtype; gfx1250 then answers like any arch
+        # without a policy: floor(2 * 256 / 36) on the default CU count.
+        d = select_split_k_wgrad(
+            wg_M=128,
+            wg_N=9 * 128,
+            wg_K=42 * 120 * 160,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            arch="gfx1250",
+        )
+        self.assertEqual(d.split_k, 14)
+        self.assertIn("CK formula", d.reason)
+
+    def test_other_arches_ignore_dtype(self):
+        # The policy is gfx1250-only: gfx950 gives the same degree with or
+        # without a dtype.
+        kw = dict(
+            wg_M=128,
+            wg_N=9 * 128,
+            wg_K=42 * 120 * 160,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            arch="gfx950",
+        )
+        self.assertEqual(
+            select_split_k_wgrad(**kw).split_k,
+            select_split_k_wgrad(**kw, dtype_d="bf16").split_k,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

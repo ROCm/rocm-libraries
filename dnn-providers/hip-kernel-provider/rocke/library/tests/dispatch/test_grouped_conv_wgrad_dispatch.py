@@ -83,6 +83,7 @@ def _expected_grid(req, spec):
             arch=spec.arch,
             groups=p.groups // gm,
             block_size=_block(spec)[0],
+            dtype_d=spec.dtype.lower(),
         ).split_k
     return (gx, gy, (p.groups // gm) * split_k)
 
@@ -113,13 +114,25 @@ class TestGroupedWgradDispatch(unittest.TestCase):
             self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
 
     def test_gfx1250_grouped_admitted_wmma(self):
-        # gfx1250 (wave32 WMMA 16x16x32): grouped grid-per-group, split_k forced
-        # to 1 (WMMA has no split_k), direct-store epilogue.
+        # gfx1250 (wave32 WMMA 16x16x32): grouped grid-per-group with the
+        # direct-store epilogue (WMMA has no cshuffle). The degree is
+        # auto-resolved and the group rides block_id_z alongside the K-slice;
+        # grouped shapes keep the narrow per-group tile.
         r = dispatch_conv_grouped(_wgrad("gfx1250", G=4))
         self.assertEqual(r.spec.direction, "wgrad")
         self.assertEqual(r.spec.epilogue, "default")
-        self.assertEqual(r.spec.split_k, 1, "WMMA wgrad must use split_k=1")
-        self.assertEqual(r.grid[2], 4, "z must be one index per group")
+        self.assertEqual(r.spec.split_k, -1, "grouped gfx1250 wgrad auto-resolves")
+        self.assertEqual((r.spec.tile_m, r.spec.tile_n), (32, 32))
+        self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+        # A 392-deep reduction is below one 2048-element slice: one slice per
+        # group, so z is the group count.
+        self.assertEqual(r.grid[2], 4)
+        # A long one splits every group: the 32768-deep reduction allows 16
+        # slices of 2048, under the 4096-CTA fill, and z carries groups * degree.
+        r = dispatch_conv_grouped(
+            _wgrad("gfx1250", G=4, N=32, Hi=32, Wi=32, dtype="bf16")
+        )
+        self.assertEqual(r.grid[2], 4 * 16)
         self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
 
     def test_ungrouped_grid_unchanged(self):
@@ -182,11 +195,59 @@ class TestTwoStageSelection(unittest.TestCase):
             ws.two_stage, "an even wg_N should reach split-K via packed atomics"
         )
 
-    def test_split_k_1_needs_no_two_stage(self):
-        r = dispatch_conv_grouped(_wgrad("gfx1250"))
+    def test_gfx1250_even_wg_N_takes_the_packed_atomic(self):
+        # A long reduction (K_wg = N*Ho*Wo) over a small dW: the auto degree
+        # splits it, and an even wg_N keeps it on the WMMA packed atomic.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        r = dispatch_conv_grouped(
+            _wgrad("gfx1250", N=42, Hi=120, Wi=160, C=128, K=128, dtype="bf16")
+        )
         ws = r.spec.to_wgrad_spec(_problem(r.request))
-        self.assertEqual(ws.split_k, 1, "gfx1250 always uses split_k=1")
-        self.assertFalse(ws.two_stage, "split_k=1 needs no two_stage")
+        # min(2048 / 36 tiles, 806400 / 2048, cap 128) = 56.
+        self.assertEqual(ws.split_k, 56)
+        self.assertFalse(ws.two_stage, "even wg_N uses the packed atomic")
+        self.assertEqual((ws.tile_m, ws.tile_n, ws.tile_k), (64, 64, 64))
+        ok, why = is_valid_wgrad_spec(ws, "gfx1250")
+        self.assertTrue(ok, why)
+        self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+    def test_gfx1250_tile_height_follows_output_channels(self):
+        # K=96 pads to 128 rows in a 64-high tile but fits 32-high tiles
+        # exactly; K=128 is exact either way and keeps the taller tile.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for k_out, tile_m in ((24, 32), (96, 32), (128, 64), (192, 64)):
+            r = dispatch_conv_grouped(
+                _wgrad("gfx1250", N=8, Hi=56, Wi=56, C=64, K=k_out, dtype="bf16")
+            )
+            ws = r.spec.to_wgrad_spec(_problem(r.request))
+            self.assertEqual(ws.tile_m, tile_m, f"K={k_out}")
+            self.assertEqual(ws.tile_n, 64, f"K={k_out}")
+            ok, why = is_valid_wgrad_spec(ws, "gfx1250")
+            self.assertTrue(ok, f"K={k_out}: {why}")
+            self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+    def test_gfx1250_odd_wg_N_keeps_the_reduction_whole(self):
+        # Odd wg_N needs the two-stage scratch path, which WMMA does not have:
+        # the resolver keeps split_k=1 instead of handing the builder a
+        # two-stage spec it rejects.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        r = dispatch_conv_grouped(
+            _wgrad("gfx1250", N=42, Hi=240, Wi=320, C=3, K=24, dtype="bf16")
+        )
+        ws = r.spec.to_wgrad_spec(_problem(r.request))
+        self.assertEqual(ws.split_k, 1)
+        self.assertFalse(ws.two_stage)
+        # Unsplit, a wider tile would only shrink the grid: keep the narrow one.
+        self.assertEqual((ws.tile_m, ws.tile_n, ws.tile_k), (32, 32, 32))
+        ok, why = is_valid_wgrad_spec(ws, "gfx1250")
+        self.assertTrue(ok, why)
+        # _expected_grid models only the degree formula, which asks for a
+        # split here; the launch must carry the unsplit z extent instead.
+        expected = _expected_grid(r.request, r.spec)
+        self.assertEqual(r.grid, (expected[0], expected[1], 1))
 
     def test_merged_split_k_never_takes_the_packed_atomic(self):
         # Merging makes two_stage a *correctness* requirement rather than a
