@@ -97,6 +97,8 @@ EXPECTED_FEATURES = {
         "fp8",
         "sinks",
         "sliding_window",
+        # Split-KV only: the 2D path writes no LSE (see attention_unified_2d).
+        "lse",
     },
 }
 
@@ -381,11 +383,12 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
+            # Only split-KV (u3d) geometries write the optional LSE output.
+            expected = set(ATTENTION_FEATURES) | (
+                {"lse"} if "_u3d_" in candidate.name else set()
+            )
             with self.subTest(candidate=candidate.name):
-                self.assertEqual(
-                    set(candidate.capability.supports_features),
-                    set(ATTENTION_FEATURES),
-                )
+                self.assertEqual(set(candidate.capability.supports_features), expected)
 
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the

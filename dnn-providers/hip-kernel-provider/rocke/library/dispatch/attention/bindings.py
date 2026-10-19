@@ -83,6 +83,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         problem.fp8_fnuz
     ):
         raise ValueError("request FP8 encoding disagrees with attention problem")
+    if bool(request.emit_lse) != problem.emit_lse:
+        raise ValueError(
+            f"request.emit_lse={bool(request.emit_lse)} disagrees with "
+            f"problem.emit_lse={problem.emit_lse}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -401,6 +406,7 @@ def bind_tuning_attention_torch(
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,
+            lse=_kw.get("lse", tensors.get("lse")),
         )
 
     return TorchBinding(
