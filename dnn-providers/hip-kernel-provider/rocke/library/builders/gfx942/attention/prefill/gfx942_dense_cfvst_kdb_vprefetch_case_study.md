@@ -4,15 +4,12 @@ Measured scope: the opt-in `use_cfvst=True`, `lds_num_buffers=2` configuration o
 gfx942 dense prefill attention kernel, bf16, D128, causal, on gfx942 with 304 CUs.
 Baseline: the `baseline` arm of the ablation harness, compiled in the same process from
 the benchmarked source commit (see
-[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Not yet
-recorded: the baseline arm's full spec (in particular `persistent` and `exp2_fast`, and
-whether it was hand-built or resolved through dispatch) and the tolerance of the
-pre-timing correctness check against the chunked FP32 reference. Result: 10.1-16.3% lower
+[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Result: 10.74–15.58% lower
 latency at the 12 measured configurations listed under Results.
 
 ## Introduction
 
-This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels. At the 12 measured configurations it lowers latency by 10.1-16.3%. Lever sweep does not bridge the gap.
+This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels. At the 12 measured configurations it lowers latency by 10.1-16.3%. 
 
 ## Problem
 
@@ -21,51 +18,111 @@ Benchmarking, profiling and tracing highlighted bottlenecks in:
 2. Awkward allocation of LDS per WG (33KB). Max limit per CU is 64KB. This limits WG occupancy in CU to 1 while leaving 31KB of LDS unused.
 3. Stalls at sync point for loading K and V tiles before MFMA.
 
-The concerned optimization points were V LDS layout, register usage, LDS usage, software pipelining. We first tried to solve the issues by lever sweep. We selected levers relevant to the optimization points.
+The concerned optimization points were V LDS layout, register usage, LDS usage, software pipelining. 
 
 ## Step-0 Lever Sweep
 
 Lever sweep was performed to check whether performance could be improved by tuning levers to affect optimization points: **LDS usage/layout, software pipelining/scheduling, and register pressure**. Available levers are listed below along with reasons for selection decision and values swept.
 
-| Field            | Swept | Relation to LDS / software pipelining / register usage                                                                                                                         | Values swept                               |
-|------------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|
-| `block_m`        | Yes   | Changes workgroup/tile size and therefore affects LDS footprint, per-wave live state, register pressure, and scheduling granularity.                                           | `32, 64, 128, 256, 512`                    |
-| `block_n`        | Yes   | Changes the K/V tile width, affecting LDS usage, loop trip count, load/compute cadence, and live register state.                                                               | `32, 64, 128`                              |
-| `waves_per_eu`   | Yes   | Controls occupancy/scheduling pressure and helps test whether register pressure or insufficient latency hiding is limiting performance.                                        | `1, 2, 3, 4, 5, 6, 7, 8`                   |
-| `lds_row_pad`    | Yes   | Directly changes the LDS layout/padding and can affect LDS bank behavior and address layout.                                                                                   | `0, 4, 8, 12, 16, 20, 24, 28, 32`          |
-| `use_cfvst`      | Yes   | Changes the V-store/LDS path and therefore directly affects LDS traffic/layout; it can also change register lifetimes.                                                         | `False, True`                              |
-| `use_v_swizzle`  | Yes   | Changes the V LDS layout/access pattern on the CFVST path and is directly relevant to LDS access behavior.                                                                     | `False`; `True` only when CFVST is enabled |
-| `use_exp2_fast`  | Yes   | Primarily changes softmax computation, but can indirectly affect instruction count and temporary register usage.                                                               | `False, True`                              |
-| `iglp`           | Yes   | Affects instruction scheduling inside the kernel by attempting to interleave MFMA and LDS operations. Relevant when CFVST introduces in-loop LDS traffic.                      | `False`; `True` only when CFVST is enabled |
-| `persistent`     | No    | Controls whether the persistent grid is used. Affects grid-level scheduling/utilization, not the per-workgroup K/V LDS layout, register buffering, or software pipeline.      | —                                          |
-| `num_persistent` | No    | Controls the number of persistent workgroups. Can affect device-level utilization and work distribution, but does not modify the inner K/V LDS/register software pipeline.    | —                                          |
-| `persist_decode` | No    | Controls how persistent work items map to query blocks, heads, and batches. It affects grid-level work distribution rather than the inner LDS/register pipeline.              | —                                          |
-| `interleave`     | No    | Controls boustrophedon query-block ordering for persistent causal workloads. It changes CTA work distribution, not instruction interleaving inside the K/V software pipeline. | —                                          |
+#### Configuration
 
-The sweep therefore varied the following eight axes:
+| Parameter | Value |
+|---|---|
+| GPU | AMD MI300X (`gfx942`, 304 CUs) |
+| Repository / branch | [ROCm/rocm-libraries](https://github.com/ROCm/rocm-libraries), `develop` |
+| Source commit | [`c8980b69a3b8c41f3be97495e7ef886cff07c892`](https://github.com/ROCm/rocm-libraries/commit/c8980b69a3b8c41f3be97495e7ef886cff07c892) |
+| Data type | **BF16** |
+| Head dimension (`D`) | **128** |
+| Sequence length (`Sq = Skv = S`) | **1024, 2048, 4096, 8192, 16384** |
+| Batch size (`B`) | **1, 16** |
+| Query heads (`Hq`) | **32** |
+| KV heads (`Hkv`) | **8, 16** |
+| Attention | Dense, causal prefill |
 
-`block_m × block_n × waves_per_eu × lds_row_pad × use_cfvst × use_v_swizzle × use_exp2_fast × iglp`
+Twelve `(B, S, Hkv)` workloads were swept independently. The completed sweep report records this source commit with LLVM flavor `llvm23`.
 
-The default domains were defined directly in the sweep harness, with applicability pruning for `use_v_swizzle` and `iglp` when CFVST was disabled.
+#### Lever inventory and exclusions
 
-`persistent`, `num_persistent`, `persist_decode`, and `interleave` were retained from the production-resolved configuration and recorded in the output for reproducibility, but were not varied by the Step-0 Cartesian search. These fields primarily control persistent-grid execution and work distribution rather than the inner LDS/register software pipeline targeted by this investigation.
+| Lever | Swept? | Group | Reason if excluded |
+|---|---|---|---|
+| `use_cfvst` | No | — | Not supported when enabled for BF16 D128 at this commit; keep the non-CFVST baseline. |
+| `lds_row_pad` | **Yes** | A | — |
+| `lds_k_group_pad` | No | — | Only changes the D64 K-LDS row-group layout; D128 uses `lds_row_pad`. |
+| `persistent` | No | — | Selects persistent vs nonpersistent grid scheduling, not the inner K/V LDS/register pipeline; preserve production dispatch. |
+| `block_m` | **Yes** | A | — |
+| `block_n` | **Yes** | A | — |
+| `num_persistent` | No | — | Changes persistent workgroup count and device-level utilization, not the inner software pipeline; preserve production dispatch. |
+| `persist_decode` | No | — | Changes grid-level mapping of work to query blocks/heads/batches; preserve production dispatch. |
+| `interleave` | No | — | Changes query-block work ordering across CTAs, not instruction interleaving within the K/V pipeline; preserve production dispatch. |
+| `use_v_swizzle` | No | — | Only affects the CFVST transposed-V LDS path, which is disabled for BF16 D128. |
+| `v_row_pad` | No | — | Only affects the CFVST transposed-V LDS layout; has no effective tuning impact on the selected baseline path. |
+| `use_exp2_fast` | **Yes** | C | — |
+| `iglp` | **Yes** | B | — |
+| `iglp_mode` | **Yes** | B | — |
+| `pv_sched_fence_mask` | **Yes** | B | — |
+| `pv_priority` | **Yes** | B | — |
+| `pv_loop_order` | **Yes** | A, B | — |
+| `o_store_width` | **Yes** | D | — |
+| `causal_diag_split` | **Yes** | A, C | — |
+| `waves_per_eu` | **Yes** | A, B, C | — |
+| `lds_num_buffers` | No | — | Only `1` is implemented/valid for the kernel at this revision; no useful sweep axis. |
+| `lazy_rescale` | No | — | Inactive in the gfx942 kernel body; only changes the kernel-name token. |
+| `emit_lse` | No | — | Requests an additional LSE output, rather than tuning the same output contract. |
 
-#### Shapes Swept
-The Step-0 lever sweep was run over the following BF16 D128 causal attention shapes:
+**Count:**: **12 swept**. The grid knobs were **not forced off**; each workload retained its dispatch-resolved settings. CFVST, K LDS double buffering, and V register prefetch were not enabled in the baseline sweep.
 
-| B  | S     | Hq | Hkv | D   |
-|----|-------|----|-----|-----|
-| 1  | 4096  | 32 | 8   | 128 |
-| 1  | 4096  | 32 | 16  | 128 |
-| 1  | 8192  | 32 | 8   | 128 |
-| 1  | 8192  | 32 | 16  | 128 |
-| 1  | 16384 | 32 | 8   | 128 |
-| 16 | 4096  | 32 | 8   | 128 |
-| 16 | 4096  | 32 | 16  | 128 |
-| 16 | 8192  | 32 | 8   | 128 |
+#### Grouping the 12 swept knobs
 
-#### Results
-None of the configurations improved the performance satisfactorily.
+| Group | Purpose | Knobs |
+|---|---|---|
+| **A — Geometry / LDS** | Tile size, LDS layout, occupancy-related interactions | `block_m`, `block_n`, `lds_row_pad`, `waves_per_eu`, `pv_loop_order`, `causal_diag_split` |
+| **B — Instruction scheduling** | IGLP, barriers, PV ordering and priority | `iglp`, `iglp_mode`, `pv_sched_fence_mask`, `pv_priority`, `pv_loop_order`, `waves_per_eu` |
+| **C — Softmax / causal computation** | Exponential policy, diagonal handling and wave interactions | `use_exp2_fast`, `causal_diag_split`, `waves_per_eu` |
+| **D — Output stores** | Store vector width | `o_store_width` |
+
+There are **12 unique knobs**, not 16: `waves_per_eu`, `pv_loop_order`, and `causal_diag_split` appear in multiple groups so their interactions can be revisited.
+
+#### Staged sweep methodology
+
+The sweep followed **A1 → A2 → C → B1 → B2 → D → R1 → R2**, independently for each workload.
+
+| Stage | Procedure |
+|---|---|
+| **A1 — Geometry screening** | Sweep `block_m={64,128,256}`, `block_n={32,64}`, `lds_row_pad={0,4,8,16}`, `waves_per_eu={1,2,4}` (72 combinations before legality/deduplication). Shortlist promising complete configurations. |
+| **A2 — Geometry interactions** | On A1 finalists, retune `waves_per_eu={1,2,3,4}`, `pv_loop_order={d_major,k_major}`, `causal_diag_split={False,True}`. |
+| **C — Computation** | On A2 finalists, tune `use_exp2_fast={Auto,False,True}`, `causal_diag_split`, and `waves_per_eu`. |
+| **B1 — Scheduling** | On C finalists, test legal `iglp`/`iglp_mode`/`pv_sched_fence_mask` combinations together with `pv_loop_order` and `pv_priority={0,1,2,3}`. IGLP and explicit scheduling fences are mutually exclusive. |
+| **B2 — Scheduling interactions** | On B1 finalists, retune `waves_per_eu` and `pv_loop_order`. |
+| **D — Output** | On B2 finalists, test `o_store_width={1,2,4}`. |
+| **R1, R2 — Cross-group refinement** | Two bounded rounds of single-knob neighborhood changes around the strongest **full configurations**, allowing adjustments to earlier group choices. |
+
+At every stage, the sweep rejects unsupported/duplicate effective specs, numerically checks legal candidates against FP32 causal SDPA (`atol=rtol=1e-2`), screens GPU latency, then remeasures promising candidates against the production baseline. **Several top full configurations** are carried forward, rather than choosing one winner per independent knob. This is a **bounded staged search**, not an exhaustive Cartesian-product sweep.
+
+#### Baseline vs winning kernels
+
+These are the best **final A/B-tested** configurations, compared with each workload's production-dispatch baseline. Each finalist passed a BF16-output-versus-FP32 causal SDPA numerical check (`atol=rtol=1e-2`) before timing. The timing statistic is the median of five alternating paired baseline/candidate rounds, with 50 timed launches per round.
+
+
+| B | S | Hkv | Speedup | Latency reduction | Paired min–max | Baseline kernel | Winning kernel |
+|---:|---:|---:|---:|---:|---|---|---|
+| 1 | 1024 | 8 | **1.66346×** | **39.88%** | 1.64369–1.66779× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `rocke_attention_dense_d128_bn32_bf16_bm128_causal_lazyrs_gfx942_wpe4_krowpad4_e2f1_dsplit` |
+| 1 | 1024 | 16 | **1.65172×** | **39.46%** | 1.63562–1.65811× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `rocke_attention_dense_d128_bn32_bf16_bm128_causal_lazyrs_gfx942_wpe4_krowpad4_e2f1_dsplit` |
+| 1 | 2048 | 8 | **1.20801×** | **17.22%** | 1.20781–1.21174× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `rocke_attention_dense_d128_bn32_bf16_bm128_causal_lazyrs_gfx942_wpe4_krowpad4_e2f1_pvkmaj_dsplit` |
+| 1 | 2048 | 16 | **1.20041×** | **16.70%** | 1.19735–1.20419× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `rocke_attention_dense_d128_bn32_bf16_bm128_causal_lazyrs_gfx942_wpe4_krowpad4_e2f1_pvkmaj_dsplit` |
+| 1 | 4096 | 8 | **1.14929×** | **12.99%** | 1.13996–1.15458× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe3_krowpad4_iglp1_iglpm1_pvkmaj_prio1_dsplit` |
+| 1 | 4096 | 16 | **1.14466×** | **12.64%** | 1.14171–1.14902× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2_krowpad4_iglp1_iglpm1_pvkmaj_prio2_dsplit` |
+| 1 | 8192 | 8 | **1.14749×** | **12.85%** | 1.14341–1.15020× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2_krowpad4_iglp1_iglpm1_pvkmaj_prio2_dsplit` |
+| 1 | 8192 | 16 | **1.14439×** | **12.62%** | 1.14271–1.14813× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe3_krowpad4_iglp1_iglpm1_pvkmaj_prio3_dsplit` |
+| 1 | 16384 | 8 | **1.13920×** | **12.22%** | 1.13823–1.14506× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2_krowpad4_iglp1_iglpm1_pvkmaj_prio1_dsplit` |
+| 16 | 4096 | 8 | **1.09626×** | **8.78%** | 1.09536–1.09692× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe1_krowpad4_iglp1_iglpm1_pvkmaj_prio3_dsplit` |
+| 16 | 4096 | 16 | **1.11022×** | **9.93%** | 1.10837–1.11122× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe1_krowpad4_iglp1_iglpm1_pvkmaj_prio2_dsplit` |
+| 16 | 8192 | 8 | **1.10214×** | **9.27%** | 1.09696–1.10866× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe3_krowpad4_iglp1_iglpm1_pvkmaj_prio1_dsplit` |
+
+The lever sweep did improve performance by around 40% for S=1024 and 17% for S=2048. For B=1 S=4096+ its around 12%. While batch=16 around 9%. The common optimizations are lds_row_pad=4 which directly targets bank conflicts (1st bottleneck) during K LDS loads. For the 2nd bottleneck, conceptualy, the optimizations used dont directly target the bottleneck but do provide gains.
+
+We explore whether introducing optimizations:
+1. That directly targets the 3rd bottleneck would give greater performance gains. (such as K Double Buffering + V Register Prefetching)
+2. That targets bank conflicts in V LDS loads (CFVST) (in contrast to K LDS loads) could also improve performance.
 
 ## Optimization 1: Enable CFVST
 
@@ -96,7 +153,7 @@ persistent grid they run once per work item (16 at `llvm20`, 7 at `llvm23`). The
 
 ## Optimization 2 and 3: K LDS Double Buffering + V register pre-fetching
 
-Analysis of stalls using threadtrace found a large number of waiting at sync points. One such point was waiting for K and V tiles to be loaded before MFMA. This wait restricted MFMA and memory loading parallelism. The hypothesis was that K LDS Double Buffering + V register pre-fetching would introduce parallelism and latency hiding. Both optimizations had to be implemented together because K and V load happens in parallel to each other. Optimizing 1 would leave other the bottleneck. The optimization improved performance substantially hence it was adopted.
+Analysis of stalls using threadtrace found a large number of waiting at sync points. One such point was waiting for K and V tiles to be loaded before MFMA. This wait restricted MFMA and memory loading parallelism. The hypothesis was that K LDS Double Buffering + V register pre-fetching would introduce parallelism and latency hiding. Optimizing 1 would leave other the bottleneck. The optimization improved performance substantially hence it was adopted.
 
 #### Results
 
@@ -120,7 +177,7 @@ Analysis of stalls using threadtrace found a large number of waiting at sync poi
 ** Not a numerical error. A repeated 1st measurement anomaly. 
 
 #### Ablation studies of optimizations
-We performed ablation study to isolate the optimizations and understand its individual contributions. Results of 1st shape is provided.
+We performed ablation study to isolate the optimizations and understand its individual contributions.
 
 | dtype | B | S | Hq | Hkv | D | CFVST vs base |  CFVST +KDB vs CFVST | CFVST +VPF vs CFVST | CFSVT +KDB +VPF vs CFVST | CFSVT +KDB +VPF vs base |
 |------:|---:|------:|---:|----:|----:|----------------:|----------------:|----------------:|----------------:|----------------:|
@@ -210,7 +267,6 @@ For each of the 12 BF16 D128 causal attention shapes:
 
 26. Report the main full-vs-baseline latency reduction using the ratio of the two median latencies, rather than the median of round-level reductions.
 27. Use the five configurations and pairwise comparisons to quantify the contributions of CFVST, K LDS double buffering (KDB), V register prefetching (VPF), and their combined effect.```
-To obtain results on 8 shapes, we run the ablation on 8 shapes and pick necessary fields.
 
 #### Benchmark Environment and Provenance
 
