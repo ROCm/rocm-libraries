@@ -27,9 +27,9 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
-**FP64 coverage update.** The f64 entries in §1, §2.5, §4B, and §4C reflect the
-IR type, arithmetic, memory, elementwise/reduce2d, and gfx942 MFMA atom support
-added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
+**FP64 coverage update.** The f64 entries in §1, §2.5, §4B, §4C, and §5 reflect the
+IR type, arithmetic, memory, elementwise/reduce2d, gfx942 MFMA atom, and gfx942
+universal GEMM support added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
 
 ---
 
@@ -385,7 +385,8 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, elementwise/reduce2d, and the gfx942 MFMA atoms.** The IR type,
+- **`f64` — IR, memory, elementwise/reduce2d, the gfx942 MFMA atoms, and gfx942
+  universal GEMM.** The IR type,
   `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
   `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
   memory up to 2-element vectors, and HIP lowering are present. Elementwise
@@ -399,8 +400,9 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
   conversions or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  gfx942 declares `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; no GEMM
-  family selects them yet, and gfx90a/gfx950 declare no f64 atom (§4C.6).
+  gfx942 declares `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; universal
+  GEMM and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
+  accumulation (§5), and gfx90a/gfx950 declare no f64 atom (§4C.6).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -625,7 +627,7 @@ scheduled to gain.
 
 | Family | Supported | Not supported |
 |---|---|---|
-| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum) | **fp8/bf8** — `NotImplementedError` at `:659` for any dtype that is not `F16`/`BF16` |
+| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum); fp64 on gfx942 when the spec's dtype is `fp64` (A/B/C homogeneous, fp64 accum; 16x16x4 warp tile; mem, compv3 and compv4 pipelines) | **fp8/bf8** — rejected (only f16, bf16 and fp64 are accepted); **fp64** with split-K or fused epilogues, or on other targets |
 | MFMA GEMM (`mfma_gemm.py`) | f16, bf16 (`_SUPPORTED_DTYPES`, `:178`) | **fp8/bf8** — rejected at `:192-195`; `:62-65` records the missing lane-decode and byte-wise A/B loads, but that docstring is itself stale (it still calls `f16` "the only shipped option" after bf16 landed) |
 | Integer WMMA GEMM ([wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py)) | Signed int8 A/B packed four values per i32 → i32 accumulation/output; gfx1151 and gfx11-generic (`iu8` WMMA atom) | Raw byte-pointer inputs; targets without this atom; requires complete 16×16 tiles and K a multiple of 16 |
 | Integer WMMA GEMM with dequantization ([wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py)) | Same packed int8 input and i32 accumulation, runtime per-tensor scales → f16 output | Same target and packing constraints; no arbitrary output dtype selector |

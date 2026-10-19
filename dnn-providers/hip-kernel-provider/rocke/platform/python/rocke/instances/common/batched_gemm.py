@@ -54,7 +54,7 @@ universal-GEMM body it calls into is not):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Tuple
 
 from ...core.ir import KernelDef
@@ -92,7 +92,10 @@ class BatchedGemmSpec(WarpTileBlockSizeMixin):
         self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        return mono_data_spec(self.dtype)
+        data = mono_data_spec(self.dtype)
+        if data.dtype_a == "fp64":
+            return replace(data, dtype_acc="fp64")
+        return data
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
@@ -230,7 +233,7 @@ def build_persistent_batched_gemm(
 def batched_gemm_signature(spec: BatchedGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
-    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16", "fp64") else "f16"
     sig = (
         SignatureBuilder()
         .ptr("A", ptr_dt)
