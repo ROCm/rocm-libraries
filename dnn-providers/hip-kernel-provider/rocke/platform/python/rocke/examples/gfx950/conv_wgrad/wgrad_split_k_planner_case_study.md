@@ -30,6 +30,7 @@ on the same binaries.
 - [Finding 3: a per-CTA cost decides deep splits of wide grids](#finding-3-a-per-cta-cost-decides-deep-splits-of-wide-grids)
 - [Finding 4: the reduction must be chosen, not assumed](#finding-4-the-reduction-must-be-chosen-not-assumed)
 - [Finding 5: a wave bound is as good as exact occupancy](#finding-5-a-wave-bound-is-as-good-as-exact-occupancy)
+- [Finding 6: degrees off the power-of-two ladder](#finding-6-degrees-off-the-power-of-two-ladder)
 - [The model](#the-model)
 - [Rejected levers](#rejected-levers)
 - [Correctness gate](#correctness-gate)
@@ -120,6 +121,46 @@ the regret with each binary's exact occupancy. The bound needs no compiled
 binary, so dispatch, the builders and the benchmark resolve one deterministic
 answer.
 
+## Finding 6: degrees off the power-of-two ladder
+
+The degree is a kernarg, so nothing ties it to powers of two. The planner also
+scores the divisors and multiples of the CU count, the smallest degree for each
+K-iteration count per CTA (any larger degree with the same count only adds
+CTAs) and the degrees that end a dispatch round. On 25 shapes (dense, grouped
+and depthwise, bf16 and fp16), each competitive split-K binary was timed at
+those degrees and the ladder around its pick, verified at every degree:
+
+- The best measured degree beats the best power of two by 3.7% (geomean) and
+  up to 24% per binary: there is something to gain.
+- **Grouped launches must keep the group stride XCD-aligned.** With
+  `z = group * split_k + slice` and workgroups dealt to the 8 XCDs by flat id,
+  `tiles_per_group * split_k` off a multiple of 8 scatters the groups' shared
+  NHWC lines over every die's L2: misaligned degrees ran 1.04-1.8x slower on
+  grouped shapes and showed no effect on dense ones. Every power of two >= 8 is
+  aligned, which is why the ladder never hit it. On a grouped launch the planner
+  offers only aligned degrees off the ladder and keeps the ladder itself whole
+  -- a small misaligned degree (2, 4) can still beat the nearest aligned one
+  (the CK formula's grouped snap encodes the same rule).
+- **Off the ladder the model resolves round filling more finely than its
+  occupancy bound supports** (a 2.3% predicted gain for degree 3 over 2 on a
+  wide dense grid measured 4% slower). A degree off the ladder is therefore
+  chosen only when it beats the best ladder degree by `ladder_margin` (5%,
+  from the fit tool's `margin` subcommand on the sweep above).
+
+Against the previous planner (powers of two only), on 30 held-out shapes that
+played no part in choosing the rules or the margin, each competitive binary
+timed at both planners' degrees in one run:
+
+| | previous planner | wider pool |
+|---|---|---|
+| shapes, best binary (geomean) | 1.000 | 0.989 (1.1% faster) |
+| shapes more than 1% faster | -- | 6 of 30 (up to 19%) |
+| shapes more than 1% slower | -- | 1 of 30 (5.2%, fp16 stride 2) |
+| worst single binary | -- | 1.07x slower |
+
+The gain is modest and concentrated in a few shapes; most shapes keep the
+degree they had.
+
 ## The model
 
 Costs are in units of `L`, the load latency of one K iteration, so every fitted
@@ -148,8 +189,15 @@ per arch; arches without a fitted model keep the CK formula.
 ## Rejected levers
 
 - **Exact occupancy from the binary's register count:** no better than the wave
-  bound (Finding 5), and it needs the binary, which dispatch does not have when
-  it chooses.
+  bound on the power-of-two ladder (Finding 5), and it needs the binary, which
+  dispatch does not have when it chooses. Retried with the wider pool, where
+  the cliffs it places matter more (dispatch compiling the binary first, the
+  constants refitted with it): held-out degree regret improved (geomean 1.036
+  to 1.028), but on the 30 held-out shapes it bought about 1% more than the
+  wave bound while 4 of 30 shapes instead of 1 got more than 1% slower and
+  single binaries up to 1.34-1.48x slower. One more round is not a whole extra
+  K loop for every kernel, so exact round boundaries make the model confidently
+  wrong. Not shipped.
 - **Per-address atomic contention term** (slices of one tile serialising on the
   same addresses): no held-out gain.
 - **Bandwidth that degrades with the number of concurrent K streams:** a small
@@ -207,8 +255,11 @@ slowest at 0.79x).
 - 13 dispatch shapes are slower than before, mostly by a few percent; on the
   ones inspected the optimum is a sharp point the smooth model misses (flat
   DRAM traffic across degrees on the profiled one).
-- The fit covers 16-bit operands on gfx950 only; fp32 reuses the constants, and
-  gfx942 and other arches keep the CK formula until fitted.
+- The fit covers 16-bit operands on gfx950 only; fp32 reuses the constants.
+  gfx942 carries the gfx950 constants by public hardware ratios (MFMA rate per
+  CU, L2 per XCD, HBM bandwidth, clock) and is not validated on gfx942; other
+  arches keep the CK formula.
+- The ladder margin was measured on a 25-shape subset, not the full corpus.
 - Run-to-run noise of the end-to-end measurement: median 0.4%, 90th percentile
   1.9% between two full passes.
 
@@ -226,7 +277,14 @@ python -m benchmarks.common.split_k_cost_fit fit --logs sweep_logs --arch gfx950
 ```
 
 `fit` prints the held-out comparison against the CK formula and the fitted
-`SplitKCostModel(...)` literal for `_COST_MODELS`.
+`SplitKCostModel(...)` literal for `_COST_MODELS`. For the ladder margin, sweep
+a shape subset off the ladder too and score it:
+
+```bash
+python -m benchmarks.common.split_k_cost_fit sweep --shapes subset.txt \
+    --cache kernel_cache --out offladder_logs --degrees 2-160,192,256,384,512,768,1024
+python -m benchmarks.common.split_k_cost_fit margin --logs offladder_logs
+```
 
 ## Keep / revert / defer decisions
 
@@ -235,6 +293,6 @@ python -m benchmarks.common.split_k_cost_fit fit --logs sweep_logs --arch gfx950
   for dispatch, builders and benchmark, the 16-bit atomic cap, the benchmark
   timing the resolver's degree and both reductions.
 - **Keep, unchanged:** the CK formula on arches without a fitted model.
-- **Defer:** fitting gfx942; a dgrad sweep before dgrad dispatch uses the
+- **Defer:** fitting gfx942 on gfx942 measurements (its constants are derived); a dgrad sweep before dgrad dispatch uses the
   planner (it keeps its pinned degree until then); modelling the sharp optima behind the remaining
   regressions; stream-K as a third reduction choice.

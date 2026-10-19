@@ -32,7 +32,10 @@ from dispatch.grouped_convolution import (
     conv_grouped_candidates,
     dispatch_conv_grouped,
 )
-from kernels.common.conv_implicit_gemm_wgrad import wgrad_atomic_epilogue_available
+from kernels.common.conv_implicit_gemm_wgrad import (
+    build_implicit_gemm_conv_wgrad,
+    wgrad_atomic_epilogue_available,
+)
 from kernels.common.conv_split_k import ENV_CONV_SPLIT_K, resolve_conv_split_k
 
 
@@ -775,6 +778,17 @@ class TestCompileIdentity(unittest.TestCase):
     def test_the_degree_alone_does_not_change_the_key(self):
         # The degree is the ks/ks_count kernarg: one binary serves both.
         self.assertEqual(self._key("8")[1], self._key("16")[1])
+
+
+class TestDefaultEpilogueSplit(unittest.TestCase):
+    def test_dispatched_16_bit_spec_builds(self):
+        # The direct-store epilogue cannot emit the packed atomic; dispatch
+        # must not hand it an atomic reduction it then fails to build.
+        r = dispatch_conv_grouped(_wgrad("gfx950", C=64, K=64, dtype="bf16"))
+        self.assertEqual(r.spec.epilogue, "default")
+        ws = r.spec.to_wgrad_spec(_problem(r.request))
+        self.assertTrue(ws.split_k == 1 or ws.two_stage, ws)
+        build_implicit_gemm_conv_wgrad(ws, arch="gfx950")
 
 
 if __name__ == "__main__":

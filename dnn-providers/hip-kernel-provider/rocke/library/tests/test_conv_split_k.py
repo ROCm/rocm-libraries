@@ -95,9 +95,9 @@ def _previous_rule(problem, arch, dtype, tile, gm, split_k):
     ],
 )
 def test_unfitted_arch_keeps_the_previous_rule(problem, dtype, tile, gm, split_k):
-    got = _wgrad(problem, "gfx942", dtype, tile, group_merge=gm, split_k=split_k)
+    got = _wgrad(problem, "gfx90a", dtype, tile, group_merge=gm, split_k=split_k)
     assert (got.split_k, got.two_stage) == _previous_rule(
-        problem, "gfx942", dtype, tile, gm, split_k
+        problem, "gfx90a", dtype, tile, gm, split_k
     )
 
 
@@ -201,7 +201,7 @@ def test_env_override_rejects_garbage():
 
 def test_dgrad_explicit_and_unfitted_arch_unchanged():
     kw = {
-        "arch": "gfx942",
+        "arch": "gfx90a",
         "dtype": "bf16",
         "tile_m": 128,
         "tile_n": 64,
@@ -217,7 +217,7 @@ def test_dgrad_explicit_and_unfitted_arch_unchanged():
         tile_m=128,
         tile_n=64,
         tile_k=32,
-        arch="gfx942",
+        arch="gfx90a",
     ).split_k
     assert resolve_conv_split_k("dgrad", DENSE, **kw).split_k == legacy
 
@@ -508,3 +508,52 @@ def test_cost_fit_keeps_each_workspace_replica_count_its_own_option():
     pairs = {(float(nb), float(ms)) for nb, ms in zip(d.setup_bytes, d.measured) if nb}
     assert (2 * 1 * 64 * 64 * 4 + out, 1.0) in pairs
     assert (2 * 8 * 64 * 64 * 4 + out, 2.0) in pairs
+
+
+def test_cost_fit_degree_list_parses_ranges():
+    import argparse
+
+    from benchmarks.common.split_k_cost_fit import _parse_degrees
+
+    assert _parse_degrees("2-5,8, 12-12") == [2, 3, 4, 5, 8, 12]
+    with pytest.raises(argparse.ArgumentTypeError):
+        _parse_degrees("1-4")
+
+
+def test_cost_fit_round_trip_keeps_the_unsearched_fields():
+    # The literal the fit prints must not drop the XCD count or the margin.
+    from benchmarks.common.split_k_cost_fit import _model_of, _x_of
+    from rocke.helpers.split_k_planner import split_k_cost_model
+
+    for arch in ("gfx950", "gfx942"):
+        cost = split_k_cost_model(arch)
+        back = _model_of(_x_of(cost), cost.max_split_k)
+        assert (back.num_xcds, back.ladder_margin) == (
+            cost.num_xcds,
+            cost.ladder_margin,
+        )
+
+
+def test_default_epilogue_never_resolves_to_the_packed_atomic():
+    # Only cshuffle emits the packed 16-bit atomic: a direct-store kernel must
+    # split through the workspace or not at all.
+    kw = dict(
+        arch="gfx950",
+        dtype="bf16",
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        block_size=256,
+        env={},
+    )
+    p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    for split_k in (-1, 8):
+        assert resolve_conv_split_k(
+            "wgrad", p, split_k=split_k, epilogue="cshuffle", **kw
+        ) == resolve_conv_split_k("wgrad", p, split_k=split_k, **kw)
+        r = resolve_conv_split_k("wgrad", p, split_k=split_k, epilogue="default", **kw)
+        assert r.split_k == 1 or r.two_stage, r
+    fixed = resolve_conv_split_k(
+        "wgrad", p, reduction="atomic", epilogue="default", **kw
+    )
+    assert fixed.split_k == 1

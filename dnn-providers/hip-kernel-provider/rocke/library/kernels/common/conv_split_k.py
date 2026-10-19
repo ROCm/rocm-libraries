@@ -41,6 +41,7 @@ part of the spec's kernel name, so set it before kernels are built or cached.
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -155,8 +156,11 @@ def _resolve_wgrad(
     ws_replicas: int,
     split_k: int,
     reduction: str,
+    epilogue: str | None,
     allow_unsplit: bool,
     env: Mapping[str, str],
+    num_cus: int | None,
+    num_xcds: int | None,
 ) -> ConvSplitK:
     gm = max(1, group_merge)
     ws_replicas = ws_replicas if ws_replicas > 0 else _DEFAULT_WS_REPLICAS
@@ -164,7 +168,13 @@ def _resolve_wgrad(
     z_cap = MAX_GRID_DIM_Z // grid_groups
     # Merged tiles cannot use the packed atomic: its epilogue has no way to
     # drop an off-diagonal group pair, so only the workspace carries the mask.
-    atomic_ok = gm == 1 and wgrad_atomic_epilogue_available(p, dtype, None)[0]
+    # The packed 16-bit atomic is emitted by the cshuffle epilogue only (the
+    # direct-store one scatters the MFMA layout and has no pairs to add).
+    atomic_ok = (
+        gm == 1
+        and wgrad_atomic_epilogue_available(p, dtype, None)[0]
+        and not (epilogue == "default" and dtype in ("bf16", "fp16"))
+    )
     # Deliberately unmerged: the workspace is R copies of the true dW.
     ws_ok = wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
     if reduction == "workspace" and not ws_ok:
@@ -196,7 +206,7 @@ def _resolve_wgrad(
 
     # The launched GEMM: a merged tile covers gm groups' channels at once.
     m, n, k = _wg_M(p) * gm, _wg_N(p) * gm, _wg_K(p)
-    cost = split_k_cost_model(arch)
+    cost = split_k_cost_model(arch, num_cus, num_xcds)
     if cost is None:
         legacy = select_split_k_wgrad(
             wg_M=m,
@@ -265,6 +275,8 @@ def _resolve_dgrad(
     split_k: int,
     allow_unsplit: bool,
     env: Mapping[str, str],
+    num_cus: int | None,
+    num_xcds: int | None,
 ) -> ConvSplitK:
     if split_k != -1:
         return ConvSplitK(split_k, False, split_k, f"explicit split_k={split_k}")
@@ -278,7 +290,7 @@ def _resolve_dgrad(
         note = "" if ok or forced == 1 else f" (no split: {why})"
         return ConvSplitK(degree, False, forced, f"{ENV_CONV_SPLIT_K}={forced}{note}")
     m, n, k = _dg_M(p), _dg_N(p), _dg_K(p)
-    cost = split_k_cost_model(arch)
+    cost = split_k_cost_model(arch, num_cus, num_xcds)
     if cost is not None:
         ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
         if not ok:
@@ -331,8 +343,11 @@ def resolve_conv_split_k(
     ws_replicas: int = _DEFAULT_WS_REPLICAS,
     split_k: int = -1,
     reduction: str = "auto",
+    epilogue: str | None = None,
     allow_unsplit: bool = True,
     env: Mapping[str, str] | None = None,
+    num_cus: int | None = None,
+    num_xcds: int | None = None,
 ) -> ConvSplitK:
     """Resolve the split-K degree and, for wgrad, the reduction path.
 
@@ -352,10 +367,17 @@ def resolve_conv_split_k(
         reduction: wgrad only. ``"auto"`` chooses between the packed atomic
             and the workspace; ``"atomic"`` / ``"workspace"`` fix the reduction
             the caller's kernel is built with, so only the degree is chosen.
+        epilogue: wgrad only. The kernel's epilogue, when known: under
+            ``"default"`` (direct store) the packed 16-bit atomic cannot be
+            emitted, so ``"auto"`` does not offer it. ``None``: not checked.
         allow_unsplit: whether the auto resolution may return degree 1. False
             for a caller holding a split-K binary (degree 1 is a different
             kernel) or building one that requires a split (two-stage).
         env: environment for ``ROCKE_CONV_SPLIT_K`` (default ``os.environ``).
+        num_cus, num_xcds: CU and XCD counts of the device the kernel runs
+            on, for a part built differently from its arch's default (gfx942:
+            MI300A has 228 CUs on 6 XCDs, MI300X 304 on 8); ``None`` keeps the
+            arch default.
 
     Forward convolution has no split-K path and always resolves to 1.
     """
@@ -365,9 +387,58 @@ def resolve_conv_split_k(
         raise ValueError(f"reduction must be one of {_REDUCTIONS}, got {reduction!r}")
     if direction != "wgrad" and reduction != "auto":
         raise ValueError(f"reduction={reduction!r} applies to wgrad only")
+    if direction != "wgrad":
+        epilogue = None
     env = os.environ if env is None else env
     if direction == "fwd":
         return ConvSplitK(1, False, 1, "fwd implicit GEMM has no split-K path")
+    # Only the override variable of ``env`` is read, so it alone keys the cache.
+    return _resolve_cached(
+        direction,
+        problem,
+        arch=arch,
+        dtype=dtype,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        block_size=block_size,
+        group_merge=group_merge,
+        ws_replicas=ws_replicas,
+        split_k=split_k,
+        reduction=reduction,
+        epilogue=epilogue,
+        allow_unsplit=allow_unsplit,
+        env_value=env.get(ENV_CONV_SPLIT_K),
+        num_cus=num_cus,
+        num_xcds=num_xcds,
+    )
+
+
+# Dispatch resolves the same (problem, kernel) several times per request, and
+# planning scores up to a few hundred degrees; the answer is a pure function of
+# the arguments.
+@functools.lru_cache(maxsize=4096)
+def _resolve_cached(
+    direction: str,
+    problem: ConvProblem,
+    *,
+    arch: str,
+    dtype: str,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    block_size: int,
+    group_merge: int,
+    ws_replicas: int,
+    split_k: int,
+    reduction: str,
+    epilogue: str | None,
+    allow_unsplit: bool,
+    env_value: str | None,
+    num_cus: int | None,
+    num_xcds: int | None,
+) -> ConvSplitK:
+    env = {} if env_value is None else {ENV_CONV_SPLIT_K: env_value}
     common = {
         "arch": arch,
         "dtype": dtype,
@@ -378,6 +449,8 @@ def resolve_conv_split_k(
         "split_k": split_k,
         "allow_unsplit": allow_unsplit,
         "env": env,
+        "num_cus": num_cus,
+        "num_xcds": num_xcds,
     }
     if direction == "dgrad":
         return _resolve_dgrad(problem, **common)
@@ -386,5 +459,6 @@ def resolve_conv_split_k(
         group_merge=group_merge,
         ws_replicas=ws_replicas,
         reduction=reduction,
+        epilogue=epilogue,
         **common,
     )

@@ -2101,6 +2101,7 @@ def build_implicit_gemm_conv_wgrad(
             group_merge=spec.group_merge,
             ws_replicas=spec.ws_replicas,
             reduction="workspace" if spec.two_stage else "atomic",
+            epilogue=None if spec.two_stage else spec.epilogue,
             # A two-stage spec is a split-K kernel: degree 1 would not validate.
             allow_unsplit=not spec.two_stage,
         )

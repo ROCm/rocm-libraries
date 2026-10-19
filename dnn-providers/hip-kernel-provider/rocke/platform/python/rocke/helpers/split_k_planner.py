@@ -47,23 +47,35 @@ launch latency itself does not show; the measured cost is the traffic.
 which is what lets a 24 x 27 output in a 128 x 32 tile come out latency-bound
 rather than compute-bound.
 
+Candidate degrees are not limited to powers of two (:func:`_degrees`): the
+divisors and multiples of the CU count, the smallest degree for each K
+iteration count per CTA, and the degrees that end a dispatch round are scored
+too. Two hardware rules shape the set. A grouped launch keeps the flat-id
+stride between groups a multiple of the XCD count, so the groups' shared NHWC
+cache lines are fetched into one die's L2. And a degree off the power-of-two
+ladder must beat the best ladder degree by
+:attr:`SplitKCostModel.ladder_margin`: between ladder points the model resolves
+round filling more finely than its occupancy bound supports.
+
 The model needs no compiled binary. Resident workgroups per CU are bounded by
 the wave limit (``max_waves_per_cu // waves_per_block``): register-heavy
 kernels fall short of it, but those are the big tiles that are throughput-bound
-long before their occupancy matters, so the bound picks the same degree as the
-exact occupancy on the measured corpus. One deterministic answer is what lets
-the dispatcher, the kernel builders and the benchmark agree.
+long before their occupancy matters, so on the power-of-two ladder the bound
+picks the same degree as the exact occupancy on the measured corpus. One
+deterministic answer is what lets the dispatcher, the kernel builders and the
+benchmark agree.
 
-The constants are per arch and fitted, not derived: see :class:`SplitKCostModel`.
-An arch without a fitted model has no plan (:func:`split_k_cost_model` returns
-``None``) and callers keep their previous heuristic there.
+The constants are per arch: fitted on gfx950, carried to gfx942 by hardware
+ratios (see :class:`SplitKCostModel`). An arch without a model has no plan
+(:func:`split_k_cost_model` returns ``None``) and callers keep their previous
+heuristic there.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 __all__ = [
     "MAX_GRID_DIM_Z",
@@ -110,6 +122,16 @@ class SplitKCostModel:
             (zeroing the output or a workspace, reading a workspace back).
         max_split_k: the largest degree the model was fitted and validated on;
             the planner never chooses beyond it.
+        ladder_margin: how much cheaper (as a fraction) the model must find a
+            degree off the ladder -- 1 and the powers of two, where it was
+            fitted -- than the best ladder degree before choosing it. Between
+            ladder points the model resolves round filling more finely than
+            its occupancy estimate supports, so a small predicted gain there is
+            noise; fitted on measured off-ladder degree curves.
+        num_xcds: dies the workgroups are dealt to, round-robin by flat
+            workgroup id. A grouped launch keeps the id stride between groups
+            a multiple of it, so the groups' matching K-slices share a die and
+            its L2 (see :func:`_degrees`).
     """
 
     num_cus: int
@@ -120,6 +142,8 @@ class SplitKCostModel:
     atomic_bytes_per_latency: Mapping[str, float]
     fill_bytes_per_latency: float
     max_split_k: int = 1024
+    ladder_margin: float = 0.0
+    num_xcds: int = 1
 
 
 # Fitted by library/benchmarks/common/split_k_cost_fit.py on gfx950, in units of
@@ -137,13 +161,84 @@ _COST_MODELS: dict[str, SplitKCostModel] = {
             "fp32": 1344520.3,
         },
         fill_bytes_per_latency=43105.9,
+        ladder_margin=0.05,
+        num_xcds=8,
     ),
 }
 
 
-def split_k_cost_model(arch: str) -> SplitKCostModel | None:
-    """The fitted cost model for ``arch``, or ``None`` if it has none."""
-    return _COST_MODELS.get(arch.split(":", 1)[0])
+def _scaled_from_gfx950(
+    *,
+    num_cus: int,
+    flops: float,
+    load: float,
+    atomic: float,
+    fill: float,
+    cta: float,
+) -> SplitKCostModel:
+    """The gfx950 fit carried to another CDNA part by hardware ratios.
+
+    Each argument is the target-over-gfx950 ratio of the throughput the
+    constant stands for (per CU for ``flops``/``load``, device-wide for the
+    rest), taken at the same latency unit, so only the ratios have to be known.
+    Unvalidated until the part is fitted on its own measurements.
+    """
+    base = _COST_MODELS["gfx950"]
+    return replace(
+        base,
+        num_cus=num_cus,
+        flops_per_latency=base.flops_per_latency * flops,
+        load_bytes_per_latency=base.load_bytes_per_latency * load,
+        cta_cost=base.cta_cost * cta,
+        atomic_bytes_per_latency={
+            k: v * atomic for k, v in base.atomic_bytes_per_latency.items()
+        },
+        fill_bytes_per_latency=base.fill_bytes_per_latency * fill,
+    )
+
+
+# gfx942 (MI300X, 304 CUs at 2.1 GHz) against the gfx950 part the model was
+# fitted on (MI350X, 256 CUs at 2.2 GHz), from public specs. Not fitted on
+# gfx942 measurements. Other gfx942 parts (MI300A: 228 CUs, MI308X: 80) share
+# the per-CU constants but not the CU count: a caller that knows its device
+# passes ``num_cus`` to :func:`split_k_cost_model`.
+_COST_MODELS["gfx942"] = _scaled_from_gfx950(
+    num_cus=304,
+    # Dense bf16 MFMA per CU: 1307.4 TFLOPS / 304 vs 2307 TFLOPS / 256.
+    flops=(1307.4 / 304) / (2307.0 / 256),
+    # The fitted operand-load rate is L2-bound (its flop/byte matches L2, not
+    # HBM): the same L2 per XCD feeds 38 CUs instead of 32, at 2.1 vs 2.2 GHz.
+    load=(32 / 38) * (2.1 / 2.2),
+    # Atomics resolve in L2: same L2 per XCD, 8 XCDs, scaled by clock.
+    atomic=2.1 / 2.2,
+    # Clearing and reading back memory is HBM-bound: 5.3 vs 8 TB/s.
+    fill=5.3 / 8.0,
+    # Per-CTA dispatch overhead is clock-bound, so it costs more latency units.
+    cta=2.2 / 2.1,
+)
+
+
+def split_k_cost_model(
+    arch: str, num_cus: int | None = None, num_xcds: int | None = None
+) -> SplitKCostModel | None:
+    """The cost model for ``arch``, or ``None`` if it has none.
+
+    ``num_cus`` and ``num_xcds`` replace the arch's defaults, for a part of the
+    arch built differently (gfx942: MI300A has 228 CUs on 6 XCDs). The per-CU
+    constants carry over exactly; the device-wide ones (atomic, fill and
+    per-CTA costs) are kept, an approximation on a part with fewer XCDs.
+    """
+    cost = _COST_MODELS.get(arch.split(":", 1)[0])
+    if cost is None or (num_cus is None and num_xcds is None):
+        return cost
+    for name, v in (("num_cus", num_cus), ("num_xcds", num_xcds)):
+        if v is not None and v < 1:
+            raise ValueError(f"{name} must be >= 1, got {v}")
+    return replace(
+        cost,
+        num_cus=cost.num_cus if num_cus is None else num_cus,
+        num_xcds=cost.num_xcds if num_xcds is None else num_xcds,
+    )
 
 
 @dataclass(frozen=True)
@@ -299,11 +394,62 @@ def predict_split_k_cost(
     return t
 
 
-def _degrees(max_split_k: int) -> Iterable[int]:
-    s = 2
-    while s <= max_split_k:
-        yield s
-        s *= 2
+def _degrees(
+    problem: SplitKProblem, kernel: SplitKKernel, cost: SplitKCostModel, cap: int
+) -> Iterable[int]:
+    """Split degrees in ``[2, cap]`` worth scoring, ascending.
+
+    A degree is a candidate when any of these rules gives it a reason to be:
+
+    * a power of two -- the ladder the model was first fitted on;
+    * a divisor or a multiple of the CU count -- one CTA tile then spreads
+      evenly over the CUs, which matters on parts whose CU count is not a power
+      of two (gfx942: 304);
+    * the smallest degree for its K iterations per CTA -- any larger degree
+      with the same ``ceil(k_iters / s)`` only adds CTAs, so it is never
+      cheaper, and the model's optimum always lies on this set;
+    * the largest degree before the CTA count starts another round of the
+      device, counted per CU and per wave-bound slot -- one more slice would
+      begin a round that is mostly idle.
+
+    A grouped launch (``z_batch > 1``: ``z = group * split_k + slice``) scores
+    instead the powers of two and every degree that makes the flat-id stride
+    between groups, ``tiles_per_group * split_k``, a multiple of the XCD count
+    (at most ``cap / step`` of them, so the rules above are not needed). The
+    groups of a grouped conv read the same NHWC cache lines, and an aligned
+    stride puts the groups' matching K-slices on one die, so each line is
+    fetched into one L2 rather than once per die (measured on depthwise wgrad:
+    up to 1.8x). The model does not see that cost, so off the ladder only
+    aligned degrees are offered; the ladder itself stays whole, since a small
+    misaligned degree can still beat the nearest aligned one.
+    """
+    k_iters = math.ceil(problem.k / kernel.tile_k)
+    group_tiles = math.ceil(problem.m / kernel.tile_m) * math.ceil(
+        problem.n / kernel.tile_n
+    )
+    tiles = group_tiles * problem.batch
+    cus = cost.num_cus
+    rounds = (cus, cus * _waves_bound_blocks_per_cu(kernel, cost))
+    z_batch = problem.batch if problem.z_batch is None else problem.z_batch
+    step = 1
+    if z_batch > 1:
+        step = cost.num_xcds // math.gcd(group_tiles, cost.num_xcds)
+    for s in range(2, cap + 1):
+        if s & (s - 1) == 0:
+            yield s
+        elif step > 1:
+            if s % step == 0:
+                yield s
+        elif (
+            cus % s == 0
+            or s % cus == 0
+            or math.ceil(k_iters / s) < math.ceil(k_iters / (s - 1))
+            or any(
+                math.ceil(tiles * (s + 1) / u) > math.ceil(tiles * s / u)
+                for u in rounds
+            )
+        ):
+            yield s
 
 
 def select_split_k_plan(
@@ -317,13 +463,14 @@ def select_split_k_plan(
 ) -> SplitKPlan:
     """Cheapest (degree, reduction) under the cost model.
 
-    Candidates are degree 1 (when ``allow_unsplit``) and every power of two
-    from 2 up to the tightest of: ``max_split_k``, the model's validated range
-    (:attr:`SplitKCostModel.max_split_k`), the K-iteration count (a larger
-    degree only adds empty slices), the gridDim.z budget
-    (``MAX_GRID_DIM_Z // z_batch``) and each reduction's own cap. Powers of two
-    are the degrees the model was fitted and validated on. Ties go to the
-    smaller degree: it is the cheaper reduction for the same predicted cost.
+    Candidates are degree 1 (when ``allow_unsplit``) and the degrees of
+    :func:`_degrees` from 2 up to the tightest of: ``max_split_k``, the model's
+    validated range (:attr:`SplitKCostModel.max_split_k`), the K-iteration count
+    (a larger degree only adds empty slices), the gridDim.z budget
+    (``MAX_GRID_DIM_Z // z_batch``) and each reduction's own cap. Ties go to the
+    smaller degree: it is the cheaper reduction for the same predicted cost. A
+    degree off the ladder (1 and the powers of two) is chosen only when it beats
+    the best ladder degree by more than :attr:`SplitKCostModel.ladder_margin`.
 
     Raises:
         ValueError: no candidate is admissible (no unsplit and no reduction
@@ -350,7 +497,7 @@ def select_split_k_plan(
         cands.append((predict_split_k_cost(problem, kernel, 1, None, cost), 1, None))
     for red in reductions:
         red_cap = cap if red.max_split_k is None else min(cap, red.max_split_k)
-        for s in _degrees(red_cap):
+        for s in _degrees(problem, kernel, cost, red_cap):
             cands.append((predict_split_k_cost(problem, kernel, s, red, cost), s, red))
     if not cands:
         raise ValueError(
@@ -359,6 +506,11 @@ def select_split_k_plan(
             f"reductions={[r.name for r in reductions]})"
         )
     t, s, red = min(cands, key=lambda c: (c[0], c[1]))
+    ladder = [c for c in cands if c[1] & (c[1] - 1) == 0]
+    if ladder and s & (s - 1):
+        lt, ls, lred = min(ladder, key=lambda c: (c[0], c[1]))
+        if lt <= t * (1.0 + cost.ladder_margin):
+            t, s, red = lt, ls, lred
     tiles = (
         math.ceil(problem.m / kernel.tile_m)
         * math.ceil(problem.n / kernel.tile_n)

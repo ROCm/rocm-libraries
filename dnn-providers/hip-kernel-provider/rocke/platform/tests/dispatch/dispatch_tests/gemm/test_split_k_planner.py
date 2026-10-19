@@ -42,8 +42,75 @@ def _plan(problem, kernel, reductions=(WORKSPACE,), **kw):
 def test_cost_model_lookup():
     assert GFX950 is not None
     assert split_k_cost_model("gfx950:sramecc+:xnack-") is GFX950
-    # No fitted model: callers keep their previous heuristic.
-    assert split_k_cost_model("gfx942") is None
+    # No model: callers keep their previous heuristic.
+    assert split_k_cost_model("gfx90a") is None
+    assert split_k_cost_model("gfx90a", num_cus=104) is None
+
+
+@pytest.mark.parametrize(
+    "problem,kernel",
+    [
+        (TINY_OUT_LONG_K, SMALL_TILE),
+        (SplitKProblem(m=24, n=27, k=1_000_003), SMALL_TILE),
+        (SplitKProblem(m=256, n=576, k=25_088), BIG_TILE),
+        (SplitKProblem(m=1280, n=17280, k=12800), BIG_TILE),
+    ],
+)
+def test_off_ladder_degree_must_beat_the_ladder_by_the_margin(problem, kernel):
+    exact = dataclasses.replace(GFX950, ladder_margin=0.0)
+    best = select_split_k_plan(problem, kernel, (WORKSPACE,), exact)
+    plan = _plan(problem, kernel)
+    ladder = min((t, d) for d, _, t in plan.candidates if d & (d - 1) == 0)
+    if plan.split_k & (plan.split_k - 1):
+        assert plan.split_k == best.split_k
+        assert ladder[0] > best.predicted_cost * (1 + GFX950.ladder_margin)
+    else:
+        assert plan.predicted_cost == ladder[0]
+        assert plan.predicted_cost <= best.predicted_cost * (1 + GFX950.ladder_margin)
+
+
+def test_grouped_launch_keeps_the_group_stride_xcd_aligned():
+    # Depthwise-like: one tile per group, groups sharing gridDim.z. Off the
+    # power-of-two ladder, every degree keeps tiles_per_group * split_k a
+    # multiple of the 8 XCDs; the ladder itself stays whole.
+    def off_ladder(plan):
+        return {d for d in _degrees(plan) if d & (d - 1)}
+
+    grouped = SplitKProblem(m=16, n=144, k=201_600, batch=12)
+    plan = _plan(grouped, SplitKKernel(32, 256, 16, 2))
+    assert {2, 4} <= _degrees(plan)
+    assert off_ladder(plan) and all(d % 8 == 0 for d in off_ladder(plan))
+    # Two tiles per group halve the step; the batch on another axis lifts it.
+    two_tiles = SplitKProblem(m=64, n=144, k=201_600, batch=12)
+    plan = _plan(two_tiles, SplitKKernel(32, 256, 16, 2))
+    assert 12 in _degrees(plan)
+    assert all(d % 4 == 0 for d in off_ladder(plan))
+    off_z = dataclasses.replace(grouped, z_batch=1)
+    assert 7 in _degrees(_plan(off_z, SplitKKernel(32, 256, 16, 2)))
+    # Ungrouped: no alignment.
+    assert 7 in _degrees(_plan(TINY_OUT_LONG_K, SMALL_TILE))
+
+
+def test_grouped_pool_contains_the_whole_ladder_under_a_tight_cap():
+    # Only 5 K iterations: no multiple of 8 fits; the ladder still does.
+    grouped = SplitKProblem(m=16, n=144, k=16 * 5, batch=12)
+    plan = _plan(grouped, SplitKKernel(32, 256, 16, 2), allow_unsplit=False)
+    assert _degrees(plan) == {2, 4}
+
+
+def test_gfx942_model_and_cu_override():
+    gfx942 = split_k_cost_model("gfx942")
+    assert gfx942.num_cus == 304
+    # Half the per-CU MFMA rate of gfx950, and a slower memory system.
+    assert gfx942.flops_per_latency < GFX950.flops_per_latency
+    assert gfx942.fill_bytes_per_latency < GFX950.fill_bytes_per_latency
+    assert gfx942.num_xcds == 8
+    mi300a = split_k_cost_model("gfx942:sramecc+:xnack-", num_cus=228, num_xcds=6)
+    assert mi300a == dataclasses.replace(gfx942, num_cus=228, num_xcds=6)
+    with pytest.raises(ValueError, match="num_cus"):
+        split_k_cost_model("gfx942", num_cus=0)
+    with pytest.raises(ValueError, match="num_xcds"):
+        split_k_cost_model("gfx942", num_xcds=0)
 
 
 @pytest.mark.parametrize(
@@ -134,11 +201,64 @@ def test_max_split_k_argument_caps_every_reduction():
     assert plan.split_k <= 16
 
 
-def test_candidates_are_powers_of_two_and_unsplit():
+def _degrees(plan):
+    return {d for d, _, _ in plan.candidates}
+
+
+def test_candidates_include_unsplit_and_every_power_of_two():
     plan = _plan(TINY_OUT_LONG_K, SMALL_TILE)
-    degrees = {d for d, _, _ in plan.candidates}
+    degrees = _degrees(plan)
     assert 1 in degrees
-    assert all(d == 1 or (d & (d - 1)) == 0 for d in degrees)
+    assert {1 << i for i in range(1, 11)} <= degrees
+
+
+def test_candidates_include_the_cu_count_divisors_and_multiples():
+    gfx942 = split_k_cost_model("gfx942")
+    plan = select_split_k_plan(TINY_OUT_LONG_K, SMALL_TILE, (WORKSPACE,), gfx942)
+    assert {19, 38, 76, 152, 304, 608, 912} <= _degrees(plan)
+
+
+def test_candidates_are_not_every_degree():
+    # A short reduction: past sqrt(k_iters) most degrees repeat an iteration
+    # count, and those (when they also fill no round) are left out.
+    problem = SplitKProblem(m=128, n=128, k=64 * 900)
+    plan = _plan(problem, BIG_TILE)
+    assert 600 not in _degrees(plan)
+    assert len(_degrees(plan)) < 900
+
+
+@pytest.mark.parametrize(
+    "problem,kernel",
+    [
+        (TINY_OUT_LONG_K, SMALL_TILE),
+        (SplitKProblem(m=24, n=27, k=1_000_003), SMALL_TILE),
+        (SplitKProblem(m=256, n=576, k=25_088), BIG_TILE),
+        (SplitKProblem(m=96, n=1728, k=42 * 60 * 80, batch=3), SMALL_TILE),
+        (DENSE_SHORT_K, BIG_TILE),
+    ],
+)
+@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
+def test_candidates_lose_nothing_against_every_degree(problem, kernel, arch):
+    # The pool only drops degrees the model can never prefer, so planning over
+    # it matches planning over every integer up to the cap -- on a grouped
+    # launch, every XCD-aligned one and the ladder. (No ladder margin: it trades cost on purpose.)
+    cost = dataclasses.replace(split_k_cost_model(arch), ladder_margin=0.0)
+    plan = select_split_k_plan(problem, kernel, (WORKSPACE, ATOMIC16), cost)
+    cap = max(_degrees(plan))
+    step = 1
+    if problem.batch > 1:
+        group_tiles = math.ceil(problem.m / kernel.tile_m) * math.ceil(
+            problem.n / kernel.tile_n
+        )
+        step = cost.num_xcds // math.gcd(group_tiles, cost.num_xcds)
+    best = min(
+        (predict_split_k_cost(problem, kernel, s, r, cost), s)
+        for r in (WORKSPACE, ATOMIC16)
+        for s in range(2, min(cap, r.max_split_k or cap) + 1)
+        if s % step == 0 or s & (s - 1) == 0
+    )
+    unsplit = predict_split_k_cost(problem, kernel, 1, None, cost)
+    assert plan.predicted_cost <= min(best[0], unsplit) * (1 + 1e-12)
 
 
 def test_unsplit_can_be_excluded():

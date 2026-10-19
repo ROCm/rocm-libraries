@@ -697,6 +697,10 @@ def _resolve_wgrad_split_k(spec: ConvGroupedSpec, p: "ConvProblem") -> ConvSplit
         group_merge=max(1, int(spec.group_merge)),
         ws_replicas=_WGRAD_WS_REPLICAS,
         split_k=spec.split_k,
+        # The packed 16-bit atomic needs the cshuffle epilogue: under the
+        # default one the resolver must not offer it (two-stage builds its
+        # Stage 1 with the default epilogue regardless).
+        epilogue=spec.epilogue,
     )
 
 

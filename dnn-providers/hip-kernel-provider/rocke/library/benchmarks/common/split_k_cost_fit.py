@@ -41,6 +41,17 @@ refreshed after a kernel change and fitted for a new arch:
     the model and for the previous CK-formula rule; the constants printed as a
     ``SplitKCostModel(...)`` literal are then fitted on every shape.
 
+``margin``
+    Measures :attr:`~rocke.helpers.split_k_planner.SplitKCostModel.ladder_margin`
+    on a sweep that also timed degrees off the power-of-two ladder
+    (``sweep --degrees 2-160,...``)::
+
+        python -m benchmarks.common.split_k_cost_fit margin --logs offladder_logs
+
+    Each margin is scored against always choosing the ladder, per binary and per
+    shape; the recommendation is the best shape geomean whose worst shape loses
+    at most ``--max-worse``.
+
 Only relative costs matter, so the model is invariant to its time unit; the
 unit is the load latency of one K iteration, and every fitted constant is a
 ratio to it (no absolute time or bandwidth is produced). Stage 1 evaluates a
@@ -81,6 +92,20 @@ def _degrees(max_degree: int) -> list[int]:
     return [1 << i for i in range(1, max_degree.bit_length()) if 1 << i <= max_degree]
 
 
+def _parse_degrees(spec: str) -> list[int]:
+    """``"2-160,192,256"`` -> the listed degrees and inclusive ranges."""
+    out: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        lo, _, hi = part.partition("-")
+        out.update(range(int(lo), int(hi or lo) + 1))
+    if not out or min(out) < 2:
+        raise argparse.ArgumentTypeError(f"degrees must be >= 2: {spec!r}")
+    return sorted(out)
+
+
 # --------------------------------------------------------------------- sweep
 
 
@@ -90,7 +115,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     shapes = [
         s.strip() for s in Path(args.shapes).read_text().splitlines() if s.strip()
     ]
-    degrees = ",".join(map(str, _degrees(args.max_degree)))
+    degrees = ",".join(map(str, args.degrees or _degrees(args.max_degree)))
     lib = Path(__file__).resolve().parents[2]
     for idx, shape in enumerate(shapes, 1):
         log = out / f"shape_{idx:03d}.log"
@@ -553,6 +578,9 @@ def _x_of(cost) -> dict:
         "load_bytes_per_latency": cost.load_bytes_per_latency,
         "cta_cost": max(cost.cta_cost, 1e-4),
         "fill_bytes_per_latency": cost.fill_bytes_per_latency,
+        # Carried, not searched: hardware fact and the separately fitted margin.
+        "num_xcds": cost.num_xcds,
+        "ladder_margin": cost.ladder_margin,
     }
     for k, v in cost.atomic_bytes_per_latency.items():
         x[f"atomic:{k}"] = v
@@ -577,6 +605,8 @@ def _model_of(x: dict, max_degree: int = 1024):
         },
         fill_bytes_per_latency=_sig(x["fill_bytes_per_latency"]),
         max_split_k=max_degree,
+        ladder_margin=x["ladder_margin"],
+        num_xcds=int(x["num_xcds"]),
     )
 
 
@@ -728,6 +758,81 @@ def cmd_fit(args: argparse.Namespace) -> int:
     return 0
 
 
+# ------------------------------------------------------------ ladder margin
+
+
+def cmd_margin(args: argparse.Namespace) -> int:
+    """Measured effect of :attr:`SplitKCostModel.ladder_margin`.
+
+    For every split-K binary timed at both its best ladder degree (1 or a power
+    of two) and the model's unrestricted pick, each margin chooses the pick only
+    when the model finds it cheaper than the ladder by more than the margin.
+    Reported against always choosing the ladder: per binary, and per shape (the
+    best binary at its chosen degree). The recommendation is the margin with
+    the best shape geomean whose worst shape loses at most ``--max-worse``.
+    """
+    from rocke.helpers.split_k_planner import select_split_k_plan, split_k_cost_model
+
+    cost = split_k_cost_model(args.arch)
+    if cost is None:
+        print(f"no cost model for {args.arch!r}", file=sys.stderr)
+        return 1
+    exact = replace(cost, ladder_margin=0.0)
+    rows, untimed = [], 0
+    for k in _load(args.logs):
+        if k.reduction is None:
+            continue
+        try:
+            plan = select_split_k_plan(
+                k.problem, k.kernel, [k.reduction], exact, allow_unsplit=False
+            )
+        except ValueError:
+            continue
+        pred = {d: t for d, _, t in plan.candidates}
+        ladder = min((t, d) for d, t in pred.items() if d & (d - 1) == 0)[1]
+        pick = plan.split_k
+        if ladder not in k.times or pick not in k.times:
+            untimed += 1
+            continue
+        rows.append((k, ladder, pick, pred[ladder] / pred[pick]))
+    if not rows:
+        print("no binary timed at both its ladder degree and its pick", file=sys.stderr)
+        return 1
+    print(
+        f"{len(rows)} split-K binaries over {len({k.cmd for k, *_ in rows})} shapes "
+        f"({untimed} skipped: a degree untimed); {sum(p != l for _, l, p, _ in rows)} "
+        "pick off the ladder"
+    )
+
+    def geo(v):
+        return math.exp(float(np.mean(np.log(v))))
+
+    best = None
+    for m in args.margins:
+        per_bin, shapes = [], {}
+        for k, ladder, pick, gain in rows:
+            d = pick if gain > 1.0 + m else ladder
+            per_bin.append(k.times[d] / k.times[ladder])
+            lad, got = shapes.get(k.cmd, (math.inf, math.inf))
+            shapes[k.cmd] = (min(lad, k.times[ladder]), min(got, k.times[d]))
+        per_shape = [g / l for l, g in shapes.values()]
+        worst = max(per_shape)
+        print(
+            f"  margin {m:5.3f}: binaries geo {geo(per_bin):.4f} "
+            f"(>1% slower {np.mean(np.array(per_bin) > 1.01):4.0%}) | shapes geo "
+            f"{geo(per_shape):.4f} best {min(per_shape):.3f} worst {worst:.3f}"
+        )
+        if worst <= 1.0 + args.max_worse and (
+            best is None or geo(per_shape) < best[1] - 1e-9
+        ):
+            best = (m, geo(per_shape))
+    if best is None:
+        print(f"no margin keeps every shape within {args.max_worse:.1%}")
+        return 1
+    print(f"\nrecommended ladder_margin={best[0]} (shapes geo {best[1]:.4f})")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -737,6 +842,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     sw.add_argument("--out", required=True, help="directory for the per-shape logs")
     sw.add_argument("--arch", default="gfx950")
     sw.add_argument("--max-degree", type=int, default=1024)
+    sw.add_argument(
+        "--degrees",
+        type=_parse_degrees,
+        default=None,
+        help="degrees to time instead of the powers of two up to --max-degree, "
+        "e.g. 2-160,192,256 (the off-ladder sweep `margin` reads)",
+    )
     sw.add_argument(
         "--prune",
         type=float,
@@ -779,7 +891,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ft.add_argument("--iters", type=int, default=3000)
     ft.add_argument("--seed", type=int, default=0)
+    mg = sub.add_parser(
+        "margin", help="measure the ladder margin on off-ladder sweep logs"
+    )
+    mg.add_argument("--logs", nargs="+", required=True)
+    mg.add_argument("--arch", default="gfx950")
+    mg.add_argument(
+        "--margins",
+        type=lambda v: [float(x) for x in v.split(",")],
+        default=[0.0, 0.01, 0.02, 0.03, 0.05, 0.08, 0.12],
+    )
+    mg.add_argument(
+        "--max-worse",
+        type=float,
+        default=0.01,
+        help="largest per-shape slowdown against the ladder the margin may allow",
+    )
     args = ap.parse_args(argv)
+    if args.cmd == "margin":
+        return cmd_margin(args)
     if args.cmd == "sweep":
         args.bench_args = [a for a in args.bench_args if a != "--"]
         return cmd_sweep(args)
