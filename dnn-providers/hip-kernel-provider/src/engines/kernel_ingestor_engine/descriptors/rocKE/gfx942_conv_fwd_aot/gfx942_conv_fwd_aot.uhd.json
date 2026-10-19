@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "43c06e3e-003b-4726-be57-4c898f3ee9d4",
+  "name": "Gfx942ConvFwdAot selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx942_conv_fwd_aot.score"
+  }
+}

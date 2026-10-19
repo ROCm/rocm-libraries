@@ -59,6 +59,50 @@ constexpr std::string_view Y_TOKEN = "gfx950_conv_fwd.y.uid";
 /// Private (`_`): the graph features already describe the problem, so this is no feature.
 constexpr std::string_view PROBLEM_TOKEN = "_gfx950_conv_fwd.problem";
 
+/// Which implicit-GEMM instances of those serving a graph run (aotCandidateFilter).
+enum class AotSelection
+{
+    /// conv::widestVectorSelection: the graph's widest width combination, else all.
+    WIDEST_COMBINATION,
+    /// conv::widestPerKindSelection: rocKE's current per-kind policy.
+    WIDEST_PER_KIND,
+};
+
+/// What tells one engine of this pack from another reading the same graph: the device
+/// it runs on, the tokens its graph match binds (public ones are UHD query features, so
+/// each engine names its own), the name its diagnostics carry, and, for an AOT engine,
+/// its selection policy and the device size its fallback score assumes.
+struct ConvFwdTarget
+{
+    std::string_view arch;
+    std::string_view xToken;
+    std::string_view wToken;
+    std::string_view yToken;
+    std::string_view problemToken;
+    std::string_view label;
+    AotSelection selection;
+    double cuCount;
+};
+
+/// hipkernel:Gfx950ConvFwd and hipkernel:Gfx950ConvFwdAot.
+constexpr ConvFwdTarget GFX950_TARGET{"gfx950",
+                                      X_TOKEN,
+                                      W_TOKEN,
+                                      Y_TOKEN,
+                                      PROBLEM_TOKEN,
+                                      "gfx950_conv_fwd",
+                                      AotSelection::WIDEST_COMBINATION,
+                                      256.0};
+/// hipkernel:Gfx942ConvFwdAot: the same instances built for gfx942 (MI300X: 304 CUs).
+constexpr ConvFwdTarget GFX942_TARGET{"gfx942",
+                                      "gfx942_conv_fwd.x.uid",
+                                      "gfx942_conv_fwd.w.uid",
+                                      "gfx942_conv_fwd.y.uid",
+                                      "_gfx942_conv_fwd.problem",
+                                      "gfx942_conv_fwd",
+                                      AotSelection::WIDEST_PER_KIND,
+                                      304.0};
+
 struct Binding
 {
     int64_t x;
@@ -134,11 +178,13 @@ bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
     return values != nullptr && values->size() == 2;
 }
 
-std::optional<MatchedProblem> matchProblem(const MatchContext& context)
+std::optional<MatchedProblem> matchProblem(const MatchContext& context,
+                                           const ConvFwdTarget& target = GFX950_TARGET)
 {
     if(!context.graph.isValid() || context.graph.getGraph().is_override_shape_enabled()
-       || !hipdnn_plugin_sdk::archMatches(
-           context.deviceProperties.gcnArchName, "gfx950", hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
+       || !hipdnn_plugin_sdk::archMatches(context.deviceProperties.gcnArchName,
+                                          target.arch,
+                                          hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
        || context.deviceProperties.warpSize != 64 || context.graph.nodeCount() != 1)
     {
         return std::nullopt;
@@ -249,15 +295,15 @@ std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
 /// passes every kernel matcher what graph_match bound for that same context. Falls back
 /// to matching the graph when the token is absent, as for a caller with no graph match.
 std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
-                                               const BoundTokens& bound)
+                                               const BoundTokens& bound,
+                                               const ConvFwdTarget& target = GFX950_TARGET)
 {
-    static const std::string s_problemToken(PROBLEM_TOKEN);
-    const auto it = bound.find(s_problemToken);
+    const auto it = bound.find(std::string(target.problemToken));
     const auto* values
         = it == bound.end() ? nullptr : std::get_if<std::vector<int64_t>>(&it->second);
     if(values == nullptr || values->size() != 18)
     {
-        return matchProblem(context);
+        return matchProblem(context, target);
     }
     const auto& v = *values;
     const conv::Problem problem{
@@ -271,17 +317,18 @@ std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
         Binding{v[0], v[1], v[2]}, problem, *geometry, static_cast<data_objects::DataType>(v[17])};
 }
 
+template <const ConvFwdTarget& Target>
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
 {
-    const auto matched = matchProblem(context);
+    const auto matched = matchProblem(context, Target);
     if(!matched)
     {
         return std::nullopt;
     }
-    return BoundTokens{{std::string(X_TOKEN), matched->binding.x},
-                       {std::string(W_TOKEN), matched->binding.w},
-                       {std::string(Y_TOKEN), matched->binding.y},
-                       {std::string(PROBLEM_TOKEN), problemTokenValues(*matched)}};
+    return BoundTokens{{std::string(Target.xToken), matched->binding.x},
+                       {std::string(Target.wToken), matched->binding.w},
+                       {std::string(Target.yToken), matched->binding.y},
+                       {std::string(Target.problemToken), problemTokenValues(*matched)}};
 }
 
 template <typename T>
@@ -697,12 +744,20 @@ std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition&
     {
         return std::nullopt;
     }
+    // Only a catalog with group-merged instances declares the field; absent, it is 1.
+    const auto groupMerge = intMetadata(kernel, "group_merge").value_or(1);
+    if(groupMerge < 1)
+    {
+        return std::nullopt;
+    }
     std::array<int64_t, AOT_INT_FIELDS.size()> values{};
     for(size_t i = 0; i < AOT_INT_FIELDS.size(); ++i)
     {
         const auto value = intMetadata(kernel, AOT_INT_FIELDS[i]);
         // Every field but the async chunk widths is positive; those are 0 without async.
-        if(!value || *value < (i >= 11 ? 0 : 1))
+        // A merged instance records its derived vector widths (8 to 10) as 0 instead.
+        const bool derivedWidth = groupMerge > 1 && i >= 8 && i <= 10;
+        if(!value || (derivedWidth ? *value != 0 : *value < (i >= 11 ? 0 : 1)))
         {
             return std::nullopt;
         }
@@ -728,7 +783,8 @@ std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition&
                              flags[1],
                              values[11],
                              values[12],
-                             flags[2]};
+                             flags[2],
+                             groupMerge};
 }
 
 /// The direct instance @p kernel describes. Its implicit-GEMM fields hold the values
@@ -744,7 +800,8 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
 {
     if(variant == conv::DirectVariant::NONE
        || !metadataEquals(kernel, "pipeline", std::string("direct"))
-       || !metadataEquals(kernel, "epilogue", std::string("direct")))
+       || !metadataEquals(kernel, "epilogue", std::string("direct"))
+       || intMetadata(kernel, "group_merge").value_or(1) != 1)
     {
         return std::nullopt;
     }
@@ -974,14 +1031,16 @@ std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
     return aotInstanceLaunch(matched, *prepared.instance);
 }
 
+template <const ConvFwdTarget& Target>
 bool aotKernelMatches(const MatchContext& context,
                       const BoundTokens& bound,
                       const KernelDefinition& kernel)
 {
-    const auto matched = matchedFromBound(context, bound);
+    const auto matched = matchedFromBound(context, bound, Target);
     return matched && aotKernelFits(*matched, kernel).has_value();
 }
 
+template <const ConvFwdTarget& Target>
 double
     aotScore(const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel)
 {
@@ -998,7 +1057,7 @@ double
     // implicit-GEMM instance (and above a refusal): an unbenchmarked plan keeps serving
     // implicit GEMM wherever it can, and the direct kernels are chosen by benchmarking,
     // a recorded winner, the kernel_family knob, or where nothing else serves.
-    const auto matched = matchedFromBound(context, bound);
+    const auto matched = matchedFromBound(context, bound, Target);
     AotPrepared scratch;
     const auto& instance = preparedOf(kernel, scratch).instance;
     const auto launch = matched && instance ? aotInstanceLaunch(*matched, *instance) : std::nullopt;
@@ -1020,15 +1079,19 @@ double
     return conv::aotInstanceScore(matched->problem,
                                   matched->geometry,
                                   std::get<conv::AotInstance>(*instance),
-                                  launch->geometry);
+                                  launch->geometry,
+                                  Target.cuCount);
 }
 
 /// Which of the instances serving a graph run: the CandidateFilterFn registered under the
 /// kernel matcher's symbol, so it sees every instance aotKernelMatches admitted at once.
-/// Among implicit-GEMM instances it keeps the problem's widest vector widths, or every
-/// serving instance when none bakes them (conv::widestVectorSelection); "serves" is the
-/// capability, this is the policy. rocKE's direct benchmark runs every direct kernel that
-/// serves, so direct instances all stay.
+/// Among implicit-GEMM instances it keeps, per the engine's AotSelection, the problem's
+/// widest vector widths or every serving instance when none bakes them
+/// (conv::widestVectorSelection), or the widest of each kernel kind
+/// (conv::widestPerKindSelection); "serves" is the capability, this is the policy.
+/// rocKE's direct benchmark runs every direct kernel that serves, so direct instances
+/// all stay.
+template <const ConvFwdTarget& Target>
 std::vector<bool> aotCandidateFilter(const MatchContext& context,
                                      const BoundTokens& /*bound*/,
                                      const std::vector<const KernelDefinition*>& candidates)
@@ -1045,22 +1108,34 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
         if(gemm != nullptr && prepared.epilogue)
         {
             implicitGemm.push_back(i);
-            keys.push_back({*prepared.epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
+            keys.push_back({*prepared.epilogue,
+                            gemm->vectorA,
+                            gemm->vectorB,
+                            gemm->vectorC,
+                            gemm->groupMerge});
         }
     }
     if(keys.empty())
     {
         return keep;
     }
-    // Every candidate was admitted by aotKernelMatches, so the graph matches.
-    const auto matched = matchProblem(context);
-    if(!matched)
+    std::vector<bool> selected;
+    if(Target.selection == AotSelection::WIDEST_PER_KIND)
     {
-        return keep;
+        selected = conv::widestPerKindSelection(keys);
     }
-    const auto& problem = matched->problem;
-    const auto selected
-        = conv::widestVectorSelection(keys, problem.c / problem.groups, problem.k / problem.groups);
+    else
+    {
+        // Every candidate was admitted by aotKernelMatches, so the graph matches.
+        const auto matched = matchProblem(context, Target);
+        if(!matched)
+        {
+            return keep;
+        }
+        const auto& problem = matched->problem;
+        selected = conv::widestVectorSelection(
+            keys, problem.c / problem.groups, problem.k / problem.groups);
+    }
     for(size_t j = 0; j < implicitGemm.size(); ++j)
     {
         keep[implicitGemm[j]] = selected[j];
@@ -1072,19 +1147,21 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
 /// kernelFits for hipkernel:Gfx950ConvFwd, aotKernelFits for hipkernel:Gfx950ConvFwdAot.
 using KernelFits = std::optional<ConvLaunch> (*)(const MatchedProblem&, const KernelDefinition&);
 
-void requireBindings(const BoundTokens& bound, const Binding& binding)
+void requireBindings(const BoundTokens& bound, const Binding& binding, const ConvFwdTarget& target)
 {
-    if(tryGetBoundInt(bound, X_TOKEN) != std::optional<int64_t>(binding.x)
-       || tryGetBoundInt(bound, W_TOKEN) != std::optional<int64_t>(binding.w)
-       || tryGetBoundInt(bound, Y_TOKEN) != std::optional<int64_t>(binding.y))
+    if(tryGetBoundInt(bound, target.xToken) != std::optional<int64_t>(binding.x)
+       || tryGetBoundInt(bound, target.wToken) != std::optional<int64_t>(binding.w)
+       || tryGetBoundInt(bound, target.yToken) != std::optional<int64_t>(binding.y))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950_conv_fwd dispatch requires this graph matcher's tensor bindings");
+            std::string(target.label) + " dispatch requires this graph matcher's tensor bindings");
     }
 }
 
-void requireOutput(const MatchContext& context, const MatchedProblem& matched)
+void requireOutput(const MatchContext& context,
+                   const MatchedProblem& matched,
+                   const ConvFwdTarget& target)
 {
     const auto* output = findTensor(context, matched.binding.y);
     if(!hasPackedNhwcStrides(output) || output->dims()->Get(0) != matched.problem.n
@@ -1094,7 +1171,8 @@ void requireOutput(const MatchContext& context, const MatchedProblem& matched)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950_conv_fwd requires packed NHWK output with the inferred convolution dimensions");
+            std::string(target.label)
+                + " requires packed NHWK output with the inferred convolution dimensions");
     }
 }
 
@@ -1182,9 +1260,12 @@ private:
 class ConvFwdDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader, KernelFits fits)
+    ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader,
+                           KernelFits fits,
+                           const ConvFwdTarget& target)
         : _loader(loader)
         , _fits(fits)
+        , _target(target)
     {
     }
 
@@ -1201,17 +1282,17 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto matched = matchProblem(context);
+        const auto matched = matchProblem(context, _target);
         const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
         if(!launch)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_fwd graph or packaged kernel does not satisfy the convolution "
-                "contract");
+                std::string(_target.label)
+                    + " graph or packaged kernel does not satisfy the convolution contract");
         }
-        requireBindings(bound, matched->binding);
-        requireOutput(context, *matched);
+        requireBindings(bound, matched->binding, _target);
+        requireOutput(context, *matched, _target);
 
         // This pack ships prebuilt code objects only; _fits already refused every
         // other source kind. Each family has its own ABI, so the signature follows it.
@@ -1235,8 +1316,9 @@ public:
         const auto& convPrepared = dynamic_cast<const PreparedConvFwd&>(prepared);
         if(deviceBuffers == nullptr)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "gfx950_conv_fwd requires device buffers");
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           std::string(_target.label)
+                                                               + " requires device buffers");
         }
         const auto& binding = convPrepared.binding();
         const auto a
@@ -1251,7 +1333,8 @@ public:
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_fwd requires non-null device pointers aligned to 16 bytes");
+                    std::string(_target.label)
+                        + " requires non-null device pointers aligned to 16 bytes");
             }
         }
         const auto& bytes = convPrepared.bytes();
@@ -1262,7 +1345,8 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
+                std::string(_target.label)
+                    + " requires nonoverlapping input, filter, and output storage");
         }
         // A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32, then the family's AOT problem
         // block in kernelSignature's order. The byte counts are storage sizes, not element
@@ -1289,6 +1373,7 @@ public:
 private:
     const compilation::KpackKernelLoader& _loader;
     KernelFits _fits;
+    const ConvFwdTarget& _target;
 };
 
 const ConvFwdDispatchHandler& dispatchHandler()
@@ -1296,16 +1381,35 @@ const ConvFwdDispatchHandler& dispatchHandler()
     // The registries retain non-owning pointers; both dependencies live for the
     // process, including across provider handle destruction and recreation.
     static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdKpackModuleCache());
-    static const ConvFwdDispatchHandler s_handler(s_loader, &kernelFits);
+    static const ConvFwdDispatchHandler s_handler(s_loader, &kernelFits, GFX950_TARGET);
     return s_handler;
 }
 
 const ConvFwdDispatchHandler& aotDispatchHandler()
 {
     static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdAotKpackModuleCache());
-    static const ConvFwdDispatchHandler s_handler(s_loader, &aotKernelFits);
+    static const ConvFwdDispatchHandler s_handler(s_loader, &aotKernelFits, GFX950_TARGET);
     return s_handler;
 }
+
+const ConvFwdDispatchHandler& gfx942AotDispatchHandler()
+{
+    static const compilation::KpackKernelLoader s_loader(gfx942ConvFwdAotKpackModuleCache());
+    static const ConvFwdDispatchHandler s_handler(s_loader, &aotKernelFits, GFX942_TARGET);
+    return s_handler;
+}
+
+// ---- hipkernel:Gfx942ConvFwdAot: the AOT instances built for gfx942 ----
+//
+// Every hook is the gfx950 AOT engine's over GFX942_TARGET; only the symbols, the
+// tokens, the selection policy and the device size of the fallback score differ.
+
+constexpr std::string_view GFX942_AOT_GRAPH_MATCHER_SYMBOL
+    = "hipkernel.gfx942_conv_fwd_aot.graph_match";
+constexpr std::string_view GFX942_AOT_KERNEL_MATCHER_SYMBOL
+    = "hipkernel.gfx942_conv_fwd_aot.kernel_match";
+constexpr std::string_view GFX942_AOT_SCORE_SYMBOL = "hipkernel.gfx942_conv_fwd_aot.score";
+constexpr std::string_view GFX942_AOT_DISPATCH_SYMBOL = "hipkernel.gfx942_conv_fwd_aot.dispatch";
 
 } // namespace
 
@@ -1317,7 +1421,7 @@ compilation::KpackModuleCache& gfx950ConvFwdKpackModuleCache()
 
 void registerGfx950ConvFwdSymbols(SymbolScope<Handle>& scope)
 {
-    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &graphMatches);
+    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &graphMatches<GFX950_TARGET>);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &score);
     scope.add(std::string(DISPATCH_SYMBOL), &dispatchHandler());
@@ -1337,17 +1441,38 @@ compilation::KpackModuleCache& gfx950ConvFwdAotKpackModuleCache()
 void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
 {
     // Both engines read the graph the same way; only the kernels they admit differ.
-    scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches);
-    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
-    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter);
+    scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches<GFX950_TARGET>);
+    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches<GFX950_TARGET>);
+    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter<GFX950_TARGET>);
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotPrepare);
-    scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore);
+    scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore<GFX950_TARGET>);
     scope.add(std::string(AOT_DISPATCH_SYMBOL), &aotDispatchHandler());
 }
 
 void resetGfx950ConvFwdAotModuleCache()
 {
     gfx950ConvFwdAotKpackModuleCache().clear();
+}
+
+compilation::KpackModuleCache& gfx942ConvFwdAotKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void registerGfx942ConvFwdAotSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add(std::string(GFX942_AOT_GRAPH_MATCHER_SYMBOL), &graphMatches<GFX942_TARGET>);
+    scope.add(std::string(GFX942_AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches<GFX942_TARGET>);
+    scope.add(std::string(GFX942_AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter<GFX942_TARGET>);
+    scope.add(std::string(GFX942_AOT_KERNEL_MATCHER_SYMBOL), &aotPrepare);
+    scope.add(std::string(GFX942_AOT_SCORE_SYMBOL), &aotScore<GFX942_TARGET>);
+    scope.add(std::string(GFX942_AOT_DISPATCH_SYMBOL), &gfx942AotDispatchHandler());
+}
+
+void resetGfx942ConvFwdAotModuleCache()
+{
+    gfx942ConvFwdAotKpackModuleCache().clear();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

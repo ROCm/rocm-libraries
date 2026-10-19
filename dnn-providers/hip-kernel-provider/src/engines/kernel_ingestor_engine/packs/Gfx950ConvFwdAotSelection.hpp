@@ -4,8 +4,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
@@ -22,6 +25,8 @@ struct AotSelectionKey
     int64_t vectorA;
     int64_t vectorB;
     int64_t vectorC;
+    /// Group-merge degree, part of the kind for widestPerKindSelection; 1 when unmerged.
+    int64_t groupMerge = 1;
 };
 
 /// The widest vector width a channel run of @p channels admits: the largest of 8, 4, 2
@@ -68,6 +73,53 @@ inline std::vector<bool>
     if(!anyWidest)
     {
         std::fill(keep.begin(), keep.end(), true);
+    }
+    return keep;
+}
+
+/// Which of @p serving to run: rocKE's current --run-from-cache policy,
+/// _widest_vector_sizes in rocke/library/benchmarks/common/benchmark_implicit_gemm_conv.py,
+/// which hipkernel:Gfx942ConvFwdAot follows. One flag per entry, in order.
+///
+/// "Widest" is taken per kernel kind, the epilogue and the merge degree (no packaged
+/// instance is split-K, two-stage or stream-K): of each kind, only the instances whose
+/// (a + b + c, a, b, c) is the greatest serving one run. Before that, default-epilogue
+/// instances drop out where a serving instance of the same merge degree stores wider
+/// than 1. A merged instance records its derived widths as 0, so every serving merged
+/// instance of its kind runs. gfx942_conv_fwd_aot_runtime_candidates in
+/// convolution_forward.py is the same policy.
+inline std::vector<bool> widestPerKindSelection(const std::vector<AotSelectionKey>& serving)
+{
+    using Rank = std::array<int64_t, 4>;
+    const auto rank = [](const AotSelectionKey& key) {
+        return Rank{key.vectorA + key.vectorB + key.vectorC, key.vectorA, key.vectorB, key.vectorC};
+    };
+    std::map<int64_t, int64_t> widestStore;
+    for(const auto& key : serving)
+    {
+        auto& widest = widestStore[key.groupMerge];
+        widest = std::max(widest, key.vectorC);
+    }
+    std::vector<bool> keep(serving.size());
+    std::map<std::pair<std::string, int64_t>, Rank> best;
+    for(size_t i = 0; i < serving.size(); ++i)
+    {
+        keep[i] = !(serving[i].epilogue == "default" && widestStore[serving[i].groupMerge] > 1);
+        if(keep[i])
+        {
+            const auto kind = std::make_pair(serving[i].epilogue, serving[i].groupMerge);
+            const auto found = best.find(kind);
+            if(found == best.end() || found->second < rank(serving[i]))
+            {
+                best[kind] = rank(serving[i]);
+            }
+        }
+    }
+    for(size_t i = 0; i < serving.size(); ++i)
+    {
+        keep[i] = keep[i]
+                  && best.at(std::make_pair(serving[i].epilogue, serving[i].groupMerge))
+                         == rank(serving[i]);
     }
     return keep;
 }

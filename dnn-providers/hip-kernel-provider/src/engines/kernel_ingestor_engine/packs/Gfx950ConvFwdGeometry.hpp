@@ -476,9 +476,10 @@ inline bool implicitGemmServes(const ImplicitGemmCapabilities& capabilities, con
            && (problem.k / problem.groups) % capabilities.storeWidth == 0;
 }
 
-/// One shape-generic AOT instance of hipkernel:Gfx950ConvFwdAot: the build-time fields
-/// of a rocKE forward KernelIdentity that bound which problems its binary computes.
-/// Mirrors Gfx950ConvFwdAotSpec in rocke/library/builders/common/convolution_forward.py.
+/// One shape-generic AOT instance of hipkernel:Gfx950ConvFwdAot or
+/// hipkernel:Gfx942ConvFwdAot: the build-time fields of a rocKE forward KernelIdentity
+/// that bound which problems its binary computes. Mirrors Gfx950ConvFwdAotSpec in
+/// rocke/library/builders/common/convolution_forward.py.
 struct AotInstance
 {
     int64_t tileM;
@@ -492,7 +493,43 @@ struct AotInstance
     int64_t asyncChunkA; ///< Elements per async A chunk; 0 without asyncDma.
     int64_t asyncChunkB;
     bool grouped; ///< Built with the grouped code path, which also serves groups == 1.
+    /// Conv groups one workgroup owns: > 1 for a group-merged depthwise kernel, whose
+    /// widths the builder derives and the identity records as 0.
+    int64_t groupMerge = 1;
 };
+
+/// The launch of a group-merged @p instance on @p problem. Mirrors _aot_merged_serves in
+/// convolution_forward.py, rocKE's KernelCache._group_merge_fits for forward plus its grid
+/// bound: a depthwise problem (cpg = kpg = 1), a merge degree that divides the group
+/// count, and a merged GEMM N (kpg * groupMerge) that fits one tile. The grid tiles that
+/// merged GEMM N and launches groups / groupMerge z slices (implicit_gemm_conv_grid);
+/// the kernel arguments stay the true problem's, as rocKE launches it, and their
+/// p_num_pid_n, ceil(kpg / tileN), is the grid's x extent, 1, under that tile bound.
+inline std::optional<LaunchGeometry> mergedInstanceLaunch(const Problem& problem,
+                                                          const Geometry& geometry,
+                                                          const AotInstance& instance)
+{
+    const auto gm = instance.groupMerge;
+    if(!instance.grouped || instance.asyncDma || instance.vectorA != 0 || instance.vectorB != 0
+       || instance.vectorC != 0 || problem.groups <= 0 || problem.c != problem.groups
+       || problem.k != problem.groups || problem.groups % gm != 0 || gm > instance.tileN
+       || instance.tileM <= 0 || instance.warpM <= 0 || instance.warpN <= 0
+       || instance.warpM > 1024 / 64 || instance.warpN > 1024 / (64 * instance.warpM)
+       || geometry.gemmM <= 0)
+    {
+        return std::nullopt;
+    }
+    const auto gridY = 1 + (geometry.gemmM - 1) / instance.tileM;
+    const auto gridZ = problem.groups / gm;
+    if(gridY > 65535 || gridZ > 65535)
+    {
+        return std::nullopt;
+    }
+    return LaunchGeometry{1u,
+                          static_cast<unsigned int>(gridY),
+                          static_cast<unsigned int>(gridZ),
+                          static_cast<unsigned int>(instance.warpM * instance.warpN * 64)};
+}
 
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot
 /// compute it. Mirrors gfx950_conv_fwd_aot_serves in convolution_forward.py, the forward
@@ -504,7 +541,12 @@ struct AotInstance
 inline std::optional<LaunchGeometry>
     aotInstanceLaunch(const Problem& problem, const Geometry& geometry, const AotInstance& instance)
 {
-    if(instance.vectorA <= 0 || instance.vectorB <= 0 || instance.vectorC <= 0)
+    if(instance.groupMerge > 1)
+    {
+        return mergedInstanceLaunch(problem, geometry, instance);
+    }
+    if(instance.groupMerge != 1 || instance.vectorA <= 0 || instance.vectorB <= 0
+       || instance.vectorC <= 0)
     {
         return std::nullopt;
     }
@@ -530,19 +572,20 @@ inline std::optional<LaunchGeometry>
 /// tile area that is real output (padding waste costs work), times how well the grid
 /// fills a device of CU_COUNT compute units, with wider vectors breaking ties. A
 /// placeholder until rocKE's dispatcher ranks instances; BenchmarkPlan replaces it.
+/// @p cuCount is the engine's device size (256 on MI355X, 304 on MI300X).
 inline double aotInstanceScore(const Problem& problem,
                                const Geometry& geometry,
                                const AotInstance& instance,
-                               const LaunchGeometry& launch)
+                               const LaunchGeometry& launch,
+                               double cuCount = 256.0)
 {
-    constexpr double CU_COUNT = 256.0;
     const auto kpg = static_cast<double>(problem.k / problem.groups);
     const auto useful = static_cast<double>(geometry.gemmM) * kpg;
     const auto launched = static_cast<double>(launch.gridY) * static_cast<double>(instance.tileM)
                           * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN);
     const auto tiles = static_cast<double>(launch.gridX) * static_cast<double>(launch.gridY)
                        * static_cast<double>(launch.gridZ);
-    const auto fill = tiles >= CU_COUNT ? 1.0 : tiles / CU_COUNT;
+    const auto fill = tiles >= cuCount ? 1.0 : tiles / cuCount;
     const auto widths
         = static_cast<double>(instance.vectorA + instance.vectorB + instance.vectorC) / 24.0;
     return (useful / launched) * fill + 1e-3 * widths;
