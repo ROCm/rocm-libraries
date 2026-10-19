@@ -294,7 +294,8 @@ namespace hipsparse_test
         bsric02Info_t info = nullptr;
         bsric02_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateBsric02Info(&info), "hipsparseCreateBsric02Info");
+            throw_if_hipsparse_error(hipsparseCreateBsric02Info(&info),
+                                     "hipsparseCreateBsric02Info");
         }
 
         ~bsric02_struct()
@@ -312,7 +313,8 @@ namespace hipsparse_test
         csric02Info_t info = nullptr;
         csric02_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsric02Info(&info), "hipsparseCreateCsric02Info");
+            throw_if_hipsparse_error(hipsparseCreateCsric02Info(&info),
+                                     "hipsparseCreateCsric02Info");
         }
 
         ~csric02_struct()
@@ -358,7 +360,8 @@ namespace hipsparse_test
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyPruneInfo(info), "hipsparseDestroyPruneInfo");
+                log_if_hipsparse_error(hipsparseDestroyPruneInfo(info),
+                                       "hipsparseDestroyPruneInfo");
             }
         }
     };
