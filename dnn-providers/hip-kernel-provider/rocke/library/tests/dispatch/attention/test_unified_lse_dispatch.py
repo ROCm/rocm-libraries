@@ -77,6 +77,30 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
     assert on.spec.cache_key() != off.spec.cache_key()
 
 
+# What a long-lived cache stored for ``_decode_request`` before emit_lse existed:
+# the unpinned spec_hash, and the split-KV pin with its spec_hash.
+_PRE_LSE_UNPINNED_SPEC_HASH = "65416b2a8b9ffa90"
+_PRE_LSE_PIN = {
+    "gfx942": ("splitkv_seg16_t1xb_wpenone@af3937a1d431c0ef", "a76b874fbb3ffdbd"),
+    "gfx950": ("splitkv_seg16_t1xb_wpenone@f24a43837b523f06", "adb2a2142c22136a"),
+}
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_pre_lse_cache_entries_still_resolve_with_lse_off(arch):
+    """A cache replays a stored pin and treats a spec_hash mismatch as a miss.
+    The LSE field must leave every LSE-off identity as it was (spec payload,
+    tuning cache key, config defaults fingerprint), or every stored entry stops
+    resolving."""
+    unpinned = dispatch_attention(_decode_request(arch))
+    assert unpinned.kernel_id.spec_hash == _PRE_LSE_UNPINNED_SPEC_HASH
+    tuning_id, spec_hash = _PRE_LSE_PIN[arch]
+    pinned = dataclasses.replace(
+        _pinned(_decode_request(arch), _SPLIT_KV_SPEC[arch]), tuning_id=tuning_id
+    )
+    assert dispatch_attention(pinned).kernel_id.spec_hash == spec_hash
+
+
 @pytest.mark.parametrize("arch", _ARCHES)
 @pytest.mark.parametrize("emit_lse", [False, True])
 def test_split_kv_sweep_keeps_the_requested_output(arch, emit_lse):

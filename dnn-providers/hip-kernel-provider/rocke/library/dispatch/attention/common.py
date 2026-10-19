@@ -868,8 +868,17 @@ class AttentionSpec:
     sliding_window: int = 0
     # The optional LSE output is a distinct kernel (the split-KV reduce takes one
     # more pointer), so it must not collapse onto the LSE-off kernel_name /
-    # spec_hash either.
+    # spec_hash either. LSE-off leaves both exactly as before the field existed
+    # (see :meth:`identity`).
     emit_lse: bool = False
+
+    def identity(self) -> dict:
+        """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
+        so an LSE-off spec keeps the hash that stored caches already hold."""
+        payload = asdict(self)
+        if not self.emit_lse:
+            del payload["emit_lse"]
+        return payload
 
     def kernel_name(self) -> str:
         if self.kernel_name_override:
@@ -973,7 +982,13 @@ class AttentionTuningSpec:
                 return None
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
-            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+            # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
+            # spec_hash taken over it) is the one stored before the field existed.
+            return tuple(
+                (f.name, repr(getattr(spec, f.name)))
+                for f in fields(spec)
+                if not (f.name == "emit_lse" and not spec.emit_lse)
+            )
 
         return (
             "explicit",
