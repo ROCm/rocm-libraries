@@ -296,9 +296,6 @@ constexpr auto scalarStorageIdentity() {
     }
 }
 
-// Compile-time description of one encoding.
-// visitScalarType passes ScalarTag<type>; HostNumerics code that knows its
-// encoding at compile time names the same type, such as ScalarTag<ScalarType::UInt8>.
 template <ScalarType TypeValue>
 struct ScalarTag {
     static_assert(isConcreteScalarType(TypeValue));
