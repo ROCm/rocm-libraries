@@ -476,11 +476,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(0,
                         getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
     }
-    // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
-    // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
-    // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
-    // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
-    // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
     // A barrier is preceded by a tail of kBarrierTailWmmas WMMAs issued back to back: the wave
     // waits for the stage's last ds_loads while the tail runs, so the tail hides that much of the
     // drain. 4 is the best batch size measured on gfx1250 (never above 8, the useful queue depth).
@@ -495,6 +490,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
                                                       : f.wmmaBarrierCoverCycles;
         return std::min(want, fullQueue);
     }
+    // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
+    // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
+    // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
+    // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
+    // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
     bool wmmaRefillActive(int wmmaLatency) {
         if (wmmaQueueCover() <= 0) return false;
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
@@ -594,7 +594,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // than the quota when a hazard or dependency forces it, e.g. an
     // s_cmp/s_cmov SCC chain.
     //
-    // Invariant: ds_load selection is untouched. fillsThisWindow_ is separate
+    // Invariant: the quota does not touch ds_load selection (the ds pacer gates that).
+    // fillsThisWindow_ is separate
     // from nonWmmaFillsSinceActiveWmma_, which counts VALU only and pads the
     // WMMA->WMMA / WMMA->VALU coexec hazards; those pads keep their full 7+1
     // length. 0 = feature off.
