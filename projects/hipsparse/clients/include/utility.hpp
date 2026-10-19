@@ -158,8 +158,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -273,10 +273,8 @@ inline void
     throw_on_generate_matrix_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
 // A pivot position of -1 requires success. Any other position requires zero pivot.
-inline void throw_on_zero_pivot_status(hipsparseStatus_t status,
-                                       int               pivot,
-                                       const char*       file,
-                                       int               line)
+inline void
+    throw_on_zero_pivot_status(hipsparseStatus_t status, int pivot, const char* file, int line)
 {
     const hipsparseStatus_t expected
         = (pivot == -1) ? HIPSPARSE_STATUS_SUCCESS : HIPSPARSE_STATUS_ZERO_PIVOT;
@@ -287,8 +285,8 @@ inline void throw_on_zero_pivot_status(hipsparseStatus_t status,
 
     std::ostringstream message;
     message << file << ":" << line << ": zero pivot status failed: received "
-            << hipsparseStatusToString(status) << ", expected "
-            << hipsparseStatusToString(expected) << ".";
+            << hipsparseStatusToString(status) << ", expected " << hipsparseStatusToString(expected)
+            << ".";
     throw std::runtime_error(message.str());
 }
 
