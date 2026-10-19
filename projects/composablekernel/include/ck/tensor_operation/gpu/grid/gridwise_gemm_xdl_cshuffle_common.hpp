@@ -191,8 +191,22 @@ struct GridwiseGemm_xdl_cshuffle_base
             {
                 // FIXME: our support to non-K contiguous layout is limited, only work in some
                 // specific setting
-                return make_naive_tensor_descriptor_packed(
-                    make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number));
+                if constexpr(!UseLdsTranspose)
+                {
+                    return make_naive_tensor_descriptor_packed(
+                        make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number));
+                }
+                else
+                {
+                    constexpr auto base_desc = make_naive_tensor_descriptor_packed(
+                        make_tuple(Number<AKPerBlock>{}, Number<MPerBlock>{}));
+                    return transform_tensor_descriptor(
+                        base_desc,
+                        make_tuple(make_unmerge_transform(make_tuple(AK0Number, AK1Number)),
+                                   make_pass_through_transform(Number<MPerBlock>{})),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}),
+                        make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+                }
             }
             else
             {
@@ -577,8 +591,22 @@ struct GridwiseGemm_xdl_cshuffle_base
             {
                 // FIXME: our support to non-K contiguous layout is limited, only work in some
                 // specific setting
-                return make_naive_tensor_descriptor_packed(
-                    make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number));
+                if constexpr(!UseLdsTranspose)
+                {
+                    return make_naive_tensor_descriptor_packed(
+                        make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number));
+                }
+                else
+                {
+                    constexpr auto base_desc = make_naive_tensor_descriptor_packed(
+                        make_tuple(Number<BKPerBlock>{}, Number<NPerBlock>{}));
+                    return transform_tensor_descriptor(
+                        base_desc,
+                        make_tuple(make_unmerge_transform(make_tuple(BK0Number, BK1Number)),
+                                   make_pass_through_transform(Number<NPerBlock>{})),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}),
+                        make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+                }
             }
             else
             {

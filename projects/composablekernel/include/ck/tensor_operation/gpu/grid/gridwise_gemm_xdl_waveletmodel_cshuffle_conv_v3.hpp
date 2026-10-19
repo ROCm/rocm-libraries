@@ -370,7 +370,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     __host__ __device__ static auto TransformGrid(GridDesc_K0_MN_K1_T& desc, DeviceArch)
     {
         // gfx1250 doesn't need swizzling for DirectLoad pipeline
-        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t>)
+        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t> || UseLdsTranspose)
         {
             return desc;
         }
