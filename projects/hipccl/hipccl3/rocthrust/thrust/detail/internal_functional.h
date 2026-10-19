@@ -244,7 +244,7 @@ struct device_destroy_functor
 
 template <typename System, typename T>
 struct destroy_functor
-    : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
+    : thrust::detail::eval_if<_THRUST_STD::is_convertible_v<System, thrust::host_system_tag>,
                               _THRUST_STD::type_identity<host_destroy_functor<T>>,
                               _THRUST_STD::type_identity<device_destroy_functor<T>>>
 {};

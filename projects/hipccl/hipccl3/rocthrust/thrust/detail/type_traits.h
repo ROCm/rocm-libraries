@@ -124,7 +124,7 @@ template <typename T>
 inline constexpr bool is_proxy_reference_v = false;
 
 template <typename Boolean>
-struct not_ : public integral_constant<bool, !Boolean::value>
+struct not_ : public _THRUST_STD::integral_constant<bool, !Boolean::value>
 {}; // end not_
 
 template <bool, typename Then, typename Else>
