@@ -2548,8 +2548,8 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
 
 
 # --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
-# Non-MX comp_async / comp_tdm / comp_tdm_v2 are only generated for gfx1250 by
-# unified_gemm_codegen. expand_sweep must drop the same combinations up front,
+# Non-MX comp_async / comp_tdm / comp_tdm_v2 / comp_tdm_pc are only generated
+# for gfx1250 by unified_gemm_codegen. expand_sweep must drop the same combinations up front,
 # otherwise it hands back configs whose header is never emitted. The rules live
 # in codegen_common.gfx1250_pipeline_reject_reason (single source of truth
 # shared with the codegen and arch_filter); pipelines outside that set are
@@ -2587,13 +2587,15 @@ def _gfx1250_pipeline_supported(
     layout: str = "",
     dtype: str = "",
     warp_tile_k: int = 0,
+    tile_mn: Optional[Tuple[int, int]] = None,
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
-    8-bit warp_tile_k rule; an empty dtype skips it."""
+    8-bit warp_tile_k rule; an empty dtype skips it. ``tile_mn`` feeds the
+    comp_tdm_pc accumulator rule; None skips it."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2608,6 +2610,8 @@ def _gfx1250_pipeline_supported(
         variant_name=variant,
         persistent=bool(persistent),
         pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
+        batched=variant == "batched",
+        tile_mn=tile_mn,
     )
     return not reason
 
@@ -2884,6 +2888,7 @@ def expand_sweep(
             layout=layout,
             dtype=dtype,
             warp_tile_k=wtk,
+            tile_mn=(tm, tn),
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
