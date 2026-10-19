@@ -93,4 +93,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 384]
           - Exact: [128, 128, 1, 512]
           - Exact: [128, 128, 1, 1024]
+          - Exact: [128, 128, 1, 2048]
+          # edge case
+          - Exact: [120, 120, 1, 512]
 
