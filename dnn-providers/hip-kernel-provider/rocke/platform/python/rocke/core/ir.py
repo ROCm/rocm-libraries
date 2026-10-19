@@ -517,6 +517,7 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x128_fp4": "acc4",
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
+    "mfma_f32_16x16x128_fp4fp6fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
 }
 
@@ -3213,6 +3214,54 @@ class IRBuilder:
         scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
         with that atom and both scales. See ``reference/mma_metadata.md``.
         """
+        attrs = self._f8f6f4_16x16x128_attrs(a, b, a_format, b_format)
+        return self.mma(
+            "mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale, attrs=attrs
+        )
+
+    def mfma_f32_16x16x128_fp4fp6fp8(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        *,
+        a_format: str = "fp8e4m3",
+        b_format: str = "fp8e4m3",
+    ) -> Value:
+        """gfx950 unscaled 16x16x128 MFMA for fp8, bf8, fp6 and fp4.
+
+        The instruction applies no scale. The lowering passes literal 0 for both
+        scale operands of ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``, and
+        the backend then selects the unscaled instruction
+        ``v_mfma_f32_16x16x128_f8f6f4``. The op always passes the literal. A
+        loaded or computed 0 would mean the factor ``2^-127``, so use
+        :meth:`mfma_scale_f32_16x16x128_f8f6f4` when the scale is not a literal.
+
+        ``a_format`` and ``b_format`` name the data type of A and B: ``fp8e4m3``,
+        ``bf8e5m2``, ``fp6e2m3``, ``fp6e3m2`` or ``fp4e2m1``. They set the
+        ``cbsz`` and ``blgp`` format selectors.
+
+        **A and B must use the same format in this version.** A call with
+        different values raises ``ValueError``. The signature already has both
+        arguments, so a later change can allow mixed formats without changing it.
+
+        ``a`` and ``b`` hold 256 bits per lane for every format (an ``<8 x i32>``
+        or any type of that width). fp8 and bf8 data fill all 8 dwords. fp6 data
+        fills the low 6 dwords and fp4 data the low 4. The instruction ignores
+        the remaining dwords. Any other width raises ``ValueError``. The result
+        is ``<4 x float>``.
+        """
+        attrs = self._f8f6f4_16x16x128_attrs(a, b, a_format, b_format)
+        return self.mma("mfma_f32_16x16x128_fp4fp6fp8", a, b, c, attrs=attrs)
+
+    def _f8f6f4_16x16x128_attrs(
+        self, a: Value, b: Value, a_format: str, b_format: str
+    ) -> Dict[str, Any]:
+        """Check the formats and operand widths; return the op attributes.
+
+        The attributes are empty for the default formats, so existing serialized
+        IR does not change.
+        """
         from .arch.mfma_scale import (
             DEFAULT_MATRIX_FORMAT,
             f8f6f4_16x16x128_operand_error,
@@ -3223,12 +3272,9 @@ class IRBuilder:
         error = f8f6f4_16x16x128_operand_error(a, b)
         if error:
             raise ValueError(error)
-        attrs = {}
-        if a_format != DEFAULT_MATRIX_FORMAT or b_format != DEFAULT_MATRIX_FORMAT:
-            attrs = {"a_format": a_format, "b_format": b_format}
-        return self.mma(
-            "mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale, attrs=attrs
-        )
+        if a_format == DEFAULT_MATRIX_FORMAT and b_format == DEFAULT_MATRIX_FORMAT:
+            return {}
+        return {"a_format": a_format, "b_format": b_format}
 
     def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
         """fp4 MX MFMA (gfx950+, P52).

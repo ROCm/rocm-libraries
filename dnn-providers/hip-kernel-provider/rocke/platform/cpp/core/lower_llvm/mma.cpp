@@ -51,6 +51,7 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
 static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op);
+static void _op_tile_mfma_f32_16x16x128_fp4fp6fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_register_p_from_qk_c(rocke_lower_t* L, const rocke_op_t* op);
 
 /* Table-driven dense MFMA dispatch (definition below the spec table). Resolves
@@ -549,6 +550,10 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     else if(strcmp(op_id, "mfma_f32_16x16x96_fp6") == 0)
     {
         _op_tile_mfma_f32_16x16x96_fp6(L, op);
+    }
+    else if(strcmp(op_id, "mfma_f32_16x16x128_fp4fp6fp8") == 0)
+    {
+        _op_tile_mfma_f32_16x16x128_fp4fp6fp8(L, op);
     }
     else if(strcmp(op_id, "mfma_f32_16x16x128_fp8") == 0)
     {
@@ -1383,16 +1388,37 @@ static void emit_f8f6f4_16x16x128(rocke_lower_t* L,
                    b_scale);
 }
 
+/* Check the formats and operand widths of op and return cbsz and blgp (Python
+ * _f8f6f4_16x16x128_selectors). The checks run here as well as in the builder,
+ * because serialized IR reaches the lowerer without passing through the builder. */
+static void f8f6f4_16x16x128_selectors(rocke_lower_t* L,
+                                       const rocke_op_t* op,
+                                       const rocke_value_t* a,
+                                       const rocke_value_t* b,
+                                       int* cbsz,
+                                       int* blgp)
+{
+    char msg[320];
+    if(rocke_f8f6f4_16x16x128_check(rocke_attr_get_str(&op->attrs, "a_format"),
+                                    rocke_attr_get_str(&op->attrs, "b_format"),
+                                    a->type,
+                                    b->type,
+                                    msg,
+                                    sizeof(msg),
+                                    cbsz,
+                                    blgp))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", msg);
+    }
+}
+
 /* MX op: the f8f6f4 MFMA with in-instruction E8M0 scales. The instruction reads
  * one E8M0 byte from each scale and multiplies by 2^(e - 127); e = 0 gives
  * 2^-127, not 1.0. Both scale operands at literal 0 make the backend select the
  * unscaled instruction instead. The optional attributes a_format and b_format
- * name the data type (default fp8e4m3) and must be equal in this version. The
- * checks run here as well as in the builder, because serialized IR reaches the
- * lowerer without passing through the builder. */
+ * name the data type (default fp8e4m3) and must be equal in this version. */
 static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const rocke_op_t* op)
 {
-    char msg[320];
     int cbsz = 0, blgp = 0;
     if(!rocke_ll_live(L))
     {
@@ -1402,17 +1428,7 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
     }
-    if(rocke_f8f6f4_16x16x128_check(rocke_attr_get_str(&op->attrs, "a_format"),
-                                    rocke_attr_get_str(&op->attrs, "b_format"),
-                                    op->operands[0]->type,
-                                    op->operands[1]->type,
-                                    msg,
-                                    sizeof(msg),
-                                    &cbsz,
-                                    &blgp))
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", msg);
-    }
+    f8f6f4_16x16x128_selectors(L, op, op->operands[0], op->operands[1], &cbsz, &blgp);
     emit_f8f6f4_16x16x128(L,
                           op,
                           op->operands[0],
@@ -1422,6 +1438,37 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
                           rocke_ll_operand(L, op->operands[4]),
                           "mxa",
                           "mxb",
+                          cbsz,
+                          blgp);
+}
+
+/* Unscaled K=128 MFMA for fp8, bf8, fp6 and fp4. gfx950 has no unscaled
+ * intrinsic for this instruction. The op calls the scaled intrinsic with both
+ * scale operands at literal 0, and the backend then selects
+ * v_mfma_f32_16x16x128_f8f6f4. The literal 0 marks "no scale". As an E8M0 value,
+ * 0 would mean 2^-127, so a loaded or computed 0 must never replace the literal
+ * here. The attributes a_format and b_format work as for the MX op. */
+static void _op_tile_mfma_f32_16x16x128_fp4fp6fp8(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int cbsz = 0, blgp = 0;
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(op->num_operands != 3)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
+    }
+    f8f6f4_16x16x128_selectors(L, op, op->operands[0], op->operands[1], &cbsz, &blgp);
+    emit_f8f6f4_16x16x128(L,
+                          op,
+                          op->operands[0],
+                          op->operands[1],
+                          op->operands[2],
+                          "0",
+                          "0",
+                          "a_f8f6f4",
+                          "b_f8f6f4",
                           cbsz,
                           blgp);
 }

@@ -30,6 +30,7 @@ authoring entrypoints:
 | Path | Authoring entrypoint | Per-lane FP32 accumulator | Current consumer |
 |---|---|---|---|
 | Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; `a_format` and `b_format` set the `cbsz` and `blgp` format selectors (default `fp8e4m3`). A and B must use the same format in this version. Every operand has 256 bits per lane |
+| Unscaled 16x16x128 op for every format | `IRBuilder.mfma_f32_16x16x128_fp4fp6fp8(...)` | 4 values | Direct operation authoring; both scale operands are literal 0, and `a_format` and `b_format` select the data type. A and B must use the same format in this version |
 | Existing 16x16x128 FP8 atom | `MfmaAtom.fp8_16x16x128().emit(...)` | 4 values | gfx950 FP8 fused-MoE dispatcher; the same scaled intrinsic is used with constant in-instruction scales |
 | Native 32x32x64 scaled family | `op_for_shape(family="mfma_scaled", ...)`, then `IRBuilder.mma(atom, a, b, c, a_scale, b_scale)` | 16 values | Direct packed GEMM builder and untuned examples, with independent A/B formats and K32 E8M0 scales |
 

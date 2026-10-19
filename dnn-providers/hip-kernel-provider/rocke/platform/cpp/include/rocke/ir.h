@@ -1241,6 +1241,30 @@ rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
                                              rocke_value_t* bb,
                                              rocke_value_t* c);
+/* gfx950 unscaled 16x16x128 MFMA for fp8, bf8, fp6 and fp4. The instruction
+ * applies no scale. The lowering passes literal 0 for both scale operands of the
+ * f8f6f4 intrinsic, and the backend then selects the unscaled instruction
+ * v_mfma_f32_16x16x128_f8f6f4. A loaded or computed 0 would mean the factor
+ * 2^-127, so use the MX op when the scale is not a literal.
+ *
+ * a_format and b_format name the data type: "fp8e4m3", "bf8e5m2", "fp6e2m3",
+ * "fp6e3m2" or "fp4e2m1". NULL means "fp8e4m3". They set the cbsz and blgp
+ * format selectors.
+ *
+ * A and B must use the same format in this version. A call with different
+ * formats records ROCKE_ERR_VALUE and returns NULL. The signature already has
+ * both arguments, so a later change can allow mixed formats without changing it.
+ *
+ * a and bb hold 256 bits per lane for every format (an <8 x i32> or any type of
+ * that width). fp8 and bf8 data fill all 8 dwords. fp6 data fills the low 6 and
+ * fp4 data the low 4; the instruction ignores the remaining dwords. Any other
+ * width, or an unknown format name, records ROCKE_ERR_VALUE and returns NULL. */
+rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4fp6fp8(rocke_ir_builder_t* b,
+                                                    rocke_value_t* a,
+                                                    rocke_value_t* bb,
+                                                    rocke_value_t* c,
+                                                    const char* a_format,
+                                                    const char* b_format);
 /* gfx950 16x16x128 MFMA with in-instruction E8M0 scales (the MX op), fp8e4m3
  * for A and B. Same as the _fmt variant with both formats NULL. */
 rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,

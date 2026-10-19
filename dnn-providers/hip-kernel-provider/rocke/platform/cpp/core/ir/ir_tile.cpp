@@ -50,6 +50,7 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_16x16x128_fp4", "acc4"},
     {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
+    {"mfma_f32_16x16x128_fp4fp6fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
@@ -723,6 +724,49 @@ ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_f16, "wmma_gfx12_f32_16x16x16_f16
 ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_bf16, "wmma_gfx12_f32_16x16x16_bf16")
 
 #undef ROCKE_MMA_WRAP
+
+rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4fp6fp8(rocke_ir_builder_t* b,
+                                                    rocke_value_t* a,
+                                                    rocke_value_t* bb,
+                                                    rocke_value_t* c,
+                                                    const char* a_format,
+                                                    const char* b_format)
+{
+    char msg[320];
+    int cbsz = 0, blgp = 0;
+    bool non_default;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!a_format)
+        a_format = ROCKE_DEFAULT_MATRIX_FORMAT;
+    if(!b_format)
+        b_format = ROCKE_DEFAULT_MATRIX_FORMAT;
+    if(rocke_f8f6f4_16x16x128_check(a_format,
+                                    b_format,
+                                    a ? a->type : NULL,
+                                    bb ? bb->type : NULL,
+                                    msg,
+                                    sizeof(msg),
+                                    &cbsz,
+                                    &blgp))
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", msg);
+    }
+    /* Default formats store no attribute, so existing serialized IR does not change. */
+    non_default = strcmp(a_format, ROCKE_DEFAULT_MATRIX_FORMAT) != 0
+                  || strcmp(b_format, ROCKE_DEFAULT_MATRIX_FORMAT) != 0;
+    return rocke_b_mma_fmt(b,
+                           "mfma_f32_16x16x128_fp4fp6fp8",
+                           a,
+                           bb,
+                           c,
+                           NULL,
+                           0,
+                           non_default ? a_format : NULL,
+                           non_default ? b_format : NULL);
+}
 
 rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4_fmt(rocke_ir_builder_t* b,
                                                            rocke_value_t* a,

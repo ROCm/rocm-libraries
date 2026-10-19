@@ -10,6 +10,10 @@ same nine-argument, mangled form, so the text does not depend on the flavor.
 
 The MX op takes ``a_format`` and ``b_format``. A and B must use the same format
 in this version. Every operand has 256 bits per lane for every format.
+
+The unscaled op ``mfma_f32_16x16x128_fp4fp6fp8`` takes the same two arguments. It
+always passes literal 0 for both scales, so the backend selects the unscaled
+instruction for every format.
 """
 
 from __future__ import annotations
@@ -74,6 +78,14 @@ def _kernel(kind: str, scales=(127, 127), fmt=None) -> KernelDef:
         r = b.mfma_scale_f32_16x16x128_f8f6f4(
             a, bb, r1, b.const_i32(scales[0]), b.const_i32(scales[1]), **kw
         )
+    elif kind == "unscaled":
+        r = b.mfma_f32_16x16x128_fp4fp6fp8(a, bb, acc, **kw)
+    elif kind == "all":
+        r1 = b.mma("mfma_f32_16x16x128_fp8", a, bb, acc)
+        r2 = b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, r1, b.const_i32(scales[0]), b.const_i32(scales[1]), **kw
+        )
+        r = b.mfma_f32_16x16x128_fp4fp6fp8(a, bb, r2, **kw)
     else:
         raise ValueError(kind)
     b.global_store_vN(pc, b.mul(tid, b.const_i32(4)), r, 4, align=16)
@@ -81,8 +93,10 @@ def _kernel(kind: str, scales=(127, 127), fmt=None) -> KernelDef:
     return b.kernel
 
 
-def _raw_kernel(a_format: str, b_format: str, dwords: int = 8) -> KernelDef:
-    """An MX op built through the generic ``mma`` with raw attributes.
+def _raw_kernel(
+    a_format: str, b_format: str, dwords: int = 8, op: str = "mx"
+) -> KernelDef:
+    """An MX or unscaled op built through the generic ``mma`` with raw attributes.
 
     The generic path skips the checks of the MX builder method. Serialized IR
     reaches both engines the same way, so the engines must check on their own.
@@ -91,15 +105,19 @@ def _raw_kernel(a_format: str, b_format: str, dwords: int = 8) -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = 64
     a = b.vector_splat(b.const_i32(1), dwords)
     acc = b.vector_splat(b.const_f32(0.0), 4)
-    b.mma(
-        "mfma_scale_f32_16x16x128_f8f6f4",
-        a,
-        a,
-        acc,
-        b.const_i32(127),
-        b.const_i32(127),
-        attrs={"a_format": a_format, "b_format": b_format},
-    )
+    attrs = {"a_format": a_format, "b_format": b_format}
+    if op == "unscaled":
+        b.mma("mfma_f32_16x16x128_fp4fp6fp8", a, a, acc, attrs=attrs)
+    else:
+        b.mma(
+            "mfma_scale_f32_16x16x128_f8f6f4",
+            a,
+            a,
+            acc,
+            b.const_i32(127),
+            b.const_i32(127),
+            attrs=attrs,
+        )
     b.ret()
     return b.kernel
 
@@ -255,6 +273,64 @@ class TestFormats(unittest.TestCase):
             lower_kernel_to_hip(_kernel("mx"), arch="gfx950")
 
 
+class TestUnscaledOp(unittest.TestCase):
+    """The op ``mfma_f32_16x16x128_fp4fp6fp8`` for every format."""
+
+    def test_the_call_passes_literal_zero_scales_and_the_selectors(self):
+        for fmt, n in _FORMATS.items():
+            for flavor in LLVM_FLAVORS:
+                with self.subTest(fmt=fmt, flavor=flavor):
+                    ll = _lower(_kernel("unscaled", fmt=fmt), flavor)
+                    self.assertEqual(_declare_lines(ll), [_DECLARATION])
+                    (call,) = _call_lines(ll)
+                    self.assertTrue(
+                        call.endswith(f"i32 {n}, i32 {n}, i32 0, i32 0, i32 0, i32 0)"),
+                        call,
+                    )
+
+    def test_all_three_ops_in_one_kernel_share_one_declaration(self):
+        for fmt in _FORMATS:
+            with self.subTest(fmt=fmt):
+                ll = _lower(_kernel("all", fmt=fmt), "llvm23")
+                self.assertEqual(_declare_lines(ll), [_DECLARATION])
+                self.assertEqual(len(_call_lines(ll)), 3)
+
+    def test_the_builder_rejects_different_formats_and_bad_input(self):
+        def build(a_format, b_format, dwords=8):
+            b = IRBuilder("bad")
+            a = b.vector_splat(b.const_i32(1), dwords)
+            acc = b.vector_splat(b.const_f32(0.0), 4)
+            b.mfma_f32_16x16x128_fp4fp6fp8(
+                a, a, acc, a_format=a_format, b_format=b_format
+            )
+
+        with self.assertRaisesRegex(ValueError, "same format"):
+            build("fp8e4m3", "fp4e2m1")
+        with self.assertRaisesRegex(ValueError, "unknown a_format 'fp8'"):
+            build("fp8", "fp8")
+        with self.assertRaisesRegex(ValueError, "256 bits per lane"):
+            build("fp4e2m1", "fp4e2m1", dwords=4)
+
+    def test_the_python_engine_checks_serialized_attributes(self):
+        for args, pattern in (
+            (("fp8e4m3", "fp4e2m1"), "same format"),
+            (("fp8", "fp8"), "unknown a_format"),
+            (("fp6e2m3", "fp6e2m3", 6), "256 bits per lane"),
+        ):
+            with self.subTest(args=args), self.assertRaisesRegex(ValueError, pattern):
+                _lower(_raw_kernel(*args, op="unscaled"), "llvm23")
+
+    def test_default_formats_add_no_attribute(self):
+        self.assertNotIn("a_format", str(serialize(_kernel("unscaled"))))
+        self.assertIn("a_format", str(serialize(_kernel("unscaled", fmt="fp4e2m1"))))
+
+    def test_the_hip_lowering_does_not_fake_the_op(self):
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        with self.assertRaises(NotImplementedError):
+            lower_kernel_to_hip(_kernel("unscaled"), arch="gfx950")
+
+
 def _kernel_mixed(a_format: str, b_format: str) -> KernelDef:
     b = IRBuilder("mixed")
     a = b.vector_splat(b.const_i32(1), 8)
@@ -280,6 +356,8 @@ class TestEngineIdentity(unittest.TestCase):
             self.skipTest(f"C++ engine unavailable: {exc}")
         cases = [(kind, None) for kind in ("hero", "mx", "both")]
         cases += [("mx", fmt) for fmt in _FORMATS]
+        cases += [("unscaled", fmt) for fmt in _FORMATS]
+        cases += [("all", "fp6e3m2")]
         for kind, fmt in cases:
             kernel = _kernel(kind, fmt=fmt)
             serialized = serialize(kernel)
@@ -300,9 +378,15 @@ class TestEngineIdentity(unittest.TestCase):
             (("fp8", "fp8"), "unknown a_format"),
             (("fp6e2m3", "fp6e2m3", 6), "256 bits per lane"),
         ):
-            with self.subTest(args=args), self.assertRaises(RuntimeError) as ctx:
-                _lower_via_cpp_engine(serialize(_raw_kernel(*args)), "gfx950", "llvm23")
-            self.assertIn(text, str(ctx.exception))
+            for op in ("mx", "unscaled"):
+                with (
+                    self.subTest(args=args, op=op),
+                    self.assertRaises(RuntimeError) as ctx,
+                ):
+                    _lower_via_cpp_engine(
+                        serialize(_raw_kernel(*args, op=op)), "gfx950", "llvm23"
+                    )
+                self.assertIn(text, str(ctx.exception))
 
 
 class TestToolchain(unittest.TestCase):
@@ -314,6 +398,8 @@ class TestToolchain(unittest.TestCase):
             self.skipTest("no llvm-as or opt found")
         cases = [(kind, None) for kind in ("hero", "mx", "both")]
         cases += [("mx", fmt) for fmt in _FORMATS]
+        cases += [("unscaled", fmt) for fmt in _FORMATS]
+        cases += [("all", "fp6e3m2")]
         for kind, fmt in cases:
             for flavor in LLVM_FLAVORS:
                 with (
@@ -394,6 +480,21 @@ class TestToolchain(unittest.TestCase):
             if n == 0:
                 self.assertNotIn("cbsz:", line)
                 self.assertNotIn("blgp:", line)
+            else:
+                self.assertIn(f"cbsz:{n}", line)
+                self.assertIn(f"blgp:{n}", line)
+
+    def test_the_unscaled_op_selects_the_unscaled_instruction_for_every_format(self):
+        for fmt, n in _FORMATS.items():
+            with self.subTest(fmt=fmt), tempfile.TemporaryDirectory() as td:
+                asm = self._isa("unscaled", td, fmt=fmt)
+            self.assertNotIn("v_mfma_scale_", asm)
+            self.assertNotIn("v_mfma_ld_scale_", asm)
+            line = next(
+                ln for ln in asm.splitlines() if "v_mfma_f32_16x16x128_f8f6f4" in ln
+            )
+            if n == 0:
+                self.assertNotIn("cbsz:", line)
             else:
                 self.assertIn(f"cbsz:{n}", line)
                 self.assertIn(f"blgp:{n}", line)
@@ -480,6 +581,11 @@ class TestGfx950Numerics(unittest.TestCase):
         for fmt in _FORMATS:
             with self.subTest(fmt=fmt):
                 self.assertEqual(self._run("mx", (127, 127), fmt), 128.0)
+
+    def test_the_unscaled_op_gives_128_for_every_format(self):
+        for fmt in _FORMATS:
+            with self.subTest(fmt=fmt):
+                self.assertEqual(self._run("unscaled", fmt=fmt), 128.0)
 
     def test_the_scale_applies_to_fp4_and_fp6(self):
         for fmt in ("fp4e2m1", "fp6e2m3"):

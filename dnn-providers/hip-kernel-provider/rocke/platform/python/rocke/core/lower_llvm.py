@@ -4284,6 +4284,27 @@ class _Lowerer:
             f"i32 {cbsz}, i32 {blgp}, i32 0, i32 {a_scale}, i32 0, i32 {b_scale})"
         )
 
+    def _f8f6f4_16x16x128_selectors(self, op: Op, a: Value, b: Value):
+        """Check the formats and operand widths of ``op``; return ``(cbsz, blgp)``.
+
+        The checks run in the lowerer as well as in the builder, because
+        serialized IR reaches the lowerer without passing through the builder.
+        """
+        from .arch.mfma_scale import (
+            DEFAULT_MATRIX_FORMAT,
+            f8f6f4_16x16x128_operand_error,
+            f8f6f4_16x16x128_selectors,
+        )
+
+        selectors = f8f6f4_16x16x128_selectors(
+            op.attrs.get("a_format", DEFAULT_MATRIX_FORMAT),
+            op.attrs.get("b_format", DEFAULT_MATRIX_FORMAT),
+        )
+        error = f8f6f4_16x16x128_operand_error(a, b)
+        if error:
+            raise ValueError(error)
+        return selectors
+
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
         """Lower the MX op: the f8f6f4 MFMA with in-instruction E8M0 scales.
 
@@ -4295,25 +4316,10 @@ class _Lowerer:
         ``e = 0`` gives ``2^-127``, not 1.0. If both scale operands are literal
         0, the backend drops the scales and selects the unscaled instruction.
 
-        The checks run here as well as in the builder, because serialized IR
-        reaches the lowerer without passing through the builder.
-
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
-        from .arch.mfma_scale import (
-            DEFAULT_MATRIX_FORMAT,
-            f8f6f4_16x16x128_operand_error,
-            f8f6f4_16x16x128_selectors,
-        )
-
         a, b, c, a_scale, b_scale = op.operands
-        cbsz, blgp = f8f6f4_16x16x128_selectors(
-            op.attrs.get("a_format", DEFAULT_MATRIX_FORMAT),
-            op.attrs.get("b_format", DEFAULT_MATRIX_FORMAT),
-        )
-        error = f8f6f4_16x16x128_operand_error(a, b)
-        if error:
-            raise ValueError(error)
+        cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
         self._emit_f8f6f4_16x16x128(
             op,
             a,
@@ -4325,6 +4331,22 @@ class _Lowerer:
             "mxb",
             cbsz,
             blgp,
+        )
+
+    def _op_tile_mfma_f32_16x16x128_fp4fp6fp8(self, op: Op) -> None:
+        """Lower the unscaled K=128 MFMA for fp8, bf8, fp6 and fp4.
+
+        gfx950 has no unscaled intrinsic for this instruction. The op calls the
+        scaled intrinsic with both scale operands at literal 0, and the backend
+        then selects ``v_mfma_f32_16x16x128_f8f6f4``. The literal 0 marks "no
+        scale". As an E8M0 value, 0 would mean ``2^-127``, so a loaded or
+        computed 0 must never replace the literal here. The attributes
+        ``a_format`` and ``b_format`` work as for the MX op.
+        """
+        a, b, c = op.operands
+        cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
+        self._emit_f8f6f4_16x16x128(
+            op, a, b, c, "0", "0", "a_f8f6f4", "b_f8f6f4", cbsz, blgp
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:

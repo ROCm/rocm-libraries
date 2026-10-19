@@ -68,6 +68,20 @@ The instruction multiplies by `2^(e - 127)` for each E8M0 scale byte `e`. The va
 `e = 0` gives `2^-127`, not 1.0. If both scale operands are literal 0, the backend
 selects the unscaled instruction instead.
 
+### 16x16x128 unscaled op for every format
+
+`IRBuilder.mfma_f32_16x16x128_fp4fp6fp8(a, b, c, *, a_format, b_format)` runs the
+unscaled instruction `v_mfma_f32_16x16x128_f8f6f4` for fp8, bf8, fp6 and fp4. It
+takes the same formats, the same operand width, and the same same-format rule as
+the MX op. The C API function is `rocke_b_mfma_f32_16x16x128_fp4fp6fp8`.
+
+LLVM has no unscaled intrinsic for this instruction. The op calls the scaled
+intrinsic with both scale operands at literal 0, and the backend selects the
+unscaled instruction. The op always passes the literal. A scale that the kernel
+loads or computes can be 0, and a 0 that the backend cannot see as a literal gives
+the factor `2^-127`. Use the MX op for such scales. The existing `fp8_16x16x128`
+hero atom is the fp8e4m3 case of this op.
+
 See [MMA selection, emission and dispatcher paths](mma_metadata.md#selection-ir-emission-and-dispatch),
 the [gfx950 GEMM contract](../instances/gfx950_block_scaled_gemm.md), and
 [runnable scaled-GEMM examples](../../python/rocke/examples/gfx950/gemm/README.md).
