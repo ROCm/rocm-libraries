@@ -741,6 +741,15 @@ workstream it serves: toolchain resolution and the move to TheRock CI under *Con
 `tensilelite-common` under *Cadence*, and the `--strict-known-bugs` lane, the characterization-to-unit
 migration, mutation testing, the linter, and type checking under *Keep it honest*.
 
+The shared plan also proposes how kernel testing is divided across StinkyTofu, TensileLite, a kernel
+corpus layer, and hipBLASLt; see
+[Who tests what](../TESTING.md#who-tests-what). For TensileLite, the proposal narrows what its
+hardware tests are for. TensileLite would own one question: given solution parameters, does it emit
+the kernel those parameters describe? That is answered by its Python unit tests and by one small
+hardware test per code-generation feature. Sweeps over the shapes of shipped kernels, which
+`Tests/common` does in part today, would move to the corpus layer, which tests every shipped kernel
+however it was generated.
+
 ## Known Risks and Gaps
 
 Stated plainly, so none of these are a surprise at release time. This section covers TensileLite,

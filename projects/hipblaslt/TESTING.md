@@ -130,6 +130,7 @@ its incident write-ups, lives in [tensilelite/TESTING.md](tensilelite/TESTING.md
 - [Improvement Roadmap](#improvement-roadmap), shared with TensileLite
   - [Testing philosophy](#testing-philosophy)
   - [Target test kinds](#target-test-kinds)
+  - [Who tests what](#who-tests-what)
   - [Cadence contract](#cadence-contract)
   - [Workstreams](#workstreams)
 - [Known Risks and Gaps](#known-risks-and-gaps)
@@ -1160,6 +1161,14 @@ This section is the plan for regularizing testing across both products. They are
 is tracked under AIHPBLAS-5028. It is a proposal: the philosophy and the target shape are for the team
 to agree on, and both will be refined as the inventory and the coverage model fill in.
 
+One part of the plan reaches past these two products. Kernel correctness is tested today in the
+hipBLASLt client suite, in TensileLite's `Tests/common`, and (in principle) in StinkyTofu, and none of
+them tests the set of kernels that ships. [Who tests what](#who-tests-what) proposes a split: StinkyTofu
+and TensileLite each test the correctness of the code they emit, a new kernel corpus layer tests every
+shipped kernel across the problems it is selected for, and hipBLASLt's own tests become mostly host
+unit tests of argument validation, selection, and dispatch. TensileLite's and StinkyTofu's TESTING.md
+files each carry a short pointer to that section.
+
 ### Testing philosophy
 
 These build on the principles in TheRock's
@@ -1214,11 +1223,85 @@ Two kinds of test in the tree today deliberately do not appear in that table:
   tests under different conditions. Treating them as modes means one set of test definitions run more
   than one way, instead of a parallel suite per condition.
 
-One open question is worth stating rather than deciding here. TensileLite's `Tests/common` and the
-hipBLASLt client suite are both numerical-correctness tests with the same kind of oracle, but they
-sample different spaces: `Tests/common` walks kernel-generation parameters, while the client suite
-walks the ways the public API gets called. Whether they should share one harness, or stay two harnesses
-that share one coverage model, is a decision the inventory should inform.
+TensileLite's `Tests/common` and the hipBLASLt client suite are both numerical-correctness tests with
+the same kind of oracle, but they sample different spaces, and neither of those spaces is the set of
+kernels that actually ships. [Who tests what](#who-tests-what) proposes how to divide that work.
+
+### Who tests what
+
+Kernel correctness is tested in three places today, and each one samples something different. The
+hipBLASLt client suite runs whichever solution the selection heuristic picks for each problem in its
+YAML data, so its coverage of any one kernel is incidental. TensileLite's `Tests/common` builds and runs
+kernels from its own test configurations, which exercise the generator's features but are not the
+kernels in the shipped library logic. StinkyTofu, which schedules and protects those kernels on
+gfx1250, runs none of them (see `shared/stinkytofu/TESTING.md`, in review in
+[PR #13945](https://github.com/ROCm/rocm-libraries/pull/13945)). The result is overlap in the work and
+a hole in the coverage: no suite systematically tests the kernels we ship, across the problems each
+one is selected for. fast_check's every-solution cases are the first piece of that missing layer, and
+they are growing inside the client suite because there is nowhere else for them to go.
+
+The proposal is to give each layer one question it owns, and to test each question once, at the layer
+that defines the thing being tested. This is a proposal for the teams involved to agree on, not
+current practice.
+
+| Layer | The question it owns | Oracle | Hardware | Owner |
+| --- | --- | --- | --- | --- |
+| StinkyTofu | Does its transformation preserve what the kernel computes, and protect every hazard on the hardware it targets? | Unit and FileCheck tests; scheduled and unscheduled builds of the same kernel must produce bitwise-identical output; an independent hazard check; one small hardware test per hazard rule | A little | StinkyTofu team |
+| TensileLite | Given solution parameters, does it emit the kernel those parameters describe? | Python unit tests; one small hardware test per code-generation feature (Stream-K, TDM, each epilogue), not per shape | A little | TensileLite team |
+| Kernel corpus (new) | Does every kernel we ship compute correctly across the problems it is selected for? | A CPU reference, or fast_check's exact integer checks; repeated launches; buffer placement near 32-bit and 4 GiB boundaries | Almost all of it | Whoever defines the kernels |
+| hipBLASLt library | Does the library validate its arguments, select a kernel, and dispatch it correctly? | Host unit tests against a fake kernel library; a thin end-to-end set on hardware | A thin layer | hipBLASLt team |
+
+Six design rules make the kernel corpus layer concrete:
+
+1. **The corpus is what ships.** It is the set of solutions in the library logic for each
+   architecture, plus kernels that do not come from TensileLite at all (the rocRoller kernels, and any
+   hand-written ones). How a kernel was generated does not change how it is tested.
+2. **The range of uses comes from the corpus's own data.** Each solution's logic entry already
+   records where it applies: its selection predicates and the sizes it was tuned for. A generator
+   reading that data can emit each solution's boundary cases, such as a K tail, M and N that are not
+   multiples of the tile, padded leading dimensions, batch counts, and buffers straddling 4 GiB. New
+   tuning then brings its tests with it, and "the full range of uses" becomes something a script can
+   check rather than a judgment call.
+3. **Launch through the public API, by solution index.** The code that packs a kernel's arguments
+   lives in TensileLite's C++ runtime
+   ([`ContractionSolution.cpp`](tensilelite/src/ContractionSolution.cpp)), and address-arithmetic
+   defects live there as often as in the kernels. A corpus harness with its own launcher would skip that
+   code. Launching each solution by index through hipBLASLt, as `algo_method` index selection already
+   does in the client suite, tests the real path while keeping the coverage target the kernel set
+   rather than the library.
+4. **Retest what changed.** Library logic, TensileLite, StinkyTofu, and compiler changes can all change
+   a shipped kernel. Rebuilding the kernels and comparing hashes of the code objects shows which ones
+   actually changed, so a pull request tests only those, and the full corpus runs on the nightly and
+   weekly cadences.
+5. **The corpus is a shared fixture.** StinkyTofu's scheduled-versus-unscheduled comparison needs
+   realistic kernels, and the corpus supplies them, so the layers share inputs without sharing
+   ownership.
+6. **Static checks of the corpus data belong to the corpus.** `TensileLogic --check-all` already
+   validates the library logic before codegen; under this split it is the corpus layer's static check.
+
+**What it would mean for the existing suites.**
+
+- **The hipBLASLt client suite becomes mostly host unit tests.** Its cases would be tagged as API-level
+  or kernel-level, and the kernel-level ones would move to the corpus as the corpus harness grows. It
+  keeps a thin end-to-end set on hardware, about one case per architecture and problem type, because
+  some failures only appear when real selection meets real kernels on a real device. The 38-CU
+  partition described in
+  [one number and three months](tensilelite/TESTING.md#how-this-one-was-learned-one-number-and-three-months)
+  is one. This move depends on the host-only link target (AIHPBLAS-5033) and on validation that runs
+  ahead of dispatch (AIHPBLAS-5034). Until both exist, and until the corpus layer does, the client suite
+  is the corpus test, however accidental, and nothing should be removed from it.
+- **`Tests/common` narrows to generator features.** Its sweeps over shapes of shipped kernels move to
+  the corpus, which answers the question of whether it and the client suite should share a harness:
+  they stop overlapping.
+- **StinkyTofu adds its bitwise comparison and hazard checks** over the corpus, rather than testing GEMM
+  numerics itself.
+- **Runner time concentrates in one layer.** That makes capacity easier to plan, and it means the
+  corpus layer needs an owner with a runner budget.
+
+**Open questions.** Who owns the corpus: the per-architecture tuning and logic owners, or a dedicated
+team? Where its harness lives in the tree? Whether hipSPARSELt, which also ships TensileLite kernels,
+gets its own corpus or shares this one? None of these is tracked yet; the inventory and the coverage
+model should inform the answers.
 
 ### Cadence contract
 
