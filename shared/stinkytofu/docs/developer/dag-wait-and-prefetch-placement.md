@@ -36,10 +36,14 @@ prefetch forward to the segment end, the barrier right before the tensor_load.
    older LDS reads whatever its count) is held until the two windows before the next
    `s_barrier_wait`. Not held when it is the last pending predecessor of real work, or when
    it feeds a prefetch's address.
-3. **ds_load pacing** (`DsSlotFirst`). In a ds stream of 2+ ds_loads per WMMA window, a
-   ds_load that still fits the window goes before fillers and prefetches, and a hazard-hoisted
-   VALU that cannot co-issue now is not forced. Otherwise each stolen slot shifts the stream,
-   and the tensor_load, one window late.
+3. **ds_load pacing** (`DsSpread`, `DsReadQueueDepth`). The ds credit queue bounds the
+   ds_loads in flight, and with `DsSpread` each batch of `DsBatchWmmas` WMMAs takes the even
+   share of its stage's ds_loads (`ceil(stage loads / stage batches)`, a stage running between
+   the two barriers a load sits behind and feeds), so the stream stays even and the
+   tensor_load is not pushed a window late. A held ds_load is released early only when no WMMA
+   is ready in its place. See `DsSpreadPacer.hpp` and `DsSpread` in
+   [scheduler-tuning-parameters](../user/scheduler-tuning-parameters.md); the
+   [spread plan](wmma-batch-ds-spread-plan.md) is the earlier slot design.
 4. **Critical chains.** A filler whose consumer (prefetch, tensor_load, ds_load) is planned
    within 20 windows skips the filler quota and takes the earliest window with a free
    co-issue slot, or issues as soon as it is ready once every remaining window is full.
@@ -52,16 +56,19 @@ takes them last, so a hold can delay work but never strand it.
 
 ## Knobs
 
-All are `ModuleOptions`, settable from tensilelite. `stinkytofu-opt` flags set the matching
+All are `ModuleOptions`, settable from tensilelite. The full list of scheduler tuning values
+is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `stinkytofu-opt` flags set the matching
 `dagFeatures` field (default off there).
 
 | ModuleOption | default | stinkytofu-opt flag | meaning |
 |---|---|---|---|
 | `PrefetchLeadWmmas` | 25 (KernelWriter: stage < 64 WMMAs 0; no HalfPLR 4; else 25 sub-byte A, 40 otherwise) | `--prefetch-lead-wmmas=N` | prefetch lead; < 8 = single-stage grouping; 0 = off |
 | `WaitAluHoldStrictCount` | 2 | `--wait-alu-hold-strict-count=N` | strict-wait threshold; < 0 = no hold |
-| `DsSlotFirst` | true | `--ds-slot-first` | ds_load before fillers in a saturated ds stream |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | spread the region's ds_loads evenly over its WMMAs |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
+| `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time. > 1 also merges the waits of back-to-back WMMAs onto the first one |
+| `WmmaQueueCoverCycles` | 0 (off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
 
 ## Measured effect
 

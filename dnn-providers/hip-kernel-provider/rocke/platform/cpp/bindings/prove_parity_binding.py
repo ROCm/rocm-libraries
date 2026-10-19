@@ -647,10 +647,577 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (128, 4, 4, "causal", False),
         (64, 6, 0, "none", True),
     ]
-    return [
-        dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v)
-        for (h, q, k, m, v) in rows
+    configs = [
+        dict(head_size=h, mask_mode=m, v_lds_stage=v, dtype=dtype)
+        for dtype in ("fp16", "bf16")
+        for (h, _q, _k, m, v) in rows
     ]
+    # Bottom-right alignment is runtime state, so these intentionally reuse
+    # the ordinary causal code objects represented by the standalone emitter.
+    configs += [dict(configs[index]) for index in (2, 8, 3, 9, 5, 11)]
+    tails = (
+        (12, True, False),
+        (13, True, False),
+        (3, False, True),
+        (9, False, True),
+        (12, True, True),
+        (13, True, True),
+        (16, True, True),
+        (17, True, True),
+    )
+    configs += [
+        dict(configs[index], query_tail=query_tail, kv_tail=kv_tail)
+        for index, query_tail, kv_tail in tails
+    ]
+    features = (
+        (12, dict(mask_mode="window")),
+        (13, dict(mask_mode="window")),
+        (2, dict(use_softcap=True)),
+        (8, dict(use_softcap=True)),
+        (2, dict(use_sinks=True)),
+        (8, dict(use_sinks=True)),
+        (12, dict(use_alibi=True)),
+        (13, dict(use_alibi=True)),
+        (0, dict(use_qq_bias=True)),
+        (6, dict(use_qq_bias=True)),
+        (18, dict(mask_mode="window", use_sinks=True)),
+        (19, dict(mask_mode="window", use_sinks=True)),
+        (
+            24,
+            dict(
+                mask_mode="window",
+                use_softcap=True,
+                use_sinks=True,
+                use_alibi=True,
+                use_qq_bias=True,
+            ),
+        ),
+        (
+            25,
+            dict(
+                mask_mode="window",
+                use_softcap=True,
+                use_sinks=True,
+                use_alibi=True,
+                use_qq_bias=True,
+            ),
+        ),
+        (2, dict(use_softcap=True, use_alibi=True)),
+        (8, dict(use_softcap=True, use_alibi=True)),
+    )
+    configs += [dict(configs[index], **flags) for index, flags in features]
+    layouts = (
+        (0, 0),
+        (7, 0),
+        (12, 0),
+        (15, 0),
+        (16, 0),
+        (39, 0),
+        (0, 16),
+        (7, 64),
+        (12, 16),
+        (15, 32),
+        (16, 32),
+        (17, 64),
+        (26, 64),
+        (33, 32),
+        (38, 16),
+        (39, 64),
+    )
+    configs += [
+        dict(configs[index], layout="paged" if page else "ragged", page_block_size=page)
+        for index, page in layouts
+    ]
+    configs += [
+        dict(configs[index], kv_dtype="fp8e4m3")
+        for index in (0, 7, 14, 15, 22, 23, 24, 25, 44, 47, 51, 57)
+    ]
+    transposed = [
+        dict(
+            head_size=head,
+            mask_mode=mask,
+            transposed_qk=True,
+            block_n=block,
+            num_waves=waves,
+        )
+        for head in (64, 128)
+        for mask in ("none", "causal")
+        for block in (32, 64)
+        for waves in (1, 2)
+    ]
+    standard = (
+        configs
+        + transposed
+        + [dict(config) for config in transposed if config["mask_mode"] == "causal"]
+        + [
+            dict(
+                head_size=64,
+                mask_mode="window",
+                layout="ragged",
+                query_tail=True,
+                kv_tail=True,
+                v_lds_stage=True,
+                scheduler_strategy=strategy,
+            )
+            for strategy in (
+                "max-ilp",
+                "max-memory-clause",
+                "iterative-ilp",
+                "iterative-minreg",
+                "iterative-maxocc",
+            )
+        ]
+        + [
+            dict(
+                head_size=256,
+                dtype=dtype,
+                mask_mode="causal" if vlds else "none",
+                query_tail=vlds,
+                kv_tail=vlds,
+                v_lds_stage=vlds,
+                value_tile_size=tile,
+            )
+            for dtype in ("fp16", "bf16")
+            for tile in (16, 32, 64, 128)
+            for vlds in (False, True)
+        ]
+        + [
+            dict(
+                head_size=256,
+                dtype=dtype,
+                mask_mode="causal",
+                query_tail=True,
+                kv_tail=True,
+                layout="paged" if paged else "ragged",
+                page_block_size=32 if paged else 0,
+                kv_dtype="fp8e4m3",
+                value_tile_size=128,
+                v_lds_stage=paged,
+            )
+            for dtype in ("fp16", "bf16")
+            for paged in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                mask_mode="causal",
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                causal_tile_skip=True,
+            )
+            for head in (64, 128)
+            for tails in (False, True)
+        ]
+        + [
+            dict(
+                head_size=head,
+                mask_mode=mask,
+                v_lds_stage=vlds,
+                v_head_size=v_head,
+                value_tile_size=tile,
+            )
+            for (head, v_head, tile, mask, vlds) in (
+                (128, 64, 0, "none", False),
+                (64, 128, 0, "causal", True),
+                (192, 128, 0, "none", True),
+                (128, 256, 64, "none", False),
+            )
+        ]
+        + [
+            dict(
+                head_size=head,
+                dtype=dtype,
+                mask_mode=mask,
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                use_sinks=sinks,
+                use_softcap="s" in extras,
+                use_alibi="a" in extras,
+                use_qq_bias="q" in extras,
+                layout=layout,
+                page_block_size=page,
+                value_tile_size=tile,
+                use_attn_bias=True,
+                bias_dtype=bdt,
+            )
+            for (layout, page, head, mask, tails, sinks, bdt, extras, tile, dtype) in (
+                ("dense", 0, 64, "none", False, False, "f32", "", 0, "fp16"),
+                ("dense", 0, 64, "causal", True, True, "q", "", 0, "fp16"),
+                ("dense", 0, 128, "none", False, False, "q", "", 0, "fp16"),
+                ("ragged", 0, 64, "causal", True, True, "f32", "", 0, "fp16"),
+                ("paged", 16, 64, "causal", True, False, "q", "", 0, "fp16"),
+                ("dense", 0, 64, "causal", True, False, "f32", "saq", 0, "fp16"),
+                ("dense", 0, 256, "none", False, False, "f32", "", 64, "fp16"),
+                ("dense", 0, 128, "causal", True, True, "q", "saq", 0, "fp16"),
+                ("dense", 0, 64, "none", False, False, "q", "", 0, "bf16"),
+            )
+        ]
+    )
+    # (dict, arch) pairs aligned with the standalone emitter indices: 0..135 at
+    # gfx1151, 136..142 replay representative configs at gfx11-generic, and
+    # 143..156 exercise runtime_head_dims on gfx1151 and both generic targets.
+    flag_fields = (
+        ("t", "query_tail"),
+        ("t", "kv_tail"),
+        ("l", "v_lds_stage"),
+        ("s", "use_softcap"),
+        ("k", "use_sinks"),
+        ("a", "use_alibi"),
+        ("q", "use_qq_bias"),
+        ("c", "causal_tile_skip"),
+    )
+    rtdim = [
+        (
+            dict(
+                head_size=head,
+                v_head_size=v_head,
+                dtype=dtype,
+                mask_mode=mask,
+                layout=layout,
+                page_block_size=page,
+                kv_dtype="fp8e4m3" if "8" in flags else "",
+                use_attn_bias=bool(bias),
+                bias_dtype=bias or "f32",
+                runtime_head_dims=True,
+                **{field: flag in flags for flag, field in flag_fields},
+            ),
+            arch,
+        )
+        for (arch, dtype, head, v_head, mask, flags, layout, page, bias) in (
+            ("gfx1151", "fp16", 64, 0, "none", "", "dense", 0, ""),
+            ("gfx1151", "bf16", 128, 0, "causal", "tlc", "dense", 0, ""),
+            ("gfx1151", "fp16", 256, 0, "none", "l", "dense", 0, ""),
+            ("gfx1151", "fp16", 128, 64, "window", "t", "dense", 0, ""),
+            ("gfx1151", "fp16", 128, 0, "window", "tl", "dense", 0, "f32"),
+            ("gfx1151", "fp16", 128, 0, "causal", "t8", "paged", 16, ""),
+            ("gfx1151", "bf16", 64, 0, "window", "tlskaq", "ragged", 0, "q"),
+            ("gfx11-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
+            ("gfx11-generic", "bf16", 256, 128, "none", "", "dense", 0, "f32"),
+            ("gfx12-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
+            ("gfx12-generic", "bf16", 128, 64, "window", "t", "dense", 0, "f32"),
+            ("gfx12-generic", "fp16", 256, 0, "causal", "tl8", "paged", 32, ""),
+            ("gfx12-generic", "fp16", 64, 0, "none", "", "dense", 0, ""),
+            ("gfx12-generic", "bf16", 192, 0, "window", "tska", "ragged", 0, ""),
+        )
+    ]
+    # Emitter replay index 85 is the BF16 D128 causal bn64/w2 transposed config,
+    # which this list's FP16-only transposed rows do not carry at index 85.
+    replay = [dict(standard[index]) for index in (0, 70)]
+    replay.append(
+        dict(
+            head_size=128,
+            dtype="bf16",
+            mask_mode="causal",
+            transposed_qk=True,
+            block_n=64,
+            num_waves=2,
+        )
+    )
+    replay += [dict(standard[index]) for index in (115, 123, 128, 133)]
+    return (
+        [(dict(config), "gfx1151") for config in standard]
+        + [(config, "gfx11-generic") for config in replay]
+        + rtdim
+    )
+
+
+def cfgs_gfx1201_wmma_fmha_fwd():
+    # The gfx1201 emitters carry the first 12 gfx1151 configs: 0-5 are the fp16
+    # specs and 6-11 repeat them as bf16. Config 11 is bf16 crossed with
+    # v_lds_stage, the one knob whose LDS allocation, stores and loads are typed
+    # by dtype. Without the bf16 rows a dropped or misparsed ``dtype`` in the
+    # binding would still report VALIDATED on this arch, because fp16 is what an
+    # unset dtype falls back to.
+    #
+    # The gfx1151 list holds (config, arch) pairs. This family sets its arch in
+    # FAMILIES, so it takes plain configs: keep each config, drop its arch.
+    return [config for config, _arch in cfgs_gfx1151_wmma_fmha_fwd()[:12]]
+
+
+def cfgs_gfx1151_wmma_fmha_fwd_v2():
+    # mirrors gfx1151_wmma_fmha_fwd_v2_emit.{py,c} index for index; (dict, arch).
+    archs = ("gfx11-generic", "gfx12-generic")
+    dtypes = ("fp16", "bf16")
+    buckets = ((64, 64), (96, 96), (128, 128), (192, 128), (256, 128), (256, 256))
+    masks = ("none", "causal")
+    out = []
+    for arch in archs:
+        for dt in dtypes:
+            for hd, hdv in buckets:
+                for mask in masks:
+                    out.append(
+                        (dict(dtype=dt, head_dim=hd, head_dim_v=hdv, mask=mask), arch)
+                    )
+    for arch in archs:
+        for dt in dtypes:
+            for hd, hdv, mask in (
+                (64, 64, "causal"),
+                (128, 128, "none"),
+                (256, 256, "causal"),
+            ):
+                for bias in ("f32", "q"):
+                    out.append(
+                        (
+                            dict(
+                                dtype=dt,
+                                head_dim=hd,
+                                head_dim_v=hdv,
+                                mask=mask,
+                                bias=bias,
+                            ),
+                            arch,
+                        )
+                    )
+    g12 = "gfx12-generic"
+    for dt in dtypes:
+        for hd in (192, 256):
+            for mask in masks:
+                out.append(
+                    (
+                        dict(
+                            dtype=dt,
+                            head_dim=hd,
+                            head_dim_v=128,
+                            mask=mask,
+                            wave_pair=False,
+                        ),
+                        g12,
+                    )
+                )
+    out.append(
+        (
+            dict(
+                dtype="bf16",
+                head_dim=256,
+                head_dim_v=128,
+                mask="causal",
+                bias="q",
+                wave_pair=False,
+            ),
+            g12,
+        )
+    )
+    out.append(
+        (
+            dict(
+                dtype="fp16",
+                head_dim=192,
+                head_dim_v=128,
+                mask="none",
+                bias="f32",
+                wave_pair=False,
+            ),
+            g12,
+        )
+    )
+    knobs = (
+        dict(head_dim=64, head_dim_v=64, block_n=64),
+        dict(block_n=16),
+        dict(block_m=64),
+        dict(waves_per_eu=0),
+        dict(scheduler_strategy="max-ilp"),
+        dict(lazy_rescale=False),
+        dict(k_pad=0, v_pad=16),
+        dict(cta_order="hbq"),
+        dict(wave_pair=True),
+        dict(head_dim=256, head_dim_v=256, block_m=32),
+    )
+    for arch in archs:
+        for knob in knobs:
+            out.append(
+                (
+                    dict(
+                        dict(dtype="bf16", head_dim=128, head_dim_v=128, mask="causal"),
+                        **knob,
+                    ),
+                    arch,
+                )
+            )
+    out.append((dict(dtype="fp16", head_dim=64, head_dim_v=64, mask="none"), "gfx1151"))
+    out.append(
+        (
+            dict(dtype="bf16", head_dim=128, head_dim_v=128, mask="causal", bias="q"),
+            "gfx1151",
+        )
+    )
+    out.append((dict(dtype="fp16", head_dim=64, head_dim_v=64, mask="none"), "gfx1201"))
+    out.append(
+        (
+            dict(
+                dtype="bf16",
+                head_dim=256,
+                head_dim_v=128,
+                mask="causal",
+                wave_pair=False,
+            ),
+            "gfx1201",
+        )
+    )
+    # Feature configs: (dtype, hd, hdv, mask, bias, flags, layout, page size,
+    # block_n, wave_pair); flags c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8.
+    feats = (
+        ("fp16", 128, 128, "none", None, "c", "dense", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "c", "dense", 0, 32, None),
+        ("bf16", 64, 64, "causal", None, "s", "dense", 0, 32, None),
+        ("fp16", 128, 128, "none", None, "s", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "a", "dense", 0, 32, None),
+        ("fp16", 128, 128, "none", None, "a", "dense", 0, 32, None),
+        ("fp16", 128, 128, "causal", None, "q", "dense", 0, 32, None),
+        ("bf16", 64, 64, "none", None, "q", "dense", 0, 32, None),
+        ("bf16", 128, 128, "none", None, "8", "dense", 0, 32, None),
+        ("fp16", 64, 64, "causal", None, "8", "dense", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "8", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "ragged", 0, 32, None),
+        ("fp16", 64, 64, "none", None, "", "ragged", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "paged", 16, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "paged", 32, 32, None),
+        ("fp16", 64, 64, "none", None, "", "paged", 64, 32, None),
+        ("bf16", 64, 64, "causal", None, "", "paged", 8, 32, None),
+        ("bf16", 256, 256, "causal", None, "", "paged", 16, 32, None),
+        ("bf16", 64, 64, "causal", None, "s", "paged", 16, 32, None),
+        ("bf16", 128, 128, "causal", None, "8", "ragged", 0, 32, None),
+        ("fp16", 128, 128, "causal", None, "8", "paged", 32, 32, None),
+        ("bf16", 128, 128, "causal", None, "sa", "paged", 16, 32, None),
+        ("fp16", 128, 128, "causal", None, "q", "ragged", 0, 32, None),
+        ("bf16", 128, 128, "none", None, "ca", "dense", 0, 32, None),
+        ("fp16", 64, 64, "causal", "f32", "s", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", "q", "csaq8", "paged", 16, 32, None),
+        ("bf16", 256, 256, "causal", None, "cs", "dense", 0, 32, None),
+        ("bf16", 64, 64, "causal", None, "", "paged", 32, 64, None),
+        ("bf16", 64, 64, "causal", None, "s", "paged", 64, 64, None),
+        ("bf16", 128, 128, "causal", None, "8", "ragged", 0, 16, None),
+    )
+    feats_gfx12 = (
+        ("bf16", 192, 128, "causal", None, "c8", "dense", 0, 32, False),
+        ("fp16", 256, 128, "none", None, "s", "paged", 32, 32, False),
+    )
+
+    def feat(row):
+        dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
+        return dict(
+            dtype=dt,
+            head_dim=hd,
+            head_dim_v=hdv,
+            mask=mask,
+            bias=bias,
+            use_softcap="c" in flags,
+            use_sinks="s" in flags,
+            use_alibi="a" in flags,
+            use_qq_bias="q" in flags,
+            layout=layout,
+            page_block_size=ps,
+            kv_dtype="fp8e4m3" if "8" in flags else "",
+            block_n=bn,
+            wave_pair=pair,
+        )
+
+    for arch in archs:
+        for row in feats:
+            out.append((feat(row), arch))
+    for row in feats_gfx12:
+        out.append((feat(row), g12))
+    out.append((feat(feats[2]), "gfx1151"))
+    out.append((feat(feats[8]), "gfx1201"))
+    return out
+
+
+def cfgs_gfx1151_wmma_fmha_decode():
+    # mirrors gfx1151_wmma_fmha_decode_emit.{py,c} index for index; (dict, arch).
+    # "kind": "merge" selects the merge kernel.
+    archs = ("gfx11-generic", "gfx12-generic")
+    dtypes = ("fp16", "bf16")
+    out = []
+    for arch in archs:
+        for dt in dtypes:
+            for hs in (64, 128, 256):
+                for bias in ("", "q", "f32"):
+                    out.append((dict(head_size=hs, dtype=dt, bias=bias), arch))
+    for arch in archs:
+        for dt in dtypes:
+            for layout in ("dense", "ragged"):
+                out.append(
+                    (dict(kind="merge", head_size=64, dtype=dt, layout=layout), arch)
+                )
+    feats = (
+        ("fp16", 128, "", "c", "dense", 0),
+        ("bf16", 256, "", "c", "dense", 0),
+        ("bf16", 64, "", "s", "dense", 0),
+        ("fp16", 128, "", "a", "dense", 0),
+        ("bf16", 64, "", "q", "dense", 0),
+        ("bf16", 64, "", "8", "dense", 0),
+        ("fp16", 128, "", "8", "dense", 0),
+        ("bf16", 256, "", "8", "dense", 0),
+        ("bf16", 128, "", "", "ragged", 0),
+        ("fp16", 64, "", "", "paged", 16),
+        ("bf16", 128, "", "", "paged", 8),
+        ("bf16", 256, "", "", "paged", 64),
+        ("bf16", 64, "", "s8", "paged", 16),
+        ("fp16", 128, "", "ca", "dense", 0),
+        ("bf16", 128, "", "aq", "ragged", 0),
+        ("bf16", 256, "", "cs8", "ragged", 0),
+        ("bf16", 64, "q", "csaq8", "paged", 16),
+        ("fp16", 128, "f32", "s", "ragged", 0),
+        ("bf16", 64, "f32", "ac8", "paged", 32),
+        ("fp16", 256, "q", "q", "paged", 4),
+    )
+
+    def feat(row):
+        dt, hs, bias, flags, layout, ps = row
+        return dict(
+            head_size=hs,
+            dtype=dt,
+            bias=bias,
+            softcap="c" in flags,
+            sinks="s" in flags,
+            alibi="a" in flags,
+            qq_bias="q" in flags,
+            kv_dtype="fp8e4m3" if "8" in flags else "",
+            layout=layout,
+            page_block_size=ps,
+        )
+
+    knobs = (
+        dict(num_waves=2),
+        dict(num_waves=8, head_size=64),
+        dict(num_waves=1),
+        dict(waves_per_eu=1),
+        dict(scheduler_strategy="default"),
+        dict(scheduler_strategy="max-ilp", head_size=256),
+        dict(dv_split=2),
+        dict(q_mode="lds"),
+        dict(q_mode="reg", head_size=256),
+        dict(v_store_early=True),
+        dict(v_store_early=False),
+        dict(prefetch=True),
+        dict(prefetch=False, head_size=64),
+        dict(lockstep=True),
+        dict(lockstep=False),
+        dict(fp8_cvt=True, kv_dtype="fp8e4m3"),
+        dict(fp8_cvt=False, kv_dtype="fp8e4m3", head_size=64),
+        dict(tanh_fast=True, softcap=True, head_size=256),
+        dict(tanh_fast=False, softcap=True),
+    )
+    for arch in archs:
+        for row in feats:
+            out.append((feat(row), arch))
+    for arch in archs:
+        for knob in knobs:
+            d = dict(head_size=128, dtype="bf16")
+            d.update(knob)
+            out.append((d, arch))
+    out.append((dict(head_size=128, dtype="bf16"), "gfx1151"))
+    out.append(
+        (dict(kind="merge", head_size=64, dtype="fp16", layout="ragged"), "gfx1151")
+    )
+    out.append((feat(feats[12]), "gfx1151"))
+    out.append((dict(head_size=64, dtype="fp16", bias="q"), "gfx1201"))
+    out.append((feat(feats[15]), "gfx1201"))
+    out.append(
+        (dict(kind="merge", head_size=64, dtype="bf16", layout="dense"), "gfx1201")
+    )
+    return out
 
 
 def cfgs_attention_unified():
@@ -1465,7 +2032,7 @@ def _selector_parity_row(problem_dict, arch):
             "kernels.common.attention_unified._resolve_attention_arch",
             return_value=arch,
         ):
-            py_spec_obj = _tiled_spec_from_problem(prob)
+            py_spec_obj = _tiled_spec_from_problem(prob, arch)
         # Normalise to the same field-set the C++ binding emits
         from dataclasses import asdict
 
@@ -1748,7 +2315,28 @@ FAMILIES = [
         "gfx1151_wmma_fmha_fwd",
         "gfx1151_wmma_fmha_fwd_lower_llvm",
         cfgs_gfx1151_wmma_fmha_fwd(),
-        "gfx1151",
+        None,
+    ),
+    (
+        "gfx1201_wmma_fmha_fwd",
+        # Same binding entry point as gfx1151: the spec is arch-parameterised,
+        # and gfx1201 selects the gfx12 WMMA atoms, so the gfx12 bf16 atom gets
+        # binding coverage too, not just the gfx11 one.
+        "gfx1151_wmma_fmha_fwd_lower_llvm",
+        cfgs_gfx1201_wmma_fmha_fwd(),
+        "gfx1201",
+    ),
+    (
+        "gfx1151_wmma_fmha_fwd_v2",
+        "gfx1151_wmma_fmha_fwd_v2_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_fwd_v2(),
+        None,
+    ),
+    (
+        "gfx1151_wmma_fmha_decode",
+        "gfx1151_wmma_fmha_decode_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_decode(),
+        None,
     ),
     (
         "gfx1201_wmma_gemm",
