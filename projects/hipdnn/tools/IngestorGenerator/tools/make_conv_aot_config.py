@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Turn rocKE AOT forward-conv instances into a hipkernel:Gfx950ConvFwdAot config.
+"""Turn rocKE AOT forward-conv instances into a hipkernel:Gfx950ConvFwdAot or
+hipkernel:Gfx942ConvFwdAot config.
 
 An instance is one rocKE ``KernelIdentity`` (``benchmarks/common/kernel_cache.py``):
 a compiled configuration with no problem extents, which serves every problem its
@@ -9,7 +10,8 @@ capabilities admit. The input is a JSON list whose entries are either an identit
 dict (``KernelIdentity.to_dict()``) or an object carrying one under ``"identity"``;
 other keys of such an object are ignored here.
 
-Every entry must be a gfx950 forward identity in fp16 or bf16 that the packaged
+Every entry must be a forward identity of one architecture of :data:`TARGETS`
+(gfx950 or gfx942), in fp16 or bf16, that the packaged
 launch supports: an implicit-GEMM identity of the AOT sweep, or a forward identity of
 the direct sweep (``benchmarks/common/direct_kernel_sweep.py``), any of its algorithms
 (``PACKAGED_DIRECT_ALGORITHMS``). Anything else is listed with its reason and the tool
@@ -20,7 +22,9 @@ key that ties a packaged kernel back to the identity it was built from.
 The shipped catalog is rocKE's full forward sweep, one list per dtype
 (``configs/gfx950_conv_fwd_aot_<dtype>.instances.json``), written by
 ``tools/enumerate_conv_aot_instances.py``; ``--instances`` takes them all as one
-catalog. ``--engine-name`` emits the same instances as another engine over the
+catalog, packaged as the shipped engine of the identities' architecture
+(``configs/gfx942_conv_fwd_aot_<dtype>.instances.json`` for gfx942).
+``--engine-name`` emits the same instances as another engine over the
 shipped engine's native code: the test-only seed is
 ``configs/gfx950_conv_fwd_aot_seed.instances.json`` as
 ``hipkernel:Gfx950ConvFwdAotSeed``. The config is an intermediate, regenerated from
@@ -61,6 +65,31 @@ INSTANCE_UUID_NAMESPACE = uuid.UUID("6b0d3b8e-6a58-5d0f-9f43-3c6f5f2a9c11")
 #: The shipped engine. Its native symbols are the ones every bundle this tool emits
 #: names; another engine name (a test-only subset of the catalog) borrows them.
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
+
+#: Per architecture, the shipped engine the catalog is packaged as and the adapter
+#: entry points that package it (rocke/library/builders/common/convolution_forward.py).
+#: ``group_merge``: the catalog may hold group-merged depthwise instances, so the
+#: KMD carries the merge degree and the engine exposes it as a knob.
+TARGETS = {
+    "gfx950": {
+        "engine": PRODUCT_ENGINE,
+        "spec_class": "Gfx950ConvFwdAotSpec",
+        "supports": "supports_gfx950_conv_fwd_aot",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "prefix": "gfx950_conv_fwd_aot",
+        "group_merge": False,
+    },
+    "gfx942": {
+        "engine": "hipkernel:Gfx942ConvFwdAot",
+        "spec_class": "Gfx942ConvFwdAotSpec",
+        "supports": "supports_gfx942_conv_fwd_aot",
+        "builder": "build_gfx942_conv_fwd_aot",
+        "prefix": "gfx942_conv_fwd_aot",
+        "group_merge": True,
+    },
+}
+#: The merge degree's KMD default: an unmerged instance, which states no group_merge.
+GROUP_MERGE_DEFAULT = 1
 
 #: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -118,6 +147,10 @@ _CONSTANT = (
     "block_h",
     "max_sub_gemms",
     "knobs",
+    "streamk",
+    "streamk_reduction",
+    "prefetch_addr",
+    "uniform_k_decode",
 )
 #: Spec field order of an implicit-GEMM Gfx950ConvFwdAotSpec; also its descriptor
 #: spec order.
@@ -195,7 +228,7 @@ _STRING_FIELDS = (
 )
 _INT_FIELDS = tuple(
     f for f in DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS) if f not in _STRING_FIELDS
-)
+) + ("group_merge",)
 #: The UED knobs: every KMD field that tunes a kernel, so the ranking model can tell
 #: apart the instances one problem admits. Left out are the fields that only restate
 #: the problem the instance was matched to (dtype, layout, the direct filter, stride,
@@ -252,15 +285,16 @@ PACKAGED_DIRECT_ALGORITHMS = {
     "direct_grouped": "grouped",
     "direct_nongrouped": "nongrouped",
 }
-#: The generator variant (kernel name) of each direct variant. std and spatial keep
-#: the name they had when they were the only direct instances.
+#: The generator variant (kernel name) of each direct variant, after the target's
+#: prefix. std and spatial keep the name they had when they were the only direct
+#: instances.
 _DIRECT_VARIANT_NAMES = {
-    "std": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
-    "spatial": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
-    "tiled": "gfx950_conv_fwd_aot_dwtiled_{dtype}_{instance_id}",
-    "col": "gfx950_conv_fwd_aot_dwcol_{dtype}_{instance_id}",
-    "grouped": "gfx950_conv_fwd_aot_grouped_{dtype}_{instance_id}",
-    "nongrouped": "gfx950_conv_fwd_aot_nongrouped_{dtype}_{instance_id}",
+    "std": "{prefix}_dw_{{dtype}}_{{instance_id}}",
+    "spatial": "{prefix}_dw_{{dtype}}_{{instance_id}}",
+    "tiled": "{prefix}_dwtiled_{{dtype}}_{{instance_id}}",
+    "col": "{prefix}_dwcol_{{dtype}}_{{instance_id}}",
+    "grouped": "{prefix}_grouped_{{dtype}}_{{instance_id}}",
+    "nongrouped": "{prefix}_nongrouped_{{dtype}}_{{instance_id}}",
 }
 
 
@@ -274,7 +308,7 @@ def _bind_rocke(rocke_root: Path) -> None:
 def spec_order(spec) -> tuple:
     """The descriptor spec order of ``spec``'s family and direct variant."""
     if not spec.is_direct:
-        return SPEC_ORDER
+        return SPEC_ORDER + (("group_merge",) if spec.is_merged else ())
     return DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
 
 
@@ -309,16 +343,19 @@ def _carried_values(identity) -> dict:
     return values
 
 
-def _checked(spec):
-    from builders.common.convolution_forward import supports_gfx950_conv_fwd_aot
+def _adapter(name: str):
+    from builders.common import convolution_forward
 
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
+    return getattr(convolution_forward, name)
+
+
+def _checked(spec):
+    ok, reason = _adapter(TARGETS[spec.ARCH]["supports"])(spec)
     return (spec, "") if ok else (None, reason)
 
 
 def _implicit_instance_spec(identity):
     from benchmarks.common.kernel_cache import KernelIdentity
-    from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
 
     defaults = KernelIdentity(
         arch=identity.arch,
@@ -343,26 +380,29 @@ def _implicit_instance_spec(identity):
         vector_size_c=0,
         llvm_flavor=identity.llvm_flavor,
     )
-    if (identity.arch, identity.direction, identity.algorithm) != (
-        "gfx950",
+    target = TARGETS.get(identity.arch)
+    if target is None or (identity.direction, identity.algorithm) != (
         "fwd",
         "implicit_gemm",
     ):
         return None, (
-            f"not a gfx950 forward implicit-GEMM identity "
+            f"not a forward implicit-GEMM identity of {sorted(TARGETS)} "
             f"({identity.arch}, {identity.direction}, {identity.algorithm})"
         )
     if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
         return None, "mixed operand dtypes are not packaged"
     for name in _CONSTANT:
+        if name == "group_merge" and target["group_merge"]:
+            continue
         if getattr(identity, name) != getattr(defaults, name):
             return None, (
                 f"{name}={getattr(identity, name)!r} is not packaged "
                 f"(only {getattr(defaults, name)!r})"
             )
-    spec = Gfx950ConvFwdAotSpec(
+    spec = _adapter(target["spec_class"])(
         dtype=identity.dtype_a,
         instance_id=identity.stable_hash(),
+        group_merge=identity.group_merge,
         **_carried_values(identity),
     )
     return _checked(spec)
@@ -372,13 +412,13 @@ def _direct_instance_spec(identity):
     """A forward direct identity: the direct sweep must be able to build it, and the
     packaged AOT launch must run its algorithm."""
     from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from builders.common.convolution_forward import (
-        Gfx950ConvFwdAotSpec,
-        aot_direct_instance_fields,
-    )
+    from builders.common.convolution_forward import aot_direct_instance_fields
 
-    if identity.arch != "gfx950":
-        return None, f"not a gfx950 forward direct identity ({identity.arch})"
+    target = TARGETS.get(identity.arch)
+    if target is None:
+        return None, (
+            f"not a forward direct identity of {sorted(TARGETS)} ({identity.arch})"
+        )
     if identity.algorithm not in PACKAGED_DIRECT_ALGORITHMS:
         return None, (
             f"direct algorithm {identity.algorithm!r} has no packaged launch "
@@ -394,7 +434,7 @@ def _direct_instance_spec(identity):
         fields = aot_direct_instance_fields(identity)
     except (LookupError, TypeError, ValueError) as exc:
         return None, str(exc)
-    spec = Gfx950ConvFwdAotSpec(
+    spec = _adapter(target["spec_class"])(
         dtype=identity.dtype_a,
         instance_id=identity.stable_hash(),
         **_carried_values(identity),
@@ -448,14 +488,14 @@ def shard_name(spec, sharding: str = "dtype") -> str:
 
 def build_config(
     specs: list,
-    engine_name: str = PRODUCT_ENGINE,
+    engine_name: str | None = None,
     authored_subpath: str = "",
     sharding: str = "dtype",
 ) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
 
-    ``engine_name`` other than :data:`PRODUCT_ENGINE` is a second engine over the
-    same native code: its descriptors name the shipped engine's symbols
+    ``engine_name`` other than the target's shipped engine is a second engine over
+    the same native code: its descriptors name the shipped engine's symbols
     (``native_symbols_from``). ``authored_subpath`` defaults to
     ``rocKE/<engine slug>``.
 
@@ -467,7 +507,22 @@ def build_config(
     their builder_default. Direct instances are one variant per direct kernel
     (std and spatial share one), each stating DIRECT_FIELDS and its own block
     knobs (DIRECT_VARIANT_FIELDS) and leaving the others to theirs.
+
+    Every spec is of one architecture (:data:`TARGETS`), which names the shipped
+    engine, ``engine_name``'s default. Where the target admits group-merged
+    instances, the KMD carries ``group_merge`` (default 1, so unmerged
+    descriptors omit it), the engine exposes it as a knob, and merged instances
+    are their own variant stating it.
     """
+    arches = sorted({spec.ARCH for spec in specs})
+    if len(arches) != 1:
+        raise ValueError(f"one catalog packages one architecture, got {arches}")
+    arch = arches[0]
+    target = TARGETS[arch]
+    product_engine = target["engine"]
+    engine_name = engine_name or product_engine
+    prefix = target["prefix"]
+    extra_fields = {"group_merge": GROUP_MERGE_DEFAULT} if target["group_merge"] else {}
     kmd = [
         {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
         for name in SPEC_ORDER
@@ -478,20 +533,31 @@ def build_config(
             "default_value": default,
             "builder_default": True,
         }
-        for name, default in {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}.items()
+        for name, default in {
+            **DIRECT_FIELDS,
+            **DIRECT_KNOB_FIELDS,
+            **extra_fields,
+        }.items()
     ]
-    metadata = list(DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS))
+    metadata = list(DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS) + tuple(extra_fields))
     shards = collections.defaultdict(list)
     for spec in specs:
         shards[shard_name(spec, sharding)].append(spec)
     packs = []
     for shard in sorted(shards):
         variants = []
-        implicit = [s for s in shards[shard] if not s.is_direct]
+        implicit = [s for s in shards[shard] if not s.is_direct and not s.is_merged]
         if implicit:
             variants.append(
+                _variant(f"{prefix}_{{dtype}}_{{instance_id}}", SPEC_ORDER, implicit)
+            )
+        merged = [s for s in shards[shard] if s.is_merged]
+        if merged:
+            variants.append(
                 _variant(
-                    "gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, implicit
+                    f"{prefix}_gm_{{dtype}}_{{instance_id}}",
+                    spec_order(merged[0]),
+                    merged,
                 )
             )
         # std and spatial share one variant, as before the other direct variants.
@@ -508,7 +574,7 @@ def build_config(
             if members:
                 variants.append(
                     _variant(
-                        _DIRECT_VARIANT_NAMES[group[0]],
+                        _DIRECT_VARIANT_NAMES[group[0]].format(prefix=prefix),
                         spec_order(members[0]),
                         members,
                     )
@@ -516,11 +582,11 @@ def build_config(
         packs.append(
             {
                 "name": shard,
-                "arch": ["gfx950"],
+                "arch": [arch],
                 "kernel_defaults": {
                     "kind": "rocke",
                     "source": "builders/common/convolution_forward.py",
-                    "builder": "build_gfx950_conv_fwd_aot",
+                    "builder": target["builder"],
                 },
                 "variants": variants,
             }
@@ -528,11 +594,11 @@ def build_config(
     engine = {
         "name": engine_name,
         "sdk_version": "1.0.0",
-        "knobs": list(ENGINE_KNOBS),
+        "knobs": list(ENGINE_KNOBS) + list(extra_fields),
         "heuristic": "native",
     }
-    if engine_name != PRODUCT_ENGINE:
-        engine["native_symbols_from"] = PRODUCT_ENGINE
+    if engine_name != product_engine:
+        engine["native_symbols_from"] = product_engine
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
@@ -660,10 +726,11 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--engine-name",
-        default=PRODUCT_ENGINE,
+        default=None,
         help="Engine the bundle declares, and whose kernel ids --stabilize-ids "
-        "derives (default: %(default)s). Another name borrows that engine's native "
-        "symbols.",
+        "derives (default: the shipped engine of the catalog's architecture; "
+        f"{PRODUCT_ENGINE} for --stabilize-ids). Another name borrows that "
+        "engine's native symbols.",
     )
     parser.add_argument(
         "--authored-subpath",
@@ -694,7 +761,7 @@ def main(argv=None) -> int:
 
     if args.stabilize_ids:
         for kdp in args.stabilize_ids:
-            count = stabilize_ids(kdp, args.engine_name)
+            count = stabilize_ids(kdp, args.engine_name or PRODUCT_ENGINE)
             print(f"{kdp}: stabilized {count} kernel id(s)")
         return 0
     if not (args.rocke_root and args.instances and args.output):

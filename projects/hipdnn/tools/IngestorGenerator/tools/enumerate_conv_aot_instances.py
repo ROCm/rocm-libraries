@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Build the rocKE gfx950 forward-conv AOT instance lists the hipkernel pack ships.
+"""Build the rocKE forward-conv AOT instance lists the hipkernel pack ships.
 
 The catalog is a curated list of rocKE kernels (:data:`CATALOG_LABELS`): one
 ``KernelIdentity.label()`` per line, which :meth:`KernelIdentity.from_label` turns
 back into the identity. Implicit-GEMM entries must be identities of the AOT sweep
 grid (``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
-direct sweep grid (``benchmarks/common/direct_kernel_sweep.py``), for gfx950,
-forward, fp16 or bf16. Every entry must also convert: an identity
+direct sweep grid (``benchmarks/common/direct_kernel_sweep.py``), for the architecture
+(``--arch``: gfx950, the default, or gfx942), forward, fp16 or bf16. Every entry must also convert: an identity
 ``make_conv_aot_config.py`` refuses, because the packaged launch does not run it,
 fails the run. Nothing is dropped silently.
 
@@ -38,18 +38,19 @@ import sys
 from pathlib import Path
 
 ARCH = "gfx950"
+ARCHES = ("gfx950", "gfx942")
 DTYPES = ("fp16", "bf16")
 
 #: File name of one dtype's instance list. One file per dtype keeps each below the
 #: 50 MB a source host accepts.
-INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
+INSTANCE_LIST = "{arch}_conv_fwd_aot_{dtype}.instances.json"
 
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
 
-#: The curated catalog: one ``KernelIdentity.label()`` per line; blank lines and
-#: lines starting with ``#`` are ignored.
-CATALOG_LABELS = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.labels.txt"
+#: The curated catalog of an architecture: one ``KernelIdentity.label()`` per line;
+#: blank lines and lines starting with ``#`` are ignored.
+CATALOG_LABELS = str(DEFAULT_OUTPUT_DIR / "{arch}_conv_fwd_aot.labels.txt")
 
 
 def _bind_rocke(rocke_root: Path) -> None:
@@ -94,19 +95,19 @@ def read_labels(path: Path) -> list:
     return identities
 
 
-def sweep_hashes(dtype: str, jobs: int) -> set:
+def sweep_hashes(dtype: str, jobs: int, arch: str = ARCH) -> set:
     """``stable_hash`` of every valid forward identity of rocKE's implicit-GEMM AOT
-    grid and of its direct grid, for ``dtype``."""
+    grid and of its direct grid, for ``dtype`` on ``arch``."""
     from benchmarks.common import kernel_sweep
     from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
     from rocke.core.arch import ArchTarget
 
-    target = ArchTarget.from_gfx(ARCH)
+    target = ArchTarget.from_gfx(arch)
     implicit = kernel_sweep.enumerate_jobs(
-        arch=ARCH, dtype=dtype, target=target, directions=("fwd",), jobs=jobs
+        arch=arch, dtype=dtype, target=target, directions=("fwd",), jobs=jobs
     )
     direct = enumerate_direct_jobs(
-        arch=ARCH, target=target, directions=("fwd",), dtype=dtype, jobs=jobs
+        arch=arch, target=target, directions=("fwd",), dtype=dtype, jobs=jobs
     )
     return {job.identity.stable_hash() for job in [*implicit, *direct]}
 
@@ -168,11 +169,17 @@ def main(argv=None) -> int:
         help="rocKE tree (platform/, library/).",
     )
     parser.add_argument(
+        "--arch",
+        choices=ARCHES,
+        default=ARCH,
+        help="Architecture the catalog is packaged for (default: %(default)s).",
+    )
+    parser.add_argument(
         "--labels",
         type=Path,
-        default=CATALOG_LABELS,
+        default=None,
         help="The curated catalog, one KernelIdentity label per line "
-        "(default: %(default)s).",
+        f"(default: {CATALOG_LABELS}).",
     )
     parser.add_argument(
         "--output-dir",
@@ -188,12 +195,18 @@ def main(argv=None) -> int:
         help="Worker processes (default: %(default)s).",
     )
     args = parser.parse_args(argv)
+    if args.labels is None:
+        args.labels = Path(CATALOG_LABELS.format(arch=args.arch))
     _bind_rocke(args.rocke_root)
 
     try:
         listed = read_labels(args.labels)
     except ValueError as error:
         print(error, file=sys.stderr)
+        return 1
+    foreign = sorted({i["arch"] for i in listed} - {args.arch})
+    if foreign:
+        print(f"{args.labels}: arch(s) {foreign} are not {args.arch}", file=sys.stderr)
         return 1
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
@@ -204,11 +217,11 @@ def main(argv=None) -> int:
     print(f"{'dtype':6s} {'implicit':>8s} {'direct':>6s}")
     for dtype in sorted(DTYPES):
         identities = [i for i in listed if i["dtype_a"] == dtype]
-        swept = sweep_hashes(dtype, args.jobs)
+        swept = sweep_hashes(dtype, args.jobs, args.arch)
         for identity in identities:
             if stable_hash(identity) not in swept:
                 print(
-                    f"not a {ARCH} forward sweep identity: {identity_label(identity)}",
+                    f"not a {args.arch} forward sweep identity: {identity_label(identity)}",
                     file=sys.stderr,
                 )
                 failed = True
@@ -227,7 +240,7 @@ def main(argv=None) -> int:
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for dtype, identities in lists.items():
-        path = args.output_dir / INSTANCE_LIST.format(dtype=dtype)
+        path = args.output_dir / INSTANCE_LIST.format(arch=args.arch, dtype=dtype)
         write_instances(path, identities)
         print(f"{len(identities)} instance(s) written to {path}")
     return 0
