@@ -45,7 +45,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
-
 template <typename DerivedPolicy, typename InputIterator, typename T>
 THRUST_HOST_DEVICE InputIterator
 find(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, const T& value)
@@ -137,6 +136,5 @@ find_if_not(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, 
 {
   return thrust::find_if(exec, first, last, _THRUST_STD::not_fn(pred));
 } // end find()
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

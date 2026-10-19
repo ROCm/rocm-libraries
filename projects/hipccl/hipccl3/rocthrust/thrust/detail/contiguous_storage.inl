@@ -43,7 +43,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
 THRUST_EXEC_CHECK_DISABLE
 template <typename T, typename Alloc>
 THRUST_HOST_DEVICE contiguous_storage<T, Alloc>::contiguous_storage(const Alloc& alloc)
@@ -268,7 +267,6 @@ THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::o
 
   return *this;
 }
-
 } // namespace detail
 
 THRUST_NAMESPACE_END

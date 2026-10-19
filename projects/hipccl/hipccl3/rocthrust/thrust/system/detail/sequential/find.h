@@ -35,7 +35,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
 {
-
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE InputIterator
@@ -57,6 +56,5 @@ find_if(execution_policy<DerivedPolicy>&, InputIterator first, InputIterator las
   // return first so zip_iterator works correctly
   return first;
 }
-
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END

@@ -33,7 +33,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace system::detail::generic::scalar
 {
-
 template <typename RandomAccessIterator, typename Size, typename T, typename BinaryPredicate>
 THRUST_HOST_DEVICE RandomAccessIterator
 lower_bound_n(RandomAccessIterator first, Size n, const T& val, BinaryPredicate comp)
@@ -118,7 +117,6 @@ THRUST_HOST_DEVICE bool binary_search(RandomAccessIterator first, RandomAccessIt
 
   return iter != last && !wrapped_comp(value, *iter);
 }
-
 } // namespace system::detail::generic::scalar
 
 THRUST_NAMESPACE_END

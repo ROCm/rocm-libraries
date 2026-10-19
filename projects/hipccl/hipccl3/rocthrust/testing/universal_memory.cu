@@ -27,7 +27,6 @@
 
 namespace
 {
-
 // The managed_memory_pointer class should be identified as a
 // contiguous_iterator
 static_assert(thrust::is_contiguous_iterator_v<thrust::universal_allocator<int>::pointer>);
@@ -51,7 +50,6 @@ struct some_object
 private:
   T m_data;
 };
-
 } // namespace
 
 template <typename T>

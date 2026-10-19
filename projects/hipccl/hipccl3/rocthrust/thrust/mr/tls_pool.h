@@ -34,7 +34,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 /*! \addtogroup memory_resources Memory Resources
  *  \ingroup memory_management
  *  \{
@@ -59,6 +58,5 @@ THRUST_HOST thrust::mr::unsynchronized_pool_resource<Upstream>& tls_pool(Upstrea
 
 /*! \}
  */
-
 } // namespace mr
 THRUST_NAMESPACE_END

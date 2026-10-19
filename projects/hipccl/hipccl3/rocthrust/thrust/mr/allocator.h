@@ -42,7 +42,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 /*! \addtogroup allocators Allocators
  *  \ingroup memory_management
  *  \{
@@ -230,6 +229,5 @@ public:
 
 /*! \} // allocators
  */
-
 } // namespace mr
 THRUST_NAMESPACE_END

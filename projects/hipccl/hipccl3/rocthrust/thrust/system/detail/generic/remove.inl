@@ -35,7 +35,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
-
 template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE ForwardIterator
 remove(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, const T& value)
@@ -116,6 +115,5 @@ THRUST_HOST_DEVICE OutputIterator remove_copy_if(
 {
   return thrust::copy_if(exec, first, last, stencil, result, _THRUST_STD::not_fn(pred));
 } // end remove_copy_if()
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

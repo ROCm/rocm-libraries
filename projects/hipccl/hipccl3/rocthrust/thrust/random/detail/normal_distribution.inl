@@ -37,7 +37,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace random
 {
-
 template <typename RealType>
 THRUST_HOST_DEVICE normal_distribution<RealType>::normal_distribution(RealType a, RealType b)
     : super_t()
@@ -184,7 +183,6 @@ std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>&
 {
   return thrust::random::detail::random_core_access::stream_in(is, d);
 }
-
 } // namespace random
 
 THRUST_NAMESPACE_END

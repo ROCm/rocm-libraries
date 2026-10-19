@@ -41,7 +41,6 @@ namespace detail
 {
 namespace is_call_possible_detail
 {
-
 template <typename T>
 class void_exp_result
 {};
@@ -63,7 +62,6 @@ struct clone_constness<const src_type, dest_type>
 {
   using type = const dest_type;
 };
-
 } // namespace is_call_possible_detail
 } // namespace detail
 THRUST_NAMESPACE_END

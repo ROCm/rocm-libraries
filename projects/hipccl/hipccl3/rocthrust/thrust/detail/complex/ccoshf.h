@@ -59,7 +59,6 @@ namespace detail
 {
 namespace complex
 {
-
 using thrust::complex;
 
 THRUST_HOST_DEVICE inline complex<float> ccoshf(const complex<float>& z)
@@ -141,9 +140,7 @@ THRUST_HOST_DEVICE inline complex<float> ccosf(const complex<float>& z)
 {
   return (ccoshf(complex<float>(-z.imag(), z.real())));
 }
-
 } // namespace complex
-
 } // namespace detail
 
 template <>

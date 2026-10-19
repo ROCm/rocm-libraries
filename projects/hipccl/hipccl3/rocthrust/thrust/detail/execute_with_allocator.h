@@ -41,7 +41,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
 template <typename T, typename Allocator, template <typename> class BaseSystem>
 THRUST_HOST thrust::pair<T*, std::ptrdiff_t>
 get_temporary_buffer(thrust::detail::execute_with_allocator<Allocator, BaseSystem>& system, std::ptrdiff_t n)
@@ -78,7 +77,6 @@ THRUST_HOST void return_temporary_buffer(
   pointer to_ptr = thrust::reinterpret_pointer_cast<pointer>(p);
   alloc_traits::deallocate(system.get_allocator(), to_ptr, num_elements);
 }
-
 } // namespace detail
 
 THRUST_NAMESPACE_END

@@ -25,7 +25,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
-
 _CCCL_EXEC_CHECK_DISABLE
 template <class Derived, class OutputIt, class Size, class Generator>
 OutputIt _CCCL_HOST_DEVICE
@@ -56,7 +55,6 @@ void _CCCL_HOST_DEVICE generate(execution_policy<Derived>& policy, OutputIt firs
 {
   cuda_cub::generate_n(policy, first, _THRUST_STD::distance(first, last), generator);
 }
-
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
 #endif

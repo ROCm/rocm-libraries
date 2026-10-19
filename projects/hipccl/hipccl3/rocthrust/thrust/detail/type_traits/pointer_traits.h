@@ -38,7 +38,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename Ptr>
 struct pointer_element;
 
@@ -146,7 +145,6 @@ struct rebind_pointer<
 
 namespace pointer_traits_detail
 {
-
 template <typename Void>
 struct capture_address
 {
@@ -170,7 +168,6 @@ struct pointer_to_param
                               _THRUST_STD::type_identity<capture_address<T>>,
                               _THRUST_STD::add_lvalue_reference<T>>
 {};
-
 } // namespace pointer_traits_detail
 
 template <typename Ptr>
@@ -332,6 +329,5 @@ template <typename FromPtr, typename ToPtr, typename T = void>
 struct enable_if_void_pointer_is_system_convertible
     : _THRUST_STD::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
 {};
-
 } // namespace detail
 THRUST_NAMESPACE_END

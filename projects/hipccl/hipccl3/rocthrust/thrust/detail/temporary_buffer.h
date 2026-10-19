@@ -50,7 +50,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename T, typename DerivedPolicy, typename Pair>
 THRUST_HOST_DEVICE
   thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
@@ -64,7 +63,6 @@ THRUST_HOST_DEVICE
     thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>;
   return result_type(ptr, p.second);
 } // end down_cast_pair()
-
 } // namespace detail
 
 THRUST_EXEC_CHECK_DISABLE

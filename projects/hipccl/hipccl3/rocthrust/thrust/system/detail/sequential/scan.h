@@ -38,7 +38,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
 {
-
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
 THRUST_HOST_DEVICE OutputIterator inclusive_scan(
@@ -148,6 +147,5 @@ THRUST_HOST_DEVICE OutputIterator exclusive_scan(
 
   return result;
 }
-
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END
