@@ -202,7 +202,6 @@ namespace TensileLite
         {
             m_numEnqueuesInSolution = 0;
             m_timeInSolution        = double_millis::zero();
-            m_timeSamplesUs.clear();
             m_skip_slow_solution    = false;
 
             ++m_currSolutionIdx; // update current sol-idx
@@ -244,8 +243,6 @@ namespace TensileLite
         void BenchmarkTimer::postSolution()
         {
             double timePerEnqueue_us;
-            double timeP50_us = std::numeric_limits<double>::quiet_NaN();
-            double timeP90_us = std::numeric_limits<double>::quiet_NaN();
             double gflops;
             double gflopsPerCu;
             double bandwidthGbps = 0.0;
@@ -257,16 +254,6 @@ namespace TensileLite
                                                                      / m_numEnqueuesInSolution
                                                                  - m_flushTimeUs
                                                            : std::numeric_limits<double>::quiet_NaN();
-                if(!sol_is_skipped && !m_timeSamplesUs.empty())
-                {
-                    std::sort(m_timeSamplesUs.begin(), m_timeSamplesUs.end());
-                    size_t n            = m_timeSamplesUs.size();
-                    auto   percentileUs = [&](double p) {
-                        return m_timeSamplesUs[std::min(n - 1, size_t(p * n))] - m_flushTimeUs;
-                    };
-                    timeP50_us = percentileUs(0.5);
-                    timeP90_us = percentileUs(0.9);
-                }
 
                 ContractionSolution::ProjectedPerformance pp;
                 double                                    flopCount = 0;
@@ -317,8 +304,6 @@ namespace TensileLite
             {
                 ScopedTimer timer("post_solution_reporting");
                 m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
-                m_reporter->report(ResultKey::TimeUSP50, timeP50_us);
-                m_reporter->report(ResultKey::TimeUSP90, timeP90_us);
                 m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
                 m_reporter->report(ResultKey::SpeedGFlops, gflops);
                 m_reporter->report(ResultKey::GbpsBW, bandwidthGbps);
@@ -326,7 +311,6 @@ namespace TensileLite
 
             m_timeInSolution        = double_millis::zero();
             m_numEnqueuesInSolution = 0;
-            m_timeSamplesUs.clear();
         }
 
         bool BenchmarkTimer::needMoreRunsInSolution() const
@@ -530,8 +514,6 @@ namespace TensileLite
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents.numInvocations();
-            m_timeSamplesUs.push_back(double_micros(totalTime).count()
-                                      / startEvents.numInvocations());
 
             if(m_sleepPercent > 0)
             {

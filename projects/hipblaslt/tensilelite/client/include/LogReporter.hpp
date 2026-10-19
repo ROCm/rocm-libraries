@@ -140,9 +140,7 @@ namespace TensileLite
                                                                      ClockRateMem,
                                                                      FanSpeedRPMs,
                                                                      HardwareSampleCount,
-                                                                     EnqueueTime,
-                                                                     TimeUSP50,
-                                                                     TimeUSP90},
+                                                                     EnqueueTime},
                                                                     stream,
                                                                     dumpTensors,
                                                                     PrintWinnersOnly));

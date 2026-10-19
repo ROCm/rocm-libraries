@@ -133,8 +133,7 @@ namespace TensileLite
             using double_nanos  = std::chrono::duration<double, std::nano>;
             using prob_sol_map  = std::map<int, int>;
 
-            double_millis       m_timeInSolution;
-            std::vector<double> m_timeSamplesUs;
+            double_millis m_timeInSolution;
             double_millis m_totalGPUTime;
             double_millis m_currentBestWarmUpTime;
             float         m_flushTimeUs;

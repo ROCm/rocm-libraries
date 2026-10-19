@@ -93,8 +93,6 @@ namespace TensileLite
             // Performance-related
             const std::string Validation       = "validation";
             const std::string TimeUS           = "time-us";
-            const std::string TimeUSP50        = "time-us-p50";
-            const std::string TimeUSP90        = "time-us-p90";
             const std::string SpeedGFlops      = "gflops";
             const std::string SpeedGFlopsPerCu = "gflops-per-cu";
             const std::string EnqueueTime      = "enqueue-time";
