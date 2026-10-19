@@ -136,6 +136,13 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - **cuDNN v9 frontend compatibility shim** behind `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` ⏳
   - Shim core node coverage landed ✅
   - Node and enum coverage expansion in progress ⏳
+- **cuDNN v8 compatibility shim (POC)** behind the same option ✅ ([RFC 0021](./rfcs/0021_CuDNN_V8_Shim.md))
+  - The cuDNN frontend v0.x builders (cuDNN v8 API), ported from cudnn-frontend v1.24.0, run on an emulated cuDNN backend descriptor C API (`cudnnBackend*`) that translates to hipDNN descriptors. Graphs a hipDNN engine supports execute; anything else compiles and fails at run time with `CUDNN_STATUS_NOT_SUPPORTED`. Covered by mock-backend unit tests, integration tests against test plugins, GPU samples (convolution, fused convolution, matmul, pointwise and the raw C API), a compile-and-run harness over NVIDIA's legacy v8 samples, and a compile check of PyTorch's hipified v8 consumers (`Conv_v8.cpp` and the quantized cuDNN operations). Behavior differences are listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#cudnn-v8-api).
+  - Remaining gaps:
+    - Numerical evidence for the matmul (hipBLASLt) path is pending from Linux CI; hipBLASLt declines matmul on gfx115x under Windows
+    - No int8 or fp8 engine: PyTorch's quantized operations and the legacy int8 samples find no engine, and the legacy fp8 samples stop at their own NVIDIA-architecture check
+    - Tensors aligned below 16 bytes need engine-plugin API 1.3.0, which no provider reports yet
+    - The per-call budget for `VariantPackBuilder::build()` plus `cudnnBackendExecute` is relaxed to 5 µs over the hipDNN equivalent (`cudnnBackendExecute` alone stays under 1 µs)
 
 ### MIOpen integration
 - **MIOpen ↔ hipDNN shim** enabling MIOpen to route through hipDNN (RFC stage)

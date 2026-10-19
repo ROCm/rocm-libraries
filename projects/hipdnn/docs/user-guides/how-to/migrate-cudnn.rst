@@ -69,6 +69,161 @@ This table provides a high-level overview of the differences between cuDNN and h
 
 See the :ref:`dimension-layouts` section of the Operation Support doccument for operation-specifc hipDNN tensor layout details.
 
+Compile cuDNN frontend source with the compatibility shim
+=========================================================
+
+Instead of porting to the ``hipdnn_frontend`` API, you can compile existing cuDNN frontend source
+against hipDNN's header-only cuDNN-compatibility shim. Build hipDNN with
+``-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`` to install the shim headers with the ``hipdnn_frontend``
+headers, then link ``hipdnn_frontend`` as shown above. The shim is source compatible only: rebuild
+your code against it. Its C entry points take HIP types (for example, ``cudnnSetStream`` takes a
+``hipStream_t``), so CUDA runtime calls in your source still need porting to HIP.
+
+Replace the cuDNN include and alias the namespace:
+
+.. code:: cpp
+
+    #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
+
+    namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
+
+The shim's behavior differs from cuDNN in places. See
+`Known divergences <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md>`__
+for the full list.
+
+cuDNN v9 graph API
+------------------
+
+Source written against the v9 graph API (``cudnn_frontend::graph::Graph``) compiles after the include
+change. Every heuristic mode runs hipDNN's fallback engine selection.
+
+cuDNN v8 API: v0.x builders and the backend C API
+-------------------------------------------------
+
+The same include provides the cuDNN v8 surface:
+
+* The v0.x builders: ``TensorBuilder``, ``ConvDescBuilder``, ``PointWiseDescBuilder``,
+  ``MatMulDescBuilder``, ``ReductionDescBuilder``, ``ResampleDescBuilder``, ``RngDescBuilder``,
+  ``OperationBuilder``, ``OperationGraphBuilder``, ``EngineHeuristicsBuilder``, ``EngineBuilder``,
+  ``EngineConfigBuilder``, ``EngineFallbackListBuilder``, ``ExecutionPlanBuilder`` and
+  ``VariantPackBuilder``, plus filters, errata, ``ExecutionPlanCache`` and ``get_heuristics_list``.
+  As upstream, a failed ``build()`` throws ``cudnnException`` unless ``NV_CUDNN_DISABLE_EXCEPTION``
+  is defined.
+* The backend descriptor C API: ``cudnnBackendCreateDescriptor``, ``cudnnBackendSetAttribute``,
+  ``cudnnBackendGetAttribute``, ``cudnnBackendFinalize``, ``cudnnBackendExecute``,
+  ``cudnnBackendDestroyDescriptor`` and ``cudnnGetLastErrorString``. Code that uses only the C API
+  can include ``<hipdnn_compatibility/cudnn/cudnn.h>`` instead.
+* Plan search: include ``<hipdnn_compatibility/cudnn/cudnn_frontend_get_plan.h>`` for
+  ``EngineConfigGenerator::cudnnGetPlan`` and ``<hipdnn_compatibility/cudnn/cudnn_frontend_find_plan.h>``
+  for ``cudnnFindPlan``, ``cudnnFindPlanAndCache`` and ``time_sorted_plan``, as with upstream.
+
+A convolution forward through the builders:
+
+.. code:: cpp
+
+    cudnn_frontend::Tensor makeTensor(int64_t uid,
+                                      const std::vector<int64_t>& dims,
+                                      const std::vector<int64_t>& strides)
+    {
+        return cudnn_frontend::TensorBuilder()
+            .setDataType(CUDNN_DATA_FLOAT)
+            .setDim(static_cast<int64_t>(dims.size()), dims.data())
+            .setStride(static_cast<int64_t>(strides.size()), strides.data())
+            .setId(uid)
+            .setAlignment(16)
+            .build();
+    }
+
+    // x, w, y and workspace are device pointers. workspace must hold plan.getWorkspaceSize() bytes.
+    cudnnStatus_t convFprop(cudnnHandle_t handle, void* x, void* w, void* y, void* workspace)
+    {
+        // Packed NCHW: x and y are 16x16x16x16, w is 16x16x3x3; padding 1, stride 1.
+        const std::vector<int64_t> xDims = {16, 16, 16, 16}, xStrides = {4096, 256, 16, 1};
+        const std::vector<int64_t> wDims = {16, 16, 3, 3}, wStrides = {144, 9, 3, 1};
+        const std::vector<int64_t> yDims = xDims, yStrides = xStrides;
+        const std::array<int64_t, 2> pad = {1, 1}, stride = {1, 1}, dilation = {1, 1};
+        cudnn_frontend::ConvDesc conv = cudnn_frontend::ConvDescBuilder()
+                                            .setComputeType(CUDNN_DATA_FLOAT)
+                                            .setMathMode(CUDNN_CROSS_CORRELATION)
+                                            .setSpatialDimCount(2)
+                                            .setPrePadding(2, pad.data())
+                                            .setPostPadding(2, pad.data())
+                                            .setSpatialStride(2, stride.data())
+                                            .setDilation(2, dilation.data())
+                                            .build();
+        const cudnn_frontend::Operation op
+            = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+                  .setxDesc(makeTensor('x', xDims, xStrides))
+                  .setwDesc(makeTensor('w', wDims, wStrides))
+                  .setyDesc(makeTensor('y', yDims, yStrides))
+                  .setcDesc(conv)
+                  .build();
+
+        std::array<const cudnn_frontend::Operation*, 1> ops = {&op};
+        cudnn_frontend::OperationGraph graph = cudnn_frontend::OperationGraphBuilder()
+                                                   .setHandle(handle)
+                                                   .setOperationGraph(1, ops.data())
+                                                   .build();
+
+        cudnn_frontend::EngineHeuristics heuristics = cudnn_frontend::EngineHeuristicsBuilder()
+                                                          .setOperationGraph(graph)
+                                                          .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
+                                                          .build();
+        const int64_t count = heuristics.getEngineConfigCount();
+        if(count == 0)
+        {
+            return CUDNN_STATUS_NOT_SUPPORTED; // No hipDNN engine runs this graph on this device.
+        }
+        auto& configs = heuristics.getEngineConfig(count);
+        cudnn_frontend::ExecutionPlan plan = cudnn_frontend::ExecutionPlanBuilder()
+                                                 .setHandle(handle)
+                                                 .setEngineConfig(configs[0], graph.getTag())
+                                                 .build();
+
+        std::array<void*, 3> pointers = {x, w, y};
+        const std::array<int64_t, 3> uids = {'x', 'w', 'y'};
+        const cudnn_frontend::VariantPack pack = cudnn_frontend::VariantPackBuilder()
+                                                     .setWorkspacePointer(workspace)
+                                                     .setDataPointers(3, pointers.data())
+                                                     .setUids(3, uids.data())
+                                                     .build();
+        return cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc());
+    }
+
+``samples/cudnn_shim/ConvFpropV8.cpp`` in the hipDNN source tree runs this graph end to end, and
+``samples/cudnn_shim/RawBackendApiV8.cpp`` builds the same convolution with the C API alone.
+
+The main differences from cuDNN on the v8 API follow, each with a link to its known-divergences
+section.
+`Known divergences: cuDNN v8 API <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#cudnn-v8-api>`__
+has the full list.
+
+* **Heuristics:** every ``CUDNN_HEUR_MODE_*`` returns the same list, in hipDNN's fallback order
+  (`Heuristic modes <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#heuristic-modes>`__).
+* **Handles:** ``OperationGraphBuilder`` needs ``setHandle``, and ``cudnnBackendExecute`` must use
+  the graph's handle; any other handle returns ``CUDNN_STATUS_BAD_PARAM``
+  (`Operation graphs <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#operation-graphs>`__,
+  `Engines, plans and execution <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#engines-plans-and-execution>`__).
+* **Convolution mode:** call ``setMathMode(CUDNN_CROSS_CORRELATION)``. A graph that keeps the
+  builder's default, ``CUDNN_CONVOLUTION``, has no engine
+  (`Builders <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#builders>`__).
+* **Scaling:** convolution, pointwise or resample alpha other than 1, or beta other than 0, returns
+  ``CUDNN_STATUS_NOT_SUPPORTED``
+  (`Operations <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#operations>`__).
+* **Tensor alignment:** a tensor aligned below 16 bytes leaves the graph with no engine
+  (`Tensors <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#tensors>`__).
+* **Unsupported operations:** operations hipDNN does not run, such as ``GEN_STATS``, ``RNG`` and
+  ``RESHAPE``, fail at ``build()`` with ``CUDNN_STATUS_NOT_SUPPORTED``
+  (`Operations <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#operations>`__).
+  A graph that translates but that no engine supports can still build; heuristics then return an
+  empty list.
+* **Engine numbers:** engine indices order hipDNN's engines by engine ID. NVIDIA engine numbers in
+  errata files or hard-coded in your source select unrelated engines, or none
+  (`Engines, plans and execution <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#engines-plans-and-execution>`__).
+* **Enum values:** the C enums have cuDNN's names but the shim's own values. Don't store or compare
+  raw values produced by cuDNN
+  (`Enum values <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#enum-values>`__).
+
 Troubleshooting
 ===============
 
