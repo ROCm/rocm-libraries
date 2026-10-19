@@ -108,8 +108,8 @@ public:
         const uint8_t* serializedPlan,
         size_t planByteSize);
 
-    // Records one successful execution of this plan and returns the new count (1-based).
-    // Thread-safe: concurrent executions of the same plan get distinct counts.
+    // Records one successful submission of this plan and returns the new count (1-based).
+    // Thread-safe: concurrent submissions of the same plan get distinct counts.
     uint64_t recordExecution();
 
     static hipdnnBackendDescriptorType_t getStaticType();

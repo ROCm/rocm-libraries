@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipdnnStatus.h"
+#include "ScopedBackendLogCapture.hpp"
 #include "TestMacros.hpp"
 #include "TestUtil.hpp"
 #include "hipdnn_backend.h"
@@ -12,9 +13,54 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <regex>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+namespace
+{
+struct BackendDescriptorDeleter
+{
+    void operator()(hipdnnBackendDescriptor_t descriptor) const
+    {
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
+    }
+};
+
+using UniqueBackendDescriptor
+    = std::unique_ptr<std::remove_pointer_t<hipdnnBackendDescriptor_t>, BackendDescriptorDeleter>;
+
+struct ExecuteLogFields
+{
+    std::string planId;
+    std::string graphId;
+    std::string executionCount;
+};
+
+// Parses every "API success: [hipdnnBackendExecute]" log that the recorder captured, in order.
+std::vector<ExecuteLogFields>
+    parseExecuteSuccessLogs(const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+{
+    const std::regex pattern(R"(planId=(\d+), graphId=([0-9a-f-]{36}),.*executionCount=(\d+))");
+    std::vector<ExecuteLogFields> fields;
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        if(log.message.find("API success: [hipdnnBackendExecute]") == std::string::npos)
+        {
+            continue;
+        }
+        std::smatch match;
+        EXPECT_TRUE(std::regex_search(log.message, match, pattern)) << log.message;
+        if(!match.empty())
+        {
+            fields.push_back({match[1].str(), match[2].str(), match[3].str()});
+        }
+    }
+    return fields;
+}
+} // namespace
 
 class IntegrationBackendExecuteApi : public ::testing::Test
 {
@@ -227,72 +273,67 @@ TEST_F(IntegrationBackendExecuteApi, ExecuteLogsExecutionCountPerPlan)
 
     ASSERT_NO_FATAL_FAILURE(createExecutablePlan());
 
-    hipdnnBackendDescriptor_t otherPlan = nullptr;
-    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &otherPlan),
-              HIPDNN_STATUS_SUCCESS);
-    test_util::populateTestExecutionPlan(
-        &otherPlan, &_engineConfig, &_engine, &_graphDescriptor, _handle, GIDX, true);
+    hipdnnBackendDescriptor_t rawOtherPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &rawOtherPlan),
+        HIPDNN_STATUS_SUCCESS);
+    const UniqueBackendDescriptor otherPlan(rawOtherPlan);
+    ASSERT_NO_FATAL_FAILURE(test_util::populateTestExecutionPlan(
+        &rawOtherPlan, &_engineConfig, &_engine, &_graphDescriptor, _handle, GIDX, true));
 
-    hipdnnSeverity_t originalLevel = HIPDNN_SEV_OFF;
-    ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&originalLevel), HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                           HIPDNN_SEV_INFO,
-                                           HIPDNN_LOG_CALLBACK_SYNC,
-                                           this),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_tests::ScopedBackendLogCapture logCapture(
+        IsolatedLogRecorder::getIsolatedUserRecordingCallback(), HIPDNN_SEV_INFO, this);
 
-    std::vector<std::string> executeLogs;
-    {
-        auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    ASSERT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendExecute(_handle, otherPlan.get(), _variantPack), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
 
-        EXPECT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(hipdnnBackendExecute(_handle, otherPlan, _variantPack), HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
+    const auto logs = parseExecuteSuccessLogs(recorder);
+    ASSERT_EQ(logs.size(), 4u) << recorder.getRecordedLogsAsString();
 
-        for(const auto& log : recorder.getRecordedLogs())
-        {
-            if(log.message.find("API success: [hipdnnBackendExecute]") != std::string::npos)
-            {
-                executeLogs.push_back(log.message);
-            }
-        }
-    }
-
-    EXPECT_EQ(hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                           HIPDNN_SEV_OFF,
-                                           HIPDNN_LOG_CALLBACK_SYNC,
-                                           this),
-              HIPDNN_STATUS_SUCCESS);
-    EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(originalLevel), HIPDNN_STATUS_SUCCESS);
-    destroyTestDescriptor(otherPlan);
-
-    ASSERT_EQ(executeLogs.size(), 4u);
-
-    // Each log names the plan by planId and the source graph by graphId.
-    const std::regex pattern(R"(planId=(\d+), graphId=([0-9a-f-]{36}),.*executionCount=(\d+))");
-    std::vector<std::smatch> matches(executeLogs.size());
-    for(size_t i = 0; i < executeLogs.size(); ++i)
-    {
-        ASSERT_TRUE(std::regex_search(executeLogs[i], matches[i], pattern)) << executeLogs[i];
-    }
-
-    const auto planId = matches[0][1].str();
-    const auto otherPlanId = matches[2][1].str();
-    EXPECT_NE(planId, otherPlanId);
-    EXPECT_EQ(matches[1][1].str(), planId);
-    EXPECT_EQ(matches[3][1].str(), planId);
+    // Each log names the plan by planId.
+    EXPECT_NE(logs[0].planId, logs[2].planId);
+    EXPECT_EQ(logs[1].planId, logs[0].planId);
+    EXPECT_EQ(logs[3].planId, logs[0].planId);
 
     // Both plans come from the same graph.
-    for(const auto& match : matches)
+    for(const auto& log : logs)
     {
-        EXPECT_EQ(match[2].str(), matches[0][2].str());
+        EXPECT_EQ(log.graphId, logs[0].graphId);
     }
 
     // Counts are per plan: the other plan starts at 1 and does not advance this plan's count.
-    EXPECT_EQ(matches[0][3].str(), "1");
-    EXPECT_EQ(matches[1][3].str(), "2");
-    EXPECT_EQ(matches[2][3].str(), "1");
-    EXPECT_EQ(matches[3][3].str(), "3");
+    EXPECT_EQ(logs[0].executionCount, "1");
+    EXPECT_EQ(logs[1].executionCount, "2");
+    EXPECT_EQ(logs[2].executionCount, "1");
+    EXPECT_EQ(logs[3].executionCount, "3");
+}
+
+TEST_F(IntegrationBackendExecuteApi, FailedExecuteDoesNotAdvanceExecutionCount)
+{
+    using hipdnn_test_sdk::utilities::IsolatedLogRecorder;
+
+    ASSERT_NO_FATAL_FAILURE(createExecutablePlan());
+
+    // The plugin resource manager rejects an unfinalized variant pack, so this execute fails
+    // after the API-level argument checks pass.
+    hipdnnBackendDescriptor_t rawUnfinalizedVariantPack = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR,
+                                            &rawUnfinalizedVariantPack),
+              HIPDNN_STATUS_SUCCESS);
+    const UniqueBackendDescriptor unfinalizedVariantPack(rawUnfinalizedVariantPack);
+
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_tests::ScopedBackendLogCapture logCapture(
+        IsolatedLogRecorder::getIsolatedUserRecordingCallback(), HIPDNN_SEV_INFO, this);
+
+    ASSERT_EQ(hipdnnBackendExecute(_handle, _plan, unfinalizedVariantPack.get()),
+              HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_EQ(hipdnnBackendExecute(_handle, _plan, _variantPack), HIPDNN_STATUS_SUCCESS);
+
+    const auto logs = parseExecuteSuccessLogs(recorder);
+    ASSERT_EQ(logs.size(), 1u) << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(logs[0].executionCount, "1");
 }
