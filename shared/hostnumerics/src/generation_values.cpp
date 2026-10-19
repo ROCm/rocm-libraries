@@ -227,7 +227,7 @@ PreparedEncodedExponent prepareEncodedExponent(
             };
         else if constexpr (scalarTypeInfo(encoding).category == ScalarCategory::FloatingPoint)
             return +[](uint64_t raw) -> double {
-                return decodeBinaryFloatKnown<encoding>(static_cast<uint32_t>(raw));
+                return decodeBinaryFloatKnown<Tag::type>(static_cast<uint32_t>(raw));
             };
         else
             throw std::runtime_error("Random encoded-exponent source type is unsupported.");
