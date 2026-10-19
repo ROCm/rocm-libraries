@@ -99,6 +99,5 @@ inline THRUST_HOST_DEVICE thrust::device_system_tag select_system(thrust::any_sy
 {
   return thrust::device_system_tag();
 }
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

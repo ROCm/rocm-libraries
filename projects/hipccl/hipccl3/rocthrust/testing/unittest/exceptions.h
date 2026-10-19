@@ -23,7 +23,6 @@
 
 namespace unittest
 {
-
 class UnitTestException
 {
 public:
@@ -75,5 +74,4 @@ public:
       : UnitTestException(msg)
   {}
 };
-
 } // end namespace unittest
