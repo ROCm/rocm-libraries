@@ -7,7 +7,9 @@
     "native": "hipkernel.gfx950_conv_fwd_aot.graph_match"
   },
   "metadata": "813567e5-0733-40a7-b5f1-cc941f7300af",
-  "heuristic": "76fb9afd-837d-4af1-8c68-0226cc7a1754",
+  "sort_kernel_catalog": {
+    "default": "76fb9afd-837d-4af1-8c68-0226cc7a1754"
+  },
   "knobs": [
     "kernel_family",
     "direct_variant",

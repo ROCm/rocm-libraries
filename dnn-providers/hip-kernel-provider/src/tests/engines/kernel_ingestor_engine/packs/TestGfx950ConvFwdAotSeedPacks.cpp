@@ -440,7 +440,7 @@ TEST_F(TestGfx950ConvFwdAotSeedPacks, ExposesTheConfiguredKnobs)
 TEST_F(TestGfx950ConvFwdAotSeedPacks, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "hipkernel.gfx950_conv_fwd_aot.score");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "hipkernel.gfx950_conv_fwd_aot.score");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx950_conv_fwd_aot.score"));
 }
 

@@ -556,7 +556,7 @@ protected:
     }
 
     // Appends @p record for @p key to this test's shard through the shard's own
-    // lock, as the engine's write-back does.
+    // lock, as the engine's write-back does. The engine's measured record created it.
     void appendPersistedRecord(const ingestor::WinnerKey& key,
                                const ingestor::WinnerRecord& record) const
     {
