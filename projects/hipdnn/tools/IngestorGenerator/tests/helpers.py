@@ -5,6 +5,7 @@
 
 from codegen.models import (
     DIALECT_DIRECT_LOAD,
+    DIALECT_PACKAGED,
     EngineSpec,
     GraphMatchSpec,
     IngestorConfig,
@@ -70,3 +71,33 @@ def make_minimal_config(**overrides) -> IngestorConfig:
         },
     )
     return IngestorConfig(**defaults)
+
+
+def make_rocke_kernel(name: str, block: int) -> KernelSpec:
+    """A packaged kernel whose candidate identity follows ``block``: two kernels built
+    from one ``block`` are the same candidate, whatever their names."""
+    return make_kernel(
+        name=name,
+        kernel_source=KernelSource(
+            kind="rocke", source="m.py", builder="build_x", spec={"block": block}
+        ),
+        metadata={"block_size": block, "dtype": "FLOAT"},
+    )
+
+
+def make_packaged_config(subpath: str, blocks: list, **overrides) -> IngestorConfig:
+    """A packaged single-pack bundle of the engine ``hipkernel:Test`` at
+    ``descriptors/<subpath>``. Bundles of one engine differ in ``subpath``."""
+    tag = subpath.rsplit("/", 1)[-1]
+    return make_minimal_config(
+        dialect=DIALECT_PACKAGED,
+        kernel_source_kind="rocke",
+        authored_subpath=subpath,
+        packs=[
+            make_pack(
+                kernels=[make_rocke_kernel(f"{tag}.b{b}", b) for b in blocks],
+                arch=["gfx950"],
+            )
+        ],
+        **overrides,
+    )

@@ -4,17 +4,27 @@
 """Renders a full descriptor bundle for one ``IngestorConfig``.
 
 Descriptor JSON is built as dicts and serialized with ``json.dumps``; Jinja2
-renders only the C++ stubs and the CMake/registration fragments. UUIDs are
-minted once per run in :func:`mint_ids`.
+renders only the C++ stubs and the CMake/registration fragments.
+
+Ids are assigned once per run by :func:`mint_ids`: an id a previous version of
+the bundle already carries is reused when its stable key matches (see
+:func:`kernel_key`), and only a descriptor with no match gets a fresh
+``uuid4``. :func:`resolve_ids` finds that previous version, in the output
+directory or in a directory named by the caller, and reports what it reused.
 """
 
+import copy
 import json
+import os
 import uuid
-from pathlib import Path
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from . import generic_targets as gtmod
+from . import prior_ids
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -64,23 +74,179 @@ def cpp_escape(value) -> str:
     return "".join(out)
 
 
-def mint_ids(config: IngestorConfig) -> dict:
-    """Generate random UUIDs once per bundle, indexed by pack/kernel position
-    so duplicate names remain distinct."""
+def kernel_key(
+    metadata: dict, arch, config: IngestorConfig
+) -> tuple[str, tuple[str, ...]]:
+    """A kernel's catalog identity: its metadata tuple completed with the CURRENT
+    config's KMD fields, plus its effective arch. It is the key the loader uses,
+    so it is unique among emitted kernels, and names and positions play no part.
+
+    `mint_ids` matches on the whole key first and falls back to the tuple alone,
+    so widening or narrowing a kernel's arch, or renaming it, keeps its id
+    while a metadata fix or a different tuple gets a new one. A match is reused
+    only if the kernel's ``kernel_source`` is unchanged: the same tuple built from
+    different compiled bytes is a retune and gets a new id (see `mint_ids`)."""
+    return (_dedup_key(metadata, config), tuple(sorted(arch or [])))
+
+
+def _source_covers(prior, new) -> bool:
+    """Whether ``new`` still says everything ``prior`` said, at the same values.
+
+    Fields only ``new`` carries are not a difference, the rule `catalog_diff`
+    applies by default: a registry that starts stating a builder knob at its
+    default would otherwise read as a retune of every kernel. A field ``prior``
+    had that ``new`` drops or changes is one."""
+    if isinstance(prior, dict) and isinstance(new, dict):
+        return all(
+            key in new and _source_covers(value, new[key])
+            for key, value in prior.items()
+        )
+    return prior == new
+
+
+def mint_ids(
+    config: IngestorConfig,
+    prior: "prior_ids.PriorBundle | None" = None,
+    siblings: "Sequence[prior_ids.PriorBundle]" = (),
+    supplement: "prior_ids.PriorBundle | None" = None,
+) -> dict:
+    """Assign every descriptor an id, once per bundle.
+
+    Keys are the engine singletons (``kmd``, ``ued``, ``kernel_match``, ``udd``,
+    ``uhd``) plus ``("pack", i)``, ``("operation_umd", i)`` and
+    ``("kernel", pack_i, kernel_i)`` indexed by position, so duplicate names stay
+    distinct.
+
+    With no ``prior`` and no ``siblings`` every id is a fresh ``uuid4``.
+
+    * Engine-level ids come from the engine's home bundle, ``prior`` or one of
+      ``siblings``, whichever holds the UED.
+    * A pack takes the id of the ``prior`` KDP with the same name; a sibling's KDP
+      id is never reused, since two KDPs sharing an id are a conflict at load.
+    * A kernel takes the id of the ``prior`` kernel with the same
+      :func:`kernel_key`. A key held by several prior kernels is ambiguous and
+      reuses none of them. A kernel left over takes the id of a left-over prior
+      kernel with the same metadata tuple at a different arch, but only when each
+      side has exactly one such candidate: a tuple shipped at several arch tiers
+      is told apart by arch alone.
+    * A kernel whose ``kernel_source`` changes or drops something the prior
+      kernel's said (see `_source_covers`) is a retune, the same tuple built from
+      different compiled bytes, and gets a new id. RFC 0017 leaves open whether an
+      id may stay with changed bytes, and a plan that records only which kernel was
+      picked would resolve a reused id to different code on replay. A field only
+      the new source carries is not a retune: it cannot be told from a knob stated
+      at its default.
+    * ``supplement`` is a second previous version that only fills gaps: a pack or
+      kernel ``prior`` has no match for may take its id from there. ``prior`` wins
+      wherever both have an answer, so ids already shipped never change.
+    * Each prior id is assigned at most once, in config order, so a freed id never
+      reaches a different descriptor.
+    """
+    engine = next(
+        (
+            bundle.engine
+            for bundle in (prior, *siblings)
+            if bundle is not None and bundle.engine is not None
+        ),
+        None,
+    )
+    claimed: set[str] = set()
+
+    def take(existing: str | None) -> str:
+        identity = existing if existing not in (None, *claimed) else str(uuid.uuid4())
+        claimed.add(identity)
+        return identity
+
     ids = {
-        "kmd": str(uuid.uuid4()),
-        "ued": str(uuid.uuid4()),
-        "kernel_match": str(uuid.uuid4()),
+        "kmd": take(engine.kmd["id"] if engine else None),
+        "ued": take(engine.ued["id"] if engine else None),
+        "kernel_match": take(engine.kernel_match_umd["id"] if engine else None),
     }
     if config.engine.has_heuristic:
-        ids["uhd"] = str(uuid.uuid4())
-    ids["udd"] = str(uuid.uuid4())
+        ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
+    ids["udd"] = take(engine.udd["id"] if engine else None)
+
+    prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
+
+    # Prior kernels as (key, id, source), in file order.
+    prior_entries = []
+    for kdp in prior.kdps if prior else ():
+        for entry in kdp.entries:
+            key = kernel_key(
+                entry.get("metadata") or {}, entry.get("arch") or kdp.arch, config
+            )
+            prior_entries.append((key, entry["id"], entry.get("kernel_source")))
+    supplement_packs = {}
+    if supplement is not None:
+        supplement_packs = {kdp.name: kdp for kdp in supplement.kdps}
+        held_ids = {identity for _key, identity, _source in prior_entries}
+        held_keys = {key for key, _identity, _source in prior_entries}
+        for kdp in supplement.kdps:
+            for entry in kdp.entries:
+                key = kernel_key(
+                    entry.get("metadata") or {}, entry.get("arch") or kdp.arch, config
+                )
+                if key not in held_keys and entry["id"] not in held_ids:
+                    prior_entries.append((key, entry["id"], entry.get("kernel_source")))
+    by_key: dict[tuple, list[tuple[str, dict]]] = {}
+    for key, identity, source in prior_entries:
+        by_key.setdefault(key, []).append((identity, source))
+
+    wanted: list[tuple[tuple, tuple, dict]] = []  # (slot, key, source) per kernel
     for pack_index, pack in enumerate(config.packs):
-        ids[("pack", pack_index)] = str(uuid.uuid4())
+        name = f"{config.engine.namespace}:{config.kdp_stem(pack)}"
+        matched = prior_packs.get(name) or supplement_packs.get(name)
+        ids[("pack", pack_index)] = take(matched.id if matched else None)
         if config.is_multi_pack:
-            ids[("operation_umd", pack_index)] = str(uuid.uuid4())
-        for kernel_index, _kernel in enumerate(pack.kernels):
-            ids[("kernel", pack_index, kernel_index)] = str(uuid.uuid4())
+            ids[("operation_umd", pack_index)] = take(
+                matched.operation_umd_id if matched else None
+            )
+        for kernel_index, kernel in enumerate(pack.kernels):
+            slot = ("kernel", pack_index, kernel_index)
+            key = source = None
+            if prior_entries:
+                key = kernel_key(
+                    _resolved_metadata(kernel, config),
+                    kernel.arch or pack.arch,
+                    config,
+                )
+                source = kernel.kernel_source.as_document()
+            wanted.append((slot, key, source))
+
+    # Pass 1: the whole key, unambiguous on the prior side, built from the same
+    # kernel_source.
+    left_over = []
+    for slot, key, source in wanted:
+        held = by_key.get(key, ())
+        if (
+            len(held) == 1
+            and held[0][0] not in claimed
+            and _source_covers(held[0][1], source)
+        ):
+            ids[slot] = take(held[0][0])
+        else:
+            left_over.append((slot, key, source))
+    # Pass 2: the tuple alone, for kernels whose arch moved. Each side must offer
+    # exactly one candidate, or the pairing would be a guess.
+    unclaimed: dict[str, list[tuple[str, dict]]] = {}
+    for key, identity, source in prior_entries:
+        if identity not in claimed:
+            unclaimed.setdefault(key[0], []).append((identity, source))
+    leftovers: dict[str, int] = {}
+    for _slot, key, _source in left_over:
+        if key is not None:
+            leftovers[key[0]] = leftovers.get(key[0], 0) + 1
+    for slot, key, source in left_over:
+        candidates = unclaimed.get(key[0], ()) if key is not None else ()
+        if (
+            len(candidates) == 1
+            and leftovers[key[0]] == 1
+            and _source_covers(candidates[0][1], source)
+        ):
+            ids[slot] = take(candidates[0][0])
+        else:
+            ids[slot] = take(None)
+    assert len(set(ids.values())) == len(ids), "mint_ids assigned an id twice"
     return ids
 
 
@@ -342,18 +508,21 @@ def _dedup_key(metadata: dict, config: IngestorConfig) -> str:
     return json.dumps(_completed_metadata(metadata, config), sort_keys=True)
 
 
-def _candidate_identity(kernel: KernelSpec) -> str:
+def _candidate_identity_doc(kernel_source: dict, priority: int) -> str:
     """What a candidate is beyond its tuple: two entries sharing a completed
     tuple are the same candidate only if they name the same binary at the same
     priority. A knob absent from ``kernel_source.spec`` and one pinned to the
-    value the policy chose are different binaries under one tuple."""
+    value the policy chose are different binaries under one tuple.
+
+    Takes the emitted ``kernel_source`` document, so a prior descriptor read
+    from disk is identified the same way as a `KernelSpec`."""
     return json.dumps(
-        {
-            "kernel_source": kernel.kernel_source.as_document(),
-            "priority": kernel.priority,
-        },
-        sort_keys=True,
+        {"kernel_source": kernel_source, "priority": priority}, sort_keys=True
     )
+
+
+def _candidate_identity(kernel: KernelSpec) -> str:
+    return _candidate_identity_doc(kernel.kernel_source.as_document(), kernel.priority)
 
 
 def _arch_competes(left: list, right: list) -> bool:
@@ -391,7 +560,8 @@ def build_specialization_contract(config: IngestorConfig, ids: dict) -> dict:
     """The ``provenance.specialization_contract`` this bundle's KDP carries.
 
     Self-contained data, so a bundle can be checked without rocKE installed.
-    ``engine_id`` and ``kmd_id`` come from `mint_ids`; the rest is authored.
+    ``engine_id`` and ``kmd_id`` come from `mint_ids` (reused from the previous
+    bundle when there is one); the rest is authored.
     A missing declaration is an error, never an empty contract.
     """
     declaration = config.specialization
@@ -591,13 +761,423 @@ def build_kdp(
     return kdp
 
 
-def build_kdp_documents(config: IngestorConfig, ids: dict) -> list:
+def build_kdp_documents(
+    config: IngestorConfig, ids: dict, seed: dict | None = None
+) -> list:
     """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide.
-    The single de-duplication scope; see `build_kdp`."""
-    seen_metadata: dict = {}
+    The single de-duplication scope; see `build_kdp`.
+
+    ``seed`` pre-fills the de-duplication state with the kernels of sibling
+    bundles of the same engine (see `resolve_ids`); it is copied, not mutated."""
+    seen_metadata: dict = copy.deepcopy(seed) if seed else {}
     return [
         (pack, build_kdp(config, pack, ids, seen_metadata)) for pack in config.packs
     ]
+
+
+@dataclass(frozen=True)
+class IdReport:
+    own_prior: Path | None  # where this bundle's ids came from; None = nothing reused
+    home: Path | None  # the root holding the engine-level files, if any
+    siblings: tuple[Path, ...]
+    reused: dict[str, int]  # engine / packs / operation_umds / kernels
+    minted: int
+    retired: tuple[str, ...]  # prior kernels and KDPs whose ids were not reused
+    warnings: tuple[str, ...] = ()  # things the caller should see but may proceed past
+    arch_moved: tuple[str, ...] = ()  # kernels that kept an id across an arch change
+
+
+@dataclass(frozen=True)
+class IdResolution:
+    ids: dict
+    seed: dict | None  # de-duplication state pre-filled from the siblings' kernels
+    satellite: bool  # the engine-level files live in a sibling; emit the KDP only
+    kdp_documents: list  # build_kdp_documents(config, ids, seed), built once here
+    report: (
+        IdReport  # counted from kdp_documents: a de-duplicated kernel is not emitted
+    )
+
+
+def _normal_parts(path: "Path | PurePosixPath") -> tuple[str, ...]:
+    return tuple(os.path.normcase(part) for part in path.parts)
+
+
+def _ends_with(path: Path, relative: str) -> bool:
+    tail = _normal_parts(PurePosixPath(relative))
+    # Not resolve(): a symlinked checkout or directory would otherwise be compared
+    # by where it points rather than by where the caller put it.
+    parts = _normal_parts(Path(os.path.abspath(path)))
+    return parts[len(parts) - len(tail) :] == tail
+
+
+def _family_of(path: Path) -> str:
+    """The folder under ``descriptors/`` that ``path`` sits in: ``hkp_pack``
+    excludes a disabled family whole, so every bundle of one engine must share it."""
+    parts = path.resolve().parts
+    for index in range(len(parts) - 2, -1, -1):
+        if parts[index] == "descriptors":
+            return os.path.normcase(parts[index + 1])
+    raise ValueError(
+        f"{path} has no 'descriptors/<family>' component, so its family folder "
+        f"cannot be told. Pass the bundle directory inside the provider's "
+        f"descriptors/ tree."
+    )
+
+
+def _check_sibling_mode(config: IngestorConfig) -> None:
+    if not config.is_packaged:
+        raise ValueError(
+            "--engine-ids-from needs a packaged bundle: each test_descriptors/<set> "
+            "is its own pack root, so a satellite's engine, dispatch and matcher "
+            "references could not resolve there."
+        )
+    if config.is_multi_pack:
+        raise ValueError(
+            "--engine-ids-from needs a single-pack bundle: a multi-pack engine's "
+            "operation matcher names a symbol only that bundle's own Native.cpp "
+            "registers."
+        )
+
+
+def resolve_ids(
+    config: IngestorConfig,
+    output_dir: Path,
+    ids_from: Path | None = None,
+    engine_ids_from: Sequence[Path] = (),
+    *,
+    fresh: bool = False,
+    also_from: Path | None = None,
+) -> IdResolution:
+    """Find this bundle's previous version, assign every id, and build the KDPs.
+
+    ``ids_from`` is the previous version of this bundle and is strict: any
+    problem reading it raises. Without it, ``output_dir / config.descriptor_dir``
+    is read when it holds descriptors, so regenerating into an existing tree
+    keeps its ids; a missing or empty directory there means a new bundle.
+
+    ``engine_ids_from`` names every OTHER bundle of the same engine. Exactly one
+    bundle of an engine, the home, holds the engine-level files; the others are
+    satellites holding only their KDP. The engine-level ids are taken from the
+    home, and the siblings' kernels seed the engine-wide de-duplication. A
+    sibling's KDP and kernel ids are never reused, since a repeated id with
+    different content is a conflict at load.
+
+    ``also_from`` is a second, lenient source: a previous run of this bundle (say
+    the scratch directory being iterated in) whose ids fill in what ``ids_from``
+    does not know, namely the kernels added since it was installed. It never
+    overrides ``ids_from``, and it is ignored with a warning when it belongs to a
+    different engine id or cannot be read.
+
+    ``fresh`` reads nothing and gives every descriptor a new id: the explicit way
+    to start a bundle over. It excludes the other two inputs.
+
+    Raises ValueError, before anything is written.
+    """
+    output_dir = Path(output_dir)
+    sibling_roots = [Path(root) for root in engine_ids_from]
+    if fresh:
+        if ids_from is not None or sibling_roots:
+            raise ValueError(
+                "fresh ids contradict --ids-from and --engine-ids-from, which exist "
+                "to reuse them"
+            )
+        ids = mint_ids(config)
+        kdp_documents = build_kdp_documents(config, ids)
+        report = _report(config, ids, kdp_documents, None, None, None, None, [])
+        return IdResolution(
+            ids=ids,
+            seed=None,
+            satellite=False,
+            kdp_documents=kdp_documents,
+            report=report,
+        )
+    if sibling_roots:
+        _check_sibling_mode(config)
+
+    strict = ids_from is not None
+    if strict:
+        own_root = Path(ids_from)
+        if not _ends_with(own_root, config.descriptor_dir):
+            raise ValueError(
+                f"--ids-from {own_root} is not this bundle's directory (this config "
+                f"writes to a path ending {config.descriptor_dir!r}). For another "
+                f"bundle of the same engine use --engine-ids-from."
+            )
+    else:
+        own_root = output_dir / config.descriptor_dir
+    for sibling in sibling_roots:
+        if sibling.resolve() == own_root.resolve():
+            raise ValueError(f"the sibling {sibling} is this bundle")
+        if _ends_with(sibling, config.descriptor_dir):
+            raise ValueError(
+                f"sibling {sibling} ends with this config's descriptor directory "
+                f"{config.descriptor_dir!r}: a satellite needs its own "
+                f"authored_subpath, or its KDP would be written into the sibling's "
+                f"folder."
+            )
+
+    use_own = strict or (
+        own_root.is_dir() and bool(prior_ids.list_docs(own_root, "ued", "kdp"))
+    )
+    roots = ([own_root] if use_own else []) + sibling_roots
+    homes = []
+    for root in roots:
+        engine = prior_ids.find_engine(root, config.engine.name)
+        if engine is not None:
+            homes.append((root, engine))
+    if len(homes) > 1:
+        raise ValueError(
+            f"the UED of engine {config.engine.name!r} is in {len(homes)} roots, "
+            f"{[str(root) for root, _ in homes]}: exactly one bundle of an engine "
+            f"holds the engine-level files, and hkp_pack rejects a repeated id."
+        )
+
+    own = None
+    siblings: list = []
+    home_root = None
+    engine = None
+    if homes:
+        home_root, engine = homes[0]
+        engine_id = engine.ued["id"]
+        match_id = engine.kernel_match_umd["id"]
+        if use_own:
+            own = prior_ids.read_prior_bundle(own_root, engine_id, match_id)
+        siblings = [
+            prior_ids.read_prior_bundle(root, engine_id, match_id)
+            for root in sibling_roots
+        ]
+        bundles = [bundle for bundle in (own, *siblings) if bundle is not None]
+        owner: dict[str, Path] = {}
+        for bundle in bundles:
+            for kdp in bundle.kdps:
+                if kdp.id in owner:
+                    raise ValueError(
+                        f"KDP id {kdp.id} is in both {owner[kdp.id]} and "
+                        f"{bundle.root}: the sibling is this bundle, or a copy of it."
+                    )
+                owner[kdp.id] = bundle.root
+                if kdp.dispatch != engine.udd["id"]:
+                    raise ValueError(
+                        f"{kdp.path}: dispatch {kdp.dispatch} is not the home's UDD "
+                        f"{engine.udd['id']}"
+                    )
+                if sibling_roots and kdp.operation_umd_id is not None:
+                    raise ValueError(
+                        f"{kdp.path} carries a graph-scope operation matcher, which "
+                        f"names a symbol only its own bundle's Native.cpp registers: "
+                        f"sibling mode is for single-pack bundles."
+                    )
+    elif sibling_roots:
+        raise ValueError(
+            f"none of the siblings {[str(root) for root in sibling_roots]} holds a "
+            f"UED named {config.engine.name!r}: no sibling holds the engine's UED"
+        )
+    elif strict:
+        raise ValueError(
+            f"no UED named {config.engine.name!r} under --ids-from {own_root}"
+        )
+    elif use_own:
+        satellite_hint = (
+            f" It holds KDP(s) but no engine-level files: this looks like a "
+            f"satellite bundle; pass --engine-ids-from <the home bundle's directory>."
+            if prior_ids.list_docs(own_root, "kdp")
+            else ""
+        )
+        raise ValueError(
+            f"{own_root} holds descriptors but no UED named "
+            f"{config.engine.name!r}.{satellite_hint} If the engine was renamed, "
+            f"pass --new-ids to start its ids over, or clear that directory."
+        )
+
+    warnings = []
+    supplement = None
+    if (
+        also_from is not None
+        and engine is not None
+        and not (use_own and also_from.resolve() == own_root.resolve())
+    ):
+        try:
+            other = prior_ids.find_engine(also_from, config.engine.name)
+            if other is not None and other.ued["id"] != engine.ued["id"]:
+                warnings.append(
+                    f"{also_from} holds engine {config.engine.name!r} under a "
+                    f"different id than {home_root}, so it was made without those ids; "
+                    f"it is ignored."
+                )
+            else:
+                supplement = prior_ids.read_prior_bundle(
+                    also_from, engine.ued["id"], engine.kernel_match_umd["id"]
+                )
+        except ValueError as e:
+            warnings.append(f"{also_from} is ignored as a source of ids: {e}")
+
+    satellite = bool(sibling_roots) and home_root is not own_root
+    if sibling_roots:
+        home_family = (
+            _family_of(home_root)
+            if home_root is not own_root
+            else PurePosixPath(config.descriptor_dir).parts[1]
+        )
+        families = {PurePosixPath(config.descriptor_dir).parts[1]} | {
+            _family_of(root) for root in sibling_roots
+        }
+        if {os.path.normcase(f) for f in families} != {os.path.normcase(home_family)}:
+            raise ValueError(
+                f"bundles of one engine must share a family folder under "
+                f"descriptors/, found {sorted(families)}: hkp_pack excludes a "
+                f"disabled family whole, which would leave the others' references "
+                f"dangling."
+            )
+
+    if own is not None or siblings:
+        for root in ([own_root] if own is not None else []) + sibling_roots:
+            warnings.extend(prior_ids.dvc_mismatches(root))
+    if engine is not None and config.is_packaged:
+        named = ([own_root] if use_own else []) + sibling_roots
+        beside = {root.parent for root in named}
+        for parent in sorted(beside):
+            warnings.extend(prior_ids.unfetched_dvc(parent, named))
+            for other in prior_ids.unnamed_siblings(parent, engine.ued["id"], named):
+                warnings.append(
+                    f"{other} holds another bundle of engine {config.engine.name!r} "
+                    f"that is not named with --engine-ids-from. Left out, its kernels "
+                    f"drop out of the engine-wide duplicate check, and a tuple "
+                    f"competing with one of them drops the whole engine at load."
+                )
+
+    ids = mint_ids(config, own, siblings, supplement)
+
+    if satellite:
+        built = {
+            "ued": (build_ued(config, ids), engine.ued),
+            "kmd": (build_kmd(config, ids), engine.kmd),
+            "udd": (build_udd(config, ids), engine.udd),
+            "kernel match UMD": (
+                build_kernel_match_umd(config, ids),
+                engine.kernel_match_umd,
+            ),
+            "uhd": (build_uhd(config, ids), engine.uhd),
+        }
+        for name, (generated, home_doc) in built.items():
+            if generated != home_doc:
+                raise ValueError(
+                    f"this config's {name} differs from the home bundle's ({home_root}). "
+                    f"Change the engine block in the home bundle and regenerate every "
+                    f"satellite after it: a satellite's KDPs depend on the home's KMD "
+                    f"through completion and through specialization_contract.kmd_id."
+                )
+
+    seed = None
+    if siblings:
+        seed = {}
+        for bundle in siblings:
+            for kdp in bundle.kdps:
+                for entry in kdp.entries:
+                    metadata = entry.get("metadata") or {}
+                    seed.setdefault(_dedup_key(metadata, config), []).append(
+                        {
+                            "name": entry["name"],
+                            "pack": kdp.name,
+                            "arch": list(entry.get("arch") or kdp.arch or []),
+                            "identity": _candidate_identity_doc(
+                                entry["kernel_source"], entry.get("priority", 0)
+                            ),
+                        }
+                    )
+
+    kdp_documents = build_kdp_documents(config, ids, seed)
+    report = _report(
+        config,
+        ids,
+        kdp_documents,
+        own,
+        engine,
+        own_root,
+        home_root,
+        sibling_roots,
+        supplement,
+    )
+    report = replace(report, warnings=tuple(warnings))
+    return IdResolution(
+        ids=ids,
+        seed=seed,
+        satellite=satellite,
+        kdp_documents=kdp_documents,
+        report=report,
+    )
+
+
+def _report(
+    config,
+    ids,
+    kdp_documents,
+    own,
+    engine,
+    own_root,
+    home_root,
+    sibling_roots,
+    supplement=None,
+):
+    """Count what was reused from what is actually emitted."""
+    previous = [bundle for bundle in (own, supplement) if bundle is not None]
+    known = set().union(*(bundle.all_ids for bundle in previous))
+    if engine is not None:
+        known.update(
+            doc["id"]
+            for doc in (
+                engine.ued,
+                engine.kmd,
+                engine.udd,
+                engine.kernel_match_umd,
+                engine.uhd,
+            )
+            if doc
+        )
+    # What each previous kernel's effective arch was, to see which reuse moved it.
+    previous_arch = {
+        entry["id"]: sorted(entry.get("arch") or kdp.arch or [])
+        for bundle in previous
+        for kdp in bundle.kdps
+        for entry in kdp.entries
+    }
+    reused = {"engine": 0, "packs": 0, "operation_umds": 0, "kernels": 0}
+    total = 0
+    for key in ("kmd", "ued", "kernel_match", "udd", "uhd"):
+        if key in ids:
+            total += 1
+            reused["engine"] += ids[key] in known
+    emitted: set[str] = set()
+    arch_moved = []
+    for pack, document in kdp_documents:
+        index = _pack_index(config, pack)
+        total += 1
+        emitted.add(document["id"])
+        reused["packs"] += document["id"] in known
+        if config.is_multi_pack:
+            total += 1
+            reused["operation_umds"] += ids[("operation_umd", index)] in known
+        for entry in document["kernelDescriptors"]:
+            total += 1
+            emitted.add(entry["id"])
+            reused["kernels"] += entry["id"] in known
+            now = sorted(entry.get("arch") or document.get("arch") or [])
+            if entry["id"] in previous_arch and previous_arch[entry["id"]] != now:
+                arch_moved.append(entry["name"])
+    retired = []
+    for bundle in previous:
+        for kdp in bundle.kdps:
+            if kdp.id not in emitted:
+                retired.append(kdp.name)
+            retired.extend(e["name"] for e in kdp.entries if e["id"] not in emitted)
+    return IdReport(
+        own_prior=own_root if own else None,
+        home=home_root,
+        siblings=tuple(sibling_roots),
+        reused=reused,
+        minted=total - sum(reused.values()),
+        retired=tuple(retired),
+        arch_moved=tuple(arch_moved),
+    )
 
 
 #: Inventory key for descriptors naming no architecture. An absent ``arch`` is
@@ -697,18 +1277,25 @@ class IngestorGenerator:
         # no counterpart filter.
         self.env.filters["cpp_escape"] = cpp_escape
 
-    def preview_files(self, config: IngestorConfig) -> list[str]:
-        """The file list :meth:`render` would write, without writing anything."""
+    def preview_files(
+        self, config: IngestorConfig, *, resolution: IdResolution | None = None
+    ) -> list[str]:
+        """The file list :meth:`render` would write, without writing anything.
+        ``resolution=None`` previews the home layout; a satellite resolution
+        lists only its KDP among the descriptors."""
         slug = config.engine.slug
         ddir = config.descriptor_dir
-        files = [
-            f"{ddir}/{slug}.kmd.json",
-            f"{ddir}/{slug}.ued.json",
-            f"{ddir}/{slug}.udd.json",
-        ]
-        if config.engine.has_heuristic:
-            files.append(f"{ddir}/{slug}.uhd.json")
-        files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
+        satellite = resolution is not None and resolution.satellite
+        files = []
+        if not satellite:
+            files = [
+                f"{ddir}/{slug}.kmd.json",
+                f"{ddir}/{slug}.ued.json",
+                f"{ddir}/{slug}.udd.json",
+            ]
+            if config.engine.has_heuristic:
+                files.append(f"{ddir}/{slug}.uhd.json")
+            files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
             if config.is_multi_pack:
@@ -720,14 +1307,29 @@ class IngestorGenerator:
             files.append(f"fragments/{fragment}")
         return files
 
-    def render(self, config: IngestorConfig, output_dir: Path) -> list[str]:
-        """Mint ids, write every descriptor JSON, the native/test C++ stubs and
-        the CMake/registration fragments. Returns the relative paths written.
+    def render(
+        self,
+        config: IngestorConfig,
+        output_dir: Path,
+        *,
+        resolution: IdResolution | None = None,
+    ) -> list[str]:
+        """Write every descriptor JSON, the native/test C++ stubs and the
+        CMake/registration fragments. Returns the relative paths written.
+
+        ``resolution`` carries the ids and the KDPs built from them (see
+        `resolve_ids`); ``None`` resolves them from ``output_dir``, so
+        regenerating into an existing tree keeps its ids. A satellite writes
+        its KDP only: the home bundle holds the engine-level files, and
+        ``hkp_pack`` rejects a repeated id even when the content is identical.
 
         Every KDP is built before rendering, since the templates are given the
         emitted inventory and that view needs the engine-wide de-duplication.
         """
-        ids = mint_ids(config)
+        output_dir = Path(output_dir)
+        if resolution is None:
+            resolution = resolve_ids(config, output_dir)
+        ids = resolution.ids
         written: list[str] = []
         slug = config.engine.slug
         ddir = config.descriptor_dir
@@ -742,19 +1344,20 @@ class IngestorGenerator:
         def write_json(rel: str, obj: dict) -> None:
             write_text(rel, _dump(obj))
 
-        kdp_documents = build_kdp_documents(config, ids)
+        kdp_documents = resolution.kdp_documents
         emitted = emitted_inventory(config, kdp_documents)
 
-        write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
-        write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-        write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
-        uhd = build_uhd(config, ids)
-        if uhd is not None:
-            write_json(f"{ddir}/{slug}.uhd.json", uhd)
-        write_json(
-            f"{ddir}/kernel_dtype_matches_graph.umd.json",
-            build_kernel_match_umd(config, ids),
-        )
+        if not resolution.satellite:
+            write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
+            write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
+            write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+            uhd = build_uhd(config, ids)
+            if uhd is not None:
+                write_json(f"{ddir}/{slug}.uhd.json", uhd)
+            write_json(
+                f"{ddir}/kernel_dtype_matches_graph.umd.json",
+                build_kernel_match_umd(config, ids),
+            )
         for pack, document in kdp_documents:
             write_json(f"{ddir}/{config.kdp_stem(pack)}.kdp.json", document)
             op_umd = build_operation_umd(config, pack, ids)

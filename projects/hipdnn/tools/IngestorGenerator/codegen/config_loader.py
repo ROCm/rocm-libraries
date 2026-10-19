@@ -3,7 +3,7 @@
 
 """YAML config loading and validation for the generic-kernel-ingestor generator.
 
-Every check runs before ``generator.py`` mints a UUID. The five numbered checks
+Every check runs before ``generator.py`` assigns any id. The five numbered checks
 catch failures ``DescriptorLoader.hpp`` either accepts silently or reports only
 after dropping a whole pack or engine.
 """
@@ -169,8 +169,8 @@ def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
     Parses with ``read_yaml``, so its ``yaml.YAMLError`` propagates. Raises
-    ``ConfigError`` on any structural problem or failed pre-mint check; no UUID
-    is minted here.
+    ``ConfigError`` on any structural problem or failed pre-mint check; no id
+    is assigned here.
     """
     raw = read_yaml(path)
 
@@ -1196,7 +1196,8 @@ _KNOWN_KERNEL_SOURCE_BY_KIND: dict = {
     for kind, required in _REQUIRED_KERNEL_SOURCE_FIELDS.items()
 }
 #: The top-level ``specialization`` block's own keys. ``engine_id``/``kmd_id``
-#: are absent because ``generator.mint_ids`` stamps them onto the emitted
+#: are absent because ``generator.mint_ids`` assigns them (reused from a prior
+#: bundle, or minted) and stamps them onto the emitted
 #: contract, and so is ``consumers``, which one config contributes exactly one
 #: entry to.
 _KNOWN_SPECIALIZATION = frozenset(
@@ -1923,7 +1924,7 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         raise ConfigError(
             f"'specialization' declares {unknown}, which this loader does not "
             f"read. Known keys: {sorted(_KNOWN_SPECIALIZATION)}. 'engine_id' and "
-            f"'kmd_id' are minted at generation and stamped on automatically; a "
+            f"'kmd_id' are assigned at generation (reused from a prior bundle or minted) and stamped on automatically; a "
             f"'consumers' list belongs to the emitted contract, not to a config, "
             f"which declares exactly one engine and one KMD."
         )
