@@ -40,7 +40,6 @@
 #if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/extrema.h>
