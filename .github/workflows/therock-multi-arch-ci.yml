@@ -9,6 +9,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/proposal2-evaluation
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
       - name: Record exact execution environment
         run: |
           git rev-parse HEAD
