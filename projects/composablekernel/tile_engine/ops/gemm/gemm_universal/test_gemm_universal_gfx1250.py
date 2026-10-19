@@ -60,18 +60,18 @@ GFX1250_LDS = 320 * 1024
 # fp16/bf16 comp_async tiles with M+N=320, K=256 exceed LDS once the descriptor
 # padding is added. The pads sweep [false, true]: comp_async keeps only
 # all-True, TDM only all-False, and the legacy pipelines keep all 8 combos.
-# comp_tdm_pc trails comp_tdm because its 3-slot LDS ring (PIPELINE_SMEM_SLOTS)
+# comp_tdm_pc trails comp_tdm because its 4-slot LDS ring (PIPELINE_SMEM_SLOTS)
 # drops the widest tiles, partly offset by it not being wave-count locked.
 FULL_COUNTS = {
-    ("fp16", "rcr"): (27625, 348, 174, 87, 136),
-    ("fp16", "rrr"): (27277, 0, 174, 87, 136),
-    ("bf16", "rcr"): (27625, 348, 174, 87, 136),
-    ("bf16", "rrr"): (27277, 0, 174, 87, 136),
+    ("fp16", "rcr"): (27586, 348, 174, 87, 97),
+    ("fp16", "rrr"): (27238, 0, 174, 87, 97),
+    ("bf16", "rcr"): (27586, 348, 174, 87, 97),
+    ("bf16", "rrr"): (27238, 0, 174, 87, 97),
     # fp8/bf8 comp_async keeps only warp_tile_k=128 (the 16x16x64 set is gated).
-    ("fp8", "rcr"): (47205, 288, 360, 180, 297),
-    ("fp8", "rrr"): (46917, 0, 360, 180, 297),
-    ("bf8", "rcr"): (47205, 288, 360, 180, 297),
-    ("bf8", "rrr"): (46917, 0, 360, 180, 297),
+    ("fp8", "rcr"): (47151, 288, 360, 180, 243),
+    ("fp8", "rrr"): (46863, 0, 360, 180, 243),
+    ("bf8", "rcr"): (47151, 288, 360, 180, 243),
+    ("bf8", "rrr"): (46863, 0, 360, 180, 243),
 }
 
 
@@ -214,7 +214,7 @@ class _ConfigLintMixin:
             self.assertEqual(t["warp_m"] * t["warp_n"] * t["warp_k"], 4, name)
         if pipeline in NEW_PIPELINES + ["compv4"]:
             # Every staged A+B slot the pipeline holds live must fit in the
-            # 320K LDS. comp_tdm_pc rings 3 slots; the rest double-buffer.
+            # 320K LDS. comp_tdm_pc rings 4 slots; the rest double-buffer.
             esz = vu.element_size(dtype)
             a = t["tile_m"] * t["tile_k"] * esz
             b = t["tile_n"] * t["tile_k"] * esz

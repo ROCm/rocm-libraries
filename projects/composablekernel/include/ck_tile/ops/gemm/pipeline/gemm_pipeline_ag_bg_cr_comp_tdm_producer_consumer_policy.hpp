@@ -21,7 +21,7 @@ namespace ck_tile {
  *                     NumSlots_. At NumSlots_ - 1, publishing a slot waits for the drain of the
  *                     one read just before it, a loader round trip on every compute step.
  */
-template <index_t NumSlots_ = 3, index_t PublishLag_ = 0>
+template <index_t NumSlots_ = 4, index_t PublishLag_ = 0>
 struct GemmPipelineAgBgCrCompTDMProducerConsumerPolicy
     : public GemmPipelineAgBgCrCompTDMDefaultPolicy<true>
 {
