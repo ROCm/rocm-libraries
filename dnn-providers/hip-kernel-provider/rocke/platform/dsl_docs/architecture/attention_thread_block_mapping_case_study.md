@@ -8,12 +8,12 @@ SPDX-License-Identifier: MIT
 Measured scope: which thread block computes which work item in the dense attention
 prefill kernel (`library/kernels/{gfx942,gfx950}/attention_dense.py`), and what that
 costs. The kernel is self-attention (`Sq == Skv`) in bf16/fp16 with D 64/128, causal or
-non-causal, on gfx942 and gfx950. It records the experiments behind PR #12714, which
-added XCD- and L2-aware block orders. The previous version (the baseline) is `develop`
+non-causal, on gfx942 and gfx950. It records the experiments behind the XCD- and
+L2-aware block orders of these kernels. The previous version (the baseline) is `develop`
 at `c81bca5ecf`, whose dense kernels are unchanged up to `5d7f9be53e`. The new version
-is `1e905f9231`. The pair fold and the persistent `hq_minor_swz` (§2.3) came later, on
-top of it. §6.1 measures the final version, `9fc40bfb25a`, against its `develop` base
-`429ba1fe444`.
+is the first version of the orders (2026-09-30). The pair fold and the persistent
+`hq_minor_swz` (§2.3) came later, on top of it. §6.1 measures the final version
+(2026-10-13) against `develop` at `429ba1fe444`.
 
 Per [`platform/AGENTS.md`](../../AGENTS.md) §Compliance, this file records relative
 results only: ratios between two code paths on the same device, with the correctness
@@ -237,7 +237,7 @@ and `21ae719`, AOTriton 0.14b (`b5e8cfb`), FlashAttention `e9cf2c1`.
 - **configurations:** arms that pin an order or a grid are diagnostic configurations;
   "auto" is the default spec;
 - **dispatcher:** the runs of §6.2–§6.4 and §7 predate the tuning-knob dispatch
-  interface (#12719) and pinned orders through the request fields it replaced; the
+  interface and pinned orders through the request fields it replaced; the
   kernels are the same.
 
 Replay a single point with the builders
@@ -247,7 +247,7 @@ take `--nonpersist-decode` / `--persist-decode` and check parity against SDPA.
 ### 6.1 End to end, `develop` vs the final version, end-to-end set
 
 Both versions ran through the dispatcher: `develop` at `429ba1fe444` against the final
-version `9fc40bfb25a`. Two configurations:
+version. Two configurations:
 - **default:** the dispatcher's default dense spec;
 - **tuned** (a diagnostic configuration): a per-shape dense spec from a tuner. `develop`
   uses the specs tuned for it. The final version keeps each spec's tile and code
