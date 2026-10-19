@@ -260,8 +260,8 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
 template <typename ForwardIterator, typename Size, typename T>
 ForwardIterator uninitialized_fill_n(ForwardIterator first, Size n, const T& x);
 
-/*! \} // end filling
- *  \} // transformations
+/*!
+ * \} end group filling
  */
 
 THRUST_NAMESPACE_END
