@@ -87,7 +87,10 @@ def _requests(args):
                     hdim_v=d,
                     arch=args.arch,
                     dtype=args.dtype,
-                    mask_type=1 if args.causal else 0,
+                    # ``_reference`` anchors the mask on the bottom-right diagonal
+                    # (``sk - sq``) for both the causal and the windowed case.
+                    mask_type=2 if args.causal else 0,
+                    diagonal_alignment=1,
                     kv_block_size=args.kv_block_size,
                     sliding_window=args.sliding_window,
                     num_cus=args.num_cus,

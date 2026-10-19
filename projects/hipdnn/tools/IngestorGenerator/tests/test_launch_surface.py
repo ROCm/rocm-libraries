@@ -3,25 +3,25 @@
 
 """The launch-surface audit must fail on each defect class it exists to catch.
 
-The headline class: a profile whose ``kmd_fields`` omits a field its own engine
-dereferences unconditionally -- ``Gfx942AttentionDenseNative.cpp`` reads ``block_m``
-through ``kernel.getIntMetadata`` on both ``kernelMatches`` and
-``attentionDenseGeometry``. Nothing else cross-references a mirror against the KMD.
+The headline class: a manifest whose ``kmd_fields`` omits a metadata field its own
+engine reads. Nothing else cross-references a mirror against the KMD.
 
 ``TestKmdFieldsCheck`` uses fresh minimal fixtures; the classes below drive the same
-check over a WHOLE profile from ``tests/fixtures/profiles/``, so every class runs on a
-bare checkout. Those fixtures are controlled INPUTS: a literal like
+check over a WHOLE manifest from ``tests/fixtures/launch_surface/``, against mirror
+files the test writes into a temporary check root, so every class runs on a bare
+checkout. Those manifests and mirrors are controlled INPUTS: a literal like
 ``set(unguarded) == {"kernargs", "spec_resolution"}`` describes the fixture, not the
-real pack.
+real pack. ``TestAgainstTheShippedEngineManifest`` audits the real shipped manifest.
 
-An author auditing their own profile overrides the fixture per arch, one variable each
-because the two profiles are not interchangeable:
+An author auditing their own manifest overrides the fixture per arch, one variable each
+because the two manifests are not interchangeable (the check then resolves paths
+against the repository root):
 
-    HIPDNN_INGESTOR_PROFILE_GFX942=/abs/path/to/gfx942.profile.yaml \\
-    HIPDNN_INGESTOR_PROFILE_GFX950=/abs/path/to/gfx950.profile.yaml \\
+    HIPDNN_INGESTOR_MANIFEST_GFX942=/abs/path/to/gfx942.engine.yaml \\
+    HIPDNN_INGESTOR_MANIFEST_GFX950=/abs/path/to/gfx950.engine.yaml \\
         .venv/bin/python -m pytest tests/test_launch_surface.py
 
-See ``tests/fixtures/profiles/README.md`` for the rest.
+See ``tests/fixtures/launch_surface/README.md`` for the rest.
 """
 
 from __future__ import annotations
@@ -42,46 +42,104 @@ import launch_surface  # noqa: E402
 
 _REPO_ROOT = launch_surface.find_repo_root(_TOOLS)
 
-_PROFILE_VAR_942 = "HIPDNN_INGESTOR_PROFILE_GFX942"
-_PROFILE_VAR_950 = "HIPDNN_INGESTOR_PROFILE_GFX950"
+_MANIFEST_VAR_942 = "HIPDNN_INGESTOR_MANIFEST_GFX942"
+_MANIFEST_VAR_950 = "HIPDNN_INGESTOR_MANIFEST_GFX950"
 
-#: The committed synthetic profiles these classes audit by default; see that
+#: The committed synthetic manifests these classes audit by default; see that
 #: directory's README for what each demonstrates.
-_FIXTURE_PROFILES = Path(__file__).resolve().parent / "fixtures" / "profiles"
+_FIXTURE_MANIFESTS = Path(__file__).resolve().parent / "fixtures" / "launch_surface"
 
 
-def _profile_path(var: str, fixture: str) -> Path:
+def _manifest_path(var: str, fixture: str) -> Path:
     """The override named by ``var`` if set, else the committed fixture. A variable
     naming a non-file raises rather than reporting the fixture's clean result as the
     author's."""
     raw = os.environ.get(var)
     if not raw:
-        return _FIXTURE_PROFILES / fixture
+        return _FIXTURE_MANIFESTS / fixture
     path = Path(raw)
     if not path.is_file():
         raise FileNotFoundError(
             f"{var} is set to {raw!r}, which is not an existing file. Unset it to "
             f"audit the committed fixture {fixture}, or point it at a readable "
-            "authoring profile."
+            "authoring manifest."
         )
     return path
 
 
-_PROFILE_942 = _profile_path(_PROFILE_VAR_942, "gfx942.profile.yaml")
-_PROFILE_950 = _profile_path(_PROFILE_VAR_950, "gfx950.profile.yaml")
+_MANIFEST_942 = _manifest_path(_MANIFEST_VAR_942, "gfx942.engine.yaml")
+_MANIFEST_950 = _manifest_path(_MANIFEST_VAR_950, "gfx950.engine.yaml")
+
+#: What the fixture manifests' paths resolve to: a python mirror defining the four
+#: functions they name, a C++ mirror whose ``matches`` reads ``dtype`` and
+#: ``block_size`` through required accessors, and a test file.
+_FIXTURE_FILES = {
+    "provider/rocke/library/kernels/mirror.py": (
+        "def grid_fn():\n    pass\n\n\n"
+        "def is_valid_fn():\n    pass\n\n\n"
+        "def build_fn():\n    pass\n\n\n"
+        "def resolve_fn():\n    pass\n"
+    ),
+    "provider/Mirror.cpp": """
+        constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
+        constexpr std::string_view DTYPE_FIELD = "dtype";
+        struct Handler { void prepare() {} };
+        bool matches(const KernelDefinition& kernel) {
+            return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == "f16"
+                && kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)) > 0;
+        }
+        void signature() {}
+    """,
+    "tests/test_mirror.py": "def test_it():\n    pass\n",
+}
 
 
-def _profile(kmd_fields, surfaces) -> dict:
+@pytest.fixture(scope="module")
+def fixture_root(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("launch_surface_mirrors")
+    for relative, text in _FIXTURE_FILES.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return root
+
+
+def _audit_root(variable: str, fixture_root: Path) -> Path:
+    """Where the audited manifest's paths resolve: the fixture's temporary root, or the
+    repository when the author overrides the manifest."""
+    return _REPO_ROOT if os.environ.get(variable) else fixture_root
+
+
+def _main_at(monkeypatch, root: Path, *args) -> int:
+    """`launch_surface.main` with its repo-root lookup answered by ``root``."""
+    monkeypatch.setattr(launch_surface, "find_repo_root", lambda start: root)
+    return launch_surface.main(list(args))
+
+
+def _manifest(kmd_fields, surfaces) -> dict:
     return {"kmd_fields": kmd_fields, "launch_surface": surfaces}
+
+
+#: A real python_source, relative to the repo root (no provider_root).
+_PYTHON_SOURCE_PATH = "projects/hipdnn/tools/IngestorGenerator/tools/launch_surface.py"
+_PYTHON_SOURCE = f"{_PYTHON_SOURCE_PATH}:main"
+
+
+def _seed_python_source(root: Path) -> Path:
+    """Copy the default python_source under a temporary check root; returns ``root``."""
+    target = root / _PYTHON_SOURCE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_TOOL.read_text(encoding="utf-8"), encoding="utf-8")
+    return root
 
 
 def _surface(**overrides) -> dict:
     """A structurally-complete surface, so a test overriding one key need not restate
-    the rest. cpp_mirror/test default to this tool's own files, relative to the REPO
-    ROOT, which every check()/CLI call here passes."""
+    the rest. python_source/cpp_mirror/test default to this tool's own files, relative
+    to the REPO ROOT."""
     base = {
         "name": "grid",
-        "python_source": "kernels/x.py:grid_fn (~line 10)",
+        "python_source": _PYTHON_SOURCE,
         "cpp_mirror": (
             "projects/hipdnn/tools/IngestorGenerator/tools/launch_surface.py"
         ),
@@ -96,41 +154,41 @@ def _surface(**overrides) -> dict:
 
 
 class TestKmdFieldsCheck:
-    """A surface cannot name a kmd_fields entry the profile does not declare: the shape
+    """A surface cannot name a kmd_fields entry the manifest does not declare: the shape
     of the block_m defect."""
 
     def test_an_undeclared_kmd_field_is_caught(self):
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[{"name": "seqlen_q", "type": "int"}],
             surfaces=[_surface(kmd_fields=["seqlen_q", "block_m"])],
         )
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
         assert any("block_m" in f and "grid" in f for f in failures), failures
 
     def test_every_declared_field_present_passes_this_check(self):
         """The positive control: the check is not vacuously true."""
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[
                 {"name": "seqlen_q", "type": "int"},
                 {"name": "block_m", "type": "int"},
             ],
             surfaces=[_surface(kmd_fields=["seqlen_q", "block_m"])],
         )
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
         assert failures == []
 
 
 class TestCppMirrorExistence:
     def test_a_missing_cpp_mirror_path_is_caught(self):
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(cpp_mirror="does/not/exist/Nowhere.cpp:fn (~line 1)")],
         )
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
         assert any("cpp_mirror" in f and "does/not/exist" in f for f in failures)
 
     def test_a_real_cpp_mirror_path_passes(self):
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[
                 _surface(
@@ -141,42 +199,42 @@ class TestCppMirrorExistence:
                 )
             ],
         )
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
         assert failures == []
 
 
 class TestTestPathExistence:
     def test_a_missing_test_path_is_caught(self):
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(test="does/not/exist/test_nowhere.py")],
         )
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
         assert any("test path does not exist" in f for f in failures)
 
     def test_the_literal_none_is_not_a_missing_path(self):
         """`test: none` is a deliberate admission, so it lands in unguarded/untested."""
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(guard="something", test="none")],
         )
-        failures, unguarded = launch_surface.check(profile, _REPO_ROOT)
+        failures, unguarded = launch_surface.check(manifest, _REPO_ROOT)
         assert failures == []
         assert unguarded == ["grid"]
 
 
 class TestUnguardedReporting:
     def test_guard_none_is_named_and_fails_without_the_flag(self, tmp_path):
-        profile_path = tmp_path / "p.yaml"
-        profile_path.write_text(
+        manifest_path = tmp_path / "p.yaml"
+        manifest_path.write_text(
             yaml.safe_dump(
-                _profile(
+                _manifest(
                     kmd_fields=[],
                     surfaces=[_surface(name="kernargs", guard="none")],
                 )
             )
         )
-        result = _run("--check", str(profile_path), cwd=_REPO_ROOT)
+        result = _run("--check", str(manifest_path), cwd=_REPO_ROOT)
         assert result.returncode == 1, result.stdout
         assert "kernargs" in result.stdout
         assert "CHECK FAILED" in result.stdout
@@ -184,16 +242,18 @@ class TestUnguardedReporting:
     def test_allow_unguarded_flips_the_exit_code_without_hiding_the_name(
         self, tmp_path
     ):
-        profile_path = tmp_path / "p.yaml"
-        profile_path.write_text(
+        manifest_path = tmp_path / "p.yaml"
+        manifest_path.write_text(
             yaml.safe_dump(
-                _profile(
+                _manifest(
                     kmd_fields=[],
                     surfaces=[_surface(name="kernargs", guard="none")],
                 )
             )
         )
-        result = _run("--check", str(profile_path), "--allow-unguarded", cwd=_REPO_ROOT)
+        result = _run(
+            "--check", str(manifest_path), "--allow-unguarded", cwd=_REPO_ROOT
+        )
         assert result.returncode == 0, result.stdout
         # The surface is still printed by name -- --allow-unguarded changes the
         # exit code, never the report.
@@ -201,44 +261,67 @@ class TestUnguardedReporting:
         assert "CHECK PASSED" in result.stdout
 
     def test_a_fully_guarded_and_tested_surface_needs_no_flag(self, tmp_path):
-        profile_path = tmp_path / "p.yaml"
-        profile_path.write_text(
-            yaml.safe_dump(_profile(kmd_fields=[], surfaces=[_surface()]))
+        manifest_path = tmp_path / "p.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump(_manifest(kmd_fields=[], surfaces=[_surface()]))
         )
-        result = _run("--check", str(profile_path), cwd=_REPO_ROOT)
+        result = _run("--check", str(manifest_path), cwd=_REPO_ROOT)
         assert result.returncode == 0, result.stdout
         assert "unguarded/untested  0" in result.stdout
 
 
 class TestReport:
     def test_every_declared_surface_is_emitted(self):
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[
-                _surface(name="grid"),
+                _surface(name="grid", guard="a folded\nguard || other\n"),
                 _surface(name="block"),
                 _surface(name="kernargs", guard="none", test="none"),
             ],
         )
-        table = launch_surface.render_report(profile)
+        table = launch_surface.render_report(manifest)
         for name in ("grid", "block", "kernargs"):
             assert name in table
         # splitlines() rather than counting "\n", so the assertion does not depend
         # on whether the table ends with a trailing newline.
         assert len(table.splitlines()) == 2 + 3  # header + separator + 3 surfaces
+        assert all(r.replace("\\|", "").count("|") == 7 for r in table.splitlines())
 
     def test_report_cli_prints_the_table(self, tmp_path):
-        profile_path = tmp_path / "p.yaml"
-        profile_path.write_text(
-            yaml.safe_dump(_profile(kmd_fields=[], surfaces=[_surface(name="grid")]))
+        manifest_path = tmp_path / "p.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump(_manifest(kmd_fields=[], surfaces=[_surface(name="grid")]))
         )
-        result = _run("--report", str(profile_path), cwd=_REPO_ROOT)
+        result = _run("--report", str(manifest_path), cwd=_REPO_ROOT)
         assert result.returncode == 0, result.stdout
         assert "| grid |" in result.stdout
 
 
-class TestMalformedProfile:
-    def test_a_profile_with_no_launch_surface_block_is_refused(self):
+class TestMalformedManifest:
+    @pytest.mark.parametrize(
+        "suffix, text",
+        [
+            (".json", '{"launch_surface": [], "launch_surface": [1]}'),
+            (".yaml", "launch_surface: []\nlaunch_surface: [1]\n"),
+        ],
+    )
+    def test_a_key_declared_twice_is_exit_2_naming_the_key(
+        self, tmp_path, capsys, suffix, text
+    ):
+        path = tmp_path / f"m{suffix}"
+        path.write_text(text)
+        assert launch_surface.main([str(path), "--report"]) == 2
+        assert "launch_surface" in capsys.readouterr().err
+
+    def test_a_tab_indented_json_manifest_loads(self, tmp_path):
+        path = tmp_path / "m.json"
+        path.write_text('{\n\t"launch_surface": [\n\t\t{"name": "grid"}\n\t]\n}\n')
+        assert launch_surface._load_manifest(str(path))["launch_surface"] == [
+            {"name": "grid"}
+        ]
+
+    def test_a_manifest_with_no_launch_surface_block_is_refused(self):
         with pytest.raises(launch_surface.LaunchSurfaceError, match="launch_surface"):
             launch_surface.load_surfaces({"kmd_fields": []})
 
@@ -250,21 +333,24 @@ class TestMalformedProfile:
         assert "cpp_mirror" in errors[0]
 
 
-class TestAgainstTheGfx942Profile:
-    """A whole gfx942-shaped profile must --check clean, modulo the surfaces it honestly
+class TestAgainstTheGfx942Manifest:
+    """A whole gfx942-shaped manifest must --check clean, modulo the surfaces it honestly
     declares unguarded.
 
-    By default `tests/fixtures/profiles/gfx942.profile.yaml`, whose `grid` and
+    By default `tests/fixtures/launch_surface/gfx942.engine.yaml`, whose `grid` and
     `applicability` surfaces split their shared mirror's two required metadata fields,
     so passing means the union-over-shared-mirror rule fired. The unguarded set is a
     literal keyed to that fixture.
     """
 
-    def test_the_profile_check_names_only_genuinely_unguarded_surfaces(self):
-        profile = yaml.safe_load(_PROFILE_942.read_text(encoding="utf-8"))
-        failures, unguarded = launch_surface.check(profile, _REPO_ROOT)
+    def test_the_manifest_check_names_only_genuinely_unguarded_surfaces(
+        self, fixture_root
+    ):
+        manifest = yaml.safe_load(_MANIFEST_942.read_text(encoding="utf-8"))
+        root = _audit_root(_MANIFEST_VAR_942, fixture_root)
+        failures, unguarded = launch_surface.check(manifest, root)
         assert failures == [], (
-            f"the profile's launch_surface block must be structurally sound: "
+            f"the manifest's launch_surface block must be structurally sound: "
             f"{failures}"
         )
         # The fixture declares kernargs and spec_resolution guard: none / test: none,
@@ -273,21 +359,33 @@ class TestAgainstTheGfx942Profile:
         # dispatcher's resolution at runtime.
         assert set(unguarded) == {"kernargs", "spec_resolution"}
 
-    def test_the_profile_passes_with_allow_unguarded(self):
-        result = _run("--check", str(_PROFILE_942), "--allow-unguarded", cwd=_REPO_ROOT)
-        assert result.returncode == 0, result.stdout
+    def test_the_manifest_passes_with_allow_unguarded(
+        self, fixture_root, monkeypatch, capsys
+    ):
+        root = _audit_root(_MANIFEST_VAR_942, fixture_root)
+        rc = _main_at(
+            monkeypatch, root, "--check", str(_MANIFEST_942), "--allow-unguarded"
+        )
+        assert rc == 0, capsys.readouterr().out
 
-    def test_the_profile_report_covers_every_surface(self):
-        profile = yaml.safe_load(_PROFILE_942.read_text(encoding="utf-8"))
-        table = launch_surface.render_report(profile)
-        for surface in profile["launch_surface"]:
+    def test_the_manifest_without_the_flag_fails_on_the_unguarded_surfaces(
+        self, fixture_root, monkeypatch, capsys
+    ):
+        root = _audit_root(_MANIFEST_VAR_942, fixture_root)
+        assert _main_at(monkeypatch, root, "--check", str(_MANIFEST_942)) == 1
+        assert "kernargs" in capsys.readouterr().out
+
+    def test_the_manifest_report_covers_every_surface(self):
+        manifest = yaml.safe_load(_MANIFEST_942.read_text(encoding="utf-8"))
+        table = launch_surface.render_report(manifest)
+        for surface in manifest["launch_surface"]:
             assert surface["name"] in table
 
 
 class TestMetadataFieldCoverage:
-    """Check 1b: a metadata field a cpp_mirror reads through a REQUIRED accessor must be
-    declared by SOME surface naming that mirror. See TestUndeclaredSurfaceLimit for the
-    shape this cannot catch."""
+    """Check 1b: a metadata field a cpp_mirror reads through a required or declining
+    accessor must be declared by SOME surface naming that mirror. See
+    TestUndeclaredSurfaceLimit for the shape this cannot catch."""
 
     _CPP_DIRECT = """
         constexpr std::string_view SEQLEN_Q_FIELD = "seqlen_q";
@@ -308,21 +406,35 @@ class TestMetadataFieldCoverage:
         }
     """
 
+    _CPP_DECLINING = """
+        constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
+        constexpr std::string_view BLOCK_M_FIELD = "block_m";
+        std::optional<int64_t> integerMetadata(const KernelDefinition& kernel, std::string_view field)
+        {
+            return std::nullopt;
+        }
+        bool kernelMatches(const KernelDefinition& kernel) {
+            const auto headSize = integerMetadata(kernel, HEAD_SIZE_FIELD);
+            const auto blockM = integerMetadata(kernel, BLOCK_M_FIELD);
+            return headSize.has_value() && blockM.has_value();
+        }
+    """
+
     def test_a_required_field_with_no_declaring_surface_is_caught(self, tmp_path):
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_DIRECT)
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[{"name": "seqlen_q", "type": "int"}],
             surfaces=[_surface(cpp_mirror="Mirror.cpp:f", kmd_fields=["seqlen_q"])],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert any("batch" in f and "Mirror.cpp" in f for f in failures), failures
 
     def test_every_required_field_declared_passes(self, tmp_path):
         """Positive control: the check is not vacuously true."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_DIRECT)
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[
                 {"name": "seqlen_q", "type": "int"},
                 {"name": "batch", "type": "int"},
@@ -335,7 +447,7 @@ class TestMetadataFieldCoverage:
                 )
             ],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert failures == []
 
     def test_the_forwarding_lambda_idiom_is_recognised(self, tmp_path):
@@ -343,13 +455,13 @@ class TestMetadataFieldCoverage:
         through a single accessor -- must resolve like a direct call."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_WRAPPER_LAMBDA)
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[{"name": "seqlen_q", "type": "int"}],
             surfaces=[
                 _surface(cpp_mirror="Mirror.cpp:kernelMatches", kmd_fields=["seqlen_q"])
             ],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert any("batch" in f for f in failures), failures
 
     def test_two_surfaces_sharing_one_mirror_combine_their_kmd_fields(self, tmp_path):
@@ -357,7 +469,7 @@ class TestMetadataFieldCoverage:
         kmd_fields, not either alone, must cover what it reads."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_DIRECT)
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[
                 {"name": "seqlen_q", "type": "int"},
                 {"name": "batch", "type": "int"},
@@ -377,7 +489,7 @@ class TestMetadataFieldCoverage:
                 ),
             ],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert failures == []
 
     def test_trygetmetadata_fields_are_not_required(self, tmp_path):
@@ -392,12 +504,35 @@ class TestMetadataFieldCoverage:
             }
             """
         )
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(cpp_mirror="Mirror.cpp:f", kmd_fields=[], test="none")],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert failures == []
+
+    @pytest.mark.parametrize("declared", [["head_size"], ["head_size", "block_m"]])
+    def test_a_declining_accessor_field_must_be_declared(self, tmp_path, declared):
+        """Also proves the helper's own definition is not a read of a field."""
+        cpp = tmp_path / "Mirror.cpp"
+        cpp.write_text(self._CPP_DECLINING)
+        manifest = _manifest(
+            kmd_fields=[{"name": n, "type": "int"} for n in declared],
+            surfaces=[
+                _surface(
+                    cpp_mirror="Mirror.cpp:kernelMatches",
+                    kmd_fields=declared,
+                    test="none",
+                )
+            ],
+        )
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
+        if "block_m" in declared:
+            assert failures == []
+        else:
+            assert any(
+                "block_m" in f and "integerMetadata" in f for f in failures
+            ), failures
 
     def test_the_positive_control_a_field_named_only_in_a_comment_is_ignored(
         self, tmp_path
@@ -433,11 +568,11 @@ class TestSymbolExistence:
     def test_a_nonexistent_cpp_symbol_is_caught(self, tmp_path):
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text("void realFunction() {}\n")
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(cpp_mirror="Mirror.cpp:notARealFunction")],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert any(
             "notARealFunction" in f and "Mirror.cpp" in f for f in failures
         ), failures
@@ -445,21 +580,21 @@ class TestSymbolExistence:
     def test_a_real_cpp_symbol_passes(self, tmp_path):
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text("void realFunction() {}\n")
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(cpp_mirror="Mirror.cpp:realFunction", test="none")],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert failures == []
 
     def test_a_class_qualified_cpp_symbol_checks_the_bare_method_name(self, tmp_path):
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text("class Handler { void launch() {} };\n")
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[_surface(cpp_mirror="Mirror.cpp:Handler::launch", test="none")],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert failures == []
 
     def test_a_nonexistent_python_function_is_caught(self, tmp_path):
@@ -468,7 +603,7 @@ class TestSymbolExistence:
         (tmp_path / "provider" / "rocke" / "library").mkdir()
         py = tmp_path / "provider" / "rocke" / "library" / "mod.py"
         py.write_text("def real_function():\n    pass\n")
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[
                 _surface(
@@ -477,9 +612,9 @@ class TestSymbolExistence:
                 )
             ],
         )
-        profile["provider_root"] = "provider"
+        manifest["provider_root"] = "provider"
         (tmp_path / "Mirror.cpp").write_text("void f() {}\n")
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, tmp_path)
         assert any(
             "not_a_real_function" in f and "mod.py" in f for f in failures
         ), failures
@@ -489,7 +624,7 @@ class TestSymbolExistence:
         py = tmp_path / "provider" / "rocke" / "library" / "mod.py"
         py.write_text("def real_function():\n    pass\n")
         (tmp_path / "Mirror.cpp").write_text("void f() {}\n")
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[
                 _surface(
@@ -499,8 +634,8 @@ class TestSymbolExistence:
                 )
             ],
         )
-        profile["provider_root"] = "provider"
-        failures, _ = launch_surface.check(profile, tmp_path)
+        manifest["provider_root"] = "provider"
+        failures, _ = launch_surface.check(manifest, tmp_path)
         assert failures == []
 
     def test_a_prose_locator_with_no_leading_symbol_is_not_checked(self, tmp_path):
@@ -508,7 +643,7 @@ class TestSymbolExistence:
         'prepare()' with parens is not a bare identifier."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text("void unrelated() {}\n")
-        profile = _profile(
+        manifest = _manifest(
             kmd_fields=[],
             surfaces=[
                 _surface(
@@ -517,51 +652,97 @@ class TestSymbolExistence:
                 )
             ],
         )
-        failures, _ = launch_surface.check(profile, tmp_path)
+        failures, _ = launch_surface.check(manifest, _seed_python_source(tmp_path))
         assert failures == []
+
+
+class TestPythonSourceExistence:
+    """Check 2b: python_source must name a real file under
+    ``<provider_root>/rocke/library``, or the check root without provider_root."""
+
+    @pytest.mark.parametrize(
+        "provider_root,written,error",
+        [
+            ("provider", None, "provider/rocke/library"),
+            ("provider", "mod.py", "provider/rocke/library"),  # outside provider_root
+            (None, None, "repo root"),
+            (None, "mod.py", None),
+        ],
+    )
+    def test_python_source_must_exist(self, tmp_path, provider_root, written, error):
+        (tmp_path / "provider" / "rocke" / "library").mkdir(parents=True)
+        if written:
+            (tmp_path / written).write_text("def fn():\n    pass\n")
+        (tmp_path / "Mirror.cpp").write_text("void f() {}\n")
+        manifest = _manifest(
+            kmd_fields=[],
+            surfaces=[
+                _surface(
+                    python_source="mod.py:fn", cpp_mirror="Mirror.cpp", test="none"
+                )
+            ],
+        )
+        if provider_root:
+            manifest["provider_root"] = provider_root
+        failures, _ = launch_surface.check(manifest, tmp_path)
+        if error is None:
+            assert failures == []
+        else:
+            assert any(
+                "python_source" in f and "mod.py" in f and error in f for f in failures
+            ), failures
 
 
 class TestUndeclaredSurfaceLimit:
     """The documented residual gap: check 1b catches a deleted surface only when it
     uniquely covered a required metadata field. Both branches come from the gfx950
-    profile, whose `applicability` and `kernargs` cite the SAME cpp_mirror."""
+    fixture, whose `applicability` and `kernargs` cite the SAME cpp_mirror."""
 
-    def test_deleting_the_kernargs_surface_is_not_caught(self):
+    def test_deleting_the_kernargs_surface_is_not_caught(self, fixture_root):
         """kernargs declares no kmd_fields and shares its mirror with applicability,
         which covers every required field, so the scan has no observable -- the real
         shape of a kernarg surface."""
-        profile = yaml.safe_load(_PROFILE_950.read_text(encoding="utf-8"))
-        profile["launch_surface"] = [
-            s for s in profile["launch_surface"] if s["name"] != "kernargs"
+        manifest = yaml.safe_load(_MANIFEST_950.read_text(encoding="utf-8"))
+        manifest["launch_surface"] = [
+            s for s in manifest["launch_surface"] if s["name"] != "kernargs"
         ]
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(
+            manifest, _audit_root(_MANIFEST_VAR_950, fixture_root)
+        )
         assert failures == [], (
             "documenting a known limit: deleting kernargs is NOT caught because no "
             f"required field loses its only declarer; unexpected failures: {failures}"
         )
 
-    def test_deleting_a_surface_with_unique_required_fields_is_caught(self):
+    def test_deleting_a_surface_with_unique_required_fields_is_caught(
+        self, fixture_root
+    ):
         """The contrast: applicability is the sole declarer of the fields its cpp_mirror
         reads through a required accessor, so deleting it leaves them undeclared."""
-        profile = yaml.safe_load(_PROFILE_950.read_text(encoding="utf-8"))
-        profile["launch_surface"] = [
-            s for s in profile["launch_surface"] if s["name"] != "applicability"
+        manifest = yaml.safe_load(_MANIFEST_950.read_text(encoding="utf-8"))
+        manifest["launch_surface"] = [
+            s for s in manifest["launch_surface"] if s["name"] != "applicability"
         ]
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
+        failures, _ = launch_surface.check(
+            manifest, _audit_root(_MANIFEST_VAR_950, fixture_root)
+        )
         assert any("dtype" in f for f in failures), failures
 
 
-class TestAgainstTheGfx950Profile:
-    """The second profile shape, through the checks `TestAgainstTheGfx942Profile` runs
+class TestAgainstTheGfx950Manifest:
+    """The second manifest shape, through the checks `TestAgainstTheGfx942Manifest` runs
     over gfx942: one shared mirror with an exclusive declarer and one unguarded surface,
     where gfx942 splits mirror coverage across two surfaces. Its unguarded set is a
     literal keyed to the committed fixture."""
 
-    def test_the_gfx950_profile_check_names_only_genuinely_unguarded_surfaces(self):
-        profile = yaml.safe_load(_PROFILE_950.read_text(encoding="utf-8"))
-        failures, unguarded = launch_surface.check(profile, _REPO_ROOT)
+    def test_the_gfx950_manifest_check_names_only_genuinely_unguarded_surfaces(
+        self, fixture_root
+    ):
+        manifest = yaml.safe_load(_MANIFEST_950.read_text(encoding="utf-8"))
+        root = _audit_root(_MANIFEST_VAR_950, fixture_root)
+        failures, unguarded = launch_surface.check(manifest, root)
         assert failures == [], (
-            f"the gfx950 profile's launch_surface block must be structurally "
+            f"the gfx950 manifest's launch_surface block must be structurally "
             f"sound: {failures}"
         )
         # spec_resolution alone, so a second honest admission creeping into the fixture
@@ -569,28 +750,41 @@ class TestAgainstTheGfx950Profile:
         # own numbers.
         assert set(unguarded) == {"spec_resolution"}
 
-    def test_the_gfx950_profile_passes_with_allow_unguarded(self):
-        result = _run("--check", str(_PROFILE_950), "--allow-unguarded", cwd=_REPO_ROOT)
-        assert result.returncode == 0, result.stdout
-        assert "CHECK PASSED" in result.stdout
+    def test_the_gfx950_manifest_passes_with_allow_unguarded(
+        self, fixture_root, monkeypatch, capsys
+    ):
+        root = _audit_root(_MANIFEST_VAR_950, fixture_root)
+        rc = _main_at(
+            monkeypatch, root, "--check", str(_MANIFEST_950), "--allow-unguarded"
+        )
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        assert "CHECK PASSED" in out
+
+
+class TestAgainstTheShippedEngineManifest:
+    def test_every_declared_surface_is_real_guarded_and_tested(self):
+        manifest = _TOOLS.parent / "configs" / "gfx950_attention_dense.engine.yaml"
+        result = _run("--check", str(manifest), cwd=_REPO_ROOT)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "unguarded/untested  0" in result.stdout
 
 
 class TestRepoRootResolution:
     """The CLI resolves cpp_mirror/test paths against the REPO ROOT, not the process
-    cwd, so the same profile reports the same result from anywhere."""
+    cwd, so the same manifest reports the same result from anywhere."""
 
     def test_find_repo_root_locates_the_git_checkout(self):
         found = launch_surface.find_repo_root(_TOOLS)
         assert (found / ".git").exists()
 
-    def test_check_from_a_nested_cwd_matches_check_from_the_repo_root(self):
-        from_root = _run(
-            "--check", str(_PROFILE_950), "--allow-unguarded", cwd=_REPO_ROOT
+    def test_check_from_a_nested_cwd_matches_check_from_the_repo_root(self, tmp_path):
+        manifest_path = tmp_path / "p.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump(_manifest(kmd_fields=[], surfaces=[_surface()]))
         )
-        nested_cwd = _PROFILE_950.parent  # wherever the profile happens to live
-        from_nested = _run(
-            "--check", str(_PROFILE_950), "--allow-unguarded", cwd=nested_cwd
-        )
+        from_root = _run("--check", str(manifest_path), cwd=_REPO_ROOT)
+        from_nested = _run("--check", str(manifest_path), cwd=tmp_path)
         assert from_root.returncode == 0, from_root.stdout
         assert from_nested.returncode == 0, from_nested.stdout
         assert "CHECK PASSED" in from_root.stdout
