@@ -5562,16 +5562,30 @@ def run_unified_attention_torch(
         # Refuse here, BEFORE the 2D graph fast path: _run_2d_graphed replays a
         # cache hit before any support gate, and _cheap_2d_sig does not encode
         # emit_lse, so an LSE-off graph captured on the same buffers would
-        # otherwise serve this request and leave lse unwritten. A split-KV LSE
-        # reason (sinks, arch) wins; then a split-KV decline ``auto`` hit for
-        # another reason; otherwise the shape routed to 2D.
+        # otherwise serve this request and leave lse unwritten. In order: a
+        # split-KV LSE reason (sinks, arch); for ``auto``, the split-KV gate's
+        # verdict (name the backend='3d' way out only when that gate admits the
+        # problem); otherwise the explicitly requested 2D path.
         rejected = _reject_lse(problem, _launch_arch, "3d")
-        if rejected is None and backend == "auto" and not prefer_2d:
+        if rejected is not None:
+            raise NotImplementedError(rejected[1])
+        if backend == "auto":
+            if prefer_2d:
+                ok_3d, reason_3d = _explicit_path_supported(
+                    problem, tuning_spec, "3d", _launch_arch
+                )
+                if ok_3d:
+                    raise NotImplementedError(
+                        "LSE output is not implemented on the tiled 2D attention "
+                        "path, which backend='auto' chose for this shape; the "
+                        "split-KV path can serve it: pass backend='3d' or pin a "
+                        "'*_u3d_*' tuning spec (it can be slower for this shape)"
+                    )
             raise NotImplementedError(
                 "LSE output needs the split-KV attention path, which declined "
                 f"this problem: {reason_3d}"
             )
-        _, why = rejected or _reject_lse(problem, _launch_arch, "tiled 2D")
+        _, why = _reject_lse(problem, _launch_arch, "tiled 2D")
         raise NotImplementedError(why)
 
     if backend in ("tiled", "auto"):

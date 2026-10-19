@@ -262,6 +262,30 @@ def test_runner_refuses_lse_on_a_2d_routed_shape_before_any_2d_path(runner, back
     assert runner.red_vals is None
 
 
+@pytest.mark.parametrize(
+    "top_left,hinted", [(False, True), (True, False)], ids=["servable", "mask"]
+)
+def test_auto_refusal_names_backend_3d_only_when_split_kv_serves(
+    runner, top_left, hinted
+):
+    """``auto`` routes this prefill to 2D, which writes no LSE. The refusal
+    points at backend='3d' only when split-KV accepts the problem: gfx942
+    split-KV declines the top-left mask, so there the hint would be wrong."""
+    prefill = _problem(
+        total_q=256,
+        num_seqs=1,
+        max_seqlen_q=256,
+        max_seqlen_k=256,
+        emit_lse=True,
+        causal_top_left=top_left,
+    )
+    assert prefill.select_path() == "2d"
+    with pytest.raises(NotImplementedError, match="LSE") as refused:
+        _run(prefill, lse=object())
+    assert ("backend='3d'" in str(refused.value)) is hinted
+    assert runner.red_vals is None
+
+
 def test_runner_reports_why_split_kv_declined_an_lse_request(runner):
     """``auto`` routes this decode to split-KV, whose gfx942 gate declines the
     top-left mask. The refusal must name that reason, not blame the 2D path."""
