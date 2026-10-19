@@ -323,6 +323,20 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
+    # Host-only differential golden check (Python reference emitters only; no
+    # compiler). The rest of tests/instances/differential needs the C++ build and
+    # stays out of the installed tree (see the tests/ install below); these files
+    # are the Python-only check: the runner, its batch worker, the golden store
+    # and file, and the CPU-count helper the runner imports from tools/.
+    set(_ROCKE_DIFFERENTIAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/differential")
+    install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/run_diff.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/python_batch_worker.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/golden_store.py"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential)
+    install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/golden/llvm_gfx_all.json"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential/golden)
+
     # The harness above builds LIBRARY kernels for its attention, attention_dense,
     # attention_d256, kda_chunkwise and lightning_indexer families (the one platform -> library
     # exception), so the library packages must be importable by both runners.
@@ -372,7 +386,8 @@ if(ROCKE_INSTALL_TESTS)
 
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
-    # the differential harness (needs compiler + source), the WaveScope sidecar
+    # the differential harness (needs compiler + source; its Python-only golden
+    # check is installed separately above), the WaveScope sidecar
     # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
     # and the arch-domain artifact unit tests. The latter remain source-only
     # units, while the full regeneration sweep is installed below as its own
@@ -482,6 +497,19 @@ if(ROCKE_INSTALL_TESTS)
            "  RUN_SERIAL TRUE\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT 1800)\n")
+
+    # The differential golden: every parity family's Python reference output,
+    # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host
+    # checks all of them) and canonical IR. tests/instances/differential/golden/README.md.
+    set(_ROCKE_RUN_DIFF "${ROCKE_TEST_CTEST_REL}tests/instances/differential/run_diff.py")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working

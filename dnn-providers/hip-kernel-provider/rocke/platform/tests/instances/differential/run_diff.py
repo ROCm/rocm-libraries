@@ -66,13 +66,21 @@ def _python_and_library_roots(root: Path) -> tuple[Path, Path]:
 
     Source: ``<root>/python/rocke`` and ``<root>/../library``. Installed (the
     CMake test install, where this directory ships for the Python-only golden
-    check): the rocke package sits beside ``tests/`` (provider layout; the
-    standalone layout puts it on PYTHONPATH) and the library under
-    ``tests/library``.
+    check): the rocke package sits beside ``tests/`` (provider layout) or in
+    ``<prefix>/lib/pythonX.Y/site-packages`` (standalone layout), and the
+    library under ``tests/library``.
     """
     if (root / "python" / "rocke").is_dir():
         return root / "python", root.parent / "library"
-    return root, root / "tests" / "library"
+    library = root / "tests" / "library"
+    if (root / "rocke").is_dir():
+        return root, library
+    pyver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    for lib in ("lib", "lib64"):
+        site_packages = root.parent / lib / pyver / "site-packages"
+        if (site_packages / "rocke").is_dir():
+            return site_packages, library
+    return root, library  # rocke must then come from PYTHONPATH
 
 
 PYROOT, LIB_ROOT = _python_and_library_roots(ROCKE)
