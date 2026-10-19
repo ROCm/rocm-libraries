@@ -53,11 +53,12 @@ int main(void)
   thrust::uniform_int_distribution<int> dist(10, 99);
 
   // initialize data
-  thrust::device_vector<int> array(R * C);
-  for (size_t i = 0; i < array.size(); i++)
+  thrust::host_vector<int> host_array(R * C);
+  for (auto& e : host_array)
   {
-    array[i] = dist(rng);
+    e = dist(rng);
   }
+  thrust::device_vector<int> array = host_array;
 
   // allocate storage for row sums and indices
   thrust::device_vector<int> row_sums(R);
