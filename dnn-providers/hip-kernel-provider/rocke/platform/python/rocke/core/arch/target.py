@@ -954,7 +954,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
     ),
     # --- MFMA MX (wave64), frag lengths only -----------------------------
-    "mfma_f32_16x16x128_fp4": _FragInfo(16, 16, 4, 64),
     "mfma_f32_16x16x96_fp6": _FragInfo(12, 12, 4, 64),
     # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
     # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per

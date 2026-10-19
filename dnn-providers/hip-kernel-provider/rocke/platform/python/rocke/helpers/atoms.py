@@ -414,26 +414,6 @@ class MfmaAtom:
         )
 
     @classmethod
-    def fp4_16x16x128(cls) -> "MfmaAtom":
-        """fp4 MX MFMA atom (gfx950+, P52).
-
-        Per-lane: A = 16 fp4 nibbles packed as i64 (= 8 bytes per
-        lane × 2 nibbles); B same; C = ``<4 x float>``. K = 128
-        elements per atom — the densest gfx950 MFMA shape.
-        """
-        return cls(
-            m=16,
-            n=16,
-            k=128,
-            a_per_lane=16,
-            b_per_lane=16,
-            c_per_lane=4,
-            dtype_in="fp4",
-            dtype_out="f32",
-            name="mfma_f32_16x16x128_fp4",
-        )
-
-    @classmethod
     def fp6_16x16x96(cls) -> "MfmaAtom":
         """fp6 MX MFMA atom (gfx950+, P52)."""
         return cls(
@@ -927,11 +907,8 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_16x16x128(),
 )
 
-# P52: MX fp4 / fp6 atoms (gfx950+).
-MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
-    MfmaAtom.fp4_16x16x128(),
-    MfmaAtom.fp6_16x16x96(),
-)
+# P52: MX fp6 atom (gfx950+).
+MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (MfmaAtom.fp6_16x16x96(),)
 
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right

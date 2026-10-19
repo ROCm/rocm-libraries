@@ -514,7 +514,6 @@ def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
 # hints that must be preserved verbatim.
 _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
-    "mfma_f32_16x16x128_fp4": "acc4",
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_f32_16x16x128_fp4fp6fp8": "acc128",
@@ -3275,16 +3274,6 @@ class IRBuilder:
         if a_format == DEFAULT_MATRIX_FORMAT and b_format == DEFAULT_MATRIX_FORMAT:
             return {}
         return {"a_format": a_format, "b_format": b_format}
-
-    def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
-        """fp4 MX MFMA (gfx950+, P52).
-
-        Operands are 64-bit packed `<16 x fp4>` per lane;
-        accumulator is `<4 x float>`. Scales are applied separately
-        via :meth:`mfma_scale_f32_16x16x128_f8f6f4` for the
-        production MX path.
-        """
-        return self.mma("mfma_f32_16x16x128_fp4", a, b, c)
 
     def mfma_f32_16x16x96_fp6(self, a: Value, b: Value, c: Value) -> Value:
         """fp6 MX MFMA (gfx950+, P52)."""

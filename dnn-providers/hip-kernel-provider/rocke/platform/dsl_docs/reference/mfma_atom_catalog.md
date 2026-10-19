@@ -1,6 +1,6 @@
 # MFMA Atom Catalog
 
-The shipped MFMA atoms live in `helpers.atoms`, grouped into `MFMA_F16_ATOMS`, `MFMA_BF16_ATOMS`, `MFMA_FP8_ATOMS` (fp8 / bf8), and `MFMA_MX_ATOMS` (fp4 / fp6), with the unified `MFMA_ATOMS` catalog covering all of them. Lookup helper: `mfma_atom("f16", m, n, k)` (also accepts `bf16`, `fp8` / `fp8e4m3`, `bf8` / `bf8e5m2`). The bf16, fp8/bf8, and MX atoms below are first-class catalog entries — not just bare `IRBuilder` methods. The RDNA wave32 / WMMA targets use the separate `WmmaAtom` catalog (`WMMA_ATOMS`, looked up via `wmma_atom(...)`); the layouts in this doc are the wave64 MFMA layouts.
+The shipped MFMA atoms live in `helpers.atoms`, grouped into `MFMA_F16_ATOMS`, `MFMA_BF16_ATOMS`, `MFMA_FP8_ATOMS` (fp8 / bf8), and `MFMA_MX_ATOMS` (fp6), with the unified `MFMA_ATOMS` catalog covering all of them. Lookup helper: `mfma_atom("f16", m, n, k)` (also accepts `bf16`, `fp8` / `fp8e4m3`, `bf8` / `bf8e5m2`). The bf16, fp8/bf8, and MX atoms below are first-class catalog entries — not just bare `IRBuilder` methods. The RDNA wave32 / WMMA targets use the separate `WmmaAtom` catalog (`WMMA_ATOMS`, looked up via `wmma_atom(...)`); the layouts in this doc are the wave64 MFMA layouts.
 
 These MFMA atoms are the wave64 CDNA path (gfx942 / gfx950). The Python and C++ engines emit byte-identical IR for them.
 
@@ -19,12 +19,11 @@ These MFMA atoms are the wave64 CDNA path (gfx942 / gfx950). The Python and C++ 
 | `fp8_16x16x32` / `bf8_16x16x32` | 16x16x32 | `<8xfp8e4m3>` / `<8xbf8e5m2>` | same | `<4xfloat>`  | 16x16 | gfx942+ | 8 f8 bytes/lane = `<2 x i32>` at the intrinsic boundary |
 | `fp8_32x32x16` / `bf8_32x32x16` | 32x32x16 | `<8xfp8e4m3>` / `<8xbf8e5m2>` | same | `<16xfloat>` | 32x32 | gfx942+ | f8/bf8 hero shape                  |
 | `fp8_16x16x128`  | 16x16x128 | `<32xfp8e4m3>` | `<32xfp8e4m3>` | `<4xfloat>` | 16x16   | gfx950  | Wide-K f8 throughput ceiling; lowers via the scaled `f8f6f4` intrinsic with both scale operands at literal 0. The backend then selects the unscaled instruction. A literal E8M0 0 would mean 2^-127, so pass the literal, never a loaded 0 |
-| `fp4_16x16x128`  | 16x16x128 | 16 fp4 (i64) | 16 fp4 (i64) | `<4xfloat>` | 16x16    | gfx950  | MX fp4 atom; densest gfx950 MFMA shape |
 | `fp6_16x16x96`   | 16x16x96 | 12 fp6      | 12 fp6      | `<4xfloat>`  | 16x16        | gfx950  | MX fp6 atom                        |
 
 The bf16 16x16x16 path uses the `_1k` variant (`mfma.f32.16x16x16bf16.1k` with `<4 x i16>` operands); the plain `mfma.f32.16x16x16.bf16` MFMA intrinsic does not exist on this LLVM target. Attempting to declare it produces an undefined symbol at link time. This is why `helpers/attention.py` provides `mfma_16x16x16_for_dtype` and `mfma_16x16x32_for_dtype` that dispatch by dtype.
 
-The wide-K / MX atoms (`fp8_16x16x128`, `fp4_16x16x128`, `fp6_16x16x96`) are gfx950-only — they map onto the `f8f6f4` / MX-scaled MFMA instructions that only the CDNA4 target exposes.
+The wide-K / MX atoms (`fp8_16x16x128`, `fp6_16x16x96`) are gfx950-only — they map onto the `f8f6f4` / MX-scaled MFMA instructions that only the CDNA4 target exposes.
 
 ## Native gfx950 32x32x64 Scaled MFMA
 

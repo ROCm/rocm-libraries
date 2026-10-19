@@ -48,7 +48,6 @@ static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* o
 static void _op_tile_mfma_f32_32x32x16_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const rocke_op_t* op);
-static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp4fp6fp8(rocke_lower_t* L, const rocke_op_t* op);
@@ -542,10 +541,6 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     else if(strcmp(op_id, "mfma_scale_f32_16x16x128_f8f6f4") == 0)
     {
         _op_tile_mfma_scale_f32_16x16x128_f8f6f4(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_16x16x128_fp4") == 0)
-    {
-        _op_tile_mfma_f32_16x16x128_fp4(L, op);
     }
     else if(strcmp(op_id, "mfma_f32_16x16x96_fp6") == 0)
     {
@@ -1471,55 +1466,6 @@ static void _op_tile_mfma_f32_16x16x128_fp4fp6fp8(rocke_lower_t* L, const rocke_
                           "b_f8f6f4",
                           cbsz,
                           blgp);
-}
-
-static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op)
-{
-    const rocke_value_t *a, *b, *c;
-    const char *a_cast, *b_cast;
-    const char *a_ty, *b_ty;
-
-    if(!rocke_ll_live(L))
-    {
-        return;
-    }
-    if(op->num_operands != 3)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    rocke_ll_need(L, "mfma.f32.16x16x128.fp4");
-    /* fp4 mantissa packs 16 nibbles into i64 per lane; normalise to i64. */
-    a_cast = rocke_ll_fresh(L, "a_fp4");
-    b_cast = rocke_ll_fresh(L, "b_fp4");
-    a_ty = rocke_ll_llvm_type(L, a->type);
-    b_ty = rocke_ll_llvm_type(L, b->type);
-    if(strcmp(a_ty, "i64") != 0)
-    {
-        rocke_ll_emitf(L, "  %s = bitcast %s %s to i64", a_cast, a_ty, rocke_ll_operand(L, a));
-    }
-    else
-    {
-        a_cast = rocke_ll_operand(L, a);
-    }
-    if(strcmp(b_ty, "i64") != 0)
-    {
-        rocke_ll_emitf(L, "  %s = bitcast %s %s to i64", b_cast, b_ty, rocke_ll_operand(L, b));
-    }
-    else
-    {
-        b_cast = rocke_ll_operand(L, b);
-    }
-    rocke_ll_emitf(L,
-                   "  %s = call <4 x float> "
-                   "@llvm.amdgcn.mfma.f32.16x16x128.fp4(i64 %s, i64 %s, "
-                   "<4 x float> %s, i32 0, i32 0, i32 0)",
-                   mma_result_name(L, op),
-                   a_cast,
-                   b_cast,
-                   rocke_ll_operand(L, c));
 }
 
 static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op)

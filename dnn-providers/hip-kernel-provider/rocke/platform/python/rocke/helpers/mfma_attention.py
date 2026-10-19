@@ -95,7 +95,6 @@ _ATOM_DTYPE_TO_CATALOG = {
     "bf16": "bf16",
     "fp8e4m3": "fp8",
     "bf8e5m2": "bf8",
-    "fp4": "fp4",
     "fp6": "fp6",
 }
 

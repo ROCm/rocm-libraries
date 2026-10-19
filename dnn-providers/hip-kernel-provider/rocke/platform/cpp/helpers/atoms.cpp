@@ -30,7 +30,7 @@
  *                      bf16_32x32x16)
  *   MFMA_FP8_ATOMS  = (fp8_16x16x32, fp8_32x32x16, bf8_16x16x32,
  *                      bf8_32x32x16, fp8_16x16x128)
- *   MFMA_MX_ATOMS   = (fp4_16x16x128, fp6_16x16x96)
+ *   MFMA_MX_ATOMS   = (fp6_16x16x96)
  *
  * _BY_SHAPE keys each by (dtype_in, m, n, k). All keys are unique, so the linear
  * scan below is order-independent for correctness, but the catalog order is
@@ -62,7 +62,6 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
     {32, 32, 16, 8, 8, 16, "bf8e5m2", "f32", "mfma_f32_32x32x16_bf8"},
     {16, 16, 128, 32, 32, 4, "fp8e4m3", "f32", "mfma_f32_16x16x128_fp8"},
     /* ---- MFMA_MX_ATOMS ---- */
-    {16, 16, 128, 16, 16, 4, "fp4", "f32", "mfma_f32_16x16x128_fp4"},
     {16, 16, 96, 12, 12, 4, "fp6", "f32", "mfma_f32_16x16x96_fp6"},
 };
 
