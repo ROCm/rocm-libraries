@@ -29,8 +29,8 @@
 #include <thrust/detail/integer_math.h>
 #include <thrust/detail/preprocessor.h>
 
+#include <cuda/std/__exception/throw_error.h>
 #include <cuda/std/cstdint>
-#include <cuda/std/detail/libcxx/include/stdexcept>
 #include <cuda/std/limits>
 #include <cuda/std/type_traits>
 
