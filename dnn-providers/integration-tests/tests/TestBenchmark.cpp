@@ -5,11 +5,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -319,7 +321,7 @@ TEST(TestResolveBenchmark, ModesThatDoNotExecuteAreRefused)
 
 // ---- reportBenchmark ------------------------------------------------------
 
-TEST(TestReportBenchmark, RecordsTheResultAsTestProperties)
+TEST(TestReportBenchmark, RecordsTheResultAsProperties)
 {
     reportBenchmark(successfulResult({0.5f, 0.25f, 1.0f}));
 
@@ -339,7 +341,7 @@ TEST(TestReportBenchmark, RecordsTheResultAsTestProperties)
     EXPECT_EQ(properties["benchmark_mean_ms"], "0.5833");
 }
 
-TEST(TestReportBenchmark, AFailedBenchmarkFailsTheTest)
+TEST(TestReportBenchmark, AFailedBenchmarkAddsAFailure)
 {
     BenchmarkResult failed;
     failed.error = "timed execution failed: device lost";
@@ -355,9 +357,30 @@ TEST(TestReportBenchmark, AFailedBenchmarkFailsTheTest)
 namespace
 {
 
+/// One way the harness verifies a bundle. Each way has its own benchmark hook.
+struct OracleCase
+{
+    const char* name;
+    VerificationMode mode;
+    bool hasGoldenOutput;
+
+    friend void PrintTo(const OracleCase& oracleCase, std::ostream* os)
+    {
+        *os << oracleCase.name;
+    }
+};
+
+/// AUTO with golden data and explicit GOLDEN compare against the golden file.
+/// AUTO without golden data falls through to the reference oracle chain.
+const std::array<OracleCase, 3> ORACLE_CASES{{
+    {"AutoGolden", VerificationMode::AUTO, true},
+    {"AutoReference", VerificationMode::AUTO, false},
+    {"GoldenMode", VerificationMode::GOLDEN, true},
+}};
+
 /// Expectations are checked after the harness returns: a gmock or EXPECT failure
 /// raised inside driveHarness() lands in its intercepted results, not in this test.
-class TestBundleHarnessBenchmark : public ::testing::Test
+class TestBundleHarnessBenchmark : public ::testing::TestWithParam<OracleCase>
 {
 protected:
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
@@ -372,30 +395,44 @@ protected:
 
     void SetUp() override
     {
+        using ::testing::_;
         testing_support::ensureTestConfigInitialized();
         _scopedDir.emplace(hipdnn_test_sdk::utilities::claimScratchDirectory("bundle_benchmark"));
 
-        ON_CALL(_mocks.engineRunner, benchmark(::testing::_, ::testing::_, ::testing::_))
+        ON_CALL(_mocks.engineRunner, benchmark(_, _, _))
             .WillByDefault(
                 [this](GraphSession&, VariantPack& variantPack, const BenchmarkSettings& s) {
                     _benchmarkCalls.push_back(s);
                     _sawVerifiedOutput = variantPack.count(fixtures::K_OUTPUT_UID) == 1;
                     return _benchmarkResult;
                 });
+
+        // Both references produce the golden value, so the reference path and the
+        // golden path agree on what a match is.
+        for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
+        {
+            ON_CALL(*reference, execute(_, _, _))
+                .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+                    auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+                    std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+                });
+        }
     }
 
-    /// Drives a golden bundle through the real harness. The mocked engine writes
-    /// `engineOutput`; the golden output is fixtures::K_OUTPUT_VALUE.
+    /// Drives a bundle through the real harness with the parameter's oracle. The
+    /// mocked engine writes `engineOutput`; the expected output is
+    /// fixtures::K_OUTPUT_VALUE.
     void run(float engineOutput,
              std::optional<BenchmarkSettings> benchmark,
              ::testing::TestPartResultArray* results)
     {
         testing_support::engineWrites(_mocks.engineRunner, &fixtures::writeOutput, engineOutput);
 
-        auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+        auto policy = testing_support::hostPolicy(GetParam().mode);
         policy.benchmark = benchmark;
         IntegrationBundleVerificationHarness harness(_mocks.dependencies(policy));
-        harness.setBundle(fixtures::loadBundle(_scopedDir->path(), "bench", true), "bench");
+        harness.setBundle(
+            fixtures::loadBundle(_scopedDir->path(), "bench", GetParam().hasGoldenOutput), "bench");
 
         testing_support::driveHarness(harness, results);
     }
@@ -403,7 +440,7 @@ protected:
 
 } // namespace
 
-TEST_F(TestBundleHarnessBenchmark, AVerifiedPassIsTimedWithThePolicySettings)
+TEST_P(TestBundleHarnessBenchmark, AVerifiedPassIsTimedWithThePolicySettings)
 {
     ::testing::TestPartResultArray results;
     run(fixtures::K_OUTPUT_VALUE, settings(4, 1), &results);
@@ -416,7 +453,7 @@ TEST_F(TestBundleHarnessBenchmark, AVerifiedPassIsTimedWithThePolicySettings)
     EXPECT_TRUE(_sawVerifiedOutput) << "the benchmark must run on the verified tensors";
 }
 
-TEST_F(TestBundleHarnessBenchmark, AMismatchIsNotTimed)
+TEST_P(TestBundleHarnessBenchmark, AMismatchIsNotTimed)
 {
     ::testing::TestPartResultArray results;
     run(fixtures::K_OUTPUT_VALUE + 100.0f, settings(4, 1), &results);
@@ -425,16 +462,26 @@ TEST_F(TestBundleHarnessBenchmark, AMismatchIsNotTimed)
     EXPECT_TRUE(_benchmarkCalls.empty());
 }
 
-TEST_F(TestBundleHarnessBenchmark, WithoutBenchmarkNothingIsTimed)
+TEST_P(TestBundleHarnessBenchmark, WithoutBenchmarkAMatchPassesUntimed)
 {
     ::testing::TestPartResultArray results;
     run(fixtures::K_OUTPUT_VALUE, std::nullopt, &results);
 
     EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
     EXPECT_TRUE(_benchmarkCalls.empty());
 }
 
-TEST_F(TestBundleHarnessBenchmark, ABenchmarkFailureFailsAVerifiedTest)
+TEST_P(TestBundleHarnessBenchmark, WithoutBenchmarkAMismatchStillFails)
+{
+    ::testing::TestPartResultArray results;
+    run(fixtures::K_OUTPUT_VALUE + 100.0f, std::nullopt, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_TRUE(_benchmarkCalls.empty());
+}
+
+TEST_P(TestBundleHarnessBenchmark, ABenchmarkFailureFailsAVerifiedBundle)
 {
     _benchmarkResult = BenchmarkResult{};
     _benchmarkResult.error = "timed execution failed: device lost";
@@ -449,5 +496,12 @@ TEST_F(TestBundleHarnessBenchmark, ABenchmarkFailureFailsAVerifiedTest)
               std::string::npos)
         << testing_support::allMessages(results);
 }
+
+INSTANTIATE_TEST_SUITE_P(Oracles,
+                         TestBundleHarnessBenchmark,
+                         ::testing::ValuesIn(ORACLE_CASES),
+                         [](const ::testing::TestParamInfo<OracleCase>& info) {
+                             return std::string(info.param.name);
+                         });
 
 // NOLINTEND(readability-identifier-naming)

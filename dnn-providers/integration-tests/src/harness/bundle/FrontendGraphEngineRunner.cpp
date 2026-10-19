@@ -4,13 +4,14 @@
 #include "harness/bundle/FrontendGraphEngineRunner.hpp"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/GraphBenchmark.hpp"
+#include "harness/PlanWorkspace.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
@@ -122,19 +123,15 @@ EngineOpResult
     auto result = [&]() -> EngineOpResult {
         try
         {
-            int64_t workspaceSize = 0;
-            if(auto status = graph.get_workspace_size(workspaceSize); !status.is_good())
+            std::string error;
+            auto workspace = allocatePlanWorkspace(graph, error);
+            if(!workspace.has_value())
             {
-                return EngineOpResult::failed(status.get_message());
+                return EngineOpResult::failed(error);
             }
-            if(workspaceSize < 0)
-            {
-                return EngineOpResult::failed("engine reported a negative workspace size");
-            }
-            const hipdnn_data_sdk::utilities::Workspace workspace(
-                static_cast<size_t>(workspaceSize));
 
-            if(auto status = graph.execute(handle, variantPack, workspace.get()); !status.is_good())
+            if(auto status = graph.execute(handle, variantPack, workspace->get());
+               !status.is_good())
             {
                 return EngineOpResult::failed(status.get_message());
             }

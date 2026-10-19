@@ -132,8 +132,13 @@ build/bin/hipdnn_integration_tests \
 
 `--benchmark` adds a performance measurement to each test. The test first
 verifies the engine output in the usual way. If the output passes, the harness
-runs the same plan on the same tensors again and times it. A test that skips or
-fails is not timed. The C++ graph tests and the bundles both support it.
+runs the same plan on the same tensors again and times it. The C++ graph tests
+and the bundles both support it.
+
+A test is not timed when it skips, fails, or passes without output
+verification (a bundle at enforcement level APPLICABLE or BUILDABLE). Such a
+test prints no `[ BENCHMARK ]` line. A filter that selects only such tests
+gives a green run with no timings, so count the `[ BENCHMARK ]` lines.
 
 ```bash
 build/bin/hipdnn_integration_tests \
