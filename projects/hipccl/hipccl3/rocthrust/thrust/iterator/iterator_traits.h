@@ -295,11 +295,11 @@ struct iterator_traversal<_THRUST_LIBCXX::tabulate_output_iterator<Fn, Index>>
   using type = random_access_traversal_tag;
 };
 
-template <class Iter, class InputFn, class OutputFn>
-struct iterator_system<_THRUST_LIBCXX::transform_input_output_iterator<Iter, InputFn, OutputFn>> : iterator_system<Iter>
+template <class InputFn, class OutputFn, class Iter>
+struct iterator_system<_THRUST_LIBCXX::transform_input_output_iterator<InputFn, OutputFn, Iter>> : iterator_system<Iter>
 {};
-template <class Iter, class InputFn, class OutputFn>
-struct iterator_traversal<_THRUST_LIBCXX::transform_input_output_iterator<Iter, InputFn, OutputFn>> : iterator_traversal<Iter>
+template <class InputFn, class OutputFn, class Iter>
+struct iterator_traversal<_THRUST_LIBCXX::transform_input_output_iterator<InputFn, OutputFn, Iter>> : iterator_traversal<Iter>
 {};
 
 template <class Fn, class Iter>
