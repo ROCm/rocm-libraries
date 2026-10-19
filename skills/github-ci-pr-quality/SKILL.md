@@ -1,6 +1,6 @@
 ---
 name: github-ci-pr-quality
-description: "GitHub CI supplements to the ROCm PR quality base skill. Use to author, review, or pre-merge-gate PRs that touch .github/ (workflows, actions, CI scripts, CODEOWNERS) in rocm-libraries. Adds and tightens base rules; never relaxes a MUST."
+description: "GitHub CI supplements to the ROCm PR quality base skill. Use when authoring, reviewing, or merge-gating a rocm-libraries PR that touches .github/ (workflows, actions, CI scripts). Adds and tightens base rules."
 argument-hint: "[author | review | pre-merge] [PR URL | branch:<name> | local]"
 extends: rocm-pr-quality
 allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
