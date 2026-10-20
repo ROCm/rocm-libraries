@@ -40,6 +40,7 @@
 
 #include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
+#include <string.h> /* strcmp   */
 
 namespace ckc
 {
@@ -759,11 +760,38 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr_b8(rocke_h_lowerer_t* lw, const
 
 /* ============================== barriers / scheduling ==================== */
 
-/* def _op_tile_sync(self, op): self._emit("__syncthreads();") */
+/* def _barrier_fence(op): the fence attr (NULL, "compiler" or "workgroup");
+ * any other value is an error. */
+static const char* rocke_h_barrier_fence(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char* fence = rocke_attr_get_str(&op->attrs, "fence");
+    if(fence && strcmp(fence, "compiler") != 0 && strcmp(fence, "workgroup") != 0)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_VALUE,
+                     "%s: unknown fence '%s'",
+                     op->name ? op->name : "tile.sync",
+                     fence);
+        return NULL;
+    }
+    return fence;
+}
+
+/* def _emit_barrier_clobber(self, op): fence attr -> compiler memory barrier
+ * after the barrier (__syncthreads carries the workgroup fences already). */
+static void rocke_h_emit_barrier_clobber(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    if(rocke_h_barrier_fence(lw, op))
+    {
+        rocke_h_emit(lw, "__asm__ volatile(\"\" ::: \"memory\");");
+    }
+}
+
+/* def _op_tile_sync(self, op): self._emit("__syncthreads();") + clobber */
 static rocke_status_t rocke_h_op_tile_sync(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    (void)op;
     rocke_h_emit(lw, "__syncthreads();");
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
@@ -783,19 +811,30 @@ static rocke_status_t rocke_h_op_tile_sync_half_block(rocke_h_lowerer_t* lw, con
 static rocke_status_t rocke_h_op_tile_sync_lds_only(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     int mask;
-    (void)op;
     mask = rocke_h_encode_waitcnt(lw, -1, -1, 0);
     rocke_h_emitf(lw, "__builtin_amdgcn_s_waitcnt(%d);", mask);
     rocke_h_emit(lw, "__syncthreads();");
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
 /* def _op_tile_s_barrier_bare(self, op):
+ *     fence attr: workgroup release / acquire fences around the barrier
  *     self._emit("__builtin_amdgcn_s_barrier();") */
 static rocke_status_t rocke_h_op_tile_s_barrier_bare(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    (void)op;
+    const char* fence = rocke_h_barrier_fence(lw, op);
+    bool workgroup = fence && strcmp(fence, "workgroup") == 0;
+    if(workgroup)
+    {
+        rocke_h_emit(lw, "__builtin_amdgcn_fence(__ATOMIC_RELEASE, \"workgroup\");");
+    }
     rocke_h_emit(lw, "__builtin_amdgcn_s_barrier();");
+    if(workgroup)
+    {
+        rocke_h_emit(lw, "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \"workgroup\");");
+    }
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
