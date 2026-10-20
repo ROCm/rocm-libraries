@@ -33,11 +33,11 @@ on:
     inputs:
       linux_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
+        description: "Comma-separated Linux GPU families to build and test, ex: gfx94X,gfx120X. Use 'none' to skip Linux or 'all' for every family."
         default: ""
       windows_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx120X (empty = skip windows)"
+        description: "Comma-separated Windows GPU families to build and test, ex: gfx110X,gfx120X. Use 'none' to skip Windows or 'all' for every family."
         default: ""
       pr_labels:
         type: string
@@ -159,6 +159,11 @@ jobs:
       # built it on every PR/push before Multi-Arch CI became the default, and this
       # restores that parity so gfx1250 build breaks are caught same-PR instead of
       # only nightly.
+      #
+      # An empty input means "not specified" here and falls back to these
+      # defaults, including on workflow_dispatch. To skip a platform entirely,
+      # pass 'none', which setup_multi_arch.yml resolves to an empty build
+      # config.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       pr_labels: ${{ inputs.pr_labels || '' }}
