@@ -113,7 +113,7 @@ def compile_hip_backend(
     stem = kdef.name.replace(".", "_")[:96]
     hip_src = out_dir / f"{stem}.hip"
     hsaco_out = out_dir / f"{stem}.hsaco"
-    hip_src.write_text(lower_kernel_to_hip(kdef))
+    hip_src.write_text(lower_kernel_to_hip(kdef, arch=arch))
     proc = subprocess.run(
         [
             "hipcc",
