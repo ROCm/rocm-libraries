@@ -1757,8 +1757,24 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return kernel_ctx.pipeline.tag == owner
             return kernel_ctx.pipeline.tag not in cls._PIPELINES_WITH_OWN_TILES
 
+        def check_tdm_skip_group_only(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # The kernel skips short sequences in group mode only.
+            return (
+                kernel_ctx.pipeline.F_skip == "f"
+                or kernel_ctx.pipeline.tag == "qr"
+                or problem_ctx.mode == "group"
+            )
+
         rules.extend(
-            [check_gemm0_k, check_tile_owner, check_qr_tdm_sched_codegen_compatibility]
+            [
+                check_gemm0_k,
+                check_tile_owner,
+                check_tdm_skip_group_only,
+                # last: the codegen tests take it as get_rules()[-1]
+                check_qr_tdm_sched_codegen_compatibility,
+            ]
         )
         return rules
 
@@ -1941,8 +1957,17 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
 
+            # min_seqlen_q (aiter's mha_varlen_fwd) only skips whole group-mode
+            # sequences in the kernel, so qr_tdm and qr_tdm_pingpong take it too: a
+            # "_skip" copy of each of their group-mode (padded) instances.
+            pipelines += [
+                replace(p, F_skip="t")
+                for p in pipelines
+                if p.tag in ("qr_tdm", "qr_tdm_pingpong") and p.F_spad == "t"
+            ]
+
             # qr: generic pipeline fallback for the trait combos qr_tdm does
-            # not emit -- dropout, skip, logits soft cap -- and for head dim
+            # not emit -- dropout, logits soft cap -- and for head dim
             # pairs outside the qr_tdm table above. Capped at 256: qr keeps
             # its own kSubQKHeaddim <= 256 assert, and only qr_tdm has the LDS
             # arena accounting that lets a 512 head dim fit. Head dim 512 is
