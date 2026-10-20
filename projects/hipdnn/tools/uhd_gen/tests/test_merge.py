@@ -1,6 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Joining sweeps from several boards of one architecture."""
+"""Joining sweeps from several machines of one architecture."""
 from __future__ import annotations
 
 import sys
@@ -17,15 +17,22 @@ from uhd_gen.merge import MergeError, merge_corpora  # noqa: E402
 
 
 def _corpus(
-    path: Path, device: str, *, problems: int = 4, extra: dict | None = None
+    path: Path,
+    device: str,
+    *,
+    problems: int = 4,
+    extra: dict | None = None,
+    slower: float = 1.0,
 ) -> Path:
     rows = []
     for problem in range(problems):
         for block_m in (64, 256):
             row = {
                 "benchmark": f"prob{problem}",
+                "arch": "gfx942",
                 "device": device,
                 "kernel": f"k{block_m}",
+                "avgTimeMs": (0.05 if block_m == 256 else 0.09) * slower,
                 "robustMeanMs": 0.05 if block_m == 256 else 0.09,
                 "is_valid": "true",
                 "kernel.block_m": block_m,
@@ -70,18 +77,19 @@ def test_the_refusal_names_the_column_and_the_fix(tmp_path):
     assert "same build" in message, "a refusal without a remedy just blocks the user"
 
 
-def test_the_same_board_twice_is_warned_about_not_refused(tmp_path, caplog):
-    """Resampling a board is legitimate but gives it extra weight."""
-    a = _corpus(tmp_path / "a.csv", "aaaa")
+def test_two_machines_with_one_kind_of_card_measure_each_configuration_once(tmp_path):
+    """`device` is the card's kind: the second machine repeats the first's measurements,
+    and the fastest repeat of each configuration is the one kept."""
+    a = _corpus(tmp_path / "a.csv", "aaaa", slower=2.0)
     b = _corpus(tmp_path / "b.csv", "aaaa")
 
-    with caplog.at_level("WARNING"):
-        merged, report = merge_corpora([a, b])
+    merged, report = merge_corpora([a, b])
 
-    assert len(merged) == 16
+    assert len(merged) == 8
+    assert report["superseded_rows"] == 8
     assert list(report["repeated_devices"]) == ["aaaa"]
-    assert "aaaa" in caplog.text
-    assert "more weight" in caplog.text
+    assert not merged.duplicated(["benchmark", "device", "kernel"]).any()
+    assert sorted(merged["avgTimeMs"].unique()) == [0.05, 0.09]
 
 
 def test_a_corpus_without_a_device_column_is_refused(tmp_path):

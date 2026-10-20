@@ -16,15 +16,11 @@ find_package(Threads REQUIRED)
 # dependencies. Build it only when they import, and warn otherwise so the gap stays visible;
 # HIPDNN_REQUIRE_UHD_GEN_TESTS makes the gap a configure error instead.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
-        set(_uhd_gen_missing_severity FATAL_ERROR)
-    else()
-        set(_uhd_gen_missing_severity WARNING)
-    endif()
+    set(_uhd_gen_missing_severity ${HIPDNN_UHD_GEN_MISSING_SEVERITY})
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import lightgbm, numpy, flatbuffers, pandas, sklearn"
+            COMMAND ${Python3_EXECUTABLE} -c "import ${HIPDNN_UHD_GEN_PYTHON_MODULES}"
             RESULT_VARIABLE _uhd_gen_deps_missing
             OUTPUT_QUIET ERROR_QUIET)
         if(_uhd_gen_deps_missing EQUAL 0)

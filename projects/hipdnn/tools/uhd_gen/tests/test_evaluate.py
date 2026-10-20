@@ -374,6 +374,51 @@ def test_partially_identified_device_column_warns_without_merging():
 # ---------------------------------------------------------------------------------
 
 
+def test_a_problem_the_model_cannot_predict_is_scored_by_the_fallback_pick():
+    """One held-out problem with a category value training never saw does not fail the
+    evaluation: it is scored as the runtime's declared-order pick and counted apart."""
+    from uhd_gen.features import UnseenCategoryError
+
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+            # g2's first row is the declared-order pick: 3.0 against the oracle's 2.0.
+            {"benchmark": "g2", "kernel": "k1", "minTimeMs": 3.0},
+            {"benchmark": "g2", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    perfect = oracle_scorer("minTimeMs", "min")
+
+    def scorer(frame: pd.DataFrame) -> np.ndarray:
+        if (frame["benchmark"] == "g2").any():
+            raise UnseenCategoryError("q.layout 'NHWC' is not in the encoding")
+        return perfect(frame)
+
+    result = evaluate_all(df, scorer, target="minTimeMs", objective="min")
+
+    assert result.report["metrics"]["problems_scored"] == 2
+    assert result.report["fallback"]["problems"] == 1
+    assert result.report["fallback"]["mean_regret"] == pytest.approx(0.5)
+    assert result.report["fallback"]["keys"] == [["g2", DEVICE_A]]
+    assert any("declared-order" in warning for warning in result.warnings)
+
+
+def test_the_split_keeps_every_finite_value_in_training():
+    """A shape holding the only instance of a value goes back to training, so the model has
+    seen every value it may be asked about."""
+    keys = [("g%02d" % i,) for i in range(40)]
+    plain = split_problems(keys, 0.25, seed=7)
+    rare = plain.eval_problems[0][0]
+    values = {shape: frozenset({("q.layout", "NCHW")}) for (shape,) in keys}
+    values[rare] = frozenset({("q.layout", "NHWC")})
+
+    split = split_problems(keys, 0.25, seed=7, values=values)
+
+    assert (rare,) in split.train_problems
+    assert len(split.eval_problems) == len(plain.eval_problems) - 1
+
+
 def test_split_is_reproducible_and_seed_dependent():
     keys = [("g%02d" % i,) for i in range(40)]
     first = split_problems(keys, 0.25, seed=7)
@@ -1027,3 +1072,97 @@ def test_keys_without_device_identity_compare_on_the_graph_alone():
     trained = _trained([["g1", "board"]])
     assert _holdout_integrity(trained, [["g1"]])["status"] == "unknown"
     assert _holdout_integrity(trained, [["g2"]])["status"] == "held_out"
+
+
+def test_the_l2_training_slice_is_every_problem_the_report_held_out_and_no_other(
+    tmp_path, evaluator
+):
+    """`evaluate --emit-train-slice` on a catalog ranker writes exactly the unscored
+    problems, so training on it never sees an evaluated one."""
+    import json
+
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    from uhd_gen.__main__ import main
+
+    rows = [
+        {
+            "benchmark": f"g{problem:02d}",
+            "device": DEVICE_A,
+            "kernel": f"k{tile}",
+            "kernel.tile_m": tile,
+            "tflops": 10.0 + problem + tile / 64,
+        }
+        for problem in range(24)
+        for tile in (64, 128, 256)
+    ]
+    corpus = tmp_path / "corpus.csv"
+    pd.DataFrame(rows).to_csv(corpus, index=False)
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(
+        json.dumps(
+            {
+                "ued": {
+                    "id": "13ab344f-4818-4772-bb8e-8e1441fec82c",
+                    "revision": "1.0",
+                },
+                "kmd": {
+                    "id": "46d64d06-18eb-483d-9bb4-94472d32b78d",
+                    "revision": "1.0",
+                },
+                "umd": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    model_dir, report = tmp_path / "model", tmp_path / "report.json"
+    common = ["--feature-evaluator", evaluator]
+    assert (
+        main(
+            [
+                "train",
+                "--provenance",
+                str(provenance),
+                "--input",
+                str(corpus),
+                "--features",
+                "kernel.tile_m",
+                "--target",
+                "tflops",
+                "--num-boost-round",
+                "4",
+                "--early-stopping",
+                "2",
+                "--output-dir",
+                str(model_dir),
+                *common,
+            ]
+        )
+        == 0
+    )
+    train_slice = tmp_path / "slice" / "train.csv"
+    assert (
+        main(
+            [
+                "evaluate",
+                "--input",
+                str(corpus),
+                "--model-dir",
+                str(model_dir),
+                "--eval-fraction",
+                "0.25",
+                "--emit-train-slice",
+                str(train_slice),
+                "--output",
+                str(report),
+                *common,
+            ]
+        )
+        == 0
+    )
+    split = json.loads(report.read_text(encoding="utf-8"))["split"]
+    held_out = {key[0] for key in split["eval_problem_keys"]}
+    kept = set(pd.read_csv(train_slice, dtype={"benchmark": str})["benchmark"])
+    assert held_out and kept
+    assert kept.isdisjoint(held_out)
+    assert kept | held_out == {f"g{problem:02d}" for problem in range(24)}

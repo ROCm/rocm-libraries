@@ -271,8 +271,9 @@ def contribution_digest(
     The same measurements get the same id whatever they are called, and different measurements
     never share one. What can change without the measurements changing (`label`, `purpose`,
     `corpus_id`, `origin`) is not part of it. Values are compared as Parquet returns them --
-    an integral float as the integer, NaN as missing -- so rows exported and added again keep
-    their id.
+    an integral float as the integer, NaN as missing -- and a missing value is the same fact
+    as an absent key (an exported row carries every column of its contribution), so rows
+    exported and added again keep their id.
     """
 
     def canonical(value: Any) -> Any:
@@ -281,7 +282,8 @@ def contribution_digest(
                 return None
             return int(value) if value.is_integer() else value
         if isinstance(value, dict):
-            return {str(key): canonical(item) for key, item in value.items()}
+            items = ((str(key), canonical(item)) for key, item in value.items())
+            return {key: item for key, item in items if item is not None}
         if isinstance(value, (list, tuple)):
             return [canonical(item) for item in value]
         return value
@@ -575,11 +577,13 @@ def add(
 
 
 def _check_immediate(rows_by_source: dict[Any, list[dict[str, Any]]]) -> None:
-    """An L1 contribution's rows pass the checks training applies to them (§13.2, the binding)."""
+    """An L1 contribution's rows pass the checks training applies to them (§13.2, the binding).
+    Its repeats (one graph measured on several GPUs of one kind) are stored as measured;
+    training reduces them."""
     from ..immediate import normalize_corpus
 
     for rows in rows_by_source.values():
-        normalize_corpus(pd.DataFrame(rows))
+        normalize_corpus(pd.DataFrame(rows), repeats=True)
 
 
 def from_collection(
@@ -731,6 +735,15 @@ def from_csv(
     )
     if "arch" not in frame.columns:
         frame["arch"] = arch
+    # A stored measurement is keyed by its graph and its device kind (training_table.py);
+    # `device.*` features describe the device but do not name it.
+    missing = [c for c in ("benchmark", "device") if c not in frame.columns]
+    if missing:
+        raise DatasetError(
+            f"{', '.join(str(p) for p in csvs)}: no {' or '.join(map(repr, missing))} "
+            "column; a stored measurement is keyed by its graph's content key and its "
+            "device kind (hipdnn_bench writes both)"
+        )
     rows = [
         {key: _native(value) for key, value in r.items()}
         for r in frame.to_dict(orient="records")

@@ -19,13 +19,14 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 
 from .correctness import known_wrong
 from .corpus_io import read_corpus_frame
+from .features import UnseenCategoryError
 from .ranking_metrics import RANKING_METRICS
 from .score_transform import INVERTIBLE as INVERTIBLE_TRANSFORMS
 from .score_transform import TRAINED as TRAINED_TRANSFORM
@@ -144,6 +145,9 @@ class ProblemResult:
     #: sum to `regret`. None for single-layer models or without the group column.
     group_regret: float | None = None
     in_group_regret: float | None = None
+    #: The model could not predict this problem (a category value training never saw), so
+    #: `picked_value` is the declared-order fallback the runtime would choose.
+    fallback: bool = False
 
 
 @dataclass
@@ -281,15 +285,51 @@ def _problem_digest(key: Sequence[str], seed: int) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+#: The namespaces of a training row's features (RFC 0019.13 §4): problem, kernel, device.
+FEATURE_PREFIXES = ("q.", "kernel.", "device.")
+
+
+def finite_values(
+    df: pd.DataFrame, keys: pd.Series
+) -> dict[str, frozenset[tuple[str, str]]]:
+    """Per shape, the values its rows hold in every string-valued feature column: the finite
+    fields (layout, dtype, a kernel enum) a model encodes by vocabulary and cannot predict
+    outside it."""
+    columns = [
+        column
+        for column in df.columns
+        if column.startswith(FEATURE_PREFIXES)
+        and df[column].dropna().map(lambda value: isinstance(value, str)).any()
+    ]
+    values: dict[str, set[tuple[str, str]]] = {}
+    for column in columns:
+        present = df[column].notna()
+        for shape, value in zip(
+            keys[present].map(lambda key: key[0]), df[column][present]
+        ):
+            values.setdefault(str(shape), set()).add((column, str(value)))
+    return {shape: frozenset(found) for shape, found in values.items()}
+
+
 def split_problems(
-    keys: Iterable[tuple[str, ...]], fraction: float, seed: int
+    keys: Iterable[tuple[str, ...]],
+    fraction: float,
+    seed: int,
+    values: Mapping[str, frozenset] | None = None,
 ) -> Split:
     """Hold out `fraction` of the shapes, reproducibly, with every problem on them.
 
     A problem key starts with its shape (`benchmark`); all its devices land on one side,
-    so a shape trained on one GPU is never scored as unseen on another. Assigned by a
-    seeded hash of the shape, so row order or appended rows do not move the split
-    (§5.6.3).
+    so a shape trained on one GPU is never scored as unseen on another. The shapes with the
+    lowest seeded hashes are held out, `round(fraction * shapes)` of them, so the split
+    depends on the set of shapes and the seed, never on row order (§5.6.3). A corpus that
+    grows can move a shape across, as the count grows: to keep a slice fixed while a corpus
+    grows, hold it out by graph id (corpus_gen's evaluation slice, `--eval-benchmarks`).
+
+    With `values` (`finite_values`), every value of every finite field stays in training: a
+    held shape carrying a value no training shape has goes back to training, highest hash
+    first, so the model has seen each value it may be asked about. At least one shape stays
+    held out.
     """
     if not 0.0 < fraction <= 1.0:
         raise ValueError(f"--eval-fraction must be in (0, 1]; got {fraction}")
@@ -307,6 +347,17 @@ def split_problems(
         # At least one shape, so a small corpus gets an imprecise slice, not an empty one.
         count = max(1, round(fraction * len(shapes)))
     held_shapes = set(shapes[:count])
+    if values and count < len(shapes):
+        covered = set().union(
+            *(values.get(str(shape), frozenset()) for shape in shapes[count:])
+        )
+        for shape in reversed(shapes[:count]):
+            if len(held_shapes) == 1:
+                break
+            carried = values.get(str(shape), frozenset())
+            if not carried <= covered:
+                held_shapes.discard(shape)
+                covered |= carried
     held_out = {key for key in ordered if key[0] in held_shapes}
     return Split(
         seed,
@@ -545,7 +596,9 @@ def evaluate_corpus(
     warnings.extend(_grouping_warnings(grouping))
 
     keys = problem_keys(df, grouping)
-    split = split_problems(keys.unique().tolist(), eval_fraction, seed)
+    split = split_problems(
+        keys.unique().tolist(), eval_fraction, seed, finite_values(df, keys)
+    )
     if split.fraction >= 1.0:
         warnings.append(
             "NO HELD-OUT SLICE: --eval-fraction 1.0 scores every problem in the "
@@ -594,6 +647,8 @@ def evaluate_corpus(
     calibration_picked_measured: list[float] = []
     # Finite scores the runtime discards as non-positive; reported beside calibration.
     discarded_predictions = 0
+    # Problems the model could not predict (an unseen category value), with the reason.
+    fallback_problems: list[tuple[tuple[str, ...], str]] = []
     physical = score_is_physical(score_declaration)
     # Grouped by hand: pandas treats tuple keys as multi-column selectors in places.
     groups: dict[tuple[str, ...], list] = {}
@@ -621,7 +676,16 @@ def evaluate_corpus(
             exclusions.problems_single_candidate += 1
             continue
 
-        predictions = np.asarray(scorer(candidates), dtype=float)
+        # A category value training never saw has no code in the model's encoding: the
+        # model cannot predict this problem, and the runtime ranks it in declared order.
+        # Scored as that fallback pick -- what a deployment chooses -- and counted apart.
+        fallback = False
+        try:
+            predictions = np.asarray(scorer(candidates), dtype=float)
+        except UnseenCategoryError as error:
+            fallback = True
+            fallback_problems.append((key, str(error)))
+            predictions = np.full(measured.shape, np.inf)
         if predictions.shape != measured.shape:
             raise ValueError(
                 f"scorer returned {predictions.shape} scores for {measured.shape} "
@@ -637,10 +701,15 @@ def evaluate_corpus(
         # Unrankable candidates (`rankable_scores`) are forced last explicitly: under
         # `min` a negative or -inf score would otherwise be picked. With nothing
         # rankable, the pick is §5 step 7's declared order, as in the engine.
-        rankable = rankable_scores(predictions, physical)
-        discarded_predictions += int(
-            np.count_nonzero(np.isfinite(predictions) & ~rankable)
+        rankable = (
+            np.zeros(measured.shape, dtype=bool)
+            if fallback
+            else rankable_scores(predictions, physical)
         )
+        if not fallback:
+            discarded_predictions += int(
+                np.count_nonzero(np.isfinite(predictions) & ~rankable)
+            )
         ranking_key = -predictions if objective == "max" else predictions
         ranking_key = np.where(rankable, ranking_key, np.inf)
         order = np.argsort(ranking_key, kind="stable")
@@ -723,7 +792,16 @@ def evaluate_corpus(
                 ),
                 group_regret=group_regret,
                 in_group_regret=in_group_regret,
+                fallback=fallback,
             )
+        )
+
+    if fallback_problems:
+        warnings.append(
+            f"{len(fallback_problems)} held-out problem(s) carry a category value training "
+            "never saw, so the model cannot predict them; each is scored by the declared-"
+            "order pick the runtime falls back to. The training set should hold every "
+            f"value of every finite field. First: {fallback_problems[0][1]}"
         )
 
     calibration = _calibration_block(
@@ -759,6 +837,12 @@ def evaluate_corpus(
         warnings=warnings,
         group_column=group_column,
     )
+    fallen_back = [result.regret for result in results if result.fallback]
+    report["fallback"] = {
+        "problems": len(fallen_back),
+        "mean_regret": float(np.mean(fallen_back)) if fallen_back else None,
+        "keys": [list(key) for key, _ in fallback_problems],
+    }
     return EvaluationResult(report=report, problems=results, warnings=warnings)
 
 

@@ -18,7 +18,7 @@ from .correctness import (
     numerical_reason,
     numerical_verdict,
 )
-from .features import evaluate_feature_maps, signature_references
+from .features import UnseenCategoryError, evaluate_feature_maps, signature_references
 from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
 from .ranking_metrics import (
@@ -346,12 +346,18 @@ def normalize_row(value: dict) -> dict:
     }
 
 
-def normalize_corpus(frame: pd.DataFrame) -> pd.DataFrame:
+def normalize_corpus(frame: pd.DataFrame, *, repeats: bool = False) -> pd.DataFrame:
+    """Normalized rows of an immediate corpus, every consistency rule checked.
+
+    A training corpus holds one row per engine, graph and device kind. A collection may hold
+    `repeats` -- the same graph measured on several GPUs of one kind (`--device` repeated) --
+    which training reduces to one (`best_per_shape`).
+    """
     if frame.empty:
         raise ValueError("immediate corpus is empty")
     rows = [normalize_row(row) for row in frame.to_dict(orient="records")]
     result = pd.DataFrame(rows)
-    if result.duplicated(["benchmark", "device", "engine"]).any():
+    if not repeats and result.duplicated(["benchmark", "device", "engine"]).any():
         raise ValueError(
             "immediate corpus must contain one row per engine/graph/device, not a candidate sweep"
         )
@@ -606,6 +612,7 @@ def evaluate_immediate(
         REPORT_SCHEMA,
         _holdout_integrity,
         _summarise,
+        finite_values,
         problem_keys,
         regret_of,
         resolve_grouping,
@@ -615,7 +622,7 @@ def evaluate_immediate(
     frame = normalize_corpus(frame)
     grouping = resolve_grouping(frame)
     keys = problem_keys(frame, grouping)
-    split = split_problems(keys, eval_fraction, seed)
+    split = split_problems(keys, eval_fraction, seed, finite_values(frame, keys))
     # Split over every row, like training, so both agree on held-out problems; then drop
     # rows checked wrong from scoring and the oracle (RFC 0019 §13.2).
     held_out = frame[keys.isin(split.eval_problems) & ~known_wrong(frame)].copy()
@@ -646,6 +653,8 @@ def evaluate_immediate(
         )
     predicted = pd.Series(index=held_out.index, dtype=float)
     declined: dict[str, int] = {}
+    # Rows with a category value training never saw, per engine.
+    unpredictable: dict[str, int] = {}
     for engine, group in frame.groupby("engine_name", sort=False):
         bundle = by_engine[engine]
         check_model_binding(bundle.descriptor, group, feature_evaluator)
@@ -659,7 +668,21 @@ def evaluate_immediate(
         selected = held_out[held_out["engine_name"].eq(engine)]
         if selected.empty:
             continue
-        values = np.asarray(bundle.scorer(selected), dtype=float)
+        try:
+            values = np.asarray(bundle.scorer(selected), dtype=float)
+        except UnseenCategoryError:
+            # A row whose category value training never saw cannot be predicted; the
+            # runtime orders that engine statically, so the row is scored unscored, as a
+            # decline is, and the pick below is the fallback a deployment makes.
+            values = np.empty(len(selected), dtype=float)
+            for position, index in enumerate(selected.index):
+                try:
+                    values[position] = float(
+                        np.asarray(bundle.scorer(selected.loc[[index]]), dtype=float)[0]
+                    )
+                except UnseenCategoryError:
+                    values[position] = np.nan
+                    unpredictable[engine] = unpredictable.get(engine, 0) + 1
         if values.shape != (len(selected),):
             raise ValueError("L1 model returned the wrong number of predictions")
         # The runtime refuses a value the metric cannot take as INVALID and orders the
@@ -747,6 +770,12 @@ def evaluate_immediate(
         warnings.append(
             "Full supplied corpus evaluated; training overlap is reported separately."
         )
+    if unpredictable:
+        warnings.append(
+            f"{sum(unpredictable.values())} held-out row(s) carry a category value training "
+            "never saw; each is scored by the static-order pick the runtime falls back to. "
+            "The training set should hold every value of every finite field."
+        )
     report = {
         "schema": REPORT_SCHEMA,
         "role": ROLE,
@@ -798,6 +827,13 @@ def evaluate_immediate(
                 "detail": f"predictions the runtime would refuse as "
                 f"invalid {name} values; the engine is "
                 f"unscored for these",
+            },
+            "unpredictable_rows": {
+                "total": sum(unpredictable.values()),
+                "per_engine": unpredictable,
+                "detail": "rows whose category value training never saw: the model "
+                "cannot predict them, so the engine is unscored there and ranked "
+                "statically, as the runtime does",
             },
             "per_engine": {
                 engine: calibration(group)

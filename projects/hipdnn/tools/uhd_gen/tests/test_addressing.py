@@ -34,6 +34,19 @@ def test_an_integer_knob_pins_its_own_value_and_is_not_an_ordinal():
     assert addressing.decode(table, "block_m", 256) == 256
 
 
+def test_a_bool_or_float_knob_is_ordinal_even_where_its_index_equals_it():
+    """`False` at index 0 and `1.0` at index 1 compare equal in Python; the runtime numbers
+    every non-integer field all the same."""
+    table = addressing.observe(
+        [
+            candidate({"flag": 0, "scale": 1}, {"flag": False, "scale": 1.0}),
+            candidate({"flag": 1, "scale": 0}, {"flag": True, "scale": 0.0}),
+        ]
+    )
+    assert addressing.is_ordinal(table, "flag")
+    assert addressing.is_ordinal(table, "scale")
+
+
 @pytest.mark.parametrize("value", ["BF16", True, 2.5, [1, 2]])
 def test_every_non_integer_kmd_type_is_addressable(value):
     """bool, float, string and int_list all pin through an index."""

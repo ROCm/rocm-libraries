@@ -48,8 +48,14 @@ def observe(candidates, table: dict | None = None) -> dict:
 
 
 def is_ordinal(table: dict, name: str) -> bool:
-    """True when the knob addresses by index rather than by its own value."""
-    return any(pinned != value for pinned, value in table.get(name, {}).items())
+    """True when the knob addresses by index rather than by its own value: as the runtime
+    decides it, by type -- any value that is not an integer (a bool, float, string or tuple)
+    is addressed by its index, even where the index happens to equal it (`False` at 0).
+    """
+    return any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in table.get(name, {}).values()
+    )
 
 
 def decode(table: dict, name: str, pinned: int):

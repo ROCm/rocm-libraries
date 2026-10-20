@@ -52,8 +52,9 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
 - Every engine call reads only the tree named for it (`HIPDNN_DESCRIPTOR_RUNTIME_DIR` and
   `HIPDNN_DESCRIPTOR_PATH` are cleared) and gets an empty `HIPDNN_CACHE_DIR`.
 - Gates: `identity` (the engine could only have read the candidate), `available` (it predicts
-  for every graph it executes; `--min-available` relaxes it), `metric` (every answer names its
-  declared metric), `selector_revision` (the engine reports the revision the model was trained
+  for every graph it executes; `--min-available` relaxes it, `--min-graphs` sets how many it
+  must execute), `metric` (the candidate's `score.metric` and every answer name the declared
+  metric), `selector_revision` (the engine reports the revision the model was trained
   against), `accuracy` (candidate median |error| ≤ incumbent × 1.05, `--max-regression`
   changes it). Both models' accuracy is always reported. With no incumbent, pass
   `--no-incumbent`: the accuracy gate then asks only that the candidate was scored, and the

@@ -448,7 +448,9 @@ def run_size(args: argparse.Namespace) -> int:
             test_corpus = work / "test.json"
             _write_json(test_corpus, [usable[key] for key in test_keys])
             sizes = sorted(set(args.sizes)) if args.sizes else default_sizes(len(pool))
-            sizes = [s for s in sizes if 0 < s <= len(pool)]
+            # The whole pool is always trained: its misses set the quotas, and it is the
+            # model the report calls "now", however the curve is sampled below it.
+            sizes = sorted({s for s in sizes if 0 < s <= len(pool)} | {len(pool)})
             curve, full_errors = [], None
             for draw in range(args.draws):
                 order = pool[:]

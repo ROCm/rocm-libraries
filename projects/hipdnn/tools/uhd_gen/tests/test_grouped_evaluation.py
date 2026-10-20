@@ -120,10 +120,9 @@ def _candidates() -> pd.DataFrame:
     )
 
 
-def test_a_grouped_artifact_rejects_every_candidate_outside_the_chosen_group():
+def test_a_grouped_artifact_rejects_every_candidate_outside_the_chosen_group(tmp_path):
     """If nothing is -inf, only layer 1 (`trees`) was scored."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
+    bundle = load_model(_write_model(tmp_path / "grouped", grouped=True))
     scores = bundle.scorer(_candidates())
 
     assert np.isneginf(
@@ -137,20 +136,18 @@ def test_a_grouped_artifact_rejects_every_candidate_outside_the_chosen_group():
     assert len(survived) == 1
 
 
-def test_an_ungrouped_artifact_scores_every_candidate():
+def test_an_ungrouped_artifact_scores_every_candidate(tmp_path):
     """`group_by_feature_index = -1` must not engage the grouped path."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    bundle = load_model(_write_model(with_tmp / "flat", grouped=False))
+    bundle = load_model(_write_model(tmp_path / "flat", grouped=False))
     scores = bundle.scorer(_candidates())
 
     assert np.all(np.isfinite(scores))
     assert bundle.group_feature is None
 
 
-def test_a_grouped_model_is_not_ranked_with_the_booster():
+def test_a_grouped_model_is_not_ranked_with_the_booster(tmp_path):
     """`model.lgbm` holds only layer 1, so grouped models must load `model.bin`."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    directory = _write_model(with_tmp / "both", grouped=True)
+    directory = _write_model(tmp_path / "both", grouped=True)
     assert (
         directory / "model.lgbm"
     ).exists(), "fixture must keep the booster to be meaningful"
@@ -159,10 +156,9 @@ def test_a_grouped_model_is_not_ranked_with_the_booster():
     assert bundle.source.endswith("model.bin")
 
 
-def test_the_group_decision_is_made_per_problem():
+def test_the_group_decision_is_made_per_problem(tmp_path):
     """Like `scoreBatch`, the group is chosen within one query, not across a corpus."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
+    bundle = load_model(_write_model(tmp_path / "grouped", grouped=True))
 
     for size in (2.0, 9.0):
         frame = pd.DataFrame([{"q.size": size, "kernel.group": g} for g in GROUPS])
@@ -171,11 +167,12 @@ def test_the_group_decision_is_made_per_problem():
 
 
 @pytest.mark.parametrize("objective, expected", [("max", 1.0), ("min", 0.0)])
-def test_layer_one_picks_the_group_in_the_objective_direction(objective, expected):
+def test_layer_one_picks_the_group_in_the_objective_direction(
+    objective, expected, tmp_path
+):
     """At q.size 9 layer 1 scores group 1 near 19 and group 0 near 11."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(
-        _write_model(with_tmp / objective, grouped=True, objective=objective)
+        _write_model(tmp_path / objective, grouped=True, objective=objective)
     )
     frame = pd.DataFrame([{"q.size": 9.0, "kernel.group": g} for g in GROUPS])
     scores = bundle.scorer(frame)
@@ -202,10 +199,9 @@ def _corpus() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_two_stage_regret_sums_to_the_total():
+def test_two_stage_regret_sums_to_the_total(tmp_path):
     """Both parts are measured against the same oracle, so they must add up."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
+    bundle = load_model(_write_model(tmp_path / "grouped", grouped=True))
 
     result = evaluate_corpus(
         _corpus(),
@@ -228,10 +224,9 @@ def test_two_stage_regret_sums_to_the_total():
         assert problem.group_regret >= 0.0
 
 
-def test_no_decomposition_is_reported_without_a_group_column():
+def test_no_decomposition_is_reported_without_a_group_column(tmp_path):
     """Absent means "not a two-layer model"; zeros would claim perfect group picks."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    bundle = load_model(_write_model(with_tmp / "flat", grouped=False))
+    bundle = load_model(_write_model(tmp_path / "flat", grouped=False))
 
     result = evaluate_corpus(
         _corpus(), bundle.scorer, target="tflops", objective="max", eval_fraction=1.0
@@ -300,10 +295,9 @@ def _single_tree_model(
     return directory
 
 
-def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
+def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it(tmp_path):
     """`decision_lte` false means `<`, not the complement `>` of `<=`."""
-    with_tmp = Path(__import__("tempfile").mkdtemp())
-    bundle = load_model(_strict_less_than_model(with_tmp / "strict_lt"))
+    bundle = load_model(_strict_less_than_model(tmp_path / "strict_lt"))
 
     scores = bundle.scorer(
         pd.DataFrame([{"q.size": 5.0}, {"q.size": 10.0}, {"q.size": 15.0}])

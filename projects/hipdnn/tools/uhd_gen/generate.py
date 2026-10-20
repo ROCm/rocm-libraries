@@ -9,7 +9,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 import shutil
 import subprocess
 import tempfile
@@ -27,9 +26,16 @@ from .correctness import (
     numerical_verdict,
     suppress_timings,
 )
+from .bench_env import bench_environment
 from .corpus_io import graph_key
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
-from .evaluate import BENCHMARK_COLUMN, problem_keys, resolve_grouping, split_problems
+from .evaluate import (
+    BENCHMARK_COLUMN,
+    finite_values,
+    problem_keys,
+    resolve_grouping,
+    split_problems,
+)
 from .features import (
     build_features_signature,
     require_admissible_kernel_axes,
@@ -71,7 +77,7 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="DIR",
         help="Train from a stored dataset (python -m uhd_gen.dataset add) instead of "
         "measuring: its training contributions, one measurement of each configuration "
-        "on each shape, the newest winning",
+        "on each shape, the best (lowest avgTimeMs) winning",
     )
     parser.add_argument(
         "--collect-only",
@@ -305,7 +311,7 @@ def write_collection(
     for source in sources:
         frame = pd.DataFrame(rows[source])
         if immediate:
-            _, binding = training_binding(normalize_corpus(frame))
+            _, binding = training_binding(normalize_corpus(frame, repeats=True))
             if provenance is not None and binding["trained_against"] != provenance:
                 raise ValueError(
                     "the engine's descriptor provenance changed between metric collections"
@@ -955,17 +961,14 @@ def _measure(
         ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
         _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
         kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
-    # The bench must load only the measured tree: the loader keeps the first definition of
-    # an id, so additive roots are cleared and this tree replaces the provider's via DIR.
-    environment = dict(os.environ)
-    environment.pop("HIPDNN_DESCRIPTOR_PATH", None)
-    environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
-    if immediate:
-        environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
-        # An L1 label is the engine's untuned pick. HIPDNN_FORCE_BENCHMARKING overrides the
-        # bench's global.benchmarking=0 in every provider that implements the knob.
-        environment["HIPDNN_FORCE_BENCHMARKING"] = "0"
-    else:
+    # The bench loads only the measured tree, from an empty cache of its own, untuned: an
+    # L1 label is the engine's own pick, not a caller's winner record (bench_env.py).
+    # Outside the stage, which becomes the output; removed when measuring ends.
+    bench_cache = tempfile.TemporaryDirectory(prefix="uhd-bench-cache-")
+    environment = bench_environment(
+        descriptor_dir=tree, cache_dir=Path(bench_cache.name)
+    )
+    if not immediate:
         collection_tree = stage / "collection_descriptors"
         shutil.copytree(tree, collection_tree)
         exposed = dict(ued)
@@ -1076,6 +1079,7 @@ def _measure(
     for source in sources:
         for row in rows[source]:
             row.update(regimes.get(str(row["benchmark"]), {}))
+    bench_cache.cleanup()
     return {
         "collected_at": collected_at,
         "rows": rows,
@@ -1290,6 +1294,17 @@ def feature_recipe(
     return signature, omitted
 
 
+def _drop_slice_warning(report: dict) -> None:
+    """Generate scores a slice it has just verified held out, at --eval-fraction 1.0 because
+    the slice is the whole input: evaluate's "no held-out slice" warning does not apply.
+    """
+    report["warnings"] = [
+        warning
+        for warning in report.get("warnings", [])
+        if not warning.startswith("NO HELD-OUT SLICE")
+    ]
+
+
 def _relocate_stage(stage: Path, output: Path) -> None:
     """Recorded paths must refer to the final output rather than the staging directory."""
     old_root = str(stage)
@@ -1382,7 +1397,9 @@ def _generate_published(
                 "there is nothing to evaluate on"
             )
     else:
-        split = split_problems(keys, args.eval_fraction, args.seed)
+        split = split_problems(
+            keys, args.eval_fraction, args.seed, finite_values(frame, keys)
+        )
         in_eval = keys.isin(split.eval_problems)
     train_frame = frame if args.recall else frame[~in_eval]
     eval_frame = frame[in_eval]
@@ -1469,6 +1486,8 @@ def _generate_published(
         "status": "recall" if args.recall else "held_out",
         "detail": "Training and evaluation problem identities recorded and compared",
     }
+    if not args.recall:
+        _drop_slice_warning(report)
     _write_json(report_path, report)
     evaluation = (
         "recall" if args.recall else ("eval_set" if held is not None else "holdout")
@@ -1643,10 +1662,12 @@ def _split_for_training(
                 ~candidates[BENCHMARK_COLUMN].astype(str).isin(held)
             ]
         else:
+            source_keys = problem_keys(frames[source], grouping)
             split = split_problems(
-                problem_keys(frames[source], grouping),
+                source_keys,
                 args.eval_fraction,
                 args.seed,
+                finite_values(frames[source], source_keys),
             )
             train_frames[source] = candidates[
                 ~problem_keys(candidates, grouping).isin(split.eval_problems)
@@ -2073,6 +2094,8 @@ def run_generate(args: argparse.Namespace) -> int:
                     "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices",
                 }
             )
+            if not args.recall:
+                _drop_slice_warning(report)
             _write_json(report_path, report)
             models.append(
                 {

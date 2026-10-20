@@ -136,6 +136,11 @@ int runPython(const std::string& arguments)
     }
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter pythonPathForChild(
         "PYTHONPATH", pythonPath);
+    // LightGBM takes every core by default; beside a parallel ctest that stalls the fit for
+    // many minutes. A caller's own setting stands.
+    const auto threads = hipdnn_data_sdk::utilities::getEnv("OMP_NUM_THREADS");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter threadsForChild(
+        "OMP_NUM_THREADS", threads.empty() ? std::string("4") : threads);
 
     const std::string invocation = std::string("\"") + HIPDNN_UHD_GEN_PYTHON + "\" "
                                    + arguments

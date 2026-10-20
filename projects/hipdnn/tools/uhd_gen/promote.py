@@ -1382,22 +1382,25 @@ def _apply(plan: PromotePlan) -> None:
         if not staged:
             return
         journal_path = staged[-1][1].parent / JOURNAL_NAME
+        # Absolute, so a recovery run from any directory restores this tree and no other.
         _write_journal(
             journal_path,
             {
                 "entries": [
                     {
-                        "destination": str(destination),
-                        "staged": str(temp),
+                        "destination": str(destination.absolute()),
+                        "staged": str(temp.absolute()),
                         "backup": (
-                            str(backups[destination])
+                            str(backups[destination].absolute())
                             if destination in backups
                             else None
                         ),
                     }
                     for temp, destination in staged
                 ],
-                "created_dirs": [str(directory) for directory in created_dirs],
+                "created_dirs": [
+                    str(directory.absolute()) for directory in created_dirs
+                ],
             },
         )
         for temp, destination in staged:

@@ -52,6 +52,8 @@ REFUSAL = re.compile(
     r"|declared-order fallback|disabling model, preserving engine|is not loaded"
     r"|reason=no_model_for_arch"
 )
+#: The leading `[...]` fields of a runtime log line.
+LOG_PREFIX = re.compile(r"^\s*(?:\[[^\]]*\]\s*)*")
 #: KernelIngestorStateManager.hpp, at INFO: a benchmarked record ordered the catalog, not the ranker.
 FROM_RECORD = re.compile(r"catalog entries from a benchmarked\s*record")
 
@@ -91,10 +93,18 @@ def run(
         }
     output = result["stderr"] + "\n" + result["stdout"]
     lines = output.splitlines()
-    refusals = sorted({line.strip()[:400] for line in lines if REFUSAL.search(line)})
+    # Without the log prefix (time, logger, level), so one refusal compares equal across the
+    # two runs: decide.py counts only what the candidate run alone reports.
+    refusals = sorted(
+        {
+            LOG_PREFIX.sub("", line).strip()[:400]
+            for line in lines
+            if REFUSAL.search(line)
+        }
+    )
     row = {
         "ok": result["returncode"] == 0,
-        "refusals": refusals[:3],
+        "refusals": refusals[:20],
         "from_record": bool(FROM_RECORD.search(output)),
     }
     if not row["ok"]:

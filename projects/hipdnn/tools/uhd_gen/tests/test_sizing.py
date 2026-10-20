@@ -389,6 +389,18 @@ def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(
     assert checked["observed_within"] is not None
 
 
+def test_sizes_that_omit_the_whole_pool_still_train_it(store, evaluator):
+    """The whole pool's misses set the quotas and its score is the report's "now"."""
+    code, output = _size(
+        store, evaluator, "partial", "--create-test-set", "--sizes", "15", "30", "60"
+    )
+    assert code == 0
+    report = json.loads((output / "sizing_report.json").read_text(encoding="utf-8"))
+    assert report["training_pool"] in {point["shapes"] for point in report["curve"]}
+    quotas = json.loads((output / "regime_quotas.json").read_text(encoding="utf-8"))
+    assert sum(quotas["toy_op"].values()) >= report["recommendation"]["new_shapes"]
+
+
 def test_a_shape_measured_on_two_kinds_of_device_is_one_shape_to_size(
     store, evaluator, monkeypatch
 ):

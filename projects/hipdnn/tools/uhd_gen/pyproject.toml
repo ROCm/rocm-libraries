@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "UHD Generation Tool - Train and export heuristic models for hipDNN"
 readme = "README.md"
 requires-python = ">=3.12"
+# requirements.txt holds the floors and says where they come from.
+dynamic = ["dependencies"]
 license = {text = "MIT"}
 authors = [
     {name = "Advanced Micro Devices, Inc."},
@@ -19,21 +21,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
 ]
-# The same floors as requirements.txt, which says where they come from.
-dependencies = [
-    "lightgbm>=4.7.0",
-    "flatbuffers>=25.12.19",
-    "numpy>=2.5.2",
-    "pandas>=3.0.5",
-    # `--input dataset.parquet` reads what uhd_gen.dataset publishes, and pandas carries
-    # no Parquet engine of its own. Declared rather than left to whatever an environment
-    # happens to have, because its absence surfaces as an ImportError deep inside
-    # read_parquet rather than as a missing dependency.
-    "pyarrow>=25.0.1",
-    # GroupKFold: training cross-validates by problem, so no shape is on both sides of a
-    # fold.
-    "scikit-learn>=1.9.0",
-]
 
 [project.optional-dependencies]
 dev = [
@@ -44,14 +31,20 @@ dev = [
 [project.scripts]
 uhd-gen = "uhd_gen.__main__:main"
 
-[tool.setuptools.packages.find]
-# Looks one level up and keeps only this package, because that is the only way to see it: this
-# file sits *inside* `uhd_gen/`, so searching `.` finds the subdirectories rather than the
-# package they belong to, and installs them as top-level `dataset` and `tests` while
-# `uhd_gen.__main__:main` above resolves to nothing. The filter is what keeps the wider search
-# from also picking up `corpus_gen` and the other tools sharing that directory.
-where = [".."]
-include = ["uhd_gen*"]
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools]
+# This file sits *inside* the package, so the package is this directory: mapped here, an sdist
+# carries it and a wheel built from that sdist (`python -m build`) holds it. The generated
+# FlatBuffers bindings are imported from `_generated/` (see __init__.py).
+package-dir = {"uhd_gen" = "."}
+packages = [
+    "uhd_gen",
+    "uhd_gen.dataset",
+    "uhd_gen._generated.hipdnn_flatbuffers_sdk",
+    "uhd_gen._generated.hipdnn_flatbuffers_sdk.data_objects",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
