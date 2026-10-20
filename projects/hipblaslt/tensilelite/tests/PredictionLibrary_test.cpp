@@ -881,19 +881,58 @@ TEST(PredictionLibraryTest, TilewrightContextHonorsTheStreamK5ForceMode)
     }
 }
 
-#if defined(TILEWRIGHT_TEST_WEIGHTS_DIR)
+#if defined(TILEWRIGHT_TEST_MODEL_WRITER)
 namespace
 {
-    // A shipped MLREC_v2 model, which the tests below expect: it records no
-    // launch model, supports the whole device with the default schedule
-    // alone and gives the probe kernels the order they test. The gfx950
-    // TF32 TT library's model is one and stays one while the other gfx950
-    // libraries move to MLREC_v3 models; once it moves too, these tests need
-    // a model of their own.
-    std::filesystem::path shippedGfx950Model()
+    // An MLREC_v2 model, which the tests below expect: it records no launch
+    // model, so they rank its candidates with no device to plan launches for
+    // and load it as the model of other architectures' libraries; it supports
+    // the whole device with the default schedule alone; and it orders the
+    // probe kernels unlike origami. Its one cell, that of dummyProblem()'s
+    // size class, scores a kernel by the log2 of its tile's N size: the
+    // skinny tile before the blocky one. The tests read a shipped MLREC_v2
+    // model until no gfx950 library shipped one.
+    std::filesystem::path writeV2Model(ScratchDir const& dir)
     {
-        return std::filesystem::path(TILEWRIGHT_TEST_WEIGHTS_DIR) / "gfx950" / "gfx950"
-               / "gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs.tilewright.bin";
+        tilewright_test::CellSpec cell;
+        cell.label = tilewright_test::base_label(1024, 1024, 1024, 1);
+        cell.edit  = [](tilewright_test::CellTensors& t) {
+            for(auto* weights : {&t.q_w0,
+                                 &t.q_b0,
+                                 &t.q_w2,
+                                 &t.q_b2,
+                                 &t.q_w4,
+                                 &t.q_b4,
+                                 &t.i_w0,
+                                 &t.i_b0,
+                                 &t.i_w2,
+                                 &t.i_b2,
+                                 &t.x_w0,
+                                 &t.x_b0,
+                                 &t.x_w2,
+                                 &t.x_b2})
+                std::fill(weights->begin(), weights->end(), 0.0f);
+            // The query embedding is (1, 0, ...) and the item embedding's
+            // first value is item feature 1, the log2 of the tile's N size,
+            // which mean 0 and std 1 leave as is: their product is the score.
+            t.temperature = 1.0f;
+            t.q_b4[0]     = 1.0f;
+            t.i_mean[1]   = 0.0f;
+            t.i_std[1]    = 1.0f;
+            t.i_w0[1]     = 1.0f;
+            t.i_w2[0]     = 1.0f;
+        };
+
+        tilewright_test::ModelSpec spec;
+        spec.arch  = "gfx950";
+        spec.cells = {cell};
+
+        auto const image = tilewright_test::write_model(spec);
+        auto const path  = dir.path() / "v2.tilewright.bin";
+        std::ofstream(path, std::ios::binary)
+            .write(reinterpret_cast<char const*>(image.bytes.data()),
+                   static_cast<std::streamsize>(image.bytes.size()));
+        return path;
     }
 
     // Loads `table` and the model at `model` as the library of `stem`.
@@ -921,7 +960,7 @@ namespace
 
     std::vector<int> const contestedTable = {13, 11, 12};
 
-    // The shipped model and origami order the blocky and the skinny tile
+    // writeV2Model's model and origami order the blocky and the skinny tile
     // differently at 1024^3; neither ranks the Dot2 kernel there.
     void addContestedKernels(SolutionMap<ContractionSolution>& solutions)
     {
@@ -997,15 +1036,12 @@ namespace
 
 TEST(PredictionLibraryTest, TilewrightOrdersTheKernelsItScores)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_rank");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto const expected = tilewrightOrder(lib);
@@ -1025,15 +1061,12 @@ TEST(PredictionLibraryTest, TilewrightOrdersTheKernelsItScores)
 
 TEST(PredictionLibraryTest, TilewrightPoolPositionsAreSolutionListPositions)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_pool");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto const& configs = lib.tilewright_ranker->candidates().configs();
@@ -1058,15 +1091,12 @@ TEST(PredictionLibraryTest, TilewrightPoolPositionsAreSolutionListPositions)
 
 TEST(PredictionLibraryTest, OrigamiRanksWhenTilewrightScoresNothing)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     solutions.emplace(13, makeDot2Solution(13));
 
     ScratchDir                          dir("tensilelite_tilewright_fallback");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), {13}, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), {13}, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto const top
@@ -1077,15 +1107,12 @@ TEST(PredictionLibraryTest, OrigamiRanksWhenTilewrightScoresNothing)
 
 TEST(PredictionLibraryTest, OrigamiRanksCallsWithACuBudgetBelowTheDevice)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_cu_budget");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto problem = TensileLite::testing::dummyProblem();
@@ -1095,9 +1122,6 @@ TEST(PredictionLibraryTest, OrigamiRanksCallsWithACuBudgetBelowTheDevice)
 
 TEST(PredictionLibraryTest, TilewrightNamesTheCompilerTargetOfTheLibrary)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     for(auto const& [suffix, arch] :
         std::vector<std::pair<std::string, std::string>>{{"gfx950", "gfx950"},
                                                          {"CU256_ID75a8_gfx950", "gfx950"},
@@ -1112,7 +1136,7 @@ TEST(PredictionLibraryTest, TilewrightNamesTheCompilerTargetOfTheLibrary)
         ScratchDir                          dir("tensilelite_tilewright_arch");
         ContractionProblemPredictionLibrary lib;
         loadWithTilewright(dir,
-                           shippedGfx950Model(),
+                           writeV2Model(dir),
                            contestedTable,
                            solutions,
                            lib,
@@ -1124,15 +1148,12 @@ TEST(PredictionLibraryTest, TilewrightNamesTheCompilerTargetOfTheLibrary)
 
 TEST(PredictionLibraryTest, TilewrightNotesEachContextTheModelDoesNotSupportOnce)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_unsupported");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     tilewright::Hardware const hardware{256, 163840, 4000000};
@@ -1152,15 +1173,12 @@ TEST(PredictionLibraryTest, TilewrightNotesEachContextTheModelDoesNotSupportOnce
 
 TEST(PredictionLibraryTest, TilewrightRanksTheTopKernelsOrEveryScoredKernel)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_every_scored");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto const problem = TensileLite::testing::dummyProblem();
@@ -1175,15 +1193,12 @@ TEST(PredictionLibraryTest, TilewrightRanksTheTopKernelsOrEveryScoredKernel)
 
 TEST(PredictionLibraryTest, TilewrightRanksCallsWithACuBudgetOfTheWholeDevice)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_full_budget");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto problem = TensileLite::testing::dummyProblem();
@@ -1193,9 +1208,6 @@ TEST(PredictionLibraryTest, TilewrightRanksCallsWithACuBudgetOfTheWholeDevice)
 
 TEST(PredictionLibraryTest, OrigamiRanksCallsWithDynamicOrAutoStreamKScheduling)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     ScopedStreamK5ForceMode respectApi(nullptr);
 
     SolutionMap<ContractionSolution> solutions;
@@ -1203,7 +1215,7 @@ TEST(PredictionLibraryTest, OrigamiRanksCallsWithDynamicOrAutoStreamKScheduling)
 
     ScratchDir                          dir("tensilelite_tilewright_streamk_mode");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     for(int mode : {1, 2})
@@ -1217,15 +1229,12 @@ TEST(PredictionLibraryTest, OrigamiRanksCallsWithDynamicOrAutoStreamKScheduling)
 
 TEST(PredictionLibraryTest, StreamK5ForceModeDecidesBetweenTilewrightAndOrigami)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
 
     ScratchDir                          dir("tensilelite_tilewright_force_mode");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
     auto problem = TensileLite::testing::dummyProblem();
@@ -1385,9 +1394,6 @@ namespace
 
 TEST(PredictionLibraryTest, TilewrightBankFollowsTheSettingAndTheModel)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     for(auto [setting, bank] :
         std::vector<std::pair<char const*, bool>>{{nullptr, false}, {"0", false}, {"1", true}})
     {
@@ -1398,9 +1404,9 @@ TEST(PredictionLibraryTest, TilewrightBankFollowsTheSettingAndTheModel)
         addContestedKernels(solutions);
         ScratchDir                          dir("tensilelite_tilewright_bank_setting");
         ContractionProblemPredictionLibrary lib;
-        loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+        loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
         ASSERT_NE(lib.tilewright_ranker, nullptr);
-        // The shipped models were not trained on the bank and read no kernel
+        // An MLREC_v2 model is not trained on the bank and reads no kernel
         // attributes.
         EXPECT_EQ(lib.tilewright_bank != nullptr, bank);
     }
@@ -1408,15 +1414,13 @@ TEST(PredictionLibraryTest, TilewrightBankFollowsTheSettingAndTheModel)
 
 TEST(PredictionLibraryTest, TilewrightBankFollowsThePoolInSolutionIndexOrder)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
     ScopedTilewrightBank bankOn("1");
 
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
     ScratchDir                          dir("tensilelite_tilewright_bank_order");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_bank, nullptr);
 
     auto const bank30 = withTile(30, 256, 128);
@@ -1445,9 +1449,6 @@ TEST(PredictionLibraryTest, TilewrightBankFollowsThePoolInSolutionIndexOrder)
 
 TEST(PredictionLibraryTest, TilewrightBankOffersEqualityKernelsForAnySize)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     auto const problem = TensileLite::testing::dummyProblem();
     auto const device  = makeGfx950Device();
     auto const blocky  = withTile(21, 128, 64);
@@ -1461,7 +1462,7 @@ TEST(PredictionLibraryTest, TilewrightBankOffersEqualityKernelsForAnySize)
         solutions.emplace(13, makeDot2Solution(13));
         ScratchDir                          dir("tensilelite_tilewright_bank_any_size");
         ContractionProblemPredictionLibrary lib;
-        loadWithTilewright(dir, shippedGfx950Model(), {13}, solutions, lib);
+        loadWithTilewright(dir, writeV2Model(dir), {13}, solutions, lib);
         ASSERT_NE(lib.tilewright_ranker, nullptr);
         setBankSources(lib, {blocky});
 
@@ -1475,15 +1476,13 @@ TEST(PredictionLibraryTest, TilewrightBankOffersEqualityKernelsForAnySize)
 
 TEST(PredictionLibraryTest, TilewrightBankLeavesExactMatchesToTheirEqualityRow)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
     ScopedTilewrightBank bankOn("1");
 
     SolutionMap<ContractionSolution> solutions;
     solutions.emplace(13, makeDot2Solution(13));
     ScratchDir dir("tensilelite_tilewright_bank_exact");
     auto       lib = std::make_shared<ContractionProblemPredictionLibrary>();
-    loadWithTilewright(dir, shippedGfx950Model(), {13}, solutions, *lib);
+    loadWithTilewright(dir, writeV2Model(dir), {13}, solutions, *lib);
     ASSERT_NE(lib->tilewright_bank, nullptr);
     setBankSources(*lib, {withTile(21, 128, 64), withTile(22, 256, 256), withTile(23, 64, 256)});
 
@@ -1507,15 +1506,13 @@ TEST(PredictionLibraryTest, TilewrightBankLeavesExactMatchesToTheirEqualityRow)
 
 TEST(PredictionLibraryTest, TilewrightBankPoolsAreKeptPerDevice)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
     ScopedTilewrightBank bankOn("1");
 
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
     ScratchDir                          dir("tensilelite_tilewright_bank_devices");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_bank, nullptr);
     setBankSources(lib, {onlyFor(withTile(21, 128, 64), 256), onlyFor(withTile(22, 128, 64), 128)});
 
@@ -1530,9 +1527,6 @@ TEST(PredictionLibraryTest, TilewrightBankPoolsAreKeptPerDevice)
 
 TEST(PredictionLibraryTest, TilewrightBankWithoutKernelsRanksThePredictionPool)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     auto const problem = TensileLite::testing::dummyProblem();
     auto const device  = makeGfx950Device();
 
@@ -1543,7 +1537,7 @@ TEST(PredictionLibraryTest, TilewrightBankWithoutKernelsRanksThePredictionPool)
         addContestedKernels(solutions);
         ScratchDir                          dir("tensilelite_tilewright_bank_off");
         ContractionProblemPredictionLibrary lib;
-        loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+        loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
         withoutBank = solutionIndices(lib.findTopSolutions(problem, device, 3));
     }
 
@@ -1552,7 +1546,7 @@ TEST(PredictionLibraryTest, TilewrightBankWithoutKernelsRanksThePredictionPool)
     addContestedKernels(solutions);
     ScratchDir                          dir("tensilelite_tilewright_bank_empty");
     ContractionProblemPredictionLibrary lib;
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_bank, nullptr);
     setBankSources(lib, {solutions.at(12)});
 
@@ -1615,14 +1609,11 @@ namespace
 
 TEST(PredictionLibraryTest, ALoadedModelIsSearchedBeforeTheGridBasedRowsOfEarlierFiles)
 {
-    if(!std::filesystem::exists(shippedGfx950Model()))
-        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
-
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
     ScratchDir dir("tensilelite_tilewright_row_order");
     auto       withModel = std::make_shared<ContractionProblemPredictionLibrary>();
-    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, *withModel);
+    loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, *withModel);
     ASSERT_NE(withModel->tilewright_ranker, nullptr);
     EXPECT_TRUE(withModel->hasTilewrightModel());
 
@@ -1670,7 +1661,6 @@ TEST(PredictionLibraryTest, ALoadedModelIsSearchedBeforeTheGridBasedRowsOfEarlie
               (std::vector<int>{31}));
 }
 
-#if defined(TILEWRIGHT_TEST_MODEL_WRITER)
 namespace
 {
     // MLREC_v3 serving flag of a model trained on the Prediction kernels and
@@ -2037,7 +2027,6 @@ TEST(PredictionLibraryTest, TilewrightWarnsAboutBlocklistNamesTheBankPoolLacks)
     EXPECT_EQ(pool.ranker->unresolvedBlocklistNames(), (std::vector<std::string>{"probe_gone"}));
     EXPECT_EQ(configPositions(*pool.ranker), (std::vector<size_t>{1, 2, 4}));
 }
-#endif
 #endif
 
 #if defined(TILEWRIGHT_TEST_MODEL_WRITER)
