@@ -1,0 +1,55 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --PrefetchBridgeSubstitutionPass --InsertWaitAluPass --print-output
+#
+# The loop-carried GL2 prefetch pattern: the prologue issues a prefetch group, and each
+# iteration bumps the addresses at the top of the loop and issues the next group further
+# down. The bump's last readers are the prologue group on entry and the loop's own group
+# around the back edge. No TEX op follows either group, so only a bridge can hide the
+# vm_vsrc wait on the bump -- and only if BOTH groups are anchored.
+
+#--- 8 ds_loads after each group plus 4 before the bump: 12 on every path. Both groups get a
+#--- flat anchor and the bump needs no vm_vsrc wait.
+# CHECK-LABEL: @loop_carried_prefetch_needs_no_wait
+# CHECK: "st.flat_prefetch_b8"(v[4:5])
+# CHECK: ^loop
+# CHECK-NOT: vm_vsrc
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+# CHECK: "st.global_prefetch_b8"(v[2:3], off)
+# CHECK: "st.flat_prefetch_b8"(v[4:5])
+st.func @loop_carried_prefetch_needs_no_wait() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[4:5], off) { issueCycles = 1, latencyCycles = 1 }
+  v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  Successors: ^loop
+^loop:
+  v110 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v111 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v112 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v113 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_add_co_u32"(v0, s10) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_co_u32"(v2, s10) { issueCycles = 1, latencyCycles = 1 }
+  v4 = "st.v_add_co_u32"(v4, s10) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[4:5], off) { issueCycles = 1, latencyCycles = 1 }
+  v120 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v121 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v122 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v123 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v124 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v125 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v126 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v127 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

@@ -4,7 +4,10 @@
 #include "stinkytofu/transforms/asm/PrefetchBridgeSubstitutionPass.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <iostream>
+#include <optional>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,6 +54,10 @@ struct Groups {
     std::unordered_map<BasicBlock*, std::vector<Ev>> evs;
     std::unordered_map<StinkyInstruction*, StinkyInstruction*> anchorOf;
     std::unordered_map<StinkyInstruction*, unsigned> ldsOf;
+    // Where each prefetch sits: its block and its index in that block's events.
+    std::unordered_map<StinkyInstruction*, std::pair<BasicBlock*, size_t>> posOf;
+    // LDS count at each block's entry and exit, in the same layout numbering as ldsOf.
+    std::unordered_map<BasicBlock*, std::pair<unsigned, unsigned>> ldsSpan;
 };
 
 // Prefetches that can still be the last reader of reg on some path into (bb, idx).
@@ -92,9 +99,9 @@ std::unordered_set<unsigned> collectPrefetchAddrRegs(Function& func) {
     return addrRegs;
 }
 
-// LDS ops are counted in layout order, which is what the gap is stated in. A group is a
-// run of prefetches with no intervening overwrite; only its LAST member needs to become
-// the anchor, since the order FIFO puts it behind the whole group.
+// LDS ops are numbered in layout order; gaps are measured along CFG paths below. A group
+// is a run of prefetches with no intervening overwrite; only its LAST member needs to
+// become the anchor, since the order FIFO puts it behind the whole group.
 Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs) {
     Groups g;
     std::vector<StinkyInstruction*> group;
@@ -106,6 +113,7 @@ Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs)
     };
 
     for (BasicBlock& bb : func) {
+        const unsigned ldsIn = ldsCount;
         for (IRBase& node : bb) {
             auto* inst = dyn_cast<StinkyInstruction>(&node);
             if (inst == nullptr) continue;
@@ -114,6 +122,7 @@ Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs)
             if (isGlobalPrefetch(*inst)) {
                 collectVgprs(inst->getSrcRegs(), regs);
                 if (regs.empty()) continue;
+                g.posOf[inst] = {&bb, g.evs[&bb].size()};
                 g.evs[&bb].push_back({inst, regs, ldsCount, true});
                 g.ldsOf[inst] = ldsCount;
                 group.push_back(inst);
@@ -127,9 +136,47 @@ Groups buildGroups(Function& func, const std::unordered_set<unsigned>& addrRegs)
             g.evs[&bb].push_back({inst, hit, ldsCount, false});
             closeGroup();
         }
+        g.ldsSpan[&bb] = {ldsIn, ldsCount};
     }
     closeGroup();
     return g;
+}
+
+// Fewest LDS ops on any CFG path from the anchor to the consumer at (bb, idx), or nullopt
+// when no path reaches it. A path may go around a back edge, which is how the anchor of a
+// loop's last copy reaches the consumer at the top of the next iteration.
+std::optional<unsigned> minLdsGap(StinkyInstruction* anchor, BasicBlock* bb, size_t idx,
+                                  unsigned consumerLds, const Groups& g) {
+    const auto [aBB, aIdx] = g.posOf.at(anchor);
+    const unsigned aLds = g.ldsOf.at(anchor);
+    std::optional<unsigned> best;
+    if (aBB == bb && aIdx < idx) best = consumerLds - aLds;
+
+    // Dijkstra over block entries; a block costs the LDS ops it holds.
+    std::unordered_map<BasicBlock*, unsigned> dist;
+    using Item = std::pair<unsigned, BasicBlock*>;
+    std::priority_queue<Item, std::vector<Item>, std::greater<Item>> queue;
+    auto relax = [&](BasicBlock* to, unsigned d) {
+        auto it = dist.find(to);
+        if (it != dist.end() && it->second <= d) return;
+        dist[to] = d;
+        queue.push({d, to});
+    };
+    const unsigned aOut = g.ldsSpan.at(aBB).second - aLds;
+    for (BasicBlock* succ : aBB->getSuccessors()) relax(succ, aOut);
+    while (!queue.empty()) {
+        const auto [d, cur] = queue.top();
+        queue.pop();
+        if (dist.at(cur) != d) continue;
+        if (cur == bb) break;
+        const auto [in, out] = g.ldsSpan.at(cur);
+        for (BasicBlock* succ : cur->getSuccessors()) relax(succ, d + (out - in));
+    }
+    if (auto it = dist.find(bb); it != dist.end()) {
+        const unsigned viaEntry = it->second + (consumerLds - g.ldsSpan.at(bb).first);
+        best = best ? std::min(*best, viaEntry) : viaEntry;
+    }
+    return best;
 }
 
 // Anchors elected by one consumer register, or empty when the consumer does not qualify.
@@ -150,18 +197,16 @@ std::vector<StinkyInstruction*> electAnchorsForReg(BasicBlock* bb, size_t idx, u
         auto a = g.anchorOf.find(pf->inst);
         StinkyInstruction* anchor = a != g.anchorOf.end() ? a->second : pf->inst;
         anchors.push_back(anchor);
-        const unsigned anchorLds = g.ldsOf.at(anchor);
-        // An anchor laid out after its consumer only reaches it around a back edge,
-        // where a layout gap says nothing. Decline.
-        if (anchorLds > consumerLds)
+        const std::optional<unsigned> gap = minLdsGap(anchor, bb, idx, consumerLds, g);
+        if (!gap)
             ok = false;
         else
-            minGap = std::min(minGap, consumerLds - anchorLds);
+            minGap = std::min(minGap, *gap);
     }
     if (!ok || minGap < static_cast<unsigned>(required)) {
         PASS_DEBUG(std::cerr << "[PrefetchBridge] declined v" << reg << " (" << anchors.size()
                              << " groups reach it, gap="
-                             << (ok ? std::to_string(minGap) : "backedge") << " < " << required
+                             << (ok ? std::to_string(minGap) : "unreachable") << " < " << required
                              << ")\n");
         return {};
     }

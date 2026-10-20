@@ -6,7 +6,8 @@
 # FIFO entry each.
 #
 # It is rewritten when at least vmVsrcBridge (11) LDS ops separate it from the write that
-# overwrites the address -- the consumer whose wait it has to discharge.
+# overwrites the address -- the consumer whose wait it has to discharge -- on every CFG path,
+# back edges included.
 #
 # The null saddr moves with the opcode: GLOBAL spells it "off", FLAT omits it. Same
 # encoding, different syntax -- keeping "off" would fail to assemble.
@@ -85,6 +86,117 @@ st.func @anchors_every_group_reaching_the_consumer() {
   v29 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
   v30 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
   v31 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- A loop whose consumer sits at the top. v0 is last read by the prologue group on entry
+#--- and by the loop's own group around the back edge. The gap is counted along the CFG:
+#--- 6 + 6 ds_loads on entry, and 6 after the loop group + 6 before the consumer around
+#--- the back edge. Both reach 11, so both groups are anchored.
+# CHECK-LABEL: @anchors_across_back_edge
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+# CHECK: "st.flat_prefetch_b8"(v[2:3])
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+# CHECK: "st.flat_prefetch_b8"(v[2:3])
+st.func @anchors_across_back_edge() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v22 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v23 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v24 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v25 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop
+^loop:
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v22 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v23 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v24 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v25 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  v30 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v31 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v32 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v33 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v34 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v35 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Same loop, but nothing follows the loop group before the back edge: 6 ds_loads around
+#--- it. The entry path has 12, but the join needs every reaching group anchored, so
+#--- neither group is rewritten.
+# CHECK-LABEL: @declines_short_back_edge
+# CHECK-NOT: flat_prefetch_b8
+st.func @declines_short_back_edge() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v22 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v23 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v24 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v25 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v26 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v27 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v28 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v29 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v30 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v31 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop
+^loop:
+  v40 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v41 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v42 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v43 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v44 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v45 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- 12 ds_loads lie between the group and the consumer in layout, but a branch skips all
+#--- of them. The gap is the fewest LDS ops on any path, 0 here, so nothing is rewritten.
+# CHECK-LABEL: @declines_on_skipped_lds_ops
+# CHECK-NOT: flat_prefetch_b8
+st.func @declines_on_skipped_lds_ops() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("label_join", SCC0)
+  Successors: ^mid, ^label_join
+^mid:
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v22 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v23 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v24 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v25 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v26 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v27 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v28 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v29 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v30 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v31 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_join
+^label_join:
   v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
   "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
 }
