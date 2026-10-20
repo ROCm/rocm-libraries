@@ -4598,8 +4598,6 @@ try
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(
-        2, batch_stride, (batch_count == 1) && (batch_stride > 0), rocsparse_status_invalid_value);
 
     descr->batch_count  = batch_count;
     descr->batch_stride = batch_stride;
@@ -4633,16 +4631,6 @@ try
     ROCSPARSE_CHECKARG(3,
                        columns_values_batch_stride,
                        (columns_values_batch_stride < 0),
-                       rocsparse_status_invalid_value);
-
-    ROCSPARSE_CHECKARG(3,
-                       offsets_batch_stride,
-                       (batch_count == 1) && (offsets_batch_stride > 0),
-                       rocsparse_status_invalid_value);
-
-    ROCSPARSE_CHECKARG(3,
-                       columns_values_batch_stride,
-                       (batch_count == 1) && (columns_values_batch_stride > 0),
                        rocsparse_status_invalid_value);
 
     descr->batch_count                 = batch_count;
@@ -4681,16 +4669,6 @@ try
                        (rows_values_batch_stride < 0),
                        rocsparse_status_invalid_value);
 
-    ROCSPARSE_CHECKARG(3,
-                       offsets_batch_stride,
-                       (batch_count == 1) && (offsets_batch_stride > 0),
-                       rocsparse_status_invalid_value);
-
-    ROCSPARSE_CHECKARG(3,
-                       rows_values_batch_stride,
-                       (batch_count == 1) && (rows_values_batch_stride > 0),
-                       rocsparse_status_invalid_value);
-
     descr->batch_count = batch_count;
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     descr->batch_stride = rows_values_batch_stride;
@@ -4721,8 +4699,6 @@ try
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(
-        2, batch_stride, (batch_count == 1) && (batch_stride > 0), rocsparse_status_invalid_value);
 
     descr->batch_count  = batch_count;
     descr->batch_stride = batch_stride;

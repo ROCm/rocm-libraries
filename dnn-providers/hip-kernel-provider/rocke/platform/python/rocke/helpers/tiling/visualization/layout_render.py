@@ -1668,7 +1668,7 @@ class LogicalTileComponent(CellFieldMixin):
     addr_fn: object | None = (
         None  # (c0,c1)->addr: memory order for vectorization shade (b/c)
     )
-    # + physical-vector borders (c); None -> coord (row-major) order
+    # + physical-vector borders (c); None -> coord order (last axis fastest)
     detail_first: bool = True  # first auto-group detailed, the rest grouped
     groups: tuple = ()  # of LogicalGroup; empty -> one detailed group over all cells
     color_mode: str = "first8"  # "first8" (owner lanes 0-7 coloured) | "full"
@@ -1798,13 +1798,13 @@ class LogicalTileComponent(CellFieldMixin):
     def _vector_shade(self):
         """SHADE = transaction TIME order (§9.6): ONE shade per vectorized access, width from the descriptor
         STRIDES (``addr_fn``), CAPPED at b128 via ``vector_transactions`` -- ✗ never uncapped ``transactions``
-        or an assumed row-major order. REQUIRES ``addr_fn`` (memory order) AND ``dtype_bits`` (the b128 cap);
+        or an assumed memory order. REQUIRES ``addr_fn`` (memory order) AND ``dtype_bits`` (the b128 cap);
         a caller that has neither must pass an explicit ``shade_map`` instead of asking for a memory shade.
         """
         if self.addr_fn is None or self.dtype_bits is None:
             raise ValueError(
                 "a memory-transaction shade (mode thread_tile) needs addr_fn (memory order from the descriptor "
-                "strides) AND dtype_bits (for the b128 cap) -- refuse to assume row-major / uncapped. "
+                "strides) AND dtype_bits (for the b128 cap) -- refuse to assume a memory order / uncapped. "
                 "Pass both, or supply an explicit shade_map."
             )
         mp = {(lane, reg): coord for coord, (lane, reg) in self._owner.items()}
@@ -4172,11 +4172,7 @@ def render_coalescing(
                 frameon=True,
                 borderaxespad=0.0,
             )
-    order = "row-major" if report.stride1_axis == report.dims[-1] else "col-major"
-    head = (
-        title
-        or f"{report.direction} coalescing -- {report.stride1_axis} stride-1 ({order})"
-    )
+    head = title or f"{report.direction} coalescing -- {report.stride1_axis}-contiguous"
     fig.text(0.5, 0.975, head, ha="center", va="top", fontsize=12, weight="bold")
     fig.text(
         0.5,

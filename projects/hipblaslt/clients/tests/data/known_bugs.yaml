@@ -31,36 +31,24 @@ Known bugs:
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
 
-  # ROCM-32151: on gfx950 bf16 solution 354888 writes about half the right value in
-  # this every-solution case. REMOVE this entry in the PR that fixes ROCM-32151.
-  # Review by 2026-11-01.
-  - { name: matmul_fast_check_size_t_output_overflow_all_solutions, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
-  # ROCM-32151: some bf16 solutions write about half the right value in the last
-  # partial M tile. On gfx942 they are offered only with
-  # TENSILE_SOLUTION_SELECTION_METHOD=2, which the Stream-K case needs. REMOVE these
-  # entries in the PR that fixes ROCM-32151. Review by 2026-11-01.
+  # ROCM-32343: on gfx950 the custom-schedule MT256x160x64 bf16 kernels give wrong
+  # values in the TN every-solution cases. REMOVE these entries in the PR that fixes
+  # ROCM-32343. Review by 2026-11-01.
   - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
-  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  # ROCM-32153: on MI350P (Device 75a8) two custom-schedule MT256x160x64 f16 kernels
+  # in gfx950_id75a8/Equality still write wrong values in the TN cases at
+  # 4099 x 2053 x 129. The custom schedule is tracked in ROCM-32343. REMOVE these
+  # entries in the PR that removes or fixes those kernels. Review by 2026-11-01.
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
   # ROCM-31826 (MT16x16 Stream-K kernels leave 256 elements of D unwritten at
   # 65,536 x 65,552) fails the Stream-K tile case on gfx942 and gfx950. REMOVE this
   # entry in the PR that fixes ROCM-31826. Review by 2026-11-01.
   - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
-  # ROCM-32151: some bf16 solutions write about half the right value, in the last
-  # partial M tile or, for gfx950 solution 354888, everywhere. On gfx942 the Stream-K
-  # case sees them. REMOVE these entries in the PR that fixes ROCM-32151. Review by
-  # 2026-11-01.
+  # ROCM-32344: on gfx950 the custom MT256x256x64 bf16 kernels give wrong values at
+  # K = 64. REMOVE this entry in the PR that fixes ROCM-32344. Review by 2026-11-01.
   - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
-  - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
-  # ROCM-32138: the library accepts HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
-  # but never passes it to the kernel, so E is written unscaled on every GPU. Both
-  # fast_check and unit_check report it. REMOVE this entry in the PR that fixes
-  # ROCM-32138; the case then becomes its regression gate. Review by 2026-11-01.
-  - { name: matmul_fast_check_aux_scale_e_ROCM32138, function: matmul }
-  # ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
-  # kernel arguments, so the GEMM returns success with a wrong D (seen on gfx90a;
-  # the packing is shared by every architecture). REMOVE this entry in the PR that
-  # fixes ROCM-32140. Review by 2026-11-01.
-  - { name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140, function: matmul }
   # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
   # where C and D are exactly 4 GiB; it kills the test process there. REMOVE this
   # entry in the PR that fixes ROCM-32050. Review by 2026-11-01.

@@ -16,7 +16,9 @@ import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
+from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.conv.direct_variants import direct_mfma_knobs_reason
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
@@ -367,7 +369,7 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         assert set(plan.workspaces) == {"ws_t"}
 
 
-@pytest.mark.parametrize("cpg,kpg", dks._DENSE_MFMA_DGRAD_CHANNELS)
+@pytest.mark.parametrize("cpg,kpg", _DENSE_MFMA_DGRAD_CHANNELS)
 def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
     """Each tuned dense (cpg, kpg) row in ``_DENSE_MFMA_DGRAD_CHANNELS`` must
     reach the MFMA dgrad pipeline for a real problem with those channel
@@ -378,6 +380,36 @@ def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
     mfma = [p for p in plans if p.identity.algorithm == "direct_grouped_dgrad_mfma"]
     assert mfma
     assert all(json.loads(p.identity.knobs)["block_groups"] == 1 for p in mfma)
+
+
+def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
+    """With waves_k > 1 the MFMA dgrad's fprop pass preloads its weights into
+    registers; specs past the budget spill at the 512-VGPR ceiling, where
+    comgr has produced a wrong-dX kernel. None of them is built."""
+    built = [j for j in jobs if j.identity.algorithm == "direct_grouped_dgrad_mfma"]
+    assert built
+    for job in built:
+        caps = dks.DirectCaps(**job.caps)
+        probe = dks.probe_problem(caps, dks.DIRECT_DTYPE, "direct_grouped_dgrad_mfma")
+        assert (
+            direct_mfma_knobs_reason(probe, job.spec_kwargs) is None
+        ), job.identity.label()
+
+    # The spec that computed the wrong dX on gfx950 is rejected; halving its
+    # Q tile brings it under the budget and it stays.
+    problem = _problem(groups=1, cpg=48, kpg=192)
+    knobs = dict(
+        block_q=32,
+        block_groups=1,
+        block_h=8,
+        waves_q=1,
+        waves_k=2,
+        runtime_k_loop=False,
+        persistent_grid=False,
+        fold_k32=True,
+    )
+    assert "spill" in direct_mfma_knobs_reason(problem, knobs)
+    assert direct_mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
 
 
 @pytest.mark.parametrize(

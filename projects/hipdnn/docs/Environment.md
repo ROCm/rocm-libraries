@@ -456,6 +456,22 @@ This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 export HIPDNN_LOG_GRAPH_DIR=/tmp/hipdnn_graphs
 ```
 
+#### Execution plan run counts
+
+With `HIPDNN_LOG_LEVEL=info`, each successful `hipdnnBackendExecute` call writes one log line. The line identifies the execution plan and shows how many times that plan has been submitted:
+
+```text
+API success: [hipdnnBackendExecute] executionPlan=ExecutionPlanDescriptor: {planId=3, graphId=1b4e28ba-2fa1-4d3b-a3f5-ef19b5a7633b, workspaceSize=0, engineId=..., engineConfig=0x...}, executionCount=42
+```
+
+- `planId` is unique for each execution plan in the process.
+- `graphId` is the ID of the graph that the plan was finalized from. It matches the `graph_<id>.json` file name from `HIPDNN_LOG_GRAPH_DIR`. A plan loaded from a serialized plan shows `graphId=(none)`.
+- `executionCount` starts at 1 for each plan and increases by 1 for each successful submission of that plan. A call that returns an error does not increase the count.
+
+`hipdnnBackendExecute` queues the work on the handle's stream and can return before the GPU work finishes. `executionCount` therefore counts successful submissions, not completed GPU executions.
+
+To get the submission count for each plan, use the largest `executionCount` value for each `planId`.
+
 ### MIOpen Plugin Logging
 
 > [!TIP]

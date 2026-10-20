@@ -342,6 +342,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"rint.f32", "declare float @llvm.rint.f32(float)"},
     {"smax.i32", "declare i32 @llvm.smax.i32(i32, i32)"},
     {"smin.i32", "declare i32 @llvm.smin.i32(i32, i32)"},
+    /* Unsigned u8 maximum / minimum (u8 renders as i8). */
+    {"umax.i8", "declare i8 @llvm.umax.i8(i8, i8)"},
+    {"umin.i8", "declare i8 @llvm.umin.i8(i8, i8)"},
     {"amdgcn.perm", "declare i32 @llvm.amdgcn.perm(i32, i32, i32)"},
     {"amdgcn.cvt.scalef32.pk.f32.fp8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
@@ -420,6 +423,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.prefetch.inst.p0", "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)"},
     {"s.prefetch.inst.p1", "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"},
     {"s.prefetch.inst.p4", "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"},
+    {"mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
+     "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
+     "i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
     /* gfx1250 data prefetch (llvm23). s.prefetch.data is llvm_anyptr_ty like
      * s.prefetch.inst above; see ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES. */
     {"s.setreg", "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)"},

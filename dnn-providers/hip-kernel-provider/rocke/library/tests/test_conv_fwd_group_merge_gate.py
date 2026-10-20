@@ -226,10 +226,11 @@ class TestConvFwdGroupMergeGate(unittest.TestCase):
         from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
 
         scalar = lower_kernel_to_llvm(
-            build_implicit_gemm_conv(self._spec(), arch="gfx950")
+            build_implicit_gemm_conv(self._spec(), arch="gfx950"), arch="gfx950"
         )
         merged = lower_kernel_to_llvm(
-            build_implicit_gemm_conv(self._spec(group_merge=8), arch="gfx950")
+            build_implicit_gemm_conv(self._spec(group_merge=8), arch="gfx950"),
+            arch="gfx950",
         )
         self.assertEqual(
             _count_vector_buffer_loads(scalar),
@@ -261,7 +262,8 @@ class TestConvFwdGroupMergeGate(unittest.TestCase):
             )
 
         merged = lower_kernel_to_llvm(
-            build_implicit_gemm_conv(self._spec(group_merge=8), arch="gfx950")
+            build_implicit_gemm_conv(self._spec(group_merge=8), arch="gfx950"),
+            arch="gfx950",
         )
         self.assertGreater(
             scalar_loads(merged), 0, "B must still issue scalar loads under merge"
