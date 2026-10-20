@@ -32,12 +32,12 @@
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 
 // Record factories: every validation and normalization rule of the cuDNN v8
-// tensor, parameter and operation descriptors. Inputs are plain values (unset
-// is std::nullopt, a null pointer or false); labels name each input in
-// messages and are supplied by the caller. Checks run in a fixed order, so the
-// first failing rule decides the status: required inputs (BAD_PARAM), inputs
-// the mode does not use (BAD_PARAM), alpha/beta (NOT_SUPPORTED), set but
-// unlowerable inputs (NOT_SUPPORTED).
+// tensor, parameter and operation descriptors, including the ones the C API
+// applies at SET time (enum range, array caps, zero denominators), so builders
+// that call the core directly get them too. Inputs are plain values (unset is
+// std::nullopt, a null pointer or false); labels name each input in messages
+// and are supplied by the caller. Each factory runs its checks in HEAD's
+// finalize order, so the first failing rule decides the status.
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
@@ -61,13 +61,97 @@ std::vector<T> requireNonEmpty(std::vector<T> values, std::string_view label)
     return values;
 }
 
-inline TensorPtr requireTensor(const TensorPtr& tensor, std::string_view label)
+template <typename T>
+void requireRecord(const std::shared_ptr<const T>& record, std::string_view label)
 {
-    if(!tensor)
+    if(!record)
     {
         throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required");
     }
+}
+
+inline TensorPtr requireTensor(const TensorPtr& tensor, std::string_view label)
+{
+    requireRecord(tensor, label);
     return tensor;
+}
+
+// Same rule and text as the C API's SET-time count check.
+template <typename T>
+void requireMaxCount(const std::vector<T>& values, std::size_t maxCount, std::string_view label)
+{
+    if(values.size() > maxCount)
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                        std::string(label) + ": element count " + std::to_string(values.size())
+                            + " outside [0, " + std::to_string(maxCount) + "]");
+    }
+}
+
+// Last declared enumerator; cuDNN's C enums are dense from 0.
+constexpr int lastEnumerator(cudnnDataType_t /*value*/) noexcept
+{
+    return CUDNN_DATA_UINT8x4;
+}
+
+constexpr int lastEnumerator(cudnnConvolutionMode_t /*value*/) noexcept
+{
+    return CUDNN_CROSS_CORRELATION;
+}
+
+constexpr int lastEnumerator(cudnnPointwiseMode_t /*value*/) noexcept
+{
+    return CUDNN_POINTWISE_TANH_FWD;
+}
+
+constexpr int lastEnumerator(cudnnReduceTensorOp_t /*value*/) noexcept
+{
+    return CUDNN_REDUCE_TENSOR_NORM2;
+}
+
+constexpr int lastEnumerator(cudnnResampleMode_t /*value*/) noexcept
+{
+    return CUDNN_RESAMPLE_NEAREST;
+}
+
+constexpr int lastEnumerator(cudnnPaddingMode_t /*value*/) noexcept
+{
+    return CUDNN_ZERO_PAD;
+}
+
+constexpr int lastEnumerator(cudnnRngDistribution_t /*value*/) noexcept
+{
+    return CUDNN_RNG_DISTRIBUTION_UNIFORM;
+}
+
+constexpr int lastEnumerator(cudnnBackendNormMode_t /*value*/) noexcept
+{
+    return CUDNN_RMS_NORM;
+}
+
+constexpr int lastEnumerator(cudnnBackendNormFwdPhase_t /*value*/) noexcept
+{
+    return CUDNN_NORM_FWD_TRAINING;
+}
+
+constexpr int lastEnumerator(cudnnBackendTensorReordering_t /*value*/) noexcept
+{
+    return CUDNN_TENSOR_REORDERING_F8_128x4;
+}
+
+// A value outside the declared enumerators is a caller error (BAD_PARAM, as
+// at SET), not an unsupported value.
+template <typename CEnum>
+CEnum requireEnumerator(CEnum value, std::string_view label)
+{
+    const auto raw = static_cast<std::int64_t>(value);
+    if(raw < 0 || raw > lastEnumerator(value))
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                        std::string(label) + " = " + std::to_string(raw)
+                            + " is not a valid enumerator");
+    }
+    return value;
 }
 
 template <typename CEnum>
@@ -82,7 +166,7 @@ template <typename CEnum>
 template <typename CEnum>
 auto requireFe(CEnum value, std::string_view label)
 {
-    const auto mapped = backend::toFe(value);
+    const auto mapped = toFe(requireEnumerator(value, label));
     if(!mapped)
     {
         throwUnsupportedValue(value, label);
@@ -96,7 +180,7 @@ template <typename CEnum>
 auto requireLowerable(CEnum value, std::string_view label)
 {
     const auto mapped = requireFe(value, label);
-    if(!backend::hasHipdnnCounterpart(mapped))
+    if(!hasHipdnnCounterpart(mapped))
     {
         throwUnsupportedValue(value, label);
     }
@@ -113,6 +197,8 @@ inline std::int64_t requireSpatialDims(std::optional<std::int64_t> value, std::s
     return spatialDims;
 }
 
+// The count must match the spatial dimension count and stay within the C API's
+// CUDNN_DIM_MAX array cap.
 template <typename T>
 void requireSpatialCount(const std::vector<T>& values,
                          std::int64_t spatialDims,
@@ -125,6 +211,7 @@ void requireSpatialCount(const std::vector<T>& values,
                             + " elements, expected the spatial dimension count "
                             + std::to_string(spatialDims));
     }
+    requireMaxCount(values, std::size_t{CUDNN_DIM_MAX}, label);
 }
 
 // Alpha/beta: absent means the default; any other value cannot be lowered.
@@ -218,6 +305,8 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
     std::vector<std::int64_t> dimensions
         = requireNonEmpty(std::move(inputs.dimensions), labels.dimensions);
     std::vector<std::int64_t> strides = requireNonEmpty(std::move(inputs.strides), labels.strides);
+    requireMaxCount(dimensions, std::size_t{CUDNN_DIM_MAX} + 1, labels.dimensions);
+    requireMaxCount(strides, std::size_t{CUDNN_DIM_MAX} + 1, labels.strides);
     if(dimensions.size() != strides.size())
     {
         throw ShimError(CUDNN_STATUS_BAD_PARAM,
@@ -253,7 +342,8 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
         throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
                         std::string(labels.vectorCount) + " other than 1 is not supported");
     }
-    if(inputs.reorderingMode != CUDNN_TENSOR_REORDERING_NONE)
+    if(requireEnumerator(inputs.reorderingMode, labels.reorderingMode)
+       != CUDNN_TENSOR_REORDERING_NONE)
     {
         throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
                         std::string(labels.reorderingMode) + " other than NONE is not supported");
@@ -477,7 +567,6 @@ struct ResampleLabels
     std::string_view strides;
 };
 
-// Fractions must have non-zero denominators.
 struct ResampleInputs
 {
     std::optional<cudnnResampleMode_t> mode;
@@ -498,6 +587,12 @@ inline std::vector<std::int64_t> integralFractions(const std::vector<cudnnFracti
     for(std::size_t i = 0; i < fractions.size(); ++i)
     {
         const cudnnFraction_t& fraction = fractions[i];
+        if(fraction.denominator == 0)
+        {
+            throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                            std::string(label) + "[" + std::to_string(i)
+                                + "] has a zero denominator");
+        }
         // INT64_MIN / -1 overflows; its quotient is unrepresentable anyway.
         const bool overflows = fraction.denominator == -1
                                && fraction.numerator == std::numeric_limits<std::int64_t>::min();
@@ -559,7 +654,7 @@ enum class NormFamily : std::uint8_t
 inline NormFamily requireNormFamily(cudnnBackendNormMode_t mode, std::string_view label)
 {
     const char* unsupported = "an unknown mode";
-    switch(mode)
+    switch(requireEnumerator(mode, label))
     {
     case CUDNN_BATCH_NORM:
         return NormFamily::BATCH;
@@ -635,13 +730,10 @@ std::shared_ptr<const OperationRecordT>
     static_assert(std::is_same_v<OperationRecordT, ConvolutionForwardOperationRecord>
                   || std::is_same_v<OperationRecordT, ConvolutionBackwardDataOperationRecord>
                   || std::is_same_v<OperationRecordT, ConvolutionBackwardFilterOperationRecord>);
-    if(!inputs.convolution)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.convolution) + " is required");
-    }
+    requireRecord(inputs.convolution, labels.convolution);
     for(std::size_t i = 0; i < inputs.tensors.size(); ++i)
     {
-        requireTensor(inputs.tensors[i], labels.tensors[i]);
+        requireRecord(inputs.tensors[i], labels.tensors[i]);
     }
     const std::size_t rank = static_cast<std::size_t>(inputs.convolution->spatialDims()) + 2;
     for(std::size_t i = 0; i < inputs.tensors.size(); ++i)
@@ -691,10 +783,7 @@ inline std::shared_ptr<const PointwiseOperationRecord>
     makeOperationRecord(const PointwiseOperationInputs& inputs,
                         const PointwiseOperationLabels& labels)
 {
-    if(!inputs.pointwise)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.pointwise) + " is required");
-    }
+    requireRecord(inputs.pointwise, labels.pointwise);
     const std::optional<PointwiseModeTraits> traits = pointwiseModeTraits(inputs.pointwise->mode());
     if(!traits)
     {
@@ -706,7 +795,7 @@ inline std::shared_ptr<const PointwiseOperationRecord>
     PointwiseOperationRecord::Fields fields;
     fields.pointwise = inputs.pointwise;
     fields.traits = *traits;
-    requireTensor(inputs.x, labels.x);
+    requireRecord(inputs.x, labels.x);
     if(backward)
     {
         fields.in0 = requireTensor(inputs.dy, labels.dy);
@@ -787,13 +876,10 @@ struct MatmulOperationInputs
 inline std::shared_ptr<const MatmulOperationRecord>
     makeOperationRecord(const MatmulOperationInputs& inputs, const MatmulOperationLabels& labels)
 {
-    if(!inputs.matmul)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.matmul) + " is required");
-    }
-    requireTensor(inputs.a, labels.a);
-    requireTensor(inputs.b, labels.b);
-    requireTensor(inputs.c, labels.c);
+    requireRecord(inputs.matmul, labels.matmul);
+    requireRecord(inputs.a, labels.a);
+    requireRecord(inputs.b, labels.b);
+    requireRecord(inputs.c, labels.c);
     rejectUnlowerable(inputs.hasMOverride, labels.mOverride, "");
     rejectUnlowerable(inputs.hasNOverride, labels.nOverride, "");
     rejectUnlowerable(inputs.hasKOverride, labels.kOverride, "");
@@ -819,12 +905,9 @@ inline std::shared_ptr<const ReductionOperationRecord>
     makeOperationRecord(const ReductionOperationInputs& inputs,
                         const ReductionOperationLabels& labels)
 {
-    if(!inputs.reduction)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.reduction) + " is required");
-    }
-    requireTensor(inputs.x, labels.x);
-    requireTensor(inputs.y, labels.y);
+    requireRecord(inputs.reduction, labels.reduction);
+    requireRecord(inputs.x, labels.x);
+    requireRecord(inputs.y, labels.y);
     return std::make_shared<const ReductionOperationRecord>(
         ReductionOperationRecord::Fields{inputs.reduction, inputs.x, inputs.y});
 }
@@ -852,12 +935,9 @@ inline std::shared_ptr<const ResampleForwardOperationRecord>
     makeOperationRecord(const ResampleForwardOperationInputs& inputs,
                         const ResampleForwardOperationLabels& labels)
 {
-    if(!inputs.resample)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.resample) + " is required");
-    }
-    requireTensor(inputs.x, labels.x);
-    requireTensor(inputs.y, labels.y);
+    requireRecord(inputs.resample, labels.resample);
+    requireRecord(inputs.x, labels.x);
+    requireRecord(inputs.y, labels.y);
     requireScaling(inputs.alpha, 1.0, labels.alpha);
     requireScaling(inputs.beta, 0.0, labels.beta);
     return std::make_shared<const ResampleForwardOperationRecord>(
@@ -893,12 +973,9 @@ inline std::shared_ptr<const ResampleBackwardOperationRecord>
     makeOperationRecord(const ResampleBackwardOperationInputs& inputs,
                         const ResampleBackwardOperationLabels& labels)
 {
-    if(!inputs.resample)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.resample) + " is required");
-    }
-    requireTensor(inputs.dx, labels.dx);
-    requireTensor(inputs.dy, labels.dy);
+    requireRecord(inputs.resample, labels.resample);
+    requireRecord(inputs.dx, labels.dx);
+    requireRecord(inputs.dy, labels.dy);
     // hipDNN's max-pool backward needs the forward pass's argmax indices.
     if(inputs.resample->mode() == ResampleMode_t::MAXPOOL && !inputs.index)
     {

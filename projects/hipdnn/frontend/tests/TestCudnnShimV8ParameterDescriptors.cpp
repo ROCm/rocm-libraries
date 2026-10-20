@@ -19,6 +19,7 @@ namespace
 {
 
 namespace backend = hipdnn_frontend::compatibility::cudnn_frontend::detail::backend;
+namespace shim = hipdnn_frontend::compatibility::cudnn_frontend::detail;
 using hipdnn_frontend::compatibility::cudnn_frontend::ConvolutionMode_t;
 using hipdnn_frontend::compatibility::cudnn_frontend::DataType_t;
 using hipdnn_frontend::compatibility::cudnn_frontend::PaddingMode_t;
@@ -342,7 +343,7 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseModeSupportFollowsHipdnnMap
         EXPECT_EQ(
             object<backend::PointwiseDescriptor>(descriptor, CUDNN_BACKEND_POINTWISE_DESCRIPTOR)
                 .mode(),
-            *backend::toFe(mode));
+            *shim::toFe(mode));
         ++supported;
     }
     EXPECT_EQ(supported, 47);
@@ -530,7 +531,7 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, ReductionOperatorSupportFollowsHipdn
         ASSERT_EQ(cudnnBackendFinalize(descriptor), CUDNN_STATUS_SUCCESS);
         const auto& lowered
             = object<backend::ReductionDescriptor>(descriptor, CUDNN_BACKEND_REDUCTION_DESCRIPTOR);
-        EXPECT_EQ(lowered.mode(), *backend::toFe(mode));
+        EXPECT_EQ(lowered.mode(), *shim::toFe(mode));
         EXPECT_EQ(lowered.computeType(), DataType_t::FLOAT);
         ++supported;
     }

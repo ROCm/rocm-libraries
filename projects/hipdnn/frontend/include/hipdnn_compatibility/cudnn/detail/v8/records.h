@@ -28,6 +28,10 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 // Immutable validated state behind one cuDNN descriptor, shared as
 // std::shared_ptr<const T>. The kind tag replaces RTTI: consumers may build
 // with RTTI disabled, so downcasts go through recordAs().
+// The concrete constructors are public on purpose: core tests build records
+// no factory would accept to reach lowering's rejection paths. Production code
+// must create records through the validate.h factories; lowering relies on
+// their invariants (required slots set, target matching kind, BN groups).
 class Record
 {
 public:

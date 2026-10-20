@@ -11,11 +11,9 @@
 #include <string_view>
 #include <utility>
 
-#include <hipdnn_compatibility/cudnn/detail/backend/attribute_table.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/engine_descriptors.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/operation_graph_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/plan.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/variant_pack.h>
 
@@ -91,12 +89,6 @@ protected:
         }
         else
         {
-            if(handle == nullptr)
-            {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                                "CUDNN_ATTR_EXECUTION_PLAN_HANDLE is required to load a serialized "
-                                "execution plan");
-            }
             plan = v8::loadPlan(handle, *json, PLAN_LABELS);
             storeComputedDescriptors(CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
                                      {EngineConfigDescriptor::forLoadedPlan(plan->configRecord())});

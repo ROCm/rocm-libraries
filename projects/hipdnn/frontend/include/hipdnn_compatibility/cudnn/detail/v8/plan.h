@@ -585,6 +585,7 @@ public:
                cudnnHandle_t contextHandle,
                std::int64_t workspaceSize)
         : _config(std::move(config))
+        , _tag(engineTag(*_config))
         , _plan(std::move(plan))
         , _contextHandle(contextHandle)
         , _workspaceSize(workspaceSize)
@@ -618,6 +619,24 @@ public:
         return _workspaceSize;
     }
 
+    // The engine part of ExecutionPlan_v8's tag: "eng<index>", then
+    // "_k<type>=<value>" per requested choice (the type as its integer). The
+    // builder prefixes its own tag.
+    const std::string& tag() const noexcept
+    {
+        return _tag;
+    }
+
+    const std::vector<cudnnBackendBehaviorNote_t>& behaviorNotes() const
+    {
+        return _config->engine().behaviorNotes();
+    }
+
+    std::vector<cudnnBackendNumericalNote_t> numericalNotes() const
+    {
+        return _config->engine().numericalNotes();
+    }
+
     const std::string& json() const
     {
         std::call_once(_jsonOnce, [this] { _json = toJson(); });
@@ -625,6 +644,16 @@ public:
     }
 
 private:
+    static std::string engineTag(const ConfigRecord& config)
+    {
+        std::string tag = "eng" + std::to_string(config.engineIndex());
+        for(const auto& [type, value] : config.requestedChoices())
+        {
+            tag += "_k" + std::to_string(static_cast<int>(type)) + "=" + std::to_string(value);
+        }
+        return tag;
+    }
+
     // An engine that cannot serialize still gets a valid JSON object, without
     // a payload: the backend's support note is not a reliable gate.
     std::optional<std::vector<std::uint8_t>> serialize() const
@@ -675,6 +704,7 @@ private:
     // Declared before _plan so the hipDNN plan is released before the config
     // (and the graph it keeps alive).
     std::shared_ptr<const ConfigRecord> _config;
+    std::string _tag;
     ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _plan;
     cudnnHandle_t _contextHandle;
     std::int64_t _workspaceSize;
@@ -729,13 +759,20 @@ inline std::shared_ptr<const PlanRecord> buildPlan(std::shared_ptr<const ConfigR
         std::move(config), std::move(plan), contextHandle, workspaceSize);
 }
 
-// Restores a plan written by PlanRecord::json() on `handle`. The JSON "id"
-// must match the engine hipDNN reports for the deserialized payload.
+// Restores a plan written by PlanRecord::json() on `handle`, which holds its
+// execution context. The JSON "id" must match the engine hipDNN reports for the
+// deserialized payload.
 inline std::shared_ptr<const PlanRecord>
     loadPlan(cudnnHandle_t handle, std::string_view json, const PlanLabels& labels)
 {
     using ::hipdnn_frontend::detail::hipdnnBackend;
 
+    if(handle == nullptr)
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                        std::string(labels.planHandle)
+                            + " is required to load a serialized execution plan");
+    }
     std::optional<plan_json::Plan> parsed = plan_json::read(json, labels.json);
     if(!parsed)
     {

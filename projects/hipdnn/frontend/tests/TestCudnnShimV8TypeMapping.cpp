@@ -27,6 +27,7 @@ namespace
 {
 
 namespace backend = hipdnn_frontend::compatibility::cudnn_frontend::detail::backend;
+namespace shim = hipdnn_frontend::compatibility::cudnn_frontend::detail;
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 // clang-format off
@@ -550,7 +551,7 @@ private:
     void check(C value, std::string_view name)
     {
         using Fe = typename Mapping<C>::Fe;
-        const std::optional<Fe> result = backend::toFe(value);
+        const std::optional<Fe> result = shim::toFe(value);
         if(isCountSentinel(name))
         {
             EXPECT_FALSE(result.has_value()) << name;
@@ -579,7 +580,7 @@ private:
         EXPECT_EQ(feName(*result), expected) << name;
         if(exception == nullptr)
         {
-            EXPECT_EQ(backend::toCudnn(*result), value) << name << " must round-trip";
+            EXPECT_EQ(shim::toCudnn(*result), value) << name << " must round-trip";
         }
     }
 };
@@ -596,7 +597,7 @@ public:
         for(const FeEnumerator<Fe>& enumerator : FeEnumerators<Fe>::all())
         {
             EXPECT_TRUE(FeEnumerators<Fe>::listed(enumerator.value));
-            const std::optional<C> result = backend::toCudnn(enumerator.value);
+            const std::optional<C> result = shim::toCudnn(enumerator.value);
             if(enumerator.name == "NOT_SET")
             {
                 EXPECT_FALSE(result.has_value()) << Mapping<C>::C_TYPE;
@@ -629,7 +630,7 @@ public:
             EXPECT_EQ(cName(Mapping<C>::C_TYPE, static_cast<std::int64_t>(*result)), *expected);
             if(exception == nullptr)
             {
-                EXPECT_EQ(backend::toFe(*result), enumerator.value)
+                EXPECT_EQ(shim::toFe(*result), enumerator.value)
                     << enumerator.name << " must round-trip";
             }
         }
@@ -653,9 +654,9 @@ protected:
     void finalizeImpl() override {}
 };
 
-static_assert(backend::toFe(CUDNN_DATA_HALF) == fe::DataType_t::HALF);
-static_assert(backend::toCudnn(fe::PointwiseMode_t::RELU_FWD) == CUDNN_POINTWISE_RELU_FWD);
-static_assert(!backend::toCudnn(fe::DataType_t::NOT_SET).has_value());
+static_assert(shim::toFe(CUDNN_DATA_HALF) == fe::DataType_t::HALF);
+static_assert(shim::toCudnn(fe::PointwiseMode_t::RELU_FWD) == CUDNN_POINTWISE_RELU_FWD);
+static_assert(!shim::toCudnn(fe::DataType_t::NOT_SET).has_value());
 
 } // namespace
 
