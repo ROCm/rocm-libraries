@@ -123,16 +123,20 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     ///
     /// The loop below does all the above at once.
     ///
-    /// The workspace size stored in a find-db record is not trusted. Records in shipped system
-    /// find-dbs can carry a size that is smaller than what the solver needs today (for example
-    /// 0 for GemmFwd1x1_0_2, ROCM-30131), and callers of GetSolution allocate exactly the
-    /// reported size before calling Immediate. So for every returned solution the reported size
-    /// is raised to the solver's current requirement, the same value that
-    /// GetSolutionWorkspaceSize returns.
+    /// The workspace size in a find-db record can be smaller than today's requirement. For
+    /// non-tunable solvers, GetWorkspaceSize gives the cheap, closed-form live size. For tunable
+    /// solvers, Immediate runs the config selected by the perf-db (or its default heuristic), so
+    /// use that config's solution size instead of GetWorkspaceSize's maximum across configs. This
+    /// keeps the reported size safe for the solution Immediate will run without walking every
+    /// CK instance and split-K value.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
-    auto n_copied = 0;
+    auto n_copied                        = 0;
+    auto workspace_ctx                   = ctx;
+    workspace_ctx.do_search              = false;
+    workspace_ctx.disable_search_enforce = true;
+    auto db                              = MakeConvDbGetter(workspace_ctx);
     for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
@@ -141,7 +145,15 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
             continue;
         if(solver.MayNeedWorkspace())
         {
-            const auto required = solver.GetWorkspaceSize(ctx, problem);
+            const auto required = [&] {
+                if(solver.IsTunable())
+                {
+                    const auto live_solution = solver.FindSolution(workspace_ctx, problem, db, {});
+                    if(live_solution.Succeeded())
+                        return live_solution.workspace_sz;
+                }
+                return solver.GetWorkspaceSize(ctx, problem);
+            }();
             if(required > s.workspace_size)
             {
                 MIOPEN_LOG_I2(solver_id.ToString() << ": find-db workspace " << s.workspace_size
