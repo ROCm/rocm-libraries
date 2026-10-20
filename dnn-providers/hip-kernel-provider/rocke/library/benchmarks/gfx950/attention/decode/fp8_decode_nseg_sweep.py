@@ -44,7 +44,6 @@ except Exception as e:  # pragma: no cover
 
 _HD, _NQH, _NKVH, _BS = 64, 64, 8, 16
 _NQK = _NQH // _NKVH
-_BLOCK_Q = 16 // _NQK
 _TOL = 5e-2
 _K_SCALE = _V_SCALE = 1.0
 _CANDIDATES = (8, 16, 32, 64, 128)
@@ -99,7 +98,7 @@ def _sweep_shape(
     _Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(arch)
     from dataclasses import replace
 
-    base_seg = au._tiled_3d_spec_from_problem(problem)
+    base_seg = au._tiled_3d_spec_from_problem(problem, arch)
 
     rng = np.random.default_rng(seed)
     max_blocks = (kv_len + _BS - 1) // _BS
@@ -152,7 +151,10 @@ def _sweep_shape(
     alibi_d = rt.alloc(4 * _NQH)
     qq_d = rt.alloc(4)
     cuq_d = alloc_copy(cu_q)
-    total_num_q_blocks = total_q // _BLOCK_Q + num_seqs
+    # Grid x follows the shipped spec (all-decode grid -> one CTA per sequence).
+    total_num_q_blocks = au._num_q_blocks(
+        problem, base_seg.block_q, decode_grid=base_seg.use_decode_grid
+    )
 
     rows = []
     for nseg in _CANDIDATES:
@@ -319,7 +321,7 @@ def main() -> int:
                     num_cus=256,
                 )
                 shipped = au._num_segments(
-                    p
+                    p, arch
                 )  # production value (gfx950 pre-bump clamp)
                 _sweep_shape(
                     arch,

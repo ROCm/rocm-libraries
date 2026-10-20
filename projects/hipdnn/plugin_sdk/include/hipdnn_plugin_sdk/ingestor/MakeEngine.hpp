@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -80,6 +81,25 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
                                   std::move(describedBy),
                                   std::move(engineName)),
         deviceResolver);
+}
+
+/// The engine for @p engine over a state manager already built from its set, e.g. the one
+/// loadValidatedDescriptorSets built while validating that set.
+/// @throws std::invalid_argument @p stateManager is null.
+template <typename THandle, typename TSettings, typename TContext>
+std::unique_ptr<IEngine<THandle, TSettings, TContext>>
+    makeEngine(EngineDescriptor engine,
+               std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
+               const IDeviceResolver<THandle>& deviceResolver)
+{
+    // GenericEngine dereferences the state manager while constructing, so a null one
+    // would be undefined behaviour there rather than an error a caller can catch.
+    if(stateManager == nullptr)
+    {
+        throw std::invalid_argument("kernel ingestor engine requires a state manager");
+    }
+    return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
+        std::move(engine), std::move(stateManager), deviceResolver);
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

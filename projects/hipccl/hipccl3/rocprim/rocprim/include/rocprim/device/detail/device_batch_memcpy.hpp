@@ -96,8 +96,7 @@ public:
     }
 
     ROCPRIM_DEVICE
-    counter
-        operator+(const counter& other) const
+    counter operator+(const counter& other) const
     {
         counter result{};
 
@@ -335,7 +334,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
 // of the conditional.
 template<bool IsMemCpy, typename InputBufferItType>
 struct AliasType
-{};
+{ };
 
 template<typename InputBufferItType>
 struct AliasType<false, InputBufferItType>
@@ -437,25 +436,32 @@ private:
     template<class TargetConfig>
     struct non_blev_memcpy
     {
-        ROCPRIM_DEVICE static constexpr batch_memcpy_config_params params = TargetConfig::params;
+        ROCPRIM_DEVICE
+        static constexpr batch_memcpy_config_params params = TargetConfig::params;
 
-        ROCPRIM_DEVICE static constexpr uint32_t block_size
+        ROCPRIM_DEVICE
+        static constexpr uint32_t                   block_size
             = params.non_blev_batch_memcpy_kernel_config.block_size;
-        ROCPRIM_DEVICE static constexpr uint32_t buffers_per_thread
+        ROCPRIM_DEVICE
+        static constexpr uint32_t buffers_per_thread
             = params.non_blev_batch_memcpy_kernel_config.items_per_thread;
-        ROCPRIM_DEVICE static constexpr uint32_t buffers_per_block
-            = buffers_per_thread * block_size;
+        ROCPRIM_DEVICE
+        static constexpr uint32_t buffers_per_block = buffers_per_thread * block_size;
 
-        ROCPRIM_DEVICE static constexpr uint32_t blev_block_size
+        ROCPRIM_DEVICE
+        static constexpr uint32_t blev_block_size
             = params.blev_batch_memcpy_kernel_config.block_size;
-        ROCPRIM_DEVICE static constexpr uint32_t blev_bytes_per_thread
+        ROCPRIM_DEVICE
+        static constexpr uint32_t blev_bytes_per_thread
             = params.blev_batch_memcpy_kernel_config.items_per_thread;
 
-        ROCPRIM_DEVICE static constexpr uint32_t tlev_bytes_per_thread
-            = params.tlev_items_per_thread;
+        ROCPRIM_DEVICE
+        static constexpr uint32_t tlev_bytes_per_thread   = params.tlev_items_per_thread;
 
-        ROCPRIM_DEVICE static constexpr uint32_t blev_buffers_per_thread = buffers_per_thread;
-        ROCPRIM_DEVICE static constexpr uint32_t tlev_buffers_per_thread = buffers_per_thread;
+        ROCPRIM_DEVICE
+        static constexpr uint32_t blev_buffers_per_thread = buffers_per_thread;
+        ROCPRIM_DEVICE
+        static constexpr uint32_t tlev_buffers_per_thread = buffers_per_thread;
 
         using buffer_load_type = rocprim::block_load<buffer_size_type,
                                                      block_size,
@@ -535,7 +541,7 @@ private:
         using storage_type = rocprim::detail::raw_storage<storage>;
         ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
-        ROCPRIM_DEVICE ROCPRIM_INLINE non_blev_memcpy() {}
+        ROCPRIM_DEVICE ROCPRIM_INLINE non_blev_memcpy() { }
 
         ROCPRIM_DEVICE ROCPRIM_INLINE
         static size_class_counter get_buffer_size_class_histogram(
@@ -1004,7 +1010,8 @@ public:
                                      blev_block_scan_state_type  blev_block_scan_state,
                                      ordered_bid_type            ordered_bid)
     {
-        ROCPRIM_SHARED_MEMORY typename non_blev_memcpy<TargetConfig>::storage_type temp_storage;
+        ROCPRIM_SHARED_MEMORY
+        typename non_blev_memcpy<TargetConfig>::storage_type temp_storage;
 
         auto tile_id = ordered_bid.get(rocprim::flat_tile_thread_id(),
                                        temp_storage.get().shared.ordered_bid);
@@ -1047,7 +1054,8 @@ public:
         uint32_t tile_id = flat_block_id;
         while(true)
         {
-            __shared__ buffer_offset_type shared_buffer_id;
+            __shared__
+            buffer_offset_type shared_buffer_id;
 
             rocprim::syncthreads();
 
@@ -1277,13 +1285,8 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
                                                                0 /* dynSharedMemPerBlk */);
             if(error != hipSuccess)
             {
-                // Attempt to reset the device.
                 static_cast<void>(hipSetDevice(previous_device));
-
                 return error;
-
-                // Restore the default device id to initial state
-                ROCPRIM_RETURN_ON_ERROR(hipSetDevice(previous_device));
             }
 
             auto batch_memcpy_blev_grid_size

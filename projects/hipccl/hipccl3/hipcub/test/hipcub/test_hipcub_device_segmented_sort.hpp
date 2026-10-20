@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -109,10 +109,11 @@ inline void generate_input_data(std::vector<key_type>&    keys_input,
     }
     else
     {
-        keys_input = test_utils::get_random_data<key_type>(size,
-                                                           std::numeric_limits<key_type>::min(),
-                                                           std::numeric_limits<key_type>::max(),
-                                                           seed_value + seed_value_addition);
+        keys_input
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value + seed_value_addition);
     }
 
     offsets.clear();
