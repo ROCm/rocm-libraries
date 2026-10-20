@@ -230,6 +230,40 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
     EXPECT_EQ(Layout(Shape{}, {}), Layout{});
     EXPECT_EQ(layout.elementOffset(std::array<size_t, 2>{1, 2}), 5);
 }
+TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
+    for (const Layout original :
+         {Layout{}, Layout(Shape{}, {}, -7), Layout(Shape{2, 3}, {5, -1}, 2),
+          Layout(Shape{2, 0}, {0, 1}, 4)}) {
+        Layout copied(original);
+        EXPECT_EQ(copied, original);
+        Layout moved(std::move(copied));
+        EXPECT_EQ(moved, original);
+        // Layout moves reset the source to a scalar with zero offset.
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(copied, Layout{});
+        EXPECT_EQ(copied.shape().elementCount(), 1);
+        EXPECT_TRUE(copied.strides().empty());
+        EXPECT_EQ(copied.elementOffset({}), 0);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+
+        Layout assigned;
+        assigned = original;
+        EXPECT_EQ(assigned, original);
+        Layout moveAssigned(Shape{9}, {1});
+        moveAssigned = std::move(assigned);
+        EXPECT_EQ(moveAssigned, original);
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(assigned, Layout{});
+        EXPECT_EQ(assigned.shape().elementCount(), 1);
+        EXPECT_TRUE(assigned.strides().empty());
+        EXPECT_EQ(assigned.elementOffset({}), 0);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        Layout& self = moveAssigned;
+        moveAssigned = std::move(self);
+        EXPECT_EQ(moveAssigned, original);
+    }
+}
+
 }  // namespace
 
 namespace {
