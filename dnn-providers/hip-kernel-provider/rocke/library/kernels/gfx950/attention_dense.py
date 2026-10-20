@@ -474,8 +474,15 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         narrow this (bake ``batch``, keep the seqlens runtime) -- the cache key
         follows automatically, but the symbol name would have to derive from this
         tuple first. It does not today.
+
+        The head counts ride along: one binary serves every (num_query_heads,
+        num_kv_heads) pair by reading them as kernargs and deriving the token strides
+        and GQA ratio at launch. The grid still takes num_query_heads host-side, which
+        is fine -- that never bakes into the binary.
         """
-        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+        if not self.runtime_shape:
+            return ()
+        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
 
     def _layout_name_parts(self) -> tuple[str, ...]:
         if self.head_size != 128:
@@ -491,6 +498,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
+
+    def _head_name_parts(self) -> tuple[str, ...]:
+        # One runtime-shape binary serves every head count, so the symbol must not
+        # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
+        return () if self.runtime_shape else super()._head_name_parts()
 
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         parts = list(super()._algorithm_name_parts())
@@ -849,6 +861,32 @@ def build_attention_dense(
     batch_p = b.param("batch", I32)
     seqlen_q_p = b.param("seqlen_q", I32)
     seqlen_kv_p = b.param("seqlen_kv", I32)
+    # Heads as kernargs, runtime_shape ONLY -- unlike batch/seqlen above, which every
+    # non-persistent spec takes. One binary then serves every (num_query_heads,
+    # num_kv_heads): the token strides and GQA ratio are derived once as uniform (SGPR)
+    # values. A baked spec reads none of these and keeps its exact IR, so the helpers
+    # below return the compile-time constant for it, emitted in place at each use.
+    if spec.runtime_shape:
+        hq_p = b.param("num_query_heads", I32)
+        hkv_p = b.param("num_kv_heads", I32)
+        gqa_p = b.div(hq_p, hkv_p)
+        stride_q_p = b.mul(hq_p, b.const_i32(D))
+        stride_k_p = b.mul(hkv_p, b.const_i32(D))
+    else:
+        hq_p = hkv_p = gqa_p = stride_q_p = stride_k_p = None
+
+    def _stride_q():
+        return stride_q_p if spec.runtime_shape else b.const_i32(stride_q_tok)
+
+    def _stride_k():
+        return stride_k_p if spec.runtime_shape else b.const_i32(stride_k_tok)
+
+    def _gqa():
+        return gqa_p if spec.runtime_shape else b.const_i32(gqa)
+
+    def _hq_count():
+        return hq_p if spec.runtime_shape else b.const_i32(Hq)
+
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -909,13 +947,20 @@ def build_attention_dense(
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
-    # Heads are baked here; NQB comes from the seqlen_q param. On the runtime-shape
-    # path seqlen_kv is a param too: a sliding window is runtime-shape, and the
-    # causal balance under a window compares W against the key count, which must
-    # not be baked. Baked specs keep the constant, so their IR is unchanged.
+    # NQB comes from the seqlen_q param. On the runtime-shape path the decode reads
+    # the whole problem shape from kernargs (as gfx942 does): the head counts and
+    # GQA ratio feed the head-major orders, and seqlen_kv feeds the causal balance
+    # under a sliding window (W against the key count). None of them may be baked
+    # there; baked specs keep the constants, so their IR is unchanged.
     grid_values = {"seqlen_q": seqlen_q_p}
     if spec.runtime_shape:
-        grid_values["seqlen_kv"] = seqlen_kv_p
+        grid_values.update(
+            batch=batch_p,
+            seqlen_kv=seqlen_kv_p,
+            num_query_heads=hq_p,
+            num_kv_heads=hkv_p,
+            gqa=gqa_p,
+        )
     grid_shape = DecodeShape(b, spec, grid_values)
     if KVS > 1:
         # The segment index is the fastest-varying part of grid x, so the decode
@@ -929,7 +974,7 @@ def build_attention_dense(
         qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
             grid_shape, b.block_id_x(), b.block_id_y(), b.block_id_z()
         )
-    hkv = b.div(hq, b.const_i32(gqa))
+    hkv = b.div(hq, _gqa())
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
     # runtime_shape empty-row predicate, computed HERE (pre-loop) while seqlen_kv_p is
@@ -964,19 +1009,15 @@ def build_attention_dense(
         seqlen_kv_b = b.sub(kv_seq1, kv_seq0)
         with b.scf_if(b.cmp_ge(b.mul(qb, b.const_i32(BLOCK_M)), seqlen_q_b)):
             b.ret()
-        q_base = b.add(
-            b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
-        )
-        k_base = b.add(
-            b.mul(kv_seq0, b.const_i32(stride_k_tok)), b.mul(hkv, b.const_i32(D))
-        )
+        q_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
+        k_base = b.add(b.mul(kv_seq0, _stride_k()), b.mul(hkv, b.const_i32(D)))
     else:
         q_base = b.add(
-            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, seqlen_kv_p), b.const_i32(stride_k_tok)),
+            b.mul(b.mul(bt, seqlen_kv_p), _stride_k()),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -1020,7 +1061,7 @@ def build_attention_dense(
     q_packs = []
     for ks in range(K_STEPS):
         col = b.add(b.const_i32(ks * 16), d_base)
-        addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
+        addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
         if RAGGED:
             raw = b.buffer_load_vN(
                 q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
@@ -1078,12 +1119,21 @@ def build_attention_dense(
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
         # params from the same spec -- so only the emitted IR changes.
-        _kv_elem_bytes = Hkv * D * 2
+        # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
+        # (one binary serves every head count), baked otherwise. Emitted fresh at each
+        # buffer_rsrc so the baked branch keeps its exact two-const node count.
+        def _kv_elem_bytes_ir():
+            return (
+                b.mul(_stride_k(), b.const_i32(2))
+                if spec.runtime_shape
+                else b.const_i32(Hkv * D * 2)
+            )
+
         k_rsrc = b.buffer_rsrc(
-            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
         v_rsrc = b.buffer_rsrc(
-            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
     # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
     b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
@@ -1163,9 +1213,7 @@ def build_attention_dense(
                     )
                 else:
                     kv_row = gkey
-                voff = b.add(
-                    b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))), gcol
-                )
+                voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
@@ -1185,7 +1233,7 @@ def build_attention_dense(
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
-                voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col)
+                voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
@@ -1716,16 +1764,14 @@ def build_attention_dense(
             b.const_f32(0.0),
         )
     if varlen:
-        o_base = b.add(
-            b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
-        )
+        o_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
     else:
         o_base = b.add(
-            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
-    q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
+    q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
     d_half = b.mul(lane_h, b.const_i32(4))
     # Under runtime_shape, zero keyless rows in the O store via the exact per-row
     # predicate (against the runtime seqlen), the same integer bit-mask the LSE path
@@ -1741,11 +1787,11 @@ def build_attention_dense(
             right_bound=RIGHT,
         )
         if varlen:
-            lse_index = b.add(b.mul(b.add(q_seq0, qtok), b.const_i32(Hq)), hq)
+            lse_index = b.add(b.mul(b.add(q_seq0, qtok), _hq_count()), hq)
             row_exists = b.cmp_lt(qtok, seqlen_q_b)
         else:
             lse_index = b.add(
-                b.mul(b.add(b.mul(bt, b.const_i32(Hq)), hq), seqlen_q_p),
+                b.mul(b.add(b.mul(bt, _hq_count()), hq), seqlen_q_p),
                 qtok,
             )
             row_exists = b.cmp_lt(qtok, seqlen_q_p)
@@ -2858,6 +2904,11 @@ def attention_dense_signature(spec: AttentionDenseSpec):
             .scalar("seqlen_q", "i32")
             .scalar("seqlen_kv", "i32")
         )
+        # Heads ride along ONLY under runtime_shape (the body declares them there and
+        # nowhere else), after the seqlens and before any pointer. Baked specs omit
+        # them, so their ABI is unchanged.
+        if spec.runtime_shape:
+            sig = sig.scalar("num_query_heads", "i32").scalar("num_kv_heads", "i32")
     if spec.use_sinks:
         sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -3097,6 +3148,9 @@ def run_attention_dense_torch(
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
+        if spec.runtime_shape:
+            vals["num_query_heads"] = int(spec.num_query_heads)
+            vals["num_kv_heads"] = int(spec.num_kv_heads)
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
