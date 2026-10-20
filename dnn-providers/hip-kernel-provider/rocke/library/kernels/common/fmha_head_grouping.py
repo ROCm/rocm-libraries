@@ -25,7 +25,12 @@ from rocke.helpers.mfma_attention import (
     mfma_attention_fwd_inner_body,
 )
 from rocke.helpers.spec import kernel_name_join
-from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
+from ._fmha_common import (
+    FmhaCommonSpec,
+    FmhaKernelBuilder,
+    _declare_fmha_fwd_params,
+    validate_common_spec,
+)
 from .fmha_arch import validate_fmha_mfma_atom
 
 
@@ -112,14 +117,7 @@ def is_valid_spec(
 
 def _declare_params(kb: FmhaKernelBuilder) -> None:
     """Declare the head_grouping kernel ABI (shared between build + sig)."""
-    kb.add_tensor("Q", readonly=True)
-    kb.add_tensor("K", readonly=True)
-    kb.add_tensor("V", readonly=True)
-    kb.add_tensor("O", readonly=False, writeonly=True)
-    kb.add_scalar("scale_log2", "f32")
-    kb.add_scalar("seqlen_q", "i32")
-    kb.add_scalar("seqlen_k", "i32")
-    kb.add_strides("q", "k", "v", "o")
+    _declare_fmha_fwd_params(kb)
 
 
 def build_fmha_fwd_head_grouping(spec: FmhaFwdHeadGroupingSpec, arch: str = "gfx950"):

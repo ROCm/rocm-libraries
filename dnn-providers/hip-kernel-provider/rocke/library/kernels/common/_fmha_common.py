@@ -508,3 +508,15 @@ class FmhaKernelBuilder:
             self.b.mul(tok, tok_stride),
             self.b.mul(hd, head_stride),
         )
+
+
+def _declare_fmha_fwd_params(kb):
+    """Declare the shared FMHA-forward kernel ABI: tensors, scalars, strides."""
+    kb.add_tensor("Q", readonly=True)
+    kb.add_tensor("K", readonly=True)
+    kb.add_tensor("V", readonly=True)
+    kb.add_tensor("O", readonly=False, writeonly=True)
+    kb.add_scalar("scale_log2", "f32")
+    kb.add_scalar("seqlen_q", "i32")
+    kb.add_scalar("seqlen_k", "i32")
+    kb.add_strides("q", "k", "v", "o")
