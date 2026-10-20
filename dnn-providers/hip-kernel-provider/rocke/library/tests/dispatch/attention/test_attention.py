@@ -65,11 +65,13 @@ EXPECTED_FEATURES = {
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
-    "attention_gfx1151_wmma": _RDNA_WMMA_FEATURES,
-    # The opt-in tuned RDNA WMMA candidates serve exactly what the auto route does.
+    "attention_rdna_wmma_prefill": _RDNA_WMMA_FEATURES,
+    "attention_rdna_wmma_decode": _RDNA_WMMA_FEATURES,
+    # The opt-in tuned RDNA WMMA candidates serve exactly what the auto routes do.
     **{
-        f"attention_{arch}_wmma_fwd": _RDNA_WMMA_FEATURES
+        f"attention_{arch}_wmma_{kind}": _RDNA_WMMA_FEATURES
         for arch in ("gfx11_generic", "gfx1151", "gfx12_generic", "gfx1201")
+        for kind in ("prefill", "decode")
     },
     "attention_gfx942_dense_pipe": {
         "causal",

@@ -436,7 +436,7 @@ if(ROCKE_INSTALL_TESTS)
     # below the install root in standalone mode -- hence the ROCKE_TEST_CTEST_REL
     # prefix on each, matching the other installed tests.
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
-        "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
+        "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -459,12 +459,15 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
 
-    # Library attention CPU tests (no GPU required): gfx950 LDS budget model and
-    # spec-wrapper parity gate. File-list style (same pattern as conv_pytest) so
-    # PYTHONPATH resolves rocke/ correctly from the installed tree.
+    # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
+    # spec-wrapper parity gate, and the 3D decode split rule and K/V cache policy.
+    # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
+    # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
-        "tests/library/tests/test_attention_spec_predicate_parity.py")
+        "tests/library/tests/test_attention_spec_predicate_parity.py"
+        "tests/library/tests/test_attention_tiled_3d_decode_split.py"
+        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -489,7 +492,7 @@ if(ROCKE_INSTALL_TESTS)
     # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
     # signature guards, spec validation and the tuned-candidate contract. Pointed at the
     # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
-    # automatically; test_wmma_fmha_fwd_spec.py sits outside it and is named beside it.
+    # automatically; the RDNA WMMA spec tests sit outside it and are named beside it.
     # The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
@@ -500,6 +503,8 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
            " -v -rs --timeout=60)\n")
@@ -576,10 +581,16 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
+        "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
+        "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
+        "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
+        "tests/library/tests/test_wmma_fmha_decode_numeric.py"
+        "tests/library/tests/test_wmma_fmha_paged_guard.py"
         "tests/library/tests/test_wmma_fp8_decode_numeric.py"
         "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")

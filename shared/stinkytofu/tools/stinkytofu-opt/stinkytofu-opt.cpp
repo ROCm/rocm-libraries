@@ -131,6 +131,19 @@ std::unique_ptr<Pass> createPassByName(const std::string& passName,
     return nullptr;
 }
 
+// Flags of the removed cap / throttle ds_load pacing and hide-budget prescan. Still accepted,
+// no longer read.
+static bool isRemovedDsPacingFlag(const std::string& a) {
+    for (const char* flag : {"--ds-read-throttle-latency", "--ds-read-throttle-transition-factor",
+                             "--ds-read-throttle-transition-entries", "--ds-read-per-cap",
+                             "--ds-issue-cap-span-cycles", "--ds-issue-cap-mode", "--ds-slot-first",
+                             "--enable-wmma-hide-budget-prescan", "--barrier-half-slack"}) {
+        const std::string f = flag;
+        if (a == f || a.starts_with(f + "=")) return true;
+    }
+    return false;
+}
+
 static void trimWhitespace(std::string& s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
         s.erase(0, 1);
@@ -186,9 +199,15 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-issue-cap-mode=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
-                arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
+                arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
+                arg == "--ds-spread" || arg == "--no-ds-spread" ||
+                arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-barrier-cover-cycles=") ||
+                arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
+                arg.starts_with("--ds-read-cycles-per-load=") ||
+                arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
@@ -526,58 +545,52 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadQueueDepth = std::stoi(a.substr(22));
         } else if (a.starts_with("--ds-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
-        } else if (a.starts_with("--ds-read-throttle-latency=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
-        } else if (a.starts_with("--ds-read-throttle-transition-factor=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
-                std::stod(a.substr(std::string("--ds-read-throttle-transition-factor=").size()));
-        } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
-                std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
-        } else if (a.starts_with("--ds-read-per-cap=")) {
-            // Length taken from the flag rather than hardcoded: the literal 19
-            // here was the length of the old --ds-read-per-cap=, and renaming
-            // the flag to an 18-character one silently made this parse the '='.
-            passFeatureConfig.dagFeatures.dsReadPerCap =
-                std::stoi(a.substr(std::string("--ds-read-per-cap=").size()));
-        } else if (a.starts_with("--ds-issue-cap-span-cycles=")) {
-            // The other half of the rule (4) cap: the ceiling is
-            // dsReadPerCap ds_loads per this many cycles. Neither number means
-            // anything alone, so both are reachable from the CLI.
-            passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
-                std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
-        } else if (a.starts_with("--ds-issue-cap-mode=")) {
-            const std::string val = a.substr(std::string("--ds-issue-cap-mode=").size());
-            if (val == "sliding")
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
-            else if (val == "periodic")
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
-            else {
-                std::cerr << "error: --ds-issue-cap-mode must be sliding or periodic\n";
-                return 1;
-            }
+        } else if (isRemovedDsPacingFlag(a)) {
+            std::cerr << "warning: " << a.substr(0, a.find('=')) << " was removed with the legacy "
+                      << "ds_load pacing and is ignored\n";
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
-        } else if (a.starts_with("--barrier-half-slack=")) {
-            passFeatureConfig.dagFeatures.barrierHalfSlack =
-                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
         } else if (a.starts_with("--wmma-queue-depth=")) {
             passFeatureConfig.dagFeatures.wmmaQueueDepth =
                 std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
+        } else if (a.starts_with("--wmma-barrier-cover-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
+                std::stoi(a.substr(std::string("--wmma-barrier-cover-cycles=").size()));
+        } else if (a == "--ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = true;
+        } else if (a == "--no-ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = false;
+        } else if (a.starts_with("--ds-batch-wmmas=")) {
+            passFeatureConfig.dagFeatures.dsBatchWmmas =
+                std::stoi(a.substr(std::string("--ds-batch-wmmas=").size()));
+        } else if (a.starts_with("--ds-catch-up-pace=")) {
+            passFeatureConfig.dagFeatures.dsCatchUpPace =
+                std::stoi(a.substr(std::string("--ds-catch-up-pace=").size()));
+        } else if (a.starts_with("--ds-read-cycles-per-load=")) {
+            passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
+                std::stoi(a.substr(std::string("--ds-read-cycles-per-load=").size()));
+        } else if (a.starts_with("--wmma-refill-mode=")) {
+            const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
+            passFeatureConfig.dagFeatures.wmmaRefillMode =
+                (v == "dynamic" || v == "1")
+                    ? stinkytofu::PassFeatureConfig::WmmaRefillMode::Dynamic
+                    : stinkytofu::PassFeatureConfig::WmmaRefillMode::Fixed;
+        } else if (a.starts_with("--wmma-batch-size=")) {
+            passFeatureConfig.dagFeatures.wmmaBatchSize =
+                std::max(1, std::stoi(a.substr(std::string("--wmma-batch-size=").size())));
+        } else if (a.starts_with("--wmma-refill-to-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaRefillToCycles =
+                std::stoi(a.substr(std::string("--wmma-refill-to-cycles=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
-        } else if (a == "--enable-wmma-hide-budget-prescan") {
-            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
         } else if (a == "--enable-esm2-track-valu-vsrc") {
             passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
         } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
@@ -588,8 +601,6 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
         } else if (a.starts_with("--war-gate-wmmas=")) {
             passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
-        } else if (a == "--ds-slot-first") {
-            passFeatureConfig.dagFeatures.dsSlotFirst = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {
             passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
