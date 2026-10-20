@@ -44,6 +44,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _int_add_wrap_error,
     BF16,
     F32,
     F16,
@@ -1807,6 +1808,9 @@ class _Lowerer:
         op = v.op
         if op is None:
             return v.name
+        if op.name == "arith.assume_range":
+            # A range marker is its first operand: it emits no instruction.
+            return self._operand(op.operands[0])
         if op.name == "arith.constant":
             ity = op.attrs.get("ity", "i32")
             val = op.attrs["value"]
@@ -2453,7 +2457,19 @@ class _Lowerer:
         self._binop(op, llvm_op + flag)
 
     def _op_arith_add(self, op: Op) -> None:
-        self._wrapping_binop(op, "add")
+        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        if wrap_error:
+            raise ValueError(wrap_error)
+        # An explicit no-unsigned-wrap add; otherwise the type's default
+        # (nsw for signed values, no flag for unsigned ones).
+        if op.attrs.get("wrap") == "nuw":
+            self._binop(op, "add nuw")
+        else:
+            self._wrapping_binop(op, "add")
+
+    def _op_arith_assume_range(self, op: Op) -> None:
+        # Emits nothing: _operand prints the marked value at every use.
+        return
 
     def _op_arith_sub(self, op: Op) -> None:
         self._wrapping_binop(op, "sub")
@@ -7309,6 +7325,8 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
 
 # arith.cmp / vector.cmp predicate -> (signed icmp predicate, unsigned one).
 _ICMP_PREDICATES = {
+    # "ult" is the explicit unsigned compare: unsigned whatever the type.
+    "ult": ("ult", "ult"),
     "lt": ("slt", "ult"),
     "le": ("sle", "ule"),
     "gt": ("sgt", "ugt"),
