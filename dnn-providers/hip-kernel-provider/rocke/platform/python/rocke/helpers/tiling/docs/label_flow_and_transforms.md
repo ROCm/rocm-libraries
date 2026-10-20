@@ -57,15 +57,16 @@ classifies it and because it is the ONE sanctioned label change (see below); it 
 
 A store/read is a **reposition**: it changes a datum's physical **storage-axis alignment / address**, never
 its label. **Never express a placement change in LABEL vocabulary.** Writing `(M,K)→(K,M)` on a store arrow is
-*the* recurring bug: the LDS memref's `(K, free)` axis order is a **positional** convention, not a relabel of
+*the* recurring bug: an LDS descriptor's axis order is a **positional** convention, not a relabel of
 the datum. When a store's free axis is already innermost (CRC's free-contiguous gift) even the storage
 alignment doesn't move — it is the identity reposition (`place into lds; free (label invariant)`). A genuine
-register realignment (row-major kernels) is a *priced* `reorder`/`cross_lane`, classified by
-`classify_transform` — still label-invariant, never a label transpose.
+register realignment (a load order that is not the order the next stage wants) is a *priced*
+`reorder`/`cross_lane`, classified by `classify_transform` — still label-invariant, never a label transpose.
 
-**The free symmetry is a coordinate transpose (reposition), NOT a "relabel."** `col_major(X) ≡ row_major(Xᵀ)`
-is the same data with its **coordinates** transposed for free via addressing — which physical axis is stride-1
-flips; the **label rides invariant**. This is a *reposition symmetry*, the cheapest transform tier. (Older
+**The free symmetry is a coordinate transpose (reposition), NOT a "relabel."** `X` and `X^T`
+(`permute([1, 0])`) are the same data with their **coordinates** transposed for free via addressing -- which
+axis position is stride-1 flips; the **label rides invariant**. This is a *reposition symmetry*, the
+cheapest transform tier. (Older
 docs call it "free-relabel symmetry" — a misnomer; it moves a position, not a label. Only the C-reuse case
 below is a relabel.)
 

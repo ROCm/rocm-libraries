@@ -84,7 +84,8 @@ bool isRemovedDsPacingOption(const std::string& key) {
                                                             "DsReadThrottleLatency",
                                                             "DsReadThrottleTransitionFactor",
                                                             "DsReadThrottleTransitionEntries",
-                                                            "DsSlotFirst"};
+                                                            "DsSlotFirst",
+                                                            "BarrierHalfSlack"};
     return removed.count(key) > 0;
 }
 
