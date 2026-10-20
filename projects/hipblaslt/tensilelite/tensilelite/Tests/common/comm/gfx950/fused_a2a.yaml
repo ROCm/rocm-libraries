@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-# Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
+# Fused GEMM+A2A (FusedA2A: GemmA2A) config for gfx950.
 
 TestParameters:
   marks: [skip-gfx1250, skip-gfx1250-strict] # gfx950-only
@@ -30,7 +30,7 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      FusedGemmA2A: True
+      FusedA2A: GemmA2A
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:

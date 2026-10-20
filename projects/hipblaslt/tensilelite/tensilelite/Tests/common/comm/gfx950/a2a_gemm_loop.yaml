@@ -1,0 +1,87 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# A2A-GEMM outer shard-loop (FusedA2A: A2AGemm) config for gfx950.
+
+TestParameters:
+  marks: [skip-gfx1250, skip-gfx1250-strict] # gfx950-only
+
+GlobalParameters:
+  SyncsPerBenchmark: 1
+  SleepPercent: 0
+  NumElementsToValidate: -1
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  Device: 0
+  PrintSolutionRejectionReason: True
+  Architecture: gfx950
+  ISA: [[9, 5, 0]]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      FusedA2A: A2AGemm
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [False]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 1}
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 2}
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 11264, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 2048, 1, 4352], world: 4}
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 8}
+          # Token counts that do not fill MT1; 300 also gives fewer token blocks than peer queues.
+          - Exact: {sizes: [3072, 2000, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 300, 1, 4096], world: 8}
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT 128x128
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [False]
+        - DirectToLds: [0]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 2}
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 4}
+          - Exact: {sizes: [3072, 2000, 1, 4096], world: 2}
+
+LibraryLogic:
+  ScheduleName: "a2a_gemm_loop_gfx950"
+  DeviceNames: ["Device 75a0"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Equality"
+
+LibraryClient:

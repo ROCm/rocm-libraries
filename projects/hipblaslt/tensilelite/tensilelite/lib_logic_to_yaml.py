@@ -665,15 +665,9 @@ def formProblemSize(
             if problem.world is None:
                 temp["ProblemSizes"] = [{"Exact": FlowList(problem.sizes)}]
             else:
-                temp["ProblemSizes"] = [
-                    {
-                        "Exact": {
-                            "sizes": FlowList(problem.sizes),
-                            "world": problem.world,
-                            "a2aExtent": problem.a2aExtent,
-                        }
-                    }
-                ]
+                exact = {"sizes": FlowList(problem.sizes), "world": problem.world,
+                         "a2aExtent": problem.a2aExtent}
+                temp["ProblemSizes"] = [{"Exact": exact}]
         if "ProblemSizes" not in temp:
             tPrint(
                 1,
