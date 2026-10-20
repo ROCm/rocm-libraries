@@ -115,11 +115,12 @@ class TestArchTarget(unittest.TestCase):
         self.assertFalse(t942.fits_lds(65537))
         self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
         # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
-        # supported on it. The fp4/MX MFMA family is the gfx950-only
-        # combo, so use it for the negative case.
+        # supported on it. No target has an unscaled fp4 MFMA: gfx950 reaches
+        # fp4 only through its scaled MFMA, so the dense combo is unsupported
+        # on both.
         self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
         self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
-        self.assertTrue(
+        self.assertFalse(
             ArchTarget.from_gfx("gfx950").supports_dtype_combo("fp4", "fp4", "fp32")
         )
         self.assertEqual(t942.max_threads_per_block, 1024)

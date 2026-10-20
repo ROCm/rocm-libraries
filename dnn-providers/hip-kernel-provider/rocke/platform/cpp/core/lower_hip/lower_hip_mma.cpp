@@ -103,7 +103,7 @@ static const char* h_mma_operand(rocke_h_lowerer_t* lw,
  * The HIP source path has no ISA backend: the neutral tile.mma op carries the
  * concrete atom name in attrs["op_id"], which we re-form into "tile.<op_id>"
  * and re-dispatch through the regular per-op handler (the mfma_* / wmma_* family
- * + the MX/fp4/fp6 scaled shims, all defined as concrete ROCKE_OP_TILE_* handlers
+ * + the MX scaled shims, all defined as concrete ROCKE_OP_TILE_* handlers
  * in this and other buckets). The concrete handlers read only op.operands /
  * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and

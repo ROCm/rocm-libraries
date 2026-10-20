@@ -412,41 +412,6 @@ class MfmaAtom:
         )
 
     @classmethod
-    def fp4_16x16x128(cls) -> "MfmaAtom":
-        """fp4 MX MFMA atom (gfx950+, P52).
-
-        Per-lane: A = 16 fp4 nibbles packed as i64 (= 8 bytes per
-        lane × 2 nibbles); B same; C = ``<4 x float>``. K = 128
-        elements per atom — the densest gfx950 MFMA shape.
-        """
-        return cls(
-            m=16,
-            n=16,
-            k=128,
-            a_per_lane=16,
-            b_per_lane=16,
-            c_per_lane=4,
-            dtype_in="fp4",
-            dtype_out="f32",
-            name="mfma_f32_16x16x128_fp4",
-        )
-
-    @classmethod
-    def fp6_16x16x96(cls) -> "MfmaAtom":
-        """fp6 MX MFMA atom (gfx950+, P52)."""
-        return cls(
-            m=16,
-            n=16,
-            k=96,
-            a_per_lane=12,
-            b_per_lane=12,
-            c_per_lane=4,
-            dtype_in="fp6",
-            dtype_out="f32",
-            name="mfma_f32_16x16x96_fp6",
-        )
-
-    @classmethod
     def f16_4x4x4(cls) -> "MfmaAtom":
         """The tiny f16 atom. One MFMA emits 16 independent 4x4x4 matmuls per wave.
 
@@ -497,7 +462,7 @@ class MfmaAtom:
 
     @property
     def is_f4f6(self) -> bool:
-        """True for the MX fp4 / fp6 atoms (CK ``IsF4F6``, 2x MFMA speed-up)."""
+        """True for an fp4 / fp6 input atom (CK ``IsF4F6``, 2x MFMA speed-up)."""
         return self.dtype_in in ("fp4", "fp6")
 
     @property
@@ -917,19 +882,13 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_16x16x128(),
 )
 
-# P52: MX fp4 / fp6 atoms (gfx950+).
-MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
-    MfmaAtom.fp4_16x16x128(),
-    MfmaAtom.fp6_16x16x96(),
-)
-
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
 # factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
 MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
-    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
 )
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,

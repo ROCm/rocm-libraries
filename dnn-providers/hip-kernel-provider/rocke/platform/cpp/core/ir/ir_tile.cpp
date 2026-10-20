@@ -47,8 +47,6 @@ typedef struct
 
 static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_32x32x16_bf16", "acc32"},
-    {"mfma_f32_16x16x128_fp4", "acc4"},
-    {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
@@ -697,8 +695,6 @@ ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_fp8, "mfma_f32_32x32x16_fp8")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_bf8, "mfma_f32_32x32x16_bf8")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_4x4x4_f16, "mfma_f32_4x4x4_f16")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_4x4x4_bf16, "mfma_f32_4x4x4_bf16")
-ROCKE_MMA_WRAP(rocke_b_mfma_f32_16x16x128_fp4, "mfma_f32_16x16x128_fp4")
-ROCKE_MMA_WRAP(rocke_b_mfma_f32_16x16x96_fp6, "mfma_f32_16x16x96_fp6")
 ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_f16, "wmma_f32_16x16x16_f16")
 ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_bf16, "wmma_f32_16x16x16_bf16")
 ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_f16, "wmma_gfx12_f32_16x16x16_f16")

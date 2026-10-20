@@ -522,3 +522,25 @@ def test_rdna_integer_wmma_rows_name_i8_and_i4():
                     k=16,
                 )
                 assert (found and found.op_id) == want
+
+
+def test_gfx950_has_no_unscaled_fp4_or_fp6_mfma():
+    # gfx950 reaches fp4 / fp6 only through the scaled f8f6f4 MFMA. There is no
+    # unscaled 16x16x128 fp4 or 16x16x96 fp6 MFMA instruction, so the catalog must
+    # neither list such an op_id nor select one for a dense fp4 / fp6 request.
+    mma = ArchTarget.from_gfx("gfx950").mma
+    op_ids = {op.op_id for op in mma.ops}
+    for op_id in ("mfma_f32_16x16x128_fp4", "mfma_f32_16x16x96_fp6"):
+        assert op_id not in op_ids
+        assert _op_id_family().get(op_id) is None
+    for dtype, k in (("fp4", 128), ("fp6", 96)):
+        found = mma.op_for_shape(
+            family="mma",
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=16,
+            n=16,
+            k=k,
+        )
+        assert found is None

@@ -1254,14 +1254,6 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
                                            rocke_value_t* a,
                                            rocke_value_t* bb,
                                            rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
-                                              rocke_value_t* a,
-                                              rocke_value_t* bb,
-                                              rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b,
-                                             rocke_value_t* a,
-                                             rocke_value_t* bb,
-                                             rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* a,
                                                        rocke_value_t* bb,
