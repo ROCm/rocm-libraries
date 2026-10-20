@@ -566,6 +566,30 @@ def _direct_dgrad_params_read(params):
     return A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
 
 
+def _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS):
+    """Shared direct-conv tiling setup: WAVE/Ho/Wo/LDS_W/LDS_ROW_FP16/LOAD_VEC/PASSES."""
+    WAVE = spec.wave_size
+    THREADS = spec.threads_per_block
+    Ho = p.Ho
+    Wo = p.Wo
+    LDS_W = (BLOCK_Q - 1) * p.stride + p.KW
+    LDS_ROW_FP16 = LDS_W * BLOCK_GROUPS * p.cpg
+    LOAD_VEC = 4
+    NUM_VEC4 = LDS_ROW_FP16 // LOAD_VEC
+    PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
+    return WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES
+
+
+def _direct_conv_lane_setup(b, c_wave):
+    """Shared lane-decomposition prefix: c_half/oob/zero_f32 + tid + wave_id."""
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    zero_f32 = b.const_f32(0.0)
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    return c_half_bytes, oob_sentinel, zero_f32, tid, wave_id
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -1594,16 +1618,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
 
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
-    WAVE = spec.wave_size
-    THREADS = spec.threads_per_block
-    Ho = p.Ho
-    Wo = p.Wo
-    LDS_W = (BLOCK_Q - 1) * p.stride + p.KW
-    # LDS row: (LDS_W positions) × (BLOCK_GROUPS groups) × (cpg=8 channels)
-    LDS_ROW_FP16 = LDS_W * BLOCK_GROUPS * p.cpg
-    LOAD_VEC = 4
-    NUM_VEC4 = LDS_ROW_FP16 // LOAD_VEC
-    PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
+    WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES = _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -2061,15 +2076,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
 
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
-    WAVE = spec.wave_size
-    THREADS = spec.threads_per_block
-    Ho = p.Ho
-    Wo = p.Wo
-    LDS_W = (BLOCK_Q - 1) * p.stride + p.KW
-    LDS_ROW_FP16 = LDS_W * BLOCK_GROUPS * p.cpg
-    LOAD_VEC = 4
-    NUM_VEC4 = LDS_ROW_FP16 // LOAD_VEC
-    PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
+    WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES = _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS)
     N_CH_BLOCKS = p.cpg // LOAD_VEC  # = 8 for cpg=32
 
     b = IRBuilder(spec.kernel_name())
@@ -6324,12 +6331,7 @@ def build_direct_depthwise(
     c_wave = b.const_i32(WAVE)
     c_W = params["p_Wo"]  # output-width bound for the store guard (runtime)
     c_groups = params["p_groups"]
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-    zero_f32 = b.const_f32(0.0)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
+    c_half_bytes, oob_sentinel, zero_f32, tid, wave_id = _direct_conv_lane_setup(b, c_wave)
     lane = b.mod(tid, c_wave)
 
     # Grid layout: bx = W-tile, by = channel-tile, bz = batch.
@@ -7599,12 +7601,7 @@ def build_direct_depthwise_spatial(
     c_wave = b.const_i32(WAVE)
     c_groups = params["p_groups"]
     c_Wo = params["p_Wo"]  # output-width bound for the store guard (runtime)
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-    zero_f32 = b.const_f32(0.0)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
+    c_half_bytes, oob_sentinel, zero_f32, tid, wave_id = _direct_conv_lane_setup(b, c_wave)
     t_in_wave = b.mod(tid, c_wave)
 
     ch = b.mod(t_in_wave, c_groups)
