@@ -152,7 +152,7 @@ build/bin/hipdnn_integration_tests \
 Each timed test prints one line:
 
 ```text
-[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE timing=DEVICE_ONLY samples=20 min=0.0182 ms robust=0.0184 ms mean=0.0185 ms stddev=0.0003 ms
+[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE tuned=0 timing=DEVICE_ONLY samples=20 min=0.0182 ms robust=0.0184 ms mean=0.0185 ms stddev=0.0003 ms
 ```
 
 - Autotune runs `--benchmark-warmup` untimed executions (default 30). Then it
@@ -166,6 +166,14 @@ Each timed test prints one line:
   if `stddev` stays large compared with `mean`.
 - `robust` is the mean after autotune drops the slow tail: what the engine
   usually costs. `min`, `mean` and `stddev` are over all timed samples.
+- `tuned=0` means that the engine chose its solution with its heuristics. The
+  harness sets no knobs, so this is the default. To time the solution that the
+  engine picks by benchmarking its candidates, set
+  `HIPDNN_FORCE_BENCHMARKING=1`. The line then shows `tuned=1` for engines
+  that support the `global.benchmarking` knob (MIOpen, the hip-kernel
+  ingestor). Engines without the knob, such as hipBLASLt, still show
+  `tuned=0`. The selection runs during the verification execution, so its
+  cost is not in the timed samples.
 - `timing=DEVICE_ONLY` means that the stream was stalled, so the times exclude
   host submission overhead. `timing=UNSTALLED` means that autotune could not
   stall the stream and re-measured without the stall gate, so the times can
@@ -174,9 +182,9 @@ Each timed test prints one line:
   engine, for example when an execution fails or too many timed executions
   return no measurement.
 - `--gtest_output=json:<file>` or `xml:<file>` writes the same values as the
-  test properties `benchmark_engine`, `benchmark_timing`, `benchmark_samples`,
-  `benchmark_min_ms`, `benchmark_robust_ms`, `benchmark_mean_ms` and
-  `benchmark_stddev_ms`.
+  test properties `benchmark_engine`, `benchmark_tuned`, `benchmark_timing`,
+  `benchmark_samples`, `benchmark_min_ms`, `benchmark_robust_ms`,
+  `benchmark_mean_ms` and `benchmark_stddev_ms`.
 - `engine=` names the engine that ran. To compare engines, run once for each
   `--test-engine`. Without `--test-engine`, hipDNN selects the engine.
 - To time your own graph, write it as a single-graph bundle

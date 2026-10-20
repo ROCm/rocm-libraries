@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
@@ -154,7 +156,12 @@ TEST(TestResolveBenchmark, ModesThatDoNotExecuteAreRefused)
 
 TEST(TestReportBenchmark, RecordsTheResultAsProperties)
 {
-    reportBenchmark(successfulResult());
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    auto benchmarked = successfulResult();
+    benchmarked.supportsExhaustive = true;
+
+    reportBenchmark(benchmarked);
 
     const auto* result = ::testing::UnitTest::GetInstance()->current_test_info()->result();
     std::map<std::string, std::string> properties;
@@ -171,6 +178,38 @@ TEST(TestReportBenchmark, RecordsTheResultAsProperties)
     EXPECT_EQ(properties["benchmark_robust_ms"], "0.3750");
     EXPECT_EQ(properties["benchmark_mean_ms"], "0.5000");
     EXPECT_EQ(properties["benchmark_stddev_ms"], "0.1250");
+    EXPECT_EQ(properties["benchmark_tuned"], "1");
+}
+
+// The harness sets no knobs, so only HIPDNN_FORCE_BENCHMARKING can turn benchmarking
+// on, and only an engine with the global.benchmarking knob reads it.
+TEST(TestReportBenchmark, TunedOnlyWhenForcedOnAnEngineWithTheKnob)
+{
+    struct Case
+    {
+        bool engineHasKnob;
+        const char* forceBenchmarking;
+        bool tuned;
+    };
+    const std::array<Case, 5> cases{{
+        {true, "", false},
+        {true, "1", true},
+        {true, "0", false},
+        {false, "1", false},
+        {false, "", false},
+    }};
+
+    for(const auto& c : cases)
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarking(
+            hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, c.forceBenchmarking);
+        auto result = successfulResult();
+        result.supportsExhaustive = c.engineHasKnob;
+
+        EXPECT_EQ(selectedByBenchmarking(result), c.tuned)
+            << "knob=" << c.engineHasKnob << " HIPDNN_FORCE_BENCHMARKING='" << c.forceBenchmarking
+            << "'";
+    }
 }
 
 TEST(TestReportBenchmark, AFailedBenchmarkAddsAFailure)
