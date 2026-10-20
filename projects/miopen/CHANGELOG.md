@@ -822,3 +822,8 @@ INI8x4 support and fix minor issues and bugs.
 ## MIOpen 1.0.0 for ROCm 1.0.0
 ### Added
 - Initial release
+
+## ROCm 7.0.2.1 compatibility note
+### Removed
+* The beta Graph API was withdrawn from MIOpen 3.6.0 in this release. Its seven exported backend entry points and associated enum definitions are unavailable. Applications built with `MIOPEN_BETA_API` must use a MIOpen release that still includes this API or remove their Graph API calls.
+
