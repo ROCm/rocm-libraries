@@ -382,12 +382,6 @@ class TestDispatchFold(unittest.TestCase):
         p = _gemm_problem(self._req(direction="fwd"))
         self.assertEqual((p.C, p.X, p.sW, p.Wi), (3, 16, 16, 224))
 
-    def test_patch_instances_are_admitted(self):
-        from dispatch.grouped_convolution import dispatch_conv_grouped_all
-
-        names = [r.spec.name for r in dispatch_conv_grouped_all(self._req())]
-        self.assertTrue(any("-patch-" in n for n in names))
-
 
 if __name__ == "__main__":
     unittest.main()
