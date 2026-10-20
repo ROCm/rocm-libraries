@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 
@@ -41,10 +42,8 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 /// applicability check keys on ragged_offset_tensor_uid being set, so we point it
 /// at another existing tensor uid to keep the value plausible. Throws if the graph
 /// has no non-virtual tensor to mark.
-inline flatbuffers::FlatBufferBuilder makeGraphWithRaggedTensor(const void* serializedGraph,
-                                                                size_t size)
+inline flatbuffers::FlatBufferBuilder makeGraphWithRaggedTensor(const void* serializedGraph)
 {
-    (void)size;
     auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT* target = nullptr;
@@ -73,7 +72,37 @@ inline flatbuffers::FlatBufferBuilder makeGraphWithRaggedTensor(const void* seri
 inline flatbuffers::FlatBufferBuilder
     makeGraphWithRaggedTensor(flatbuffers::FlatBufferBuilder&& builder)
 {
-    return makeGraphWithRaggedTensor(builder.GetBufferPointer(), builder.GetSize());
+    return makeGraphWithRaggedTensor(builder.GetBufferPointer());
+}
+
+/// Re-serializes a graph with its first non-virtual device tensor (not pass-by-value or
+/// constant) given the requested alignment. Throws if the graph has no such tensor.
+inline flatbuffers::FlatBufferBuilder makeGraphWithTensorAlignment(const void* serializedGraph,
+                                                                   int64_t alignment)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
+
+    const auto target = std::find_if(
+        graph->tensors.begin(), graph->tensors.end(), [](const auto& tensor) {
+            return !tensor->virtual_ && !tensor->is_runtime_pass_by_value
+                   && tensor->value.type == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE;
+        });
+    if(target == graph->tensors.end())
+    {
+        throw std::runtime_error(
+            "makeGraphWithTensorAlignment: graph has no non-virtual device tensor to realign");
+    }
+    (*target)->alignment = alignment;
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder
+    makeGraphWithTensorAlignment(flatbuffers::FlatBufferBuilder&& builder, int64_t alignment)
+{
+    return makeGraphWithTensorAlignment(builder.GetBufferPointer(), alignment);
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(

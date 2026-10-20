@@ -9,9 +9,12 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <string>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -25,6 +28,9 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
+
+constexpr auto SDPA_SEQ_AXIS
+    = static_cast<flatbuffers::uoffset_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
 
 static RoundingMode
     getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
@@ -127,6 +133,77 @@ static bool isScalarTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
         elementCount *= dims->Get(i);
     }
     return elementCount == 1;
+}
+
+// AITER group mode reads INT32 [B+1] token seqstarts.
+static bool isTokenSeqstartTensor(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid,
+    int64_t batch)
+{
+    const auto it = tensorMap.find(uid);
+    if(it == tensorMap.end())
+    {
+        return false;
+    }
+    const auto* tensor = it->second;
+    if(tensor->virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
+       || tensor->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32)
+    {
+        return false;
+    }
+    const auto* dims = tensor->dims();
+    const auto* strides = tensor->strides();
+    return dims != nullptr && strides != nullptr && dims->size() == 4 && strides->size() == 4
+           && dims->Get(0) == batch + 1 && dims->Get(1) == 1 && dims->Get(2) == 1
+           && dims->Get(3) == 1 && strides->Get(0) == 1;
+}
+
+// hipDNN addresses a ragged element at offset[b] * multiplier + strides . (h, s, d), while
+// AITER uses seqstart[b] * seq_stride + strides . (h, s, d) with one seqstart for Q/O and one
+// for K/V. The two agree for any stride permutation under the conditions below.
+static bool hasAiterCompatibleRaggedAddressing(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vTensor,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oTensor)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t qoOffsetUid = qTensor.ragged_offset_tensor_uid().value();
+    const int64_t kvOffsetUid = kTensor.ragged_offset_tensor_uid().value();
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor.ragged_offset_tensor_uid().value() != qoOffsetUid,
+                               "Q and O must share a ragged offset tensor");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor.ragged_offset_tensor_uid().value() != kvOffsetUid,
+                               "K and V must share a ragged offset tensor");
+
+    for(const auto& [label, tensor] : {std::pair{"q", &qTensor},
+                                       std::pair{"k", &kTensor},
+                                       std::pair{"v", &vTensor},
+                                       std::pair{"o", &oTensor}})
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(tensor->strides() == nullptr || tensor->strides()->size() != 4,
+                                   std::string(label) + " tensor must have rank 4 strides");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            tensor->ragged_offset_multiplier() != tensor->strides()->Get(SDPA_SEQ_AXIS),
+            std::string(label) + " tensor ragged_offset_multiplier must equal its sequence "
+                + "stride (Actual multiplier: " + std::to_string(tensor->ragged_offset_multiplier())
+                + ", sequence stride: " + std::to_string(tensor->strides()->Get(SDPA_SEQ_AXIS))
+                + ")");
+    }
+
+    const int64_t batch = qTensor.dims()->Get(0);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !isTokenSeqstartTensor(tensorMap, qoOffsetUid, batch)
+            || !isTokenSeqstartTensor(tensorMap, kvOffsetUid, batch),
+        "Ragged offset tensors must be non-virtual INT32 [B+1, 1, 1, 1] device tensors");
+    return true;
 }
 
 static bool isMi308Device(hipStream_t stream)
@@ -239,6 +316,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // rather than risk a mismatch (RFC 0008 §4.6).
     HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
                                "Graph has override shapes enabled");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
+        "All tensors must be aligned to a multiple of 16 bytes");
 
     auto& nodeWrappers = opGraph.nodeWrappers();
 
@@ -293,9 +373,8 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
     }
 
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET
-                                   && attrs.mma_core_mode() != DataType::FLOAT,
-                               "mma_core_mode must be unset or float");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
+                               "mma_core_mode must be unset");
 
     const auto& tensorMap = opGraph.getTensorMap();
 
@@ -310,22 +389,14 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* oTensor = tensorMap.at(oUid);
 
     BatchMode batchMode;
-    // Batch mode checks
     {
-
-        std::vector<std::string> unsupportedRaggedTensorStrings;
-        for(auto id : listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid, oUid}))
-        {
-            const std::string unsupportedString
-                = std::to_string(id) + " (" + tensorMap.at(id)->name()->str() + ")";
-            unsupportedRaggedTensorStrings.push_back(unsupportedString);
-        }
-
+        const auto unsupportedRaggedTensorIds
+            = listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid, oUid});
         HIP_KERNEL_RETURN_FALSE_IF(
-            !unsupportedRaggedTensorStrings.empty(),
-            "Only the Q, K, V and O tensors can be ragged. The following "
-            "tensors are ragged and not supported: "
-                + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorStrings));
+            !unsupportedRaggedTensorIds.empty(),
+            "Only the Q, K, V and O tensors can be ragged. The following tensor uids are ragged "
+            "and not supported: "
+                + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorIds));
 
         const int numberRagged
             = static_cast<int>(qTensor->ragged_offset_tensor_uid().has_value())
@@ -336,8 +407,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
         HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
                                        || attrs.seq_len_q_tensor_uid().has_value(),
                                    "SEQ_LENS_Q and SEQ_LENS_KV not supported");
-
-        // TODO: Add support and checks for CU_SEQ_LENS_Q and CU_SEQ_LENS_KV
 
         HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
                                    "Either all or none of Q, K, V or O must be ragged");
@@ -358,9 +427,18 @@ bool SdpaFwdPlanBuilder::isApplicable(
         oTensor->dims()->size() != 4,
         "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
 
+    if(batchMode == BatchMode::GROUP
+       && !hasAiterCompatibleRaggedAddressing(tensorMap, *qTensor, *kTensor, *vTensor, *oTensor))
+    {
+        return false;
+    }
+
     // Validate optional stats (LSE) output tensor.
     // Gate purely on generate_stats; the UID is required when the flag is set.
     const bool hasStats = hasStatsOutput(attrs);
+    // Varlen LSE is [H, total_q] indexed by seqstart, not the dense [B, H, Sq] stats layout.
+    HIP_KERNEL_RETURN_FALSE_IF(hasStats && batchMode == BatchMode::GROUP,
+                               "stats (LSE) output is not supported for ragged tensors");
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statsTensor = nullptr;
     if(hasStats)
     {
@@ -566,11 +644,8 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
 
-    // Ragged (group-mode) tensors are canonical BSHD [B, S, H, D] per RFC 0014;
-    // batch-mode tensors are BHSD [B, H, S, D]. Only the heads and seq axes swap
-    // between the layouts — batch (0) and head-dim (3) are identical in both.
     const unsigned int headAxis = 1U;
-    const unsigned int seqAxis = 2U;
+    const unsigned int seqAxis = SDPA_SEQ_AXIS;
 
     // Extract dimensions from Q tensor
     auto* qDims = qTensor->dims();
@@ -700,7 +775,8 @@ void SdpaFwdPlanBuilder::buildPlan(
                                                         sdpaAttrs.descale_v_tensor_uid().value()};
     }
 
-    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, so we only need to check one
+    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, and that O and V
+    // share the Q and K offset tensors respectively
     const auto batchMode
         = qTensor->ragged_offset_tensor_uid().has_value() ? BatchMode::GROUP : BatchMode::BATCH;
 

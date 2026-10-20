@@ -193,9 +193,10 @@ TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalSmallSeqCoversAllTiles)
 
 // =============================================================================
 // Group (ragged) mode grid tests — gridDimX=nhead, gridDimY=batch,
-// gridDimZ=ceil(per-batch-S-tiles / tgDiv). hipDNN group tensors are padded
-// [B, S, H, D] with batch carried by gridDimY, so Q-tiles use per-batch seqLen
-// (not a packed total_q). Grid math only reads params.group.has_value().
+// gridDimZ=ceil(per-batch-S-tiles / tgDiv). hipDNN group tensors are logical
+// [B, H, S, D] with token-major strides and batch carried by gridDimY, so Q-tiles
+// use per-batch seqLen (not a packed total_q). Grid math only reads
+// params.group.has_value().
 // =============================================================================
 
 TEST(TestSdpaFwdPlanGridMath, GroupCausalRemapsGridToNheadBatchTiles)

@@ -88,8 +88,43 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGr
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForRaggedGraph)
 {
     // The backward engine does not support group mode; any ragged tensor must be
-    // rejected via CHECK_NO_RAGGED_TENSORS.
+    // rejected.
     auto builder = sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsTrueForMultipleOf16ByteAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder
+        = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaBwdGraph(), 32);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNon16ByteAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Without a gfx942 device the device check declines first, masking the alignment check.
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder
+        = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(createSdpaBwdGraph(), 8);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 

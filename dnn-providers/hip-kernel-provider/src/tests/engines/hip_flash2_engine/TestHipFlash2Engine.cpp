@@ -171,6 +171,37 @@ TEST_F(TestHipFlash2Engine, RaggedTensorFlipsApplicableGraphToRejected)
     }
 }
 
+TEST_F(TestHipFlash2Engine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
+{
+    auto baseBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseGraph(
+        baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_TRUE(engine.isApplicable(_handle, baseGraph));
+    }
+
+    auto misalignedBuilder = hipdnn_test_sdk::utilities::makeGraphWithTensorAlignment(
+        hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(), 8);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper misalignedGraph(
+        misalignedBuilder.GetBufferPointer(), misalignedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_FALSE(engine.isApplicable(_handle, misalignedGraph));
+    }
+}
+
 // -- ID and name tests ---------------------------------------------------------
 
 TEST_F(TestHipFlash2Engine, StaticIdMatchesEngineId)

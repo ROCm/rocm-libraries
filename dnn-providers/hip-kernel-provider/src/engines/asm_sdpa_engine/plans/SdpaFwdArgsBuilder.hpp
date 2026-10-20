@@ -122,24 +122,9 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
         args.s_o_Bs = 0;
 
         args.ptr_qseq_padding = uidToPtrMap.at(group->qoRaggedOffsetUid);
-        if(group->qoCuSeqLengthsUid)
-        {
-            args.ptr_qseq = uidToPtrMap.at(group->qoCuSeqLengthsUid.value());
-        }
-        else
-        {
-            args.ptr_qseq = args.ptr_qseq_padding;
-        }
-
+        args.ptr_qseq = args.ptr_qseq_padding;
         args.ptr_kseq_padding = uidToPtrMap.at(group->kvRaggedOffsetUid);
-        if(group->kvCuSeqLengthsUid)
-        {
-            args.ptr_kseq = uidToPtrMap.at(group->kvCuSeqLengthsUid.value());
-        }
-        else
-        {
-            args.ptr_kseq = args.ptr_kseq_padding;
-        }
+        args.ptr_kseq = args.ptr_kseq_padding;
     }
 
     return args;

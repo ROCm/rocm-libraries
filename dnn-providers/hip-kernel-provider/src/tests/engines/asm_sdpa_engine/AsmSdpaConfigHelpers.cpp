@@ -153,15 +153,18 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     if(config.mode == BatchMode::GROUP)
     {
         const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
-        const std::vector<int64_t> offsetStrides
-            = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
+        const std::vector<int64_t> offsetStrides = generateStrides(offsetDims);
+        const auto makeOffset = [&]() {
+            auto offset = std::make_shared<TensorAttributes>();
+            offset->set_dim(offsetDims).set_stride(offsetStrides).set_data_type(DataType::INT32);
+            return offset;
+        };
+        const auto qoOffset = makeOffset();
+        const auto kvOffset = makeOffset();
 
-        auto raggedOffset = std::make_shared<TensorAttributes>();
-        raggedOffset->set_dim(offsetDims).set_stride(offsetStrides).set_data_type(DataType::INT64);
-
-        q->set_ragged_offset(raggedOffset);
-        k->set_ragged_offset(raggedOffset);
-        v->set_ragged_offset(raggedOffset);
+        q->set_ragged_offset(qoOffset).set_ragged_offset_multiplier(q->get_stride()[2]);
+        k->set_ragged_offset(kvOffset).set_ragged_offset_multiplier(k->get_stride()[2]);
+        v->set_ragged_offset(kvOffset).set_ragged_offset_multiplier(v->get_stride()[2]);
     }
 
     // Configure SDPA attributes based on config
@@ -244,7 +247,10 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
 
     if(config.mode == BatchMode::GROUP)
     {
-        o->set_ragged_offset(q->get_ragged_offset());
+        const std::vector<int64_t> oDims = {batch, numHeads, seqQ, config.hdim_v};
+        o->set_dim(oDims).set_stride(generateStrides(oDims, layout));
+        o->set_ragged_offset(q->get_ragged_offset())
+            .set_ragged_offset_multiplier(o->get_stride()[2]);
     }
 
     return {graph, testCase.withStats ? stats : nullptr};

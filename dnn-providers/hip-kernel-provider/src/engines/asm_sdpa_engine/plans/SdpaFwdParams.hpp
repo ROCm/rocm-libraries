@@ -18,14 +18,6 @@ struct SdpaFwdGroupModeParams
 {
     int64_t qoRaggedOffsetUid;
     int64_t kvRaggedOffsetUid;
-    std::optional<int64_t> qoCuSeqLengthsUid;
-    std::optional<int64_t> kvCuSeqLengthsUid;
-
-    SdpaFwdGroupModeParams(int64_t qoRaggedOffsetUidIn, int64_t kvRaggedOffsetUidIn)
-        : qoRaggedOffsetUid(qoRaggedOffsetUidIn)
-        , kvRaggedOffsetUid(kvRaggedOffsetUidIn)
-    {
-    }
 };
 
 /**

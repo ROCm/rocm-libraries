@@ -72,19 +72,24 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
 
     int64_t uid = 1;
 
-    auto raggedUid = [&]() -> flatbuffers::Optional<int64_t> {
-        if(config.mode == BatchMode::GROUP)
+    const bool isGroup = config.mode == BatchMode::GROUP;
+    const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
+    const std::vector<int64_t> offsetStrides
+        = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
+    auto appendRaggedOffset = [&](const char* name) -> flatbuffers::Optional<int64_t> {
+        if(!isGroup)
         {
-            const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
-            const std::vector<int64_t> offsetStrides
-                = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
-            const auto raggedUid = uid++;
-            tensorAttributes.push_back(CreateTensorAttributesDirect(
-                builder, raggedUid, "ragged_offset", DataType::INT64, &offsetStrides, &offsetDims));
-            return raggedUid;
+            return flatbuffers::nullopt;
         }
-        return flatbuffers::nullopt;
-    }();
+        const auto offsetUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, offsetUid, name, DataType::INT32, &offsetStrides, &offsetDims));
+        return offsetUid;
+    };
+    const auto qoRaggedUid = appendRaggedOffset("qo_ragged_offset");
+    const auto kvRaggedUid = appendRaggedOffset("kv_ragged_offset");
+    const auto raggedMultiplier
+        = [&](const std::vector<int64_t>& strides) { return isGroup ? strides[2] : 1; };
 
     // Q tensor
     const auto qUid = uid++;
@@ -98,7 +103,9 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                                             TensorValue::NONE,
                                                             0,
                                                             false,
-                                                            raggedUid));
+                                                            qoRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(qStrides)));
 
     // K tensor
     const auto kUid = uid++;
@@ -112,7 +119,9 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                                             TensorValue::NONE,
                                                             0,
                                                             false,
-                                                            raggedUid));
+                                                            kvRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(kStrides)));
 
     // V tensor
     const auto vUid = uid++;
@@ -126,7 +135,9 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                                             TensorValue::NONE,
                                                             0,
                                                             false,
-                                                            raggedUid));
+                                                            kvRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(vStrides)));
 
     // O tensor
     const auto oUid = uid++;
@@ -140,7 +151,9 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                                             TensorValue::NONE,
                                                             0,
                                                             false,
-                                                            raggedUid));
+                                                            qoRaggedUid,
+                                                            16,
+                                                            raggedMultiplier(oStrides)));
 
     // Scale tensor (always include for SDPA)
     const std::vector<int64_t> scaleDims = {1};

@@ -3,7 +3,7 @@
 
 // Verifies that the CPU reference plan builders reject any graph containing a
 // ragged tensor. The check lives in every plan builder's isApplicable (see
-// CHECK_NO_RAGGED_TENSORS in ApplicabilityUtils.hpp); here we exercise it end-to-end
+// CHECK_NO_RAGGED_TENSORS in PlanUtils.hpp); here we exercise it end-to-end
 // through CpuReferenceGraphExecutor::isApplicable, which dispatches to the
 // correct builder for each node.
 
@@ -73,7 +73,7 @@ void expectRaggedTensorRejected(const std::vector<uint8_t>& serializedGraph)
         executor.isApplicable(const_cast<uint8_t*>(serializedGraph.data()), serializedGraph.size()))
         << "Baseline (non-ragged) graph should be applicable";
 
-    auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph.data(), serializedGraph.size());
+    auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph.data());
     EXPECT_FALSE(executor.isApplicable(raggedGraph.GetBufferPointer(), raggedGraph.GetSize()))
         << "Graph containing a ragged tensor must be rejected";
 }

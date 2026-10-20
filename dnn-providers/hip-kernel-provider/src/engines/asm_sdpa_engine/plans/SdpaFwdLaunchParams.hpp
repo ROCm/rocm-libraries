@@ -25,9 +25,9 @@ struct SdpaFwdLaunchParams
 // hd192x128/gfx942 lays out gridDimX = nhead / gridDimY = full Q-tiles (no tgDiv)
 // with tuneOpt=0; group (ragged) mode then remaps to
 // gridDimX = nhead / gridDimY = batch / gridDimZ = ceil(Q-tiles / tgDiv). hipDNN's
-// group tensors are padded [B, S, H, D] with batch carried by gridDimY, so Q-tiles
+// group tensors are logical [B, H, S, D] with batch carried by gridDimY, so Q-tiles
 // come from the per-batch seqLen S (not a packed total_q); per-batch ragged offsets
-// bound the live tokens within S. The hd192x128 kernel uses 256-wide blocks on all
+// locate each batch's tokens. The hd192x128 kernel uses 256-wide blocks on all
 // architectures.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {

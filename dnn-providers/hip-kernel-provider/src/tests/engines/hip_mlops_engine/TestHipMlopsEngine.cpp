@@ -163,6 +163,37 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
     }
 }
 
+TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
+{
+    auto baseBuilder = createValidMatmulGraph();
+    const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
+    }
+
+    auto misalignedBuilder = makeGraphWithTensorAlignment(createValidMatmulGraph(), 8);
+    const GraphWrapper misalignedGraph(misalignedBuilder.GetBufferPointer(),
+                                       misalignedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_FALSE(engine.isApplicable(dummyHandle, misalignedGraph));
+    }
+}
+
 TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();

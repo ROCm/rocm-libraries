@@ -85,7 +85,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
     }
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
-    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
     auto builder
         = sdpa::withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
                                       dims,

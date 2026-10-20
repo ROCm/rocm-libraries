@@ -32,9 +32,7 @@ public:
             .WillByDefault(
                 ::testing::Return(hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView{
                     _defaultGraphBuffer.GetBufferPointer(), _defaultGraphBuffer.GetSize()}));
-        // Default: an empty tensor map (no ragged tensors), so isApplicable()
-        // ragged-tensor guards pass without every test stubbing getTensorMap().
-        // Tests exercising ragged rejection override this via ON_CALL/EXPECT_CALL.
+        // Lets isApplicable() tensor-map guards pass without every test stubbing getTensorMap().
         ON_CALL(*this, getTensorMap()).WillByDefault(::testing::ReturnRef(_emptyTensorMap));
     }
 

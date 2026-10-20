@@ -455,6 +455,20 @@ std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
     return cases;
 }
 
+// Stats (LSE) output is not supported for ragged tensors.
+std::vector<GraphTestCase> getBatchModeStatsTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH)
+        {
+            cases.push_back(configToTestCase(config, /*withStats=*/true));
+        }
+    }
+    return cases;
+}
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
@@ -484,8 +498,7 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp8,
 
 INSTANTIATE_TEST_SUITE_P(SmokeStats,
                          IntegrationGpuSdpaFwdBf16,
-                         testing::ValuesIn(getCompatibleGraphTestCases(cfg_fmha_fwd,
-                                                                       /*withStats=*/true)),
+                         testing::ValuesIn(getBatchModeStatsTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

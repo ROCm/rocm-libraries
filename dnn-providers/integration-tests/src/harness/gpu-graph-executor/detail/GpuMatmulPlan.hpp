@@ -5,7 +5,6 @@
 
 #include "hipdnn-gpu-ref/GpuFpReferenceMatmul.hpp"
 #include "hipdnn-gpu-ref/ShallowGpuTensor.hpp"
-#include <hipdnn_plugin_sdk/ApplicabilityUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
