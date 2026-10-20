@@ -35,15 +35,25 @@ Usage:
 
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import subprocess
 import sys
 
+# Find files in utilities folder without requiring a package to be created
+sys.path.insert(1, os.path.dirname(os.path.realpath(__file__)) + "/utilities/")
 import torch
-import torch.nn.functional as F
-from torch.nn.attention import SDPBackend, sdpa_kernel
+from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
+    DTYPE_MAP,
+    build_mask,
+    compute_contiguous_strides,
+    compute_forward,
+    compute_lse,
+    compute_strides,
+    save_tensor_bin,
+    script_sha256,
+    to_physical_layout,
+)
 
 # Bump when generator logic changes in a way that affects emitted output: the
 # tensors (different reference backend, precision handling, tensor layout) or
@@ -76,15 +86,14 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #         mma_core_mode is "unset" for bf16/fp16 and "fp8_e4m3" for fp8 (never
 #         "float"); it is the MMA operand precision, and a float request on
 #         16-bit or fp8 inputs is a mismatch that ASM_SDPA_ENGINE declines (see #12844)
+# 1.4.1 — Moved the stride/layout, masking, forward/LSE reference, tensor-writing
+#         and script-hashing helpers to utilities/sdpa_common.py so the backward
+#         generator computes its forward pass with this exact code (RFC 0011
+#         §4.2). Emitted tensors and graph JSON are byte-identical to 1.4.0.
 # 1.5.0 — --window-left is cuDNN's left_bound: it keeps that many keys including the
 #         diagonal (SdpaSemanticsRegister SEM-001); 0 is rejected. Windowed bundles from
 #         earlier versions keep one more key and must be regenerated
 GENERATOR_VERSION = "1.5.0"
-
-DTYPE_MAP = {
-    "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
-    "fp16": {"torch": torch.float16, "json": "half", "bytes": 2},
-}
 
 # FP8 operation: FP8_E4M3 inputs (Q/K/V), BF16 output. AITER's fmha fp8 path uses
 # the OCP e4m3 encoding (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
@@ -109,11 +118,6 @@ UID_DESCALE_V = 9
 UID_RAGGED_OFFSET_QO = 10
 UID_RAGGED_OFFSET_KV = 11
 
-# Physical stride order per memory layout. The value at position i is the rank of
-# dim i (0 = fastest-varying/unit stride). Logical dims stay [B, H, S, D]; only
-# the strides change, so BSHD swaps the H and S ranks relative to BHSD.
-LAYOUT_STRIDE_ORDER = {"bhsd": [3, 2, 1, 0], "bshd": [3, 1, 2, 0]}
-
 # Sequence axis of the logical [B, H, S, D] dims (cuDNN convention).
 SDPA_SEQ_AXIS = 2
 
@@ -122,36 +126,6 @@ SDPA_SEQ_AXIS = 2
 # seq_lens so a bundle can catch a kernel that derives lengths from the offsets
 # instead of reading the seq_len tensor (RFC 0014 §2.3 padding).
 RAGGED_PAD_ROWS = 8
-
-
-def compute_contiguous_strides(dims):
-    strides = []
-    stride = 1
-    for d in reversed(dims):
-        strides.append(stride)
-        stride *= d
-    strides.reverse()
-    return strides
-
-
-def compute_strides(dims, layout="bhsd"):
-    """Strides for the given layout. bhsd matches compute_contiguous_strides."""
-    order = LAYOUT_STRIDE_ORDER.get(layout)
-    if order is None or len(dims) != len(order):
-        raise ValueError(f"no stride order for layout {layout!r} at rank {len(dims)}")
-    stride = [1] * len(dims)
-    acc = 1
-    for idx in sorted(range(len(dims)), key=lambda i: order[i]):
-        stride[idx] = acc
-        acc *= dims[idx]
-    return stride
-
-
-def to_physical_layout(tensor, layout):
-    """Reorder a rank-4 BHSD tensor to physical BSHD byte order when requested."""
-    if layout == "bshd" and tensor.dim() == 4:
-        return tensor.transpose(1, 2).contiguous()  # physical [B, S, H, D]
-    return tensor
 
 
 def pack_ragged(tensor_bhsd, seq_lens):
@@ -189,90 +163,6 @@ def physical_seqlens(valid_lens, s_max):
     return [min(s_max, v + RAGGED_PAD_ROWS) for v in valid_lens]
 
 
-def build_mask(s_q, s_kv, causal, window_left, window_right):
-    """Construct a boolean keep-mask [S_q, S_kv] for the given causal/window config.
-
-    Returns None when no masking applies (the dense attention case), so callers
-    can take the fast PyTorch path. The mask is True where attention is allowed.
-    The bound math matches the CPU reference executor's leftBound/rightBound +
-    topLeftAlignment semantics so golden output is reproducible on the CPU side.
-
-    causal:
-      - "none":          no causal constraint
-      - "top_left":      diagonal anchored at (0,0); keep skv <= sq
-      - "bottom_right":  diagonal anchored bottom-right; keep skv <= sq + (S_kv - S_q)
-    """
-    has_causal = causal != "none"
-    has_window = window_left >= 0 or window_right >= 0
-    if not has_causal and not has_window:
-        return None
-
-    row = torch.arange(s_q).unsqueeze(1)  # [S_q, 1]
-    col = torch.arange(s_kv).unsqueeze(0)  # [1, S_kv]
-    # Bottom-right alignment shifts the diagonal by (S_kv - S_q).
-    offset = 0 if causal != "bottom_right" else (s_kv - s_q)
-
-    # Resolve the bounds exactly as build_graph serializes them (cuDNN setter composition):
-    # causal sets right_bound = 0, and an explicit window bound replaces it. ANDing causal with
-    # the window instead would keep right_bound at 0 while the graph says window_right.
-    left_bound = window_left
-    right_bound = window_right if window_right >= 0 else (0 if has_causal else -1)
-
-    mask = torch.ones(s_q, s_kv, dtype=torch.bool)
-    # cuDNN's band: left_bound = L keeps L keys up to and including the diagonal.
-    if left_bound >= 0:
-        mask &= (row + offset - col) < left_bound
-    if right_bound >= 0:
-        mask &= (col - (row + offset)) <= right_bound
-    return mask
-
-
-def _additive_mask(keep_mask):
-    """Convert a boolean keep-mask to an additive FP32 mask (0 keep, -inf drop)."""
-    additive = torch.zeros(keep_mask.shape, dtype=torch.float32)
-    additive.masked_fill_(~keep_mask, float("-inf"))
-    return additive
-
-
-def compute_forward(Q, K, V, scale, H_q, H_kv, keep_mask=None):
-    """SDPA forward via PyTorch Math backend (half->FP32->half).
-
-    keep_mask is an optional boolean [S_q, S_kv] (True = attend); applied as an
-    additive mask so causal/window compose uniformly with GQA.
-    """
-    attn_mask = _additive_mask(keep_mask) if keep_mask is not None else None
-    with sdpa_kernel(SDPBackend.MATH):
-        O = F.scaled_dot_product_attention(
-            Q,
-            K,
-            V,
-            attn_mask=attn_mask,
-            scale=scale,
-            enable_gqa=(H_q != H_kv),
-        )
-    return O
-
-
-def compute_lse(Q, K, scale, H_q, H_kv, keep_mask=None):
-    """Compute Log-Sum-Exp reference: logsumexp(Q @ K^T * scale, dim=-1).
-
-    Returns shape [B, H_q, S_q, 1] in FP32. For fully-masked rows the LSE is
-    -inf (log of zero), matching the CPU reference semantics.
-    """
-    Q_f = Q.float()
-    K_f = K.float()
-
-    if H_q != H_kv:
-        gqa_ratio = H_q // H_kv
-        K_f = K_f.repeat_interleave(gqa_ratio, dim=1)
-
-    scores = torch.matmul(Q_f, K_f.transpose(-2, -1)) * scale
-    if keep_mask is not None:
-        scores = scores + _additive_mask(keep_mask)
-    lse = torch.logsumexp(scores, dim=-1, keepdim=True)  # [B, H_q, S_q, 1]
-    return lse
-
-
 def quantize_fp8_per_tensor(t):
     """Quantize a float tensor to FP8_E4M3 with a single per-tensor descale.
 
@@ -285,16 +175,6 @@ def quantize_fp8_per_tensor(t):
     fp8 = quantized.to(FP8_TORCH_DTYPE)
     dequant = fp8.float() * scale
     return fp8, scale.reshape(1), dequant
-
-
-def save_tensor_bin(tensor, path):
-    t = tensor.contiguous().cpu()
-    if t.dtype in (torch.bfloat16, torch.float16, FP8_TORCH_DTYPE):
-        raw = t.view(torch.uint8).numpy().tobytes()
-    else:
-        raw = t.numpy().tobytes()
-    with open(path, "wb") as f:
-        f.write(raw)
 
 
 def build_graph_json(
@@ -481,15 +361,10 @@ def build_graph_json(
 def _get_generator_sha256():
     """SHA-256 of this script's contents — git-independent version marker.
 
-    It names the exact script bytes that emitted a bundle, so any edit here --
-    logic, metadata schema, even a comment -- makes the value recorded in already
-    checked-in .meta.json files stale. That is the intended behaviour: those files
-    record the generator that produced *their* tensors, so they are never rewritten
-    to match a later revision of this script.
+    See sdpa_common.script_sha256 for why checked-in bundles keep the value of
+    the script revision that produced their tensors.
     """
-    script_path = os.path.abspath(__file__)
-    with open(script_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    return script_sha256(os.path.abspath(__file__))
 
 
 def build_meta_json(config, pytorch_version):

@@ -1,0 +1,42 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_bwd_golden.py",
+    "generator_version": "1.1.0",
+    "generator_sha256": "010e9ae84fbd929c8ac7ea11a770f8050bb0a0e4a7e6d07bc5e6961d7c4f761e",
+    "generated_at": "2026-10-20T14:57:00Z",
+    "reference_source": "PyTorch 2.14.1+cu130",
+    "reference_backend": "pytorch_explicit_fp32_backward",
+    "reference_strategy": "matched_precision",
+    "rocm_version": "",
+    "direction": "backward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "intermediate_rounding": "none",
+    "config": {
+        "batch": 1,
+        "num_heads_q": 1,
+        "num_heads_kv": 1,
+        "seq_q": 256,
+        "seq_kv": 256,
+        "head_dim_qk": 128,
+        "head_dim_v": 128,
+        "dtype": "fp16",
+        "layout": "bhsd",
+        "scale": 0.08838834764831843,
+        "left_bound": null,
+        "right_bound": 0,
+        "diagonal_alignment": "bottom_right",
+        "additive_mask": false
+    },
+    "generation_precision": "matched-precision: FP16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+    "forward_source": {
+        "method": "pytorch_math_backend",
+        "version": "2.14.1+cu130",
+        "generated_at": "2026-10-20T14:57:00Z",
+        "bundle": "../../hd128_causal_batch_fwd_pair/Small/Small.json"
+    }
+}
