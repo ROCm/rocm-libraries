@@ -50,6 +50,16 @@ class LayoutTests(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 setattr(layout, attribute, value)
 
+    def test_value_hashing(self):
+        left = hn.Layout(hn.Shape([2, 3]), [5, -1], 2)
+        equal = hn.Layout(hn.Shape([2, 3]), [5, -1], 2)
+        different = hn.Layout(hn.Shape([2, 3]), [5, -1], 3)
+        expected = hash(((2, 3), (5, -1), 2))
+        self.assertEqual(hash(left), expected)
+        self.assertEqual(hash(equal), expected)
+        self.assertEqual(len({left, equal, different}), 2)
+        self.assertEqual({left: "value"}[equal], "value")
+
     def test_contiguous_orders_match_numpy(self):
         factories = (
             ("C", hn.Layout.contiguous_last_dimension_fastest),
@@ -129,6 +139,25 @@ class LayoutTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 empty.element_offset([0] * len(dimensions))
 
+    def test_coordinates_are_validated_before_arithmetic(self):
+        for strides, offset, point in (
+            ([PTRDIFF_MAX, 1], 0, [2, 3]),
+            ([1, 1], PTRDIFF_MAX, [1, 3]),
+        ):
+            layout = hn.Layout(hn.Shape([3, 3]), strides, offset)
+            with self.assertRaisesRegex(
+                RuntimeError, r"coordinate 3 in dimension 1 is outside \[0, 3\)"
+            ):
+                layout.element_offset(point)
+        for dimensions in ([SIZE_MAX, 2, 0], [3, 0]):
+            layout = hn.Layout(hn.Shape(dimensions), [PTRDIFF_MAX] * len(dimensions))
+            point = [d - 1 if d else 0 for d in dimensions]
+            axis = dimensions.index(0)
+            with self.assertRaisesRegex(
+                RuntimeError, f"coordinate 0 in dimension {axis} is outside"
+            ):
+                layout.element_offset(point)
+
     def test_offset_arithmetic_boundaries(self):
         for stride, offset, index in (
             (PTRDIFF_MAX, PTRDIFF_MIN, 1),
@@ -200,6 +229,10 @@ class LayoutTests(unittest.TestCase):
         for offset in (PTRDIFF_MIN - 1, PTRDIFF_MAX + 1, 1.5):
             with self.assertRaises(TypeError):
                 hn.Layout(hn.Shape([2]), [1], offset)
+        layout = hn.Layout(hn.Shape([2]), [1])
+        for axis in (-1, -(1 << 63), SIZE_MAX + 1, 1.5, slice(None)):
+            with self.assertRaises(TypeError):
+                layout.stride(axis)
         for point in ([-1], [SIZE_MAX + 1], [1.5], 3):
             with self.assertRaises(TypeError):
                 hn.Layout(hn.Shape([2]), [1]).element_offset(point)
