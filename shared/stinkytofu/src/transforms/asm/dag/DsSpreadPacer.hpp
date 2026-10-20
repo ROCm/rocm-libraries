@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <climits>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -15,7 +16,8 @@ namespace stinkytofu {
 //
 // A batch is `batch` WMMAs, counted from the stage's own start. A ds_load belongs to a stage: it
 // can not start before the barrier it reads behind (`start`, a WMMA index) and must be done
-// `drainWindows` WMMAs before the barrier it feeds (`end`, INT_MAX = the region end). The loads of
+// `drainWindows` WMMAs before the barrier it feeds (`end`; INT_MAX = the region end, which needs no
+// drain because the loop returns to its start). The loads of
 // a stage are spread evenly over the stage's batches: X = ceil(loads / batches). A sparse stage
 // gets a small X, so its loads leave room for stalls; a dense one an X above what one batch holds
 // at the LDS rate (the LDS credits then throttle it). A batch that began behind the stage's even
@@ -40,7 +42,7 @@ class DsSpreadPacer {
     }
 
     // loads: the region's ds_loads. wmmaTotal: the region's WMMAs. drainWindows: WMMAs kept free
-    // in front of a barrier (and the region end) for the last load feeding it to return.
+    // in front of a barrier (not the region end) for the last load feeding it to return.
     void plan(const std::vector<Load>& loads, int wmmaTotal, int batch, int catchUp,
               int drainWindows) {
         reset();
@@ -52,8 +54,10 @@ class DsSpreadPacer {
         std::map<std::pair<int, int>, int> index;
         for (const Load& l : loads) {
             const int start = std::clamp(l.start, 0, wmmaTotal);
-            const int end = std::clamp(std::min(l.end, wmmaTotal) - std::max(0, drainWindows),
-                                       start, wmmaTotal);
+            // Only a barrier needs the drain: the region end loops back to the start, so the last
+            // load of the region has nothing to be done before.
+            const int drain = l.end == INT_MAX ? 0 : std::max(0, drainWindows);
+            const int end = std::clamp(std::min(l.end, wmmaTotal) - drain, start, wmmaTotal);
             auto [it, fresh] = index.try_emplace({start, end}, static_cast<int>(stages_.size()));
             if (fresh) {
                 Stage st;
