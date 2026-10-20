@@ -558,7 +558,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
 
     def _check(self, shape: _Shape, dtype: str, epilogue: str, gm: int) -> None:
         ok, why = _run_one(GPU_ARCH, shape, dtype, "mem", epilogue, group_merge=gm)
-        _assert_case_ran(self, ok, f"{shape.id} {dtype} {epilogue} gm={gm}: {why}")
+        _assert_case_ran(self, ok, why)
 
     def test_merged_matches_reference(self):
         ran = 0
@@ -598,7 +598,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                     group_merge=gm,
                     unroll_k=True,
                 )
-                _assert_case_ran(self, ok, f"{shape.id} unroll_k gm={gm}: {why}")
+                _assert_case_ran(self, ok, why)
 
     def test_merged_direct_epilogue(self):
         # Every case above stores through cshuffle, because merged kpg derives
@@ -618,7 +618,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                         "default",
                         group_merge=gm,
                     )
-                    _assert_case_ran(self, ok, f"{shape.id} default gm={gm}: {why}")
+                    _assert_case_ran(self, ok, why)
 
     def test_merged_wavelet(self):
         # The wavelet load waves fetch B through their own loader; it must
@@ -639,9 +639,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                             epilogue,
                             group_merge=gm,
                         )
-                        _assert_case_ran(
-                            self, ok, f"{shape.id} wavelet/{epilogue} gm={gm}: {why}"
-                        )
+                        _assert_case_ran(self, ok, why)
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason())

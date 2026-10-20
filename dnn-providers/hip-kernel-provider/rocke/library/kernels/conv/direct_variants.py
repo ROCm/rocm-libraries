@@ -86,6 +86,11 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     from kernels.common import conv_direct_nongrouped as dn
 
     if variant in DIRECT_WAVE_PARAMETRIC:
+        if "wave_size" in knobs and knobs["wave_size"] != wave_size:
+            raise ValueError(
+                f"knob wave_size {knobs['wave_size']!r} conflicts with wave_size "
+                f"{wave_size!r}"
+            )
         knobs = dict(knobs, wave_size=wave_size)
 
     if variant == "direct_grouped":
@@ -306,6 +311,29 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
     }
     return builders[variant](spec, arch=arch)
+
+
+def direct_entry_wave_reason(
+    variant: str, identity_wave_size: int, meta: dict
+) -> str | None:
+    """Why a cached binary of ``variant`` cannot launch at its identity's wave
+    size, or ``None`` when it can.
+
+    The launch geometry of a :data:`DIRECT_WAVE_PARAMETRIC` kernel follows the
+    spec's ``wave_size`` (block size, channels per block), so it has to be the
+    one the binary was built with. The build records it as ``spec_wave_size``;
+    an entry without it predates the record and was built at the wave64 spec
+    default, whatever wave size its identity says.
+    """
+    if variant not in DIRECT_WAVE_PARAMETRIC:
+        return None
+    built = meta.get("spec_wave_size", 64)
+    if built != identity_wave_size:
+        return (
+            f"cache entry was built at wave_size {built}, its identity says "
+            f"{identity_wave_size} (rebuild the cache with --compile-all)"
+        )
+    return None
 
 
 def direct_spec_for_problem(

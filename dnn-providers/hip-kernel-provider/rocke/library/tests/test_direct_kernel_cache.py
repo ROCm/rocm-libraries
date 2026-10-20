@@ -693,11 +693,54 @@ def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_job
         assert spec.wave_size == 32, job.identity.label()
 
 
+def _wave32_cache(tmp_path, jobs, spec_wave_size):
+    """The wave32 jobs with placeholder binaries. ``spec_wave_size`` is the
+    wave size the build recorded (``None``: an entry that predates the record)."""
+    c = KernelCache(tmp_path, _WAVE32_ARCH)
+    for job in jobs:
+        meta = {"kernel_name": job.identity.label()}
+        if spec_wave_size is not None:
+            meta["spec_wave_size"] = spec_wave_size
+        c.put(job.identity, b"placeholder", meta)
+    return c
+
+
+def test_wave32_build_records_its_wave_size(wave32_jobs):
+    """The build records the wave size its binary was built at, which is what
+    the run side checks before deriving a launch geometry from the identity."""
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
+
+    job = wave32_jobs[0]
+    _, meta = direct_kernel_for_job(job, _WAVE32_ARCH, dks.DIRECT_DTYPE)
+    assert meta == {"spec_wave_size": 32}
+
+
+def test_legacy_wave32_entries_are_not_launched(tmp_path, wave32_jobs):
+    """A gfx1250 entry built before the wave size was recorded holds a binary
+    built at the wave64 spec default under a wave32 identity: launching it with
+    the identity's geometry would leave half of every channel tile unwritten,
+    so it is rejected with a rebuild hint rather than offered."""
+    c = _wave32_cache(tmp_path, wave32_jobs, None)
+    problem = _problem(H=56, W=56, groups=192, cpg=1, kpg=1)
+    plans, rejected = dks.direct_plans(c, problem, "fwd", _WAVE32_ARCH)
+    assert plans == []
+    assert rejected and all("--compile-all" in why for _, why in rejected)
+
+
+def test_conflicting_wave_size_knob_is_rejected():
+    problem = _problem(groups=64, cpg=1, kpg=1)
+    knobs = dict(block_w=8, block_h=2, block_waves=1, unroll_rows=False)
+    with pytest.raises(ValueError, match="conflicts"):
+        dks.make_spec("direct_depthwise_tiled", problem, dict(knobs, wave_size=0), 32)
+    spec = dks.make_spec(
+        "direct_depthwise_tiled", problem, dict(knobs, wave_size=32), 32
+    )
+    assert spec.wave_size == 32
+
+
 @pytest.mark.parametrize("groups", [9, 192])
 def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
-    c = KernelCache(tmp_path, _WAVE32_ARCH)
-    for job in wave32_jobs:
-        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
+    c = _wave32_cache(tmp_path, wave32_jobs, 32)
     problem = _problem(H=56, W=56, groups=groups, cpg=1, kpg=1)
     plans, _ = dks.direct_plans(c, problem, "fwd", _WAVE32_ARCH)
     assert plans

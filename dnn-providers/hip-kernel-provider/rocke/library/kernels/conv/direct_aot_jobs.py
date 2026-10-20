@@ -22,6 +22,7 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
+    DIRECT_WAVE_PARAMETRIC,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
     make_direct_spec as make_spec,
@@ -793,7 +794,13 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
-    return _build_kernel(variant, spec, arch), {}
+    # The wave size the binary is built at, which the run side checks against
+    # the identity before it derives a launch geometry from it
+    # (direct_entry_wave_reason).
+    meta = (
+        {"spec_wave_size": spec.wave_size} if variant in DIRECT_WAVE_PARAMETRIC else {}
+    )
+    return _build_kernel(variant, spec, arch), meta
 
 
 def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
