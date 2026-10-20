@@ -55,6 +55,115 @@ inline size_t clampWorkspaceSize(const char* func, size_t workspaceBytes)
     return rocblaslt_max_workspace_bytes;
 }
 
+inline bool isW4A16ScaleFormat(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// Scale type named by a w4a16 mode, or HIPBLASLT_DATATYPE_INVALID.
+inline hipDataType w4a16ScaleType(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+        return HIP_R_16BF;
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return HIP_R_16F;
+    default:
+        return HIPBLASLT_DATATYPE_INVALID;
+    }
+}
+
+/// w4a16 checks shared by rocblaslt_matmul_valid_args and the ext setProblem paths.
+/// Returns rocblaslt_status_continue if not w4a16 or valid.
+inline rocblaslt_status
+    validateW4A16Args(hipDataType                                typeA,
+                      hipDataType                                typeB,
+                      RocblasltContractionProblem::ScalingFormat scaleAType,
+                      const void*                                scaleA,
+                      int64_t                                    numBatchesA,
+                      int64_t                                    rowsA,
+                      int64_t                                    lda)
+{
+    // int4 A and a group A-scale only make sense together.
+    const bool int4A       = (typeA == HIP_R_4I);
+    const bool blockScaleA = isW4A16ScaleFormat(scaleAType);
+    if(int4A != blockScaleA)
+    {
+        log_error(__func__,
+                  "w4a16 requires HIP_R_4I matrix A together with a "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC*_{16BF,16F}[_ZP]_EXT A scale mode; "
+                  "got a_type=",
+                  static_cast<int>(typeA),
+                  " scaleAType=",
+                  rocblaslt_scaling_format_to_string(scaleAType));
+        return rocblaslt_status_invalid_value;
+    }
+    if(int4A && scaleA == nullptr)
+    {
+        log_error(__func__, "w4a16 requires a non-null A scale pointer");
+        return rocblaslt_status_invalid_pointer;
+    }
+    // Only scales of B's type are implemented.
+    if(int4A && w4a16ScaleType(scaleAType) != typeB)
+    {
+        log_error(__func__,
+                  "w4a16 A scale mode names scale type ",
+                  static_cast<int>(w4a16ScaleType(scaleAType)),
+                  " but matrix B is type ",
+                  static_cast<int>(typeB),
+                  "; the scale type must equal B's");
+        return rocblaslt_status_invalid_value;
+    }
+    // The scale tensor has no batch dimension.
+    if(int4A && numBatchesA > 1)
+    {
+        log_error(
+            __func__, "w4a16 does not support batch_count > 1 yet (got ", numBatchesA, ")");
+        return rocblaslt_status_not_implemented;
+    }
+    // Kernels step A rows by lda >> 3 dwords.
+    if(int4A && (lda < rowsA || lda % 8 != 0))
+    {
+        log_error(__func__,
+                  "w4a16 requires lda >= rows of A and lda % 8 == 0; lda",
+                  lda,
+                  "rows_A",
+                  rowsA);
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_continue;
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -149,6 +258,33 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
+ * Validate Kernel Argument Widths
+ * Kernels receive M, N, K, the leading dimensions and the batch strides as 32-bit
+ * values; a single batch never uses its batch stride.
+ ******************************************************************************/
+inline bool problemFitsKernelArgs(int64_t m,
+                                  int64_t n,
+                                  int64_t k,
+                                  int64_t lda,
+                                  int64_t ldb,
+                                  int64_t ldc,
+                                  int64_t ldd,
+                                  int64_t num_batches,
+                                  int64_t batch_stride_a,
+                                  int64_t batch_stride_b,
+                                  int64_t batch_stride_c,
+                                  int64_t batch_stride_d)
+{
+    constexpr int64_t max_arg = std::numeric_limits<uint32_t>::max();
+    for(int64_t value : {m, n, k, lda, ldb, ldc, ldd})
+        if(value > max_arg)
+            return false;
+    return num_batches <= 1
+           || (batch_stride_a <= max_arg && batch_stride_b <= max_arg && batch_stride_c <= max_arg
+               && batch_stride_d <= max_arg);
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -167,6 +303,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            rocblaslt_compute_type        compute_type,
                                            hipblasOperation_t            opA,
                                            hipblasOperation_t            opB,
+                                           int64_t                       lda,
+                                           int64_t                       ldb,
+                                           int64_t                       ldc,
+                                           int64_t                       ldd,
                                            int                           num_batches_a  = 1,
                                            int                           num_batches_b  = 1,
                                            int                           num_batches_c  = 1,
@@ -268,6 +408,47 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
         return rocblaslt_status_invalid_size;
     }
 
+    if(!problemFitsKernelArgs(m,
+                              n,
+                              k,
+                              lda,
+                              ldb,
+                              ldc,
+                              ldd,
+                              num_batches_a,
+                              batch_stride_a,
+                              batch_stride_b,
+                              batch_stride_c,
+                              batch_stride_d))
+    {
+        log_error(__func__,
+                  "sizes, leading dimensions and batch strides of 2^32 elements or more are not "
+                  "supported",
+                  "m",
+                  m,
+                  "n",
+                  n,
+                  "k",
+                  k,
+                  "lda",
+                  lda,
+                  "ldb",
+                  ldb,
+                  "ldc",
+                  ldc,
+                  "ldd",
+                  ldd,
+                  "stride_a",
+                  batch_stride_a,
+                  "stride_b",
+                  batch_stride_b,
+                  "stride_c",
+                  batch_stride_c,
+                  "stride_d",
+                  batch_stride_d);
+        return rocblaslt_status_not_implemented;
+    }
+
     // quick return 0 is valid in BLAS
     // Note: k==0 is not a quick return, because C must still be multiplied by
     // beta
@@ -343,7 +524,11 @@ inline rocblaslt_status
     batch_stride_e = original_stride_e > 0 ? original_stride_e : original_lde * num_cols_e;
     if(E != nullptr && ((lde < num_rows_e) || (batch_stride_e < (num_cols_e * num_rows_e))))
         status = rocblaslt_status_invalid_value;
-    if(scaleAType != RocblasltContractionProblem::ScalingFormat::None
+    const bool w4a16ScalarB
+        = isW4A16ScaleFormat(scaleAType)
+          && scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar;
+    if(!w4a16ScalarB
+       && scaleAType != RocblasltContractionProblem::ScalingFormat::None
        && scaleBType != RocblasltContractionProblem::ScalingFormat::None
        && scaleAType != scaleBType)
     {
@@ -469,6 +654,16 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         }
     }
 
+    if(auto status = validateW4A16Args(matA->type,
+                             matB->type,
+                             matmul_descr->scaleAType,
+                             matmul_descr->scaleA,
+                             num_batches_a,
+                             num_rows_a,
+                             lda);
+       status != rocblaslt_status_continue)
+        return status;
+
     auto matmul_status = validateMatmulArgs(m,
                                             n,
                                             k,
@@ -485,6 +680,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             compute_type,
                                             matmul_descr->op_A,
                                             matmul_descr->op_B,
+                                            lda,
+                                            ldb,
+                                            ldc,
+                                            ldd,
                                             num_batches_a,
                                             num_batches_b,
                                             num_batches_c,
