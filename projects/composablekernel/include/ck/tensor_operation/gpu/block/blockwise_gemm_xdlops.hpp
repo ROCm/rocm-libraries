@@ -851,7 +851,9 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                     Number<0>,
                     Number<k>,
                     index_expression::Div<index_expression::Ik, Number<A_K1>>,
-                    index_expression::Div<index_expression::Ik, Number<VectorSizeA>>,
+                    index_expression::Mod<
+                        index_expression::Div<index_expression::Ik, Number<VectorSizeA>>,
+                        Number<A_K1 / VectorSizeA>>,
                     index_expression::Mod<index_expression::Ik, Number<VectorSizeA>>>{a_thread_vec,
                                                                                       a_thread_buf};
                 auto loadB = thread_buf_to_vec_loader<
@@ -864,7 +866,9 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                     Number<0>,
                     Number<k>,
                     index_expression::Div<index_expression::Ik, Number<B_K1>>,
-                    index_expression::Div<index_expression::Ik, Number<VectorSizeB>>,
+                    index_expression::Mod<
+                        index_expression::Div<index_expression::Ik, Number<VectorSizeB>>,
+                        Number<B_K1 / VectorSizeB>>,
                     index_expression::Mod<index_expression::Ik, Number<VectorSizeB>>>{b_thread_vec,
                                                                                       b_thread_buf};
 
@@ -1015,7 +1019,9 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                     Number<0>,
                     Number<k>,
                     index_expression::Div<index_expression::Ik, Number<A_K1>>,
-                    index_expression::Div<index_expression::Ik, Number<VectorSizeA>>,
+                    index_expression::Mod<
+                        index_expression::Div<index_expression::Ik, Number<VectorSizeA>>,
+                        Number<A_K1 / VectorSizeA>>,
                     index_expression::Mod<index_expression::Ik, Number<VectorSizeA>>>{a_thread_vec,
                                                                                       a_thread_buf};
                 auto loadB = thread_buf_to_vec_loader<
@@ -1028,7 +1034,9 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                     Number<0>,
                     Number<k>,
                     index_expression::Div<index_expression::Ik, Number<B_K1>>,
-                    index_expression::Div<index_expression::Ik, Number<VectorSizeB>>,
+                    index_expression::Mod<
+                        index_expression::Div<index_expression::Ik, Number<VectorSizeB>>,
+                        Number<B_K1 / VectorSizeB>>,
                     index_expression::Mod<index_expression::Ik, Number<VectorSizeB>>>{b_thread_vec,
                                                                                       b_thread_buf};
 
