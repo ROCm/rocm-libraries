@@ -118,15 +118,15 @@ namespace
     //  - only the strictly-lower entries (plus the diagonal) contribute.
     // ell_col_ind / ell_val are laid out exactly like rocsparse_create_ell_descr
     // expects: column-major, ELL_IND(row, slot, m, width) = slot * m + row.
-    std::vector<float> host_ellsv_lower(int64_t                      m,
-                                        int64_t                      n,
-                                        int64_t                      ell_width,
+    std::vector<float> host_ellsv_lower(int64_t                     m,
+                                        int64_t                     n,
+                                        int64_t                     ell_width,
                                         const std::vector<int32_t>& ell_col_ind,
                                         const std::vector<float>&   ell_val,
                                         const std::vector<float>&   x,
-                                        float                        alpha,
-                                        rocsparse_diag_type          diag_type,
-                                        int64_t*                     zero_pivot)
+                                        float                       alpha,
+                                        rocsparse_diag_type         diag_type,
+                                        int64_t*                    zero_pivot)
     {
         std::vector<float> y(static_cast<size_t>(m), 0.0f);
         *zero_pivot = -1;
@@ -182,13 +182,13 @@ namespace
     // triangular ELL matrix A, operation none, alpha on the host. Returns the
     // zero-pivot position reported after analysis and after compute (-1 if
     // none was reported at that stage).
-    void run_ellsv(rocsparse_handle       handle,
-                   rocsparse_spmat_descr  A,
-                   rocsparse_dnvec_descr  x,
-                   rocsparse_dnvec_descr  y,
-                   float                  alpha,
-                   int64_t*               analysis_pivot,
-                   int64_t*               solve_pivot)
+    void run_ellsv(rocsparse_handle      handle,
+                   rocsparse_spmat_descr A,
+                   rocsparse_dnvec_descr x,
+                   rocsparse_dnvec_descr y,
+                   float                 alpha,
+                   int64_t*              analysis_pivot,
+                   int64_t*              solve_pivot)
     {
         rocsparse_sptrsv_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_sptrsv_descr(&descr), rocsparse_status_success);
@@ -197,26 +197,21 @@ namespace
         const rocsparse_sptrsv_alg alg   = rocsparse_sptrsv_alg_default;
         const rocsparse_datatype   dt    = rocsparse_datatype_f32_r;
 
+        ASSERT_EQ(
+            rocsparse_sptrsv_set_input(
+                handle, descr, rocsparse_sptrsv_input_operation, &trans, sizeof(trans), nullptr),
+            rocsparse_status_success);
         ASSERT_EQ(rocsparse_sptrsv_set_input(
-                      handle, descr, rocsparse_sptrsv_input_operation, &trans, sizeof(trans), nullptr),
+                      handle, descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(
-            rocsparse_sptrsv_set_input(handle, descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr),
+            rocsparse_sptrsv_set_input(
+                handle, descr, rocsparse_sptrsv_input_scalar_datatype, &dt, sizeof(dt), nullptr),
             rocsparse_status_success);
-        ASSERT_EQ(rocsparse_sptrsv_set_input(handle,
-                                             descr,
-                                             rocsparse_sptrsv_input_scalar_datatype,
-                                             &dt,
-                                             sizeof(dt),
-                                             nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_sptrsv_set_input(handle,
-                                             descr,
-                                             rocsparse_sptrsv_input_compute_datatype,
-                                             &dt,
-                                             sizeof(dt),
-                                             nullptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_sptrsv_set_input(
+                handle, descr, rocsparse_sptrsv_input_compute_datatype, &dt, sizeof(dt), nullptr),
+            rocsparse_status_success);
         // Mandatory: the descriptor's analysis policy defaults to an invalid
         // sentinel, so rocsparse::ellsv_analysis's ROCSPARSE_CHECKARG_ENUM on it
         // fails with rocsparse_status_invalid_value unless this is set.
@@ -230,9 +225,10 @@ namespace
                   rocsparse_status_success);
 
         size_t bs_analysis = 0;
-        ASSERT_EQ(rocsparse_sptrsv_buffer_size(
-                      handle, descr, A, x, y, rocsparse_sptrsv_stage_analysis, &bs_analysis, nullptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_sptrsv_buffer_size(
+                handle, descr, A, x, y, rocsparse_sptrsv_stage_analysis, &bs_analysis, nullptr),
+            rocsparse_status_success);
         device_vector<char> buf_a{bs_analysis ? bs_analysis : size_t(1)};
         ASSERT_TRUE(buf_a.ptr);
         ASSERT_EQ(rocsparse_sptrsv(handle,
@@ -246,9 +242,14 @@ namespace
                                    nullptr),
                   rocsparse_status_success);
 
-        int64_t          pivot        = -1;
-        rocsparse_status pivot_status = rocsparse_sptrsv_get_output(
-            handle, descr, rocsparse_sptrsv_output_zero_pivot_position, &pivot, sizeof(pivot), nullptr);
+        int64_t          pivot = -1;
+        rocsparse_status pivot_status
+            = rocsparse_sptrsv_get_output(handle,
+                                          descr,
+                                          rocsparse_sptrsv_output_zero_pivot_position,
+                                          &pivot,
+                                          sizeof(pivot),
+                                          nullptr);
         ASSERT_TRUE(pivot_status == rocsparse_status_success
                     || pivot_status == rocsparse_status_zero_pivot);
         *analysis_pivot = pivot;
@@ -281,8 +282,12 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         pivot        = -1;
-        pivot_status = rocsparse_sptrsv_get_output(
-            handle, descr, rocsparse_sptrsv_output_zero_pivot_position, &pivot, sizeof(pivot), nullptr);
+        pivot_status = rocsparse_sptrsv_get_output(handle,
+                                                   descr,
+                                                   rocsparse_sptrsv_output_zero_pivot_position,
+                                                   &pivot,
+                                                   sizeof(pivot),
+                                                   nullptr);
         ASSERT_TRUE(pivot_status == rocsparse_status_success
                     || pivot_status == rocsparse_status_zero_pivot);
         *solve_pivot = pivot;
@@ -303,19 +308,19 @@ namespace
     // [slice_offsets[s], slice_offsets[s+1]) with depth = (end - start) /
     // sell_slice_size, slot p, local row r (0 <= r < sell_slice_size), the
     // entry lives at slice_offsets[s] + p * sell_slice_size + r.
-    std::vector<float> host_sellmv(int64_t                      m,
-                                   int64_t                      n,
-                                   int64_t                      sell_slice_size,
+    std::vector<float> host_sellmv(int64_t                     m,
+                                   int64_t                     n,
+                                   int64_t                     sell_slice_size,
                                    const std::vector<int32_t>& slice_offsets,
                                    const std::vector<int32_t>& col_ind,
                                    const std::vector<float>&   val,
                                    const std::vector<float>&   x,
-                                   float                        alpha,
-                                   float                        beta,
+                                   float                       alpha,
+                                   float                       beta,
                                    const std::vector<float>&   y_init,
-                                   rocsparse_operation          trans)
+                                   rocsparse_operation         trans)
     {
-        const int64_t       out_size = (trans == rocsparse_operation_none) ? m : n;
+        const int64_t      out_size = (trans == rocsparse_operation_none) ? m : n;
         std::vector<float> result(static_cast<size_t>(out_size));
         for(int64_t i = 0; i < out_size; ++i)
         {
@@ -380,8 +385,8 @@ namespace
     // any sell_slice_size >= 2; for sell_slice_size == 1 use
     // build_bidiagonal_sell_csr_exact instead (slice_size == 1 is dispatched
     // straight to the CSR fallback, which does not skip padded entries).
-    void build_bidiagonal_sell(int64_t                m,
-                               int64_t                sell_slice_size,
+    void build_bidiagonal_sell(int64_t               m,
+                               int64_t               sell_slice_size,
                                std::vector<int32_t>& slice_offsets,
                                std::vector<int32_t>& col_ind,
                                std::vector<float>&   val)
@@ -392,7 +397,8 @@ namespace
         slice_offsets.assign(static_cast<size_t>(nslices + 1), 0);
         for(int64_t s = 0; s <= nslices; ++s)
         {
-            slice_offsets[static_cast<size_t>(s)] = static_cast<int32_t>(s * sell_slice_size * depth);
+            slice_offsets[static_cast<size_t>(s)]
+                = static_cast<int32_t>(s * sell_slice_size * depth);
         }
 
         const int64_t colval_size = nslices * sell_slice_size * depth;
@@ -410,14 +416,14 @@ namespace
                     continue;
                 }
                 // slot 0: main diagonal.
-                const int64_t idx0            = start + 0 * sell_slice_size + r;
+                const int64_t idx0                 = start + 0 * sell_slice_size + r;
                 col_ind[static_cast<size_t>(idx0)] = static_cast<int32_t>(row);
                 val[static_cast<size_t>(idx0)]     = static_cast<float>(row + 1);
 
                 // slot 1: sub-diagonal (none for row 0).
                 if(row >= 1)
                 {
-                    const int64_t idx1            = start + 1 * sell_slice_size + r;
+                    const int64_t idx1                 = start + 1 * sell_slice_size + r;
                     col_ind[static_cast<size_t>(idx1)] = static_cast<int32_t>(row - 1);
                     val[static_cast<size_t>(idx1)]     = static_cast<float>(row);
                 }
@@ -428,7 +434,7 @@ namespace
     // Same bidiagonal pattern, but as an exact CSR structure (slice_offsets
     // behaves as a CSR row pointer, no padding) for the sell_slice_size == 1
     // dispatch, which routes straight through rocsparse::csrmv_template.
-    void build_bidiagonal_sell_csr_exact(int64_t                m,
+    void build_bidiagonal_sell_csr_exact(int64_t               m,
                                          std::vector<int32_t>& slice_offsets,
                                          std::vector<int32_t>& col_ind,
                                          std::vector<float>&   val)
@@ -466,8 +472,8 @@ namespace
                           const std::vector<float>&   val,
                           int64_t                     sell_slice_size,
                           const std::vector<float>&   hx,
-                          float                        alpha,
-                          float                        beta,
+                          float                       alpha,
+                          float                       beta,
                           const std::vector<float>&   hy_init,
                           const std::vector<float>&   expected)
     {
@@ -519,16 +525,14 @@ namespace
         ASSERT_EQ(rocsparse_spmv_set_input(
                       handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spmv_set_input(
-                      handle, spmv_descr, rocsparse_spmv_input_operation, &trans, sizeof(trans), nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spmv_set_input(handle,
-                                           spmv_descr,
-                                           rocsparse_spmv_input_scalar_datatype,
-                                           &dt,
-                                           sizeof(dt),
-                                           nullptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spmv_set_input(
+                handle, spmv_descr, rocsparse_spmv_input_operation, &trans, sizeof(trans), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spmv_set_input(
+                handle, spmv_descr, rocsparse_spmv_input_scalar_datatype, &dt, sizeof(dt), nullptr),
+            rocsparse_status_success);
         ASSERT_EQ(rocsparse_spmv_set_input(handle,
                                            spmv_descr,
                                            rocsparse_spmv_input_compute_datatype,
@@ -624,37 +628,49 @@ TEST_F(EllSv, lower_non_unit)
     ASSERT_TRUE(d_col.ptr && d_val.ptr);
 
     rocsparse_spmat_descr A = nullptr;
-    ASSERT_EQ(rocsparse_create_ell_descr(
-                  &A, m, n, d_col.ptr, d_val.ptr, width, rocsparse_indextype_i32, rocsparse_index_base_zero, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_ell_descr(&A,
+                                         m,
+                                         n,
+                                         d_col.ptr,
+                                         d_val.ptr,
+                                         width,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     const rocsparse_fill_mode   fill_mode = rocsparse_fill_mode_lower;
     const rocsparse_diag_type   diag_type = rocsparse_diag_type_non_unit;
     const rocsparse_matrix_type mat_type  = rocsparse_matrix_type_general;
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mat_type, sizeof(mat_type)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mat_type, sizeof(mat_type)),
+        rocsparse_status_success);
 
     std::vector<float> hx{4, 12, 40};
-    const float         alpha = 1.0f;
+    const float        alpha = 1.0f;
 
     device_vector<float> x{hx};
     device_vector<float> y{std::vector<float>(static_cast<size_t>(m), 0.0f)};
     ASSERT_TRUE(x.ptr && y.ptr);
 
     rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
     run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot);
     EXPECT_EQ(analysis_pivot, -1);
     EXPECT_EQ(solve_pivot, -1);
 
-    int64_t             ref_pivot = -1;
+    int64_t            ref_pivot = -1;
     std::vector<float> expected
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, -1);
@@ -672,7 +688,7 @@ TEST_F(EllSv, lower_non_unit)
 //   [    0.25  1]   [y2]   [8]
 TEST_F(EllSv, lower_unit_diagonal)
 {
-    const int64_t m = 3, n = 3, width = 2;
+    const int64_t        m = 3, n = 3, width = 2;
     std::vector<int32_t> col_ind{-1, 0, 1, 0, 1, 2};
     std::vector<float>   val{0, 0.5f, 0.25f, 999, 999, 999};
 
@@ -681,37 +697,49 @@ TEST_F(EllSv, lower_unit_diagonal)
     ASSERT_TRUE(d_col.ptr && d_val.ptr);
 
     rocsparse_spmat_descr A = nullptr;
-    ASSERT_EQ(rocsparse_create_ell_descr(
-                  &A, m, n, d_col.ptr, d_val.ptr, width, rocsparse_indextype_i32, rocsparse_index_base_zero, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_ell_descr(&A,
+                                         m,
+                                         n,
+                                         d_col.ptr,
+                                         d_val.ptr,
+                                         width,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     const rocsparse_fill_mode   fill_mode = rocsparse_fill_mode_lower;
     const rocsparse_diag_type   diag_type = rocsparse_diag_type_unit;
     const rocsparse_matrix_type mat_type  = rocsparse_matrix_type_general;
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mat_type, sizeof(mat_type)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mat_type, sizeof(mat_type)),
+        rocsparse_status_success);
 
     std::vector<float> hx{2, 4, 8};
-    const float         alpha = 1.0f;
+    const float        alpha = 1.0f;
 
     device_vector<float> x{hx};
     device_vector<float> y{std::vector<float>(static_cast<size_t>(m), 0.0f)};
     ASSERT_TRUE(x.ptr && y.ptr);
 
     rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
     run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot);
     EXPECT_EQ(analysis_pivot, -1);
     EXPECT_EQ(solve_pivot, -1);
 
-    int64_t             ref_pivot = -1;
+    int64_t            ref_pivot = -1;
     std::vector<float> expected
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, -1);
@@ -734,7 +762,7 @@ TEST_F(EllSv, lower_unit_diagonal)
 //   [  3  4  ]   [y2]   [20]
 TEST_F(EllSv, zero_pivot)
 {
-    const int64_t m = 3, n = 3, width = 2;
+    const int64_t        m = 3, n = 3, width = 2;
     std::vector<int32_t> col_ind{0, 0, 1, -1, 1, 2};
     std::vector<float>   val{2, 1, 3, 0, 0, 4};
 
@@ -743,30 +771,42 @@ TEST_F(EllSv, zero_pivot)
     ASSERT_TRUE(d_col.ptr && d_val.ptr);
 
     rocsparse_spmat_descr A = nullptr;
-    ASSERT_EQ(rocsparse_create_ell_descr(
-                  &A, m, n, d_col.ptr, d_val.ptr, width, rocsparse_indextype_i32, rocsparse_index_base_zero, rocsparse_datatype_f32_r),
+    ASSERT_EQ(rocsparse_create_ell_descr(&A,
+                                         m,
+                                         n,
+                                         d_col.ptr,
+                                         d_val.ptr,
+                                         width,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     const rocsparse_fill_mode   fill_mode = rocsparse_fill_mode_lower;
     const rocsparse_diag_type   diag_type = rocsparse_diag_type_non_unit;
     const rocsparse_matrix_type mat_type  = rocsparse_matrix_type_general;
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mat_type, sizeof(mat_type)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mat_type, sizeof(mat_type)),
+        rocsparse_status_success);
 
     std::vector<float> hx{4, 10, 20};
-    const float         alpha = 1.0f;
+    const float        alpha = 1.0f;
 
     device_vector<float> x{hx};
     device_vector<float> y{std::vector<float>(static_cast<size_t>(m), 0.0f)};
     ASSERT_TRUE(x.ptr && y.ptr);
 
     rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dx, n, x.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&dy, m, y.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
     run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot);
@@ -775,7 +815,7 @@ TEST_F(EllSv, zero_pivot)
     EXPECT_EQ(analysis_pivot, -1);
     EXPECT_EQ(solve_pivot, 1);
 
-    int64_t             ref_pivot = -1;
+    int64_t            ref_pivot = -1;
     std::vector<float> expected
         = host_ellsv_lower(m, n, width, col_ind, val, hx, alpha, diag_type, &ref_pivot);
     EXPECT_EQ(ref_pivot, 1);
@@ -791,9 +831,10 @@ TEST_F(EllSv, zero_pivot)
 
 TEST_F(EllSv, skipped_ell_trsv_not_built)
 {
-    GTEST_SKIP() << "ELL triangular solve support not built "
-                    "(BUILD_WITH_ELL_TRSV=OFF / ROCSPARSE_WITH_ELL_TRSV not defined); "
-                    "rocsparse_sptrsv on rocsparse_format_ell returns rocsparse_status_not_implemented.";
+    GTEST_SKIP()
+        << "ELL triangular solve support not built "
+           "(BUILD_WITH_ELL_TRSV=OFF / ROCSPARSE_WITH_ELL_TRSV not defined); "
+           "rocsparse_sptrsv on rocsparse_format_ell returns rocsparse_status_not_implemented.";
 }
 
 #endif // ROCSPARSE_WITH_ELL_TRSV
@@ -810,20 +851,31 @@ class SellMv : public HandleTest
 // slice = 32: a single, exactly-full slice.
 TEST_F(SellMv, none_small_slice)
 {
-    const int64_t m = 32, n = 32, slice = 32;
+    const int64_t        m = 32, n = 32, slice = 32;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
     build_bidiagonal_sell(m, slice, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
     std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
-    const float          alpha = 2.0f, beta = 0.0f;
+    const float        alpha = 2.0f, beta = 0.0f;
 
-    std::vector<float> expected
-        = host_sellmv(m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
+    std::vector<float> expected = host_sellmv(
+        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(
-        handle, rocsparse_operation_none, m, n, offs, cols, vals, slice, hx, alpha, beta, hy0, expected);
+    run_v2_spmv_sell(handle,
+                     rocsparse_operation_none,
+                     m,
+                     n,
+                     offs,
+                     cols,
+                     vals,
+                     slice,
+                     hx,
+                     alpha,
+                     beta,
+                     hy0,
+                     expected);
 }
 
 // Transpose, slice size 32 (small-slice kernel sellmvt_device), m = 40 is not
@@ -834,17 +886,17 @@ TEST_F(SellMv, none_small_slice)
 // padding threads' loop range is empty, so the numeric result is unaffected.
 TEST_F(SellMv, transpose_small_slice_partial_last_slice)
 {
-    const int64_t m = 40, n = 40, slice = 32;
+    const int64_t        m = 40, n = 40, slice = 32;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
     build_bidiagonal_sell(m, slice, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(m);
     std::vector<float> hy0(static_cast<size_t>(n), 0.0f);
-    const float          alpha = 1.0f, beta = 0.0f;
+    const float        alpha = 1.0f, beta = 0.0f;
 
-    std::vector<float> expected
-        = host_sellmv(m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
+    std::vector<float> expected = host_sellmv(
+        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
 
     run_v2_spmv_sell(handle,
                      rocsparse_operation_transpose,
@@ -868,37 +920,48 @@ TEST_F(SellMv, transpose_small_slice_partial_last_slice)
 // reaches this kernel, one exactly-full slice.
 TEST_F(SellMv, none_large_slice)
 {
-    const int64_t m = 256, n = 256, slice = 256;
+    const int64_t        m = 256, n = 256, slice = 256;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
     build_bidiagonal_sell(m, slice, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
     std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
-    const float          alpha = 1.0f, beta = 0.0f;
+    const float        alpha = 1.0f, beta = 0.0f;
 
-    std::vector<float> expected
-        = host_sellmv(m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
+    std::vector<float> expected = host_sellmv(
+        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(
-        handle, rocsparse_operation_none, m, n, offs, cols, vals, slice, hx, alpha, beta, hy0, expected);
+    run_v2_spmv_sell(handle,
+                     rocsparse_operation_none,
+                     m,
+                     n,
+                     offs,
+                     cols,
+                     vals,
+                     slice,
+                     hx,
+                     alpha,
+                     beta,
+                     hy0,
+                     expected);
 }
 
 // Transpose, slice size 256 (large-slice kernel sellmvt_large_slice_device).
 // Same sell_slice_size <= rows constraint as none_large_slice above.
 TEST_F(SellMv, transpose_large_slice)
 {
-    const int64_t m = 256, n = 256, slice = 256;
+    const int64_t        m = 256, n = 256, slice = 256;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
     build_bidiagonal_sell(m, slice, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(m);
     std::vector<float> hy0(static_cast<size_t>(n), 0.0f);
-    const float          alpha = 1.0f, beta = 0.0f;
+    const float        alpha = 1.0f, beta = 0.0f;
 
-    std::vector<float> expected
-        = host_sellmv(m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
+    std::vector<float> expected = host_sellmv(
+        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
 
     run_v2_spmv_sell(handle,
                      rocsparse_operation_transpose,
@@ -920,20 +983,31 @@ TEST_F(SellMv, transpose_large_slice)
 // data), bypassing sellmv_device.h entirely.
 TEST_F(SellMv, slice_size_one_csr_fallback)
 {
-    const int64_t m = 5, n = 5, slice = 1;
+    const int64_t        m = 5, n = 5, slice = 1;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
     build_bidiagonal_sell_csr_exact(m, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
     std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
-    const float          alpha = 1.0f, beta = 0.0f;
+    const float        alpha = 1.0f, beta = 0.0f;
 
-    std::vector<float> expected
-        = host_sellmv(m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
+    std::vector<float> expected = host_sellmv(
+        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(
-        handle, rocsparse_operation_none, m, n, offs, cols, vals, slice, hx, alpha, beta, hy0, expected);
+    run_v2_spmv_sell(handle,
+                     rocsparse_operation_none,
+                     m,
+                     n,
+                     offs,
+                     cols,
+                     vals,
+                     slice,
+                     hx,
+                     alpha,
+                     beta,
+                     hy0,
+                     expected);
 }
 
 // beta != 0, so y is read as well as written and the kernels take their
@@ -942,7 +1016,7 @@ TEST_F(SellMv, slice_size_one_csr_fallback)
 // the float arithmetic is exact.
 TEST_F(SellMv, none_small_slice_nonzero_beta)
 {
-    const int64_t m = 32, n = 32, slice = 32;
+    const int64_t        m = 32, n = 32, slice = 32;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
     build_bidiagonal_sell(m, slice, offs, cols, vals);
@@ -955,9 +1029,20 @@ TEST_F(SellMv, none_small_slice_nonzero_beta)
     }
     const float alpha = 2.0f, beta = 3.0f;
 
-    std::vector<float> expected
-        = host_sellmv(m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
+    std::vector<float> expected = host_sellmv(
+        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(
-        handle, rocsparse_operation_none, m, n, offs, cols, vals, slice, hx, alpha, beta, hy0, expected);
+    run_v2_spmv_sell(handle,
+                     rocsparse_operation_none,
+                     m,
+                     n,
+                     offs,
+                     cols,
+                     vals,
+                     slice,
+                     hx,
+                     alpha,
+                     beta,
+                     hy0,
+                     expected);
 }
