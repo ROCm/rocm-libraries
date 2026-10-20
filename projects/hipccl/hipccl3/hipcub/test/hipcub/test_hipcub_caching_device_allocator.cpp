@@ -51,52 +51,46 @@
     #define IS_ASAN_BUILD 0
 #endif
 
-// Borrowing upstream blocking_kernel for host-side control of kernel lifetimes.
-// This kernel does very bad things that violate the HIP programming model, but
-// is okay for the tests here. Do not use this pattern in production code.
-
-// Once launched, this kernel will block the stream until `flag` updates to non-zero.
-__global__ void block_stream(const volatile int32_t* flag)
-{
-	while (!(*flag))
-	{
-	}
-}
-
+// Host-side control of stream progress, used to keep blocks "in use" on a stream.
+// block() enqueues a stream wait on a flag in signal memory, so all later work on the
+// stream is held back until unblock() sets the flag from the host. Unlike a spinning
+// kernel, the wait occupies no GPU resources and is known to the runtime.
+// Construct instances before blocking any stream: the constructor allocates memory,
+// which may synchronize with the device.
 struct blocking_kernel
 {
 	blocking_kernel(const hipStream_t& stream)
 	  : m_stream(stream)
 	{
-		HIP_CHECK(hipHostRegister(&m_host_flag, sizeof(m_host_flag), hipHostRegisterMapped));
-		HIP_CHECK(hipHostGetDevicePointer((void**)&m_device_flag, &m_host_flag, 0));
+		// hipStreamWaitValue32 requires signal memory, which is 8 bytes.
+		HIP_CHECK(hipExtMallocWithFlags((void**)&m_flag, sizeof(uint64_t), hipMallocSignalMemory));
+		__atomic_store_n(m_flag, 0u, __ATOMIC_RELEASE);
 	}
 	~blocking_kernel()
 	{
-		HIP_CHECK(hipHostUnregister(&m_host_flag));
+		// Release the stream in case a failed assertion skipped unblock()
+		__atomic_store_n(m_flag, 1u, __ATOMIC_RELEASE);
+		HIP_CHECK(hipFree(m_flag));
 	}
+
+	blocking_kernel(const blocking_kernel&) = delete;
+	blocking_kernel& operator=(const blocking_kernel&) = delete;
 
 	void block()
 	{
 		printf("Blocking Stream %lld\n", (long long) m_stream);
-		m_host_flag = 0;
-		hipLaunchKernelGGL(
-				HIP_KERNEL_NAME(block_stream),
-				dim3(1), dim3(1), 0, m_stream,
-				m_device_flag
-			);		
+		__atomic_store_n(m_flag, 0u, __ATOMIC_RELEASE);
+		HIP_CHECK(hipStreamWaitValue32(m_stream, m_flag, 1, hipStreamWaitValueEq));
 	}
 
 	void unblock()
 	{
-		volatile int32_t& flag = m_host_flag;
-		flag                              = 1;
+		__atomic_store_n(m_flag, 1u, __ATOMIC_RELEASE);
 		printf("Unblocking Stream %lld\n", (long long) m_stream);
 	}
 
 private:
-	int32_t m_host_flag{};
-	int32_t* m_device_flag{};
+	uint32_t* m_flag{};
 	hipStream_t m_stream{0};
 };
 
@@ -129,6 +123,15 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     HIP_CHECK(hipGetDeviceCount(&num_gpus));
     HIP_CHECK(hipGetDevice(&initial_gpu));
 
+    // blocking_kernel relies on hipStreamWaitValue32
+    int can_use_stream_wait_value = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&can_use_stream_wait_value,
+                                    hipDeviceAttributeCanUseStreamWaitValue,
+                                    initial_gpu));
+    if (!can_use_stream_wait_value) {
+        GTEST_SKIP() << "Skipping test: device does not support hipStreamWaitValue32";
+    }
+
     // Create default allocator (caches up to 6MB in device allocations per GPU)
     hipcub::CachingDeviceAllocator allocator;
     allocator.debug = true;
@@ -139,15 +142,19 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
 
     // Create a new stream
     hipStream_t other_stream;
-    HIP_CHECK(hipStreamCreate(&other_stream));
+    HIP_CHECK(hipStreamCreateWithFlags(&other_stream, hipStreamNonBlocking));
+
+    // Create the stream blockers up front, while no stream is blocked
+    blocking_kernel block_0_a(0);
+    blocking_kernel block_0_b(0);
+    blocking_kernel block_other(other_stream);
 
     // Allocate 999 bytes on the current gpu in stream0
     char *d_999B_stream0_a;
     char *d_999B_stream0_b;
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_a, 999, 0));
 
-	// Run a kernel on stream 0
-	blocking_kernel block_0_a(0);
+	// Block stream 0
 	block_0_a.block();
     HIP_CHECK(hipGetLastError());
 
@@ -163,9 +170,8 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     // Check that that we have no cached block on the initial GPU
     ASSERT_EQ(allocator.cached_blocks.size(), 0u);
 
-    // Launch another kernel on stream 0
-	blocking_kernel block_0_b(0);
-	block_0_b.block();	
+    // Block stream 0 again
+	block_0_b.block();
     HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream0_b
@@ -182,9 +188,8 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     // Check that that we have one cached block on the initial GPU
     ASSERT_EQ(allocator.cached_blocks.size(), 1u);
 
-    // Now run a kernel in other_stream
-	blocking_kernel block_other(other_stream);
-	block_other.block();	
+    // Now block other_stream
+	block_other.block();
     HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream_other
