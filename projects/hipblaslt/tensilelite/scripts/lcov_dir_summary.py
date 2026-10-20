@@ -11,6 +11,8 @@ Usage:
     python scripts/lcov_dir_summary.py --root . coverage_cpp/combined.lcov \
         coverage_cpp/advisory_with_headers.lcov
 
+Lines are counted from DA records, the same way genhtml and Codecov count them.
+
 A file's directory group is its path relative to ``--root`` up to and
 including the first ``src`` or ``include`` component (``src``,
 ``include``, ``client/src``, ``rocisa/rocisa/include``, ...). Files with
@@ -39,18 +41,30 @@ def group_for(source: Path, root: Path) -> str:
 
 
 def read_lcov(path: Path, root: Path) -> dict[str, list[int]]:
-    """Sum LF (lines found) and LH (lines hit) per directory group."""
-    totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
-    group = None
+    """Count instrumented and hit lines per directory group.
+
+    Counts DA (per-line) records rather than the LF/LH summary fields, because
+    llvm-cov's LF/LH can disagree with its DA records, and genhtml, the
+    Cobertura XML and Codecov all count DA lines. A file that appears in more
+    than one record is merged, so each line counts once.
+    """
+    line_hits: dict[Path, dict[int, int]] = defaultdict(dict)
+    source = None
     for line in path.read_text().splitlines():
         if line.startswith("SF:"):
-            group = group_for(Path(line[3:]).resolve(), root)
-        elif line.startswith("LF:") and group is not None:
-            totals[group][0] += int(line[3:])
-        elif line.startswith("LH:") and group is not None:
-            totals[group][1] += int(line[3:])
+            source = Path(line[3:]).resolve()
+        elif line.startswith("DA:") and source is not None:
+            number, count = (int(field) for field in line[3:].split(",")[:2])
+            lines = line_hits[source]
+            lines[number] = max(lines.get(number, 0), count)
         elif line == "end_of_record":
-            group = None
+            source = None
+
+    totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for source, lines in line_hits.items():
+        group = totals[group_for(source, root)]
+        group[0] += len(lines)
+        group[1] += sum(1 for count in lines.values() if count > 0)
     return totals
 
 

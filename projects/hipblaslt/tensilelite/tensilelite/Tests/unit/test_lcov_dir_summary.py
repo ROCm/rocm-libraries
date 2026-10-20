@@ -52,20 +52,36 @@ def test_file_outside_root_keeps_absolute_parent():
 
 
 def _write_lcov(path: pathlib.Path, records: list[tuple[str, int, int]]) -> None:
+    """Write one record per (source, lines, hit lines); lines 1..hit are hit."""
     lines = []
     for source, found, hit in records:
-        lines += [
-            "TN:",
-            f"SF:{source}",
-            "DA:1,1",
-            f"LF:{found}",
-            f"LH:{hit}",
-            "end_of_record",
-        ]
+        lines += ["TN:", f"SF:{source}"]
+        lines += [f"DA:{n},{3 if n <= hit else 0}" for n in range(1, found + 1)]
+        lines += [f"LF:{found}", f"LH:{hit}", "end_of_record"]
     path.write_text("\n".join(lines) + "\n")
 
 
-def test_read_lcov_sums_lf_and_lh_per_group(tmp_path):
+def test_read_lcov_counts_da_lines_not_lf_lh(tmp_path):
+    report = tmp_path / "a.lcov"
+    report.write_text(
+        f"SF:{tmp_path / 'src' / 'A.cpp'}\n"
+        "DA:10,4\nDA:11,0\nDA:12,1\n"
+        "LF:7\nLH:5\nend_of_record\n"
+    )
+    assert dict(summary.read_lcov(report, tmp_path.resolve())) == {"src": [3, 2]}
+
+
+def test_read_lcov_merges_records_for_the_same_file(tmp_path):
+    source = tmp_path / "src" / "A.cpp"
+    report = tmp_path / "a.lcov"
+    report.write_text(
+        f"SF:{source}\nDA:1,0\nDA:2,5\nend_of_record\n"
+        f"SF:{source}\nDA:1,2\nDA:3,0\nend_of_record\n"
+    )
+    assert dict(summary.read_lcov(report, tmp_path.resolve())) == {"src": [3, 2]}
+
+
+def test_read_lcov_sums_lines_per_group(tmp_path):
     report = tmp_path / "a.lcov"
     _write_lcov(
         report,
