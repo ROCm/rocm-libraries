@@ -100,13 +100,16 @@ In all cases the tool:
 
 - prints the case id and the GTest name that the harness registers
   (`gtest name: quick_Relu_Nchw.2_3_4_5_fp32_nchw`);
-- sets `generator` to `import_graph.py`, unless you pass `--meta generator=…`;
+- sets `generator` to `import_graph.py`, unless the capture sidecar or
+  `--meta generator=…` sets one;
 - warns if there is no `reference_source`;
 - creates an empty `support.json` in the sweep directory if it has none. It
   never changes an existing `support.json`.
 
-Other flags: `--seed`, `--meta key=value` (repeatable; `inputs` takes JSON),
-`--dry-run`.
+Other flags: `--seed`, `--meta key=value` (repeatable), `--dry-run`. `seed`,
+`format_version`, `minimum_vram_mb` and `inputs` parse as JSON, so
+`--meta seed=42` is the number 42; NaN and Infinity are refused. Any other key
+is stored as the string given.
 
 Afterwards, review `git status` and `git diff`. Expect one new case, or one new
 directory with three files.
@@ -124,18 +127,33 @@ build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
 find /tmp/captured -name '*.json' ! -name '*.meta.json' | while read -r graph; do
     python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \
         --graph "$graph" \
-        --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
-        --meta reference_source="c++ integration suite: $(basename "$(dirname "$graph")")"
+        --bundle-dir dnn-providers/integration-tests/integration-test-bundles
 done
 ```
 
 Capture writes `{suite}/{case}/{case}.json` and a `.meta.json` beside each
 graph. The suite name keeps its `/` (`Full/IntegrationGpu…`). The files are
 therefore one directory deeper than expected, so the example uses `find`.
-`import_graph.py` does not read the `.meta.json` of the capture. If the
-imported case must reproduce the inputs of the C++ test exactly, pass `--seed`
-and `--meta inputs=<json>` yourself. After each printed test runs and passes as
-a bundle, delete the C++ registration.
+
+`import_graph.py` reads the `.meta.json` beside the graph and uses it as the
+case metadata, as `place_bundles.py` does, so no `--seed`, `--meta` or `--tier`
+flags are needed:
+
+- the seed and `inputs` fill specs carry over, so the case reproduces the
+  inputs of the C++ test;
+- `reference_source` is `c++ integration suite: <Suite>.<Case>`, derived from
+  the sidecar's `operation` and the capture path;
+- the suite prefix picks the tier: `Smoke/` → `quick`, `Full/` → `full`,
+  `Standard/` → `standard`, `Comprehensive/` → `comprehensive`, anything else
+  → `quick`.
+
+A `--seed`, `--meta` or `--tier` value that contradicts the sidecar is applied
+but prints a `WARN` naming both values; `--strict` makes it an error. A sidecar
+that exists but is unusable (bad JSON, not an object, an `inputs` key that is
+not a tensor UID, an `operation` that is not a non-empty string) fails the
+import, with or without `--strict`. A graph with no sidecar lands in `--tier`
+(default `quick`). After each printed test runs and passes as a bundle, delete
+the C++ registration.
 [`migration-scripts/README.md`](../migration-scripts/README.md) describes the
 bulk pipeline and its byte-level verification.
 
