@@ -22,12 +22,15 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <iostream>
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -35,6 +38,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 #define DEBUG_TYPE "StinkyBuildImplicitDependencyPass"
@@ -62,10 +66,10 @@
 //    which forces the scheduler to respect: producers → barrier → consumers.
 //
 //    Under the GIR frame contract an instruction carries no MemTokenData; the token is derived
-//    here from GirFrameAnalysis. The token is the concrete storage id, one per (operand,
-//    generation). Every later touch of that storage reuses it, in any frame. A GIR fence gets
-//    the token of every hazard storage it encloses. The derived token then takes the normal
-//    path below.
+//    here from one coherent path through the GirFrame graph. Its concrete storage id is the
+//    scheduling token; predecessor-to-successor phase transitions preserve unrolled LDS rotation,
+//    while other dynamic paths remain exclusively in GIR hazard/waitcnt analysis. A GIR fence gets
+//    only selected-path endpoint tokens used in its own scheduling block.
 
 namespace {
 using namespace stinkytofu;
@@ -82,7 +86,134 @@ static void addUniqueLdsSrc(StinkyInstruction& inst, int tokenId) {
     inst.addSrcReg(StinkyRegister(RegType::LDS, tokenId, 1));
 }
 
+const char* girHazardKindName(GirHazardKind kind) {
+    switch (kind) {
+        case GirHazardKind::RAW:
+            return "RAW";
+        case GirHazardKind::WAR:
+            return "WAR";
+        case GirHazardKind::WAW:
+            return "WAW";
+    }
+    return "???";
+}
+
+// "gen0=0 gen5=1", the phase vector that names one frame.
+std::string girFrameText(const GirFrame& frame) {
+    std::string text;
+    for (const auto& [gen, phase] : frame.phases) {
+        if (!text.empty()) text += " ";
+        text += "gen" + std::to_string(gen) + "=" + std::to_string(phase);
+    }
+    return text.empty() ? "-" : text;
+}
+
+// "ds_load_b128 label_LoopBeginL#10"
+std::string girWhere(const StinkyInstruction* inst, const BasicBlock* block, size_t index);
+
+size_t girIndexInBlock(const StinkyInstruction* inst) {
+    size_t index = 0;
+    if (!inst || !inst->getParent()) return index;
+    for (IRBase& node : *const_cast<BasicBlock*>(inst->getParent())) {
+        auto* here = dyn_cast<StinkyInstruction>(&node);
+        if (!here) continue;
+        if (here == inst) break;
+        ++index;
+    }
+    return index;
+}
+
+std::string girWhere(const StinkyInstruction* inst, const BasicBlock* block, size_t index) {
+    const char* mnemonic = inst && inst->getHwInstDesc() && inst->getHwInstDesc()->mnemonic
+                               ? inst->getHwInstDesc()->mnemonic
+                               : "?";
+    return std::string(mnemonic) + " " + (block ? block->getLabel() : "?") + "#" +
+           std::to_string(index);
+}
+
 using GirSlotTokens = std::map<const StinkyInstruction*, std::set<int>>;
+using GirFencePieces = std::map<const StinkyInstruction*, std::vector<StinkyInstruction*>>;
+
+// A materialized split fence has no GIR action tying its two physical instructions together.
+// Index both halves so a hazard owned by either one can assign its complete token bridge to the
+// pair directly.
+GirFencePieces collectGirFencePieces(Function& func) {
+    GirFencePieces pieces;
+    for (BasicBlock& block : func) {
+        StinkyInstruction* pendingSignal = nullptr;
+        for (IRBase& node : block) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (!inst) continue;
+            if (isBarrierSignal(*inst) && isSplitBarrierAllWave(*inst)) {
+                pendingSignal = inst;
+                continue;
+            }
+            if (isBarrierWait(*inst) && isSplitBarrierAllWave(*inst) && pendingSignal) {
+                std::vector<StinkyInstruction*> pair{pendingSignal, inst};
+                pieces[pendingSignal] = pair;
+                pieces[inst] = std::move(pair);
+                pendingSignal = nullptr;
+                continue;
+            }
+            if (isBarrier(*inst)) pendingSignal = nullptr;
+        }
+    }
+    return pieces;
+}
+
+using GirSchedulingFrames = std::map<const BasicBlock*, GirFrame>;
+
+// Select one coherent path through the frame graph. Picking each block's smallest phase
+// independently resets every unrolled loop-copy block to phase zero and destroys the intended LDS
+// rotation. A selected predecessor instead hands its exact successor frame to the next block.
+GirSchedulingFrames collectGirSchedulingFrames(Function& func,
+                                               const GirFrameAnalysis::Result& frames) {
+    std::map<const BasicBlock*, std::vector<GirFrameNode>> candidates;
+    const auto remember = [&](const GirFrameNode& node) {
+        auto& list = candidates[node.block];
+        if (std::find(list.begin(), list.end(), node) == list.end()) list.push_back(node);
+    };
+    for (const auto& [node, successors] : frames.edges) {
+        remember(node);
+        for (const GirFrameNode& successor : successors) remember(successor);
+    }
+    for (auto& [block, nodes] : candidates) {
+        (void)block;
+        std::sort(nodes.begin(), nodes.end(), [](const GirFrameNode& lhs, const GirFrameNode& rhs) {
+            if (!(lhs.frame == rhs.frame)) return lhs.frame < rhs.frame;
+            return lhs.incomingAction < rhs.incomingAction;
+        });
+    }
+
+    GirSchedulingFrames selected;
+    std::deque<GirFrameNode> work;
+    const auto select = [&](const GirFrameNode& node) {
+        if (!node.block || selected.contains(node.block)) return false;
+        selected.emplace(node.block, node.frame);
+        work.push_back(node);
+        return true;
+    };
+    const auto propagate = [&] {
+        while (!work.empty()) {
+            const GirFrameNode node = work.front();
+            work.pop_front();
+            auto edges = frames.edges.find(node);
+            if (edges == frames.edges.end()) continue;
+            for (const GirFrameNode& successor : edges->second) select(successor);
+        }
+    };
+
+    // Function order makes the entry path primary and gives mutually-exclusive, still-unselected
+    // arms a deterministic feasible fallback.
+    for (const BasicBlock& block : func) {
+        if (selected.contains(&block)) continue;
+        auto available = candidates.find(&block);
+        if (available == candidates.end() || available->second.empty()) continue;
+        select(available->second.front());
+        propagate();
+    }
+    return selected;
+}
 
 static const char* instMnemonic(const StinkyInstruction* inst) {
     if (!inst || !inst->getHwInstDesc() || !inst->getHwInstDesc()->mnemonic) return "?";
@@ -105,14 +236,31 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
     const auto& frames = AM.getResult<GirFrameAnalysis>(func);
     if (frames.empty()) return tokens;
 
-    // Token id is the storage id. The first touch of a storage claims it; every later
-    // touch of that storage, in any frame, reuses the same token.
-    std::set<int> seenStorage;
+    // Memory tokens constrain one static scheduling instance, not every dynamic frame. Map each
+    // static access to the concrete storage on one coherent frame-graph path. The full graph
+    // remains the authority for hazard and waitcnt analysis.
+    const GirSchedulingFrames schedulingFrames = collectGirSchedulingFrames(func, frames);
+
+    using StaticAccessKey = std::pair<const StinkyInstruction*, size_t>;
+    using EndpointKey = std::tuple<const StinkyInstruction*, GirFrame, int>;
+    std::map<StaticAccessKey, int> schedulingTokens;
+    std::map<EndpointKey, std::set<size_t>> endpointAccesses;
+
     PASS_DEBUG(std::cerr << "[GirToken] occurrences=" << frames.occurrences.size() << "\n");
     for (const GirAccessOccurrence& occurrence : frames.occurrences) {
-        const int tokenId = occurrence.storage;
-        const bool shared = !seenStorage.insert(tokenId).second;
-        tokens[occurrence.inst].insert(tokenId);
+        endpointAccesses[EndpointKey{occurrence.inst, occurrence.frame, occurrence.storage}].insert(
+            occurrence.accessIndex);
+
+        auto selected = schedulingFrames.find(occurrence.block);
+        if (selected == schedulingFrames.end() || !(occurrence.frame == selected->second)) continue;
+
+        const StaticAccessKey accessKey{occurrence.inst, occurrence.accessIndex};
+        auto [scheduled, fresh] = schedulingTokens.emplace(accessKey, occurrence.storage);
+        if (!fresh && scheduled->second != occurrence.storage)
+            STINKY_UNREACHABLE(
+                "StinkyBuildImplicitDependencyPass: one static access maps to multiple "
+                "single-frame tokens");
+        tokens[occurrence.inst].insert(occurrence.storage);
         const GirAccessSpec* access = occurrence.accessIndex < frames.contract.accesses.size()
                                           ? &frames.contract.accesses[occurrence.accessIndex]
                                           : nullptr;
@@ -125,52 +273,114 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
                                  << " operand=" << access->operand
                                  << " gen=" << occurrenceGeneration(*access, occurrence.frame);
                    } std::cerr
-                   << " storage=" << occurrence.storage << (shared ? " slot=shared" : " slot=new")
-                   << " token=" << tokenId << "\n";);
+                   << " storage=" << occurrence.storage
+                   << " schedulingFrame=1 token=" << occurrence.storage << "\n";);
     }
 
     const auto& hazards = AM.getResult<GirFrameHazardAnalysis>(func);
-    for (const GirFrameHazard& hazard : hazards.hazards) {
-        for (const GirHazardFenceOwner& owner : enclosingFences(frames, hazard).owners) {
+    const GirFencePieces splitFencePieces = collectGirFencePieces(func);
+    const auto tokensAtEndpoint = [&](const StinkyInstruction* inst, const GirFrame& frame,
+                                      int storage) {
+        auto access = endpointAccesses.find(EndpointKey{inst, frame, storage});
+        if (access == endpointAccesses.end())
+            STINKY_UNREACHABLE(
+                "StinkyBuildImplicitDependencyPass: GIR hazard endpoint has no static access");
+        std::set<int> result;
+        for (size_t accessIndex : access->second) {
+            auto token = schedulingTokens.find(StaticAccessKey{inst, accessIndex});
+            if (token == schedulingTokens.end())
+                STINKY_UNREACHABLE(
+                    "StinkyBuildImplicitDependencyPass: GIR hazard endpoint has no single-frame "
+                    "memory token");
+            result.insert(token->second);
+        }
+        return result;
+    };
+    // Placement recorded what each fence covers and on which frame. Scheduling constrains ONE
+    // path, so a fence takes the slots it covers on its block's selected frame and no others.
+    const auto* placed = func.getStructMetaData<GirFenceCoverage>(kGirFenceCoverageKey);
+    std::set<const StinkyInstruction*> answered;
+    if (placed)
+        for (const auto& [fence, byFrame] : placed->fences) {
+            auto selected = schedulingFrames.find(fence->getParent());
+            if (selected == schedulingFrames.end()) continue;
+            auto covered = byFrame.find(selected->second);
+            if (covered == byFrame.end() || covered->second.empty()) continue;
+            std::vector<StinkyInstruction*> pieces{const_cast<StinkyInstruction*>(fence)};
+            if (auto physical = splitFencePieces.find(fence); physical != splitFencePieces.end())
+                pieces = physical->second;
+            for (const StinkyInstruction* piece : pieces) {
+                answered.insert(piece);
+                for (const GirFrameHazard& hazard : covered->second)
+                    if (hazard.storage >= 0) tokens[piece].insert(hazard.storage);
+            }
+            PASS_DEBUG({
+                const char* mnemonic = fence->getHwInstDesc() && fence->getHwInstDesc()->mnemonic
+                                           ? fence->getHwInstDesc()->mnemonic
+                                           : "fence";
+                std::cerr << "\n[GirCover] " << mnemonic << " at " << fence->getParent()->getLabel()
+                          << " #" << girIndexInBlock(fence) << "  (" << byFrame.size()
+                          << (byFrame.size() == 1 ? " frame)\n" : " frames)\n");
+                for (const auto& [frame, hz] : byFrame) {
+                    const bool isSelected = frame == selected->second;
+                    std::vector<GirFrameHazard> sorted(hz.begin(), hz.end());
+                    std::sort(sorted.begin(), sorted.end(),
+                              [](const GirFrameHazard& a, const GirFrameHazard& b) {
+                                  return std::tie(a.kind, a.storage) < std::tie(b.kind, b.storage);
+                              });
+                    std::cerr << (isSelected ? "  -> " : "     ") << girFrameText(frame)
+                              << (isSelected ? "   [scheduled]\n" : "\n");
+                    for (const GirFrameHazard& h : sorted)
+                        std::cerr << "       " << girHazardKindName(h.kind) << " LDS" << h.storage
+                                  << "  " << girWhere(h.producer, h.producerBlock, h.producerIndex)
+                                  << " -> "
+                                  << girWhere(h.consumer, h.consumerBlock, h.consumerIndex)
+                                  << (h.gap == 0 ? "  (same node)\n"
+                                                 : "  (" + std::to_string(h.gap) + " nodes on)\n");
+                }
+            });
+        }
+
+    const GirPlanFenceCoverage plan = buildGirPlanFenceCoverage(frames, hazards);
+    for (size_t h = 0; h < hazards.hazards.size(); ++h) {
+        const GirFrameHazard& hazard = hazards.hazards[h];
+        for (const GirHazardFenceOwner& owner : plan.byHazard[h].owners) {
+            BasicBlock* anchorBlock = owner.anchor ? owner.anchor->getParent() : nullptr;
+            if (!anchorBlock) continue;
+            if (answered.count(owner.anchor)) continue;
+
             std::vector<StinkyInstruction*> pieces{owner.anchor};
-            if (const auto* action = owner.anchor->getModifier<GirActionData>()) {
+            if (auto physical = splitFencePieces.find(owner.anchor);
+                physical != splitFencePieces.end()) {
+                pieces = physical->second;
+            } else if (const auto* action = owner.anchor->getModifier<GirActionData>()) {
                 auto owned = frames.actionInstructions.find(action->actionId);
                 if (owned != frames.actionInstructions.end()) pieces = owned->second;
             }
-            const int tokenId = hazard.storage;
-            PASS_DEBUG(std::cerr << "[GirToken] fence anchor=" << instMnemonic(owner.anchor)
-                                 << " storage=" << hazard.storage << " token=" << tokenId << "\n");
-            for (const StinkyInstruction* piece : pieces) tokens[piece].insert(tokenId);
-        }
-    }
-
-    // A materialized split fence has no GIR action tying its two physical instructions together.
-    // enclosingFences deliberately names the signal as the logical owner, so copy the complete
-    // frame-derived token set to its paired wait. Both halves must carry the tokens for the
-    // register DAG to form producer -> signal -> wait -> consumer.
-    for (BasicBlock& block : func) {
-        StinkyInstruction* pendingSignal = nullptr;
-        for (IRBase& node : block) {
-            auto* inst = dyn_cast<StinkyInstruction>(&node);
-            if (!inst) continue;
-            if (isBarrierSignal(*inst) && isSplitBarrierAllWave(*inst)) {
-                pendingSignal = inst;
-                continue;
+            std::set<int> bridge;
+            // The scheduler never moves instructions across blocks. Keep only endpoint tokens that
+            // can form a dependency in this barrier's block; dynamic frame occurrences collapse
+            // onto the one selected-path storage of that static endpoint.
+            if (hazard.producerBlock == anchorBlock) {
+                const std::set<int> producer =
+                    tokensAtEndpoint(hazard.producer, hazard.producerFrame, hazard.storage);
+                bridge.insert(producer.begin(), producer.end());
             }
-            if (isBarrierWait(*inst) && isSplitBarrierAllWave(*inst) && pendingSignal) {
-                std::set<int> pairedTokens;
-                if (auto signalTokens = tokens.find(pendingSignal); signalTokens != tokens.end())
-                    pairedTokens.insert(signalTokens->second.begin(), signalTokens->second.end());
-                if (auto waitTokens = tokens.find(inst); waitTokens != tokens.end())
-                    pairedTokens.insert(waitTokens->second.begin(), waitTokens->second.end());
-                if (!pairedTokens.empty()) {
-                    tokens[pendingSignal] = pairedTokens;
-                    tokens[inst] = std::move(pairedTokens);
-                }
-                pendingSignal = nullptr;
-                continue;
+            if (hazard.consumerBlock == anchorBlock) {
+                const std::set<int> consumer =
+                    tokensAtEndpoint(hazard.consumer, hazard.consumerFrame, hazard.storage);
+                bridge.insert(consumer.begin(), consumer.end());
             }
-            if (isBarrier(*inst)) pendingSignal = nullptr;
+            if (bridge.empty()) continue;
+            PASS_DEBUG({
+                std::cerr << "[GirToken] fence anchor=" << instMnemonic(owner.anchor)
+                          << " storage=" << hazard.storage << " schedulingTokens=";
+                for (int token : bridge) std::cerr << token << ",";
+                std::cerr << "\n";
+            });
+            for (const StinkyInstruction* piece : pieces) {
+                tokens[piece].insert(bridge.begin(), bridge.end());
+            }
         }
     }
     return tokens;

@@ -739,7 +739,9 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
     return result;
 }
 
-GirHazardFenceCover enclosingFences(
+/// One hazard's cover. Internal: the walk is an implementation detail of the plan coverage, so
+/// nothing outside asks a per-hazard path question for itself.
+static GirHazardFenceCover coverOfHazard(
     const GirFrameAnalysis::Result& frames, const GirFrameHazard& hazard,
     const std::function<bool(const StinkyInstruction&)>& alsoFences) {
     GirHazardFenceCover cover;
@@ -865,6 +867,16 @@ GirHazardFenceCover enclosingFences(
     }
 
     return cover;
+}
+
+GirPlanFenceCoverage buildGirPlanFenceCoverage(
+    const GirFrameAnalysis::Result& frames, const GirFrameHazardAnalysis::Result& hazards,
+    const std::function<bool(const StinkyInstruction&)>& alsoFences) {
+    GirPlanFenceCoverage coverage;
+    coverage.byHazard.reserve(hazards.hazards.size());
+    for (const GirFrameHazard& hazard : hazards.hazards)
+        coverage.byHazard.push_back(coverOfHazard(frames, hazard, alsoFences));
+    return coverage;
 }
 
 GirFrameHazardAnalysis::Result GirFrameHazardAnalysis::run(Function& function,
