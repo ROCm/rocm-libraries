@@ -85,10 +85,14 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``FP32``
      - NCHW, NCDHW
      - Single-node graph⁷
+   * - Reduction (standalone)
+     - ``FP16``, ``FP32``
+     - Any, rank 1-6
+     - Single-node graph⁸
 
 .. note::
 
-  - For annotations ¹ through ⁴, ⁶ and ⁷, see :ref:`operations`.
+  - For annotations ¹ through ⁴ and ⁶ through ⁸, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -146,6 +150,7 @@ Operation notes
 - **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
 - **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
 - ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
+- ⁸ **Standalone Reduction**: A single-node reduction graph supports ADD, MUL, MIN, MAX, AMAX, AVG, NORM1 and NORM2 with an ``FP32`` compute type. Input and output share one datatype and one rank (1-6), and each output dimension is either 1 (reduced) or equal to the input dimension. MUL_NO_ZEROS, ``BFP16`` and deterministic reduction (``is_deterministic``) aren't supported; reduction is only available through the default (non-deterministic) engine.
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs
