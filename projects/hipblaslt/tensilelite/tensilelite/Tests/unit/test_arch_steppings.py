@@ -2380,12 +2380,12 @@ _DIRECTIVE = '.amdgcn_target "amdgcn-amd-amdhsa--{}"'
 def test_the_target_id_is_rewritten_to_the_stepping(tmp_path):
     """Without this the assembler refuses the file outright: the base target id
     names a processor that is not valid for the stepping's subarch."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToBuildTarget
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n  s_endpgm\n")
 
-    _alignAmdgcnTargetToStepping(asm, ISA_GFX1250, GFX1250_STRICT)
+    _alignAmdgcnTargetToBuildTarget(asm, ISA_GFX1250, GFX1250_STRICT)
 
     assert _DIRECTIVE.format(GFX1250_STRICT) in asm.read_text()
     assert _DIRECTIVE.format(GFX1250) not in asm.read_text()
@@ -2397,7 +2397,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
     """Every architecture but a stepping already agrees with the ISA-derived
     name, so this must be provably inert for them -- it runs on every .s the
     build emits."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToBuildTarget
 
     isa = gfxToIsa("gfx942")
     asm = tmp_path / "k0.s"
@@ -2405,7 +2405,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
     asm.write_text(original)
     before = asm.stat().st_mtime_ns
 
-    _alignAmdgcnTargetToStepping(asm, isa, "gfx942")
+    _alignAmdgcnTargetToBuildTarget(asm, isa, "gfx942")
 
     assert asm.read_text() == original
     # Not rewritten with identical content either: the file is not reopened at
@@ -2416,12 +2416,12 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
 def test_assembly_with_no_target_directive_is_left_alone(tmp_path):
     """The directive is rocisa's to emit, and a helper kernel that carries none
     must not acquire one -- nor make the rewrite an error."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToBuildTarget
 
     asm = tmp_path / "helper.s"
     asm.write_text("  s_endpgm\n")
 
-    _alignAmdgcnTargetToStepping(asm, ISA_GFX1250, GFX1250_STRICT)
+    _alignAmdgcnTargetToBuildTarget(asm, ISA_GFX1250, GFX1250_STRICT)
 
     assert asm.read_text() == "  s_endpgm\n"
 
@@ -2430,12 +2430,12 @@ def test_only_the_first_target_directive_is_rewritten(tmp_path):
     """One .s is one code object with one target. A second directive means the
     file is not what this rewrite assumes, and silently retargeting all of them
     would turn that into a code object claiming a target it was not built for."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToBuildTarget
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n{_DIRECTIVE.format(GFX1250)}\n")
 
-    _alignAmdgcnTargetToStepping(asm, ISA_GFX1250, GFX1250_STRICT)
+    _alignAmdgcnTargetToBuildTarget(asm, ISA_GFX1250, GFX1250_STRICT)
 
     text = asm.read_text()
     assert text.count(_DIRECTIVE.format(GFX1250_STRICT)) == 1
@@ -2467,7 +2467,7 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
     """The build runs both on each stepping kernel: this module's directive
     rewrite while writing it, then the assembler's before assembling it. Either
     alone is covered above; this is the order they actually run in."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToBuildTarget
     from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
@@ -2476,7 +2476,7 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
         f"\tamdhsa.target: amdgcn-amd-amdhsa--{GFX1250}\n"
     )
 
-    _alignAmdgcnTargetToStepping(asm, ISA_GFX1250, GFX1250_STRICT)
+    _alignAmdgcnTargetToBuildTarget(asm, ISA_GFX1250, GFX1250_STRICT)
     Assembler._retargetAssemblySource(GFX1250_STRICT, str(asm))
 
     text = asm.read_text()
@@ -2485,9 +2485,12 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
     assert "-strict-strict" not in text
 
 
-def test_the_assembler_retarget_keeps_features_after_a_stepping(tmp_path):
-    """A stepping name and a feature suffix are separate axes: the hyphen belongs
-    to the processor, the colon starts what the retarget carries over."""
+def test_the_assembler_retarget_replaces_a_sources_own_features(tmp_path):
+    """The build target owns the feature tail, not the source. The assembler
+    compares the directive against the id ``-mcpu`` names and errors on any
+    difference in either direction, so a source declaring ``:xnack+`` that is
+    being assembled for a plain target must come out plain -- carrying the tail
+    over would hand the assembler a directive it is about to reject."""
     from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
@@ -2495,7 +2498,313 @@ def test_the_assembler_retarget_keeps_features_after_a_stepping(tmp_path):
 
     Assembler._retargetAssemblySource(GFX1250_STRICT, str(asm))
 
-    assert asm.read_text() == _DIRECTIVE.format(f"{GFX1250_STRICT}:xnack+") + "\n"
+    assert asm.read_text() == _DIRECTIVE.format(GFX1250_STRICT) + "\n"
+
+
+def test_the_assembler_retarget_gives_the_source_the_targets_features(tmp_path):
+    """And the other direction: a source declaring no features assembled for a
+    feature-carrying target acquires them. This is what lets the one gfx942
+    custom kernel under CustomKernels/rocroller/ build in a gfx950:sramecc+
+    build instead of being rejected for declaring a bare target id."""
+    from tensilelite.Toolchain.Component import Assembler
+
+    asm = tmp_path / "k0.s"
+    asm.write_text(
+        f"{_DIRECTIVE.format('gfx942')}\n"
+        "\tamdhsa.target: amdgcn-amd-amdhsa--gfx942\n"
+    )
+
+    Assembler._retargetAssemblySource("gfx950:sramecc+", str(asm))
+
+    text = asm.read_text()
+    assert _DIRECTIVE.format("gfx950:sramecc+") in text
+    assert "amdhsa.target: amdgcn-amd-amdhsa--gfx950:sramecc+\n" in text
+    assert "gfx942" not in text
+
+
+# =========================================================================== #
+# ISA features on the build target. gfx950's checked-in rocRoller kernels
+# declare `gfx950:sramecc+`, and the assembler rejects a directive that is not
+# exactly the id -mcpu names -- so the build has to assemble to that id. The
+# id and the *name* are therefore separate: the id carries features, the name
+# stays bare because it is also the output subtree and the code-object file.
+# =========================================================================== #
+GFX950 = "gfx950"
+GFX950_ID = "gfx950:sramecc+"
+
+
+def test_the_build_target_carries_the_architectures_isa_features():
+    """gfx950 is built sramecc-on; an architecture with no entry is unchanged."""
+    from tensilelite.Common.Architectures import ARCH_TARGET_ID_FEATURES, targetIdOf
+
+    assert ARCH_TARGET_ID_FEATURES[GFX950] == ["sramecc+"]
+    assert targetIdOf(GFX950) == GFX950_ID
+    assert targetIdOf("gfx942") == "gfx942"
+    assert targetIdOf(GFX1250_STRICT) == GFX1250_STRICT
+    # xnack is deliberately not named: naming it would pin the code object to
+    # one xnack setting, and nothing in the tree asks for that.
+    assert "xnack" not in targetIdOf(GFX950)
+
+
+def test_a_requested_qualifier_merges_into_the_target_id_in_order():
+    """A spec that already names features keeps them, and the architecture's own
+    are merged rather than appended -- clang spells sramecc before xnack and
+    rejects the other order. An explicit setting wins over the default."""
+    from tensilelite.Common.Architectures import targetIdOf
+
+    assert targetIdOf("gfx950:xnack+") == "gfx950:sramecc+:xnack+"
+    assert targetIdOf("gfx950:sramecc-") == "gfx950:sramecc-"
+    assert targetIdOf("gfx942:xnack-") == "gfx942:xnack-"
+
+
+def test_the_feature_tail_never_reaches_a_path_or_a_file_name():
+    """A directory called `gfx950:sramecc+` would be a hazard on its own, and
+    the runtime looks the subtree up as `library/gfx950/` regardless. So the
+    name every path is built from stays bare even though the target id is not."""
+    from tensilelite.Common.Architectures import archNamesByIsa, baseArchName, compilerTargetOf
+    from tensilelite.TensileCreateLibrary.Run import libraryDir
+
+    isa950 = gfxToIsa(GFX950)
+    assert archNamesByIsa([GFX950, GFX950 + ":xnack-"]) == {isa950: GFX950}
+    assert compilerTargetOf(GFX950) == GFX950
+    assert baseArchName(GFX950_ID) == GFX950
+    assert libraryDir("/out", GFX950) == Path("/out/library/gfx950")
+
+
+def test_gfx950_is_assembled_and_compiled_to_the_id_its_kernels_declare(monkeypatch):
+    """The actual bug this fixes: bare `-mcpu=gfx950` against a kernel declaring
+    `gfx950:sramecc+` is an assembler error, so every rocRoller custom kernel
+    failed to build."""
+    from tensilelite.Toolchain import Component as ComponentMod
+
+    captured = []
+    monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
+    monkeypatch.setattr(ComponentMod, "_invoke", lambda args, desc: captured.append([str(a) for a in args]))
+    ComponentMod.Assembler(Path("amdclang++"), 5)(GFX950, 64, "k.s", "k.o")
+    ComponentMod.Compiler(Path("amdclang++"), "sha1")("inc", [GFX950], "k.cpp", "k.o")
+    asmArgs, ccArgs = captured
+
+    assert f"-mcpu={GFX950_ID}" in asmArgs
+    assert f"--offload-arch={GFX950_ID}" in ccArgs
+
+
+def test_the_bundle_entry_names_the_id_the_objects_were_built_to(tmp_path):
+    """The file name stays bare; the entry the runtime matches an agent against
+    does not. An entry claiming plain gfx950 over sramecc-on content would be
+    picked for an sramecc-off agent and then fail in the ELF loader."""
+    from unittest.mock import MagicMock
+
+    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+
+    bundler = MagicMock()
+    isa950 = gfxToIsa(GFX950)
+    coFiles = buildAssemblyCodeObjectFiles(
+        MagicMock(), bundler, [{"ISA": isa950, "BaseName": "k0"}], tmp_path, tmp_path,
+        compress=True, archNames={isa950: GFX950},
+    )
+    assert [str(c.relative_to(tmp_path)) for c in coFiles] == [f"{GFX950}/TensileLibrary_{GFX950}.co"]
+    assert bundler.compress.call_args[0][2] == GFX950_ID
+
+
+def test_a_generated_gfx950_kernels_directive_gains_the_features(tmp_path):
+    """rocisa writes the directive from the ISA alone, so it spells a bare
+    gfx950 -- which the assembler now rejects just as surely as the mismatch in
+    the other direction. Generated kernels are the bulk of the build."""
+    from tensilelite.Common.Architectures import targetIdOf
+    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToBuildTarget
+
+    asm = tmp_path / "k0.s"
+    asm.write_text(f"{_DIRECTIVE.format(GFX950)}\n  s_endpgm\n")
+
+    _alignAmdgcnTargetToBuildTarget(asm, gfxToIsa(GFX950), targetIdOf(GFX950))
+
+    assert _DIRECTIVE.format(GFX950_ID) in asm.read_text()
+    assert "s_endpgm" in asm.read_text()
+
+
+def test_every_checked_in_gfx950_kernel_declares_the_id_the_build_assembles_to():
+    """The constraint the whole change exists to satisfy, asserted against the
+    shipped sources rather than a fixture: one disagreeing kernel is one build
+    failure. The gfx942 kernel in the same directory declares its own target
+    and is retargeted at assembly time, so it is not expected to match."""
+    from tensilelite.Common.Architectures import targetIdOf
+
+    root = Path(__file__).resolve().parents[3] / "tensilelite/CustomKernels/rocroller"
+    sources = sorted(root.glob("*.s"))
+    assert sources, root
+
+    declared = {}
+    for path in sources:
+        for line in path.read_text().splitlines():
+            if line.startswith(".amdgcn_target"):
+                declared[path.name] = line.split('"')[1]
+                break
+
+    assert len(declared) == len(sources), "every kernel must declare a target id"
+    expected = f"amdgcn-amd-amdhsa--{targetIdOf(GFX950)}"
+    wrong = {
+        name: value
+        for name, value in declared.items()
+        if value != expected and "gfx950" in value
+    }
+    assert not wrong, wrong
+
+
+# --- the CMake side of the same table ----------------------------------------
+#
+# Three gfx950 code-object paths are driven by CMake rather than by the
+# TensileLite toolchain: the rocRoller custom kernels under
+# rocblaslt/src/rocroller/custom_kernels/, device-library/extops/ and
+# device-library/matrix-transform/. They get their target id from
+# tensilelite_offload_target, which has to say the same thing targetIdOf does.
+
+_HIPBLASLT = Path(__file__).resolve().parents[4]
+_ARCH_CMAKE = _HIPBLASLT / "cmake/tensilelite_supported_architectures.cmake"
+_RR_CUSTOM_KERNELS = (
+    _HIPBLASLT / "library/src/amd_detail/rocblaslt/src/rocroller/custom_kernels"
+)
+
+
+def _cmakeTargets(script: str, *defines: str):
+    """Run a snippet against the real architectures module and return its output."""
+    if not _ARCH_CMAKE.is_file():
+        pytest.skip(f"{_ARCH_CMAKE} not present (tensilelite-only checkout)")
+    if shutil.which("cmake") is None:
+        pytest.skip("cmake not on PATH")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "probe.cmake"
+        path.write_text(f'include("{_ARCH_CMAKE}")\n{script}\n')
+        result = subprocess.run(
+            ["cmake", *defines, "-P", str(path)],
+            capture_output=True, text=True, timeout=120,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return [line for line in result.stderr.splitlines() if line.strip()]
+
+
+def test_the_cmake_offload_target_carries_the_architectures_isa_features():
+    """What -mcpu / --offload-arch get on the CMake-driven paths."""
+    lines = _cmakeTargets(
+        "\n".join(
+            f'tensilelite_offload_target(t "{a}")\nmessage("${{t}}")'
+            for a in ("gfx950", "gfx942", "gfx1250-strict", "gfx950:xnack-")
+        )
+    )
+    assert lines == ["gfx950:sramecc+", "gfx942", "gfx1250-strict", "gfx950:sramecc+:xnack-"]
+
+
+def test_a_sanitizer_build_spells_sramecc_before_xnack():
+    """clang rejects the reverse order, so the merge is not an append."""
+    lines = _cmakeTargets(
+        'tensilelite_offload_target(t "gfx950")\nmessage("${t}")',
+        "-DHIPBLASLT_ENABLE_ASAN=ON",
+    )
+    assert lines == ["gfx950:sramecc+:xnack+"]
+
+
+def test_gpu_targets_itself_never_grows_a_feature_tail():
+    """GPU_TARGETS is an identifier: it is checked against
+    SUPPORTED_ARCHITECTURES, forwarded verbatim to TensileLite as
+    ``--architecture=`` (where splitArchsFromPredicates rejects anything
+    architectureMap does not list), and regex-stripped into directory names.
+    Only tensilelite_offload_target may add ISA features."""
+    lines = _cmakeTargets(
+        'tensilelite_normalize_targets(n gfx950 gfx942)\nmessage("${n}")'
+    )
+    assert lines == ["gfx950;gfx942"]
+    assert "gfx950:sramecc+" not in _ARCH_CMAKE.read_text().split(
+        "function(tensilelite_normalize_targets"
+    )[-1]
+
+
+def test_the_cmake_and_python_feature_tables_agree():
+    """Two descriptions of the same code objects. If they drift, half the
+    gfx950 library is built to one target id and half to another, and the
+    halves stop loading on the same parts."""
+    from tensilelite.Common.Architectures import ARCH_TARGET_ID_FEATURES
+
+    if not _ARCH_CMAKE.is_file():
+        pytest.skip(f"{_ARCH_CMAKE} not present (tensilelite-only checkout)")
+    fromCmake = {
+        arch: features.strip().strip('"').split(";")
+        for arch, features in re.findall(
+            r'^set\(TARGET_ID_FEATURES_(\S+)\s+(.*?)\)\s*$',
+            _ARCH_CMAKE.read_text(),
+            re.MULTILINE,
+        )
+    }
+    assert fromCmake == ARCH_TARGET_ID_FEATURES
+
+
+def test_every_rocroller_cmake_custom_kernel_agrees_with_its_build_target():
+    """The second custom-kernel directory, built by CMake rather than by
+    TensileLite. Most of its sources declare no target id at all, which the
+    assembler accepts; the ones that do declare must spell the id -mcpu names."""
+    from tensilelite.Common.Architectures import targetIdOf
+
+    if not _RR_CUSTOM_KERNELS.is_dir():
+        pytest.skip(f"{_RR_CUSTOM_KERNELS} not present (tensilelite-only checkout)")
+    sources = sorted(_RR_CUSTOM_KERNELS.glob("*.s"))
+    assert sources, _RR_CUSTOM_KERNELS
+
+    expected = f'amdgcn-amd-amdhsa--{targetIdOf(GFX950)}'
+    wrong = {}
+    for path in sources:
+        for line in path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith(".amdgcn_target"):
+                value = stripped.split('"')[1]
+                if value != expected:
+                    wrong[path.name] = value
+    assert not wrong, wrong
+
+
+def test_the_extop_generators_are_told_the_id_the_assembler_is_given():
+    """extops emits its own ``.amdgcn_target``; the directive and -mcpu must be
+    the same string or the assembler refuses the file. The id is passed
+    unconditionally, not only when it differs from the bare arch."""
+    cmakeLists = _HIPBLASLT / "device-library/extops/CMakeLists.txt"
+    if not cmakeLists.is_file():
+        pytest.skip(f"{cmakeLists} not present (tensilelite-only checkout)")
+    text = cmakeLists.read_text()
+    assert "set(extop_target_id_args --target-id ${offload_arch})" in text
+    assert "-mcpu=${offload_arch}" in text
+    assert "--xnack" not in text
+
+
+@pytest.mark.parametrize(
+    "generator", ["AMaxGenerator.py", "SoftmaxGenerator.py", "LayerNormGenerator.py"]
+)
+def test_an_extop_generator_emits_the_target_id_it_is_given(generator):
+    """The receiving end of the same contract, exercised against the shipped
+    ``kernel_header``. Extracted rather than imported because importing the
+    generator pulls in rocisa, which this suite does not require."""
+    import ast
+    import types
+
+    source = (_TENSILELITE / generator).read_text()
+    tree = ast.parse(source)
+    func = next(
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "kernel_header"
+    )
+    namespace = {
+        # AMaxGenerator's header asks rocisa for a wavefront-size capability.
+        "_global_ti": types.SimpleNamespace(
+            getArchCaps=lambda: {"HasWavefrontSize32Directive": False}
+        )
+    }
+    exec(compile(ast.Module(body=[func], type_ignores=[]), generator, "exec"), namespace)
+    kernel_header = namespace["kernel_header"]
+
+    extra = [8, 8, 0] if generator != "SoftmaxGenerator.py" else []
+    withId = kernel_header("k", "gfx950", *extra, "gfx950:sramecc+")
+    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"' in withId
+    # Omitted, it falls back to the bare arch, which is what every
+    # feature-less architecture still builds as.
+    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"' in kernel_header("k", "gfx942", *extra)
 
 
 # =========================================================================== #

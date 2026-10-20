@@ -98,6 +98,29 @@ ARCH_BUILD_ALIASES = {
 }
 
 
+# ISA features an architecture's code objects are built with, spelled the way a
+# target id spells them (``sramecc+``, not the clang ``+sramecc``). These are
+# not the same thing as ``deviceTargetFeatures``: a target-id feature changes
+# the code object's e_flags and is part of the identity the assembler checks
+# ``.amdgcn_target`` against, so -mcpu, --offload-arch, the directive and the
+# bundle entry all have to agree on it or the build fails outright.
+#
+# gfx950 carries ``sramecc+`` because the rocRoller kernels shipped under
+# CustomKernels/rocroller/ declare ``amdgcn-amd-amdhsa--gfx950:sramecc+`` and a
+# bare ``-mcpu=gfx950`` makes the assembler reject every one of them. The
+# consequence is deliberate: gfx950 code objects become SRAMECC_ON instead of
+# SRAMECC_ANY and so will not load on a gfx950 part with sramecc disabled.
+# xnack is left unspecified, which keeps the objects XNACK_ANY -- naming it
+# would pin them to one xnack setting for no gain.
+ARCH_TARGET_ID_FEATURES: Dict[str, List[str]] = {
+    "gfx950": ["sramecc+"],
+}
+
+# The order a target id spells its features in. Anything else keeps the order
+# the spec gave it, after these.
+_TARGET_ID_FEATURE_ORDER = ("sramecc", "xnack")
+
+
 def _buildAlias(spec: str) -> Optional[dict]:
     return ARCH_BUILD_ALIASES.get(baseArchName(spec))
 
@@ -119,6 +142,41 @@ def deviceTargetFeaturesOf(spec: str) -> List[str]:
     """Target features added when compiling or assembling a spec; none unless aliased."""
     alias = _buildAlias(spec)
     return list(alias["deviceTargetFeatures"]) if alias else []
+
+
+def targetIdOf(spec: str) -> str:
+    """The target id a spec's code objects are built to, features included.
+
+    This is the string that belongs in ``-mcpu``, ``--offload-arch``, the
+    ``.amdgcn_target`` directive and the bundle entry -- never in a path, a
+    filename or a dict key, which keep using ``compilerTargetOf`` /
+    ``baseArchName``. Keeping the two apart is the whole point: a target id may
+    contain ``:``, and a directory named ``gfx950:sramecc+`` would be a hazard
+    on its own, quite apart from the runtime looking up ``library/gfx950/``.
+
+    Features the spec already names are kept, so ``gfx942:xnack+`` survives,
+    and the architecture's own features are merged in rather than appended --
+    a target id spells sramecc before xnack and clang rejects the other order.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        ``<processor>[:<feature>]...``.
+    """
+    target = compilerTargetOf(spec)
+    processor = baseArchName(target)
+    _, _, tail = target.partition(":")
+    byName = {}
+    for feature in tail.split(":"):
+        feature = feature.split("[")[0].strip()
+        if feature:
+            byName[feature.rstrip("+-")] = feature
+    for feature in ARCH_TARGET_ID_FEATURES.get(processor, []):
+        byName.setdefault(feature.rstrip("+-"), feature)
+    ordered = [byName[n] for n in _TARGET_ID_FEATURE_ORDER if n in byName]
+    ordered += [f for n, f in byName.items() if n not in _TARGET_ID_FEATURE_ORDER]
+    return ":".join([processor, *ordered])
 
 
 def withArchBuildAliases(archs: List[str]) -> List[str]:
@@ -373,9 +431,10 @@ def archNamesByIsa(specs: List[str]) -> Dict[IsaVersion, str]:
     names neither the compiler target, nor the code object, nor the output
     subtree; the requested name has to travel from the command line to each.
 
-    Qualifiers are dropped: ``gfx942:xnack+`` names an architecture its ISA
-    already describes, and forwarding it would pin the code object to one xnack
-    setting instead of leaving it xnack-agnostic.
+    Qualifiers are dropped: the name returned here is also the output subtree
+    and the code object's filename, and a ``:`` has no business in either. The
+    features a build target carries travel separately, via ``targetIdOf``,
+    which is what ``-mcpu`` and ``.amdgcn_target`` are built from.
 
     Args:
         specs: The requested architecture specs, qualified or not.
