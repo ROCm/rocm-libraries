@@ -611,15 +611,15 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                            typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
 
-                        constexpr auto kNumAccess =
-                    #if defined(__gfx125__)
-                            sizeof(typename Problem::PDataType) == 1 &&
-                                Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 64
-                            ? WGAttrNumAccessEnum::Quad
-                            : WGAttrNumAccessEnum::Default;
-                    #else
-                            WGAttrNumAccessEnum::Default;
-                    #endif
+        constexpr auto kNumAccess =
+#if defined(__gfx125__)
+            sizeof(typename Problem::PDataType) == 1 &&
+                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 64
+                ? WGAttrNumAccessEnum::Quad
+                : WGAttrNumAccessEnum::Default;
+#else
+            WGAttrNumAccessEnum::Default;
+#endif
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::PDataType,
                                             typename Problem::VDataType,
