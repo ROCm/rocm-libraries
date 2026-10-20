@@ -233,7 +233,18 @@ static rocke_isa_backend_t LL_BACKEND_RESOLVED;
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
     const rocke_isa_backend_t* base = NULL;
-    if(arch == NULL || strcmp(arch, "gfx950") == 0)
+    /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
+     * that forgot the target lowered for one arch and compiled for another.
+     * Mirrors the Python lowerer, which raises on `arch=None`. */
+    if(arch == NULL)
+    {
+        if(st)
+        {
+            *st = ROCKE_ERR_VALUE;
+        }
+        return NULL;
+    }
+    if(strcmp(arch, "gfx950") == 0)
     {
         base = &LL_BACKEND_GFX950;
     }
@@ -412,10 +423,13 @@ void rocke_ll_block_emitf(rocke_lower_t* L, rocke_ll_block_t* blk, const char* f
         rocke_ll_block_emit(L, blk, buf);
         return;
     }
-    /* Long line: format into the arena. */
+    /* Long line: size the buffer from vsnprintf's count rather than a fixed
+     * cap, which used to truncate lines past 8191 bytes silently (a long
+     * inline-asm template is one line). */
+    size_t need = (n >= 0) ? (size_t)n + 1 : 8192;
+    char* big = (char*)rocke_arena_alloc(&L->arena, need);
     va_start(ap, fmt);
-    char big[8192];
-    vsnprintf(big, sizeof big, fmt, ap);
+    vsnprintf(big, need, fmt, ap);
     va_end(ap);
     rocke_ll_block_emit(L, blk, big);
 }
@@ -442,9 +456,13 @@ void rocke_ll_emitf(rocke_lower_t* L, const char* fmt, ...)
         rocke_ll_block_emit(L, blk, buf);
         return;
     }
+    /* Long line: size the buffer from vsnprintf's count rather than a fixed
+     * cap, which used to truncate lines past 8191 bytes silently (a long
+     * inline-asm template is one line). */
+    size_t need = (n >= 0) ? (size_t)n + 1 : 8192;
+    char* big = (char*)rocke_arena_alloc(&L->arena, need);
     va_start(ap, fmt);
-    char big[8192];
-    vsnprintf(big, sizeof big, fmt, ap);
+    vsnprintf(big, need, fmt, ap);
     va_end(ap);
     rocke_ll_block_emit(L, blk, big);
 }
@@ -603,13 +621,15 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
     {
         return "ptr addrspace(3)";
     }
-    /* scalar */
+    /* scalar. No packed-only type has an entry: rocke_i_refuse_packed_only_value
+     * keeps its values out of the IR. */
     const char* n = t->name;
     if(n)
     {
         if(strcmp(n, "i1") == 0)
             return "i1";
-        if(strcmp(n, "i8") == 0)
+        /* LLVM integers carry no sign; signedness lives in the operations. */
+        if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0)
             return "i8";
         if(strcmp(n, "i16") == 0)
             return "i16";
@@ -942,6 +962,20 @@ const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v)
     return rocke_arena_printf(&L->arena, "%s %s", ty, op);
 }
 
+const char* rocke_ll_reinterpret(rocke_lower_t* L,
+                                 const rocke_value_t* v,
+                                 const rocke_type_t* register_type)
+{
+    /* The fresh name is taken before the operand is rendered, as in Python. */
+    const char* reinterpreted = rocke_ll_fresh(L, "reg");
+    rocke_ll_emitf(L,
+                   "  %s = bitcast %s to %s",
+                   reinterpreted,
+                   rocke_ll_operand_with_type(L, v),
+                   rocke_ll_llvm_type(L, register_type));
+    return reinterpreted;
+}
+
 /* ====================================================================== */
 /* Shared binary-op helpers (Python _binop / _vector_binop)               */
 /* ====================================================================== */
@@ -980,6 +1014,34 @@ void rocke_ll_vector_binop(rocke_lower_t* L, const rocke_op_t* op, const char* l
                    rocke_ll_llvm_type(L, a->type),
                    rocke_ll_operand(L, a),
                    rocke_ll_operand(L, b));
+}
+
+const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
+                                    const char* op_name,
+                                    const char* pred,
+                                    const rocke_type_t* t)
+{
+    static const struct
+    {
+        const char* pred;
+        const char* signed_form;
+        const char* unsigned_form;
+    } k_icmp[] = {
+        {"lt", "slt", "ult"},
+        {"le", "sle", "ule"},
+        {"gt", "sgt", "ugt"},
+        {"ge", "sge", "uge"},
+        {"eq", "eq", "eq"},
+        {"ne", "ne", "ne"},
+    };
+    for(const auto& row : k_icmp)
+    {
+        if(strcmp(pred, row.pred) == 0)
+        {
+            return rocke_type_is_unsigned(t) ? row.unsigned_form : row.signed_form;
+        }
+    }
+    rocke_ll_fail(L, ROCKE_ERR_KEY, "%s: unknown pred %s", op_name, pred);
 }
 
 /* ====================================================================== */
@@ -1213,14 +1275,17 @@ static void
     }
 }
 
-/* Size of one smem allocation in bytes (Python _seg_size). */
+/* Size of one smem allocation in bytes (Python _seg_size).
+ * No packed-only type has an entry: rocke_i_refuse_packed_only_value refuses
+ * its LDS tiles. */
 static int ll_smem_seg_size(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
         return 0;
     const char* n = stype->elem->name;
     int eb;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+       || strcmp(n, "bf8e5m2") == 0)
         eb = 1;
     else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
         eb = 2;
@@ -1236,7 +1301,8 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
     return seg;
 }
 
-/* Alignment for one smem allocation (Python _align). */
+/* Alignment for one smem allocation (Python _align). A packed-only type never
+ * reaches here: rocke_i_refuse_packed_only_value refuses its LDS tiles. */
 static int ll_smem_align(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
@@ -1244,7 +1310,8 @@ static int ll_smem_align(const rocke_type_t* stype)
     const char* n = stype->elem->name;
     if(strcmp(n, "f64") == 0)
         return 8;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+       || strcmp(n, "bf8e5m2") == 0)
         return 16;
     return 4;
 }
@@ -1261,6 +1328,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
 
     /* Initialize offset vector to zero. */
     rocke_vec_init(&L->smem_offsets);
+    rocke_vec_init(&L->smem_sizes);
 
     size_t n = L->smem_globals.len;
     if(n == 0)
@@ -1446,7 +1514,129 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         rocke_vec_push(&L->arena, &L->smem_offsets, offsets[i], rc);
         if(rc != 0)
             rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets push");
+        /* Python _smem_sizes: only allocations that got a pool slot. */
+        int sz = intervals[i].used ? ll_smem_seg_size(L->smem_globals.data[i].stype) : -1;
+        rocke_vec_push(&L->arena, &L->smem_sizes, sz, rc);
+        if(rc != 0)
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: sizes push");
     }
+}
+
+/* ---------------------------------------------------------------------- */
+/* LDS alias scopes (Python _lds_aa_names / _lds_aa_suffix / _lds_aa_render) */
+/* ---------------------------------------------------------------------- */
+
+#define ROCKE_LL_LDS_AA_BASE 900000
+
+/* Indices (into smem_globals) of the used allocations, sorted by gname. */
+static size_t ll_lds_aa_names(rocke_lower_t* L, size_t* idx)
+{
+    size_t n = 0;
+    for(size_t i = 0; i < L->smem_globals.len && i < L->smem_sizes.len; i++)
+    {
+        if(L->smem_sizes.data[i] < 0)
+            continue;
+        size_t k = n++;
+        while(k > 0
+              && strcmp(L->smem_globals.data[idx[k - 1]].gname, L->smem_globals.data[i].gname) > 0)
+        {
+            idx[k] = idx[k - 1];
+            k--;
+        }
+        idx[k] = i;
+    }
+    return n;
+}
+
+const char* rocke_ll_lds_aa_suffix(rocke_lower_t* L, const char* gname)
+{
+    if(!L || !L->lds_aa || !gname)
+        return "";
+    size_t* idx = (size_t*)rocke_arena_alloc(&L->arena, sizeof(size_t) * (L->smem_globals.len + 1));
+    size_t n = ll_lds_aa_names(L, idx);
+    for(size_t i = 0; i < n; i++)
+    {
+        if(strcmp(L->smem_globals.data[idx[i]].gname, gname) == 0)
+        {
+            L->lds_aa_used = true;
+            long long b = ROCKE_LL_LDS_AA_BASE;
+            return rocke_arena_printf(&L->arena,
+                                      ", !alias.scope !%lld, !noalias !%lld",
+                                      b + 1 + (long long)n + (long long)i,
+                                      b + 1 + 2 * (long long)n + (long long)i);
+        }
+    }
+    return "";
+}
+
+static void ll_lds_aa_render(rocke_lower_t* L, rocke_strbuf_t* out)
+{
+    size_t* idx = (size_t*)rocke_arena_alloc(&L->arena, sizeof(size_t) * (L->smem_globals.len + 1));
+    size_t n = ll_lds_aa_names(L, idx);
+    long long b = ROCKE_LL_LDS_AA_BASE;
+    rocke_strbuf_append(out, "\n");
+    rocke_strbuf_append(
+        out, rocke_arena_printf(&L->arena, "!%lld = distinct !{!%lld, !\"rocke.lds\"}\n", b, b));
+    for(size_t i = 0; i < n; i++)
+        rocke_strbuf_append(out,
+                            rocke_arena_printf(&L->arena,
+                                               "!%lld = distinct !{!%lld, !%lld, !\"%s\"}\n",
+                                               b + 1 + (long long)i,
+                                               b + 1 + (long long)i,
+                                               b,
+                                               L->smem_globals.data[idx[i]].gname));
+    for(size_t i = 0; i < n; i++)
+        rocke_strbuf_append(out,
+                            rocke_arena_printf(&L->arena,
+                                               "!%lld = !{!%lld}\n",
+                                               b + 1 + (long long)n + (long long)i,
+                                               b + 1 + (long long)i));
+    for(size_t i = 0; i < n; i++)
+    {
+        size_t gi = idx[i];
+        int lo = L->smem_offsets.data[gi];
+        int hi = lo + L->smem_sizes.data[gi];
+        rocke_strbuf_append(
+            out,
+            rocke_arena_printf(&L->arena, "!%lld = !{", b + 1 + 2 * (long long)n + (long long)i));
+        int first = 1;
+        for(size_t j = 0; j < n; j++)
+        {
+            if(j == i)
+                continue;
+            size_t gj = idx[j];
+            int lo2 = L->smem_offsets.data[gj];
+            int hi2 = lo2 + L->smem_sizes.data[gj];
+            if(lo2 >= hi || hi2 <= lo)
+            {
+                rocke_strbuf_append(
+                    out,
+                    rocke_arena_printf(
+                        &L->arena, "%s!%lld", first ? "" : ", ", b + 1 + (long long)j));
+                first = 0;
+            }
+        }
+        rocke_strbuf_append(out, "}\n");
+    }
+}
+
+void rocke_ll_lds_prov_set(rocke_lower_t* L, const rocke_value_t* v, const char* gname)
+{
+    int rc;
+    rocke_ll_lds_prov_t p;
+    p.value = v;
+    p.gname = gname;
+    rocke_vec_push(&L->arena, &L->lds_prov, p, rc);
+    if(rc != 0)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "lds_prov push");
+}
+
+const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const rocke_value_t* v)
+{
+    for(size_t i = 0; i < L->lds_prov.len; i++)
+        if(L->lds_prov.data[i].value == v)
+            return L->lds_prov.data[i].gname;
+    return NULL;
 }
 
 const char*
@@ -2023,6 +2213,10 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!5 = !{i32 1}\n");
     }
+    if(L->lds_aa_used)
+    {
+        ll_lds_aa_render(L, out);
+    }
     if(L->debug)
     {
         rocke_ll_debug_render(L, L->debug, out);
@@ -2055,10 +2249,14 @@ static void ll_lower_into(rocke_lower_t* L,
     L->backend = rocke_ll_backend_for(arch, &bst);
     if(L->backend == NULL || bst != ROCKE_OK)
     {
-        rocke_ll_fail(L,
-                      bst != ROCKE_OK ? bst : ROCKE_ERR_KEY,
-                      "unknown arch backend %s",
-                      arch ? arch : "(null)");
+        if(arch == NULL)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "lowering requires an explicit gfx target "
+                          "(there is no default)");
+        }
+        rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
     /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
      * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
@@ -2165,6 +2363,10 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.smem_globals);
     rocke_vec_init(&L.smem_names);
     rocke_vec_init(&L.smem_offsets);
+    rocke_vec_init(&L.smem_sizes);
+    rocke_vec_init(&L.lds_prov);
+    L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
+    L.lds_aa_used = false;
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
     rocke_vec_init(&L.yield_stack);

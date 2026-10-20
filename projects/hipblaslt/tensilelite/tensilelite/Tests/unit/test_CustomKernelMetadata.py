@@ -959,12 +959,54 @@ def test_build_from_metadata_numworkgroups_grid():
     assert ck["grid"][0] == "TilesXYBatchGSU"
 
 
+@pytest.mark.parametrize("segment, padding", [(16, 4), (12, None)])
+def test_build_from_metadata_pads_trailing_group_size(segment, padding):
+    """The kernarg segment can end past the trailing groupSize; the gap is padding."""
+    full = _kernel_yaml([dict(_D_ARG, **{".offset": 0}),
+                         {".name": "groupSize", ".size": 4, ".offset": 8,
+                          ".value_kind": "by_value"}])
+    full["amdhsa.kernels"][0][".kernarg_segment_size"] = segment
+    ck = _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
+    assert ck["args"][-1]["semantic"] == "ScaleBlockSizeA"
+    assert ck["args"][-1].get("padding") == padding
+
+
 def test_build_from_metadata_default_multidim_grid():
     # Version 0 split-K kernels need one work group per GSU slice along Y.
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
     )
     assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+@pytest.mark.parametrize("name", ["foreign_WGM", "foreign_WGM_"])
+def test_build_from_metadata_wgm_name_without_rocroller_args_stays_multidim(name):
+    ck = _buildCustomKernelFromMetadata(
+        name, _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
+    )
+    assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+def test_build_from_metadata_rocroller_wgm_args_flatten_workgroup_x():
+    wgm = {
+        "type": "CommandArgument",
+        "name": "WGM",
+        ".size": 4,
+        ".value_kind": "by_value",
+    }
+    magic = {
+        ".name": "MagicMultiple_22",
+        ".size": 4,
+        ".value_kind": "by_value",
+        ".variableType": {"dataType": "Int32"},
+        ".expression": {"type": "MagicMultiple", "arg": wgm},
+    }
+    ck = _buildCustomKernelFromMetadata(
+        "not_named_for_wgm",
+        _kernel_yaml([magic, _D_ARG]),
+        {"MatrixInstruction": [16, 16, 16, 1]},
+    )
+    assert ck["grid"] == ["TilesXY", "One", "Batch"]
 
 
 def test_build_from_metadata_macrotile_name_fallback():
