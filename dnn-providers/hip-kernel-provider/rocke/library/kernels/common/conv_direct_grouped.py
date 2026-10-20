@@ -690,15 +690,6 @@ def _direct_conv_h_loop_setup(b, p, A_smem, p_Hi, store_to_lds, issue_dram_load,
     return UNROLL, c_unroll, n_iters_v
 
 
-def _direct_conv_d_desc_and_acc_args(b, params, q_subtiles, zero_acc, p_KH):
-    """Shared direct-conv descriptors: output descriptor + accumulator arg names."""
-    d_desc = direct_d_descriptor_dynamic(b, params)
-    acc_args = [
-        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p_KH)
-    ]
-    return d_desc, acc_args
-
-
 def _direct_conv_constants(b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo):
     """Shared direct-conv scalar constants: c0..c_W."""
     c0 = b.const_i32(0)
@@ -1908,7 +1899,11 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
     )
 
-    d_desc, acc_args = _direct_conv_d_desc_and_acc_args(b, params, q_subtiles, zero_acc, p.KH)
+    d_desc = direct_d_descriptor_dynamic(b, params)
+
+    acc_args = [
+        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
+    ]
 
     def _acc_index(qt: int, pi: int) -> int:
         return qt * p.KH + pi
@@ -2308,7 +2303,11 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
         b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
     )
 
-    d_desc, acc_args = _direct_conv_d_desc_and_acc_args(b, params, q_subtiles, zero_acc, p.KH)
+    d_desc = direct_d_descriptor_dynamic(b, params)
+
+    acc_args = [
+        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
+    ]
 
     def _acc_index(qt: int, pi: int) -> int:
         return qt * p.KH + pi
