@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -75,6 +74,25 @@ inline std::optional<ptrdiff_t> tryOffsetAdd(ptrdiff_t left, ptrdiff_t right) no
 class Layout {
    public:
     Layout() = default;
+    Layout(const Layout&) = default;
+    Layout& operator=(const Layout&) = default;
+
+    Layout(Layout&& other) noexcept
+        : m_shape(std::move(other.m_shape)),
+          m_strides(std::move(other.m_strides)),
+          m_offset(std::exchange(other.m_offset, 0)) {
+        other.m_strides.clear();
+    }
+
+    Layout& operator=(Layout&& other) noexcept {
+        if (this != &other) {
+            m_shape = std::move(other.m_shape);
+            m_strides = std::move(other.m_strides);
+            m_offset = std::exchange(other.m_offset, 0);
+            other.m_strides.clear();
+        }
+        return *this;
+    }
 
     // Lvalue vectors are copied; rvalue vectors transfer their storage. Lists
     // and spans are copied too, so no constructor borrows the supplied strides.
@@ -133,13 +151,15 @@ class Layout {
                                      std::to_string(m_shape.rank()) + ".");
 
         const auto dimensions = m_shape.dimensions();
-        ptrdiff_t result = m_offset;
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             if (indices[dimension] >= dimensions[dimension])
                 throw std::runtime_error("Tensor coordinate " + std::to_string(indices[dimension]) +
                                          " in dimension " + std::to_string(dimension) +
                                          " is outside [0, " +
                                          std::to_string(dimensions[dimension]) + ").");
+        }
+        ptrdiff_t result = m_offset;
+        for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             const ptrdiff_t delta = checkedMultiply(indices[dimension], m_strides[dimension]);
             result = checkedAdd(result, delta);
         }

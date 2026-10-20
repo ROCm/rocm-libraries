@@ -14,7 +14,20 @@ using namespace roc::hostnumerics;
 namespace roc::hostnumerics::python_bindings {
 void registerLayoutBindings(nb::module_& module) {
     nb::class_<Layout>(module, "Layout",
-                       "Owned shape, signed element strides, and starting element offset.")
+                       R"doc(
+Owned Shape, signed element strides, and starting element offset.
+
+Strides and offsets count elements rather than bytes. For Shape([2, 3]),
+contiguous C order uses strides [3, 1], and Fortran order uses [1, 2].
+Negative strides describe reversal; zero strides describe repeated addresses.
+Layout describes indexing independently of datatype and allocation bounds.
+
+Coordinates and axes must be nonnegative, following Shape's convention.
+Signed strides and offsets can produce negative element offsets. Invalid
+ranks, bounds, and arithmetic overflow raise RuntimeError; values that cannot
+be converted to size_t or ptrdiff_t raise TypeError. Layouts are immutable and
+compare and hash by their shape, strides, and offset.
+)doc")
         .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a = 0)
@@ -30,14 +43,29 @@ void registerLayoutBindings(nb::module_& module) {
                 return std::vector<ptrdiff_t>(strides.begin(), strides.end());
             },
             "Return a copy of the strides.")
-        .def("stride", &Layout::stride, "dimension"_a)
+        .def("stride", &Layout::stride, "dimension"_a,
+             "Return the signed stride at a nonnegative axis less than rank.")
         .def_prop_ro("offset", &Layout::offset)
         .def(
             "element_offset",
             [](const Layout& layout, const std::vector<size_t>& indices) {
                 return layout.elementOffset(indices);
             },
-            "indices"_a, "Checked offset + sum(indices[d] * strides[d]), in elements.")
+            "indices"_a,
+            "Return offset + sum(indices[d] * strides[d]), in elements. All coordinates "
+            "are validated before checking each intermediate multiplication and addition.")
+        .def("__hash__",
+             [](const Layout& layout) {
+                 const auto dimensions = layout.shape().dimensions();
+                 const auto strides = layout.strides();
+                 const nb::tuple value = nb::make_tuple(
+                     nb::tuple(nb::cast(std::vector<size_t>(dimensions.begin(), dimensions.end()))),
+                     nb::tuple(nb::cast(std::vector<ptrdiff_t>(strides.begin(), strides.end()))),
+                     layout.offset());
+                 const Py_hash_t result = PyObject_Hash(value.ptr());
+                 if (result == -1) throw nb::python_error();
+                 return result;
+             })
         .def(
             "__eq__", [](const Layout& left, const Layout& right) { return left == right; },
             nb::is_operator())
