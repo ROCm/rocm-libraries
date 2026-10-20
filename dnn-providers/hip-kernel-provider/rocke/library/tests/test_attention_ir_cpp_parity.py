@@ -28,7 +28,10 @@ from pathlib import Path
 _HARNESS_DIR = Path(__file__).resolve().parents[2] / "platform" / "tests" / "instances"
 
 # Families whose cases this gate covers (the ones built from library kernels).
-_FAMILIES = ("attention_dense", "attention_d256")
+# lightning_indexer is a Python-authored, generically-lowered family (no
+# hand-written C++ emitter), so this gate is what actually proves its Python and
+# C++ lowerings agree -- the representative golden only pins the Python side.
+_FAMILIES = ("attention_dense", "attention_d256", "lightning_indexer")
 
 
 def _harness():

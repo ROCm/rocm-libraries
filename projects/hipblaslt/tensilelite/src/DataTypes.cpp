@@ -84,6 +84,8 @@ namespace rocisa
             return "E8";
         case rocisa::DataType::E5M3:
             return "E5M3";
+        case rocisa::DataType::Int4:
+            return "I4";
         case rocisa::DataType::Count:
             return "Invalid";
         }
@@ -151,6 +153,8 @@ namespace rocisa
             return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
         case rocisa::DataType::E5M3:
             return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
+        case rocisa::DataType::Int4:
+            return TensileLite::TypeInfo<TensileLite::Int4x2>::ElementSize;
         case rocisa::DataType::Count:
             return 1;
         }
@@ -244,6 +248,7 @@ namespace TensileLite
 #endif // _WIN32
         registerTypeInfo<E8>();
         registerTypeInfo<E5M3>();
+        registerTypeInfo<Int4x2>();
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()

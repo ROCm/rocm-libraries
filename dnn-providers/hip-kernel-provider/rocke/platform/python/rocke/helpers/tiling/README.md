@@ -24,14 +24,17 @@ store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)
 
 ## Documentation
 - `docs/tiling_api_surface.md` -- the how-to-use catalog: every surface, its default (MMA-driven)
-  mode and its manual override, a composability matrix, and runnable examples. **Start here.**
-- `docs/tiling_design_proposal.md` -- the why + architecture + status/decisions.
+  mode and its manual override, a composability matrix, and runnable examples. **Start here.** Its
+  section 3 is the one home of the axis convention and of LDS buffers described by their descriptor.
+- `docs/tiling_api_contract.md` -- the why: the promotion gate, the audience tiers, the rules.
 
 ## Package layout
 ```
 encoding.py         WarpDistributionEncoding -- the foundational coordinate-transform type
 register_mapper.py  RegisterMapper / LaneRegister -- pure-int lane x register -> coordinate
-descriptors.py      TensorDesc + TensorWindow (memory model) + make_tensor_desc / make_window
+descriptors.py      TensorDesc + TensorWindow (memory model, global and LDS) + make_tensor_desc /
+                    make_window + check_gemm_shapes
+memory.py           the cooperative global->LDS bridge: cooperative_load_desc, lds_tile_desc, lds_store / lds_read
 fragments.py        TileDesc + Fragment (register model) + make_fragment / fragment_length
 emit.py             b-first IR verbs: load_fragment / store_fragment / fill_fragment + coordinates
 layouts/            make_tile_desc -- quantity-major human-approachable distribution authoring
@@ -52,8 +55,8 @@ authoring / reflection) runs anywhere.
 ## Status
 Dense MMA GEMM on gfx90a is BUILT and bit-exact: single-atom and wave-tile subtiling (M/N/K grid +
 `order`), the human-approachable `make_tile_desc` authoring surface, clipping/bounds for ragged
-tiles, and target-agnostic MMA resolution. `c_transpose`, interleaved layouts, sparse, and MX are
-designed-in reserved seams.
+tiles, LDS staging through the tensor descriptor, and target-agnostic MMA resolution. `c_transpose`,
+interleaved layouts, sparse, and MX are designed-in reserved seams.
 
 ## Engineering standards
 - Descriptive names for every argument, variable, and class; no obfuscating short names.

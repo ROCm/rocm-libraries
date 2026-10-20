@@ -299,15 +299,6 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             return false;
         }
     }
-    if(p->groups > 1 && rocke_conv_problem_cpg(p) == 1)
-    {
-        snprintf(reason,
-                 reason_cap,
-                 "depthwise dgrad (channels-per-group == 1) is not supported by the "
-                 "implicit-GEMM grouped path");
-        return false;
-    }
-
     if(s->tile_m % (s->warp_m * s->warp_tile_m))
     {
         snprintf(reason, reason_cap, "tile_m not divisible by warp_m * warp_tile_m");
