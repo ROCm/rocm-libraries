@@ -177,7 +177,8 @@ def _args_section(text):
 def test_shipped_wgm_kernels_classify_to_the_eleven_roles():
     root = Path(__file__).resolve().parents[2] / "CustomKernels" / "rocroller"
     kernels = sorted(root.glob("*_WGM_.s"))
-    assert len(kernels) == 20
+    # 20 mixed-operand WGM kernels + 12 pure MXFP8/MXBF8/MXFP4 WGM kernels.
+    assert len(kernels) == 32
     for path in kernels:
         text = path.read_text(errors="replace")
         # Flattened workgroup X. These kernels do not read workgroup Y.
@@ -187,7 +188,11 @@ def test_shipped_wgm_kernels_classify_to_the_eleven_roles():
             mapped = _metadataArgToCustomArg(arg, path.stem)
             if mapped["semantic"] in WGM_ROLE_ORDER:
                 roles.append(mapped["semantic"])
-        assert tuple(roles) == WGM_ROLE_ORDER, path.name
+        # Each hoisted value appears exactly once. Their *order* is per-kernel:
+        # it is the kernarg layout rocRoller chose, and ContractionSolution.cpp
+        # walks customKernel.args switching on the semantic, so a permutation is
+        # launched correctly. The pure-MXFP4 32x32x128 kernels permute them.
+        assert sorted(roles) == sorted(WGM_ROLE_ORDER), path.name
 
 
 def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
