@@ -2167,6 +2167,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 # ---------------------------------------------------------------------
 
 
+def _gemm_universal_c_lane(b, atom, lane, kc_m1, kc_nlane, c_per_lane):
+    """Decode the per-lane (row, col) pairs for one MFMA C warp tile."""
+    from rocke.helpers.atoms import make_c_warp_dstr_encoding
+    from rocke.helpers.distribution import make_static_tile_distribution
+
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+
+    c_nlane = b.const_i32(kc_nlane)
+    n_in_atom = b.mod(lane, c_nlane)
+    m_blk = b.div(lane, c_nlane)
+    p_lane = [m_blk, n_in_atom]
+
+    row_in_atom: List[Value] = []
+    col_in_atom: Optional[Value] = None
+    for i in range(c_per_lane):
+        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+        row_in_atom.append(x_row)
+        col_in_atom = x_col
+    return row_in_atom, col_in_atom
+
+
 def _emit_mfma_acc_scatter(
     b: IRBuilder,
     spec: UniversalGemmSpec,
@@ -2235,26 +2257,9 @@ def _emit_mfma_acc_scatter(
         t.warp_tile_k,
     )
     _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
-
-    c_nlane = b.const_i32(kc_nlane)
-    # Single P (the lane) -> [m_blk, n_in_atom] = [lane // kCNLane, lane %
-    # kCNLane]. n_in_atom is also the column coordinate (col_in_atom).
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
-    # Per accumulator slot ``i`` the two Y dims decompose row-major over
-    # (kCM0PerLane, kCM1PerLane): y0 = i // kCM1PerLane, y1 = i % kCM1PerLane.
-    # calculate_x reconstructs the full row_in_atom (lane + slot) and the
-    # col_in_atom (= n_in_atom) from these.
-    row_in_atom: List[Value] = []
-    col_in_atom: Optional[Value] = None
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        row_in_atom.append(x_row)
-        col_in_atom = x_col  # constant across i (depends only on n_in_atom)
+    row_in_atom, col_in_atom = _gemm_universal_c_lane(
+        b, atom, lane, kc_m1, kc_nlane, c_per_lane
+    )
 
     flat = 0
     for mi in range(mfmas_m):
