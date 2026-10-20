@@ -757,6 +757,21 @@ def _caps_of(identity: KernelIdentity) -> DirectCaps:
     )
 
 
+def _dw_cols_probe_width(caps: DirectCaps, channels: int, strip: int) -> int:
+    """A width the small-C depthwise wgrad takes at ``caps``, or 64 if none.
+
+    The kernel needs Wo to be a multiple of its strip and both W * C and
+    Wo * C to be whole 16-byte vectors. W is a runtime extent, so any width
+    that passes probes the same binary; a fixed 64 fails every one of them
+    at PAD 0 (Wo = 62 at 3x3), which left those capability rows unbuilt.
+    """
+    for w in range(64, 64 + 16 * strip * caps.stride):
+        wo = (w + 2 * caps.PAD - caps.KH) // caps.stride + 1
+        if (w * channels) % 8 == 0 and (wo * channels) % 8 == 0 and wo % strip == 0:
+            return w
+    return 64
+
+
 def probe_problem(
     caps: DirectCaps,
     dtype: str = DIRECT_DTYPE,
@@ -788,7 +803,7 @@ def probe_problem(
         return DirectConvProblem(
             N=1,
             H=64,
-            W=64,
+            W=_dw_cols_probe_width(caps, knobs["channels"], knobs["strip"]),
             groups=knobs["channels"],
             cpg=1,
             kpg=1,
