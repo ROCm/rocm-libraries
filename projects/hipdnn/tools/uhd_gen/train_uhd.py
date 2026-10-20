@@ -13,6 +13,7 @@ from sklearn.model_selection import GroupKFold
 
 from . import score_transform
 from .features import (
+    UnseenCategoryError,
     encode_feature_value,
     evaluate_feature_rows,
     feature_reference,
@@ -73,7 +74,7 @@ def build_feature_matrix(
                 if codes is not None and isinstance(raw, str):
                     code = codes.get(raw)
                     if code is None:
-                        raise ValueError(
+                        raise UnseenCategoryError(
                             f"categorical value {raw!r} is not in the encoding for "
                             f"{reference}, whose vocabulary is {sorted(codes)}. The "
                             "encoding is derived from the training corpus and ships "
@@ -84,9 +85,12 @@ def build_feature_matrix(
                 else:
                     encoded[row] = encode_feature_value(reference, raw)
             except (TypeError, ValueError) as error:
-                raise ValueError(
-                    f"feature column {name!r}, row {row}: {error}"
-                ) from error
+                kind = (
+                    UnseenCategoryError
+                    if isinstance(error, UnseenCategoryError)
+                    else ValueError
+                )
+                raise kind(f"feature column {name!r}, row {row}: {error}") from error
         columns.append(encoded)
 
     return np.column_stack(columns)
@@ -160,8 +164,3 @@ def train_model(
     model = lgb.train(params, train_data, num_boost_round=best_iter)
     logger.info("Trained model with %d trees", model.num_trees())
     return model
-
-
-def predict(model: lgb.Booster, X: np.ndarray) -> np.ndarray:
-    """Predict in the metric's units, inverting the trained transform."""
-    return score_transform.inverse(model.predict(X), score_transform.TRAINED)

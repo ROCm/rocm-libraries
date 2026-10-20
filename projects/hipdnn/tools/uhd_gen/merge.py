@@ -1,10 +1,12 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Join sweeps from several boards of one architecture into one corpus.
+"""Join sweeps from several machines of one architecture into one corpus.
 
-A UHD is keyed by arch, not board (RFC 0019 §3.1), and a problem is (benchmark, device),
-so concatenation keeps boards apart. Refuses mismatched column sets (a missing column
-would be NaN exactly on one board's rows) and warns when one device appears twice.
+A UHD is keyed by arch (RFC 0019 §3.1). `device` is the device's kind, its DeviceKey hash
+(RFC 0019.13 §4.1), so two machines with the same card measure the same problems: a
+configuration measured on both is one measurement, repeated, and the merge keeps the fastest
+usable one (`training_table.best_per_shape`'s rule). Different kinds of card stay apart.
+Refuses mismatched column sets (a missing column would be NaN exactly on one machine's rows).
 """
 from __future__ import annotations
 
@@ -15,6 +17,11 @@ from pathlib import Path
 import pandas as pd
 
 from .corpus_io import read_corpus_frame
+from .dataset.training_table import (
+    BEST_STATISTIC,
+    measurement_error,
+    measurement_key,
+)
 
 __all__ = [
     "MergeError",
@@ -25,7 +32,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: Hex DeviceKey hash: stable for one board, distinct between two.
+#: The DeviceKey hash: one value for every GPU of one kind, distinct between kinds.
 DEVICE_COLUMN = "device"
 
 BENCHMARK_COLUMN = "benchmark"
@@ -98,20 +105,18 @@ def merge_corpora(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
 
     merged = pd.concat(frames, ignore_index=True)
 
-    # One device in two files doubles that board's weight; allowed, but always warned.
+    # Machines with the same kind of card repeat each other's measurements; one row each.
     seen: dict[str, list[str]] = {}
     for entry in per_file:
         for device in entry["devices"]:
             seen.setdefault(device, []).append(entry["path"])
     repeated = {device: files for device, files in seen.items() if len(files) > 1}
-    for device, files in sorted(repeated.items()):
-        logger.warning(
-            "device %s appears in %d corpora (%s). Those rows share problem identity, so "
-            "that board carries proportionally more weight than the others. Intended when "
-            "resampling one machine; a mistake if you meant to merge two.",
-            device,
-            len(files),
-            ", ".join(files),
+    merged, superseded = _keep_fastest_repeat(merged)
+    if superseded:
+        logger.info(
+            "%d repeated measurement(s) of one configuration on one kind of device were "
+            "set aside for the fastest",
+            superseded,
         )
 
     report = {
@@ -126,8 +131,33 @@ def merge_corpora(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
         "repeated_devices": {
             device: files for device, files in sorted(repeated.items())
         },
+        "superseded_rows": superseded,
     }
     return merged, report
+
+
+def _keep_fastest_repeat(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """`frame` with each repeated usable measurement reduced to its fastest row, and how
+    many rows were set aside. Rows that cannot be a label are kept as they are: whatever
+    reads the corpus reports them."""
+    if not {BENCHMARK_COLUMN, "arch"} <= set(frame.columns):
+        return frame, 0
+    best: dict = {}
+    dropped: set = set()
+    for index, row in zip(frame.index, frame.to_dict(orient="records")):
+        if measurement_error(row) is not None:
+            continue
+        key = measurement_key(row)
+        time = float(row[BEST_STATISTIC])
+        held = best.get(key)
+        if held is None:
+            best[key] = (time, index)
+        elif time < held[0]:
+            dropped.add(held[1])
+            best[key] = (time, index)
+        else:
+            dropped.add(index)
+    return frame.drop(index=sorted(dropped)).reset_index(drop=True), len(dropped)
 
 
 def add_merge_arguments(parser: argparse.ArgumentParser) -> None:

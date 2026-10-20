@@ -594,43 +594,6 @@
   },
   "archetypes": [
     {
-      "name": "llama3_8b_decode",
-      "source": "RFC 0019.13 \u00a712.3",
-      "note": "one query token against the whole KV cache",
-      "values": {
-        "batch": [
-          1,
-          8,
-          16,
-          32,
-          64,
-          128,
-          256
-        ],
-        "heads": [
-          32
-        ],
-        "heads_kv": [
-          8
-        ],
-        "seqlen_q": [
-          1
-        ],
-        "seqlen_k": [
-          512,
-          2048,
-          8192,
-          32768
-        ],
-        "head_dim": [
-          128
-        ],
-        "is_causal": [
-          true
-        ]
-      }
-    },
-    {
       "name": "llama3_8b_prefill",
       "source": "RFC 0019.13 \u00a712.3",
       "values": {
@@ -679,7 +642,6 @@
           8
         ],
         "seqlen_q": [
-          1,
           512,
           2048
         ],

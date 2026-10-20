@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -114,8 +116,15 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
             }
             return std::find(applicable.begin(), applicable.end(), engineId) != applicable.end();
         }
+        catch(const std::exception& error)
+        {
+            // A builder or frontend exception is a failure to build, not the engine declining.
+            tally.note(std::string("exception: ") + error.what());
+            return false;
+        }
         catch(...)
         {
+            tally.note("exception: unknown");
             return false;
         }
     };
@@ -144,41 +153,5 @@ inline ProblemOracle makeCorpusOracle(hipdnnHandle_t handle,
 /// Pre-oracle filter, given the operation name and the point. A refused point costs no oracle
 /// call and does not count toward a combination's target.
 using CorpusFilter = std::function<bool(const std::string&, const ProblemPoint&)>;
-
-/// @brief Generates the problem corpus for @p engineId across every declared operation.
-///
-/// @p handle may be null; see @ref makeCorpusOracle.
-inline std::vector<MetadataOperationCorpus> generateCorpus(hipdnnHandle_t handle,
-                                                           int64_t engineId,
-                                                           const MetadataSet& declarations,
-                                                           const ExplorationRequest& request,
-                                                           int64_t maxBytes = 0,
-                                                           const CorpusFilter& keep = {})
-{
-    std::vector<MetadataOperationCorpus> results;
-
-    for(const auto& entry : declarations.operations)
-    {
-        MetadataOperationCorpus result;
-        result.metadataPath = entry.first;
-        result.operation = entry.second.operation;
-
-        const auto oracle = makeCorpusOracle(handle,
-                                             engineId,
-                                             entry.second,
-                                             &result.buildFailures,
-                                             &result.firstBuildError,
-                                             maxBytes);
-
-        const auto& operation = entry.second.operation;
-        const ProblemOracle admits = [&](const ProblemPoint& point) {
-            return (!keep || keep(operation, point)) && oracle(point);
-        };
-
-        result.corpus = exploreProblemSpace(entry.second, request, admits);
-        results.push_back(std::move(result));
-    }
-    return results;
-}
 
 } // namespace hipdnn_corpus_gen

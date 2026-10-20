@@ -12,12 +12,16 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_corpus_gen/ProblemSpace.hpp>
+#include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
+#include <algorithm>
+#include <climits>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <set>
 #include <string>
 
@@ -312,6 +316,85 @@ TEST(TestCorpusRealism, EveryDeclaredArchetypeSetIsActuallyDrawnFrom)
             << " archetypes and drew from none of them";
         EXPECT_GT(composition.fromNeighbourhood, 0)
             << parsed.metadata->operation << " never perturbed an anchor";
+    }
+}
+
+TEST(TestCorpusRealism, EveryShippedMirrorKeepsItsArchetypesProportion)
+{
+    // A neighbour of an archetype is near it: a mirrored extent keeps the archetype's own
+    // proportion to what it follows (within the declared ratios), so a decode shape stays a
+    // decode shape and a D2=1 activation keeps its row length.
+    for(const auto& file :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
+    {
+        if(file.path().string().find(".opmeta.json") == std::string::npos)
+        {
+            continue;
+        }
+        std::ifstream stream(file.path());
+        ASSERT_TRUE(stream.good()) << file.path();
+        const auto parsed = parseOperationMetadata(nlohmann::json::parse(stream));
+        ASSERT_TRUE(parsed.ok()) << file.path().filename();
+        const auto& metadata = *parsed.metadata;
+
+        std::mt19937_64 rng(31);
+        size_t total = 0;
+        const auto combinations = detail::categoricalCombinations(metadata.parameters, 64, total);
+        for(const auto& archetype : metadata.archetypes)
+        {
+            for(const auto& combination : combinations)
+            {
+                const auto anchor
+                    = detail::drawFromArchetype(metadata, archetype, combination, rng);
+                if(!anchor.has_value())
+                {
+                    continue;
+                }
+                const auto moved = detail::perturbWithinNeighbourhood(metadata, *anchor, rng);
+                for(const auto& [follower, hood] : metadata.neighbourhood)
+                {
+                    if(hood.kind != Neighbourhood::Kind::MIRROR)
+                    {
+                        continue;
+                    }
+                    const auto* parameter = metadata.find(follower);
+                    const auto anchorFollower = detail::integerAt(*anchor, follower);
+                    const auto anchorFollowed = detail::integerAt(*anchor, hood.mirrors);
+                    const auto movedFollower = detail::integerAt(moved, follower);
+                    const auto movedFollowed = detail::integerAt(moved, hood.mirrors);
+                    if(parameter == nullptr || !anchorFollower || !anchorFollowed || !movedFollower
+                       || !movedFollowed || *anchorFollowed <= 0 || *movedFollowed <= 0)
+                    {
+                        continue;
+                    }
+                    // A value held at its declared bound has lost its proportion by design.
+                    if(*movedFollower == detail::clampToRange(*parameter, INT64_MIN)
+                       || *movedFollower == detail::clampToRange(*parameter, INT64_MAX))
+                    {
+                        continue;
+                    }
+                    const auto proportion = static_cast<double>(*anchorFollower)
+                                            / static_cast<double>(*anchorFollowed);
+                    const auto [low, high]
+                        = hood.ratios.empty()
+                              ? std::pair{1.0, 1.0}
+                              : std::pair{
+                                    *std::min_element(hood.ratios.begin(), hood.ratios.end()),
+                                    *std::max_element(hood.ratios.begin(), hood.ratios.end())};
+                    const auto actual
+                        = static_cast<double>(*movedFollower) / static_cast<double>(*movedFollowed);
+                    // Rounding to integers moves a small extent by up to half a unit.
+                    const auto slack = 1.0 + 1.0 / static_cast<double>(*movedFollowed);
+                    EXPECT_GE(actual * slack, proportion * low)
+                        << metadata.operation << " archetype " << archetype.name << ": " << follower
+                        << "=" << *movedFollower << " vs " << hood.mirrors << "=" << *movedFollowed
+                        << " lost the archetype's " << proportion << ":1";
+                    EXPECT_LE(actual, proportion * high * slack)
+                        << metadata.operation << " archetype " << archetype.name << ": " << follower
+                        << "=" << *movedFollower << " vs " << hood.mirrors << "=" << *movedFollowed;
+                }
+            }
+        }
     }
 }
 

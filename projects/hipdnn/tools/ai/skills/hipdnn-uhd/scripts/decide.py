@@ -13,7 +13,9 @@ An engine predictor (L1) has these gates, each guarding a failure that is otherw
   describe some other model.
 * **available** -- with the candidate installed, the engine returns a prediction for the
   graphs it executes. An engine that reports UNAVAILABLE falls back to no L1 at all.
-* **metric** -- it answers in the metric its id is declared for.
+* **metric** -- the candidate's descriptor (`score.metric`) and its answers name the metric
+  its id is declared for. The bench echoes the metric it was asked for, so the descriptor is
+  what shows a model of another metric.
 * **selector_revision** -- the revision the engine reports now is the one the model was
   trained against. The engine refuses a stale model at load time on a user's machine;
   refusing it here is cheaper.
@@ -119,6 +121,7 @@ def decide(
     max_regression: Optional[float] = None,
     min_graphs: int = 1,
     incumbent_baseline: bool = True,
+    candidate_metric: Optional[str] = None,
 ) -> dict[str, Any]:
     """The validation report. `passed` is True only if every enabled gate holds."""
     rows = document.get("rows") or []
@@ -184,6 +187,13 @@ def decide(
     wrong = [m for m in answered if m not in ("None", metric)]
     unnamed = sum((r.get("candidate") or {}).get("metric") is None for r in available)
     metric_problems = []
+    # The bench names the metric it was asked for, so the answers alone cannot show the
+    # model's metric; the candidate's descriptor declares it (`score.metric`).
+    if candidate_metric is not None and candidate_metric != metric:
+        metric_problems.append(
+            f"the candidate model predicts {candidate_metric}, but the engine declares "
+            f"this id for {metric}"
+        )
     if wrong:
         metric_problems.append(f"candidate answered in {wrong}, not {metric}")
     if unnamed:
@@ -366,7 +376,18 @@ def decide_catalog(
     rows = rows_doc.get("rows") or []
     runnable = [r for r in rows if (r.get("incumbent") or {}).get("ok")]
     ran = [r for r in runnable if (r.get("candidate") or {}).get("ok")]
-    refused = [r for r in rows if (r.get("candidate") or {}).get("refusals")]
+
+    # A refusal both runs report is about another engine's model in the shared root; only one
+    # the candidate run alone reports is about the candidate.
+    def candidate_only(row: dict) -> list[str]:
+        theirs = set((row.get("incumbent") or {}).get("refusals") or [])
+        return [
+            line
+            for line in (row.get("candidate") or {}).get("refusals") or []
+            if line not in theirs
+        ]
+
+    refused = [r for r in rows if candidate_only(r)]
     gates: dict[str, Any] = {}
     fraction = len(ran) / len(runnable) if runnable else 0.0
     passed = bool(runnable) and fraction >= min_available
@@ -393,8 +414,7 @@ def decide_catalog(
     gates["read"] = {
         "passed": not refused,
         "problems": [
-            f"{Path(r['graph']).name}: {r['candidate']['refusals'][0]}"
-            for r in refused[:5]
+            f"{Path(r['graph']).name}: {candidate_only(r)[0]}" for r in refused[:5]
         ],
     }
     records = rows_doc.get("winner_records") or {}
@@ -581,6 +601,13 @@ def main(argv: list[str] | None = None) -> int:
     l1.add_argument("--rows", type=Path, required=True)
     l1.add_argument("--candidate-dir", type=Path, required=True)
     l1.add_argument("--min-available", type=float, default=1.0)
+    l1.add_argument(
+        "--min-graphs",
+        type=int,
+        default=1,
+        help="fewest graphs the engine must execute (and, with no incumbent, the candidate "
+        "must predict) for the verdict to count",
+    )
     l1.add_argument("--max-regression", type=float, default=DEFAULT_L1_MAX_REGRESSION)
     l1.add_argument(
         "--no-incumbent",
@@ -610,7 +637,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
             min_available=args.min_available,
             max_regression=args.max_regression if rows.get("measured") else None,
+            min_graphs=args.min_graphs,
             incumbent_baseline=not args.no_incumbent,
+            candidate_metric=(candidate.get("score") or {}).get("metric"),
         )
         note = comparison_warning("predict_engine", report["metrics"].get("paired"))
     else:

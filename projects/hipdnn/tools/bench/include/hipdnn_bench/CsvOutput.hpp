@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -104,6 +105,78 @@ inline std::string csvTiming(bool timed, float milliseconds)
     std::ostringstream text;
     text << milliseconds;
     return text.str();
+}
+
+/// Why an untimed candidate has no measurement, or empty when it was timed. RFC 0019.13
+/// §7.4/§8: untimed pairs are kept with is_valid=False and this reason for coverage auditing.
+inline std::string skipReason(bool succeeded, int64_t iterationsRun)
+{
+    if(!succeeded)
+    {
+        return "config_not_applicable: engine declined or failed to run this configuration";
+    }
+    if(iterationsRun == 0)
+    {
+        // Emitting this as valid would put a zero time in the training set.
+        return "not_timed: autotune reported success without running an iteration";
+    }
+    return {};
+}
+
+/// One candidate's outcome, as the CSV columns after its knobs and the JSON `results[]`
+/// entry report it.
+struct CandidateOutcome
+{
+    std::string engine;
+    int64_t rank = 0;
+    bool succeeded = false;
+    int64_t iterationsRun = 0;
+    /// `numerically_valid` as CSV text (verdictText) and as JSON (true, false or null), and
+    /// its reason.
+    std::string verdict;
+    nlohmann::json numericallyValid = nullptr;
+    std::string validation;
+    float minTimeMs = 0.0F;
+    float avgTimeMs = 0.0F;
+    float robustTimeMs = 0.0F;
+    float stddevMs = 0.0F;
+    bool converged = false;
+    int64_t workspaceBytes = 0;
+};
+
+/// One CSV row, in @ref csvHeader's column order: the problem and its graph's content key,
+/// the feature, query and knob values given in their header's order, then the outcome.
+///
+/// Every text field goes through csvField: the problem id defaults to the graph's path, and
+/// knob values and engine names are free text. Training filters on is_valid.
+inline std::string csvRow(const std::string& problem,
+                          const std::string& benchmark,
+                          const std::vector<std::string>& features,
+                          const std::vector<std::string>& queries,
+                          const std::vector<std::string>& knobs,
+                          const CandidateOutcome& outcome)
+{
+    std::string row = csvField(problem) + "," + csvField(benchmark);
+    for(const auto* values : {&features, &queries, &knobs})
+    {
+        for(const auto& value : *values)
+        {
+            row += "," + csvField(value);
+        }
+    }
+
+    const bool timed = outcome.succeeded && outcome.iterationsRun > 0;
+
+    std::ostringstream tail;
+    tail << "," << csvField(outcome.engine) << "," << outcome.rank << ","
+         << (outcome.succeeded ? 1 : 0) << "," << (timed ? "True" : "False") << ","
+         << outcome.verdict << "," << csvField(outcome.validation) << ","
+         << csvField(skipReason(outcome.succeeded, outcome.iterationsRun)) << ","
+         << csvTiming(timed, outcome.minTimeMs) << "," << csvTiming(timed, outcome.avgTimeMs) << ","
+         << csvTiming(timed, outcome.robustTimeMs) << "," << csvTiming(timed, outcome.stddevMs)
+         << "," << outcome.iterationsRun << "," << (outcome.converged ? 1 : 0) << ","
+         << outcome.workspaceBytes;
+    return row + tail.str();
 }
 
 } // namespace hipdnn_bench

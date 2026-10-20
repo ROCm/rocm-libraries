@@ -10,8 +10,10 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_bench/CandidatePageJson.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <array>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -121,6 +123,47 @@ TEST(TestCandidatePageJson, AKnobTupleOfEveryValueTypeReadsBack)
         {"block_size", int64_t{128}}, {"scale", 0.5}, {"layout", std::string("nhwc")}};
     EXPECT_EQ(knobJson(knobs),
               nlohmann::json({{"block_size", 128}, {"layout", "nhwc"}, {"scale", 0.5}}));
+}
+
+TEST(TestCandidatePageJson, ASweepResultIsTheEntryUhdGenReads)
+{
+    // uhd_gen's test_generate reads the same staged entry through collect_graph, so a key
+    // renamed on either side fails one of the two.
+    CandidateOutcome outcome;
+    outcome.rank = 0;
+    outcome.succeeded = true;
+    outcome.iterationsRun = 40;
+    outcome.numericallyValid = true;
+    outcome.validation = "agrees_with_catalog: 2 of 2 cross-checked candidates that wrote "
+                         "their output produced it";
+    outcome.minTimeMs = 2.0F;
+    outcome.avgTimeMs = 2.75F;
+    outcome.robustTimeMs = 2.5F;
+    outcome.stddevMs = 0.125F;
+    outcome.converged = true;
+
+    const auto samplePath = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                            / HIPDNN_TEST_DATA_RELDIR / HIPDNN_BENCH_CSV_SAMPLE_SUBDIR
+                            / "hipdnn_bench_sweep_result.json";
+    std::ifstream sample(samplePath);
+    ASSERT_TRUE(sample.good()) << samplePath;
+    EXPECT_EQ(sweepResultJson("kernel-a",
+                              nlohmann::json{{"tile_m", 32}},
+                              nlohmann::json{{"kernel.tile_m", 32}},
+                              outcome),
+              nlohmann::json::parse(sample));
+}
+
+TEST(TestCandidatePageJson, AnUntimedSweepResultHasNullTimingsAndItsReason)
+{
+    CandidateOutcome outcome;
+    outcome.succeeded = false;
+    outcome.avgTimeMs = 2.75F;
+    const auto entry
+        = sweepResultJson("kernel-b", nlohmann::json::object(), nlohmann::json::object(), outcome);
+    EXPECT_FALSE(entry.at("is_valid").get<bool>());
+    EXPECT_TRUE(entry.at("avg_time_ms").is_null());
+    EXPECT_EQ(entry.at("skip_reason").get<std::string>().rfind("config_not_applicable", 0), 0U);
 }
 
 } // namespace hipdnn_bench

@@ -242,6 +242,35 @@ def test_published_csv_converts_with_the_binding_the_caller_states(tmp_path):
     assert store.add(tmp_path / "ds", entry, rows)["rows"] == 4
 
 
+def test_a_csv_that_names_no_device_kind_is_refused_by_column(tmp_path):
+    """`device.*` features describe a device without naming it; the store keys on `device`."""
+    csv = tmp_path / "sweep.csv"
+    pd.DataFrame(
+        {
+            "benchmark": ["p1", "p1"],
+            "q.M": [64, 64],
+            "q.flops": [1e9] * 2,
+            "q.bytes": [1e6] * 2,
+            "kernel.solver_id": [1, 2],
+            "device.cu_count": [80] * 2,
+            "minTimeMs": [1.0, 2.0],
+            "avgTimeMs": [1.1, 2.1],
+            "stddevMs": [0.0] * 2,
+            "iters": [10] * 2,
+        }
+    ).to_csv(csv, index=False)
+    with pytest.raises(store.DatasetError, match="'device'"):
+        store.from_csv(
+            [csv],
+            engine="MIOPEN",
+            engine_id=11,
+            role="sort_kernel_catalog",
+            arch="gfx942",
+            selector_revision="miopen/abc",
+            collected_at="2026-10-02T00:00:00+00:00",
+        )
+
+
 def test_a_hipdnn_bench_csv_converts_with_its_untimed_candidates_as_failures(tmp_path):
     """fixtures/hipdnn_bench.csv is hipdnn_bench's CSV (TestCsvOutput pins its header): a row
     keyed by graph and device kind, and a candidate that did not run, with empty timings.
@@ -636,3 +665,57 @@ def test_exported_rows_added_again_keep_their_id(tmp_path):
     exported = store.export_rows(original, contributions=[added["contribution_id"]])
     again = store.add(tmp_path / "rebuilt", stored, {None: exported})
     assert again["contribution_id"] == added["contribution_id"]
+
+
+def test_rows_with_different_keys_exported_and_added_again_keep_their_id(tmp_path):
+    """An exported row carries every column of its contribution, as null where it had none;
+    absent and null are one fact, so the measurements are not stored a second time."""
+    rows = [
+        {
+            "benchmark": "g0",
+            "device": "d0",
+            "arch": "gfx942",
+            "kernel": "k0",
+            "knob_settings": "{}",
+            "avgTimeMs": 1.5,
+        },
+        {
+            "benchmark": "g1",
+            "device": "d0",
+            "arch": "gfx942",
+            "kernel": "k0",
+            "knob_settings": "{}",
+            "avgTimeMs": 2.5,
+            "graph.flops": 1e9,
+        },
+    ]
+    original = tmp_path / "original"
+    added = store.add(
+        original, *store.from_collection(_collection(tmp_path, "a", rows=rows))
+    )
+    (stored,) = store.read_manifest(original)["contributions"]
+    exported = store.export_rows(original, contributions=[added["contribution_id"]])
+    assert "graph.flops" in exported[0], "the export fills the column the row lacked"
+    again = store.add(original, stored, {None: exported})
+    assert again["contribution_id"] == added["contribution_id"]
+    assert not again["added"], "the same measurements are stored once"
+
+
+def test_a_zero_time_is_no_measurement_and_never_replaces_a_real_one():
+    """A 0 ms row is a timer that did not run, not the fastest kernel."""
+    from uhd_gen.dataset.training_table import best_per_shape, measurement_error
+
+    def row(time):
+        return {
+            "benchmark": "g",
+            "arch": "gfx942",
+            "device": "d",
+            "kernel": "k",
+            "knob_settings": "{}",
+            "avgTimeMs": time,
+        }
+
+    assert measurement_error(row(0.0)) == "unmeasured"
+    assert measurement_error(row(-1.0)) == "unmeasured"
+    kept, superseded, excluded = best_per_shape([("a", row(1.0)), ("b", row(0.0))])
+    assert kept == [0] and superseded == 0 and excluded == {"unmeasured": 1}

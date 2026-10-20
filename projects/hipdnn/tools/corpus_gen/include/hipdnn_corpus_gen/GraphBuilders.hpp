@@ -402,13 +402,15 @@ inline GraphBytes matmulEpilogue(const TensorSpec& a,
 /// @brief C = dequantize(A, scaleA) x dequantize(B, scaleB): a block-scaled (MX) matmul.
 ///
 /// Three nodes: each operand is dequantized into a virtual fp32 tensor and the matmul consumes
-/// those. Every node computes in fp32.
+/// those. Every node computes in fp32. Both operands are blocked along K: A [M, K] by its
+/// trailing dimension (`{block}`), B [K, N] by its leading one (`{block, 1}`), matching their
+/// scales [M, K/block] and [K/block, N].
 inline GraphBytes blockScaledMatmul(const TensorSpec& a,
                                     const TensorSpec& aScale,
                                     const TensorSpec& b,
                                     const TensorSpec& bScale,
                                     const TensorSpec& c,
-                                    const std::vector<int32_t>& blockSize,
+                                    int32_t block,
                                     const GraphTypes& types)
 {
     constexpr int64_t A_DEQUANTIZED_UID = 101;
@@ -434,11 +436,14 @@ inline GraphBytes blockScaledMatmul(const TensorSpec& a,
         detail::addTensor(builder, bDeq),
         detail::addTensor(builder, c)};
 
+    const std::vector<int32_t> aBlock{block};
+    const std::vector<int32_t> bBlock{block, 1};
     std::vector<flatbuffers::Offset<fb::Node>> nodes;
     for(const auto* operand : {&a, &b})
     {
         const auto& scale = operand == &a ? aScale : bScale;
         const auto& out = operand == &a ? aDeq : bDeq;
+        const auto& blockSize = operand == &a ? aBlock : bBlock;
         const auto deq = fb::CreateBlockScaleDequantizeAttributesDirect(
             builder, operand->uid, scale.uid, out.uid, &blockSize, /*is_negative_scale=*/false);
         nodes.push_back(fb::CreateNodeDirect(builder,

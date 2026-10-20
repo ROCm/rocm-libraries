@@ -873,3 +873,55 @@ def test_the_emitted_training_slice_is_every_problem_the_report_held_out_and_no_
     assert kept.isdisjoint(held_out)
     assert kept | held_out == {f"graph-{index}" for index in range(24)}
     assert len(sliced) == len(kept)
+
+
+def test_import_immediate_joins_responses_into_one_normalized_corpus(tmp_path, caplog):
+    """`uhd-gen import-immediate` reads bench responses and writes the corpus training reads,
+    as JSON or CSV by suffix; any other suffix is refused."""
+    from uhd_gen.__main__ import main
+
+    first, second = tmp_path / "a.json", tmp_path / "b.json"
+    first.write_text(
+        json.dumps([measurement(graph="g0"), measurement(graph="g1")]), encoding="utf-8"
+    )
+    second.write_text(json.dumps([measurement(graph="g2")]), encoding="utf-8")
+
+    as_json, as_csv = tmp_path / "out" / "corpus.json", tmp_path / "out" / "corpus.csv"
+    assert (
+        main(
+            [
+                "import-immediate",
+                "--input",
+                str(first),
+                str(second),
+                "--output",
+                str(as_json),
+            ]
+        )
+        == 0
+    )
+    rows = json.loads(as_json.read_text(encoding="utf-8"))
+    assert sorted(row["benchmark"] for row in rows) == ["g0", "g1", "g2"]
+    assert all(row["avgTimeMs"] > 0 for row in rows)
+
+    assert (
+        main(["import-immediate", "--input", str(first), "--output", str(as_csv)]) == 0
+    )
+    assert sorted(pd.read_csv(as_csv, dtype={"benchmark": str})["benchmark"]) == [
+        "g0",
+        "g1",
+    ]
+
+    assert (
+        main(
+            [
+                "import-immediate",
+                "--input",
+                str(first),
+                "--output",
+                str(tmp_path / "x.txt"),
+            ]
+        )
+        == 1
+    )
+    assert ".json or .csv" in caplog.text

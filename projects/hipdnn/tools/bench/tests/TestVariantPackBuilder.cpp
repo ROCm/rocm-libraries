@@ -167,6 +167,9 @@ TEST(TestVariantPackBuilder, MarksTheTensorsTheGraphWritesAndOnlyThose)
     const auto plan = planVariantPack(graph);
     ASSERT_TRUE(plan.error.empty()) << plan.error;
     ASSERT_EQ(plan.tensors.size(), 3U) << "the virtual intermediate is not planned";
+    ASSERT_NE(planned(plan, 1), nullptr);
+    ASSERT_NE(planned(plan, 2), nullptr);
+    ASSERT_NE(planned(plan, 4), nullptr);
     EXPECT_FALSE(planned(plan, 1)->produced);
     EXPECT_FALSE(planned(plan, 2)->produced);
     EXPECT_TRUE(planned(plan, 4)->produced);

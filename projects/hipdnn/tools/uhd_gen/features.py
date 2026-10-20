@@ -11,6 +11,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+class UnseenCategoryError(ValueError):
+    """A categorical value the model's encoding does not hold: training never saw it, so the
+    model cannot predict for that row, and the runtime falls back to the declared order.
+    """
+
+
 MAX_SAFE_NUMERIC_LITERAL = 1e15
 
 

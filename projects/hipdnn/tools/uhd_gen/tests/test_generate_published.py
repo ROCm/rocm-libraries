@@ -152,6 +152,8 @@ def test_a_published_dataset_trains_a_grouped_model_scored_on_held_out_problems(
     assert (output / "model" / "miopen_conv.uhd.json").is_file()
     report = json.loads((output / "model" / "eval_report.json").read_text())
     assert report["holdout_integrity"]["status"] == "held_out"
+    # The slice was verified held out, so evaluate's whole-input warning does not apply.
+    assert not any("NO HELD-OUT SLICE" in w for w in report["warnings"])
 
 
 @pytest.mark.parametrize(

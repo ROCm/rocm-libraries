@@ -592,7 +592,7 @@ exemption from it.
 
 Example CSV:
 ```csv
-M,N,K,tile_m,tile_n,tile_k,cu_count,tflops
+q.M,q.N,q.K,kernel.tile_m,kernel.tile_n,kernel.tile_k,device.cu_count,tflops
 1024,1024,1024,128,128,32,120,50.5
 2048,2048,2048,256,128,32,120,75.2
 ...
@@ -769,8 +769,9 @@ cd projects/hipdnn/tools
 PLUGINS=<build>/lib/hipdnn_plugins/engines
 
 # 1. A corpus for the engine: every candidate problem is offered to it, so the corpus is
-#    what that engine serves. Deterministic from the seed and the in-tree inputs.
-<build>/bin/hipdnn_corpus_gen --operations corpus_gen/operations --operation sdpa_fwd \
+#    what that engine serves. Deterministic from the seed and the in-tree inputs. The
+#    operation declarations are the ones installed beside the tool (--operations overrides).
+<build>/bin/hipdnn_corpus_gen --operation sdpa_fwd \
     --plugin-dir $PLUGINS --engine-name <engine> --output corpus --count 1000 --seed 0
 
 # 2. L2 (catalog ranker), then L1 (engine estimate). L2 goes first because an immediate
@@ -1058,7 +1059,9 @@ searched again with the regime's declared equalities pinned (`seqlen_q == 1`) or
 (`heads_kv == heads`), so a walk can reach populations it would otherwise almost never meet.
 Every point still passes the engine, the constraints, `--keep` and `--exclude-corpus`.
 `manifest.json` `reports.regime_quota` records asked, delivered and saturated per regime, and
-the tool exits 3 when a quota is short without being shown saturated.
+the tool exits 3 when a quota is short without being shown saturated. A regime the
+declaration's own constraints exclude (sdpa's `cross_*`, kept so lifting `seqlen_q <= seqlen_k`
+files cross attention correctly) is marked `excluded_by_constraints`: no engine was asked.
 
 L1 (`predict_engine`) models only: within-X% is a per-row error, which is what an L1 predicts.
 
@@ -1138,7 +1141,7 @@ live in `_generated/`, committed alongside the tool the same way the C++
 
 ```
 _generated/hipdnn_flatbuffers_sdk/data_objects/
-└── GbdtModel.py, GbdtTree.py                                        # gbdt_model.fbs
+└── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
@@ -1201,7 +1204,8 @@ recorded in `train_manifest.json` (as `{}` when there is none) and is the one
 - **Target transform**: `log(target)` for scale-invariant training; its inverse `exp` is
   positive for every finite prediction, so the runtime never orders a physical score last
   as non-positive (`log1p`'s `expm1` could). Targets must be strictly positive
-- **Cross-validation**: GroupKFold when `--group-by` specified
+- **Cross-validation**: GroupKFold over shapes -- the first grouping column, `--group-by`'s
+  or the inferred `benchmark` -- so every device's measurements of one shape share a fold
 - **Early stopping**: Prevents overfitting
 - **Model format**: LightGBM → FlatBuffer GbdtModel
 

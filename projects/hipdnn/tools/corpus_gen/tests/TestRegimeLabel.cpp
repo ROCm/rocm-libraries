@@ -34,7 +34,7 @@ OperationMetadata shippedSdpa()
     EXPECT_TRUE(file.is_open()) << path;
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return *parsed.metadata;
+    return parsed.metadata.value_or(OperationMetadata{});
 }
 
 /// Multi-head by default, so the grouping facet stays fixed in the phase and context cases.
@@ -324,6 +324,26 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
     EXPECT_TRUE(found.problems.empty());
     EXPECT_TRUE(found.saturated);
     EXPECT_FALSE(found.searchCapped);
+}
+
+TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
+{
+    // Each combination is probed before it gets the full budget and its doublings, as the
+    // first pass does: an engine that serves none of the regime costs at most one probe each.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    const ProblemOracle shortOnly
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("seqlen_k")) <= 1024; };
+    auto request = focusRequest();
+    request.probeBudget = 200;
+
+    const auto found = exploreRegime(metadata, *focus, request, 10, shortOnly, {}, {});
+
+    EXPECT_TRUE(found.problems.empty());
+    EXPECT_TRUE(found.saturated);
+    EXPECT_LE(found.proposed, static_cast<int64_t>(request.maxCombinations) * request.probeBudget);
 }
 
 TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)

@@ -77,6 +77,27 @@ def _l1_train(corpus, output, *extra):
     return main(["train", *_l1_arguments(corpus, output, *extra)])
 
 
+def test_a_bad_source_date_epoch_fails_training_before_anything_is_written(
+    tmp_path, evaluator, monkeypatch, caplog
+):
+    """The stamp is resolved with the other inputs: exit 1 and no partial model."""
+    corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "soon")
+    assert (
+        _l1_train(
+            corpus,
+            tmp_path / "model",
+            "--metric",
+            "tflops",
+            "--feature-evaluator",
+            evaluator,
+        )
+        == 1
+    )
+    assert "SOURCE_DATE_EPOCH" in caplog.text
+    assert not (tmp_path / "model").exists()
+
+
 def test_rows_collected_under_another_metric_cannot_train_a_model(
     tmp_path, evaluator, caplog
 ):
@@ -330,7 +351,7 @@ def test_the_model_is_fitted_in_the_space_its_descriptor_declares(tmp_path, eval
     import pandas as pd
 
     from uhd_gen import score_transform
-    from uhd_gen.train_uhd import predict, train_model
+    from uhd_gen.train_uhd import train_model
 
     labels = np.array([50.0, 100.0, 150.0])
     frame = pd.DataFrame({"x": np.repeat([1.0, 2.0, 3.0], 100)})
@@ -342,7 +363,8 @@ def test_the_model_is_fitted_in_the_space_its_descriptor_declares(tmp_path, eval
     # Noiseless and converged: the fit is the transformed label (within 0.1% with LightGBM
     # 4.7; 1% leaves room for another version), far from the label itself.
     np.testing.assert_allclose(model.predict(X), np.log(labels), rtol=1e-2)
-    np.testing.assert_allclose(predict(model, X), labels, rtol=1e-2)
+    predicted = score_transform.inverse(model.predict(X), score_transform.TRAINED)
+    np.testing.assert_allclose(predicted, labels, rtol=1e-2)
 
     corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
     output = tmp_path / "model"
@@ -387,3 +409,34 @@ def test_cross_validation_never_splits_a_shape_across_devices(monkeypatch):
     for train, valid in captured["folds"]:
         assert set(shapes[train]) & set(shapes[valid]) == set()
     assert np.unique(shapes).size == 20
+
+
+def test_a_non_finite_numeric_feature_is_refused_before_fitting():
+    """LightGBM would treat NaN as missing and route it by a default; a feature column the
+    runtime evaluates to a number must hold one."""
+    import numpy as np
+    import pandas as pd
+
+    from uhd_gen.train_uhd import build_feature_matrix
+
+    frame = pd.DataFrame({"x": [1.0, np.nan, 3.0], "y": [1.0, 2.0, np.inf]})
+    with pytest.raises(ValueError, match="'x' contains non-finite"):
+        build_feature_matrix(frame, ["x"])
+    with pytest.raises(ValueError, match="'y' contains non-finite"):
+        build_feature_matrix(frame, ["y"])
+
+
+def test_the_model_is_fitted_for_the_round_early_stopping_chose():
+    """Cross-validation picks the round; the final fit stops there, not at the budget."""
+    import numpy as np
+    import pandas as pd
+
+    from uhd_gen.train_uhd import train_model
+
+    frame = pd.DataFrame({"x": np.repeat([1.0, 2.0, 3.0], 100)})
+    frame["tflops"] = frame["x"] * 50.0
+    budget = 2000
+    model = train_model(
+        frame, ["x"], "tflops", num_boost_round=budget, early_stopping_rounds=5
+    )
+    assert 0 < model.num_trees() < budget

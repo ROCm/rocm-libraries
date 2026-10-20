@@ -11,7 +11,7 @@ target_include_directories(hipdnn_corpus_gen
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
 # Reuses the shared §6.2 expression parser/interpreter rather than a second evaluator.
-target_link_libraries(hipdnn_corpus_gen INTERFACE hipdnn_plugin_sdk hipdnn_flatbuffers_sdk)
+target_link_libraries(hipdnn_corpus_gen INTERFACE hipdnn_plugin_sdk hipdnn_flatbuffers_sdk hipdnn_tools_common)
 
 if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     add_executable(hipdnn_corpus_gen_tool CorpusGen.cpp)
@@ -21,6 +21,21 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
         PRIVATE hipdnn_corpus_gen hipdnn_tools_common hipdnn_backend hipdnn_frontend hipdnn_data_sdk)
     clang_tidy_check(hipdnn_corpus_gen_tool)
     install(TARGETS hipdnn_corpus_gen_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # The shipped declarations travel with the tool, so an installed hipdnn_corpus_gen runs
+    # without a source checkout: --operations defaults to them, found from the binary. The
+    # build tree keeps the same offset.
+    set(_operations_install_dir "${CMAKE_INSTALL_DATADIR}/hipdnn/corpus_gen/operations")
+    file(RELATIVE_PATH _operations_reldir "/${CMAKE_INSTALL_BINDIR}" "/${_operations_install_dir}")
+    target_compile_definitions(hipdnn_corpus_gen_tool
+        PRIVATE HIPDNN_CORPUS_GEN_DEFAULT_OPERATIONS_RELDIR="${_operations_reldir}")
+    file(GLOB _shipped_operations CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/operations/*.json")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/StageFiles.cmake)
+    hipdnn_tools_stage_files(hipdnn_corpus_gen_operations
+        "${CMAKE_BINARY_DIR}/${_operations_install_dir}"
+        FILES ${_shipped_operations}
+        INSTALL_DESTINATION "${_operations_install_dir}")
+    add_dependencies(hipdnn_corpus_gen_tool hipdnn_corpus_gen_operations)
 
     # 0 for --help, 1 for arguments it cannot use.
     if(NOT HIPDNN_SKIP_TESTS)
@@ -37,14 +52,30 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             "ceiling_zero|--without-engine,--operations,.,--ceiling,0|1|--ceiling needs a number of at least 1, not '0'"
             "restarts_zero|--without-engine,--operations,.,--restarts,0|1|--restarts needs a number of at least 1"
             "share_negative|--without-engine,--operations,.,--model-share,-0.5|1|--model-share needs a number of at least 0"
+            "seed_negative|--without-engine,--operations,.,--seed,-1|1|--seed needs a number of at least 0"
+            "kdp_root_missing|--without-engine,--operations,${CMAKE_CURRENT_SOURCE_DIR}/operations,--operation,matmul,--kdp-root,no-such-dir|1|does not exist"
+            "model_shapes_missing|--without-engine,--operations,${CMAKE_CURRENT_SOURCE_DIR}/operations,--operation,matmul,--model-shapes,no-such.csv|1|cannot be read"
             "engine_id_unsigned|--engine-id,17768770578713086094,--help|0|Usage:"
             "engine_id_past_int64|--engine-id,18446744073709551616,--help|1|--engine-id needs a number")
 
         # A whole run: what it writes, and exit 2 when it generates nothing.
         set(_operations_dir "${CMAKE_CURRENT_SOURCE_DIR}/operations")
+        set(_model_shapes "${CMAKE_CURRENT_BINARY_DIR}/model_shapes.csv")
+        file(WRITE "${_model_shapes}"
+             "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,"
+             "q.alignment,q.generate_stats,q.dtype\n"
+             "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16\n")
         foreach(_run IN ITEMS
                 "without_engine|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4|0|4"
-                "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0")
+                # No --operations: the declarations staged beside the tool.
+                "default_operations|--without-engine,--operation,matmul,--count,4|0|4"
+                "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
+                # With quotas and no --count, the corpus is the quotas alone.
+                "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3|0|3"
+                "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"
+                # The engine path, host-only: every problem is offered to the test plugin's
+                # engine, which serves matmul without a device.
+                "engine|--plugin-dir,${HIPDNN_TEST_PLUGIN_DIR}/default,--engine-name,TEST_GOOD_DEFAULT_ENGINE,--operations,${_operations_dir},--operation,matmul,--count,3|0|3")
             string(REPLACE "|" ";" _fields "${_run}")
             list(GET _fields 0 _name)
             list(GET _fields 1 _args)
@@ -57,6 +88,24 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                         "-DEXPECTED_GRAPHS=${_graphs}"
                         "-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_test}"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CorpusGenRun.cmake")
+            set_tests_properties(${_test} PROPERTIES TIMEOUT 120)
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(${_test} PROPERTIES
+                    ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+            endif()
+            _apply_hipdnn_test_category_labels(${_test})
+        endforeach()
+
+        # Corpora compared by content key: an excluded corpus shares no graph with the one
+        # excluding it, and a seed reproduces its corpus.
+        foreach(_mode IN ITEMS exclude seed)
+            set(_test hipdnn_corpus_gen_cli_${_mode})
+            add_test(NAME ${_test}
+                COMMAND ${CMAKE_COMMAND} "-DTOOL=$<TARGET_FILE:hipdnn_corpus_gen_tool>"
+                        "-DCLI_ARGS=--without-engine,--operations,${_operations_dir},--operation,matmul,--count,6"
+                        "-DMODE=${_mode}"
+                        "-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_test}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CorpusGenPair.cmake")
             set_tests_properties(${_test} PROPERTIES TIMEOUT 120)
             if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
                 set_tests_properties(${_test} PROPERTIES

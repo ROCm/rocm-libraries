@@ -118,6 +118,34 @@ def test_a_tree_the_runtime_cannot_prepare_is_refused(tmp_path):
         verify_tree_artifact(cyclic, None)
 
 
+def test_trees_sharing_one_table_past_what_the_buffer_holds_are_refused(tmp_path):
+    """`trees` entries may point at one table, so the node count is not bounded by the
+    entries; the runtime refuses more nodes than the buffer has int32s for, and so does this.
+    """
+    from hipdnn_flatbuffers_sdk.data_objects import GbdtModel
+
+    builder = flatbuffers.Builder(1024)
+    shared = _stump().Pack(builder)
+    entries = 4000  # 3 nodes each: far more than a buffer of a few KiB can hold
+    GbdtModel.GbdtModelStartTreesVector(builder, entries)
+    for _ in range(entries):
+        builder.PrependUOffsetTRelative(shared)
+    trees = builder.EndVector()
+    digest = builder.CreateString("sha256:0123456789abcdef")
+    GbdtModel.GbdtModelStart(builder)
+    GbdtModel.GbdtModelAddTrees(builder, trees)
+    GbdtModel.GbdtModelAddNumFeatures(builder, 2)
+    GbdtModel.GbdtModelAddFeaturesHash(builder, digest)
+    GbdtModel.GbdtModelAddGroupByFeatureIndex(builder, -1)
+    builder.Finish(GbdtModel.GbdtModelEnd(builder), file_identifier=b"HGBM")
+    path = tmp_path / "model.bin"
+    path.write_bytes(bytes(builder.Output()))
+    assert 3 * entries > len(path.read_bytes()) // 4
+
+    with pytest.raises(ValueError, match="more nodes than the model buffer can hold"):
+        verify_tree_artifact(path, None)
+
+
 def test_a_buffer_the_flatbuffers_verifier_refuses_is_refused(tmp_path):
     """`VerifyGbdtModelBuffer` refuses a string missing its NUL; Python does not."""
     path = _artifact(tmp_path / "model.bin")

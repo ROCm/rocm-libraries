@@ -78,6 +78,14 @@ endif()
 option(HIPDNN_REQUIRE_UHD_GEN_TESTS
     "Fail, rather than skip, the uhd_gen tests whose prerequisites are missing" OFF
 )
+# How a missing prerequisite is reported, and the modules uhd_gen imports
+# (tools/uhd_gen/requirements.txt), for both places that probe for them.
+if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+    set(HIPDNN_UHD_GEN_MISSING_SEVERITY FATAL_ERROR)
+else()
+    set(HIPDNN_UHD_GEN_MISSING_SEVERITY WARNING)
+endif()
+set(HIPDNN_UHD_GEN_PYTHON_MODULES "lightgbm, flatbuffers, numpy, pandas, pyarrow, sklearn")
 
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
 # tests. The shim sources always exist in the tree; this option controls only

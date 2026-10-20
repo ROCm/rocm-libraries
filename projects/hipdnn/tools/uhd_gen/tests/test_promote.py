@@ -425,6 +425,46 @@ def test_a_promotion_killed_mid_swap_is_undone_by_the_next(tmp_path, monkeypatch
     assert not [p for p in tree.rglob("*") if p.name.endswith(".tmp")]
 
 
+def test_a_killed_promotion_of_a_relative_tree_is_recovered_from_any_directory(
+    tmp_path, monkeypatch
+):
+    """The journal names the tree absolutely: recovery from another working directory
+    restores this tree, and never a same-named one beside that directory."""
+    from uhd_gen import promote
+
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _apply(build_plan(model, tree))
+    (model / "model.bin").write_bytes(_weights(5.0))
+    monkeypatch.chdir(tmp_path)
+    plan = build_plan(model, Path("tree"))
+    [(_, artifact)] = plan.copies
+    before = artifact.read_bytes()
+    replace = os.replace
+
+    def dying(source, destination):
+        if Path(destination) == plan.ued_path:
+            raise _Killed()
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", dying)
+    monkeypatch.setattr(promote, "_undo", lambda journal: None)  # never ran
+    with pytest.raises(_Killed):
+        _apply(plan)
+    monkeypatch.undo()
+    [journal] = tree.rglob(promote.JOURNAL_NAME)
+    for entry in json.loads(journal.read_text())["entries"]:
+        assert Path(entry["destination"]).is_absolute()
+
+    elsewhere = tmp_path / "elsewhere"
+    decoy = _tree(elsewhere / "tree")
+    decoy_files = _files(decoy)
+    monkeypatch.chdir(elsewhere)
+    assert promote.recover_interrupted(tree) == [journal]
+    assert (tmp_path / artifact).read_bytes() == before
+    assert _files(decoy) == decoy_files, "recovery touched another tree"
+
+
 def test_an_undo_that_cannot_restore_keeps_the_journal_and_the_backups(
     tmp_path, monkeypatch
 ):

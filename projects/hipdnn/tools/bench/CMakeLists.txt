@@ -7,6 +7,7 @@ add_library(hipdnn_bench_lib INTERFACE)
 
 target_include_directories(hipdnn_bench_lib
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(hipdnn_bench_lib INTERFACE hipdnn_tools_common)
 
 if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     find_package(hip REQUIRED)
@@ -35,8 +36,8 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             "engine_id_not_a_number|--engine-id,ten|1|--engine-id needs a number"
             "error_before_help|--warmup,x,--help|1|--warmup needs a number"
             "warmup_empty|--graph,g.fb,--warmup,{empty},--help|1|--warmup needs a number, not ''"
-            "warmup_negative|--warmup,-1,--help|1|--warmup needs a number in"
-            "iterations_past_int|--max-iterations,4294967296,--help|1|--max-iterations needs a number in"
+            "warmup_negative|--warmup,-1,--help|1|--warmup needs a number of at least 0"
+            "iterations_past_int|--max-iterations,4294967296,--help|1|--max-iterations needs a number of at most 2147483647"
             "stability_negative|--stability,-0.1,--help|1|--stability needs a number of at least 0"
             "engine_id_unsigned|--engine-id,18446744073709551615,--help|0|Usage:")
     endif()

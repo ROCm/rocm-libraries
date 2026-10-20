@@ -327,6 +327,30 @@ TEST(TestWorkloadSampling, AMirrorFollowsThePerturbedValueNotTheOriginal)
     }
 }
 
+TEST(TestWorkloadSampling, AMirrorKeepsTheAnchorsProportionToWhatItFollows)
+{
+    // A decode-like anchor (H 1, W 4096) must stay one: W follows the perturbed H at the
+    // anchor's own 4096:1, spread by the declared ratios, not at the bare ratios.
+    const auto metadata = tinyConv();
+    std::mt19937_64 rng(11);
+
+    const ProblemPoint anchor{{"C", int64_t{64}},
+                              {"H", int64_t{1}},
+                              {"W", int64_t{4096}},
+                              {"R", int64_t{3}},
+                              {"pad", int64_t{1}},
+                              {"dtype", std::string{"fp32"}}};
+
+    for(int i = 0; i < 100; ++i)
+    {
+        const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
+        const auto ratio
+            = static_cast<double>(at(moved, "W")) / static_cast<double>(at(moved, "H"));
+        EXPECT_TRUE(ratio == 4096.0 || ratio == 8192.0)
+            << "W=" << at(moved, "W") << " lost the anchor's proportion to H=" << at(moved, "H");
+    }
+}
+
 TEST(TestWorkloadSampling, AParameterWithNoNeighbourhoodDoesNotDrift)
 {
     // Padding is chosen with the filter; moving it independently invents unseen geometries.

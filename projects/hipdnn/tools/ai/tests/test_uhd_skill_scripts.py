@@ -323,6 +323,30 @@ def _decide_l1(decide, document, **kwargs):
     )
 
 
+def test_a_candidate_that_cannot_be_scored_fails_the_accuracy_gate(decide):
+    """Every prediction NaN: the candidate has no error to compare, which is a failure, not
+    a pass by default."""
+    rows = _rows()
+    for row in rows:
+        row["candidate"]["value"] = float("nan")
+    report = _decide_l1(
+        decide,
+        _document(rows),
+        min_available=0.0,
+        max_regression=decide.DEFAULT_L1_MAX_REGRESSION,
+    )
+    assert not report["gates"]["accuracy"]["passed"]
+    assert not report["passed"]
+
+
+def test_fewer_executed_graphs_than_asked_fail_the_available_gate(decide):
+    report = _decide_l1(decide, _document(_rows(n=10)), min_graphs=11)
+    assert not report["gates"]["available"]["passed"]
+    assert _decide_l1(decide, _document(_rows(n=10)), min_graphs=10)["gates"][
+        "available"
+    ]["passed"]
+
+
 def test_a_good_candidate_passes_and_is_compared_with_the_incumbent_model(decide):
     report = _decide_l1(
         decide, _document(_rows()), max_regression=decide.DEFAULT_L1_MAX_REGRESSION
@@ -372,6 +396,17 @@ def test_a_stale_selector_revision_fails(decide):
 def test_a_candidate_answering_in_another_metric_fails(decide):
     report = _decide_l1(decide, _document(_rows(metric="time")))
     assert not report["passed"] and not report["gates"]["metric"]["passed"]
+
+
+def test_a_candidate_model_of_another_metric_fails(decide):
+    """The bench echoes the requested metric; the descriptor says what the model predicts."""
+    gate = _decide_l1(decide, _document(_rows()), candidate_metric="time")["gates"][
+        "metric"
+    ]
+    assert not gate["passed"] and "predicts time" in gate["problems"][0]
+    assert _decide_l1(decide, _document(_rows()), candidate_metric="tflops")["gates"][
+        "metric"
+    ]["passed"]
 
 
 def test_an_answer_that_names_no_metric_fails(decide):
@@ -457,6 +492,27 @@ def _l2_row(name, incumbent, candidate, refusal=None):
 
 def _report(mean):
     return {"metrics": {"top1_regret": {"mean": mean}}}
+
+
+def test_a_refusal_both_runs_report_is_another_models_not_the_candidates(decide):
+    """The candidate tree copies the whole root, so another engine's refused model is
+    refused in both runs; only what the candidate run alone reports fails `read`."""
+    other = (
+        "descriptor loader: engine 'other' model=1 disabled: x; declared-order fallback"
+    )
+    shared = _l2_row("a", True, True, refusal=other)
+    shared["incumbent"]["refusals"] = [other]
+    rows = {"rows": [shared], "winner_records": {}}
+    gate = decide.decide_catalog(
+        rows, candidate_report=_report(0.0), incumbent_report=None
+    )["gates"]["read"]
+    assert gate["passed"], gate
+
+    rows = {"rows": [_l2_row("b", True, True, refusal=REFUSED)], "winner_records": {}}
+    gate = decide.decide_catalog(
+        rows, candidate_report=_report(0.0), incumbent_report=None
+    )["gates"]["read"]
+    assert not gate["passed"] and "not used" in gate["problems"][0]
 
 
 def test_a_graph_the_build_tree_cannot_run_is_the_engines_failure(decide):
@@ -622,7 +678,8 @@ def test_every_way_the_runtime_declines_a_model_is_a_refusal(l2_job, tmp_path, r
         60,
         tmp_path / "caches",
     )
-    assert row["refusals"] == [refusal]
+    # Recorded without the log prefix, so the two runs' lines compare equal.
+    assert row["refusals"] == [l2_job.LOG_PREFIX.sub("", refusal).strip()]
 
 
 def test_a_failed_run_keeps_the_runtimes_error_lines_not_the_teardown(l2_job, tmp_path):
@@ -848,8 +905,11 @@ def test_the_l1_run_and_its_verdict_end_to_end(tmp_path):
 
 
 def test_an_isolated_run_reads_only_the_tree_it_names(engine_run, tmp_path):
-    build = engine_run.isolated_env(base=LEAKY_ENV)
-    assert build == {"HIPDNN_CACHE_DIR": "/user/cache"}, "every descriptor root cleared"
+    # The caller's roots, cache and log file are not inherited, and nothing autotunes.
+    build = engine_run.isolated_env(
+        base=dict(LEAKY_ENV, HIPDNN_LOG_FILE="/user/log", HIPDNN_FORCE_BENCHMARKING="1")
+    )
+    assert build == {"HIPDNN_FORCE_BENCHMARKING": "0"}
     named = engine_run.isolated_env(tmp_path, base=LEAKY_ENV)
     assert named["HIPDNN_DESCRIPTOR_DIR"] == str(tmp_path)
     assert not {"HIPDNN_DESCRIPTOR_RUNTIME_DIR", "HIPDNN_DESCRIPTOR_PATH"} & set(named)
@@ -1250,3 +1310,41 @@ def test_a_descriptor_engines_l1_is_measured_under_the_tree_it_is_promoted_into(
         row["measured"]["ok"] and row["measured_incumbent"]["ok"]
         for row in document["rows"]
     ), "truth under each tree"
+
+
+# --- definitions shared with uhd_gen ----------------------------------------------------
+
+
+def test_the_slice_hash_is_the_one_uhd_gen_splits_by(slicing):
+    """eval_slice ranks a graph by the digest evaluate's split uses for a shape, so a slice
+    chosen here and a split drawn there agree on the same seed."""
+    pytest.importorskip("pandas")
+    from uhd_gen.evaluate import _problem_digest
+
+    for benchmark, seed in (("1102948572918374651", 0), ("g-7", 42)):
+        assert slicing._rank(benchmark, seed) == _problem_digest((benchmark,), seed)
+
+
+def test_stage_v_accuracy_and_the_sizing_target_measure_error_alike(decide, tmp_path):
+    """The sizing target (within X%, median |error|) is read against Stage V's accuracy
+    gate: both summarise the same relative errors the same way."""
+    pytest.importorskip("pandas")
+    from uhd_gen.sizing import _score
+
+    pairs = [(110.0, 100.0), (95.0, 100.0), (130.0, 100.0), (100.0, 100.0)]
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "per_row": [
+                    {"key": [f"g{i}"], "signed_relative_error": (p - m) / m}
+                    for i, (p, m) in enumerate(pairs)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    stage_v = decide.accuracy(pairs)
+    sizing = _score(report, 0.10)
+    assert sizing["median_abs_pct"] == pytest.approx(stage_v["median_abs_pct_error"])
+    assert sizing["within"] == pytest.approx(stage_v["within_10pct"])

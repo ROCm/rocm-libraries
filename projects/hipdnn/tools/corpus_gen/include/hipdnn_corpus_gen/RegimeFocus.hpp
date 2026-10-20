@@ -314,6 +314,9 @@ struct RegimeSearchResult
     /// the focus compiled too little of the declaration.
     int64_t proposed = 0;
     int64_t inRegime = 0;
+    /// In the regime and inside the declared constraints. Zero with `inRegime` above zero means
+    /// the declaration itself excludes the regime: no engine was ever asked.
+    int64_t admissible = 0;
 };
 
 /// @brief Up to @p wanted problems in @p focus's regime that @p admits accepts, none of them
@@ -519,7 +522,11 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             if(regimeLabel(metadata, point) == focus.label)
             {
                 ++outcome.inRegime;
-                verdict = detail::satisfiesConstraints(metadata, point) && admits(point);
+                if(detail::satisfiesConstraints(metadata, point))
+                {
+                    ++outcome.admissible;
+                    verdict = admits(point);
+                }
             }
             lane.memo.emplace(shape, verdict);
             return verdict;
@@ -552,6 +559,24 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         }
         return sum;
     };
+
+    // Probe each lane at the first pass's probe budget, as the main search does: a combination
+    // the engine does not serve in this regime is set aside before it is given the full budget
+    // and its doublings. The memo keeps the probe's answers for the lanes that go on.
+    if(request.probeBudget < request.budgetPerCombination)
+    {
+        for(auto& lane : lanes)
+        {
+            lane.search.oracleBudget = request.probeBudget;
+            lane.search.targetCount = 1;
+            lane.reached = run(lane);
+            lane.search.oracleBudget = request.budgetPerCombination;
+            if(lane.cells == 0)
+            {
+                lane.saturated = true;
+            }
+        }
+    }
 
     // Split what is still wanted over the lanes not yet spent, so a combination that cannot
     // serve the regime hands its share to those that can.

@@ -332,6 +332,31 @@ def test_a_repeat_within_one_occasion_keeps_the_fastest():
     assert out["minTimeMs"].tolist() == [2.0]
 
 
+def test_a_repeat_checked_wrong_never_wins_however_fast():
+    """A wrong repeat would otherwise beat the correct one and then lose its timing, leaving
+    the problem incomplete although a valid measurement was taken."""
+    frame = pd.DataFrame(
+        {
+            "q.M": [1024, 1024],
+            "q.N": [1024, 1024],
+            "q.K": [1024, 1024],
+            "q.dtype": ["fp32", "fp32"],
+            "kernel.tile_m": [64, 64],
+            "device.cu_count": [80, 80],
+            "minTimeMs": [5.0, 2.0],
+            "avgTimeMs": [5.1, 2.1],
+            "stddevMs": [0.01, 0.01],
+            "iters": [10, 10],
+            "error": ["", ""],
+            "numerically_valid": [True, False],
+            "date_run": ["2026-01-01", "2026-01-01"],
+        }
+    )
+
+    out = resolve_duplicates(frame, "date_run", "minTimeMs")
+    assert out["minTimeMs"].tolist() == [5.0]
+
+
 def test_resolution_settles_what_validation_would_otherwise_reject():
     """A re-measured problem fails validation until resolution keeps one occasion."""
     frame = pd.DataFrame(

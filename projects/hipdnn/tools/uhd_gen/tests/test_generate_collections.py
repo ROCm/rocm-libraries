@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for `generate --collect-only` followed by `generate --dataset`.
 
-Merging keeps the newest measurement of each configuration on each shape, and refuses
-contributions that cannot form one model.
+Merging keeps the best (lowest `avgTimeMs`) usable measurement of each configuration on each
+shape, and refuses contributions that cannot form one model.
 """
 import json
 from pathlib import Path
@@ -461,6 +461,25 @@ def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_a_collection_on_two_gpus_of_one_kind_keeps_both_and_trains_once(
+    world, evaluator
+):
+    """A collection records every repeat; the dataset trains on one row per shape."""
+    from uhd_gen.__main__ import main
+
+    world["engine"]["drift"] = 1.01
+    name = "two_gpus_collected"
+    assert (
+        main(_collect_arguments(world, name) + ["--device", "0", "--device", "1"]) == 0
+    )
+    collection = world["root"] / name
+    assert (collection / "collection_manifest.json").is_file()
+    code, output = _train(world, "from_two_gpus", evaluator, collections=[collection])
+    assert code == 0
+    rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert len(rows) == GRAPHS
 
 
 def test_one_run_on_two_kinds_of_gpu_measures_each_kind_separately(world, evaluator):

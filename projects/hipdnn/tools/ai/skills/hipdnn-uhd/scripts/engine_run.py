@@ -3,13 +3,12 @@
 # SPDX-License-Identifier: MIT
 """One `hipdnn_bench` call against one descriptor tree, with nothing else deciding the answer.
 
-Standard library only; imported by validate_l1.py, validate_l2.py and candidate_tree.py.
+Standard library only, plus `uhd_gen.bench_env`; imported by validate_l1.py, validate_l2.py and
+candidate_tree.py.
 
-The runtime reads the build's descriptor tree, or `HIPDNN_DESCRIPTOR_DIR` in its place, and
-beside it every `HIPDNN_DESCRIPTOR_RUNTIME_DIR` and `HIPDNN_DESCRIPTOR_PATH` root
-(DescriptorLoader.hpp). `isolated_env` clears all three and names the one tree a run reads.
-
-A benchmark winner record in `HIPDNN_CACHE_DIR` takes precedence over every heuristic
+`isolated_env` is `uhd_gen.bench_env.bench_environment`, the environment generate collects
+with: only the named descriptor tree, never benchmarking, logging to stderr. A benchmark
+winner record in `HIPDNN_CACHE_DIR` takes precedence over every heuristic
 (KernelIngestorStateManager.hpp), and a `--collect-immediate` run writes one, so `call` gives
 each run an empty cache of its own and removes it afterwards.
 """
@@ -17,33 +16,26 @@ each run an empty cache of its own and removes it afterwards.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-#: Every variable that names a descriptor root the runtime reads.
-DESCRIPTOR_ROOT_VARIABLES = (
-    "HIPDNN_DESCRIPTOR_DIR",
-    "HIPDNN_DESCRIPTOR_RUNTIME_DIR",
-    "HIPDNN_DESCRIPTOR_PATH",
-)
+try:
+    from uhd_gen.bench_env import bench_environment
+except ImportError:
+    # Run from a checkout without PYTHONPATH: uhd_gen sits in the same tools directory.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+    from uhd_gen.bench_env import bench_environment
 
 
 def isolated_env(
     tree: Optional[Path] = None, base: Optional[Mapping[str, str]] = None
 ) -> dict[str, str]:
     """`base` (default: this process's environment) reading only `tree`, or only the build's
-    own tree when `tree` is None."""
-    env = {
-        k: v
-        for k, v in (os.environ if base is None else base).items()
-        if k not in DESCRIPTOR_ROOT_VARIABLES
-    }
-    if tree is not None:
-        env["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
-    return env
+    own tree when None (`uhd_gen.bench_env.bench_environment`)."""
+    return bench_environment(base, descriptor_dir=tree)
 
 
 def first_json_object(text: str) -> dict[str, Any]:

@@ -69,11 +69,9 @@ using hipdnn_bench::NumericalVerdict;
 /// Every candidate of one problem, cross-checked in one go.
 std::vector<hipdnn_bench::ValidationOutcome>
     crossCheck(std::vector<hipdnn_bench::CandidateOutput> candidates,
-               const std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
-               bool nonFiniteMayBeCorrect = false)
+               const std::map<int64_t, hipdnn_bench::TensorDescription>& tensors)
 {
     hipdnn_bench::CatalogCrossCheck check(tensors);
-    check.setNonFiniteMayBeCorrect(nonFiniteMayBeCorrect);
     for(auto& candidate : candidates)
     {
         check.add(std::move(candidate));
@@ -285,9 +283,10 @@ TEST(TestNumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::DISAGREED);
 }
 
-TEST(TestNumericalValidation, ANonFiniteOutputIsWrongWhereTheFillAllowsNone)
+TEST(TestNumericalValidation, AUnanimousNonFiniteOutputIsUndecided)
 {
-    // The fill gives every correct kernel finite results, so even a unanimous NaN is wrong.
+    // A product reduction of 64 values of magnitude 2 overflows fp16: every correct kernel
+    // writes the infinity, as every one writes the NaN of a sqrt of a computed negative.
     for(const float error : {std::nanf(""), std::numeric_limits<float>::infinity()})
     {
         const auto verdicts
@@ -295,24 +294,10 @@ TEST(TestNumericalValidation, ANonFiniteOutputIsWrongWhereTheFillAllowsNone)
 
         for(const auto& verdict : verdicts)
         {
-            EXPECT_EQ(verdict.verdict, NumericalVerdict::DISAGREED);
+            EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN);
             EXPECT_NE(verdict.reason.find("non_finite_output"), std::string::npos);
+            EXPECT_NE(verdict.reason.find("may be correct"), std::string::npos);
         }
-    }
-}
-
-TEST(TestNumericalValidation, AUnanimousNonFiniteOutputIsUndecidedWhereItMayBeCorrect)
-{
-    // A sqrt of a computed, possibly negative tensor: every correct kernel writes the NaN.
-    const auto nan = std::nanf("");
-    const auto verdicts = crossCheck({ran({1.0F, nan}), ran({1.0F, nan}), ran({1.0F, nan})},
-                                     tensors(),
-                                     /*nonFiniteMayBeCorrect=*/true);
-
-    for(const auto& verdict : verdicts)
-    {
-        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN);
-        EXPECT_NE(verdict.reason.find("may be correct"), std::string::npos);
     }
 }
 
@@ -329,7 +314,8 @@ TEST(TestNumericalValidation, ANonFiniteMajorityCannotOutvoteAFiniteOutput)
     }
     EXPECT_EQ(verdicts[1].verdict, NumericalVerdict::UNKNOWN);
     EXPECT_NE(verdicts[1].reason.find("no_reference"), std::string::npos);
-    EXPECT_EQ(verdicts[0].verdict, NumericalVerdict::DISAGREED);
+    // With one finite output nothing is agreed, so the NaNs are undecided rather than wrong.
+    EXPECT_EQ(verdicts[0].verdict, NumericalVerdict::UNKNOWN);
 }
 
 TEST(TestNumericalValidation, AnInputOfAnOperationUndefinedOnNegativesIsFilledPositive)

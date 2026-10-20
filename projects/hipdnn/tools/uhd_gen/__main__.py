@@ -79,7 +79,7 @@ from .features import (
     parse_signature_entry,
     signature_references,
 )
-from .lgbm_to_flatbuffer import convert
+from .lgbm_to_flatbuffer import convert, resolve_training_date
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 from . import score_transform
@@ -931,6 +931,10 @@ def _run_train(args: argparse.Namespace) -> int:
         group_index, group_models = _group_models(
             args, df, names, groups, matrix, categorical_encoding
         )
+        # Read before anything is written: a bad SOURCE_DATE_EPOCH or an unreadable input
+        # fails the run here, with no partial output.
+        training_date = resolve_training_date()
+        input_sha256 = hashlib.sha256(input_path.read_bytes()).hexdigest()
     except (OSError, TypeError, ValueError, KeyError) as error:
         logger.error("%s", error)
         return 1
@@ -948,6 +952,7 @@ def _run_train(args: argparse.Namespace) -> int:
         num_training_samples=len(df),
         training_arches=args.training_arches,
         model_version=args.model_version,
+        training_date=training_date,
         group_by_feature_index=group_index,
         group_models=group_models or None,
     )
@@ -1017,7 +1022,7 @@ def _run_train(args: argparse.Namespace) -> int:
         },
         "num_samples": len(df),
         "input_file": str(input_path.resolve()),
-        "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        "input_sha256": input_sha256,
         "training_arches": args.training_arches or [],
         "model_version": args.model_version,
         "training_options": {

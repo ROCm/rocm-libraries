@@ -21,27 +21,12 @@ target_link_libraries(hipdnn_corpus_gen_tests
 # does not reach back into the source tree.
 set(_operations_subdir "corpus_gen_operations")
 file(GLOB _operations CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../operations/*.json")
-set(_staged_operations "")
-foreach(_source IN LISTS _operations)
-    get_filename_component(_name "${_source}" NAME)
-    set(_staged "${HIPDNN_TEST_DATA_DIR}/${_operations_subdir}/${_name}")
-    add_custom_command(
-        OUTPUT "${_staged}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPDNN_TEST_DATA_DIR}/${_operations_subdir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_source}" "${_staged}"
-        DEPENDS "${_source}"
-        COMMENT "Staging corpus_gen operation declaration ${_name}"
-        VERBATIM
-    )
-    list(APPEND _staged_operations "${_staged}")
-endforeach()
-add_custom_target(
-    hipdnn_corpus_gen_test_operations
-    DEPENDS ${_staged_operations}
-    COMMENT "Staging corpus_gen operation declarations beside the test data"
-)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/StageFiles.cmake)
+hipdnn_tools_stage_files(hipdnn_corpus_gen_test_operations
+    "${HIPDNN_TEST_DATA_DIR}/${_operations_subdir}"
+    FILES ${_operations}
+    INSTALL_DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_operations_subdir}")
 add_dependencies(hipdnn_corpus_gen_tests hipdnn_corpus_gen_test_operations)
-install(FILES ${_operations} DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_operations_subdir}")
 
 target_compile_definitions(hipdnn_corpus_gen_tests PRIVATE
     HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"

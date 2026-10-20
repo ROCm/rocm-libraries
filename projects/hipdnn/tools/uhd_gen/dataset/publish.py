@@ -338,13 +338,16 @@ def resolve_duplicates(
     newest = occasion.groupby(problem).transform("max")
     frame = frame[occasion == newest]
 
-    # A repeated candidate within one occasion is a repeated measurement; keep the best.
+    # A repeated candidate within one occasion is a repeated measurement; keep the best. A
+    # repeat checked wrong is never the best, however fast: it goes last, as a failed run's
+    # null timing does.
     kernels = _kernel_columns(frame)
     if kernels:
         keep = frame[query + kernels].astype(str).agg("|".join, axis=1)
-        frame = frame.sort_values(best_column, kind="mergesort").loc[
-            lambda f: ~keep.loc[f.index].duplicated()
-        ]
+        order = frame.assign(_wrong=known_wrong(frame)).sort_values(
+            ["_wrong", best_column], kind="mergesort"
+        )
+        frame = frame.loc[order.index].loc[lambda f: ~keep.loc[f.index].duplicated()]
     return frame.sort_index()
 
 

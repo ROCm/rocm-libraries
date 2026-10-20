@@ -119,6 +119,7 @@ TEST(TestProblemSpace, AppliesTheOracleToWholeProblemPoints)
 
     const auto corpus = exploreProblemSpace(twoDimsAndADtype(), request, halfOnlySmall);
 
+    ASSERT_FALSE(corpus.problems().empty());
     for(const auto& point : corpus.problems())
     {
         if(std::get<std::string>(point.at("dtype")) == "fp16")
@@ -221,6 +222,76 @@ TEST(TestProblemSpace, IsReproducibleFromItsSeed)
 
     EXPECT_EQ(first.problems(), second.problems());
     EXPECT_NE(first.problems(), other.problems());
+}
+
+TEST(TestProblemSpace, AnAllCategoricalDeclarationKeepsItsConstraintsAndExclusions)
+{
+    // With no numeric parameter there is no search, but a constraint still forbids a
+    // combination and a held point is still not offered again.
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy_unary",
+      "parameters": {
+        "mode":  { "type": "enum", "values": ["RELU_FWD", "TANH_FWD"] },
+        "dtype": { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "b", "source": "x.hpp", "arguments": [] },
+      "constraints": [ { "or": [ { "!=": ["$q.dtype", "fp16"] },
+                                 { "==": ["$q.mode", "RELU_FWD"] } ] } ]
+    })");
+    const ProblemOracle heldFp32Relu = [](const ProblemPoint& point) {
+        return std::get<std::string>(point.at("mode")) == "RELU_FWD"
+               && std::get<std::string>(point.at("dtype")) == "fp32";
+    };
+
+    const auto corpus
+        = exploreProblemSpace(metadata, ExplorationRequest{}, ACCEPT_EVERYTHING, heldFp32Relu);
+
+    std::set<std::string> found;
+    for(const auto& point : corpus.problems())
+    {
+        found.insert(std::get<std::string>(point.at("mode")) + "/"
+                     + std::get<std::string>(point.at("dtype")));
+    }
+    EXPECT_EQ(found, (std::set<std::string>{"TANH_FWD/fp32", "RELU_FWD/fp16"}));
+}
+
+TEST(TestProblemSpace, ACappedCategoricalSpaceStillHoldsEveryDeclaredValue)
+{
+    // 4 x 4 x 4 combinations capped at 8: a prefix would keep two values of the first
+    // parameter; every value of every parameter must still reach the corpus.
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy_modes",
+      "parameters": {
+        "a": { "type": "enum", "values": ["a0", "a1", "a2", "a3"] },
+        "b": { "type": "enum", "values": ["b0", "b1", "b2", "b3"] },
+        "c": { "type": "enum", "values": ["c0", "c1", "c2", "c3"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "b", "source": "x.hpp", "arguments": [] }
+    })");
+    ExplorationRequest request;
+    request.maxCombinations = 8;
+
+    const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+    std::map<std::string, std::set<std::string>> seen;
+    for(const auto& point : corpus.problems())
+    {
+        for(const auto& [name, value] : point)
+        {
+            seen[name].insert(std::get<std::string>(value));
+        }
+    }
+    for(const auto& name : {"a", "b", "c"})
+    {
+        EXPECT_EQ(seen[name].size(), 4U) << name;
+    }
+    EXPECT_FALSE(corpus.skippedCombinations.empty()) << "the cap is still reported";
 }
 
 TEST(TestProblemSpace, DeclaredConstraintsKeepInvalidPointsOutOfTheSearch)
@@ -525,6 +596,7 @@ TEST(TestProblemSpace, NothingServedHasNoEdges)
     request.probeBudget = 100;
     const auto corpus = exploreProblemSpace(
         twoDimsAndADtype(), request, [](const ProblemPoint&) { return false; });
+    ASSERT_FALSE(corpus.combinations.empty());
     for(const auto& combination : corpus.combinations)
     {
         EXPECT_TRUE(combination.lowest.empty());

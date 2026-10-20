@@ -6,7 +6,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_library(hipdnn_tools_common INTERFACE)
     target_include_directories(hipdnn_tools_common
         INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
-    target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk)
+    target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk)
 
     # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
     # training tooling.
@@ -17,8 +17,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(corpus_gen)
 
     add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
+    target_compile_options(hipdnn_uhd_features PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
     target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
+    clang_tidy_check(hipdnn_uhd_features)
     install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -43,11 +45,7 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # the skips of all four suites into failures (uhd_gen/conftest.py, which the two suites outside
 # uhd_gen/ load with `-p`) and a missing pytest into a configure error.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
-    if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
-        set(_uhd_gen_missing_severity FATAL_ERROR)
-    else()
-        set(_uhd_gen_missing_severity WARNING)
-    endif()
+    set(_uhd_gen_missing_severity ${HIPDNN_UHD_GEN_MISSING_SEVERITY})
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
@@ -60,7 +58,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
         if(UHD_GEN_PYTEST_PROBE EQUAL 0)
             add_test(
                 NAME uhd_gen_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
                         ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/tests
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             # pytest exits 5 when it collects nothing (the importorskip guards skipped
@@ -73,7 +71,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
             # and this one needs no ML dependencies.
             add_test(
                 NAME uhd_gen_dataset_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
                         ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5)
@@ -83,7 +81,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
             # imports.
             add_test(
                 NAME mine_shapes_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -q --noconftest -p uhd_gen.conftest
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider --noconftest -p uhd_gen.conftest
                         ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/test_mine_shapes.py
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5)
@@ -92,7 +90,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
             # cases (promotion into a candidate tree) need the evaluator too.
             add_test(
                 NAME uhd_skill_scripts_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p uhd_gen.conftest
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider -p uhd_gen.conftest
                         ${CMAKE_CURRENT_SOURCE_DIR}/ai/tests/test_uhd_skill_scripts.py
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(uhd_skill_scripts_tests PROPERTIES
@@ -104,6 +102,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
                              uhd_skill_scripts_tests APPEND PROPERTY
                              ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
             endif()
+            # LightGBM takes every core by default, which stalls these suites for many
+            # minutes beside a parallel ctest. Bytecode and pytest's cache stay out of the
+            # source tree.
+            set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                         uhd_skill_scripts_tests APPEND PROPERTY
+                         ENVIRONMENT "OMP_NUM_THREADS=4" "PYTHONDONTWRITEBYTECODE=1")
 
             # Build tree only: none of the four is installed.
             _apply_hipdnn_test_category_labels(uhd_gen_tests)
@@ -115,7 +119,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
                     "uhd_gen tests NOT registered: pytest is not importable by "
                     "${Python3_EXECUTABLE}. These pin the features_hash contract between "
                     "tools/uhd_gen and the C++ FeatureExtractor; install pytest (plus "
-                    "lightgbm, flatbuffers, numpy) so they run.")
+                    "${HIPDNN_UHD_GEN_PYTHON_MODULES}) so they run.")
         endif()
     else()
         message(${_uhd_gen_missing_severity}

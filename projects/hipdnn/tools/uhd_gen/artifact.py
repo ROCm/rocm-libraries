@@ -251,8 +251,12 @@ def is_contained_relative_path(payload: str) -> bool:
     return ".." not in segments and segments[-1] not in ("", ".")
 
 
-def _check_trees(trees, num_features: int, where: str) -> None:
-    """`TreeDataAdapter::prepareTrees`, check for check, with its reasons."""
+def _check_trees(
+    trees, num_features: int, where: str, total: int, max_nodes: int
+) -> int:
+    """`TreeDataAdapter::prepareTrees`, check for check, with its reasons; returns `total`
+    plus these trees' nodes. Every layer shares one node store, so `max_nodes` bounds them all.
+    """
     for index, tree in enumerate(trees or []):
 
         def reject(reason: str):
@@ -275,6 +279,10 @@ def _check_trees(trees, num_features: int, where: str) -> None:
             or len(tree.thresholds) != count
         ):
             reject("node-parallel arrays have different lengths")
+        # Entries may share one table, so the count is bounded by the buffer, not by them.
+        if count > max_nodes - total:
+            reject("ensemble has more nodes than the model buffer can hold")
+        total += count
         incoming = [0] * count
         children: list[tuple[int, int] | None] = []
         for node in range(count):
@@ -309,6 +317,7 @@ def _check_trees(trees, num_features: int, where: str) -> None:
                     ready.append(child)
         if len(ready) != count:
             reject("cycle in child indices")
+    return total
 
 
 def verify_tree_artifact(
@@ -350,7 +359,9 @@ def verify_tree_artifact(
         raise ValueError(f"{path}: negative feature count")
     if not math.isfinite(model.baseScore):
         raise ValueError(f"{path}: base score is not finite")
-    _check_trees(model.trees, model.numFeatures, str(path))
+    # Each distinct node needs an int32 in left_children, as TreeDataAdapter bounds it.
+    max_nodes = min(len(data) // 4, 2**32 - 1)
+    total = _check_trees(model.trees, model.numFeatures, str(path), 0, max_nodes)
     if model.groups:
         if not 0 <= model.groupByFeatureIndex < model.numFeatures:
             raise ValueError(
@@ -368,7 +379,13 @@ def verify_tree_artifact(
                     f"{path}: group {index} value {value!r} must be finite and unique"
                 )
             values.add(value)
-            _check_trees(group.trees, model.numFeatures, f"{path} group {index}")
+            total = _check_trees(
+                group.trees,
+                model.numFeatures,
+                f"{path} group {index}",
+                total,
+                max_nodes,
+            )
     if feature_count is not None:
         verify_feature_count(model.numFeatures, feature_count, path)
     return data

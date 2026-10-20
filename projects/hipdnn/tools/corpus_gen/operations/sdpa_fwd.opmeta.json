@@ -555,7 +555,7 @@
     },
     {
       "name": "llama3_70b_gqa",
-      "note": "grouped-query attention: 64 query heads sharing 8 KV heads",
+      "note": "grouped-query attention: 64 query heads sharing 8 KV heads; prefill, the prompt against itself",
       "values": {
         "batch": [
           1,
@@ -570,12 +570,44 @@
           8
         ],
         "seqlen_q": [
-          1,
           512,
           2048
         ],
         "seqlen_k": [
           "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "llama3_70b_gqa_decode",
+      "note": "grouped-query attention: 64 query heads sharing 8 KV heads; decode, one query token against the KV cache",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          64
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          512,
+          2048,
+          8192,
+          32768
         ],
         "head_dim": [
           128

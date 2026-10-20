@@ -738,15 +738,23 @@ def test_graph_failures_over_the_budget_fail_the_run_and_keep_what_measured(
 def test_an_l1_measurement_cannot_inherit_a_benchmarking_override(
     monkeypatch, tmp_path
 ):
-    """HIPDNN_FORCE_BENCHMARKING overrides the bench's global.benchmarking=0, so an L1
-    label would otherwise be a searched pick."""
+    """HIPDNN_FORCE_BENCHMARKING overrides the bench's global.benchmarking=0, and a winner
+    record in the caller's HIPDNN_CACHE_DIR outranks the engine's own pick, so an L1 label
+    would otherwise be a searched or recorded kernel. HIPDNN_LOG_FILE would hide the
+    runtime's lines from the bench's stderr."""
     main = _cli()
     tree = _ued_tree(tmp_path / "descriptors")
     monkeypatch.setenv("HIPDNN_FORCE_BENCHMARKING", "1")
+    monkeypatch.setenv("HIPDNN_CACHE_DIR", str(tmp_path / "caller_cache"))
+    monkeypatch.setenv("HIPDNN_LOG_FILE", str(tmp_path / "caller.log"))
     seen = []
 
     def bench(command, environment, *args):
         seen.append(environment.get("HIPDNN_FORCE_BENCHMARKING"))
+        cache = environment.get("HIPDNN_CACHE_DIR")
+        assert cache and cache != str(tmp_path / "caller_cache")
+        assert not any(Path(cache).iterdir()), "the bench's cache starts empty"
+        assert "HIPDNN_LOG_FILE" not in environment
         raise ValueError("stop after observing the child environment")
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
@@ -1022,3 +1030,56 @@ def test_an_authored_recipe_reading_kernel_priority_is_admitted():
             _SHIPPING_KNOBS,
             [],
         )
+
+
+def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
+    """Every other test replaces `_run_json`; this one runs a stand-in executable, so the
+    exit status and the one-JSON-object rule are what is checked."""
+    import sys
+
+    from uhd_gen.generate import _run_json
+
+    def bench(body: str) -> list:
+        script = tmp_path / f"bench{len(list(tmp_path.glob('bench*')))}.py"
+        script.write_text(body, encoding="utf-8")
+        return [sys.executable, str(script)]
+
+    commands: list = []
+    answered = _run_json(
+        bench("print('{\"avg_time_ms\": 1.5}')"), {}, tmp_path / "logs", 0, commands
+    )
+    assert answered == {"avg_time_ms": 1.5} and commands[0]["returncode"] == 0
+
+    with pytest.raises(ValueError, match=r"hipdnn_bench failed \(3\)"):
+        _run_json(
+            bench("import sys\nprint('{}')\nsys.exit(3)"),
+            {},
+            tmp_path / "logs",
+            1,
+            commands,
+        )
+    with pytest.raises(ValueError, match="one JSON response"):
+        _run_json(bench("print('not json')"), {}, tmp_path / "logs", 2, commands)
+
+
+def test_the_bench_sweep_entry_is_read_as_the_bench_writes_it(monkeypatch, tmp_path):
+    """The staged entry is what TestCandidatePageJson pins hipdnn_bench to emit; each value
+    must reach its own column, so a renamed key fails here or there."""
+    sample = (
+        Path(__file__).resolve().parents[1]
+        / "dataset"
+        / "tests"
+        / "fixtures"
+        / "hipdnn_bench_sweep_result.json"
+    )
+    entry = json.loads(sample.read_text(encoding="utf-8"))
+    row = _collect(monkeypatch, tmp_path, [_sweep(_page(), entry)])[0][0]
+    assert (
+        row["minTimeMs"],
+        row["avgTimeMs"],
+        row["robustMeanMs"],
+        row["stddevMs"],
+        row["iters"],
+    ) == (2.0, 2.75, 2.5, 0.125, 40)
+    assert row["is_valid"] is True and row["numerically_valid"] is True
+    assert row["validation"] == entry["validation"]

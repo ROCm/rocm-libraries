@@ -704,8 +704,9 @@ TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
         const auto reference = buildGraphFor(metadata, baseline);
         if(!reference.ok())
         {
-            // Logged so an operation without a builder is visible, not silently exempt.
-            GTEST_LOG_(INFO) << metadata.operation << ": " << reference.error;
+            // Every shipped operation builds its baseline; one that does not would otherwise be
+            // exempt from both checks.
+            ADD_FAILURE() << metadata.operation << ": " << reference.error;
             continue;
         }
 
