@@ -585,6 +585,8 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # FusedA2A=A2AGemm: K sub-rounds per peer shard, each with its own flag.
+    "A2ASubRounds": [1, 2, 4],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

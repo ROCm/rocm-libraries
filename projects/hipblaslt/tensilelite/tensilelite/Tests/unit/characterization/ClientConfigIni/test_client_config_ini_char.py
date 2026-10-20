@@ -1008,7 +1008,7 @@ class TestWorldFilter:
         assert "world-filter" not in content
 
     def test_one_line_per_world(self, tmp_path, monkeypatch):
-        ptDict = dict(_PLAIN_GEMM_PT_DICT, FusedGemmA2A=True)
+        ptDict = dict(_PLAIN_GEMM_PT_DICT, FusedA2A="GemmA2A")
         pt = _make_problem_type(ptDict)
         content = _write_ini(tmp_path, monkeypatch, pt, ptDict,
                              extra_gp={"WorldFilter": [2, 4]})

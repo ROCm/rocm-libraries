@@ -34,6 +34,7 @@
 
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/TensorDescriptor.hpp>
@@ -378,7 +379,7 @@ namespace TensileLite
             GATE_RESIDUAL = 17,
             // Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
             SCALEZEROA    = 18,
-            A2A_RECV      = 19,
+            A2A_BUF       = 19,
             TENSOR_COUNT
         };
 
@@ -1312,14 +1313,14 @@ namespace TensileLite
             m_swizzleTensorB = swizzle;
         }
 
-        bool fusedGemmA2A() const
+        FusedA2A fusedA2A() const
         {
-            return m_fusedGemmA2A;
+            return m_fusedA2A;
         }
 
-        void setFusedGemmA2A(bool fusedGemmA2A)
+        void setFusedA2A(FusedA2A mode)
         {
-            m_fusedGemmA2A = fusedGemmA2A;
+            m_fusedA2A = mode;
         }
 
         int64_t fusedA2AExtent() const
@@ -1332,17 +1333,20 @@ namespace TensileLite
             m_fusedA2AExtent = extent;
         }
 
-        // recv[W][N][AM/W] in D's type.
-        void setA2ARecv()
+        // [W][N][extent/W]: recv in D's type for GemmA2A, gathered in B's type for A2AGemm.
+        void setA2ABuf()
         {
             const size_t world  = m_world;
-            const size_t nShard = m_fusedA2AExtent / world;
             const size_t tokens = freeSizeB(0);
-            m_tensors[ContractionProblemGemm::TENSOR::A2A_RECV]
-                = {"a2aRecv",
-                   m_tensors[ContractionProblemGemm::TENSOR::D].dataType(),
-                   {nShard, tokens, world},
-                   {1, nShard, nShard * tokens}};
+            const bool   gather = m_fusedA2A == FusedA2A::A2AGemm;
+            const size_t shard  = m_fusedA2AExtent / world;
+            m_tensors[ContractionProblemGemm::TENSOR::A2A_BUF]
+                = {"a2aBuf",
+                   m_tensors[gather ? ContractionProblemGemm::TENSOR::B
+                                    : ContractionProblemGemm::TENSOR::D]
+                       .dataType(),
+                   {shard, tokens, world},
+                   {1, shard, shard * tokens}};
         }
 
         size_t mxBlockA() const
@@ -1613,7 +1617,7 @@ namespace TensileLite
         bool             m_outputAmaxD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
-        bool             m_fusedGemmA2A            = false;
+        FusedA2A         m_fusedA2A                = FusedA2A::Disabled;
         int64_t          m_fusedA2AExtent          = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
@@ -1790,7 +1794,7 @@ namespace TensileLite
         void*                           fusedA2ACounter = nullptr;
         uint32_t                        fusedA2AMyRank  = 0;
         uint32_t                        fusedA2ADrain   = 0;
-        void*                           a2aRecv         = nullptr;
+        void*                           a2aBuf          = nullptr;
 
         // Workspace
         void* ws = nullptr;

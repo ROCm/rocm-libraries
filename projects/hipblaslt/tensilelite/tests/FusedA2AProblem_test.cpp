@@ -7,6 +7,8 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include <memory>
@@ -41,7 +43,7 @@ namespace
                                                       ldd,
                                                       ldd * N,
                                                       0.0);
-        p.setFusedGemmA2A(true);
+        p.setFusedA2A(FusedA2A::GemmA2A);
         p.setWorld(world);
         p.setFusedA2AExtent(extent);
         return p;
@@ -50,7 +52,7 @@ namespace
 
 TEST(FusedA2AProblem, ShapePredicate)
 {
-    Predicates::Contraction::FusedA2AShape mt256(256);
+    Predicates::Contraction::GemmA2AShape mt256(256);
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 4, 2048)));
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 8, 2048)));
     // AM % (MT0 * W) != 0
@@ -104,7 +106,7 @@ namespace
         setOption(args, "mx-b-block", 0);
         setOption(args, "mx-a-type", rocisa::DataType::E8);
         setOption(args, "mx-b-type", rocisa::DataType::E8);
-        setOption(args, "fused-gemm-a2a", fused);
+        setOption(args, "fused-a2a", fused ? FusedA2A::GemmA2A : FusedA2A::Disabled);
         setOption(args, "metadata-layout", 0);
         setOption(args, "a-ops", TensorOps{});
         setOption(args, "b-ops", TensorOps{});
@@ -133,11 +135,11 @@ TEST(FusedA2AClientProblemFactory, PerProblemWorldAndExtent)
     for(size_t i = 0; i < 2; i++)
     {
         auto const& p = gemmAt(factory, i);
-        EXPECT_TRUE(p.fusedGemmA2A());
+        EXPECT_EQ(p.fusedA2A(), FusedA2A::GemmA2A);
         EXPECT_EQ(p.world(), worlds[i]);
         EXPECT_EQ(p.fusedA2AExtent(), 2048);
         size_t const nShard = 2048 / worlds[i];
-        auto const&  recv   = p.tensors()[ContractionProblemGemm::TENSOR::A2A_RECV];
+        auto const&  recv   = p.tensors()[ContractionProblemGemm::TENSOR::A2A_BUF];
         EXPECT_EQ(recv.sizes(), (std::vector<size_t>{nShard, 512, worlds[i]}));
         EXPECT_EQ(recv.strides(), (std::vector<size_t>{1, nShard, nShard * 512}));
     }
@@ -170,4 +172,116 @@ TEST(FusedA2AClientProblemFactory, NonFusedKeepsDefaultWorld)
     Client::ClientProblemFactory factory(factoryArgs(false, 1));
     ASSERT_EQ(factory.problems().size(), 1u);
     EXPECT_EQ(gemmAt(factory, 0).world(), 1u);
+}
+
+namespace
+{
+    ContractionProblemGemm
+        a2aGemmProblem(size_t K, uint32_t world, size_t ldb = 0, size_t batch = 1, size_t N = 2048)
+    {
+        constexpr size_t M = 3072;
+        if(ldb == 0)
+            ldb = K;
+        auto p = ContractionProblemGemm::GEMM_Strides(true,
+                                                      false,
+                                                      rocisa::DataType::BFloat16,
+                                                      rocisa::DataType::BFloat16,
+                                                      rocisa::DataType::BFloat16,
+                                                      rocisa::DataType::BFloat16,
+                                                      M,
+                                                      N,
+                                                      K,
+                                                      batch,
+                                                      K,
+                                                      K * M,
+                                                      ldb,
+                                                      ldb * N,
+                                                      M,
+                                                      M * N,
+                                                      M,
+                                                      M * N,
+                                                      0.0);
+        p.setFusedA2A(FusedA2A::A2AGemm);
+        p.setWorld(world);
+        p.setFusedA2AExtent(K);
+        return p;
+    }
+}
+
+TEST(FusedA2AProblem, A2AGemmShapePredicate)
+{
+    Predicates::Contraction::A2AGemmShape du64(64);
+    EXPECT_TRUE(du64(a2aGemmProblem(4096, 4)));
+    // K / W % DU != 0
+    EXPECT_FALSE(du64(a2aGemmProblem(4352, 8)));
+    // K / W % (DU * SubRounds) != 0
+    EXPECT_TRUE(du64(a2aGemmProblem(4352, 4)));
+    EXPECT_FALSE(Predicates::Contraction::A2AGemmShape(128)(a2aGemmProblem(4352, 4)));
+    // (K / W) * bpeB / 16 > 2^14
+    EXPECT_TRUE(du64(a2aGemmProblem(524288, 4)));
+    EXPECT_FALSE(du64(a2aGemmProblem(524544, 4)));
+    // N * (K / W) * bpeB % 128 != 0
+    Predicates::Contraction::A2AGemmShape du8(8);
+    EXPECT_TRUE(du8(a2aGemmProblem(16, 2, 0, 1, 8)));
+    EXPECT_FALSE(du8(a2aGemmProblem(16, 2, 0, 1, 1)));
+    // ldb != K
+    EXPECT_FALSE(du64(a2aGemmProblem(4096, 4, 4096 + 64)));
+    EXPECT_FALSE(du64(a2aGemmProblem(4096, 4, 0, 2)));
+    EXPECT_FALSE(du64(a2aGemmProblem(4096, 0)));
+
+    auto gsuc = a2aGemmProblem(4096, 4);
+    gsuc.setParams().setGSUC(true);
+    EXPECT_FALSE(du64(gsuc));
+
+    auto pointerArray = a2aGemmProblem(4096, 4);
+    pointerArray.setBatchMode(ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+    EXPECT_FALSE(du64(pointerArray));
+
+    auto partialK = a2aGemmProblem(4096, 4);
+    partialK.setFusedA2AExtent(2048);
+    EXPECT_FALSE(du64(partialK));
+}
+
+TEST(FusedA2AProblem, DeviceUserArgsRejectA2AGemm)
+{
+    ContractionInputs inputs;
+    inputs.alpha          = 1.0f;
+    inputs.beta           = 0.0f;
+    inputs.activationArgs = {0.0f, 0.0f};
+    ContractionGroupedInputs grouped;
+    grouped.grouped = {inputs};
+    DeviceUserArguments<float> args{};
+    auto                       p = a2aGemmProblem(4096, 2);
+    p.setAlphaType(rocisa::DataType::Float);
+    p.setBetaType(rocisa::DataType::Float);
+    EXPECT_THROW(setDeviceUserArgs<float>({p}, grouped, &args), std::runtime_error);
+}
+
+// factoryArgs uses problem-size {3072, 512, 1, 2048}, so K is 2048.
+TEST(FusedA2AClientProblemFactory, A2AGemmRejectsPartialExtentAndIndivisibleK)
+{
+    for(auto const& c : std::vector<std::pair<int, int>>{{2, 1024}, {2, 0}, {3, 2048}})
+    {
+        auto args = factoryArgs(true, 1);
+        setOption(args, "fused-a2a", FusedA2A::A2AGemm);
+        setOption(args, "world", std::vector<int>{c.first});
+        setOption(args, "fused-a2a-extent", std::vector<int>{c.second});
+        EXPECT_THROW(Client::ClientProblemFactory{args}, std::invalid_argument)
+            << c.first << " " << c.second;
+    }
+}
+
+TEST(FusedA2AClientProblemFactory, A2AGemmExtentDefaultsToK)
+{
+    auto args = factoryArgs(true, 1);
+    setOption(args, "fused-a2a", FusedA2A::A2AGemm);
+    setOption(args, "world", std::vector<int>{2});
+    Client::ClientProblemFactory factory(args);
+    ASSERT_EQ(factory.problems().size(), 1u);
+    auto const&  p      = gemmAt(factory, 0);
+    size_t const kShard = 2048 / 2;
+    EXPECT_EQ(p.fusedA2AExtent(), 2048);
+    auto const& gathered = p.tensors()[ContractionProblemGemm::TENSOR::A2A_BUF];
+    EXPECT_EQ(gathered.sizes(), (std::vector<size_t>{kShard, 512, 2}));
+    EXPECT_EQ(gathered.strides(), (std::vector<size_t>{1, kShard, kShard * 512}));
 }
