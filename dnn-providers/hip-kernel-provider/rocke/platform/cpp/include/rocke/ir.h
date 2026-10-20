@@ -693,14 +693,20 @@ bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
  * signedness asks it which form to emit. NULL-safe. */
 bool rocke_type_is_unsigned(const rocke_type_t* t);
 
-/* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
+/* AMDGPU buffer-load cache-policy bits (the AUX operand; Python module
+ * constants). Bit 0 (1) is GLC on gfx90a and SC0 on gfx942/gfx950; bit 1 (2) is
+ * SLC on gfx90a and NT (streaming) on gfx942/gfx950. */
 typedef enum rocke_cache_policy
 {
-    ROCKE_CACHE_ALL = 0,
-    ROCKE_CACHE_GLOBAL = 1,
-    ROCKE_CACHE_STREAM = 2,
-    ROCKE_NON_TEMPORAL = 3
+    ROCKE_CACHE_ALL = 0, /* no bits: the default caching */
+    ROCKE_CACHE_GLOBAL = 1, /* GLC / SC0 */
+    ROCKE_CACHE_STREAM = 2, /* SLC / NT */
+    ROCKE_NON_TEMPORAL = 3 /* GLC + SLC / SC0 + NT */
 } rocke_cache_policy_t;
+
+/* The bits of a cache-policy name ("all", "global", "stream", "nt"; Python
+ * cache_policy_from_name). Returns false for any other name. */
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out);
 
 /* ============================== ATTR MAP ================================ */
 
