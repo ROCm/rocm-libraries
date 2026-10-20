@@ -247,6 +247,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2w0MpTfpZ
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB16_LBSPPA512_LPA16_MIWT1_1_SVW1_VWA1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB16_GSU1_LBSPPA512_LPA16_MIWT1_1_SU0_SUM1_SUS0_SVW1_VWA1_WGM8
   AssignedDerivedParameters: true
@@ -381,6 +382,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 1
+  SolutionUID: 0uR2w0Mp1DWw
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT32x32x32_MI16x16x1_SN_LDSB0_AFC1_GRVWB4_GSU1_LPA16_LPB16_MIWT1_1_PGR2_PLR1_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT32x32x32_MI16x16x1_SN_LDSB0_AFC1_GRVWB4_GSU1_LPA16_LPB16_MIWT1_1_PGR2_PLR1_WG32_8_1
   AssignedDerivedParameters: true
@@ -510,6 +512,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 3
 - SolutionIndex: 2
+  SolutionUID: 0uR2w0MpGnM6
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
   AssignedDerivedParameters: true
@@ -639,6 +642,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 2
 - SolutionIndex: 3
+  SolutionUID: 0uR2w0Mp1m9A
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_GRVWB16_GSUM_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT128x128x32_MI32x32x1_SN_LDSB0_AFC0_GRVWB16_GSU2_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
   AssignedDerivedParameters: true
@@ -768,6 +772,7 @@ Solutions:
   _WorkspaceSizePerElemC: 8
   _staggerStrideShift: 3
 - SolutionIndex: 4
+  SolutionUID: 0uR2w0MplGte
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC0_GRVWB16_GSUM_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC0_GRVWB16_GSU2_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
   1LDSBuffer: 1
@@ -898,6 +903,7 @@ Solutions:
   _WorkspaceSizePerElemC: 8
   _staggerStrideShift: 3
 - SolutionIndex: 5
+  SolutionUID: 0uR2w0MpJbDx
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
   1LDSBuffer: 1

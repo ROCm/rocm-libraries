@@ -43,6 +43,12 @@ ROCKE = PLATFORM.parent  # platform -> rocke
 PYROOT = PLATFORM / "python"
 LIBRARY = ROCKE / "library"
 
+# Explicit rather than relying on sys.path[0]: that only holds while this file
+# is the entry point, and the helper is needed whether it is run or imported.
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+from _hostcaps import available_cpus
+
 # The rolled gate verifies one parametric recipe per axis at several values,
 # sampled and held out. Pinning the count here rather than in the CI workflow
 # keeps one source of truth: an axis that quietly stops rolling then fails
@@ -121,7 +127,11 @@ def build_shared_engine(build_root: Path) -> Optional[Path]:
                 "--target",
                 "rocke_shared",
                 "-j",
-                str(os.cpu_count() or 1),
+                # This process's share, not the machine's size -- same reason
+                # the probe gates size from this helper. A scheduler-pinned
+                # host reports 384 against an allocation of 2, where `-j384`
+                # is an OOM rather than a fast build.
+                str(available_cpus()),
             ],
             check=True,
             stdout=subprocess.DEVNULL,

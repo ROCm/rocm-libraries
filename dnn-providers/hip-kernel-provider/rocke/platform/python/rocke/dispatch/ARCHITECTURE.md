@@ -105,6 +105,19 @@ Selection is not reproducible for a target that is not the host, which rules out
 AOT compilation, cross-arch CI, and any offline tuning record that is keyed by
 architecture.
 
+*Fixed (AICK-2146).* Every selector and spec-builder on the attention selection
+path now takes `arch` as a required argument, so the cohort heuristics gate on
+the request's arch rather than the device's; `_resolve_attention_arch()` survives
+only on the launch path, where compile-then-run does target the local device.
+`library/tests/dispatch/attention/test_host_independent_dispatch.py` holds the
+ratchet: an AST sweep fails if any call site omits the arch or passes a live
+device probe in that slot, and a second sweep confines every
+`_resolve_attention_arch()` call to an allow-list of launch entry points.
+One scoped exception remains: with `num_cus` left at 0 the CU count is still
+read from a matching-arch host, so the guarantee is arch-independence rather
+than full host-independence — `dispatch/attention/common.py::_resolve_num_cus`
+states the boundary, and callers pass an explicit `num_cus` to close it.
+
 **Identifiers are write-only.** `CandidateRegistry` exposes `register`,
 `candidates`, `supported`, `select`, `extend`. There is no `get(name)` and no
 way to resolve a `KernelId`. Names are already unique (`register` enforces it),
@@ -816,10 +829,13 @@ Rules:
   the trace. `"not eligible"` is useless; `"seqlen_k=192 below the 256 tile  floor for block_n=64"` is not.
 3. **Be pure and host-independent.** No device probes. Selection for `gfx1250`
   must be reproducible from a `gfx950` host, otherwise AOT compilation and
-   cross-arch testing are impossible. This is the single largest constraint the
-   current attention stack violates: `_tiled_spec_from_problem` calls
-   `_resolve_attention_arch()`, which reads the running device — the cause of
-   the host-dependent gfx942 selection shown in section 2.
+   cross-arch testing are impossible. The attention stack used to be the
+   standing violation of this — `_tiled_spec_from_problem` called
+   `_resolve_attention_arch()`, which reads the running device. AICK-2146 made
+   `arch` a required argument there and on every other selector (section 2),
+   so a predicate taking a device probe in an arch slot now fails an AST sweep
+   rather than shipping. The one remaining read is the CU count behind an unset
+   `num_cus`; see `dispatch/attention/common.py::_resolve_num_cus`.
 4. **Share cohort predicates with the builder.** When a heuristic decides both
   eligibility and geometry, it must have one definition imported by both, so
    selection and codegen cannot drift.
@@ -2221,4 +2237,5 @@ Worked examples: the toy family in
 `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every
 piece in one file) and attention (`library/dispatch/attention`: `DenseSpace`
 in `dense_rules.py`, `UnifiedSpace` in `unified_rules.py`, factories in
-`candidate.py`).
+`candidate.py`; `WmmaSpace` in `wmma_rules.py` for a per-problem policy whose
+every knob is `recorded`, with its candidates in `gfx1151.py`).

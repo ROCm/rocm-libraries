@@ -1,4 +1,6 @@
-# Source of truth for the shipped hipkernel:Gfx950AttentionDense catalog.
+# Packaged-dialect (`variants`) reference config for the hipkernel:Gfx950AttentionDense
+# catalog. The catalog's source of truth is the rocKE dispatcher registry, expanded from
+# configs/gfx950_attention_dense.engine.yaml by tools/registry_enumerator.py.
 #
 # The descriptors under
 # dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
@@ -7,9 +9,16 @@
 # IngestorGenerator root and copy exactly those files into the provider:
 #     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
 #         --output-dir <scratch> --force
+# tests/test_registry_regeneration.py gates this file against
+# configs/gfx950_attention_dense.engine.yaml. `default: true` marks each cell's default
+# variant, which variant reduction keeps; neither it nor `reduction` reaches a descriptor.
 # The generated packs/Gfx950AttentionDenseNative.cpp and
 # tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
 # hand-maintained and must not be overwritten.
+#
+# The generated gfx950_attention_dense.kdp.json is a DVC output: copy it to
+# descriptors/rocKE/gfx950_attention_dense/artifacts/ and run `dvc add artifacts`, not
+# `git add`. See the descriptors README ("Large rocKE files live in DVC").
 #
 # The kernel is the dense flash-attention prefill from
 # rocke/library/kernels/gfx950/attention_dense.py, in the PACKAGED dialect: hkp_pack
@@ -122,6 +131,33 @@ specialization:
       field: block_n
 kernel_source_kind: rocke
 workspace_policy: none
+# A copy of the manifest's `reduction` block.
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    performance:
+      - {name: block_m, divides: seqlen_q}
+      - {name: block_n, divides: seqlen_kv}
+      - {name: waves_per_eu}
+      - {name: lazy_rescale}
+      - {name: lds_k_group_pad}
+      - {name: lds_v_row_pad}
+      - {name: lds_k_row_pad}
+      - {name: lazy_rescale_threshold}
+      - {name: use_exp2_fast}
+      - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}
+      - {name: partial_vmcnt_prefetch}
+      - {name: pv_priority}
+      - {name: pv_sched_fence, unset_resolves_by: resolved_pv_sched_fence}
+      - {name: pv_sched_group_template, unset_resolves_by: resolved_pv_sched_group_template}
+      - {name: iglp_mode, unset_resolves_by: resolved_iglp_mode}
+      - {name: pv_sched_fence_mask}
+      - {name: pv_sched_group_ds_read}
+      - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}
+      - {name: causal_diag_split}
+      - {name: o_store_width}
+    ignored: []
+  aot_budget_per_arch: 1000
 packs:
 - name: gfx950_attention_dense
   arch:
@@ -168,7 +204,7 @@ packs:
       use_sinks: false
     knob_sets:
       d64_tiles:
-      - {block_m: 256, block_n: 64}
+      - {block_m: 256, block_n: 64, default: true}
       - {block_m: 128, block_n: 32}
       - {block_m: 128, block_n: 64}
       - {block_m: 128, block_n: 128}
@@ -264,7 +300,7 @@ packs:
       use_sinks: false
     knob_sets:
       d128_tiles:
-      - {block_m: 256, block_n: 64}
+      - {block_m: 256, block_n: 64, default: true}
       - {block_m: 128, block_n: 32}
       - {block_m: 128, block_n: 64}
       - {block_m: 128, block_n: 128}
