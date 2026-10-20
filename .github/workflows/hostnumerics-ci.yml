@@ -210,6 +210,9 @@ jobs:
       # fetched GoogleTest runtime to CMake's default shared MSVC runtime.
       # Use serial CPU paths initially: classic MSVC OpenMP rejects unsigned
       # loop indices used by MX generation and packing.
+      # Keep this initial Windows job focused on native MSVC and CMake package
+      # coverage. Linux already tests the Python bindings and installed import;
+      # Windows binding builds and installed imports can follow separately.
       - name: Configure
         run: >-
           cmake -S shared/hostnumerics
