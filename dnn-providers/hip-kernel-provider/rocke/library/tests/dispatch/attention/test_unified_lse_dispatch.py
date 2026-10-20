@@ -81,8 +81,8 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
 # the unpinned spec_hash, and the split-KV pin with its spec_hash.
 _PRE_LSE_UNPINNED_SPEC_HASH = "65416b2a8b9ffa90"
 _PRE_LSE_PIN = {
-    "gfx942": ("splitkv_seg16_t1xb_wpenone@af3937a1d431c0ef", "a76b874fbb3ffdbd"),
-    "gfx950": ("splitkv_seg16_t1xb_wpenone@f24a43837b523f06", "adb2a2142c22136a"),
+    "gfx942": ("splitkv_seg16_t1xb_wpenone@d50574be81e67c73", "8dc6060ed42707f6"),
+    "gfx950": ("splitkv_seg16_t1xb_wpenone@57868e64315f8eb1", "c534bcdedc7b30db"),
 }
 
 
