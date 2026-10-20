@@ -35,7 +35,29 @@ Hard errors, single-graph bundles (`{Name}.json`):
 - present tensors (input or output) with floating dtypes must not contain NaN or Inf
 - bundle total size must not exceed 2 MiB; larger bundles fail because they would quickly explode test artifact sizes
 - discovered metadata sidecars (`meta.json` or `*.meta.json`) must parse and contain non-empty string fields `generator` and `reference_source`
+- `direction`, when present, must be `forward` or `backward`
 - advisory naming must be derivable as `{Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json`
+
+Hard errors, backward bundles (metadata whose `direction` is `backward`), from
+RFC 0011 4.1 and 4.2. These apply to both single-graph metadata sidecars and
+template-sweep `cases[].metadata`:
+- `reference_strategy` is required. RFC 0011 lists it as mandatory for every
+  bundle that has metadata at all, but it is enforced only here: forward bundles
+  migrated from the old test system are explicitly allowed to carry none, and
+  rejecting them would be a regression rather than a check.
+- `forward_source` is required, and must be an object with non-empty string
+  `method`, `version` and `generated_at`. A backward bundle's `O` and `LSE` come
+  from a forward pass; if that forward pass is regenerated on its own the
+  backward bundle stays internally consistent with its stale inputs while
+  silently describing a different reference implementation, and no test catches
+  it. `forward_source` is what makes it detectable.
+- `forward_source.bundle`, when present, must name the forward bundle's graph
+  JSON relative to the backward bundle (for a sweep case, relative to that
+  case's golden directory). When that bundle's metadata is in scope, its
+  `direction`, `reference_backend` and `generated_at` are cross-checked against
+  `forward_source` — RFC 0011 4.2's stale-pairing check. A forward bundle that
+  is not on disk is skipped rather than failed, so verifying one subtree without
+  its partner pulled still passes.
 
 Hard errors, template-sweep bundles (`graph.template.json` + `sweep.json`):
 - a directory containing either file must contain both
