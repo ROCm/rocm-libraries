@@ -5,7 +5,7 @@
 
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
-#include <hipdnn_frontend/version.h>
+#include <hipdnn_frontend/version_number.h>
 
 #include <memory>
 #include <string>
