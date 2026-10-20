@@ -344,10 +344,12 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         *arch = "gfx1201";
         return 0;
     case 32:
-        /* Rejected by both validators: depthwise (channels-per-group == 1) is
-         * not an implicit-GEMM grouped problem. */
+        /* Grouped depthwise (channels-per-group == 1): a one-column GEMM per
+         * group, every operand scalar. cshuffle so the config is accepted
+         * (the default epilogue rejects a 16-bit dX). */
         spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
         spec->problem.groups = 64;
+        spec->epilogue = "cshuffle";
         *arch = "gfx950";
         return 0;
     case 33:
