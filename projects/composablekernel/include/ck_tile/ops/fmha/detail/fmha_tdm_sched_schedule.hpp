@@ -102,24 +102,50 @@ struct FmhaTdmSchedEvenlyInterleavedReadSchedule
     CK_TILE_HOST_DEVICE static constexpr void VisitQkRowHalf(Visitor&& visitor)
     {
         static_assert(Wmma >= 0 && Wmma < kQkWmmasPerStage);
-        constexpr auto row  = MakeQkRows<Stage>().rows[Wmma];
-        constexpr auto kind = Stage == kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
-        static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
-            [&](auto i) {
-                visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
-            });
+        constexpr auto row                 = MakeQkRows<Stage>().rows[Wmma];
+        constexpr auto kind                = Stage == kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
+        constexpr bool pair_d64_n128_reads = std::is_same_v<typename Geometry::QDataType, bf16_t> &&
+                                             Geometry::kM == 128 && Geometry::kN == 128 &&
+                                             Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
+        if constexpr(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 0)
+        {
+            static_assert(Geometry::kKSuLoadCount == 8 && Geometry::kVStageLoadCount == 8 &&
+                          kQkWmmasPerStage == 8);
+            visitor(std::integral_constant<Kind, kind>{}, number<Wmma>{});
+            visitor(std::integral_constant<Kind, kind>{}, number<Wmma + 1>{});
+        }
+        else if constexpr(!(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 1))
+        {
+            static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
+                [&](auto i) {
+                    visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
+                });
+        }
     }
 
     template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
     CK_TILE_HOST_DEVICE static constexpr void VisitPvRowHalf(Visitor&& visitor)
     {
         static_assert(Wmma >= 0 && Wmma < kPvWmmasPerStage);
-        constexpr auto row  = MakePvRows<Stage>().rows[Wmma];
-        constexpr auto kind = Stage == kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
-        static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
-            [&](auto i) {
-                visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
-            });
+        constexpr auto row                 = MakePvRows<Stage>().rows[Wmma];
+        constexpr auto kind                = Stage == kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
+        constexpr bool pair_d64_n128_reads = std::is_same_v<typename Geometry::QDataType, bf16_t> &&
+                                             Geometry::kM == 128 && Geometry::kN == 128 &&
+                                             Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
+        if constexpr(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 0)
+        {
+            static_assert(Geometry::kKSuLoadCount == 8 && Geometry::kVStageLoadCount == 8 &&
+                          kPvWmmasPerStage == 8);
+            visitor(std::integral_constant<Kind, kind>{}, number<Wmma>{});
+            visitor(std::integral_constant<Kind, kind>{}, number<Wmma + 1>{});
+        }
+        else if constexpr(!(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 1))
+        {
+            static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
+                [&](auto i) {
+                    visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
+                });
+        }
     }
 };
 
@@ -438,7 +464,7 @@ struct FmhaTdmSchedSequentialTileSchedule
 
 template <typename Geometry>
 using FmhaTdmSchedDefaultScheduleFor = FmhaTdmSchedSequentialTileSchedule<
-    std::conditional_t<Geometry::kHeadDimQK == 64,
+    std::conditional_t<Geometry::kHeadDimQK == 64 && Geometry::kN == 64,
                        FmhaTdmSchedReadFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>,
                        FmhaTdmSchedWmmaFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>>>;
 

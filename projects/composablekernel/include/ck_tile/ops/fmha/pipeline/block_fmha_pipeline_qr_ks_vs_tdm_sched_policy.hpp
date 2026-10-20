@@ -826,7 +826,7 @@ template <typename Geometry>
 struct FmhaTdmSchedTuningSelector
 {
     static constexpr index_t kBlockPerCu =
-        Geometry::kHeadDimQK == 64 ? 3
+        Geometry::kHeadDimQK == 64 ? (Geometry::kN == 128 ? 1 : 3)
                                    : (Geometry::kHeadDimQK == 192 && Geometry::kN == 64 ? 2 : 1);
     using type = FmhaTdmSchedDerivedTuning<Geometry, kBlockPerCu>;
 };

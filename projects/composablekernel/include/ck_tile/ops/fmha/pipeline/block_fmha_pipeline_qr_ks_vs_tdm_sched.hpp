@@ -46,6 +46,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     using Mode                  = FmhaTdmSchedMode<Problem, Policy>;
     static_assert(Mode::kIsLegal,
                   "qr_tdm_sched schedule geometry or output-rescale placement is incompatible");
+    // The shared geometry admits D64/V64 with N128 tiles for the batch-prefill page-tile core
+    // only; this pipeline is not built or validated for it.
+    static_assert(!(Policy::Geometry::kHeadDimQK == 64 && Policy::Geometry::kN == 128),
+                  "qr_tdm_sched forward does not support D64/V64 with N128 tiles");
 
     using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
