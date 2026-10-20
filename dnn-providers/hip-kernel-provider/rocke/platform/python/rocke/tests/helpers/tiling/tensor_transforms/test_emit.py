@@ -8,9 +8,10 @@ the host: a small interpreter computes each op with its integer width, for every
 of per-wave values, and fails on any no-signed-wrap op whose result leaves its type (the width
 proof). The op-count tests pin where work lands: the uniform side once per call, a per-lane
 division at most once per call, one compare and select per access. A golden string per case
-pins the emitted IR text, and every case compiles for gfx90a, gfx942 and gfx950. The GPU tests
-at the end run the same coordinates on whatever GPU is present, compiled for it, and compare each
-lane's parts with the golden.
+pins the emitted IR text; every case lowers to the same IR in both engines and compiles for
+gfx90a, gfx942, gfx950, gfx1151, gfx1201 and gfx1250. The GPU tests at the end run the same
+coordinates on whatever GPU is present, compiled for it, and compare each lane's parts with the
+golden.
 
 Every block origin that feeds an unmerge goes through a range marker stating ``0 <= origin <
 length``: the marker the tiling layer's tile guard emits, which a kernel author reaches through
@@ -27,6 +28,7 @@ import pytest
 
 from rocke.core.ir import F16, F32, I32, I64, IRBuilder, PtrType, Value
 from rocke.core.ir_print import print_ir
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.helpers.tiling import tensor_transforms as tt
 from rocke.helpers.tiling.descriptors import TensorDesc
 from rocke.helpers.tiling.tensor_transforms import (
@@ -54,6 +56,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     UniformPart,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
+from rocke.tests.engines import lower_with_both_engines
 from rocke.tests.gpu import current_device_arch
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -864,13 +867,42 @@ def _store_parts(b: IRBuilder, addresses: tuple[tt.ElementAddress, ...]) -> int:
     return len(parts)
 
 
-@pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
+# One target of each family the graphs' ops (unsigned compare, no-unsigned-wrap add, range
+# marker) lower for: CDNA, RDNA and gfx1250.
+GOLDEN_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250")
+
+
+def _golden_kernel(case: str):
+    b, addresses = GOLDEN_CASES[case]()
+    _store_parts(b, addresses)
+    return b.kernel
+
+
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+@pytest.mark.parametrize("arch", GOLDEN_ARCHES)
+@pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
+def test_every_golden_case_lowers_to_the_same_ir_in_both_engines(case, arch, flavor):
+    assert lower_with_both_engines(_golden_kernel(case), arch, flavor)
+
+
+def _require_comgr_target(arch: str) -> None:
+    """Skip when the loaded comgr cannot target ``arch`` (an older ROCm lacks the newest
+    targets); after this, any compile error is the kernel's and fails the test."""
+    comgr = pytest.importorskip("rocke.runtime.comgr")
+    try:
+        isas = comgr.supported_isas()
+    except comgr.ComgrError as exc:
+        pytest.skip(f"comgr unavailable: {exc}")
+    if arch not in {name.split("--")[-1].split(":")[0] for name in isas}:
+        pytest.skip(f"the loaded comgr cannot target {arch}")
+
+
+@pytest.mark.parametrize("arch", GOLDEN_ARCHES)
 @pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
 def test_every_golden_case_compiles(case, arch):
     compile_kernel = pytest.importorskip("rocke.helpers.compile").compile_kernel
-    b, addresses = GOLDEN_CASES[case]()
-    _store_parts(b, addresses)
-    assert compile_kernel(b.kernel, arch=arch).hsaco
+    _require_comgr_target(arch)
+    assert compile_kernel(_golden_kernel(case), arch=arch).hsaco
 
 
 # --- errors ----------------------------------------------------------------------------------------
