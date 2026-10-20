@@ -590,6 +590,25 @@ def _direct_conv_lane_setup(b, c_wave):
     return c_half_bytes, oob_sentinel, zero_f32, tid, wave_id
 
 
+def _direct_wgrad_params(b, io_type, RTC):
+    """Shared direct-conv wgrad preamble: params, RTC block, constants, tid."""
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
+    A_bytes = b.param("A_bytes", I32)
+    D_bytes = b.param("D_bytes", I32)
+    rtc_cpg = rtc_kpg = None
+    if RTC:
+        rtc_cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
+        rtc_kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
+
+    c0 = b.const_i32(0)
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+
+    tid = b.thread_id_x()
+    return A, D, A_bytes, D_bytes, rtc_cpg, rtc_kpg, c0, c_half_bytes, oob_sentinel, tid
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -4548,20 +4567,7 @@ def build_direct_transpose_weights_dgrad(
     b = IRBuilder(f"direct_transpose_weights_dgrad_{p.short()}{rtc_tag}")
     b.kernel.attrs["max_workgroup_size"] = BLOCK
 
-    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
-    A_bytes = b.param("A_bytes", I32)
-    D_bytes = b.param("D_bytes", I32)
-    if RTC:
-        rtc_cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
-        rtc_kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
-
-    c0 = b.const_i32(0)
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-
-    tid = b.thread_id_x()
-
+    A, D, A_bytes, D_bytes, rtc_cpg, rtc_kpg, c0, c_half_bytes, oob_sentinel, tid = _direct_wgrad_params(b, io_type, RTC)
     # Grid:
     #   bx = flat (group * KH * KW) index:  g = bx // (KH*KW),  rs = bx % (KH*KW)
     #   by = k tile: k_in_g = by*64 + lane
@@ -4730,19 +4736,7 @@ def build_direct_reorganize_weights(
     b.kernel.attrs["max_workgroup_size"] = WAVE
 
     io_type = _io_type(p.dtype)
-    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
-    A_bytes = b.param("A_bytes", I32)
-    D_bytes = b.param("D_bytes", I32)
-    if RTC:
-        rtc_cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
-        rtc_kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
-
-    c0 = b.const_i32(0)
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-
-    tid = b.thread_id_x()
+    A, D, A_bytes, D_bytes, rtc_cpg, rtc_kpg, c0, c_half_bytes, oob_sentinel, tid = _direct_wgrad_params(b, io_type, RTC)
     bx = b.block_id_x()
 
     if RTC:
