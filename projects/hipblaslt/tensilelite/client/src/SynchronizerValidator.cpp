@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "SynchronizerValidator.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "ResultReporter.hpp"
 
@@ -120,6 +121,7 @@ namespace TensileLite
         {
             try
             {
+                ScopedTimer timer("validate_synchronizer_check");
                 checkInputs(inputs, "warmup");
             }
             catch(...)
@@ -135,7 +137,11 @@ namespace TensileLite
                                                 char const*                    stage)
         {
             if(!active() || m_problem == nullptr || inputs == nullptr)
+            {
+                // Solution cannot use the Synchronizer (or the check is off): nothing to read.
+                ScopedTimer timer("validate_synchronizer_inactive");
                 return;
+            }
 
             if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
@@ -198,7 +204,10 @@ namespace TensileLite
                                                 size_t                        gemmIdx)
         {
             if(deviceSynchronizer == nullptr)
+            {
+                ScopedTimer timer("validate_synchronizer_no_buffer");
                 return true;
+            }
 
             auto const&  tensor = problem.tensors()[ContractionProblemGemm::TENSOR::Synchronizer];
             size_t const bytes  = tensor.totalAllocatedBytes();
@@ -227,10 +236,19 @@ namespace TensileLite
 
             // Once per solution, so the copy is hot: pinned staging avoids the
             // pageable bounce buffer.
-            uint8_t* host = readBuffer(deviceSynchronizer, bytes);
+            uint8_t* host;
+            {
+                ScopedTimer timer("validate_synchronizer_readback");
+                host = readBuffer(deviceSynchronizer, bytes);
+            }
 
             SynchronizerResidue residue;
-            if(!scanSynchronizerResidue(host, bytes, residue))
+            bool                dirty;
+            {
+                ScopedTimer timer("validate_synchronizer_scan");
+                dirty = scanSynchronizerResidue(host, bytes, residue);
+            }
+            if(!dirty)
                 return true;
 
             std::ostringstream msg;

@@ -48,9 +48,11 @@ namespace TensileLite
     {
         namespace
         {
-            // Returns a stable "pre_solution_listener.<ListenerType>" category string (ScopedTimer needs
+            // Returns a stable "<prefix><ListenerType>" category string (ScopedTimer needs
             // storage that outlives the timing buffer). Only called when timing is enabled.
-            const char* preSolutionCategory(RunListener const& listener)
+            // One cache per Tag so each call site only does a type_index lookup.
+            template <int Tag>
+            const char* listenerCategory(char const* prefix, RunListener const& listener)
             {
                 static std::unordered_map<std::type_index, std::string> names;
                 auto idx = std::type_index(typeid(listener));
@@ -58,14 +60,14 @@ namespace TensileLite
                 if(it == names.end())
                 {
                     int         status = 0;
-                    char*       dem    = abi::__cxa_demangle(idx.name(), nullptr, nullptr, &status);
-                    std::string name   = (status == 0 && dem) ? dem : idx.name();
+                    char*       dem    = abi::__cxa_demangle(typeid(listener).name(), nullptr, nullptr, &status);
+                    std::string name   = (status == 0 && dem) ? dem : typeid(listener).name();
                     std::free(dem);
                     // Strip the namespace: ':' is the field separator of the TIMING: lines.
                     auto pos = name.rfind("::");
                     if(pos != std::string::npos)
                         name = name.substr(pos + 2);
-                    it = names.emplace(idx, "pre_solution_listener." + name).first;
+                    it = names.emplace(idx, std::string(prefix) + name).first;
                 }
                 return it->second.c_str();
             }
@@ -134,7 +136,7 @@ namespace TensileLite
             {
                 if(g_timingInstrumentationEnabled)
                 {
-                    ScopedTimer timer(preSolutionCategory(**iter));
+                    ScopedTimer timer(listenerCategory<0>("pre_solution_listener.", **iter));
                     (*iter)->preSolution(solution);
                 }
                 else
@@ -193,7 +195,15 @@ namespace TensileLite
                                               TimingEvents const&            stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateWarmups(inputs, startEvents, stopEvents);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<1>("validate_warmups_listener.", **iter));
+                    (*iter)->validateWarmups(inputs, startEvents, stopEvents);
+                }
+                else
+                    (*iter)->validateWarmups(inputs, startEvents, stopEvents);
+            }
         }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
