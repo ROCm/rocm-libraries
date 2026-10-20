@@ -440,7 +440,8 @@ class TestI64KvAddr(unittest.TestCase):
         large = _combo_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx950"):
             self.assertNotEqual(
-                _au._tiled_cache_key(small), _au._tiled_cache_key(large)
+                _au._tiled_cache_key(small, "gfx950"),
+                _au._tiled_cache_key(large, "gfx950"),
             )
 
     def test_i64_threshold_splits_3d_cache_key(self):
@@ -450,7 +451,8 @@ class TestI64KvAddr(unittest.TestCase):
         large = _combo_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx950"):
             self.assertNotEqual(
-                _au._tiled_3d_cache_key(small), _au._tiled_3d_cache_key(large)
+                _au._tiled_3d_cache_key(small, "gfx950"),
+                _au._tiled_3d_cache_key(large, "gfx950"),
             )
 
     def test_num_kv_blocks_only_affects_key_via_i64(self):
@@ -461,8 +463,8 @@ class TestI64KvAddr(unittest.TestCase):
         small = _combo_prob(num_kv_blocks=_AT_I32_LIMIT)
         large = _combo_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx950"):
-            ks = _au._tiled_cache_key(small)
-            kl = _au._tiled_cache_key(large)
+            ks = _au._tiled_cache_key(small, "gfx950")
+            kl = _au._tiled_cache_key(large, "gfx950")
             i64_small = _au._enable_i64_kv_addr(small)
             i64_large = _au._enable_i64_kv_addr(large)
         self.assertEqual(len(ks), len(kl))
@@ -479,11 +481,13 @@ class TestI64KvAddr(unittest.TestCase):
             for n in (_AT_I32_LIMIT - 1, _AT_I32_LIMIT, _OVER_I32_LIMIT, 65536, 65537):
                 p = _combo_prob(num_kv_blocks=n)
                 with self.subTest(arch=arch, n=n), _patch_arch(arch):
-                    spec = _asb._tiled_spec_from_problem(p)
+                    spec = _asb._tiled_spec_from_problem(p, arch)
                     self.assertEqual(spec.use_i64_kv_addr, _au._enable_i64_kv_addr(p))
                     limit = _au._spec_kv_addr_limit(p, spec)
                     with _clear_launch_memos():
-                        meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+                        meta = _au._get_2d_launch_meta(
+                            p, _au._tiled_cache_key(p, arch), arch=arch
+                        )
                     self.assertEqual(meta.kv_addr_limit, limit)
                     _au._check_kv_addr_width(p, _kv_cache(n, p), limit)
 
@@ -552,7 +556,9 @@ class TestKvAddrLimit(unittest.TestCase):
         p = _combo_prob(use_fp8=True, num_kv_blocks=2 * _OVER_I32_LIMIT)
         with _patch_arch("gfx1250"), _clear_launch_memos():
             self.assertTrue(_au._enable_i64_kv_addr(p))
-            meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+            meta = _au._get_2d_launch_meta(
+                p, _au._tiled_cache_key(p, "gfx1250"), arch="gfx1250"
+            )
         self.assertEqual(meta.kv_addr_limit, _no_i64_path(2**31))
 
     def test_gfx942_4warp_route_meta_has_no_i64_path(self):
@@ -560,8 +566,10 @@ class TestKvAddrLimit(unittest.TestCase):
         # K/V with i32 element offsets whatever the problem decides.
         p = _prob(128, 32, 32, 8, sliding_window=128)
         with _patch_arch("gfx942"), _clear_launch_memos():
-            self.assertIsNotNone(_au._gfx942_4warp_route(p))
-            meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+            self.assertIsNotNone(_au._gfx942_4warp_route(p, "gfx942"))
+            meta = _au._get_2d_launch_meta(
+                p, _au._tiled_cache_key(p, "gfx942"), arch="gfx942"
+            )
         self.assertEqual(meta.kv_addr_limit, _no_i64_path(2 * 2**31))
 
     def test_gfx1250_spec_has_no_i64_field(self):
@@ -570,7 +578,7 @@ class TestKvAddrLimit(unittest.TestCase):
     def test_4warp_builder_rejects_i64(self):
         p = _prob(128, 32, 32, 8, sliding_window=128, num_kv_blocks=_BUG_BLOCKS)
         with _patch_arch("gfx942"):
-            spec = _asb._tiled_spec_from_problem(p)
+            spec = _asb._tiled_spec_from_problem(p, "gfx942")
         spec = replace(spec, use_i64_kv_addr=True)
         with self.assertRaisesRegex(NotImplementedError, "use_i64_kv_addr"):
             build_gfx942_4warp_gqa(spec, arch="gfx942")
@@ -648,9 +656,13 @@ class TestKvAddrLimit(unittest.TestCase):
         )
         for spec_cls in (Gfx942TiledSpec, Gfx950TiledSpec):
             for f in fields(spec_cls):
-                if not f.name.startswith("use_") or f.type not in (bool, "bool"):
+                if not f.name.startswith("use_"):
                     continue
                 with self.subTest(spec=spec_cls.__module__, flag=f.name):
+                    # A non-bool flag type would hide the field from this check.
+                    self.assertIn(
+                        f.type, (bool, "bool"), f"{f.name}: declare it a plain bool"
+                    )
                     homes = sum(f.name in c for c in classes)
                     self.assertEqual(
                         homes,
@@ -705,10 +717,12 @@ class TestKvAddrLimit(unittest.TestCase):
         # no i64 branch: an i64 problem still gets its flat i32 limit.
         p = _cfvst_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx942"), _clear_launch_memos():
-            spec = _asb._tiled_spec_from_problem(p)
+            spec = _asb._tiled_spec_from_problem(p, "gfx942")
             self.assertTrue(spec.use_i64_kv_addr)
             self.assertTrue(spec.use_conflict_free_v_store)
-            meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+            meta = _au._get_2d_launch_meta(
+                p, _au._tiled_cache_key(p, "gfx942"), arch="gfx942"
+            )
         self.assertEqual(
             meta.kv_addr_limit, _au._KvAddrLimit(2**31, "use_conflict_free_v_store")
         )
@@ -718,12 +732,16 @@ class TestKvAddrLimit(unittest.TestCase):
         # the problem says i64; the meta must follow the spec and keep the limit.
         p = _combo_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx950"):
-            i32_spec = replace(_asb._tiled_spec_from_problem(p), use_i64_kv_addr=False)
+            i32_spec = replace(
+                _asb._tiled_spec_from_problem(p, "gfx950"), use_i64_kv_addr=False
+            )
             with _clear_launch_memos(), mock.patch.object(
                 _au, "_tiled_spec_from_problem", return_value=i32_spec
             ):
                 self.assertTrue(_au._enable_i64_kv_addr(p))
-                meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+                meta = _au._get_2d_launch_meta(
+                    p, _au._tiled_cache_key(p, "gfx950"), arch="gfx950"
+                )
         self.assertEqual(meta.kv_addr_limit, _I32_BUFFER)
 
     def test_limit_memo_is_keyed_per_kernel(self):
@@ -741,7 +759,9 @@ class TestKvAddrLimit(unittest.TestCase):
             for arch, n, limit in cases:
                 p = _cfvst_prob(num_kv_blocks=n)
                 with self.subTest(arch=arch, n=n), _patch_arch(arch):
-                    meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+                    meta = _au._get_2d_launch_meta(
+                        p, _au._tiled_cache_key(p, arch), arch=arch
+                    )
                     self.assertEqual(meta.kv_addr_limit, limit)
 
     def test_limit_memo_builds_the_spec_once_per_kernel(self):
@@ -752,10 +772,10 @@ class TestKvAddrLimit(unittest.TestCase):
         with _patch_arch("gfx942"), _clear_launch_memos(), mock.patch.object(
             _au, "_tiled_spec_from_problem", wraps=_au._tiled_spec_from_problem
         ) as build:
-            key = _au._tiled_cache_key(p)
-            self.assertEqual(key, _au._tiled_cache_key(q))
-            first = _au._get_2d_launch_meta(p, key)
-            second = _au._get_2d_launch_meta(q, key)
+            key = _au._tiled_cache_key(p, "gfx942")
+            self.assertEqual(key, _au._tiled_cache_key(q, "gfx942"))
+            first = _au._get_2d_launch_meta(p, key, arch="gfx942")
+            second = _au._get_2d_launch_meta(q, key, arch="gfx942")
         self.assertEqual(build.call_count, 1)
         self.assertEqual(first.kv_addr_limit, second.kv_addr_limit)
         self.assertNotEqual(first.grid, second.grid)

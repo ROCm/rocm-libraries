@@ -2926,7 +2926,7 @@ def _check_kv_addr_width(
     ``_enable_i64_kv_addr`` only sees ``problem.num_kv_blocks``. A caller that
     builds the problem without it (0 means unknown, so assume small) or with a
     stale count gets the i32 path, and past the i32 limit the loads read zeros
-    or wrong data with no fault. Some kernels have no i64 path at all, and some
+    or wrong data, or fault. Some kernels have no i64 path at all, and some
     i64 specs still select an i32-only loader. ``k`` is the real cache, so check
     it at launch against ``kv_addr_limit`` (see ``_spec_kv_addr_limit``).
     Overcounting only costs the i64 path on a small cache, which is still
