@@ -110,7 +110,6 @@ def _max_threads_per_bank(addrs, banksPerThread: int, aligned: bool = False) -> 
   """
   if aligned:
     return max(Counter([(a >> 2) & 63 for a in addrs]).values())
-  
   counts = {}
   for a in addrs:
     first = (a >> 2) % 64
@@ -236,33 +235,44 @@ def _pick_best(candidates, costFn):
       best = cand
   return best
 
-def _wave_costs(rawAddrs, B, P, wOffsets, instOffs, banksPerThread):
-  """Cost of one (B, P) candidate, one entry per wave.
+def _is_aligned(addrs, align: int) -> bool:
+  return all(a % align == 0 for a in addrs)
 
-  A thread reads pad(natural + wOff) + pad(instOff), matching the code
-  generator. Cost per instruction is the largest number of threads on one
-  bank, summed over the instructions a wave issues.
+def _general_wave_cost(base, deltas, banksPerThread: int):
+  """Wave cost counting each instruction, or None if base + delta is misaligned.
 
-  A thread's load is banksPerThread dwords wide and has to be aligned to its
-  own width, 4 * banksPerThread bytes: the b64 reads (FP4, FP8) take 2 banks
-  and 8 bytes, b128 (FP16) 4 banks and 16 bytes, b32 (FP32) 1 bank and 4
-  bytes. Returns None if a candidate breaks that. Every address is then
-  aligned, which is what lets _max_threads_per_bank count start banks.
+  The sum is checked, not the parts: a misaligned base and offset can add up
+  to an aligned address.
   """
   align = 4 * banksPerThread
+  total = 0
+  for delta in deltas:
+    addrs = [a + delta for a in base]
+    if not _is_aligned(addrs, align):
+      return None
+    total += _max_threads_per_bank(addrs, banksPerThread, aligned=True)
+  return total
+
+def _wave_costs(rawAddrs, B, P, wOffsets, instOffs, banksPerThread):
+  """Cost of one (B, P) candidate, one entry per wave; None if it is illegal.
+
+  A thread reads pad(natural + wOff) + pad(instOff). An instruction costs the
+  most threads on one bank; a wave's cost sums its instructions. A load is
+  banksPerThread dwords wide and must be aligned to 4 * banksPerThread bytes
+  (b64: 2 banks, 8 bytes; b128: 4, 16; b32: 1, 4).
+  """
   def pad(x):
     return x + (x // B) * P if B else x
+
+  deltas = [pad(instOff) for instOff in instOffs]
+
   perWave = []
   for wOff in wOffsets:
     base = [pad(a + wOff) for a in rawAddrs]
-    total = 0
-    for instOff in instOffs:
-      delta = pad(instOff)
-      addrs = [a + delta for a in base]
-      if any(a % align for a in addrs):
-        return None
-      total += _max_threads_per_bank(addrs, banksPerThread, aligned=True)
-    perWave.append(total)
+    cost = _general_wave_cost(base, deltas, banksPerThread)
+    if cost is None:
+      return None
+    perWave.append(cost)
   return perWave
 
 def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
