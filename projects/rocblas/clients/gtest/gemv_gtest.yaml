@@ -230,6 +230,13 @@ Definitions:
   - &gemvt_grid_x_workitem_limit_range
     - { M: 1, N: 16777216, lda: 1, stride_a: 16777216 }
 
+  # Transpose gemvt: n and incy each fit in int32, but the y index (n-1)*incy does not.
+  # 16777215 * 129 = 2164260735 > 2147483647. col * incy overflows signed int32 if the
+  # int64 widening is not present. n is also past the 256-thread grid cap. Float keeps
+  # y near 8 GiB. gfx90a and gfx942-float take the fat-n kernel; it uses the same widening.
+  - &gemvt_n_incy_int32_range
+    - { M: 1, N: 16777216, lda: 1, incx: 1, incy: -129, stride_a: 16777216 }
+
 Tests:
 # Regular gemv
 - name: gemv_bad_arg
@@ -346,12 +353,20 @@ Tests:
   gpu_arch: '9??'
 
 - name: gemv_grid_x_workitem_limit
-  category: pre_checkin
+  category: nightly
   function: gemv
   precision: *single_double_precisions_complex_real
   transA: [ T, C ]
   matrix_size: *gemvt_grid_x_workitem_limit_range
   incx_incy: *incx_incy_unity
+  alpha_beta: *alpha_beta_range_small
+
+- name: gemv_gemvt_n_incy_int32
+  category: nightly
+  function: gemv
+  precision: *single_precision
+  transA: [ T, C ]
+  matrix_size: *gemvt_n_incy_int32_range
   alpha_beta: *alpha_beta_range_small
 
 - name: gemv_skinny_n
