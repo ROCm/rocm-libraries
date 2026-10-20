@@ -42,6 +42,7 @@ cd hipBLASLt; cd build/release
 --HMM                      Parameter requesting the use of HipManagedMemory
 --verify |-v               Validate GPU results with CPU?
 --verify_strict            Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Implies --verify.
+--verify_all_iters         After timing, relaunch each solution --iters more times, untimed, and check that every relaunch gives the same D, bit for bit, as the first launch. Implies --verify.
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
 --adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
@@ -132,6 +133,8 @@ allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + r
 ```
 
 By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
+To catch a solution that is wrong only on some launches, add `--verify_all_iters`. After timing each solution, the bench relaunches it `--iters` more times, untimed and without a co-tenant or cache flush, and compares each relaunch's D bit for bit with the first launch's D, which the checks above compared with the CPU. Each relaunch costs one copy of D to the host. When a relaunch differs, the bench prints how many relaunches differed and the first element that changed, and says whether that relaunch still passes the allclose check against the CPU. A solution whose summation order changes from launch to launch can differ bit for bit and still pass. A difference counts as a failed check for `--verify_strict`. Relaunches use the first rotation block only, and `--c_equal_d` with a nonzero beta is refused, since each launch then reads the D the previous launch wrote.
 
 Show the frequency with environment variable
 ```

@@ -28,6 +28,7 @@
 
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
+#include "bitwise_difference.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
 #include "cotenant.hpp"
@@ -6477,6 +6478,92 @@ void testing_matmul_with_bias(const Arguments& arg,
             assert(perf_monitor);
             perf_monitor->start();
         };
+        // --verify_all_iters: each launch path sets relaunch to one launch of rotation block 0,
+        // which writes the D that the first cold launch copied to hD_1.
+        std::function<void(size_t)> relaunch;
+        std::vector<HipHostBuffer>  hD_relaunch;
+        const int                   d_copies
+            = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? arg.batch_count : gemm_count;
+        // Where element e of D copy c sits: copy c is gemm c, or batch c in pointer-array mode.
+        auto describeElement = [&](int c, size_t e, const void* got, const void* expected) {
+            const bool         pointer_array = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            const int          gemm          = pointer_array ? 0 : c;
+            const int64_t      stride        = pointer_array ? 0 : stride_d[gemm];
+            const int64_t      batch  = pointer_array ? c : (stride ? int64_t(e) / stride : 0);
+            const int64_t      within = int64_t(e) - (pointer_array ? 0 : batch * stride);
+            std::ostringstream s;
+            s << std::setprecision(9) << "gemm " << gemm << ", batch " << batch << ", row "
+              << within % ldd[gemm] << ", column " << within / ldd[gemm] << ": "
+              << fast_check_load(got, To, e) << " instead of " << fast_check_load(expected, To, e);
+            return s.str();
+        };
+        // Relaunches solution sol --iters times and compares each D bit for bit with hD_1.
+        auto verifyRelaunches = [&](size_t sol) {
+            const size_t element_size = realDataTypeSize(To);
+            if(hD_relaunch.empty())
+                for(int c = 0; c < d_copies; c++)
+                    hD_relaunch.emplace_back(To, hD_1[c].getNumBytes() / element_size);
+
+            int         differing = 0;
+            int         first     = 0;
+            std::string report;
+            for(int iter = 1; iter <= arg.iters; iter++)
+            {
+                relaunch(sol);
+                copy_gemm_to_host(stream, d_copies, hD_relaunch, (*dDp));
+                bool same = true;
+                for(int c = 0; c < d_copies; c++)
+                {
+                    const BitwiseDifference d
+                        = bitwise_difference(hD_1[c].buf(),
+                                             hD_relaunch[c].buf(),
+                                             hD_1[c].getNumBytes() / element_size,
+                                             element_size);
+                    if(d.count == 0)
+                        continue;
+                    same = false;
+                    if(first == 0)
+                    {
+                        const char* elementPtr = hD_relaunch[c].as<char>();
+                        const char* firstPtr   = hD_1[c].as<char>();
+                        const int   gemm  = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 0 : c;
+                        double      atol  = 0;
+                        double      rtol  = 0;
+                        const bool  close = allclose_check_general(
+                            'F',
+                            M[gemm],
+                            N[gemm],
+                            ldd[gemm],
+                            batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 0 : stride_d[gemm],
+                            hD_gold[c].buf(),
+                            hD_relaunch[c].buf(),
+                            batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : num_batches[gemm],
+                            atol,
+                            rtol,
+                            To);
+                        first  = iter;
+                        report = std::to_string(d.count) + " elements of D differ; the first is "
+                                 + describeElement(c, d.first, elementPtr, firstPtr)
+                                 + (close ? ". That relaunch still passes the allclose check "
+                                            "against the CPU reference, so the solution may "
+                                            "sum in a different order from launch to launch"
+                                          : ". That relaunch also fails the allclose check "
+                                            "against the CPU reference");
+                    }
+                }
+                if(!same)
+                    differing++;
+            }
+            if(differing)
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "verify_all_iters failed for solution " << sol << ": "
+                               << differing << " of " << arg.iters
+                               << " relaunches gave a different D than the first launch. In "
+                                  "relaunch "
+                               << first << ", " << report << std::endl;
+            }
+        };
         auto measured = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
             // hipblaslt-bench stops a single GEMM's cotenant before the efficiency
             // monitor and a grouped GEMM's after it; keep both orders.
@@ -6598,6 +6685,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Talpha,
                       batchMode);
             }
+            if(hipblaslt_bench_options::verify_all_iters() && relaunch)
+                verifyRelaunches(sol);
 
 #define argument_param                                                                            \
     e_transA, e_transB, e_grouped_gemm, e_batch_count, e_M, e_N, e_K, e_alpha, e_lda, e_stride_a, \
@@ -6706,7 +6795,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             searchCfg.flush = arg.flush;
             if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
+                relaunch = [&](size_t) { CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream)); };
+                search   = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
@@ -6772,6 +6862,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                            workspace_size,
                                            stream);
                 };
+                relaunch = [&](size_t sol) {
+                    EXPECT_HIPBLAS_STATUS(launchBatched(sol, 0), HIPBLAS_STATUS_SUCCESS);
+                };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6818,6 +6911,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                         workspace_size,
                         stream);
                 };
+                relaunch = [&](size_t sol) {
+                    EXPECT_HIPBLAS_STATUS(launchMatmul(sol, 0), HIPBLAS_STATUS_SUCCESS);
+                };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6848,6 +6944,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.use_user_args)
             {
                 std::vector<unsigned char*> d_userArgsVec(block_count);
+                relaunch = [&](size_t) {
+                    CHECK_HIPBLASLT_ERROR(groupedGemmVec[0].run(d_userArgsVec[0], stream));
+                };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6893,7 +6992,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else
             {
-                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
+                relaunch = [&](size_t) { CHECK_HIPBLASLT_ERROR(groupedGemmVec[0].run(stream)); };
+                search   = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,

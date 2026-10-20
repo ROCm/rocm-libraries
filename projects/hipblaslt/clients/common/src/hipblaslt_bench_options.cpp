@@ -106,4 +106,10 @@ namespace hipblaslt_bench_options
             return ret;
         return 2;
     }
+
+    bool& verify_all_iters()
+    {
+        static bool v = false;
+        return v;
+    }
 }

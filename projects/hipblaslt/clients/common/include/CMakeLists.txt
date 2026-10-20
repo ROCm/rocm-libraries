@@ -7,6 +7,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/candidate_search.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/allclose.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bitwise_difference.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cotenant.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu.hpp"

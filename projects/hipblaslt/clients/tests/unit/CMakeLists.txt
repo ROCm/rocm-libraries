@@ -7,6 +7,7 @@
 set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/allclose_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_verify_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/bitwise_difference_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
 )
