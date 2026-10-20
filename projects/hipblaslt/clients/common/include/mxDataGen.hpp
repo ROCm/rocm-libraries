@@ -11,6 +11,7 @@ enum class MXScaleLayout
 };
 
 #include "hipblaslt_scaling_format.hpp"
+#include <cstddef>
 #include <string_view>
 
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
@@ -20,6 +21,14 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 // block formats; everything else stays natural-packed (None).
 MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
                                      std::string_view       archName);
+
+// Element count of a GFX950 pre-swizzled scale buffer. The layout is a 32x8 grid, so
+// it pads the MN extent to 32 and the K-block extent to 8; a buffer sized for the
+// unpadded extents is short by a whole group whenever either one is unaligned.
+inline size_t mxPreSwizzledScaleSize(size_t mnExtent, size_t kBlocks)
+{
+    return ((mnExtent + 31) / 32 * 32) * ((kBlocks + 7) / 8 * 8);
+}
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 

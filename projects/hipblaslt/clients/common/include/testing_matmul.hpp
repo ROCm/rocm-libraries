@@ -2341,9 +2341,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                     bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
                     size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
-                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                        size_scaleAVec[i] = mxPreSwizzledScaleSize(mnDim, kDim);
+                    else
+                    {
+                        size_t padDim     = kAlongRowsA ? kDim : mnDim;
+                        size_t paddedDim  = (padDim + dimk - 1) / dimk * dimk;
+                        size_scaleAVec[i] = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    }
                 }
                 else
                 {
@@ -2368,9 +2373,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                     bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
                     size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
-                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                        size_scaleBVec[i] = mxPreSwizzledScaleSize(mnDim, kDim);
+                    else
+                    {
+                        size_t padDim     = kAlongRowsB ? kDim : mnDim;
+                        size_t paddedDim  = (padDim + dimk - 1) / dimk * dimk;
+                        size_scaleBVec[i] = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+                    }
                 }
                 else
                 {
