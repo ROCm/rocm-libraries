@@ -58,7 +58,7 @@ from copy import deepcopy
 #              a tile boundary (required for row-uniform summation order).
 #
 # The selector rides in bit 29 of the MagicShiftItersPerTile kernel argument.
-# That bit is free: magicNumberAlg2 (ContractionSolution.cpp) packs
+# That bit is free: magicNumberAlg2 (MagicDivision.hpp) packs
 # abit(31) | shift, and the shift field never exceeds 6 bits (bits 0..5).
 # Bit 30 is already taken by the SK5 hybrid mode bit (see _extract_hybrid_mode).
 #

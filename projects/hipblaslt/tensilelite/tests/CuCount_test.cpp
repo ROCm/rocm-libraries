@@ -446,14 +446,14 @@ namespace
             assert(pAMDGPU != nullptr);
             // The same helper generateSingleCall() packs from, so this mirror
             // cannot drift from the arithmetic it claims to reproduce.
-            const StreamKStaticSplit split
-                = streamKStaticSplit(pack.tiles,
-                                     pack.itersPerTile,
-                                     pack.grid,
-                                     pAMDGPU->skFullTiles,
-                                     solution.sizeMapping.isPersistentDataParallel());
-            pack.skTiles      = split.skTiles;
-            pack.skItersPerWG = split.skItersPerWG;
+            const StreamK::Static::Split split
+                = StreamK::Static::computeSplit(pack.tiles,
+                                                pack.itersPerTile,
+                                                pack.grid,
+                                                pAMDGPU->skFullTiles,
+                                                solution.sizeMapping.isPersistentDataParallel());
+            pack.skTiles      = split.args.skTiles;
+            pack.skItersPerWG = split.args.itersPerWG;
         }
 
         return pack;
