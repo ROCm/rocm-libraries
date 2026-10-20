@@ -195,6 +195,56 @@ struct BlockFmhaBatchPrefillPipelineProblem
                   "Batch prefill kernel requires RowMajor VLayout");
 };
 
+// pagedkv_prefill on the TDM pipelines of fmha_fwd (gfx125): the paged K/V rows are mapped
+// by BlockFmhaPagedKVRows, with the page size taken at run time. kKVGather reads the K/V rows
+// with TDM gathers (any page size) instead of a view of each warp's page.
+template <typename QDataType_,
+          typename KDataType_,
+          typename VDataType_,
+          typename SaccDataType_,
+          typename SMPLComputeDataType_,
+          typename BiasDataType_,
+          typename RandValOutputDataType_,
+          typename LSEDataType_,
+          typename PDataType_,
+          typename OaccDataType_,
+          typename ODataType_,
+          typename BlockFmhaShape_,
+          bool kIsGroupMode_,
+          typename AttentionVariant_,
+          typename FmhaMask_,
+          typename Traits_,
+          bool kKVGather_,
+          bool kUseDoubleKVLdsBuffer_ = false,
+          bool kProgressiveDsLoadK_   = false>
+struct BlockFmhaFwdPagedKVTdmPipelineProblem
+    : public BlockFmhaPipelineProblem<QDataType_,
+                                      KDataType_,
+                                      VDataType_,
+                                      SaccDataType_,
+                                      SMPLComputeDataType_,
+                                      BiasDataType_,
+                                      RandValOutputDataType_,
+                                      LSEDataType_,
+                                      PDataType_,
+                                      OaccDataType_,
+                                      ODataType_,
+                                      BlockFmhaShape_,
+                                      kIsGroupMode_,
+                                      AttentionVariant_,
+                                      FmhaMask_,
+                                      false,
+                                      Traits_,
+                                      kUseDoubleKVLdsBuffer_,
+                                      kProgressiveDsLoadK_>
+{
+    static constexpr bool kDoFp8StaticQuant = false;
+    static constexpr bool kIsPagedKV        = true;
+    static constexpr bool kKVGather         = kKVGather_;
+
+    static_assert(BlockFmhaShape_::IsVLayoutRowMajor, "TDM pagedkv_prefill needs row-major V");
+};
+
 template <typename QDataType_,
           typename KDataType_,
           typename VDataType_,

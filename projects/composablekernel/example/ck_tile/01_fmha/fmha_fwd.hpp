@@ -443,6 +443,9 @@ struct fmha_fwd_pagedkv_args
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
     ck_tile::index_t min_seqlen_q;
+
+    // If not null, receives the name of the kernel that runs.
+    std::string* selected_kernel_name = nullptr;
 };
 
 struct fmha_fwd_splitkv_args
@@ -1627,7 +1630,8 @@ template <ck_tile::index_t HDim_,
           bool kPadDv_,
           bool kSkipMinSeqlenQ_ = false,
           bool kHasSink_        = false,
-          int kOccupancy_       = -1>
+          int kOccupancy_       = -1,
+          bool kKVGather_       = false>
 struct fmha_fwd_pagedkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1656,6 +1660,8 @@ struct fmha_fwd_pagedkv_traits_
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
     static constexpr int kOccupancy = kOccupancy_;
+    // TDM pipelines (gfx125): K/V rows read with TDM gathers instead of a page view
+    static constexpr bool kKVGather = kKVGather_;
 };
 
 template <typename Traits_, typename Arch = void>

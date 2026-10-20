@@ -724,7 +724,7 @@ TEST_P(QrTdmPingPongEdges, DataTypeConfig)
 // to s_q 16), and no other API or pipeline when it has no kernel for the args. "small" is
 // 2 x 4 heads; otherwise the grid is sized as for QrTdmPingPong. One K/V head; splitkv runs
 // 2 splits. tile: a part of the kernel name, nullptr where the API does not report it
-// (splitkv, pagedkv), "" for no kernel at all.
+// (splitkv), "" for no kernel at all.
 // api, pipeline, mode, small grid, seqlen_q, seqlen_k, page_block_size, tile
 using ForcedPipelineCase =
     std::tuple<const char*, const char*, mode_enum, bool, int, int, int, const char*>;
@@ -817,11 +817,24 @@ INSTANTIATE_TEST_SUITE_P(SplitKV,
 #endif
 
 #if CK_TILE_FMHA_FWD_PAGEDKV_API
+// pagedkv_prefill: qr_pagedkv (pages of 128), and on gfx1250 the TDM pipelines with any page
+// size: each warp's K/V rows from one page where the page size is a multiple of them, TDM
+// gathers otherwise ("_gather").
 INSTANTIATE_TEST_SUITE_P(
     PagedKV,
     ForcedPipeline,
-    Values(ForcedPipelineCase{
-        "pagedkv", "qr_pagedkv", mode_enum::batch, true, 100, 300, 128, nullptr}));
+    Values(
+        ForcedPipelineCase{"pagedkv", "qr_pagedkv", mode_enum::batch, true, 100, 300, 128, "_b64x"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_pingpong", mode_enum::batch, true, 100, 300, 16, "_b64x"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_pingpong", mode_enum::group, true, 8, 532, 1, "_gather"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_sched", mode_enum::batch, false, 300, 531, 16, "_gather"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_sched", mode_enum::group, true, 300, 531, 64, "_b128x"},
+        ForcedPipelineCase{"pagedkv", "qr_tdm", mode_enum::group, true, 100, 500, 7, "_gather"},
+        ForcedPipelineCase{"pagedkv", "qr_tdm", mode_enum::batch, true, 100, 500, 48, "_b128x"}));
 #endif
 
 #if CK_TILE_FMHA_FWD_BATCH_PREFILL_API

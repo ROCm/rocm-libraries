@@ -426,10 +426,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
         page_block_size = 0;
     }
 #endif
-    // batch_prefill supports flexible page sizes (not just multiples of 128)
+    // batch_prefill, and pagedkv_prefill on the gfx125 TDM pipelines, take any page size
     const bool need_128_aligned_page =
-        api != "batch_prefill" && (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
-                                   CK_TILE_FMHA_FWD_PAGEDKV_API);
+        api != "batch_prefill" && api != "pagedkv" &&
+        (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
+         CK_TILE_FMHA_FWD_PAGEDKV_API);
     if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
     {
         std::cerr << "only paged-kvcache block size divisible by 128 are currently supported"
@@ -1588,7 +1589,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.head_start           = 0;
             args.selected_kernel_name = selected_kernel_name;
         }
-        if constexpr(std::is_same_v<fmha_batch_prefill_args, std::decay_t<decltype(args)>>)
+        if constexpr(std::is_same_v<fmha_batch_prefill_args, std::decay_t<decltype(args)>> ||
+                     std::is_same_v<fmha_fwd_pagedkv_args, std::decay_t<decltype(args)>>)
         {
             args.selected_kernel_name = selected_kernel_name;
         }

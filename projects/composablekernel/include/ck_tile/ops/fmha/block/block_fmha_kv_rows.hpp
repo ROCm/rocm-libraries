@@ -27,7 +27,10 @@ struct BlockFmhaDenseKVRows
 //   zero-fills. Needs each K/V page stride to be a multiple of its row stride.
 // MakeKView/MakeVView(physical_page, rows) return the view of the first `rows` rows of a
 // page, with the type of the K/V views the pipeline was called with.
-template <index_t kPageSize,
+// kPageSize 0 (pagedkv_prefill) takes the page size at run time, and the sequence may then
+// start `row_offset` rows into its first page (gappy paged K/V); page view needs the page
+// size and row_offset to be multiples of a warp's K/V rows.
+template <index_t kPageSize, // 0: page_size at run time
           typename MakeKView,
           typename MakeVView,
           index_t kGatherWarpRows = 0> // gather: K/V rows per warp; 0: page view
@@ -46,14 +49,18 @@ struct BlockFmhaPagedKVRows
                                              MakeKView make_k_view_,
                                              MakeVView make_v_view_,
                                              index_t k_page_rows_ = 0,
-                                             index_t v_page_rows_ = 0)
+                                             index_t v_page_rows_ = 0,
+                                             index_t page_size_   = kPageSize,
+                                             index_t row_offset_  = 0)
         : page_idx(page_idx_),
           max_page(max_page_),
           seqlen_k(seqlen_k_),
           make_k_view(make_k_view_),
           make_v_view(make_v_view_),
           k_page_rows(k_page_rows_),
-          v_page_rows(v_page_rows_)
+          v_page_rows(v_page_rows_),
+          page_size(page_size_),
+          row_offset(row_offset_)
     {
     }
 
@@ -65,6 +72,25 @@ struct BlockFmhaPagedKVRows
     // gather: K/V page stride in units of the K/V row stride
     index_t k_page_rows = 0;
     index_t v_page_rows = 0;
+    // kPageSize == 0 only: rows per page, and the page row of sequence row 0
+    index_t page_size  = kPageSize;
+    index_t row_offset = 0;
+
+    CK_TILE_DEVICE index_t rows_per_page() const
+    {
+        if constexpr(kPageSize > 0)
+            return kPageSize;
+        else
+            return page_size;
+    }
+    // Row of the sequence's pages (from the start of its first page) holding sequence row `row`.
+    CK_TILE_DEVICE index_t page_row(index_t row) const
+    {
+        if constexpr(kPageSize > 0)
+            return row;
+        else
+            return row + row_offset;
+    }
 
     // Consecutive K/V tiles mostly stay in one page: reload only when the page changes.
     mutable index_t cached_page_id = -1;
@@ -106,8 +132,8 @@ struct BlockFmhaPagedKVRows
     // Physical page holding sequence row `row`.
     CK_TILE_DEVICE index_t physical_page(index_t row) const
     {
-        return __builtin_amdgcn_readfirstlane(
-            page_idx[__builtin_amdgcn_readfirstlane(min(row / kPageSize, max_page))]);
+        return __builtin_amdgcn_readfirstlane(page_idx[__builtin_amdgcn_readfirstlane(
+            min(page_row(row) / rows_per_page(), max_page))]);
     }
 
     // Point `window` at sequence row `row`.
@@ -126,9 +152,10 @@ struct BlockFmhaPagedKVRows
             // One vector load reads the page ids of all rows, lane j for row j.
             const auto fetch = [&](index_t first_row) {
                 const index_t r    = first_row + static_cast<index_t>(__lane_id());
-                const index_t page = page_idx[min(r / kPageSize, max_page)];
+                const index_t pr   = page_row(r);
+                const index_t page = page_idx[min(pr / rows_per_page(), max_page)];
                 // unsigned: TDM row indices span 32 bits
-                return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + r % kPageSize
+                return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + pr % rows_per_page()
                                     : 0xffffffffu;
             };
             if(seq_row == g.next_row)
@@ -141,22 +168,23 @@ struct BlockFmhaPagedKVRows
         }
         else
         {
-            const index_t warp_row     = warp_row_of(window);
-            const index_t warp_seq_row = row + warp_row;
+            const index_t warp_row      = warp_row_of(window);
+            const index_t warp_page_row = page_row(row + warp_row);
+            const index_t psize         = rows_per_page();
 
             // A wave-uniform page index keeps the page table read on the scalar path.
             const index_t page_id =
-                __builtin_amdgcn_readfirstlane(min(warp_seq_row / kPageSize, max_page));
+                __builtin_amdgcn_readfirstlane(min(warp_page_row / psize, max_page));
             if(page_id != cached_page_id)
             {
                 cached_page    = __builtin_amdgcn_readfirstlane(page_idx[page_id]);
                 cached_page_id = page_id;
             }
-            const index_t page_start = page_id * kPageSize;
-            const index_t rows       = max(index_t{0}, min(kPageSize, seqlen_k - page_start));
+            const index_t page_start = page_id * psize;
+            const index_t rows       = max(index_t{0}, min(psize, page_row(seqlen_k) - page_start));
 
             auto origin         = window.get_window_origin();
-            origin(number<0>{}) = warp_seq_row - page_start - warp_row;
+            origin(number<0>{}) = warp_page_row - page_start - warp_row;
             if constexpr(kIsK)
                 window = make_tile_window(make_k_view(cached_page, rows),
                                           window.get_window_lengths(),
