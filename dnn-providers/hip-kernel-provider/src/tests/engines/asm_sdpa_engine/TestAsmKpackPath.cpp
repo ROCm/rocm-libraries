@@ -101,6 +101,8 @@ TEST(TestAsmKpackPath, ArchivePathAppendsArchDirectoryAndFileName)
 
 /// AsmKpackArchive must open what the resolver names, not a path of its own. The
 /// scratch root is empty, so the open fails and the error names the attempted path.
+/// The expected path is spelled out rather than taken from asmSdpaKpackArchivePath(),
+/// so a resolver that ignored the override would fail here too.
 TEST(TestAsmKpackPath, ArchiveOpenUsesTheResolvedPath)
 {
     const ScopedDirectory existing = claimScratchDirectory(SCRATCH_LABEL);
@@ -108,6 +110,7 @@ TEST(TestAsmKpackPath, ArchiveOpenUsesTheResolvedPath)
                                                    existing.path().string());
     // An arch no other test opens: the singleton caches successfully opened archives.
     const std::string arch = "gfx_kpack_path_test";
+    const auto expected = existing.path() / arch / ("hip_kernel_provider_sdpa_" + arch + ".kpack");
 
     try
     {
@@ -116,8 +119,7 @@ TEST(TestAsmKpackPath, ArchiveOpenUsesTheResolvedPath)
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
     {
-        EXPECT_NE(std::string(error.what()).find(asmSdpaKpackArchivePath(arch).string()),
-                  std::string::npos)
+        EXPECT_NE(std::string(error.what()).find(expected.string()), std::string::npos)
             << error.what();
     }
 }
