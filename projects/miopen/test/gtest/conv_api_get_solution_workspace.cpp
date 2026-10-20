@@ -9,6 +9,10 @@
 // workspace for the configuration Immediate will run, retains a larger stored value, and executes
 // correctly with the size it reports.
 
+#include <miopen/any_solver.hpp>
+#include <miopen/conv/db_getter.hpp>
+#include <miopen/execution_context.hpp>
+#include <miopen/invoke_params.hpp>
 #include <miopen/miopen.h>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/convolution.hpp>
@@ -154,11 +158,11 @@ protected:
         const auto solver_id = miopen::solver::Id{selected_solver}.Value();
         const auto solutions = GetSolutions();
         ASSERT_EQ(solutions.size(), 1) << "expected only the record from the temporary find-db";
-        EXPECT_EQ(solutions[0].solution_id, solver_id);
+        ASSERT_EQ(solutions[0].solution_id, solver_id);
         if(expected_reported)
-            EXPECT_EQ(solutions[0].workspace_size, *expected_reported);
+            ASSERT_EQ(solutions[0].workspace_size, *expected_reported);
         else
-            EXPECT_GT(solutions[0].workspace_size, db_workspace);
+            ASSERT_GT(solutions[0].workspace_size, db_workspace);
 
         // What a framework does next: allocate exactly the reported size and run Immediate.
         DeviceBuffer x{x_bytes}, w{w_bytes}, y{y_bytes}, ws{solutions[0].workspace_size};
@@ -207,6 +211,27 @@ protected:
         const auto solver_id = miopen::solver::Id{selected_solver}.Value();
         return miopenConvolutionForwardGetSolutionWorkspaceSize(
                    handle, wDesc, xDesc, convDesc, yDesc, solver_id, &live) == miopenStatusSuccess;
+    }
+    std::optional<std::size_t> SelectedWorkspace(const char* selected_solver) const
+    {
+        auto& handle_ref = miopen::deref(handle);
+        auto ctx         = miopen::ExecutionContext{&handle_ref};
+        auto problem     = miopen::conv::ProblemDescription{miopen::deref(xDesc),
+                                                        miopen::deref(wDesc),
+                                                        miopen::deref(yDesc),
+                                                        miopen::deref(convDesc),
+                                                        miopen::conv::Direction::Forward};
+        problem.SetupFloats(ctx);
+        problem.SetupComputeType(ctx);
+        ctx.do_search              = false;
+        ctx.disable_search_enforce = true;
+
+        const auto solver   = miopen::solver::Id{selected_solver}.GetSolver();
+        auto db             = miopen::MakeConvDbGetter(ctx);
+        const auto solution = solver.FindSolution(ctx, problem, db, {});
+        if(!solution.Succeeded())
+            return std::nullopt;
+        return solution.workspace_sz;
     }
 
     void SetGroupFwdShape()
@@ -261,5 +286,8 @@ TEST_F(GPU_ConvApiGetSolutionWorkspace_FP16, GroupFwdNonzeroUndersizedWorkspaceE
     if(!LiveWorkspace(live, group_fwd_solver_name))
         GTEST_SKIP() << group_fwd_solver_name << " is not applicable on this device or build";
     ASSERT_GT(live, 1);
-    Check(group_fwd_solver_name, implicit_gemm_algo, 1, std::nullopt, true);
+    const auto selected_workspace = SelectedWorkspace(group_fwd_solver_name);
+    ASSERT_TRUE(selected_workspace);
+    ASSERT_GT(*selected_workspace, 1);
+    Check(group_fwd_solver_name, implicit_gemm_algo, 1, selected_workspace, true);
 }
