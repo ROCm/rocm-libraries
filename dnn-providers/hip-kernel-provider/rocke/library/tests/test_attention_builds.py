@@ -868,6 +868,12 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertTrue(spec64.use_k_single_buffer)
 
     def test_unified_attention_scalar_kernels_compile(self):
+        """The scalar fallbacks lower on every arch we ship, not just one.
+
+        These kernels carry no MFMA and no arch-gated memory op, so the claim
+        is that the scalar path is portable -- which a single-arch run cannot
+        make. Both wired targets are sub-tested so a regression names its arch.
+        """
         p = UnifiedAttentionProblem(
             total_q=3,
             num_seqs=1,
@@ -887,9 +893,11 @@ class TestAttentionHelpers(unittest.TestCase):
             ),
         ]
         for k in kernels:
-            ll = lower_kernel_to_llvm(k)
-            self.assertIn("define amdgpu_kernel void", ll)
-            self.assertIn("@llvm.exp2.f32", ll)
+            for arch in ("gfx942", "gfx950"):
+                with self.subTest(kernel=k.name, arch=arch):
+                    ll = lower_kernel_to_llvm(k, arch=arch)
+                    self.assertIn("define amdgpu_kernel void", ll)
+                    self.assertIn("@llvm.exp2.f32", ll)
 
     def test_unified_attention_2d_tiled_kernel_compiles(self):
         """The production tiled kernel emits async DMA + MFMA + ds_bpermute."""
@@ -909,7 +917,7 @@ class TestAttentionHelpers(unittest.TestCase):
             has_softcap=False,
         )
         k = build_unified_attention_2d_tiled(spec)
-        ll = lower_kernel_to_llvm(k)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
         # Async DMA for K/V should be emitted.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
         # MFMA atoms for QK (16x16x32) and PV (16x16x16 since T=16 < 32).
@@ -1014,7 +1022,7 @@ class TestAttentionHelpers(unittest.TestCase):
             use_transposed_half_local_pv=True,
         )
         k = build_unified_attention_2d_tiled(spec)
-        ll = lower_kernel_to_llvm(k)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.bf16", ll)
         self.assertIn("_s1_", k.name)
@@ -1044,7 +1052,7 @@ class TestAttentionHelpers(unittest.TestCase):
             use_agpr_alloc_zero=True,
         )
         agpr_k = build_unified_attention_2d_tiled(agpr_spec)
-        agpr_ll = lower_kernel_to_llvm(agpr_k)
+        agpr_ll = lower_kernel_to_llvm(agpr_k, arch="gfx950")
         self.assertIn("_agpr0", agpr_k.name)
         self.assertIn('"amdgpu-agpr-alloc"="0,0"', agpr_ll)
 
@@ -1069,7 +1077,7 @@ class TestAttentionHelpers(unittest.TestCase):
             use_qq_bias=True,
         )
         k = build_unified_attention_2d_tiled(spec)
-        ll = lower_kernel_to_llvm(k)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
         # ALiBi adds a position->f32 conversion (sitofp), since col_abs and
         # context_len are i32 and slope * (col-ctx) needs f32 arithmetic.
         self.assertIn("sitofp i32", ll)
@@ -1106,7 +1114,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 num_seqs=4,
             )
         )
-        seg_ll = lower_kernel_to_llvm(seg)
+        seg_ll = lower_kernel_to_llvm(seg, arch="gfx950")
         # Segment kernel must use the async DMA + transpose-read PV operand
         # path and emit MFMA atoms.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", seg_ll)
@@ -1116,6 +1124,15 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # LDS: Q [16,128] + K [2,16,128] + one V slot [1,16,128], fp16. V(i)
+        # is loaded and consumed within iteration i, so a second V slot would
+        # never be live; P stays in registers.
+        lds_bytes = 2 * (16 * 128 + 2 * 16 * 128 + 16 * 128)
+        self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", seg_ll)
+        # Softmax exponents are <= 0, so p and alpha use the native exp2
+        # (one v_exp_f32), not the range-reduced llvm.exp2.f32.
+        self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
+        self.assertNotIn("@llvm.exp2.f32", seg_ll)
         red = build_unified_attention_reduce_tiled(
             UnifiedAttentionReduceTiledSpec(
                 head_size=128,
@@ -1125,10 +1142,12 @@ class TestAttentionHelpers(unittest.TestCase):
                 num_segments=128,
             )
         )
-        red_ll = lower_kernel_to_llvm(red)
-        # Reduce must compute exp2-weighted segment combine and use NaN-safe
-        # factor (`-inf - overall_max -> 0`).
-        self.assertIn("@llvm.exp2.f32", red_ll)
+        red_ll = lower_kernel_to_llvm(red, arch="gfx950")
+        # Reduce must compute exp2-weighted segment combine (native exp2: the
+        # exponent is seg_max - overall_max <= 0) and use NaN-safe factor
+        # (`-inf - overall_max -> 0`).
+        self.assertIn("@llvm.amdgcn.exp2.f32", red_ll)
+        self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
         # Reach comgr for both the segment and reduce kernels + LDS budget.
         seg_art = _compile_or_skip(seg, arch="gfx950")
@@ -1161,7 +1180,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 use_qq_bias=True,
             )
         )
-        ll = lower_kernel_to_llvm(seg)
+        ll = lower_kernel_to_llvm(seg, arch="gfx950")
         self.assertIn("sitofp i32", ll)
         self.assertIn("select i1", ll)
         # `qq_bias_stride_0` is the last kernel param.
@@ -2337,8 +2356,35 @@ class TestAttentionHelpers(unittest.TestCase):
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
         with _patch_resolved_arch("gfx950"):
             self.assertIsNone(au._gfx942_3d_tile_size_override(p, "gfx950"))
-            self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p, "gfx950"))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p, "gfx950"))
+
+    def test_gfx942_3d_wide_kv_load_up_to_head_size_128(self):
+        """The gfx942 3D wide K/V feed is on for fp16/bf16 up to head size 128;
+        head size 256 keeps the async DMA (the wide feed relies on the
+        compiler to overlap its copies). fp8 K/V turns it off."""
+        import kernels.common.attention_unified as au
+
+        def problem(head_size, **kw):
+            return UnifiedAttentionProblem(
+                total_q=4,
+                num_seqs=4,
+                num_query_heads=8,
+                num_kv_heads=1,
+                head_size=head_size,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=4096,
+                dtype="bf16",
+                **kw,
+            )
+
+        with _patch_resolved_arch("gfx942"):
+            self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(64), "gfx942"))
+            self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(128), "gfx942"))
+            self.assertFalse(au._enable_gfx942_3d_wide_kv_load(problem(256), "gfx942"))
+            self.assertFalse(
+                au._enable_gfx942_3d_wide_kv_load(problem(128, use_fp8=True), "gfx942")
+            )
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
@@ -2567,6 +2613,152 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
                 self.assertTrue(reason)
 
+    def test_gfx942_3d_dispatch_specs_fit_lds(self):
+        """Every gfx942 3D segment spec default dispatch builds fits the 64 KiB
+        LDS (one V slot; D256 at block 64 needs it)."""
+        import re
+
+        import kernels.common.attention_unified as au
+
+        with _patch_resolved_arch("gfx942"):
+            _, _, build, _, _ = au._tiled_3d_impl("gfx942")
+            for head_size in (64, 128, 256):
+                for block_size in (16, 32, 64):
+                    with self.subTest(head_size=head_size, block_size=block_size):
+                        problem = au.UnifiedAttentionProblem(
+                            total_q=4,
+                            num_seqs=4,
+                            num_query_heads=16,
+                            num_kv_heads=2,
+                            head_size=head_size,
+                            block_size=block_size,
+                            max_seqlen_q=1,
+                            max_seqlen_k=4096,
+                            dtype="bf16",
+                            num_cus=304,
+                        )
+                        spec = au._tiled_3d_spec_from_problem(problem, "gfx942")
+                        ll = lower_kernel_to_llvm(
+                            build(spec, arch="gfx942"), arch="gfx942"
+                        )
+                        lds = int(
+                            re.search(
+                                r"addrspace\(3\) global \[(\d+) x i8\]", ll
+                            ).group(1)
+                        )
+                        self.assertLessEqual(lds, 64 * 1024)
+
+    def test_unified_attention_3d_tiled_decode_grid(self):
+        """``use_decode_grid``: seq_idx = block_id_x, no binary search over
+        ``query_start_len`` (its ``bs_i`` induction variable), on both arches."""
+        from dataclasses import replace
+
+        import kernels.common.attention_unified as au
+
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), _patch_resolved_arch(arch):
+                spec_type, _, build, _, _ = au._tiled_3d_impl(arch)
+                spec = spec_type(
+                    head_size=128,
+                    block_size=16,
+                    num_query_heads=32,
+                    num_kv_heads=2,
+                    dtype="fp16",
+                    use_sinks=False,
+                    sliding_window=0,
+                    has_softcap=False,
+                    num_segments=16,
+                    num_seqs=16,
+                )
+                dg_spec = replace(spec, use_decode_grid=True)
+                base_ll = lower_kernel_to_llvm(build(spec, arch=arch), arch=arch)
+                dg_ll = lower_kernel_to_llvm(build(dg_spec, arch=arch), arch=arch)
+                self.assertTrue(dg_spec.kernel_name().endswith("_dg"))
+                self.assertIn("bs_i", base_ll)
+                self.assertNotIn("bs_i", dg_ll)
+
+    def test_gfx950_3d_multipage_tile(self):
+        """``tile_size_override`` = k * block_size: one loop iteration stages a
+        k-page KV tile, with each page id loaded once per tile (wave-uniform)
+        and passed as the DMA soffset; invalid tiles are rejected."""
+        import re
+        from dataclasses import replace
+
+        from kernels.gfx950.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=128,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=16,
+            tile_size_override=32,
+        )
+        self.assertEqual(spec.tile_size, 32)
+        self.assertEqual(spec.n_blocks_per_tile, 2)
+        self.assertIn("_b16_t32_", spec.kernel_name())
+        ll = lower_kernel_to_llvm(build_unified_attention_3d_tiled(spec), arch="gfx950")
+        # LDS: Q [16,128] + K [2,32,128] + V [1,32,128], fp16 (P stays in
+        # registers).
+        lds_bytes = 2 * (16 * 128 + 2 * 32 * 128 + 32 * 128)
+        self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", ll)
+        # The page-sized tile keeps the old name and IR.
+        page = replace(spec, tile_size_override=None)
+        self.assertIsNone(re.search(r"_t\d+_", page.kernel_name()))
+        for bad in (24, 8, 256):
+            with self.subTest(tile=bad), self.assertRaises(ValueError):
+                replace(spec, tile_size_override=bad)
+        # D256 at T128 needs more async calls per tile than vmcnt can count.
+        with self.assertRaises(ValueError):
+            replace(spec, head_size=256, tile_size_override=128)
+        # fp8 KV loads synchronously and keeps page-sized tiles.
+        with self.assertRaises(ValueError):
+            replace(spec, dtype="bf16", kv_storage_dtype="fp8e4m3")
+        replace(spec, tile_size_override=16, dtype="bf16", kv_storage_dtype="fp8e4m3")
+
+    def test_3d_dispatch_derives_decode_grid(self):
+        """Default dispatch turns the decode grid on for all-decode problems on
+        gfx942/gfx950 and keys the kernel cache on it."""
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+
+        def problem(sq):
+            return au.UnifiedAttentionProblem(
+                total_q=16 * sq,
+                num_seqs=16,
+                num_query_heads=32,
+                num_kv_heads=2,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=sq,
+                max_seqlen_k=4096,
+                dtype="fp16",
+                num_cus=256,
+            )
+
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), _patch_resolved_arch(arch):
+                self.assertTrue(
+                    au._tiled_3d_spec_from_problem(problem(1), arch).use_decode_grid
+                )
+                self.assertFalse(
+                    au._tiled_3d_spec_from_problem(problem(4), arch).use_decode_grid
+                )
+                keys = {}
+                for on in (False, True):
+                    with mock.patch.object(au, "_use_decode_grid", return_value=on):
+                        keys[on] = au._tiled_3d_cache_key(problem(1), arch)
+                self.assertNotEqual(keys[False], keys[True])
+
     def test_unified_attention_3d_tiled_kernel_compiles_gfx942(self):
         """gfx942 analogue of ``test_unified_attention_3d_tiled_kernel_compiles``
         (which exercises the default gfx950 arch only). Builds the gfx942 3D
@@ -2599,7 +2791,12 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_seqs=4,
                 )
             )
-            seg_ll = lower_kernel_to_llvm(seg)
+            # gfx942, not gfx950: the assertions below are about what this
+            # target can and cannot lower, so selection and emission must name
+            # the same arch. The 16x16x32 MFMA asserted absent here, and its
+            # ds.read.tr16 / permlane32.swap neighbours, are `ok` on gfx950 and
+            # `arch_absent` on gfx942 in every committed arch-domain column.
+            seg_ll = lower_kernel_to_llvm(seg, arch="gfx942")
             # The arch-dispatched reduce kernel must also build on gfx942.
             red = build_unified_attention_reduce_tiled(
                 UnifiedAttentionReduceTiledSpec(
@@ -2610,7 +2807,7 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_segments=128,
                 )
             )
-            red_ll = lower_kernel_to_llvm(red)
+            red_ll = lower_kernel_to_llvm(red, arch="gfx942")
         # gfx942 narrow 3D path: 16x16x16 MFMA + 1-DWORD async DMA KV feed.
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", seg_ll)
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", seg_ll)
@@ -2620,8 +2817,12 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # Native exp2 in the softmax (exponents <= 0).
+        self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
+        self.assertNotIn("@llvm.exp2.f32", seg_ll)
         # Reduce kernel: exp2-weighted segment combine + NaN-safe factor.
-        self.assertIn("@llvm.exp2.f32", red_ll)
+        self.assertIn("@llvm.amdgcn.exp2.f32", red_ll)
+        self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
 
 
@@ -2688,7 +2889,9 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         for wpe in (1, 2):
             with self.subTest(waves_per_eu=wpe):
                 spec = replace(base, waves_per_eu=wpe)
-                ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+                ll = lower_kernel_to_llvm(
+                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                )
                 self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
 
     def test_waves_per_eu_cache_key_isolation(self):
@@ -2796,7 +2999,7 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                     replace(base, waves_per_eu=wpe), arch="gfx950"
                 )
                 ir_hashes[wpe] = hashlib.sha256(
-                    lower_kernel_to_llvm(kernel).encode()
+                    lower_kernel_to_llvm(kernel, arch="gfx950").encode()
                 ).hexdigest()
                 # Each variant must survive codegen, not just lowering.
                 _compile_or_skip(kernel, arch="gfx950")
@@ -2860,7 +3063,9 @@ class TestAttentionDenseGfx950CodegenKnobs(unittest.TestCase):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.gfx950.attention_dense import build_attention_dense
 
-        return lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+        return lower_kernel_to_llvm(
+            build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+        )
 
     def test_defaults_resolve_to_the_shipped_policy(self):
         grid = self._spec(self._GRID)
@@ -3093,7 +3298,9 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         from kernels.gfx950.attention_dense import build_attention_dense
 
         kernel = build_attention_dense(spec, arch="gfx950")
-        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+        return hashlib.sha256(
+            lower_kernel_to_llvm(kernel, arch="gfx950").encode()
+        ).hexdigest()
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
         """Shapes that collapse to one cache key must emit one kernel."""
@@ -3244,7 +3451,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         from kernels.gfx942.attention_dense import build_attention_dense
 
         kernel = build_attention_dense(spec, arch="gfx942")
-        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+        return hashlib.sha256(
+            lower_kernel_to_llvm(kernel, arch="gfx942").encode()
+        ).hexdigest()
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
         """Shapes that collapse to one cache key must emit one kernel -- and,
@@ -3480,7 +3689,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             with self.subTest(arm=arm):
                 spec = self._spec(**self._BASE_KWARGS, **kw)
                 self.assertTrue(spec.runtime_shape)
-                ir = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx942"))
+                ir = lower_kernel_to_llvm(
+                    build_attention_dense(spec, arch="gfx942"), arch="gfx942"
+                )
                 lines = ir.splitlines()
                 (define,) = [ln for ln in lines if ln.startswith("define ")]
                 body = "\n".join(ln for ln in lines if not ln.startswith("define "))
@@ -3513,7 +3724,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         from kernels.gfx942.attention_dense import build_attention_dense
 
         def runtime_divisors(spec):
-            ir = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx942"))
+            ir = lower_kernel_to_llvm(
+                build_attention_dense(spec, arch="gfx942"), arch="gfx942"
+            )
             return re.findall(r"= (?:s|u)(?:div|rem) i32 [^,\n]+, (%[\w.]+)", ir)
 
         default = runtime_divisors(self._spec(**self._BASE_KWARGS))
@@ -4606,7 +4819,7 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
             has_softcap=False,
             waves_per_eu=2,
         )
-        ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
+        ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec), arch="gfx950")
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
     def test_gfx950_fp16_sinks_gate_selection(self):
@@ -4684,7 +4897,7 @@ class TestEveryAttentionKernelUsesMfma(unittest.TestCase):
     """
 
     def _llvm_for(self, build_fn, spec):
-        return lower_kernel_to_llvm(build_fn(spec))
+        return lower_kernel_to_llvm(build_fn(spec), arch="gfx950")
 
     def test_fmha_mfma_uses_mfma(self):
         from kernels import FmhaMfmaSpec, build_fmha_fwd_mfma
@@ -4741,7 +4954,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             max_seqlen_k=256,
             batch=2,
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_varlen(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_varlen(spec), arch="gfx950")
         self.assertIn("@llvm.exp2.f32", ll)
         self.assertIn("define amdgpu_kernel", ll)
 
@@ -4754,7 +4967,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             batch=2,
             rotary=RotarySpec(head_size=64, layout="half"),
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_appendkv(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_appendkv(spec), arch="gfx950")
         self.assertGreaterEqual(ll.count("load float"), 32)
 
     def test_fmha_paged_prefill_builds(self):
@@ -4790,7 +5003,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             sorted(p.name for p in seg.params)[:3],
             sorted(["Q", "K", "V"])[:3],
         )
-        ll_red = lower_kernel_to_llvm(red)
+        ll_red = lower_kernel_to_llvm(red, arch="gfx950")
         self.assertIn("@llvm.exp2.f32", ll_red)
 
     def test_fmha_head_grouping_builds_for_gqa(self):
@@ -4804,7 +5017,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             seqlen_q=128,
             seqlen_k=128,
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_head_grouping(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_head_grouping(spec), arch="gfx950")
         self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
 
     def test_fmha_bwd_uses_atomic_fadd(self):
@@ -4815,7 +5028,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             seqlen_q=64,
             seqlen_k=64,
         )
-        ll = lower_kernel_to_llvm(build_fmha_bwd(spec))
+        ll = lower_kernel_to_llvm(build_fmha_bwd(spec), arch="gfx950")
         # 3 atomic accumulators (dQ, dK, dV) per K-step per head dim.
         self.assertGreaterEqual(ll.count("atomicrmw fadd ptr addrspace(1)"), 3)
 
@@ -4827,7 +5040,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             kv_dtype="fp8e4m3",
             seqlen_q=32,
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_fp8(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_fp8(spec), arch="gfx950")
         self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
 
@@ -4874,13 +5087,17 @@ class TestSageAttentionBuilds(unittest.TestCase):
     def test_fp16_baseline_no_fp8_cvt(self):
         from kernels.common.sage_attention import build_sage_attention
 
-        ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp16_bf16")))
+        ll = lower_kernel_to_llvm(
+            build_sage_attention(self._spec("fp16_bf16")), arch="gfx950"
+        )
         self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
     def test_fp8_variant_uses_fp8_cvt(self):
         from kernels.common.sage_attention import build_sage_attention
 
-        ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp8_bf16")))
+        ll = lower_kernel_to_llvm(
+            build_sage_attention(self._spec("fp8_bf16")), arch="gfx950"
+        )
         self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
     def test_int_variants_add_codebook_params(self):
@@ -4923,7 +5140,7 @@ class TestSparseAttentionBuilds(unittest.TestCase):
             block_q=1,
             block_k=32,
         )
-        ll = lower_kernel_to_llvm(build_jenga_sparse_attention(spec))
+        ll = lower_kernel_to_llvm(build_jenga_sparse_attention(spec), arch="gfx950")
         self.assertIn("load i8", ll)
         self.assertIn("icmp ne i8", ll)
 
@@ -4941,7 +5158,7 @@ class TestSparseAttentionBuilds(unittest.TestCase):
             block_k=32,
             max_blocks_per_q=4,
         )
-        ll = lower_kernel_to_llvm(build_vsa_sparse_attention(spec))
+        ll = lower_kernel_to_llvm(build_vsa_sparse_attention(spec), arch="gfx950")
         self.assertGreaterEqual(ll.count("load i32"), 2)
 
 
@@ -5015,7 +5232,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
         # head_idx = block_id_y, kv_head_idx = head_idx // 4 (HQ=8 / HK=2).
         # Lower and check the IR shows the divide.
         kb.builder.ret()
-        ll = lower_kernel_to_llvm(kb.kernel)
+        ll = lower_kernel_to_llvm(kb.kernel, arch="gfx950")
         # The arith.div lowers to ``sdiv i32 ..., 4``.
         self.assertIn("sdiv i32", ll)
 

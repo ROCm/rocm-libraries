@@ -32,6 +32,7 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
+from ..ir import I32, Op, VectorType
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -133,8 +134,6 @@ class ISABackend:
         which calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
         (WMMA is an RDNA-only instruction).
         """
-        from ..ir import Op
-
         op_id = op.attrs["op_id"]
         from ..arch.mfma_scale import gfx950_scaled_mfma
 
@@ -364,8 +363,6 @@ class Gfx11RdnaBackend(ISABackend):
         name-keyed lookup keeps working, then emits the WMMA call. This is the
         RDNA half of the neutral-MMA contract; the CDNA base emits MFMA.
         """
-        from ..ir import Op
-
         op_id = op.attrs["op_id"]
         from ..arch.mfma_scale import gfx950_scaled_mfma
 
@@ -426,15 +423,16 @@ class Gfx11RdnaBackend(ISABackend):
         verified empirically on gfx11-generic (iu8 GEMM probe): passing ``0``
         made the unit compute the **unsigned** dot product (all-positive
         results matching ``A.view(uint8) @ B.view(uint8).T``). Our quantized
-        data is signed, so both flags are ``1``. Operands arrive as
-        ``<N x i32>`` in SSA (int8/int4 packed into i32), so no bitcast is
-        needed; values stay within i32 range -> ``clamp = 0`` (exact wrap).
+        data is signed, so both flags are ``1``. A and B are passed as the
+        intrinsic's ``<N x i32>``; packed bytes of the same width (for example
+        ``<16 x i8>``) are reinterpreted with one bitcast. Values stay within
+        i32 range -> ``clamp = 0`` (exact wrap).
         """
         decl_key, intrinsic, op_vec, acc_vec = spec
-        a, b, c = op.operands
+        c = op.operands[2]
         lowerer._need(decl_key)
-        a_arg = lowerer._operand(a)
-        b_arg = lowerer._operand(b)
+        a_arg = lowerer._mma_operand(op, "a", VectorType(I32, op_vec))
+        b_arg = lowerer._mma_operand(op, "b", VectorType(I32, op_vec))
         c_arg = lowerer._operand(c)
         lowerer._current().emit(
             f"  {op.result.name} = call <{acc_vec} x i32> @{intrinsic}("
@@ -607,17 +605,20 @@ class Gfx1250Backend(Gfx12RdnaBackend):
     def _emit_wmma_fp8(self, lowerer, op, spec) -> None:
         """Emit a gfx1250 K=64 FP8/BF8 WMMA call.
 
-        The A/B fragments arrive in SSA as ``<8 x i32>`` (32 low-bit bytes per
-        lane). The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the
-        format / reuse immediates pinned to 0 (plain unscaled MMA).
+        A and B are passed as the intrinsic's ``<8 x i32>`` (32 low-bit bytes
+        per lane); a ``<32 x i8>`` fragment is reinterpreted with one bitcast.
+        The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the format /
+        reuse immediates pinned to 0 (plain unscaled MMA).
         """
         decl_key, intrinsic = spec
-        a, b, c = op.operands
+        c = op.operands[2]
         lowerer._need(decl_key)
+        a_arg = lowerer._mma_operand(op, "a", VectorType(I32, 8))
+        b_arg = lowerer._mma_operand(op, "b", VectorType(I32, 8))
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"<8 x i32> {lowerer._operand(a)}, "
-            f"<8 x i32> {lowerer._operand(b)}, "
+            f"<8 x i32> {a_arg}, "
+            f"<8 x i32> {b_arg}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i1 false, i1 false)"
         )
@@ -676,6 +677,7 @@ BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx1201": Gfx12RdnaBackend,
     "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
+    "gfx12-generic": Gfx12RdnaBackend,
 }
 
 

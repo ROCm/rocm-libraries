@@ -2415,18 +2415,29 @@ namespace
     }
 
     // A layout whose span does not fit in size_t is declined rather than
-    // sized from a wrapped value.
+    // sized from a wrapped value. hipBLASLt refuses sizes, leading dimensions
+    // and batch strides of 2^32 elements or more, so both cases stay below it.
     TEST_F(TuningScratchPlan_pre_checkin, ShapeWhoseSpanOverflowsIsDeclined)
     {
+        const int64_t largest = (int64_t(1) << 32) - 1;
+
         PlanCase large;
         large.batch   = 4;
-        large.strideD = int64_t(1) << 40;
+        large.strideD = largest;
         Plan plan;
         ASSERT_TRUE(planFor(large, &plan));
         ASSERT_TRUE(plan.usable) << "a large but representable stride is declined too";
 
-        PlanCase overflowing = large;
-        overflowing.strideD  = int64_t(1) << 62;
+        PlanCase wide;
+        wide.n = largest;
+        ASSERT_TRUE(planFor(wide, &plan));
+        ASSERT_TRUE(plan.usable) << "the widest D hipBLASLt accepts is declined too";
+
+        // With its leading dimension at the limit too, D's span is about 2^64
+        // halves. Its single batch never uses the stride.
+        PlanCase overflowing = wide;
+        overflowing.ldd      = largest;
+        overflowing.strideD  = 0;
         ASSERT_TRUE(planFor(overflowing, &plan));
         EXPECT_FALSE(plan.usable);
         EXPECT_EQ(plan.bytesD, 0u);

@@ -146,15 +146,23 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v);
  *   vec<elem x n> -> "f16xN"/"bf16xN"/"f32xN"/"i32xN"/"i16xN"/"i8xN"
  *                    (fp8e4m3/bf8e5m2 -> "i8xN"; i1 -> "boolxN")
  *   smem<elem,...> -> "<elem>*"
- * Returns an arena-owned string. Throws for an unmappable HIP type (Python
- * KeyError parity), including logical types without direct HIP lowering. */
+ * Returns an arena-owned string. A type it does not compose itself goes to
+ * rocke_h_require_hip_scalar, which refuses an unmappable one (logical types
+ * without direct HIP lowering included). */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t);
 
 /* Map a scalar IR type *name* ("i32","f16",...) to its HIP scalar spelling
- * (the raw _HIP_TYPE dict). Returns NULL on an unknown name (caller decides
- * whether that is an error). Used where Python indexes _HIP_TYPE[name] directly
- * (e.g. constants, vector.sum element type). */
+ * (the raw _HIP_TYPE dict). Returns NULL on an unknown name. Only a caller with
+ * a fallback for a miss (scf.for iter-arg types use "auto") calls this
+ * directly; every other caller uses rocke_h_require_hip_scalar. */
 const char* rocke_h_hip_scalar(const char* ir_scalar_name);
+
+/* Python _hip_scalar_type: rocke_h_hip_scalar, or refuse the type with
+ * ROCKE_ERR_NOTIMPL "no HIP mapping for type <name>" -- the HIP twin of the
+ * LLVM lowering's "no LLVM mapping for type <name>", so a type with no HIP
+ * spelling (a logical sub-byte type such as i4, or a vector of an unmapped
+ * element) is refused with one message wherever it is met. */
+const char* rocke_h_require_hip_scalar(rocke_h_lowerer_t* lw, const char* ir_type_name);
 
 /* The "f16x"/"bf16x"/"f32x"/"i32x"/"i16x"/"i8x" vector-name prefix for an IR
  * scalar element name, used by the smem/global vN load/store handlers. Returns

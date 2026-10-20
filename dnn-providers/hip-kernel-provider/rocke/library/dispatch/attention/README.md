@@ -69,8 +69,8 @@ requires every candidate to provide:
 - `block`;
 - `bind_torch`.
 
-Routing-only path labels are absent. Dense gfx942/gfx950, gfx1151/gfx1250 WMMA,
-and explicit unified-tuning candidates are executable.
+Routing-only path labels are absent. Dense gfx942/gfx950, RDNA (gfx11/gfx12)
+and gfx1250 WMMA, and explicit unified-tuning candidates are executable.
 
 ```python
 from dispatch.attention import AttentionRequest, dispatch_attention_all
@@ -121,7 +121,8 @@ candidate            one geometry variant, fixed at registration
 The axes and production stacks are data in `axes.py`; `dense_rules.py` and
 `unified_rules.py` state attention's legality rules as `KnobSpace`
 subclasses (through `waves.py`'s `WavesPerEuSpace`); `candidate.py` turns a
-variant into a registered candidate.
+variant into a registered candidate. The RDNA WMMA kernels have no occupancy
+loop: `wmma_rules.py`'s `WmmaSpace` is a plain `KnobSpace`.
 Walking, sampling, canonicalizing and naming are the shared
 `rocke.dispatch.tuning` (platform `ARCHITECTURE.md` section 14). Geometry
 catalogs live in the arch modules.
@@ -133,6 +134,7 @@ catalogs live in the arch modules.
 | Unified tiled tuning | `AttentionGeometryVariant` catalog: 109 on gfx950, 75 on gfx942 | `gfx{942,950}_unified.py` | path, codepath, builder, tile policy, warps, rows per warp, segments, compile backend |
 | gfx950 dense | three `Gfx950DenseVariant`s under two algorithms: `attention_dense_grid` (grid) and `attention_dense_persist` (persist, persist + wide DMA) | `gfx950_dense.py` | `persistent`, `wide_lds_dma`; the tile is a knob |
 | gfx942 dense | one candidate (`attention_dense`) | `gfx942_dense.py` | nothing; persistence and the tile are knobs |
+| RDNA WMMA prefill / decode | two per RDNA arch, `attention_{arch}_wmma_prefill` under `wmma_fmha_fwd_v2` and `attention_{arch}_wmma_decode` under `wmma_fmha_decode` (see [RDNA WMMA](#rdna-wmma-inference-gfx11-and-gfx12)) | `gfx1151.py` | the kernel; every policy choice is a knob |
 
 The gfx950 grid and persistent bodies are separate algorithms because they
 serve different requests (only the grid body runs a moving bottom-right causal
@@ -174,7 +176,8 @@ Every knob is its own axis, on dense as on unified. Knobs the kernel refuses
 to combine (for example gfx950 IGLP with the manual PV fence) are separate
 axes, and the kernel's validator prunes the illegal combinations.
 
-`_AXES[(arch, path)]` holds the list for `2d`, `3d` and `dense` on each arch.
+`_AXES[(arch, path)]` holds the list for `2d`, `3d` and `dense` on each CDNA
+arch, and for `wmma` (prefill) and `wmma_decode` on each RDNA arch.
 The unified test `test_every_kernel_tuning_field_is_swept` and the dense
 field-classification tests fail when a kernel spec gains a field that no axis
 or exemption covers.
@@ -389,52 +392,119 @@ In every case the coverage tests in
 `tests/dispatch/attention/test_tuning_space.py` fail until the new field sits
 on an axis or in an exemption.
 
-## gfx1151 inference
+## RDNA WMMA inference (gfx11 and gfx12)
 
-`attention_gfx1151_wmma` is the gfx1151 auto route and an execution candidate.
-Its explicit selectors are `algorithm="wmma_fmha_fwd"` and
-`spec_id="gfx1151_wmma_fmha_fwd"`. Other architecture defaults are unchanged.
+Two kernels serve every `gfx11-generic`, `gfx1151`, `gfx12-generic` and
+`gfx1201` request. Requests for a generic target compile one code object set
+that loads on every device of the generation (gfx1100-gfx1154, or
+gfx1200/gfx1201); map a device name with
+`rocke.core.arch.generic_arch_from_target_id`. Other architecture defaults are
+unchanged.
 
-The request describes layout (`dense`, `ragged`, or `paged`) and score features
-(`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, legacy
-`sliding_window`, optional `window_right`, or explicit `window_left`) before
-selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
-FP16/BF16 Q/O and head dimensions that are multiples of 16 up to 256 (Q/K and
-V/O widths may differ) are supported. Legacy `sliding_window` remains the left
+| Route | Kernel | Selectors | Serves |
+|---|---|---|---|
+| `attention_rdna_wmma_decode` (priority 4) | split-KV, GQA-packed decode (`kernels.gfx1151.wmma_fmha_decode`) plus its merge kernel | `algorithm="wmma_fmha_decode"`, `spec_id="rdna_wmma_fmha_decode"` | unpinned requests the decode/prefill rule assigns to it |
+| `attention_rdna_wmma_prefill` (priority 5) | multi-wave prefill (`kernels.gfx1151.wmma_fmha_fwd_v2`) | `algorithm="wmma_fmha_fwd_v2"`, `spec_id="rdna_wmma_fmha_fwd_v2"` | every other request |
+
+The decode/prefill rule is `gfx1151.rdna_attention_use_decode`, a pure function
+of the problem, the WMMA family and the CU count; its docstring describes the
+crossover points it encodes. A decode bucket
+(64/128/256) serves Q/K widths only from its own minimum up
+(`wmma_fmha_decode_bucket`), so widths no bucket serves (Q64/V128, for
+instance) and `runtime_head_dims` requests run the prefill. Pinning either
+algorithm runs that kernel on any request it can serve, whatever the rule says.
+
+The request describes layout (`dense`, `ragged`, or `paged`, power-of-two
+pages) and score features (`use_softcap`, `use_sinks`, `use_alibi`,
+`use_qq_bias`, legacy `sliding_window`, optional `window_right`, or explicit
+`window_left`) before selection; both kernels serve all of them, in any
+combination. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O.
+FP16/BF16 Q/O and head widths that are multiples of 8 up to 256 (Q/K and V/O
+widths may differ) are supported. Legacy `sliding_window` remains the left
 width; `window_right` supplies an optional runtime right bound, while
 `window_bottom_right=True` bottom-right-aligns a `SLIDING_WINDOW` request.
-`use_attn_bias=True` adds the `attn_bias` feature and requires an `attn_bias`
-tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
+Masks are runtime arguments: one prefill object per mask class (`none`, or
+`causal` for every causal/window request) and one decode object serve every
+bound. `use_attn_bias=True` adds the `attn_bias` feature and requires an
+`attn_bias` tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
 `attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
 expanded, permuted, and row-padded views are accepted without copies; invalid
 dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
 requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 `[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
-contract uses rank-4 stats. Fully masked rows store `-inf`.
-Explicit layout or feature requirements reject candidates that do not declare
-them; `layout="auto"` retains legacy layout conventions and resolves to dense
-on gfx1151.
+contract uses rank-4 stats. Fully masked rows store `-inf` (the sink with
+sinks). Explicit layout or feature requirements reject candidates that do not
+declare them; `layout="auto"` retains legacy layout conventions and resolves to
+dense on these candidates.
 
-The dense binding accepts either BSHD or BHSD shapes (`tensor_layout` disambiguates
-equal sequence/head extents) and preserves independently padded, non-overlapping
-batch/token/head strides. Set `emit_lse=True` and provide an FP32 `lse` tensor
-to receive row-wise log-sum-exp values. The binding otherwise takes `q`, `k`,
-`v`, and `out`; packed inputs also provide the selected prefix sums or paged
-metadata. Runtime kwargs are `softmax_scale`, positive `softcap` when selected,
-and explicit FP32 `k_scale`/`v_scale` for FP8 storage.
+Every object takes its head widths at launch: the prefill buckets Q/K into
+64/96/128/192/256 (192 only beside a V/O bucket of at most 128) and V/O into
+64/96/128/256 (`gfx1151.prefill_head_buckets`), the decode into 64/128/256.
+`runtime_head_dims=True` (the `runtime_head_dims` feature, which only the RDNA
+candidates declare) makes `hdim_q`/`hdim_v` the bucket maxima and also takes
+the V head count from the `v` tensor (any count dividing `nhead_q`; the decode
+kernel also needs one of the K/V head counts to divide the other).
 
-Aligned dense FP16 and BF16 D64/D128 requests use the transposed-QK fast path.
-Its compiled identity excludes sequence lengths, query/KV head counts, and
-window widths; these and all dense strides are runtime arguments. Modules are
-cached and stream handles are forwarded. Use `fence=False` for asynchronous or
+The bindings (`bindings.bind_rdna_prefill_torch` /
+`bind_rdna_decode_torch`) accept BSHD or BHSD dense shapes (`tensor_layout`
+disambiguates equal sequence/head extents) with independently padded,
+non-overlapping batch/token/head strides, and packed ragged/paged inputs with
+their prefix sums or paged metadata. Rows load as 16-byte vectors (8-byte for
+FP8 K/V), so data pointers and every outer stride must keep that alignment.
+Paged launches pass the caches' page count as `num_blocks`; the kernels treat a
+`block_table` entry outside `[0, num_blocks)` as a page of zeros (no read
+outside the caches, no host-side value check).
+Runtime kwargs are `softmax_scale`, positive `softcap` when selected, and
+explicit FP32 `k_scale`/`v_scale` for FP8 storage. The decode binding takes
+its split count from the shape, the visible key range and the CU count
+(`gfx1151.request_decode_plan`), and with more than one split allocates and
+owns the split workspace (`launch.workspace`, plan in `launch.plan`): up to 4
+splits merge in the last split to finish (its arrival counters are zeroed
+once at bind; the kernel re-arms them), more launch the merge kernel after the
+decode kernel. One binding's launches share that workspace, so issue them on
+one stream. Compiled identity excludes sequence lengths, head counts, head
+widths within a bucket, window bounds and strides. Modules are cached and
+stream handles are forwarded. Use `fence=False` for asynchronous or
 graph-captured launches, then release retained owners after the appropriate
 synchronization and graph-destruction boundary.
 
-The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI
-and packages reusable FP16/BF16 D64/D96/D128/D256 objects for no-mask,
-causal, and two-sided-window requests. Runtime dimensions and strides do not
-multiply the AOT object count.
-See the [gfx1151 ABI and tensor-layout guide](../../builders/gfx1151/attention/README.md).
+The shipped `hipkernel:Gfx1151WmmaAttention` catalog does not package these
+kernels yet: it still builds the single-wave `kernels.gfx1151.wmma_fmha_fwd`
+objects (runtime-head-dim buckets, plus exact D64/D128 transposed-QK objects
+on gfx11), which rocKE dispatch no longer selects. Moving the catalog to the
+prefill/decode pair is a separate packaging change. Kernel design and
+generic-target requirements are in the
+[RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
+dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`
+(`rocke-attention-gfx1151/v7`): v7 retires the single-wave forward kernel from
+dispatch, gives the prefill a `batch` argument and a flat 1-D grid, and routes
+decode-shaped requests to the split-KV decode with its workspace and merge
+kernel. Callers built against an earlier header must be rebuilt.
+
+### Tuned RDNA WMMA candidates
+
+Each RDNA arch also registers two opt-in tuned candidates built with
+`make_tuned_candidate`: `attention_{arch}_wmma_prefill` (path `wmma`) and
+`attention_{arch}_wmma_decode` (path `wmma_decode`), `-` spelled `_`, pinned
+by the kernel's `algorithm` and `spec_id` without the `attention_` prefix.
+`tuning_id="auto"` returns the auto route's spec wrapped in an
+`AttentionTuningSpec`; the decode spec's `build` returns the `(decode, merge)`
+kernel pair. A tuned base never reads the live device, so a pin or a catalog
+enumeration is host-independent; the decode grid, like the binding that
+launches it, splits for the live device's CU count. The RDNA candidates own
+their grids: `AttentionTuningSpec.launch_grid` does not serve RDNA specs.
+
+`WmmaSpace` (`wmma_rules.py`) walks `tuning_axes(arch, "wmma")` (`block_m`,
+`wave_pair`, `block_n`, `waves_per_eu`, `scheduler_strategy`,
+`lazy_rescale`, `k_pad`, `v_pad`, `cta_order`) or
+`tuning_axes(arch, "wmma_decode")` (`num_waves`, `dv_split`, `q_mode`,
+`v_store_early`, `prefetch`, `lockstep`, `scheduler_strategy`,
+`waves_per_eu`, plus `fp8_cvt` for gfx12 FP8 K/V and `tanh_fast` under
+softcap). The policy spells every knob out (the prefill's derived tile and
+wave pair, the decode's per-family resolution), so each in-scope knob is
+recorded in `tuning_id`. Illegal settings are refused with the kernel's
+reason. Each auto candidate's `sweep_space` is the same space's production
+stream, unwrapped.
 
 ## Capability versus support
 
@@ -473,12 +543,13 @@ only problem semantics such as dtype, masks, heads, and cache addressing.
 It does **not** call production selection heuristics or silently resize an
 invalid point. Concrete kernel validators remain the structural gate.
 
-The resulting `AttentionTuningSpec` is also the runtime's launch contract:
-`run_unified_attention_torch(tuning_spec=...)` compiles `spec.build()` under
-`spec.cache_key()` and launches with `spec.launch_grid(problem)` /
-`spec.launch_block()`. The runtime never decodes `builder_kind`. The spec is
-the one owner of grid and block: the dispatcher's `grid` / `block` and the
-Torch bindings all call these methods.
+For the unified and dense paths the resulting `AttentionTuningSpec` is also the
+runtime's launch contract: `run_unified_attention_torch(tuning_spec=...)`
+compiles `spec.build()` under `spec.cache_key()` and launches with
+`spec.launch_grid(problem)` / `spec.launch_block()`. The runtime never decodes
+`builder_kind`. For those paths the spec is the one owner of grid and block:
+the dispatcher's `grid` / `block` and the Torch bindings call these methods.
+RDNA specs are the exception described under *Tuned RDNA WMMA candidates*.
 
 ## Torch bindings
 
@@ -486,7 +557,10 @@ Torch bindings all call these methods.
 
 - gfx942/gfx950 dense attention;
 - explicit unified 2D/3D tuning kernels;
-- gfx1250 WMMA attention.
+- gfx1250 WMMA attention;
+- RDNA prefill (`bind_rdna_prefill_torch`) and split-KV decode
+  (`bind_rdna_decode_torch`), which share one tensor, layout and scalar
+  contract.
 
 Bindings close over caller-owned tensors and return `TorchBinding(launch, grid,
 block)`. Torch is never imported at dispatch module load time; it remains a
@@ -516,6 +590,10 @@ from the gfx942 spec rather than from a free field.
 - `common.py` — arch-neutral request/spec types and shared gates.
 - `generic.py` — candidates that cover more than one architecture.
 - `gfx1250.py` — architecture-owned candidates.
+- `gfx1151.py` — RDNA WMMA candidates: the decode and prefill auto routes
+  (`attention_rdna_wmma_decode` / `attention_rdna_wmma_prefill`), the
+  decode/prefill rule, the decode launch plan, and one tuned
+  `attention_{arch}_wmma_prefill` / `_decode` pair per RDNA arch.
 - `gfx942_dense.py` — the gfx942 dense-kernel candidate (geometry swept by its
   knob space).
 - `gfx942_unified.py` — gfx942 unified-kernel candidates: the fp16 `dense_pipe`
@@ -530,6 +608,8 @@ from the gfx942 spec rather than from a free field.
   the `DenseSpace` hooks.
 - `unified_rules.py` — unified geometry variants, codepath rules, and the
   gfx950 2D LDS / KQ-pad legality, stated as the `UnifiedSpace` hooks.
+- `wmma_rules.py` — RDNA WMMA knob scope and launch legality for both kernels,
+  stated as the `WmmaSpace` hooks.
 - `waves.py` — `waves_per_eu` as the attention spaces' outer knob: the WPE
   sweep values and `WavesPerEuSpace`, which sets the outer knob and the
   `{variant_id}_wpe{N}` id stem for both spaces.

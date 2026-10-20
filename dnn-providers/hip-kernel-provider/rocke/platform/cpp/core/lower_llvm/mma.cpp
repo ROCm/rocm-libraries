@@ -24,9 +24,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/mma_operand_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc
@@ -69,6 +72,387 @@ static const char* mma_result_name(rocke_lower_t* L, const rocke_op_t* op)
                       op->num_results);
     }
     return op->results[0]->name;
+}
+
+/* The register type `vec<elem x count>`, built in the lowerer's arena. */
+static const rocke_type_t*
+    mma_register_vector(rocke_lower_t* L, const rocke_type_t* elem, int count)
+{
+    const rocke_type_t* t = rocke_i_vector_type_in_arena(&L->arena, elem, count);
+    if(!t)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "MMA register type: OOM");
+    return t;
+}
+
+/* MMA operand `role` (A or B) of `op` as the instruction's register type
+ * (Python _Lowerer._mma_operand): unchanged, or reinterpreted with one bitcast,
+ * as rocke_mma_operand_needs_reinterpret decides; that rule also throws for an
+ * operand it refuses. */
+static const char* mma_operand(rocke_lower_t* L,
+                               const rocke_op_t* op,
+                               const char* op_id,
+                               rocke_mma_role_t role,
+                               const rocke_type_t* register_type)
+{
+    const rocke_value_t* value = rocke_mma_operand_value(op, role);
+    if(rocke_mma_operand_needs_reinterpret(
+           op_id, role, value->type, register_type, L->backend->gfx))
+        return rocke_ll_reinterpret(L, value, register_type);
+    return rocke_ll_operand(L, value);
+}
+
+/* ====================================================================== */
+/* Emulated atoms: BF16x3 expansion (Python _expand_emulated_mma)          */
+/* ====================================================================== */
+
+/* The catalog atom for op_id on the arch being lowered, when it needs
+ * expansion; NULL when it is natively encoded (every atom predating XF32) or
+ * absent. Per-arch, not a bare-op_id table: the same logical atom may be native
+ * on one target and emulated on another, so the arch being lowered is the one
+ * asked. Mirrors Python _emulated_mma_atom. */
+static const rocke_mma_op_t* _emulated_mma_atom(rocke_lower_t* L, const char* op_id)
+{
+    const rocke_arch_target_t* arch;
+    const rocke_mma_op_t* atom;
+    if(!L->backend || !L->backend->gfx)
+    {
+        return NULL;
+    }
+    arch = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(!arch)
+    {
+        return NULL;
+    }
+    atom = rocke_mma_catalog_by_op_id(&arch->mma, op_id);
+    if(!atom || rocke_arch_mma_op_is_native(atom))
+    {
+        return NULL;
+    }
+    return atom;
+}
+
+/* The fp32 view of a TF32 fragment: its I32 carrier bits, reinterpreted (Python
+ * _tf32_payload_as_f32). A bitcast and nothing else -- never a rounding -- so the
+ * split sees every payload bit the caller put there. That is the difference from
+ * a native XF32 instruction, which ignores the low 13 bits of each operand. */
+static const char*
+    _tf32_payload_as_f32(rocke_lower_t* L, const rocke_value_t* v, const char* hint, int n)
+{
+    char name_hint[32];
+    char i32v[24];
+    char f32v[24];
+    const char* cast;
+
+    snprintf(name_hint, sizeof(name_hint), "%s_f32", hint);
+    cast = rocke_ll_fresh(L, name_hint);
+    snprintf(i32v, sizeof(i32v), "<%d x i32>", n);
+    snprintf(f32v, sizeof(f32v), "<%d x float>", n);
+    rocke_ll_emitf(L, "  %s = bitcast %s %s to %s", cast, i32v, rocke_ll_operand(L, v), f32v);
+    return cast;
+}
+
+/* bf16 as the i16 lanes the TF32 split saturates on (Python _BF16_MAX_FINITE and
+ * _BF16_SIGN_BIT): the largest finite bf16 has magnitude pattern 0x7f7f, and the
+ * sign bit is LLVM's signed i16 literal for 0x8000. */
+static const int kBf16MaxFinite = 0x7F7F;
+static const int kBf16SignBit = -0x8000;
+
+/* `<n x i16>` constant with every lane `value` (the `lanes` helper in Python
+ * _split_f32_to_bf16). An explicit list rather than `splat (...)`, which older
+ * LLVM flavors do not parse. Arena-owned, sized to the lane count. */
+static const char* _i16_lanes(rocke_lower_t* L, int value, int n)
+{
+    char lane[16];
+    const int lane_len = snprintf(lane, sizeof(lane), "i16 %d", value);
+    const size_t cap = (size_t)n * (size_t)(lane_len + 2) + 3;
+    char* out = static_cast<char*>(rocke_arena_alloc(&L->arena, cap));
+    char* p = out;
+    int i;
+
+    *p++ = '<';
+    for(i = 0; i < n; ++i)
+    {
+        if(i)
+        {
+            *p++ = ',';
+            *p++ = ' ';
+        }
+        memcpy(p, lane, (size_t)lane_len);
+        p += lane_len;
+    }
+    *p++ = '>';
+    *p = '\0';
+    return out;
+}
+
+/* Dekker-style split of an fp32 fragment into two bf16 fragments (Python
+ * _split_f32_to_bf16). ``src`` names the fp32 vector of n elements. ``big`` is it
+ * rounded to bf16 (and saturated, below); ``small`` is what that rounding threw
+ * away, itself rounded to bf16.
+ *
+ * The narrowings are `fptrunc ... to bfloat`, which is round-to-nearest-even --
+ * LLVM has no other fp32->bf16 rounding -- and the AMDGPU backend selects the
+ * packed v_cvt_pk_bf16_f32 for the vector form on gfx950. That is CK's shipping
+ * packed path; CK's *scalar* fallback truncates instead and is deliberately not
+ * the parity target.
+ *
+ * SATURATION. Rounding to bf16 overflows to infinity for every payload of
+ * magnitude 0x7f7f8000 or more: the top 2^-9 of the finite fp32 range, which
+ * holds TF32's largest finite values. Left alone, ``big`` becomes +-inf and
+ * ``small`` the opposite infinity, and the `inf * 0` that results in the cross
+ * terms turns a finite product into NaN. ``big`` is therefore capped at the
+ * largest finite bf16, 0x7f7f, keeping the sign. ``small`` is still taken from
+ * the original payload, so it holds what the cap threw away -- finite, and within
+ * bf16's own precision of it -- and the three terms sum to the same product as
+ * anywhere else. Payloads below the threshold are untouched, bit for bit.
+ *
+ * A non-finite payload goes through the same cap, which makes ``big`` finite for
+ * it too. ``small`` is computed from the payload itself, so it stays +-inf (or
+ * NaN), and small*big -- the first term issued -- is then non-finite whatever the
+ * other operand holds: an infinity or NaN in an operand makes every output
+ * element it feeds non-finite. `Inf * 0` is NaN as IEEE says, and Inf against an
+ * ordinary finite partner stays Inf; a partner whose own residual is large enough
+ * to overflow against the cap can turn it into NaN. */
+static void _split_f32_to_bf16(rocke_lower_t* L,
+                               const char* src,
+                               const char* hint,
+                               int n,
+                               const rocke_type_t* bf16_vec,
+                               rocke_value_t* out_big,
+                               rocke_value_t* out_small)
+{
+    char f32v[24];
+    char bf16v[24];
+    char i16v[24];
+    char name_hint[32];
+    const char* big_rne;
+    const char* bits;
+    const char* sign;
+    const char* cap;
+    const char* over;
+    const char* sat;
+    const char* big;
+    const char* big_f32;
+    const char* diff;
+    const char* small;
+    const char* sign_lanes;
+    const char* max_lanes;
+
+    snprintf(f32v, sizeof(f32v), "<%d x float>", n);
+    snprintf(bf16v, sizeof(bf16v), "<%d x bfloat>", n);
+    snprintf(i16v, sizeof(i16v), "<%d x i16>", n);
+
+    /* Fresh names are allocated in emission order, so the temp counter matches
+     * the Python lowerer's and the two engines agree byte for byte. */
+    snprintf(name_hint, sizeof(name_hint), "%s_big_rne", hint);
+    big_rne = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_bits", hint);
+    bits = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_sign", hint);
+    sign = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_cap", hint);
+    cap = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_over", hint);
+    over = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_sat", hint);
+    sat = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big", hint);
+    big = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_big_f32", hint);
+    big_f32 = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_diff", hint);
+    diff = rocke_ll_fresh(L, name_hint);
+    snprintf(name_hint, sizeof(name_hint), "%s_small", hint);
+    small = rocke_ll_fresh(L, name_hint);
+
+    sign_lanes = _i16_lanes(L, kBf16SignBit, n);
+    max_lanes = _i16_lanes(L, kBf16MaxFinite, n);
+
+    rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", big_rne, f32v, src, bf16v);
+    /* The bf16 bit patterns are ordered like their magnitudes, so "past the
+     * largest finite value" is an unsigned compare against that pattern with the
+     * value's own sign bit attached: it catches +-inf and every NaN (all 0x7f80
+     * and up in magnitude) and nothing finite. */
+    rocke_ll_emitf(L, "  %s = bitcast %s %s to %s", bits, bf16v, big_rne, i16v);
+    rocke_ll_emitf(L, "  %s = and %s %s, %s", sign, i16v, bits, sign_lanes);
+    rocke_ll_emitf(L, "  %s = or %s %s, %s", cap, i16v, sign, max_lanes);
+    rocke_ll_emitf(L, "  %s = icmp ugt %s %s, %s", over, i16v, bits, cap);
+    rocke_ll_emitf(
+        L, "  %s = select <%d x i1> %s, %s %s, %s %s", sat, n, over, i16v, cap, i16v, bits);
+    rocke_ll_emitf(L, "  %s = bitcast %s %s to %s", big, i16v, sat, bf16v);
+    rocke_ll_emitf(L, "  %s = fpext %s %s to %s", big_f32, bf16v, big, f32v);
+    rocke_ll_emitf(L, "  %s = fsub %s %s, %s", diff, f32v, src, big_f32);
+    rocke_ll_emitf(L, "  %s = fptrunc %s %s to %s", small, f32v, diff, bf16v);
+
+    out_big->name = big;
+    out_big->type = bf16_vec;
+    out_big->op = NULL;
+    out_small->name = small;
+    out_small->type = bf16_vec;
+    out_small->op = NULL;
+}
+
+/* Expand an emulated tile.mma in place; return whether it was one. Mirrors
+ * Python _expand_emulated_mma.
+ *
+ * BF16x3: reinterpret both TF32 operands as fp32, split them, then issue three
+ * BF16 MMAs threading a single fp32 accumulator. The small*small term is dropped:
+ * it is below 2^-16 of the product, the same order as the split's own
+ * representation error, so a fourth MMA would buy back only part of the error.
+ *
+ * The term ORDER is load-bearing. fp32 accumulation is not associative, so
+ * issuing these three in any other order produces different result bits and
+ * breaks parity with CK. */
+static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
+{
+    const rocke_mma_op_t* atom = _emulated_mma_atom(L, op_id);
+    const rocke_value_t *a, *b, *c;
+    rocke_value_t a_big, a_small, b_big, b_small;
+    rocke_value_t acc_tmp[2];
+    rocke_type_t bf16_vec;
+    char bf16_vec_name[24];
+    const rocke_value_t* acc;
+    const char* physical;
+    const char* a_f32;
+    const char* b_f32;
+    int n;
+    int i;
+
+    if(atom == NULL)
+    {
+        return false;
+    }
+    /* rocke_ll_fail is [[noreturn]]; nothing after a fail call runs. */
+    if(atom->emulation_recipe != ROCKE_MMA_EMULATION_BF16X3)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "tile.mma %s: no lowering for emulation recipe %d",
+                      atom->op_id,
+                      (int)atom->emulation_recipe);
+    }
+    if(op->num_operands != 3 || op->num_results != 1)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "tile.mma %s expects 3 operands and 1 result", atom->op_id);
+    }
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    for(i = 0; i < 2; ++i)
+    {
+        const rocke_value_t* v = (i == 0) ? a : b;
+        const char* role = (i == 0) ? "a" : "b";
+        const int frag_len = (i == 0) ? atom->a_frag_len : atom->b_frag_len;
+        if(!v->type || v->type->kind != ROCKE_TYPE_VECTOR || !v->type->elem
+           || v->type->elem->scalar != ROCKE_SCALAR_TF32)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.mma %s: BF16x3 emulation needs a TF32 vector for "
+                          "operand %s, got %s; wrap fp32 payload bits with "
+                          "bitcast(v, TF32), or round them first with "
+                          "cvt_f32_to_tf32(v)",
+                          atom->op_id,
+                          role,
+                          (v->type && v->type->name) ? v->type->name : "(none)");
+        }
+        if(v->type->count != frag_len)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.mma %s: operand %s must be a vec<tf32x%d>, got %s",
+                          atom->op_id,
+                          role,
+                          frag_len,
+                          v->type->name);
+        }
+    }
+    n = a->type->count;
+
+    snprintf(bf16_vec_name, sizeof(bf16_vec_name), "vec<bf16x%d>", n);
+    memset(&bf16_vec, 0, sizeof(bf16_vec));
+    bf16_vec.kind = ROCKE_TYPE_VECTOR;
+    bf16_vec.name = bf16_vec_name;
+    bf16_vec.elem = rocke_scalar_by_name("bf16");
+    bf16_vec.count = n;
+
+    a_f32 = _tf32_payload_as_f32(L, a, "xf32_a", n);
+    _split_f32_to_bf16(L, a_f32, "xf32_a", n, &bf16_vec, &a_big, &a_small);
+    b_f32 = _tf32_payload_as_f32(L, b, "xf32_b", n);
+    _split_f32_to_bf16(L, b_f32, "xf32_b", n, &bf16_vec, &b_big, &b_small);
+    if(!rocke_ll_live(L))
+    {
+        return true;
+    }
+
+    physical = rocke_arch_mma_op_physical_op_id(atom);
+    {
+        const rocke_value_t* terms[3][2]
+            = {{&a_small, &b_big}, {&a_big, &b_small}, {&a_big, &b_big}};
+        acc = c;
+        for(i = 0; i < 3; ++i)
+        {
+            /* The last term must land in the caller's SSA value; the earlier two
+             * thread through temporaries. */
+            const bool last = (i == 2);
+            rocke_value_t* out = last ? NULL : &acc_tmp[i];
+            rocke_value_t* result;
+            rocke_op_t sub;
+            rocke_value_t* operands[3];
+            rocke_value_t* results[1];
+
+            if(!last)
+            {
+                out->name = rocke_ll_fresh(L, "xf32_acc");
+                out->type = c->type;
+                out->op = NULL;
+                result = out;
+            }
+            else
+            {
+                result = op->results[0];
+            }
+
+            operands[0] = const_cast<rocke_value_t*>(terms[i][0]);
+            operands[1] = const_cast<rocke_value_t*>(terms[i][1]);
+            operands[2] = const_cast<rocke_value_t*>(acc);
+            results[0] = result;
+
+            memset(&sub, 0, sizeof(sub));
+            sub.opcode = op->opcode;
+            sub.name = op->name;
+            sub.operands = operands;
+            sub.num_operands = 3;
+            sub.results = results;
+            sub.num_results = 1;
+            sub.loc = op->loc;
+
+            /* The physical atom is native by construction -- the catalog
+             * refuses an expansion chain -- so the dense table resolves it and
+             * the text is identical to a hand-written physical tile.mma.
+             *
+             * Python reaches the same emission through backend.emit_mma, which
+             * also covers WMMA. Every emulated row shipped today is MFMA, so
+             * the two engines cannot disagree on bytes; a future WMMA-arch row
+             * would land in the fail below rather than emit something wrong. */
+            if(!_try_emit_mfma_table(L, &sub, physical))
+            {
+                rocke_ll_fail(L,
+                              ROCKE_ERR_NOTIMPL,
+                              "tile.mma %s: physical atom '%s' has no dense MFMA "
+                              "emission",
+                              atom->op_id,
+                              physical);
+            }
+            if(!rocke_ll_live(L))
+            {
+                return true;
+            }
+            acc = result;
+        }
+    }
+    return true;
 }
 
 /* ====================================================================== */
@@ -116,8 +500,18 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_operand(L, op->operands[4]));
         return;
     }
-    if(rocke_tf32_mma_count(op_id) && strcmp(L->backend->gfx, "gfx942") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+    char tf32_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
+
+    /* An emulated atom is expanded here, before ISA dispatch, so the expansion
+     * is written once rather than per ISA family. Native atoms -- every atom
+     * that predates XF32 -- fall straight through, so their emission is
+     * unchanged. */
+    if(_expand_emulated_mma(L, op, op_id))
+    {
+        return;
+    }
 
     /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
      * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
@@ -402,7 +796,7 @@ static const _wmma_spec_t WMMA_SPECS[] = {
      "bfloat",
      16,
      WMMA_SHAPE_GFX1250},
-    /* _GFX1250_WMMA_FP8 (K=64). A/B arrive in SSA already as <8 x i32>. */
+    /* _GFX1250_WMMA_FP8 (K=64). A/B are passed as <8 x i32> (mma_operand). */
     {"wmma_gfx1250_f32_16x16x64_fp8_fp8",
      "wmma.gfx1250.f32.16x16x64.fp8.fp8",
      "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
@@ -437,8 +831,9 @@ static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0])
 /* Integer WMMA spec table (Python _RDNA_WMMA_INT). Integer WMMA differs from
  * the float path: operands/accumulator are i32 vectors (A/B packed, C/D the i32
  * accumulator), and the intrinsic signature carries i1 signedness flags before
- * each matrix operand and a trailing i1 clamp. Operands arrive in SSA already
- * as <N x i32> so no bitcast is needed. Quantized data is signed and within i32
+ * each matrix operand and a trailing i1 clamp. A and B are passed as <N x i32>;
+ * packed bytes of the same width (for example <16 x i8>) are reinterpreted with
+ * one bitcast (mma_operand). Quantized data is signed and within i32
  * range, so the flags are (signedA=1, signedB=1, clamp=0). */
 typedef struct _wmma_int_spec
 {
@@ -466,14 +861,14 @@ static const int WMMA_INT_SPECS_N = (int)(sizeof(WMMA_INT_SPECS) / sizeof(WMMA_I
 /* Emit an integer WMMA (iu8/iu4) call (Python _emit_wmma_int). The signature is
  * (i1 signedA, <N x i32> A, i1 signedB, <N x i32> B, <8 x i32> C, i1 clamp) with
  * an <8 x i32> result. Both signedness flags are 1 (signed quant data); clamp
- * is 0 (values stay within i32 range). No operand bitcast (already <N x i32>). */
+ * is 0 (values stay within i32 range). */
 static void _emit_wmma_int(rocke_lower_t* L, const rocke_op_t* op, const _wmma_int_spec_t* spec)
 {
-    const rocke_value_t *a, *b, *c;
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
+    const rocke_value_t* c = op->operands[2];
     rocke_ll_need(L, spec->decl_key);
+    const rocke_type_t* register_type = mma_register_vector(L, rocke_i32(), spec->op_vec);
+    const char* a_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_A, register_type);
+    const char* b_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_B, register_type);
     rocke_ll_emitf(L,
                    "  %s = call <%d x i32> @%s("
                    "i1 1, <%d x i32> %s, "
@@ -483,9 +878,9 @@ static void _emit_wmma_int(rocke_lower_t* L, const rocke_op_t* op, const _wmma_i
                    spec->acc_vec,
                    spec->intrinsic,
                    spec->op_vec,
-                   rocke_ll_operand(L, a),
+                   a_arg,
                    spec->op_vec,
-                   rocke_ll_operand(L, b),
+                   b_arg,
                    spec->acc_vec,
                    rocke_ll_operand(L, c));
 }
@@ -545,8 +940,19 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     w = spec->frag_width;
 
     rocke_ll_need(L, spec->decl_key);
-    a_arg = rocke_ll_operand(L, a);
-    b_arg = rocke_ll_operand(L, b);
+    if(spec->shape == WMMA_SHAPE_GFX1250_FP8)
+    {
+        /* A and B are passed as the intrinsic's <8 x i32> (32 low-bit bytes per
+         * lane); a <32 x i8> fragment is reinterpreted with one bitcast. */
+        const rocke_type_t* register_type = mma_register_vector(L, rocke_i32(), w);
+        a_arg = mma_operand(L, op, op_id, ROCKE_MMA_ROLE_A, register_type);
+        b_arg = mma_operand(L, op, op_id, ROCKE_MMA_ROLE_B, register_type);
+    }
+    else
+    {
+        a_arg = rocke_ll_operand(L, a);
+        b_arg = rocke_ll_operand(L, b);
+    }
 
     if(strcmp(spec->call_elt, spec->ssa_elt) != 0)
     {
@@ -649,6 +1055,10 @@ typedef struct _mfma_spec
     const char* ab_ty; /* A/B SSA operand type spelling                  */
     const char* acc_ty; /* accumulator/result vector spelling             */
     const char* bitcast_to; /* operand bitcast target (NULL = no bitcast)     */
+    /* The A/B register type when A and B pass through mma_operand (a value of
+     * another shape is reinterpreted); NULL prints them as is, as Python does
+     * for every atom but the two f32 ones. */
+    const rocke_type_t* (*ab_register)(void);
 } _mfma_spec_t;
 
 static const _mfma_spec_t MFMA_SPECS[] = {
@@ -708,13 +1118,15 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "llvm.amdgcn.mfma.f32.16x16x4f32",
      "float",
      "<4 x float>",
-     NULL},
+     NULL,
+     rocke_f32},
     {"mfma_f32_32x32x2_f32",
      "mfma.f32.32x32x2f32",
      "llvm.amdgcn.mfma.f32.32x32x2f32",
      "float",
      "<16 x float>",
-     NULL},
+     NULL,
+     rocke_f32},
     {"mfma_f32_32x32x16_f16",
      "mfma.f32.32x32x16.f16",
      "llvm.amdgcn.mfma.f32.32x32x16.f16",
@@ -782,6 +1194,13 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
         a_arg = a_cast;
         b_arg = b_cast;
         call_ty = spec->bitcast_to;
+    }
+    else if(spec->ab_register != NULL)
+    {
+        const rocke_type_t* register_type = spec->ab_register();
+        a_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_A, register_type);
+        b_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_B, register_type);
+        call_ty = spec->ab_ty;
     }
     else
     {

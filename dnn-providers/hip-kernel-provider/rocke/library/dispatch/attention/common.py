@@ -145,6 +145,22 @@ class AttentionRequest(OperatorRequest):
     window_right: int | None = None
     window_bottom_right: bool = False
     tensor_layout: str = "auto"  # dense tensors only: "auto" | "bshd" | "bhsd"
+    # Right bound and diagonal alignment of the attention band, in the cuDNN / hipDNN
+    # vocabulary (``sliding_window`` is the left bound, 0 = unbounded). Consulted
+    # only for ``NO_MASK`` / ``SLIDING_WINDOW``: ``TOP_LEFT_CAUSAL`` /
+    # ``BOTTOM_RIGHT_CAUSAL`` fix the right bound at 0 and name their own alignment.
+    # ``right_bound``: -1 = unbounded (default), 0 = causal, R > 0 = R keys of
+    # lookahead. ``diagonal_alignment``: None = unset (TOP_LEFT for NO_MASK /
+    # SLIDING_WINDOW, as hipDNN; the kind's own alignment for the causal kinds),
+    # 0 = TOP_LEFT, 1 = BOTTOM_RIGHT. Setting it against a causal kind's alignment
+    # is an error rather than being ignored. The paged unified kernels apply it per
+    # sequence (``seqlen_q`` / ``seqlen_k`` are the batch maxima there, so
+    # ``seqlen_q == 1`` means every sequence has one query row), so it matters even
+    # when they are equal; dense takes uniform lengths and ignores it at
+    # ``seqlen_q == seqlen_k``. The same holds for ``TOP_LEFT_CAUSAL`` vs
+    # ``BOTTOM_RIGHT_CAUSAL`` on gfx950.
+    right_bound: int = -1
+    diagonal_alignment: int | None = None
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
     # 0 => auto-resolve at dispatch (_resolve_num_cus). NOTE: auto-resolution is
     # the one part of selection that is NOT host-independent -- on-box it reads
@@ -182,8 +198,14 @@ class AttentionRequest(OperatorRequest):
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
-    # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
+    # candidates whose kernels implement it (dense, RDNA WMMA) admit it.
     emit_lse: bool = False
+    # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
+    # are the bucket maxima, and any widths the kernel takes up to them (RDNA
+    # WMMA: multiples of 8) run at launch, as does the ``v`` tensor's head
+    # count. Reported as the ``runtime_head_dims`` feature, so only candidates
+    # whose kernels implement it (RDNA WMMA) admit it.
+    runtime_head_dims: bool = False
 
     def __post_init__(self) -> None:
         # ONE ``__post_init__``, normalizing both fields. Two of them is not two
@@ -204,6 +226,9 @@ class AttentionRequest(OperatorRequest):
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
+        # An unset alignment and the value it resolves to are the same request.
+        if self.diagonal_alignment is None:
+            d["diagonal_alignment"] = int(_implied_alignment(self.mask_type))
         d["layout"] = (
             self.layout.strip().lower() if isinstance(self.layout, str) else ""
         )
@@ -236,18 +261,36 @@ class AttentionRequest(OperatorRequest):
             # Let _request_errors report the invalid ordinal. In particular, do
             # not silently classify an arbitrary nonzero value as causal.
             mask_type = None
-        if mask_type in (
-            AttentionMaskType.TOP_LEFT_CAUSAL,
-            AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-        ):
-            active.add("causal")
-        if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
-            self.seqlen_q
-        ) != int(self.seqlen_k):
-            active.add("causal_bottom_right")
         explicit_window = self.window_left is not None or (
             self.window_right is not None and int(self.window_right) >= 0
         )
+        band = None
+        if mask_type is not None and _uses_band_dispatch(self, explicit_window):
+            try:
+                band = normalize_band(self)
+            except ValueError:
+                pass  # _request_errors reports it
+        if band is not None:
+            if band.is_causal:
+                active.add("causal")
+                if band.alignment is Alignment.BOTTOM_RIGHT and int(
+                    self.seqlen_q
+                ) != int(self.seqlen_k):
+                    active.add("causal_bottom_right")
+            elif band.is_full:
+                active.add("full_attention")
+            else:
+                active.add("band")
+        else:
+            if mask_type in (
+                AttentionMaskType.TOP_LEFT_CAUSAL,
+                AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+            ):
+                active.add("causal")
+            if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
+                self.seqlen_q
+            ) != int(self.seqlen_k):
+                active.add("causal_bottom_right")
         windowed = (
             mask_type == AttentionMaskType.SLIDING_WINDOW
             or int(self.sliding_window) > 0
@@ -264,6 +307,8 @@ class AttentionRequest(OperatorRequest):
             active.add("window_right")
         if self.emit_lse:
             active.add("lse")
+        if self.runtime_head_dims:
+            active.add("runtime_head_dims")
         if bool(self.use_sinks):
             active.add("sinks")
         if bool(self.use_fp8):
@@ -301,8 +346,49 @@ ATTENTION_DIM_VOCABULARY = (
 )
 
 # Feature set of the existing unified backend, not the union of standalone capabilities.
+# The attention band. hipDNN / cuDNN describe the mask as (left_bound, right_bound,
+# diagonal_alignment): unset = unbounded, ``right_bound = 0`` is causal, and any
+# bounded trio that is neither full nor causal is what hipDNN classifies as
+# SLIDING_WINDOW. An AttentionRequest carries the same trio as (``sliding_window``,
+# ``right_bound``, ``diagonal_alignment``) plus a mask kind:
+#   * TOP_LEFT_CAUSAL / BOTTOM_RIGHT_CAUSAL -- right bound 0, alignment from the kind;
+#   * NO_MASK / SLIDING_WINDOW -- the trio is read as given, so NO_MASK with a window
+#     is a (non-causal) left-only band, exactly as in cuDNN. NO_MASK without bounds
+#     is full attention, the SDPA default. SLIDING_WINDOW names a band, so it needs
+#     at least one bound.
+# The request is normalised once, by ``normalize_band`` below, into an
+# ``AttentionBand``; every dispatcher reads that instead of re-deriving the aliases.
+# A candidate that cannot compute the band is excluded by its declared features, so
+# the request fails with a reason instead of being served a different mask.
+# gfx950 implements the whole band in the unified kernels. KNOWN GAP: on the other
+# arches the tiled kernels are bottom-right causal only, so ``normalize_band`` keeps
+# serving ``NO_MASK`` (the request default) by that causal body and rejects every
+# other non-causal band. That is the only place the logical mask depends on the arch;
+# the gfx942 tiled / dense kernels implement the full band in the stacked follow-up
+# (#13211), which removes it.
+_BAND_NEEDS_BOUND_ERROR = (
+    "mask_type SLIDING_WINDOW names a band: set sliding_window > 0 and/or "
+    "right_bound > 0 (use TOP_LEFT_CAUSAL / BOTTOM_RIGHT_CAUSAL for a causal mask "
+    "and NO_MASK for full attention)"
+)
+_BAND_GFX950_ONLY_ERROR = (
+    "a non-causal attention band (right_bound != 0 with NO_MASK / SLIDING_WINDOW) "
+    "is implemented on gfx950 only"
+)
+
+# ``full_attention``: no left and no right bound (NO_MASK without a window, more than
+# one query row). ``band``: any other non-causal band -- a lookahead or a non-causal
+# window. A causal window is ``causal`` + ``sliding_window``.
 ATTENTION_FEATURES = frozenset(
-    {"causal", "causal_bottom_right", "sliding_window", "sinks", "fp8"}
+    {
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+        "full_attention",
+        "band",
+        "sinks",
+        "fp8",
+    }
 )
 
 
@@ -324,6 +410,11 @@ def _request_errors(
         errors.append(f"unsupported op {req.op!r}")
     if type(req.emit_lse) is not bool:
         errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
+    if type(req.runtime_head_dims) is not bool:
+        errors.append(
+            "runtime_head_dims must be a bool, got "
+            f"{type(req.runtime_head_dims).__name__}"
+        )
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -359,8 +450,17 @@ def _request_errors(
             errors.append(f"{field} must be -1 (unbounded) or a nonnegative I32")
     if explicit_left and int(req.sliding_window) != 0:
         errors.append("sliding_window cannot be combined with explicit window_left")
-    if explicit_left and mask_type != AttentionMaskType.SLIDING_WINDOW:
-        errors.append("explicit window_left requires mask_type=SLIDING_WINDOW")
+    # A causal mask plus a left bound is the cuDNN spelling of a causal sliding
+    # window: the bounds become (window_left, 0) on the causal diagonal.
+    if explicit_left and mask_type not in (
+        AttentionMaskType.SLIDING_WINDOW,
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        errors.append(
+            "explicit window_left requires mask_type SLIDING_WINDOW, "
+            "TOP_LEFT_CAUSAL, or BOTTOM_RIGHT_CAUSAL"
+        )
     if explicit_right and mask_type not in (
         AttentionMaskType.NO_MASK,
         AttentionMaskType.SLIDING_WINDOW,
@@ -372,6 +472,20 @@ def _request_errors(
         )
     if bool(req.window_bottom_right) and mask_type != AttentionMaskType.SLIDING_WINDOW:
         errors.append("window_bottom_right requires mask_type=SLIDING_WINDOW")
+    if (explicit_left or explicit_right or bool(req.window_bottom_right)) and (
+        int(req.right_bound) != -1 or req.diagonal_alignment is not None
+    ):
+        errors.append(
+            "window_left / window_right / window_bottom_right carry their own bounds "
+            "and alignment; right_bound and diagonal_alignment must stay unset"
+        )
+    if mask_type is not None and _uses_band_dispatch(
+        req, explicit_left or explicit_right
+    ):
+        try:
+            normalize_band(req)
+        except ValueError as exc:
+            errors.append(str(exc))
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
@@ -495,9 +609,176 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return 120
 
 
+def _has_no_mask_kernel(arch: str) -> bool:
+    """Arches whose unified kernels have a top-left body. Elsewhere the tiled kernels
+    are bottom-right causal only, so an equal-length top-left request is served by the
+    bottom-right body (see ``normalize_band``)."""
+    return arch.strip().lower() == "gfx950"
+
+
+# Arches served by the unified / dense candidates, i.e. the ones ``normalize_band``
+# governs. Other arches (gfx1151) have their own candidates and, with the explicit
+# ``window_left`` / ``window_right`` / ``window_bottom_right`` fields, their own window
+# vocabulary: those requests are never band-normalised here.
+_BAND_ARCHES = ("gfx942", "gfx950", "gfx1250")
+
+
+def _uses_band_dispatch(req: "AttentionRequest", explicit_window: bool) -> bool:
+    return req.arch.strip().lower() in _BAND_ARCHES and not explicit_window
+
+
+class Alignment(IntEnum):
+    """Which corner the diagonal is anchored to (the cuDNN ``diagonal_alignment``)."""
+
+    TOP_LEFT = 0
+    BOTTOM_RIGHT = 1
+
+
+@dataclass(frozen=True)
+class AttentionBand:
+    """The normalised attention mask: key ``k`` is visible to the query at diagonal
+    position ``d`` iff ``d - k < left_bound`` and ``k <= d + right_bound``.
+
+    ``None`` is unbounded. ``left_bound = W`` therefore sees W keys, counting the
+    diagonal. ``alignment`` places ``d``: top-left ``d = q``, bottom-right
+    ``d = q + kv_len - q_len`` (per sequence).
+    """
+
+    left_bound: "int | None"
+    right_bound: "int | None"
+    alignment: Alignment
+
+    @property
+    def is_full(self) -> bool:
+        """No bound on either side (alignment is moot)."""
+        return self.left_bound is None and self.right_bound is None
+
+    @property
+    def is_causal(self) -> bool:
+        """Right bound 0, with or without a window."""
+        return self.right_bound == 0
+
+    @property
+    def is_real_band(self) -> bool:
+        """Neither causal nor full: a lookahead or a non-causal window."""
+        return not self.is_causal and not self.is_full
+
+    @property
+    def top_left(self) -> bool:
+        return self.alignment is Alignment.TOP_LEFT
+
+    @property
+    def kernel_right_bound(self) -> int:
+        """``UnifiedAttentionProblem.right_bound`` (-1 = unbounded)."""
+        return -1 if self.right_bound is None else self.right_bound
+
+
+def _implied_alignment(mask_type) -> Alignment:
+    """The alignment an unset ``diagonal_alignment`` stands for: the causal kinds
+    name their own, NO_MASK / SLIDING_WINDOW default to top-left (hipDNN)."""
+    try:
+        kind = _parse_attention_mask_type(mask_type)
+    except ValueError:
+        return Alignment.TOP_LEFT
+    return (
+        Alignment.BOTTOM_RIGHT
+        if kind == AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+        else Alignment.TOP_LEFT
+    )
+
+
+def normalize_band(
+    req: AttentionRequest, *, uniform_lengths: bool = False
+) -> AttentionBand:
+    """The one place a request's mask aliases are resolved. Raises ``ValueError``
+    (with the reason) for a request that names no valid band.
+
+    * Causal kinds fix the right bound at 0; the alignment comes from the kind.
+    * ``NO_MASK`` / ``SLIDING_WINDOW`` read the ``(sliding_window, right_bound,
+      diagonal_alignment)`` trio as given, so ``NO_MASK`` + window is a non-causal
+      left-only band (cuDNN semantics). ``SLIDING_WINDOW`` needs at least one bound.
+    * Arches without the band kernels serve ``NO_MASK`` by the legacy causal body
+      (``_has_no_mask_kernel``); see the known gap above.
+    * Full attention ignores the alignment, and with one query row per sequence
+      (``seqlen_q == 1``, single-token decode) it is the same computation as
+      bottom-right causal, so it is normalised to that.
+    * Top-left and bottom-right coincide when every sequence has ``q_len == kv_len``.
+      ``uniform_lengths`` (the dense kernel, which takes uniform lengths) folds them at
+      ``seqlen_q == seqlen_k``. The paged unified kernels do not: ``seqlen_q`` /
+      ``seqlen_k`` are batch maxima and the kernel derives ``context_len`` per
+      sequence at runtime. Arches without a top-left kernel
+      (``_has_no_mask_kernel``) fold regardless, which is only right for uniform
+      lengths: a known limitation.
+    """
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    right = int(req.right_bound)
+    alignment = req.diagonal_alignment
+    window = int(req.sliding_window)
+    if right < -1:
+        raise ValueError(f"right_bound must be >= -1 (-1 = unbounded), got {right}")
+    if alignment is not None and int(alignment) not in (0, 1):
+        raise ValueError(
+            f"diagonal_alignment must be 0 (TOP_LEFT) or 1 (BOTTOM_RIGHT), got {alignment}"
+        )
+    left_bound = window if window > 0 else None
+    if mask_type in (
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        if right not in (-1, 0):
+            raise ValueError(
+                "right_bound applies only to NO_MASK / SLIDING_WINDOW; the causal "
+                "mask kinds fix it at 0"
+            )
+        right_bound = 0
+        align = _implied_alignment(mask_type)
+        if alignment is not None and Alignment(int(alignment)) is not align:
+            raise ValueError(
+                f"diagonal_alignment={int(alignment)} contradicts mask_type "
+                f"{mask_type.name}, which is {align.name}; leave it unset"
+            )
+    else:
+        if mask_type == AttentionMaskType.SLIDING_WINDOW and window <= 0 and right <= 0:
+            raise ValueError(_BAND_NEEDS_BOUND_ERROR)
+        if not _has_no_mask_kernel(req.arch):
+            if mask_type == AttentionMaskType.NO_MASK and right == -1:
+                # KNOWN GAP (see above): the legacy causal body, window included.
+                return AttentionBand(left_bound, 0, Alignment.BOTTOM_RIGHT)
+            if right != 0:
+                raise ValueError(_BAND_GFX950_ONLY_ERROR)
+        right_bound = None if right < 0 else right
+        align = Alignment.TOP_LEFT if alignment is None else Alignment(int(alignment))
+    if left_bound is None and right_bound is None:
+        # Full attention: the alignment is moot; one query row sees every key.
+        return AttentionBand(
+            None, 0 if sq == 1 and not uniform_lengths else None, Alignment.BOTTOM_RIGHT
+        )
+    if sq == sk and (uniform_lengths or not _has_no_mask_kernel(req.arch)):
+        align = Alignment.BOTTOM_RIGHT
+    return AttentionBand(left_bound, right_bound, align)
+
+
+def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
+    """``(causal_top_left, right_bound)`` the unified kernels compute for ``req``.
+
+    Requests the unified family does not serve (other arches, and the explicit
+    ``window_*`` fields, which carry their own bounds) get the default mask: the
+    problem is then only a geometry carrier, e.g. for the gfx1151 launch grid.
+    """
+    explicit = req.window_left is not None or (
+        req.window_right is not None and int(req.window_right) >= 0
+    )
+    if not _uses_band_dispatch(req, explicit):
+        return False, 0
+    band = normalize_band(req)
+    return band.top_left, band.kernel_right_bound
+
+
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
+    top_left, right_bound = _attention_band(req)
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
         total_q=int(req.batch) * int(req.seqlen_q),
@@ -515,6 +796,8 @@ def _problem_with_num_cus(
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
+        causal_top_left=top_left,
+        right_bound=right_bound,
     )
 
 
@@ -529,10 +812,18 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     A tuning candidate already fixes path and geometry, so it does not consume
     the live-device CU heuristic used by production routing. Keep its base a
     pure function of the request: honor an explicit ``num_cus`` and otherwise
-    use the deterministic cross-compile fallback.
+    take the arch's full-part CU count (the static table the split-K heuristics
+    use). Only the split-rule segment count and the dispatcher's K/V layout
+    knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
+    from rocke.helpers.split_k import _ARCH_NUM_CUS
+
     num_cus = int(req.num_cus)
-    return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
+    if num_cus <= 0:
+        if req.arch not in _ARCH_NUM_CUS:
+            raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
+        num_cus = _ARCH_NUM_CUS[req.arch]
+    return _problem_with_num_cus(req, num_cus)
 
 
 # Shared pin-selector: identical across families, so it lives in the dispatch
@@ -566,6 +857,13 @@ class AttentionSpec:
     # ``attention_unified._d256_gfx950_spec_overrides``; the builder consumes them
     # via ``_tiled_spec_from_problem(problem, overrides=...)``.
     tiled_overrides: Tuple[Tuple[str, object], ...] = ()
+    # Band the kernel computes (see ``UnifiedAttentionProblem``): diagonal alignment
+    # and right bound. Top-left and a non-causal right bound are distinct kernel
+    # bodies, so they must not collapse onto the bottom-right kernel_name / cache key.
+    causal_top_left: bool = False
+    right_bound: int = 0
+    # Left bound, part of kernel_name() for every mask.
+    sliding_window: int = 0
 
     def kernel_name(self) -> str:
         if self.kernel_name_override:
@@ -582,6 +880,12 @@ class AttentionSpec:
         ]
         if self.use_fp8:
             parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
+        if self.causal_top_left:
+            parts.append("tl")
+        if self.right_bound != 0:
+            parts.append("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+        if self.sliding_window > 0:
+            parts.append(f"sw{self.sliding_window}")
         return kernel_name_join(*parts)
 
 
@@ -600,18 +904,23 @@ class AttentionTuningSpec:
     """Concrete dispatcher-owned spec for every executable tuned candidate.
 
     Generic production candidates intentionally return :class:`AttentionSpec`
-    and defer geometry. A unified tuning candidate or a dense candidate returns
-    this wrapper instead: the exact arch spec, builder choice, compile backend,
-    and optional 3D reduce spec are serializable and therefore participate in
-    dispatch/cache identity. ``path`` is ``"2d"`` / ``"3d"`` for the unified
-    tiled kernels and ``"dense"`` for the standalone dense kernel.
+    and defer geometry. A unified tuning candidate, a dense candidate or an RDNA
+    WMMA tuned candidate returns this wrapper instead: the exact arch spec,
+    builder choice, compile backend, and optional 3D reduce spec are
+    serializable and therefore participate in dispatch/cache identity. ``path``
+    is ``"2d"`` / ``"3d"`` for the unified tiled kernels, ``"dense"`` for the
+    standalone dense kernel, ``"wmma"`` for the RDNA WMMA prefill and
+    ``"wmma_decode"`` for the RDNA split-KV decode (decode + merge kernels).
 
-    It is also the whole launch contract the runtime needs:
-    ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
-    under :meth:`cache_key` and launches with :meth:`launch_grid` /
-    :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
-    dense runner reads ``kernel_spec`` directly. ``allow_unsupported`` skips the
-    unified runtime's problem-shape support check.
+    For the unified and dense paths it is also the whole launch contract the
+    runtime needs: ``run_unified_attention_torch(tuning_spec=...)`` compiles
+    :meth:`build` under :meth:`cache_key` and launches with :meth:`launch_grid`
+    / :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
+    RDNA ``"wmma"`` / ``"wmma_decode"`` specs launch through their candidate's
+    grid (``gfx1151.py``), which depends on the live device, so
+    :meth:`launch_grid` refuses them. The dense runner reads ``kernel_spec``
+    directly. ``allow_unsupported`` skips the unified runtime's problem-shape
+    support check.
 
     Two identities, for two consumers. ``tuning_id`` / ``config_key`` name the
     configuration -- ``variant_id`` plus the canonical ``knobs`` -- and are the
@@ -668,7 +977,8 @@ class AttentionTuningSpec:
         )
 
     def build(self, arch: str | None = None):
-        """IR for this spec: one kernel for 2D, ``(segment, reduce)`` for 3D."""
+        """IR for this spec: one kernel for 2D, dense and RDNA prefill;
+        ``(segment, reduce)`` for 3D; ``(decode, merge)`` for RDNA decode."""
         from .tuning_specs import (
             build_explicit_attention_2d,
             build_explicit_attention_3d,
@@ -679,6 +989,14 @@ class AttentionTuningSpec:
             return _dense_kernel_module(self.arch).build_attention_dense(
                 self.kernel_spec, arch=arch
             )
+        if self.path == "wmma":
+            from kernels.gfx1151.wmma_fmha_fwd_v2 import build_wmma_fmha_fwd_v2
+
+            return build_wmma_fmha_fwd_v2(self.kernel_spec, arch=arch)
+        if self.path == "wmma_decode":
+            from .gfx1151 import build_decode_kernels
+
+            return build_decode_kernels(self.kernel_spec, arch)
         if self.path == "3d":
             return build_explicit_attention_3d(
                 self.kernel_spec, self.reduce_spec, arch=arch
@@ -696,9 +1014,16 @@ class AttentionTuningSpec:
         if self.path == "dense":
             # The dense spec bakes (or declares) its whole problem shape.
             return tuple(_dense_kernel_module(self.arch).attention_dense_grid(ks))
+        if self.path in ("wmma", "wmma_decode"):
+            # The RDNA candidates own their launch grid (gfx1151.py).
+            raise ValueError(
+                f"{self.path!r} specs launch through their candidate's grid"
+            )
         if self.path == "3d":
+            from kernels.common.attention_unified import _num_q_blocks
+
             block_q = max(1, 16 // problem.num_queries_per_kv)
-            qblocks = problem.total_q // block_q + problem.num_seqs
+            qblocks = _num_q_blocks(problem, block_q, decode_grid=ks.use_decode_grid)
             return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
         if self.builder_kind == "gfx942_4warp_gqa":
             from kernels.common.attention_unified import gfx942_4warp_launch_grid
@@ -720,6 +1045,10 @@ class AttentionTuningSpec:
             return tuple(
                 _dense_kernel_module(self.arch).attention_dense_block(self.kernel_spec)
             )
+        if self.path == "wmma":
+            return (int(self.kernel_spec.threads), 1, 1)
+        if self.path == "wmma_decode":
+            return (int(self.kernel_spec.block_size), 1, 1)
         if self.path == "3d":
             return (64, 1, 1)
         if self.builder_kind == "gfx942_4warp_gqa":
