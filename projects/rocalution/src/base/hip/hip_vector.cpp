@@ -950,25 +950,27 @@ namespace rocalution
             ValueType* dres = NULL;
             allocate_hip(1, &dres);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTreduce(buffer,
                                size,
                                this->vec_,
                                dres,
                                this->size_,
-                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                __FILE__,
+                __LINE__);
 
             allocate_hip(size, &buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTreduce(buffer,
                                size,
                                this->vec_,
                                dres,
                                this->size_,
-                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+                               HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                __FILE__,
+                __LINE__);
 
             free_hip(&buffer);
 
@@ -1000,26 +1002,28 @@ namespace rocalution
             char*  buffer = NULL;
             size_t size   = 0;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTinclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
-                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                __FILE__,
+                __LINE__);
 
             allocate_hip(size, &buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTinclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
-                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                __FILE__,
+                __LINE__);
 
             free_hip(&buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -1055,26 +1059,28 @@ namespace rocalution
             char*  buffer = NULL;
             size_t size   = 0;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTexclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
-                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                __FILE__,
+                __LINE__);
 
             allocate_hip(size, &buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTexclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
-                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                __FILE__,
+                __LINE__);
 
             free_hip(&buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -1694,7 +1700,7 @@ namespace rocalution
             assert(cast_sort != NULL);
 
             char*  buffer = NULL;
-            size_t size;
+            size_t size   = 0;
 
             unsigned int begin_bit = 0;
             unsigned int end_bit   = 8 * sizeof(ValueType);
@@ -1702,29 +1708,31 @@ namespace rocalution
             if(cast_perm == NULL)
             {
                 // Sort without permutation
-                DISCARD_HIP_ERROR(rocprim::radix_sort_keys(
-                    buffer,
-                    size,
-                    this->vec_,
-                    cast_sort->vec_,
-                    this->size_,
-                    begin_bit,
-                    end_bit,
-                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                CHECK_HIP_STATUS(rocprim::radix_sort_keys(
+                                     buffer,
+                                     size,
+                                     this->vec_,
+                                     cast_sort->vec_,
+                                     this->size_,
+                                     begin_bit,
+                                     end_bit,
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                                 __FILE__,
+                                 __LINE__);
 
                 allocate_hip(size, &buffer);
 
-                DISCARD_HIP_ERROR(rocprim::radix_sort_keys(
-                    buffer,
-                    size,
-                    this->vec_,
-                    cast_sort->vec_,
-                    this->size_,
-                    begin_bit,
-                    end_bit,
-                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                CHECK_HIP_STATUS(rocprim::radix_sort_keys(
+                                     buffer,
+                                     size,
+                                     this->vec_,
+                                     cast_sort->vec_,
+                                     this->size_,
+                                     begin_bit,
+                                     end_bit,
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                                 __FILE__,
+                                 __LINE__);
 
                 free_hip(&buffer);
             }
@@ -1744,33 +1752,35 @@ namespace rocalution
                 CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
                 // Radix sort pairs
-                DISCARD_HIP_ERROR(rocprim::radix_sort_pairs(
-                    buffer,
-                    size,
-                    this->vec_,
-                    cast_sort->vec_,
-                    workspace,
-                    cast_perm->vec_,
-                    this->size_,
-                    begin_bit,
-                    end_bit,
-                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                CHECK_HIP_STATUS(rocprim::radix_sort_pairs(
+                                     buffer,
+                                     size,
+                                     this->vec_,
+                                     cast_sort->vec_,
+                                     workspace,
+                                     cast_perm->vec_,
+                                     this->size_,
+                                     begin_bit,
+                                     end_bit,
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                                 __FILE__,
+                                 __LINE__);
 
                 allocate_hip(size, &buffer);
 
-                DISCARD_HIP_ERROR(rocprim::radix_sort_pairs(
-                    buffer,
-                    size,
-                    this->vec_,
-                    cast_sort->vec_,
-                    workspace,
-                    cast_perm->vec_,
-                    this->size_,
-                    begin_bit,
-                    end_bit,
-                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                CHECK_HIP_STATUS(rocprim::radix_sort_pairs(
+                                     buffer,
+                                     size,
+                                     this->vec_,
+                                     cast_sort->vec_,
+                                     workspace,
+                                     cast_perm->vec_,
+                                     this->size_,
+                                     begin_bit,
+                                     end_bit,
+                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
+                                 __FILE__,
+                                 __LINE__);
 
                 free_hip(&buffer);
             }
