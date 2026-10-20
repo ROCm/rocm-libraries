@@ -72,9 +72,11 @@ filters = ["Smoke/IntegrationGpuConvFwd3dFp32.Correctness/*"]
 atol = 5e-5
 rtol = 1e-5
 
-# Bundle equivalent of the C++ 3D fp32 conv fwd override above
+# Bundle equivalent of the C++ 3D fp32 conv fwd override above. Case ids come from
+# reference-data-scripts/generate_conv_fwd_bundles.py:
+# <items>_3d_i<spatial>_n<N>c<C>k<K>_f<filter>_fp32_<layout>.
 [[tolerance_overrides]]
-filters = ["*_ConvolutionFwd_Default.*fp32_ncdhw*", "*_ConvolutionFwd_Default.*fp32_ndhwc*"]
+filters = ["*_ConvolutionFwd_Default.*_3d_*_fp32_*"]
 atol = 5e-5
 rtol = 1e-5
 

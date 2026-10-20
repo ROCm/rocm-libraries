@@ -51,6 +51,7 @@ scripts/                    verify_support_claims.py, harvest_support_claims.py 
 - [RFC 0006 — Plugin-Agnostic Integration Tests](../../projects/hipdnn/docs/rfcs/0006_PluginAgnosticIntegrationTests.md)
 - [RFC 0011 — Golden Reference Validation](../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md)
 - [RFC 0015 — Engine Support Claims](../../projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md)
+- [Per-op test plans](docs/test-plans/README.md): what each op's bundles must cover, and the plan-to-file mapping
 
 ## Project policies
 
