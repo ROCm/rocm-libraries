@@ -6304,6 +6304,20 @@ def build_gfx942_4warp_gqa(
         b.cmp_ge(qbase, qlen)
     ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
         b.ret()
+    # Rows past qlen are never stored, but their Q load must stay in bounds: clamp to the
+    # sequence's last token (once, outside the KV loop that reloads Q).
+    _last_tok = b.sub(cu_q_stop, b.const_i32(1))
+    if _FOLD:
+        # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS, head=m%FOLD_HEADS),
+        # head-fastest. Split by FOLD_HEADS (tile geometry); head BASE strides by GQAG.
+        _m = b.add(wq, ld.n_in_atom)
+        q_tok_c = b.smin(b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS))), _last_tok)
+        q_head_c = b.add(
+            b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
+        )
+    else:
+        q_tok_c = b.smin(b.add(b.add(qstart, wq), ld.n_in_atom), _last_tok)
+        q_head_c = qhead
 
     V_lds = b.smem_alloc(
         dtype, [64, HD], name_hint="Vlds"
@@ -6527,19 +6541,7 @@ def build_gfx942_4warp_gqa(
             koff = b.add(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
-            if _FOLD:
-                # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
-                # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
-                # geometry); head BASE strides by GQAG (the GQA group).
-                _m = b.add(wq, ld.n_in_atom)
-                _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
-                _hd = b.add(
-                    b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
-                )
-                q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
-            else:
-                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-                q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+            q_off, _ = q_desc.offset(b, token=q_tok_c, head=q_head_c, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
                 if HD128_PIPE:
