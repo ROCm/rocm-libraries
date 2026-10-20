@@ -230,7 +230,9 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
                              const char* b_cast_name);
 
 /* Emit the byte-identical text of an integer WMMA (iu8/iu4) call. Mirrors
- * Gfx11Backend._emit_wmma_int: signedA=1, signedB=1, clamp=0, no bitcast.
+ * Gfx11Backend._emit_wmma_int: signedA=1, signedB=1, clamp=0. `a_name` and
+ * `b_name` must already name <op_vec x i32> values; reinterpreting an operand
+ * of another shape is the lowerer's job (mma_operand in lower_llvm/mma.cpp).
  *   %<result_name> = call <acc_vec x i32> @<intrinsic>(
  *     i1 1, <op_vec x i32> a, i1 1, <op_vec x i32> b,
  *     <acc_vec x i32> c, i1 0)

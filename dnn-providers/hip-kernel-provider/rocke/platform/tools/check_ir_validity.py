@@ -150,6 +150,21 @@ def _llvm_tool(name: str) -> str | None:
         if raw:
             roots.append(Path(raw))
 
+    # Real ROCm installs, found without going through a loaded comgr. When the
+    # comgr that loaded is one bundled with another package (the ROCm torch
+    # wheel ships its own), no LLVM sits beside it, and stopping here would fall
+    # through to PATH -- typically a distro clang with no AMDGPU linker, the
+    # wrong-vintage toolchain this lookup exists to avoid.
+    try:
+        from rocke.runtime.runtime_coexistence import _rocm_root_libdirs
+
+        install_libdirs = _rocm_root_libdirs()
+    except (ImportError, OSError):  # rocke not importable here, or an unreadable /opt
+        install_libdirs = []
+    for libdir in install_libdirs:
+        libp = Path(libdir).resolve()
+        roots.extend(libp.parents[i] for i in range(min(3, len(libp.parents))))
+
     for root in roots:
         cand = root / "llvm" / "bin" / exe
         if _is_file(cand):

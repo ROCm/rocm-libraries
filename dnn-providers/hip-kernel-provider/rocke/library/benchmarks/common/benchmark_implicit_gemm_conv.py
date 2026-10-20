@@ -54,9 +54,9 @@ from typing import NamedTuple
 from typing import List
 
 # hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
-# is the only launch in this driver that can reach the limit. Mirrors
-# dispatch.grouped_convolution._MAX_GRID_DIM_Z -- this file is a standalone
-# sweep driver that deliberately does not import the dispatcher.
+# is the only launch in this driver that can reach the limit. The z extent is
+# a 16-bit field in the dispatch packet on every arch rocke targets, so this is
+# an architectural constant rather than a per-device query.
 _MAX_GRID_DIM_Z = 65535
 
 # Suppress the "fell back to Python lowerer" warning — expected in environments
@@ -66,9 +66,10 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # ---------------------------------------------------------------------------
 # Swept parameter grids
 #
-# All axes are imported from the AOT cache grid (kernel_sweep.py CACHE_*) so
-# the two stay in sync: a kernel found fastest by this JIT sweep will always
-# have a cached counterpart that --run-from-cache can offer.
+# All axes are imported from the AOT cache grid (the CACHE_* of
+# kernels.conv.aot_jobs) so the two stay in sync: a kernel found fastest
+# by this JIT sweep will always have a cached counterpart that --run-from-cache
+# can offer.
 #
 # gfx1250 extensions (tile=512, warp=16) go beyond what gfx950/942 can use
 # and are defined locally; they are skipped automatically by the spec
@@ -79,8 +80,8 @@ from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
     add_early_stop_arg,
 )
-from benchmarks.common.kernel_sweep import _AOT_ALIAS_PIPELINES  # noqa: E402
-from benchmarks.common.kernel_sweep import (  # noqa: E402
+from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
+from kernels.conv.aot_jobs import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
     CACHE_TILE_K as _TILE_K,
@@ -1520,6 +1521,10 @@ def main() -> int:
     # and both exiting 0, which reads as a successful run that found nothing.
     if args.csv_top < 1:
         print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
+        return 2
+
+    if args.ckprofiler is not None and args.ckprofiler_script is None:
+        print("error: --ckprofiler requires --ckprofiler-script", file=sys.stderr)
         return 2
 
     if args.streamk == "off" and (

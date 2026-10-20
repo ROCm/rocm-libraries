@@ -313,6 +313,12 @@ class TestCkTileGemmPipeline : public ::testing::Test
     static constexpr bool ClusterLaunch =
         ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
+    // Waves per block as ck_tile::sequence<M_Warp, N_Warp, K_Warp>
+    using BlockWarps = ck_tile::tuple_element_or_default_t<
+        Tuple,
+        16,
+        ck_tile::sequence<PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2, 2, 1>>;
+
     protected:
     // The kernel type the fixture instantiates for a given pad/preshuffle combination.
     // Factored out of invoke_gemm so host-side argument-validation tests can reach
@@ -320,7 +326,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     struct KernelFor
     {
-        // CompTDMProducerConsumer stays at [2, 2, 1] (4 consumer + 2 producer waves).
+        // CompTDMProducerConsumer stays at the default BlockWarps [2, 2, 1] (4 consumer + 2
+        // producer waves).
         //
         // [4, 4, 1] was tried as the default and REVERTED: it passes SingleTile (64x64x32 and
         // 128x128x64) on hardware and the host ring replay is sound at ring_spec<3, 2, 16> for
@@ -335,10 +342,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
         // that hangs takes the whole device with it. The hang was observed while
         // named_barrier.hpp was missing its release/acquire fences; those are restored now, so
         // re-testing [4, 4, 1] against the fenced build is the first step in root-causing it.
-        static constexpr ck_tile::index_t M_Warp =
-            PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2;
-        static constexpr ck_tile::index_t N_Warp = 2;
-        static constexpr ck_tile::index_t K_Warp = 1;
+        static constexpr ck_tile::index_t M_Warp = BlockWarps::at(ck_tile::number<0>{});
+        static constexpr ck_tile::index_t N_Warp = BlockWarps::at(ck_tile::number<1>{});
+        static constexpr ck_tile::index_t K_Warp = BlockWarps::at(ck_tile::number<2>{});
 
         static constexpr ck_tile::index_t kClusterSizeM = ClusterLaunch ? 2 : 1;
         static constexpr ck_tile::index_t kClusterSizeN = ClusterLaunch ? 2 : 1;
