@@ -18,14 +18,15 @@ namespace stinkytofu {
 // can not start before the barrier it reads behind (`start`, a WMMA index) and must be done
 // `drainWindows` WMMAs before the barrier it feeds (`end`; INT_MAX = the region end, which needs no
 // drain because the loop returns to its start). The loads of
-// a stage are spread evenly over the stage's batches: X = ceil(loads / batches). A sparse stage
-// gets a small X, so its loads leave room for stalls; a dense one an X above what one batch holds
-// at the LDS rate (the LDS credits then throttle it). A batch that began behind the stage's even
-// line (a dependency delayed its loads) may take `catchUp` more, so the stage closes the gap
-// gradually. A stage the drain leaves no room for (its end falls at or before its start) has one
-// batch: all its loads are released at once, as early as the graph lets them. Stages are paced
-// independently: two stages open at the same time each take their own share. Once the region's last
-// WMMA has issued nothing is held.
+// a stage are spread evenly over the stage's batches: by the end of batch k, ceil(loads * k /
+// batches) are placed (63 loads over 12 batches: 5 5 5 6 ...), so the last batch ends the stage. A
+// sparse stage gets a small quota, so its loads leave room for stalls; a dense one a quota above
+// what one batch holds at the LDS rate (the LDS credits then throttle it). A batch that began
+// behind the stage's even line (a dependency delayed its loads) may take `catchUp` more, so the
+// stage closes the gap gradually. A stage the drain leaves no room for (its end falls at or before
+// its start) has one batch: all its loads are released at once, as early as the graph lets them.
+// Stages are paced independently: two stages open at the same time each take their own quota. Once
+// the region's last WMMA has issued nothing is held.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -68,7 +69,6 @@ class DsSpreadPacer {
             ++stages_[it->second].total;
             stageOf_[l.nodeId] = it->second;
         }
-        for (Stage& st : stages_) st.share = (st.total + st.batches - 1) / st.batches;
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -83,13 +83,16 @@ class DsSpreadPacer {
         return active_;
     }
 
-    // Whether the ds_load may issue with `wmmaIssued` WMMAs of the region issued so far. The first
-    // load of a batch always may (a stage's share is at least 1).
+    // Whether the ds_load may issue with `wmmaIssued` WMMAs of the region issued so far.
     bool released(unsigned nodeId, int wmmaIssued) const {
         auto it = stageOf_.find(nodeId);
         if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return true;
         const Stage& st = stages_[it->second];
-        return st.batchIdx != batchOf(st, wmmaIssued) || st.inBatch < st.allow;
+        const int idx = batchOf(st, wmmaIssued);
+        if (idx >= st.batches)
+            return true;  // past the stage's end: what is left is late, not paced
+        const bool open = st.batchIdx == idx;  // the batch already took its first load
+        return (open ? st.inBatch : 0) < (open ? st.allow : allowFor(st, idx));
     }
 
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
@@ -101,8 +104,7 @@ class DsSpreadPacer {
         if (idx != st.batchIdx) {  // the allowance is set when a batch gets its first load
             st.batchIdx = idx;
             st.inBatch = 0;
-            const bool behind = st.issued < std::min(st.total, st.share * idx);
-            st.allow = st.share + (behind ? catchUp_ : 0);
+            st.allow = allowFor(st, idx);
         }
         ++st.inBatch;
         ++st.issued;
@@ -113,12 +115,24 @@ class DsSpreadPacer {
         int start = 0;    // WMMA index the stage opens at
         int batches = 1;  // batches between its start and its end minus the drain
         int total = 0;    // its loads
-        int share = 0;    // loads per batch on the even line
         int issued = 0;
         int batchIdx = -1;
         int inBatch = 0;
         int allow = 0;
     };
+
+    // Loads the even line has placed by the start of batch `idx`: ceil(total * idx / batches), so a
+    // stage of 63 loads over 12 batches takes 5 5 5 6 ... and ends with its last batch.
+    static int evenLine(const Stage& st, int idx) {
+        return std::min(st.total, (st.total * idx + st.batches - 1) / st.batches);
+    }
+
+    // The loads batch `idx` (inside the stage) may take: its slice of the even line, plus the
+    // catch-up step when the stage is behind that line.
+    int allowFor(const Stage& st, int idx) const {
+        const int quota = evenLine(st, idx + 1) - evenLine(st, idx);
+        return quota + (st.issued < evenLine(st, idx) ? catchUp_ : 0);
+    }
 
     // The stage's batch holding `wmmaIssued`. Counted from the stage's start, so every batch is a
     // full `batch_` WMMAs wide whatever WMMA index the barrier it waits behind sits at (the plan

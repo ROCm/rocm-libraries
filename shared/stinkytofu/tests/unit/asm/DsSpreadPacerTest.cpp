@@ -56,14 +56,21 @@ TEST(DsSpreadPacer, ADenseStageGetsAShareAboveWhatTheLdsRateFits) {
     EXPECT_EQ(issueBatch(p, 0, pending), 8);
 }
 
-TEST(DsSpreadPacer, TheShareDoesNotGrowWhileOnTheEvenLine) {
-    // 128 loads feeding a barrier at WMMA 109, 17 kept free: 23 batches, 6 per batch every batch.
+TEST(DsSpreadPacer, TheQuotaFollowsTheEvenLine) {
+    // 128 loads feeding a barrier at WMMA 109, 17 kept free: 23 batches on the even line, 5 or 6
+    // per batch (128 / 23 = 5.57), 56 placed after the first 10.
     Loads v;
     add(v, 128, 0, 0, 109);
     DsSpreadPacer p;
     p.plan(v, 109, 4, 2, 17);
     auto pending = ids(v);
-    for (int w = 0; w < 40; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 6) << "w=" << w;
+    int placed = 0;
+    for (int w = 0; w < 40; w += 4) {
+        const int n = issueBatch(p, w, pending);
+        EXPECT_TRUE(n == 5 || n == 6) << "w=" << w << " n=" << n;
+        placed += n;
+    }
+    EXPECT_EQ(placed, 56);
 }
 
 TEST(DsSpreadPacer, ABatchThatBeganBehindTakesExactlyTheShareAndTheCatchUpStep) {
@@ -131,6 +138,23 @@ TEST(DsSpreadPacer, TheDrainEndsAStageEarlier) {
     p.plan(v, 32, 4, 0, /*drain=*/8);
     auto pending = ids(v);
     for (int w = 0; w < 24; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 2) << "w=" << w;
+    EXPECT_TRUE(pending.empty());
+}
+
+TEST(DsSpreadPacer, AStageEndsWithItsLastBatch) {
+    // 63 loads over 12 batches (48 WMMAs): 5 5 5 6 repeating, all placed by the last batch.
+    Loads v;
+    add(v, 63, 0, 0, 48 + 17);
+    DsSpreadPacer p;
+    p.plan(v, 128, 4, 0, 17);
+    auto pending = ids(v);
+    int total = 0;
+    for (int w = 0; w < 48; w += 4) {
+        const int n = issueBatch(p, w, pending);
+        EXPECT_TRUE(n == 5 || n == 6) << "w=" << w << " n=" << n;
+        total += n;
+    }
+    EXPECT_EQ(total, 63);
     EXPECT_TRUE(pending.empty());
 }
 

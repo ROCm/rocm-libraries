@@ -2552,12 +2552,12 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
         }
         return best;
     };
-    // Greedy bursts the loads; the spread keeps them at most two to a window and finishes the
-    // last one about a ds return latency before the region's last WMMA.
+    // Greedy bursts the loads; the spread keeps them at most two to a window and, with no barrier
+    // ahead of the loads, spreads them to the region's end (no drain there).
     EXPECT_GE(longestRun(shapes[0]), 5u) << shapes[0];
     EXPECT_LE(longestRun(shapes[1]), 2u) << shapes[1];
     EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8);
-    EXPECT_LT(shapes[1].find_last_of('d') + 9, shapes[1].size()) << shapes[1];
+    EXPECT_GE(shapes[1].find_last_of('d') + 10, shapes[1].size()) << shapes[1];
 }
 
 // Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.
