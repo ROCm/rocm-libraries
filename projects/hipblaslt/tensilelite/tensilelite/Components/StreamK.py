@@ -1064,11 +1064,13 @@ class StreamK(TileProcessingStrategy):
         if isStreamKSpatialCluster(kernel):
             module.add(SCmpEQU32(src0=sgpr("SizesSum+%u" % writer.states.unrollIdx), src1=0, comment="Empty summation"))
             module.add(SCSelectB32(dst=sgpr(loopCounterName), src0=0, src1=sgpr(loopCounterName), comment="K=0 stores without compute"))
-        # Short circuit if alpha==0 (set loopCounter to 0 to skip main loop)
-        alphaLabel2 = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
-        module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel2))
-        module.add(SMovB32(dst=sgpr(loopCounterName), src=0, comment="Skip iterations"))
-        module.add(alphaLabel2)
+        # Input-bias gradients reduce raw A/B even when GEMM alpha is zero.
+        if not self.hasInputBiasPartials(kernel):
+            # Short circuit if alpha==0 (set loopCounter to 0 to skip main loop)
+            alphaLabel2 = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
+            module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel2))
+            module.add(SMovB32(dst=sgpr(loopCounterName), src=0, comment="Skip iterations"))
+            module.add(alphaLabel2)
 
         # Adjust loop count for tail loop
         if not kernel["NoTailLoop"]:
@@ -1578,9 +1580,8 @@ class StreamK(TileProcessingStrategy):
 
     @staticmethod
     def hasInputBiasPartials(kernel):
-        problem = kernel["ProblemType"]
-        return (isStreamKSpatialCluster(kernel) and problem["Gradient"]
-                and problem["UseBias"] and problem["BiasSrc"] in ("A", "B"))
+        return (isStreamKSpatialCluster(kernel)
+                and TileProcessingStrategy.needsInputBiasReduction(kernel))
 
     def inputBiasPartials(self, writer, kernel, logicalProducer, *, reduce=False):
         """Publish or accumulate the input-bias LDS payload in the tree handshake.
@@ -3300,29 +3301,31 @@ class StreamKTwoTileDPFirst(StreamK):
         # Map SK index to WG
         module.add(self.tileIndexToWorkGroup(writer, kernel, sTmp))
 
-        # Short circuit if alpha==0 (skip main loop and reading A/B, only do beta * C)
-        # To skip main loop in stream-k, we check if this WG is responsible for writing results (ie: WG starts tile)
-        # If WG starts tile then set LocalEnd=ItersPerTile to skip fixup step, and set loopCounter to 0 to skip main loop
-        # If WG does not start tile, skip to end of persistent loop to check for other SK tile
-        alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
-        module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
-        # Skip to end if not doing the global write
-        module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
-        skCloseLoopLabel = Label("PersistentLoopClose", "")
-        if isStreamKSpatialCluster(kernel) and kernel["ClusterBarrier"]:
-            alphaOwner = Label(writer.labels.getNameInc("SKClusterAlphaOwner"), "")
-            module.add(SCBranchSCC1(labelName=alphaOwner.getLabelName()))
-            module.add(SBarrier(True, True, True, comment="alpha-zero nonowner consumes cluster arrive"))
-            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
-            module.add(alphaOwner)
-        else:
-            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
-        sIpt = writer.acquirePersistentConstSgpr(kernel, "ItersPerTile")
-        if writer.isPersistentConstantsToVgprEnabled(kernel):
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs["ItersPerTile"])))
-        module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
-        writer.releasePersistentConstSgpr(sIpt)
-        module.add(alphaLabel)
+        # Every input-bias producer must retain its K interval and tree role.
+        if not self.hasInputBiasPartials(kernel):
+            # Short circuit if alpha==0 (skip main loop and reading A/B, only do beta * C)
+            # To skip main loop in stream-k, we check if this WG is responsible for writing results (ie: WG starts tile)
+            # If WG starts tile then set LocalEnd=ItersPerTile to skip fixup step, and set loopCounter to 0 to skip main loop
+            # If WG does not start tile, skip to end of persistent loop to check for other SK tile
+            alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
+            module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
+            # Skip to end if not doing the global write
+            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+            skCloseLoopLabel = Label("PersistentLoopClose", "")
+            if isStreamKSpatialCluster(kernel) and kernel["ClusterBarrier"]:
+                alphaOwner = Label(writer.labels.getNameInc("SKClusterAlphaOwner"), "")
+                module.add(SCBranchSCC1(labelName=alphaOwner.getLabelName()))
+                module.add(SBarrier(True, True, True, comment="alpha-zero nonowner consumes cluster arrive"))
+                module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+                module.add(alphaOwner)
+            else:
+                module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+            sIpt = writer.acquirePersistentConstSgpr(kernel, "ItersPerTile")
+            if writer.isPersistentConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs["ItersPerTile"])))
+            module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
+            writer.releasePersistentConstSgpr(sIpt)
+            module.add(alphaLabel)
 
         writer.sgprPool.checkIn(sTmp)
 

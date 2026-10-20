@@ -50,6 +50,13 @@ def test_input_bias_gradient_completion_assembles(tmp_path, strategy, source):
         assert error == 0
         assert_assembles(assembly, name)
         bias_store = assembly.index("global store bias")
+        # A/B bias sums use raw inputs even when GEMM alpha is zero. Neither
+        # the prologue nor the StreamK activation/main-loop setup may skip K.
+        compute_setup = assembly[:assembly.index("tensor_load_to_lds")]
+        assert "SKAlphaCheck" not in compute_setup
+        assert "PersistentAlphaCheck" not in compute_setup
+        assert "Set summation dim=0 if Alpha == 0" not in compute_setup
+        assert "Skip iterations" not in compute_setup
         if strategy == "DataParallel":
             assert "publish input bias partial" not in assembly
             continue
@@ -126,3 +133,24 @@ def test_output_bias_gradient_intermediate_and_reduction_helper(tmp_path, strate
         if strategy == "StreamK":
             assert assembly.index("flag offset based on physical partial slot") < first_store
             assert "publish input bias partial" not in assembly
+
+
+@pytest.mark.parametrize("source", ["A", "B"])
+def test_alpha_zero_hardware_config_assembles_all_variants(tmp_path, source):
+    root = Path(tensile_file).parent
+    config = yaml.safe_load((root / "Tests/common/streamk/gfx1250/persistent_input_bias_alpha0.yaml").read_text())
+    config["BenchmarkProblems"] = [entry for entry in config["BenchmarkProblems"]
+                                   if entry[0]["BiasSrc"] == source]
+    path = tmp_path / "alpha_zero.yaml"
+    path.write_text(yaml.safe_dump(config))
+    results = emit_kernels_from_config(str(path), limit=4, arch="gfx1250", canonical=False)
+    assert len(results) == 4, "both persistent strategies and prefetch depths must generate"
+    for name, assembly, error in results:
+        assert error == 0
+        assert_assembles(assembly, name)
+        assert "global store bias" in assembly
+        compute_setup = assembly[:assembly.index("tensor_load_to_lds")]
+        assert "SKAlphaCheck" not in compute_setup
+        assert "PersistentAlphaCheck" not in compute_setup
+        assert "Set summation dim=0 if Alpha == 0" not in compute_setup
+        assert "Skip iterations" not in compute_setup

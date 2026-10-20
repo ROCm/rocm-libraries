@@ -1,0 +1,84 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Input-bias gradients sum raw A/B independently of GEMM alpha: bias must be K
+# for these all-one inputs, while D = beta*C = 1. Run this config twice:
+# TENSILE_PERSISTENT_FIXED_GRID=4  gives one logical cluster (whole-block K),
+# TENSILE_PERSISTENT_FIXED_GRID=16 gives four logical clusters (split K).
+# The K=31 and K=0 cases always exercise whole-block completion. K=1031 adds
+# a tail to the split reduction; ragged M/N and batching exercise its owners.
+# DataParallel covers the same full-K input reduction without split fixup.
+# Base gfx1250 only, matching the existing input-bias gradient support.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a,
+          skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950,
+          skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+          skip-gfx1100, skip-gfx1101, skip-gfx1102,
+          skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters:
+  Architecture: gfx1250
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: false
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+  DataInitTypeC: 1
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 0
+  DataInitTypeBeta: 1
+  ForceGenerateKernel: true
+  CpuThreads: 8
+  PrintLevel: 1
+  NumWarmups: 1
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  PrintSolutionRejectionReason: true
+BenchmarkProblems:
+- - &input_bias
+    OperationType: GEMM
+    DataType: h
+    DestDataType: h
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    Gradient: true
+    UseBias: 1
+    BiasSrc: A
+  - &streamk
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+    - DepthU: [64]
+    - Groups:
+      - - TileProcessingStrategy: StreamK
+          StreamKFixupTreeReduction: 1
+        - TileProcessingStrategy: DataParallel
+          StreamKFixupTreeReduction: 0
+    - WorkAssignment: [StaticGrid]
+    - ClusterDim: [[2, 2]]
+    - TDMInst: [3]
+    - WavefrontSize: [32]
+    - GlobalSplitU: [0]
+    - StaggerU: [0]
+    - PrefetchGlobalRead: [1, 2]
+    - PrefetchLocalRead: [1]
+    - ForceDisableShadowInit: [false]
+    - ScheduleIterAlg: [0]
+    - SourceSwap: [false]
+    - ExpandPointerSwap: [false]
+    - 1LDSBuffer: [0]
+    - PrefetchAcrossPersistent: [0]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [16, 16, 1, 1024]
+      - Exact: [17, 17, 2, 1031]
+      - Exact: [17, 17, 1, 31]
+      - Exact: [17, 17, 2, 0]
+    - BiasTypeArgs: [s]
+- - <<: *input_bias
+    BiasSrc: B
+  - *streamk
