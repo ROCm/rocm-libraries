@@ -3471,6 +3471,495 @@ constexpr auto histogram_config_picker() ->
     return histogram_config_params_base<value_type, channels, active_channels>();
 }
 
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
+template<class Target, class value_type, unsigned int channels, unsigned int active_channels>
+constexpr auto histogram_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, histogram_config_params>
+{
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'channels': '1', 'active_channels': '1', 'block_size_x': 64, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8) && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 64, 4 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'channels': '2', 'active_channels': '2', 'block_size_x': 256, 'ipt': 8, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8) && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 256, 8 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'channels': '3', 'active_channels': '3', 'block_size_x': 256, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8) && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 256, 3 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'channels': '4', 'active_channels': '4', 'block_size_x': 128, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8) && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 128, 4 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'channels': '4', 'active_channels': '3', 'block_size_x': 128, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8) && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 4 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int64_t', 'channels': '1', 'active_channels': '1', 'block_size_x': 128, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 128, 2 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int64_t', 'channels': '2', 'active_channels': '2', 'block_size_x': 64, 'ipt': 5, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 64, 5 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int64_t', 'channels': '3', 'active_channels': '3', 'block_size_x': 256, 'ipt': 1, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 256, 1 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int64_t', 'channels': '4', 'active_channels': '4', 'block_size_x': 256, 'ipt': 1, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 256, 1 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int64_t', 'channels': '4', 'active_channels': '3', 'block_size_x': 128, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 3 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int', 'channels': '1', 'active_channels': '1', 'block_size_x': 128, 'ipt': 8, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 128, 8 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int', 'channels': '2', 'active_channels': '2', 'block_size_x': 256, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 256, 3 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int', 'channels': '3', 'active_channels': '3', 'block_size_x': 64, 'ipt': 1, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 64, 1 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int', 'channels': '4', 'active_channels': '4', 'block_size_x': 128, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 128, 2 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int', 'channels': '4', 'active_channels': '3', 'block_size_x': 128, 'ipt': 1, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 1 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'short', 'channels': '1', 'active_channels': '1', 'block_size_x': 64, 'ipt': 6, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1) && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 64, 6 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'short', 'channels': '2', 'active_channels': '2', 'block_size_x': 256, 'ipt': 8, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1) && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 256, 8 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'short', 'channels': '3', 'active_channels': '3', 'block_size_x': 64, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1) && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 64, 4 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'short', 'channels': '4', 'active_channels': '4', 'block_size_x': 64, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1) && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 64, 2 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'short', 'channels': '4', 'active_channels': '3', 'block_size_x': 64, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1) && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 64, 4 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int8_t', 'channels': '1', 'active_channels': '1', 'block_size_x': 128, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+     && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 128, 3 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int8_t', 'channels': '2', 'active_channels': '2', 'block_size_x': 256, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+     && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 256, 2 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int8_t', 'channels': '3', 'active_channels': '3', 'block_size_x': 256, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+     && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 256, 2 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int8_t', 'channels': '4', 'active_channels': '4', 'block_size_x': 256, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+     && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 256, 3 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'int8_t', 'channels': '4', 'active_channels': '3', 'block_size_x': 128, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+     && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 2 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'double', 'channels': '1', 'active_channels': '1', 'block_size_x': 256, 'ipt': 16, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 256, 16 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'double', 'channels': '2', 'active_channels': '2', 'block_size_x': 64, 'ipt': 8, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 64, 8 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'double', 'channels': '3', 'active_channels': '3', 'block_size_x': 256, 'ipt': 1, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 256, 1 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'double', 'channels': '4', 'active_channels': '4', 'block_size_x': 64, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 64, 4 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'double', 'channels': '4', 'active_channels': '3', 'block_size_x': 128, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4) && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 3 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'float', 'channels': '1', 'active_channels': '1', 'block_size_x': 64, 'ipt': 5, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 64, 5 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'float', 'channels': '2', 'active_channels': '2', 'block_size_x': 64, 'ipt': 3, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 64, 3 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'float', 'channels': '3', 'active_channels': '3', 'block_size_x': 128, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 4 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'float', 'channels': '4', 'active_channels': '4', 'block_size_x': 64, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 64, 4 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'float', 'channels': '4', 'active_channels': '3', 'block_size_x': 128, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2) && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 4 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::half', 'channels': '1', 'active_channels': '1', 'block_size_x': 64, 'ipt': 9, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 3}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+     && (channels == 1) && (active_channels == 1)))
+    {
+        return histogram_config_params{ { 64, 9 },
+                        2048,
+                        2048,
+                        3,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::half', 'channels': '2', 'active_channels': '2', 'block_size_x': 64, 'ipt': 5, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+     && (channels == 2) && (active_channels == 2)))
+    {
+        return histogram_config_params{ { 64, 5 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::half', 'channels': '3', 'active_channels': '3', 'block_size_x': 128, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 2}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+     && (channels == 3) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 128, 4 },
+                        2048,
+                        2048,
+                        2,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::half', 'channels': '4', 'active_channels': '4', 'block_size_x': 256, 'ipt': 4, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+     && (channels == 4) && (active_channels == 4)))
+    {
+        return histogram_config_params{ { 256, 4 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // CONFIG: {'value_type': 'rocprim::half', 'channels': '4', 'active_channels': '3', 'block_size_x': 256, 'ipt': 2, 'max_grid_size': 2048, 'shared_impl_max_bins': 2048, 'shared_impl_histograms': 4}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+     && (channels == 4) && (active_channels == 3)))
+    {
+        return histogram_config_params{ { 256, 2 },
+                        2048,
+                        2048,
+                        4,
+                        {1024, 4}};
+    }
+    // Default case if none of the conditions match
+    return histogram_config_params_base<value_type, channels, active_channels>();
+}
+
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class value_type, unsigned int channels, unsigned int active_channels>
 constexpr auto histogram_config_picker() -> 
@@ -3487,6 +3976,7 @@ using histogram_targets = comp_targets<
     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

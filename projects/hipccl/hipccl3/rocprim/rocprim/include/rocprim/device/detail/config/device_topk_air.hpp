@@ -3561,6 +3561,593 @@ constexpr auto topk_air_config_picker() ->
     return topk_air_config_params_base<key_type, value_type, size_type>();
 }
 
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
+template<class Target, 
+    class key_type, class value_type, class size_type
+>
+constexpr auto topk_air_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, topk_air_config_params>
+{
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
+    if constexpr(
+    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>)
+)
+    {
+        return topk_air_config_params{
+        { 256, 10 },
+        8,
+        256,
+        32
+    };
+    }
+    // Default case if none of the conditions match
+    return topk_air_config_params_base<key_type, value_type, size_type>();
+}
+
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, 
     class key_type, class value_type, class size_type
@@ -3577,6 +4164,7 @@ using topk_air_targets = comp_targets<
     comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
     comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

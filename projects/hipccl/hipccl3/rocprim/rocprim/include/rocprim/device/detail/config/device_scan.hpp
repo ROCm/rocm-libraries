@@ -917,6 +917,111 @@ constexpr auto scan_config_picker() ->
     return scan_config_params_base<value_type>();
 }
 
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
+template<class Target, class value_type>
+constexpr auto scan_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, scan_config_params>
+{
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 14, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8)))
+    {
+        return scan_config_params{ { 256, 14 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::using_warp_scan,
+                    128 };
+    }
+    // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4)))
+    {
+        return scan_config_params{ { 256, 24 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::using_warp_scan,
+                    128 };
+    }
+    // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 64}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2)))
+    {
+        return scan_config_params{ { 256, 24 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::reduce_then_scan,
+                    64 };
+    }
+    // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 128}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1)))
+    {
+        return scan_config_params{ { 256, 24 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::reduce_then_scan,
+                    128 };
+    }
+    // CONFIG: {'value_type': 'int8_t', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 128}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+    ))
+    {
+        return scan_config_params{ { 256, 24 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::using_warp_scan,
+                    128 };
+    }
+    // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 17, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::using_warp_scan', 'lookback_scan_state_alignment': 64}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4)))
+    {
+        return scan_config_params{ { 256, 17 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::using_warp_scan,
+                    64 };
+    }
+    // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 23, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 128}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2)))
+    {
+        return scan_config_params{ { 256, 23 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::reduce_then_scan,
+                    128 };
+    }
+    // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 256, 'ipt': 24, 'block_load_method': '::rocprim::block_load_method::block_load_transpose', 'block_store_method': '::rocprim::block_store_method::block_store_transpose', 'block_scan_algo': '::rocprim::block_scan_algorithm::reduce_then_scan', 'lookback_scan_state_alignment': 64}
+    if constexpr(
+    (bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    ))
+    {
+        return scan_config_params{ { 256, 24 },
+                    ::rocprim::block_load_method::block_load_transpose,
+                    ::rocprim::block_store_method::block_store_transpose,
+                    ::rocprim::block_scan_algorithm::reduce_then_scan,
+                    64 };
+    }
+    // Default case if none of the conditions match
+    return scan_config_params_base<value_type>();
+}
+
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class value_type>
 constexpr auto scan_config_picker() -> 
@@ -934,6 +1039,7 @@ using scan_targets = comp_targets<
     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

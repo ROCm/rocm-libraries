@@ -3951,6 +3951,495 @@ constexpr auto radix_sort_onesweep_config_picker() ->
     return radix_sort_onesweep_config_params_base<key_type, value_type>();
 }
 
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
+template<class Target, class key_type, class value_type>
+constexpr auto radix_sort_onesweep_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, radix_sort_onesweep_config_params>
+{
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 4, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 4 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 4, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 4 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 4, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 4 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'short', 'block_size_x': 1024, 'ipt': 4, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 4 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'int8_t', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 16, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 16 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int', 'block_size_x': 512, 'ipt': 16, 'sort_block_size_x': 512, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 16 },
+    kernel_config_params{ 512, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'short', 'block_size_x': 512, 'ipt': 18, 'sort_block_size_x': 512, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 18 },
+    kernel_config_params{ 512, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'int8_t', 'block_size_x': 512, 'ipt': 16, 'sort_block_size_x': 512, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 16 },
+    kernel_config_params{ 512, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 12, 'sort_block_size_x': 512, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 12 },
+    kernel_config_params{ 512, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 18, 'sort_block_size_x': 1024, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 18 },
+    kernel_config_params{ 1024, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 16, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 16 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 18, 'sort_block_size_x': 1024, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 18 },
+    kernel_config_params{ 1024, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'short', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 22, 'sort_block_size_x': 1024, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 22 },
+    kernel_config_params{ 1024, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 1024, 'ipt': 8, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 8 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'short', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 22, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 22 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 6, 'sort_block_size_x': 1024, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 6 },
+    kernel_config_params{ 1024, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 22, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 22 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'short', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 22, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 22 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 8, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 8 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 16, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 16 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'short', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 16, 'sort_block_size_x': 1024, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 16 },
+    kernel_config_params{ 1024, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 12, 'sort_block_size_x': 512, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 12 },
+    kernel_config_params{ 512, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 8, 'sort_block_size_x': 1024, 'sort_ipt': 6, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 8 },
+    kernel_config_params{ 1024, 6 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 18, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 18 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'short', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'int8_t', 'block_size_x': 512, 'ipt': 16, 'sort_block_size_x': 512, 'sort_ipt': 16, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 16 },
+    kernel_config_params{ 512, 16 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 1024, 'ipt': 16, 'sort_block_size_x': 1024, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 16 },
+    kernel_config_params{ 1024, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 4, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 4 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int64_t', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 8, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 8 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int', 'block_size_x': 1024, 'ipt': 22, 'sort_block_size_x': 1024, 'sort_ipt': 22, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 22 },
+    kernel_config_params{ 1024, 22 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'short', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 22, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 22 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'int8_t', 'block_size_x': 512, 'ipt': 32, 'sort_block_size_x': 512, 'sort_ipt': 22, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 1) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 512, 32 },
+    kernel_config_params{ 512, 22 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 1024, 'ipt': 32, 'sort_block_size_x': 1024, 'sort_ipt': 12, 'radix_bits': 8, 'algo': 'block_radix_rank_algorithm::match'}
+    if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+    {
+        return radix_sort_onesweep_config_params{
+    kernel_config_params{ 1024, 32 },
+    kernel_config_params{ 1024, 12 },
+    8,
+    block_radix_rank_algorithm::match
+};
+    }
+    // Default case if none of the conditions match
+    return radix_sort_onesweep_config_params_base<key_type, value_type>();
+}
+
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class key_type, class value_type>
 constexpr auto radix_sort_onesweep_config_picker() -> 
@@ -3967,6 +4456,7 @@ using radix_sort_onesweep_targets = comp_targets<
     comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

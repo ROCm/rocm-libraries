@@ -599,6 +599,55 @@ constexpr auto transform_pointer_config_picker() ->
     return transform_config_params_base<value_type>();
 }
 
+// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
+template<class Target, class value_type>
+constexpr auto transform_pointer_config_picker() -> 
+    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, transform_config_params>
+{
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 1, 'load_type': '::rocprim::load_nontemporal'}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 16)
+    && (sizeof(value_type) > 8)))
+    {
+        return transform_config_params{ { 64, 1 }, ::rocprim::load_nontemporal };
+    }
+    // CONFIG: {'value_type': 'int64_t', 'block_size_x': 512, 'ipt': 2, 'load_type': '::rocprim::load_nontemporal'}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 8)
+    && (sizeof(value_type) > 4)))
+    {
+        return transform_config_params{ { 512, 2 }, ::rocprim::load_nontemporal };
+    }
+    // CONFIG: {'value_type': 'int', 'block_size_x': 512, 'ipt': 4, 'load_type': '::rocprim::load_nontemporal'}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 4)
+    && (sizeof(value_type) > 2)))
+    {
+        return transform_config_params{ { 512, 4 }, ::rocprim::load_nontemporal };
+    }
+    // CONFIG: {'value_type': 'short', 'block_size_x': 768, 'ipt': 8, 'load_type': '::rocprim::load_nontemporal'}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 2)
+    && (sizeof(value_type) > 1)))
+    {
+        return transform_config_params{ { 768, 8 }, ::rocprim::load_nontemporal };
+    }
+    // CONFIG: {'value_type': 'int8_t', 'block_size_x': 64, 'ipt': 16, 'load_type': '::rocprim::load_nontemporal'}
+    if constexpr(
+    (!bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= 1)
+    ))
+    {
+        return transform_config_params{ { 64, 16 }, ::rocprim::load_nontemporal };
+    }
+    // Default case if none of the conditions match
+    return transform_config_params_base<value_type>();
+}
+
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class value_type>
 constexpr auto transform_pointer_config_picker() -> 
@@ -615,6 +664,7 @@ using transform_pointer_targets = comp_targets<
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
+    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
