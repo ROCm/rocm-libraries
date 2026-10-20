@@ -680,6 +680,16 @@ def _direct_flush_acc(b, p_dtype, acc_src, d_rsrc, safe_off, c0, accs_flat, flat
     accs_flat[flat] = zero_acc
 
 
+def _direct_conv_h_loop_setup(b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0):
+    """Shared H-streaming-loop preamble: prologue prefetch, unroll count, trip count."""
+    store_to_lds(issue_dram_load(c0), A_smem)
+    b.sync()
+    UNROLL = direct_row_loop_unroll(p.KH)
+    c_unroll = b.const_i32(UNROLL)
+    n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+    return UNROLL, c_unroll, n_iters_v
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -1065,31 +1075,9 @@ def build_direct_conv_16c(
     # offset=-PAD, lo=0, hi=H) flips the validity to false; the loader
     # then replaces the byte offset with the OOB sentinel + zero-fill
     # so the prologue effectively zero-fills A_smem for iter 0.
-    store_to_lds(issue_dram_load(c0), A_smem)
-    b.sync()
-
-    # ---- the H-row streaming loop ----
-    # Streams input rows y = 0 .. H + KH - 2. Each input row contributes to
-    # KH accumulator slots; slot ``(y - (KH-1)) % KH`` is complete at the end
-    # of iteration y and is flushed to D when that row maps to a real output
-    # row.
-    #
-    # AOT: H is a kernarg, so the row count is runtime. Two things in the body
-    # are build-time-periodic and would break under a runtime induction
-    # variable -- the LDS ping-pong (period 2, and an LDS allocation cannot be
-    # selected by a runtime index) and the accumulator slot rotation (period
-    # KH). Unrolling the body lcm(2, KH) times aligns both periods with the
-    # body boundary: the step is a multiple of KH, so the loop variable is
-    # always 0 mod KH at the top and every buffer choice and slot index inside
-    # reduces to a Python constant again.
-    #
-    # The trip count rounds up, so the last body may run past H + KH - 2.
-    # That costs nothing and needs no guard: the A descriptor's
-    # ``0 <= h < H`` bound zero-fills those loads, and the flush predicate
-    # below drops any row outside ``[0, H)``.
-    UNROLL = direct_row_loop_unroll(p.KH)
-    c_unroll = b.const_i32(UNROLL)
-    n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
+        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    )
 
     # Output descriptor: D[N, Ho, Wo, total_k] in NHWK. Built ONCE outside
     # the loop so each iteration only pays one ``d_desc.offset`` emission.
@@ -1903,18 +1891,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         vec = b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=4)
         return b.select(lane_in_lo_half, vec, fp16x4_zero)
 
-    # Prologue: prefetch row 0 into A_smem.
-    store_to_lds(issue_dram_load(c0), A_smem)
-    b.sync()
-
-    # ---- the H-row streaming loop ----
-    # AOT: H is a kernarg. The body is unrolled lcm(2, KH) times so the LDS
-    # ping-pong (period 2) and the accumulator slot rotation (period KH) both
-    # line up with the body boundary and stay Python constants while y is
-    # runtime. See direct_row_loop_unroll.
-    UNROLL = direct_row_loop_unroll(p.KH)
-    c_unroll = b.const_i32(UNROLL)
-    n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
+        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    )
 
     d_desc = direct_d_descriptor_dynamic(b, params)
 
@@ -2320,16 +2299,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
 
     q_subtiles = BLOCK_Q // 32
 
-    store_to_lds(issue_dram_load(c0), A_smem)
-    b.sync()
-
-    # ---- the H-row streaming loop ----
-    # AOT: H is a kernarg. The body is unrolled lcm(2, KH) times so the LDS
-    # ping-pong (period 2) and the accumulator slot rotation (period KH) both
-    # line up with the body boundary. See direct_row_loop_unroll.
-    UNROLL = direct_row_loop_unroll(p.KH)
-    c_unroll = b.const_i32(UNROLL)
-    n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
+        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    )
 
     d_desc = direct_d_descriptor_dynamic(b, params)
 
