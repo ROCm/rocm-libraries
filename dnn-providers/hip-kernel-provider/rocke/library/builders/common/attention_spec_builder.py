@@ -21,7 +21,6 @@ from kernels.common.attention_unified import (
     _enable_combo_2d,
     _enable_early_v_schedule,
     _enable_fp8_mfma_qk,
-    _enable_gfx942_3d_invariant_hoist,
     _enable_gfx942_3d_wide_kv_load,
     _enable_gfx942_bf16_flash,
     _enable_gfx942_flash_k_sliced_ldsseq,
@@ -49,6 +48,9 @@ from kernels.common.attention_unified import (
     _gfx942_flash_use_cfvst,
     _gfx942_flash_use_single_buffer,
     _gfx942_flash_wide_setting,
+    _gfx950_3d_tile_size_override,
+    _kv_cache_policy_3d,
+    _kv_lds_swizzle_3d,
     _kv_storage_dtype,
     _num_segments,
     _resolve_gfx1250_tiled3d,
@@ -60,6 +62,8 @@ from kernels.common.attention_unified import (
     _select_gfx942_flash_num_warps,
     _tiled_2d_impl,
     _tiled_3d_impl,
+    _use_decode_grid,
+    _wave_page_id_load_3d,
 )
 
 # Imported as a module (not a bound symbol) so tests that
@@ -296,6 +300,8 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
     _spec = UnifiedAttention2DTiledSpec(
         **_base_2d_generic_fields(problem, arch),
         **_schedule_fields,
+        causal_top_left=problem.causal_top_left,
+        right_bound=problem.right_bound,
     )
     if _kau._d256_gfx950_fast(problem, arch):
         # D256 gfx950 bf16 prefill fast route -- pins the 32x32 transposed + FA3
@@ -365,7 +371,11 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
     dispatcher identity + C++ parity unchanged.
     """
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
-    tile_size_override = _gfx942_3d_tile_size_override(problem, arch)
+    tile_size_override = (
+        _gfx950_3d_tile_size_override(problem, arch)
+        if arch == "gfx950"
+        else _gfx942_3d_tile_size_override(problem, arch)
+    )
     return UnifiedAttention3DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -382,9 +392,22 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         waves_per_eu=_select_3d_waves_per_eu(problem, arch),
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size_override=tile_size_override,
-        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem, arch),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        use_decode_grid=_use_decode_grid(problem, arch),
+        **(
+            {
+                "kv_cache_policy": _kv_cache_policy_3d(problem, arch),
+                "use_kv_lds_swizzle": _kv_lds_swizzle_3d(problem, arch),
+                "use_wave_page_id_load": _wave_page_id_load_3d(problem, arch),
+            }
+            if arch in ("gfx942", "gfx950")
+            else {}
+        ),
+        # Only the gfx950 spec class declares these; the 3D tiled gate rejects any
+        # non-default mask on every other arch before a spec is built.
+        **({"causal_top_left": True} if problem.causal_top_left else {}),
+        **({"right_bound": problem.right_bound} if problem.right_bound != 0 else {}),
     )
 
 

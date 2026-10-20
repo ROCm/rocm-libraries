@@ -39,7 +39,7 @@ The catalog currently contains the following operation IDs.
   - f16: `wmma_f32_16x16x16_f16`
   - bf16: `wmma_f32_16x16x16_bf16`
   - integer: `wmma_i32_16x16x16_iu4`, `wmma_i32_16x16x16_iu8`
-- **`gfx1201` (wave32)**
+- **`gfx1201` and `gfx12-generic` (wave32)**
   - f16: `wmma_gfx12_f32_16x16x16_f16`
   - bf16: `wmma_gfx12_f32_16x16x16_bf16`
 - **`gfx1250` (wave32)**
@@ -128,6 +128,8 @@ and exact gfx targets.
 | `build_unified_attention_2d_fastkv_register_p` | [L/gfx950/attention_tiled_2d_fastkv_regp.py](../../../library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py) | tiled attention with register-resident probability fragments | MFMA plus VALU softmax | `gfx950` |
 | `build_attention_dense` | [L/gfx950/attention_dense.py](../../../library/kernels/gfx950/attention_dense.py) | dense attention | target-specific MFMA plus VALU softmax | `gfx950` |
 | `build_wmma_fmha_fwd` | [L/gfx1151/wmma_fmha_fwd.py](../../../library/kernels/gfx1151/wmma_fmha_fwd.py) | forward attention | target-catalog WMMA QK/PV plus VALU softmax | `gfx1151` or validator-accepted compatible target |
+| `build_wmma_fmha_fwd_v2` | [L/gfx1151/wmma_fmha_fwd_v2.py](../../../library/kernels/gfx1151/wmma_fmha_fwd_v2.py) | forward attention (prefill) | multi-wave WMMA QK/PV with one query row per lane, shared LDS K/V, VALU softmax | `gfx11-generic` / `gfx12-generic` or a validator-accepted gfx11/gfx12 target |
+| `build_wmma_fmha_decode`, `build_wmma_fmha_decode_module` | [L/gfx1151/wmma_fmha_decode.py](../../../library/kernels/gfx1151/wmma_fmha_decode.py) | split-KV decode attention plus merge | GQA-packed WMMA QK/PV, VALU softmax, LSE merge | `gfx11-generic` / `gfx12-generic` or a validator-accepted gfx11/gfx12 target |
 | `build_wmma_attention_fwd` | [L/gfx1250/wmma_attention_fwd.py](../../../library/kernels/gfx1250/wmma_attention_fwd.py) | forward attention | target-catalog WMMA QK/PV plus VALU softmax | `gfx1250` |
 | `build_fmha_fwd_mfma` | [L/common/fmha_mfma.py](../../../library/kernels/common/fmha_mfma.py) | forward attention | validator-selected matrix MMA QK/PV plus VALU softmax | owning validator |
 | `build_fmha_fwd_varlen` | [L/common/fmha_varlen.py](../../../library/kernels/common/fmha_varlen.py) | variable-length forward attention | current matrix MMA QK/PV body | owning validator |

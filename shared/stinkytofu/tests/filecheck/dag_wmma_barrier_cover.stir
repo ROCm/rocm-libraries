@@ -1,0 +1,63 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --wmma-batch-size=4 --ds-spread --debug-pass StinkyDAGSchedulerPass --print-output 2>&1
+#
+# A ready barrier waits for the WMMA queue to cover its stall (WmmaBarrierCoverCycles, automatic:
+# a tail of 4 WMMAs, 32 cycles) instead of issuing the moment its threshold is met, so the queued
+# WMMAs hide the barrier stall:
+#
+#   wmma wmma ds ds wmma wmma wmma barrier
+#
+# 24 independent WMMAs are available and the barrier threshold is 18. The barrier issues after 22
+# WMMAs with 37 cycles queued (36 for the second half of the pair), the cover met. The 25th WMMA
+# reads the post-barrier ds_loads, so it cannot be used for cover.
+#
+# CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=37
+# CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=36
+#
+# The barrier pair still precedes the ds_loads that read the data it protects.
+# CHECK-LABEL: @barrier_cover
+# CHECK: s_barrier_signal
+# CHECK: s_barrier_wait
+# CHECK: ds_load_b128
+
+st.func @barrier_cover() {
+^entry:
+  v[50:53] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[54:57] = "st.buffer_load_b128"(v8, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[58:61] = "st.buffer_load_b128"(v9, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[62:65] = "st.buffer_load_b128"(v9, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.ds_store_b128"(v10, v[50:53]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b128"(v10, v[54:57]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0, 1] } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0, 1] } }
+  v[20:23] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:27] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[30:33] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[34:37] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[100:107] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[100:107]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[108:115] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[108:115]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[116:123] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[116:123]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[124:131] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[124:131]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[132:139] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[132:139]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[140:147] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[140:147]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[148:155] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[148:155]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[156:163] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[156:163]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[164:171] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[164:171]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[172:179] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[172:179]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[180:187] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[180:187]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[188:195] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[188:195]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[196:203] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[196:203]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[204:211] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[204:211]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[212:219] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[212:219]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[220:227] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[220:227]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[228:235] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[228:235]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[236:243] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[236:243]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[244:251] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[244:251]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[252:259] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[252:259]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[260:267] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[260:267]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[268:275] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[268:275]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[276:283] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[276:283]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[284:291] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[284:291]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

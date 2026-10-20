@@ -479,3 +479,27 @@ def test_mma_naming_without_target_lookup():
                 )
                 result = b.mma(arg, a, a, c, *extra)
                 assert result.name.lstrip("%").startswith(hint)
+
+
+def test_rdna_integer_wmma_rows_name_i8_and_i4():
+    # The instruction names keep "iu8"/"iu4"; the operand dtypes are i8/i4, and only
+    # i8/i4 select the ops ("iu8"/"iu4" are not dtypes).
+    for gfx in ("gfx1151", "gfx11-generic"):
+        mma = ArchTarget.from_gfx(gfx).mma
+        for op_id, dtype, old in (
+            ("wmma_i32_16x16x16_iu8", "i8", "iu8"),
+            ("wmma_i32_16x16x16_iu4", "i4", "iu4"),
+        ):
+            op = mma.by_op_id(op_id)
+            assert (op.a_dtype, op.b_dtype, op.c_dtype) == (dtype, dtype, "i32")
+            for spelling, want in ((dtype, op_id), (old, None)):
+                found = mma.op_for_shape(
+                    family="wmma",
+                    a_dtype=spelling,
+                    b_dtype=spelling,
+                    c_dtype="i32",
+                    m=16,
+                    n=16,
+                    k=16,
+                )
+                assert (found and found.op_id) == want
