@@ -566,6 +566,17 @@ def _direct_dgrad_params_read(params):
     return A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
 
 
+def _direct_conv_tid_decode(b, c_wave, WAVE):
+    """Shared lane decomposition: c_half, oob_sentinel, zero_f32, tid, wave_id, lane."""
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    zero_f32 = b.const_f32(0.0)
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    lane = b.mod(tid, c_wave)
+    return c_half_bytes, oob_sentinel, zero_f32, tid, wave_id, lane
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -6324,13 +6335,7 @@ def build_direct_depthwise(
     c_wave = b.const_i32(WAVE)
     c_W = params["p_Wo"]  # output-width bound for the store guard (runtime)
     c_groups = params["p_groups"]
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-    zero_f32 = b.const_f32(0.0)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
-    lane = b.mod(tid, c_wave)
+    c_half_bytes, oob_sentinel, zero_f32, tid, wave_id, lane = _direct_conv_tid_decode(b, c_wave, WAVE)
 
     # Grid layout: bx = W-tile, by = channel-tile, bz = batch.
     bx = b.block_id_x()
@@ -6827,13 +6832,7 @@ def build_direct_depthwise_tiled(
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
     c_wave = b.const_i32(WAVE)
-    c_half = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-    zero_f32 = b.const_f32(0.0)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
-    lane = b.mod(tid, c_wave)
+    c_half, oob_sentinel, zero_f32, tid, wave_id, lane = _direct_conv_tid_decode(b, c_wave, WAVE)
 
     # Grid: bx = W tile, by = channel tile, bz = n * n_h_tiles + h tile. The
     # row-tile count follows the runtime output height.
@@ -7599,13 +7598,7 @@ def build_direct_depthwise_spatial(
     c_wave = b.const_i32(WAVE)
     c_groups = params["p_groups"]
     c_Wo = params["p_Wo"]  # output-width bound for the store guard (runtime)
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-    zero_f32 = b.const_f32(0.0)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
-    t_in_wave = b.mod(tid, c_wave)
+    c_half_bytes, oob_sentinel, zero_f32, tid, wave_id, t_in_wave = _direct_conv_tid_decode(b, c_wave, WAVE)
 
     ch = b.mod(t_in_wave, c_groups)
     w_in_wave = b.div(t_in_wave, c_groups)
