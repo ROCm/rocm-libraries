@@ -45,7 +45,7 @@ from builders.common.conv_reference import wgrad_reference as _wgrad_reference_s
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
 # ---------------------------------------------------------------------------
 
-from benchmarks.common.direct_kernel_sweep import (
+from kernels.conv.direct_aot_jobs import (
     BLOCK_GROUPS as _BLOCK_GROUPS,
     BLOCK_Q as _BLOCK_Q,
     DGRAD_BLOCK_H as _DGRAD_BLOCK_H,
@@ -123,6 +123,7 @@ class DepthwiseResult:
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",  # rejected — fp32 not supported
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "int8",  # rejected — int8 not supported
@@ -147,6 +148,10 @@ def parse_miopen_cmd_direct(cmd: str):
     driver_kw = None
     driver_idx = None
     for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
         key = t.split("/")[-1].lower()
         if key in _MIOPEN_DTYPE_MAP:
             driver_kw = key
@@ -233,16 +238,18 @@ def parse_miopen_cmd_direct(cmd: str):
             f"-F {miopen_args.forw}, -g {groups})"
         )
 
+    # The direct kernels take one stride and one padding for both axes;
+    # substituting the H value for W would run, and report, another problem.
     sH = miopen_args.sH
     if miopen_args.sH != miopen_args.sW:
-        print(
-            f"[warn] sH={miopen_args.sH} != sW={miopen_args.sW}; using sH={miopen_args.sH}",
-            file=sys.stderr,
+        raise ValueError(
+            f"direct conv takes one stride for both axes "
+            f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
     if miopen_args.pH != miopen_args.pW:
-        print(
-            f"[warn] pH={miopen_args.pH} != pW={miopen_args.pW}; using pH={miopen_args.pH}",
-            file=sys.stderr,
+        raise ValueError(
+            f"direct conv takes one padding for both axes "
+            f"(got -p {miopen_args.pH} -q {miopen_args.pW})"
         )
 
     from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -2180,7 +2187,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
@@ -2552,7 +2559,7 @@ def main() -> int:
 
     args = parser.parse_args()
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
     if args.dtype is None:
@@ -2660,16 +2667,13 @@ def main() -> int:
             )
             return 2
 
-        if args.sH != args.sW:
+        if args.sH != args.sW or args.pH != args.pW:
             print(
-                f"warning: sH={args.sH} != sW={args.sW}; using sH={args.sH}",
+                f"error: direct conv takes one stride and one padding for both "
+                f"axes (got sH={args.sH} sW={args.sW} pH={args.pH} pW={args.pW})",
                 file=sys.stderr,
             )
-        if args.pH != args.pW:
-            print(
-                f"warning: pH={args.pH} != pW={args.pW}; using pH={args.pH}",
-                file=sys.stderr,
-            )
+            return 2
 
         problem = DirectConvProblem(
             N=args.N,

@@ -36,6 +36,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
 )
 
 if(NOT WIN32)
