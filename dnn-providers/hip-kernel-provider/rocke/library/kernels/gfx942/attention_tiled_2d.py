@@ -5944,11 +5944,18 @@ def _build_gfx942_4warp_gqa_lean(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # The last KV tile can extend past klen (BN > klen % BN), so its tail keys map
+    # to logical blocks at or past cdiv(klen, BS) -- outside this sequence's
+    # block-table row. Clamp to the row's last valid entry: those keys are masked
+    # (key_g >= klen), so only the address must stay in bounds.
+    bt_last = b.sub(
+        b.div(b.add(klen, b.const_i32(BS - 1)), b.const_i32(BS)), b.const_i32(1)
+    )
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        blk = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        blk = b.select(b.cmp_lt(bt_last, blk), bt_last, blk)
+        lblk = b.add(b.mul(sid, bt_stride_p), blk)
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
@@ -6293,11 +6300,18 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # The last KV tile can extend past klen (BN > klen % BN), so its tail keys map
+    # to logical blocks at or past cdiv(klen, BS) -- outside this sequence's
+    # block-table row. Clamp to the row's last valid entry: those keys are masked
+    # (key_g >= klen), so only the address must stay in bounds.
+    bt_last = b.sub(
+        b.div(b.add(klen, b.const_i32(BS - 1)), b.const_i32(BS)), b.const_i32(1)
+    )
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        blk = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        blk = b.select(b.cmp_lt(bt_last, blk), bt_last, blk)
+        lblk = b.add(b.mul(sid, bt_stride_p), blk)
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
