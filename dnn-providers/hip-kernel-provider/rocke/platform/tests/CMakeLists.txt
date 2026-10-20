@@ -165,6 +165,22 @@ if(BUILD_TESTING)
                  rocke_tanh_lowering)
   endif()
 
+  # Fenced barriers (fence attr of tile.sync / sync_lds_only / s_barrier_bare).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_barrier_fence.cpp")
+    add_executable(rocke_barrier_fence core/test_barrier_fence.cpp)
+    target_link_libraries(rocke_barrier_fence PRIVATE rocke_core)
+    add_test(NAME rocke_barrier_fence COMMAND rocke_barrier_fence)
+    set_tests_properties(rocke_barrier_fence
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_barrier_fence)
+    set_target_properties(rocke_barrier_fence
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_barrier_fence
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_barrier_fence)
+  endif()
+
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_xf32_bf16x3_lowering.cpp")
     add_executable(rocke_xf32_bf16x3_lowering core/test_xf32_bf16x3_lowering.cpp)
