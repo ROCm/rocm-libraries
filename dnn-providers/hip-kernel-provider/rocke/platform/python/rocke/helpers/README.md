@@ -87,7 +87,8 @@ rocke/helpers/
 │ # descriptor + per-lane offset emitter for the
 │ # high-bandwidth FP8 / BF8 GEMM path.
 ├── spec.py # IOSpecRule + validate_io, SignatureBuilder,
-│ # kernel_name_join, ceil_div_grid -- spec/signature/grid
+│ # kernel_name_join, ceil_div_grid, ceil_div / align_up,
+│ # non_default_fields / salted_kernel_name -- spec/signature/grid
 │ # scaffolding so each instance file is ~10 lines of glue.
 │
 │ # Kernel-shape abstractions (GEMM / conv / attention infrastructure).
@@ -105,6 +106,8 @@ rocke/helpers/
 ├── attention.py # Attention2DConfig, OnlineSoftmaxState, PagedKvDescriptor,
 │ # warp_xor_reduce_*, dtype MFMA dispatch, log2 softcap,
 │ # causal/sliding-window masks, select_*d_config.
+├── attention_fwd_ext.py # AttnFwdExt: opt-in hooks / tail guards for the MFMA+WMMA forward body
+├── attention_band.py # AttnRuntimeBounds / BandEmitter / I32_FAR: runtime two-sided band (shell-side)
 ├── compile.py # compile_kernel() one-shot IR -> HSACO
 └── manifest.py # make_gemm_manifest, make_conv_manifest,
  # make_simple_op_manifest, write_artifact
@@ -998,7 +1001,7 @@ configs = [
 @functools.lru_cache(maxsize=None) # cache the compiled launcher
 def _build(cfg):
  k = build_universal_gemm(cfg.spec)
- ir = lower_kernel_to_llvm(k)
+ ir = lower_kernel_to_llvm(k, arch="gfx950")
  hsaco, _ = build_hsaco_from_llvm_ir(ir)
  return KernelLauncher(hsaco=hsaco, kernel_name=k.name,
  signature=gemm_args_signature()), cfg.spec

@@ -211,7 +211,7 @@ the same operand ABI on either target. Such a row carries an `emulation` descrip
 into; its fragment lengths and layout maps are inherited from that atom, and
 the catalog refuses a row whose physical atom is not a native atom of the same arch.
 The lowering reinterprets the TF32 payload as FP32 and splits it, so no payload bit is
-dropped; see the [emulation plan](../architecture/xf32_bf16x3_emulation_plan.md).
+dropped; see the [emulation description](../architecture/xf32_bf16x3_emulation.md).
 
 See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 for the distinction between raw FP32 payloads and explicit RNE preparation,

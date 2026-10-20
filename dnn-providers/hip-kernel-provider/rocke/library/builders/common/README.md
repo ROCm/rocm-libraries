@@ -76,10 +76,41 @@ All remaining shapes.  Key knob decisions:
   `use_dtla_prefetch`, `use_ds_tr_reads`, `use_fused_reduce`, `use_dpp_softmax`, …).
 * **gfx942 / gfx950 (default)**: `_num_segments`, `_select_3d_waves_per_eu`,
   `_kv_storage_dtype`, `_gfx942_3d_tile_size_override`,
-  `_enable_gfx942_3d_invariant_hoist`, `_enable_gfx942_3d_wide_kv_load`,
-  `_enable_i64_kv_addr`.
+  `_gfx950_3d_tile_size_override`, `_enable_gfx942_3d_wide_kv_load`,
+  `_enable_i64_kv_addr`, `_use_decode_grid`, `_kv_cache_policy_3d`,
+  `_kv_lds_swizzle_3d`, `_wave_page_id_load_3d`.
 
 ### Knob reference
+
+Tiled-3D knobs (gfx942 and gfx950 split-KV segment kernel) come first; the
+Knob Catalog in `platform/dsl_docs/optimization/optimization_runbook.md`
+(§12.1.K2) lists them with the other 3D fields.
+
+**`kv_cache_policy`** (3D) — Cache policy of the K/V copies, by the same names
+as the 2D field. `_kv_cache_policy_3d` picks `"stream"` (non-temporal) when every
+sequence decodes: each K/V byte is read once, so caching it only evicts other
+data. The fp8 K/V loader keeps `"all"`; the gfx942 wide loader takes `"all"` or
+`"stream"`.
+
+**`use_kv_lds_swizzle`** (3D) — Stores each K/V LDS row's 16-byte chunks
+XOR-permuted by the row, which spreads the QK and PV reads over the LDS banks.
+The copies fetch permuted source chunks, so the tiles need no padding. fp16/bf16
+K/V, paged or strided. Selected by `_kv_lds_swizzle_3d`.
+
+**`use_wave_page_id_load`** (3D) — The wave loads the segment's page-table
+entries 64 at a time, one per lane, and each tile reads its page ids from those
+registers, so no page-table load sits on the KV loop's critical path. Paged
+fp16/bf16 K/V. Selected by `_wave_page_id_load_3d`; the decode split rule in
+`_num_segments` assumes it where both apply.
+
+**`use_decode_grid`** (3D) — One CTA per sequence along grid x when every
+sequence has one query token, instead of the prefill upper bound and a search
+over `query_start_len`. Derived from the problem by `_use_decode_grid`, not a
+tuning knob; it stays a spec field because the binary and the launch grid differ.
+
+**`tile_size_override`** (gfx950 3D) — A multiple of the page size: each loop
+iteration gathers several pages. `_gfx950_3d_tile_size_override` uses it for
+decode with too few CTAs to fill the device, together with the K/V LDS swizzle.
 
 **`use_transposed_half_local_pv`** — Rewrites the PV phase of the transposed
 32x32 kernel so each 32-lane warp-half reads only the P rows it owns,
