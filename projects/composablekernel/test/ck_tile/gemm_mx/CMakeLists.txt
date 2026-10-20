@@ -38,3 +38,12 @@ if(GPU_TARGETS MATCHES "gfx125")
         endif()
     endforeach()
 endif()
+
+if(GPU_TARGETS MATCHES "gfx95|gfx125")
+    # Host-only: the MX test helpers (6-bit fillers, E8M0 scales, tolerance). They serve the MX GEMM
+    # tests of both gfx95 and gfx125, so they are built for either.
+    add_gtest_executable(test_ck_tile_mx_gemm_host_helpers test_mx_gemm_host_helpers.cpp)
+    if(TARGET test_ck_tile_mx_gemm_host_helpers)
+        target_compile_options(test_ck_tile_mx_gemm_host_helpers PRIVATE ${TEST_MX_GEMM_COMPILE_OPTIONS})
+    endif()
+endif()
