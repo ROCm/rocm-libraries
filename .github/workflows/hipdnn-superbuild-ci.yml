@@ -24,8 +24,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Two layers of filtering:
+  #  1. The trigger-level `paths:` keeps this workflow off PRs that touch
+  #     neither hipDNN nor its providers (hipBLASLt-only, MIOpen-only, ...).
+  #  2. Within a PR that does match, this job skips the builds when every
+  #     changed hipDNN/provider file is documentation. A skipped build job
+  #     counts as passing, and the summary job below still reports, so a
+  #     docs-only PR never sits at "Expected - Waiting for status".
+  # Docs cannot be excluded in layer 1: a workflow skipped by `paths:` never
+  # reports a status at all.
+  changes:
+    name: Detect hipDNN changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+    steps:
+      # No checkout: on pull_request, paths-filter reads the changed-file list
+      # from the GitHub REST API (hence `pull-requests: read`), and the filters
+      # are inline.
+
+      # Schedule and manual dispatch always build; only PRs are filtered.
+      # `every` makes a file count only if it matches all patterns: inside the
+      # first (brace) pattern, and none of the exclusions. Docs-only PRs (RFCs,
+      # READMEs, guides) therefore do not run the superbuild; a PR that also
+      # touches any non-doc file still does.
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '!**/*.md'
+              - '!**/*.rst'
+              - '!projects/hipdnn/docs/**'
+              - '!dnn-providers/**/docs/**'
+
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -315,6 +358,8 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-linux-scale-rocm
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
@@ -582,6 +627,7 @@ jobs:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
+      - changes
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
     runs-on: ubuntu-24.04

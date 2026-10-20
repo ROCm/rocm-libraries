@@ -57,6 +57,8 @@ _METADATA_NAME_TO_SEMANTIC = {
     "ComputeUnits":           "ComputeUnits",
     "AddressScaleA":          "AddressScaleA",
     "AddressScaleB":          "AddressScaleB",
+    "AddressScaleZeroA":      "AddressScaleZeroA",
+    "groupSize":              "ScaleBlockSizeA",
     "AddressScaleC":          "AddressScaleC",
     "AddressScaleD":          "AddressScaleD",
     "AddressMXScaleA":        "AddressMXScaleA",
@@ -386,7 +388,13 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
             f"section to custom.config."
         )
 
-    args = [_metadataArgToCustomArg(a, kernelName) for a in kernelMeta[".args"]]
+    metadataArgs = kernelMeta[".args"]
+    args = [_metadataArgToCustomArg(a, kernelName) for a in metadataArgs]
+    if args and args[-1]["semantic"] == "ScaleBlockSizeA":
+        last = metadataArgs[-1]
+        padding = kernelMeta[".kernarg_segment_size"] - last[".offset"] - last[".size"]
+        if padding:
+            args[-1]["padding"] = padding
 
     # UseUniversalArgs kernels expect a header (GemmInfo, InternalArgs, ...) at
     # the start of the kernel argument buffer, followed by the data args.  The
