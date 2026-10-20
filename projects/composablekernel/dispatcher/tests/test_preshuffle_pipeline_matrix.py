@@ -21,7 +21,7 @@ from gemm_utils import expand_sweep
 from ctypes_utils import validate_kernel_config, _parse_gemm_header_metadata
 from unified_gemm_codegen import CKTileKernelGenerator, GemmVariant, KernelNaming, UnifiedGemmCodegen
 from gemm_instance_builder import GemmKernelBuilder
-from gemm_full_benchmark import resolve_configs
+from gemm_full_benchmark import _resolve_arch, resolve_configs
 from gemm_validation_utils import validate_gemm_preshuffle_warp_tile_combination
 
 CONFIG = CK_ROOT / 'tile_engine/ops/gemm/gemm_preshuffle/configs/default_config_gfx1250.json'
@@ -119,13 +119,12 @@ def test_gfx1250_feature_suffix_does_not_disable_warp_validation():
 
 
 def test_arch_default_and_explicit_config_selection():
-    args = SimpleNamespace(configs=[], variant='gemm_preshuffle', arch='gfx1250:xnack-')
-    assert resolve_configs(args) == [str(CONFIG)]
+    args = SimpleNamespace(configs=[], variant='gemm_preshuffle', dtype='fp16')
+    assert resolve_configs(args, _resolve_arch('gfx1250:xnack-')) == [str(CONFIG)]
     args.configs = ['custom.json']
-    assert resolve_configs(args) == ['custom.json']
+    assert resolve_configs(args, 'gfx1250') == ['custom.json']
     args.configs = []
-    args.arch = 'gfx950'
-    assert Path(resolve_configs(args)[0]).name == 'default_ci_config.json'
+    assert Path(resolve_configs(args, 'gfx950')[0]).name == 'default_ci_config.json'
 
 
 @pytest.mark.parametrize('pipeline', ['comp_tdm', 'comp_tdm_v2', 'preshuffle_tdm', 'comp_async'])

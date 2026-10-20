@@ -38,14 +38,14 @@ import json
 from contextlib import contextmanager
 import os.path
 
-from Tensile.Common.Utilities import _global_ti
-from Tensile.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
-from Tensile.Common.RegisterPool import allocTmpGpr
-from Tensile.Common.Types import IsaVersion
-from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Common.Utilities import _global_ti
+from tensilelite.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
+from tensilelite.Common.RegisterPool import allocTmpGpr
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def record_num_calls(f):
     @wraps(f)
@@ -645,7 +645,7 @@ def kernel_rodata(name: str, gfx_arch: Tuple[int, int, int]):
         header += f'.amdhsa_accum_offset 8\n'
     header += f'.amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n'
     header += f'.amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n'
-    if _global_ti.getArchCaps()["HasWave32"]:
+    if _global_ti.getArchCaps()["HasWavefrontSize32Directive"]:
         header += f'.amdhsa_wavefront_size32 1\n'
     header += f'.end_amdhsa_kernel\n'
     return header

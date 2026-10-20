@@ -71,7 +71,6 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
-#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
 
 namespace stinkytofu {
@@ -172,16 +171,21 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             PassFeatureConfig passFeatureConfig;
             if (runScheduler) {
                 passFeatureConfig.loopConfig.unrollGemm = true;
-                passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
                 passFeatureConfig.dagFeatures.distributeGlobalRead = true;
                 passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
-                passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
-                    moduleOptions.DsReadThrottleTransitionFactor;
-                passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
-                    moduleOptions.DsReadThrottleTransitionEntries;
                 passFeatureConfig.dagFeatures.tensorLoadWmmaSpace =
                     moduleOptions.TensorLoadWmmaSpace;
+                passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
+                    moduleOptions.TensorLoadDsLoadGapCycles;
+                passFeatureConfig.dagFeatures.wmmaQueueDepth = moduleOptions.WmmaQueueDepth;
+                passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
+                    moduleOptions.WmmaQueueCoverCycles;
+                passFeatureConfig.dagFeatures.wmmaRefillMode =
+                    static_cast<PassFeatureConfig::WmmaRefillMode>(moduleOptions.WmmaRefillMode);
+                passFeatureConfig.dagFeatures.wmmaBatchSize =
+                    std::max(1, moduleOptions.WmmaBatchSize);
+                passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
@@ -190,7 +194,21 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // cluster-barrier.md).
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
-                applyResolvedSchedulingKnobs(passFeatureConfig, resolvedKnobs);
+                passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
+                passFeatureConfig.dagFeatures.dsSpread = moduleOptions.DsSpread;
+                passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
+                    moduleOptions.WmmaBarrierCoverCycles;
+                passFeatureConfig.dagFeatures.dsCatchUpPace = moduleOptions.DsCatchUpPace;
+                passFeatureConfig.dagFeatures.dsBatchWmmas = moduleOptions.DsBatchWmmas;
+                passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
+                    moduleOptions.DsReadCyclesPerLoad;
+                // The hold mirrors InsertWaitAlu, which only runs with ESM2.
+                passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
+                    moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
+                passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
+                passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
+                    moduleOptions.PrefetchLeadMinStageWmmas;
+                passFeatureConfig.dagFeatures.warGateWmmas = moduleOptions.WarGateWmmas;
                 if (moduleOptions.DsReadOrder >= 0)
                     passFeatureConfig.dagFeatures.dsReadOrder =
                         static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
@@ -211,17 +229,11 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 WaitCntInsertionOptions waitCntOptions;
                 waitCntOptions.enableLoopCarriedTokenDeps =
                     moduleOptions.EnableLoopCarriedTokenDeps;
+                // A deep WMMA queue issues WMMAs back-to-back: one wait before the first.
+                waitCntOptions.mergeWaitsInWmmaRuns =
+                    moduleOptions.WmmaQueueDepth > 1 && moduleOptions.WmmaQueueCoverCycles > 0;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
-            }
-
-            // The wait insertion above leaves each final wait immediately before the
-            // WMMA that consumes its loads, so that WMMA has nothing to issue behind
-            // it. Repair moves this many non-WMMA instructions past each anchor to
-            // refill those slots, without changing any wait immediate.
-            const int waitRepairSlotsAfterAnchor = 1;
-            if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
-                innerPM.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
             }
 
             pm.addPass(createKernelToRegionsPassAdaptor(
@@ -297,9 +309,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // Whole-kernel expert SCHED_MODE=2: wait-alu insertion + mode2 enable.
     if (moduleOptions.EnableESM2) {
         mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
-        mpm.addPass(createInsertWaitAluModulePass({moduleOptions.EnableESM2TrackValuVsrc,
-                                                   /*sharedOrderCountFollowers=*/true,
-                                                   /*xdlCountFromNextWmma=*/true}));
+        mpm.addPass(createInsertWaitAluModulePass(
+            gfx1250InsertWaitAluOptions(moduleOptions.EnableESM2TrackValuVsrc)));
     }
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));

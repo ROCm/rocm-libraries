@@ -6,6 +6,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
+  dirty-buffer check for the handle's inter-workgroup flag buffers, which their
+  kernels must leave at zero (`1`, `on` or `true` to enable; anything else
+  disables). It scans the whole `Synchronizer` buffer used by GSU
+  MultipleBufferSingleKernel and amaxD, and the Stream-K flag block bound to the
+  launch's stream. Covers `rocblaslt_matmul_impl` only. Unlike
+  `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
+  device-to-host copy, so this is single-threaded debugging use only, not for
+  concurrent-stream workloads.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
@@ -14,6 +23,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Complex CGEMM/ZGEMM support for gfx1250.
 * `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
 * `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
+* Opt-in runtime tuning cache, off by default. `HIPBLASLT_TUNING_MODE=cache` with `HIPBLASLT_TUNING_CACHE_PATH=<file>` replays a tuning file, validating each entry as `HIPBLASLT_TUNING_OVERRIDE_FILE` does. Unlike the override file, it also serves `hipblasLtMatmul` calls that pass no `algo`, and it reports what it loaded and a closing summary of how many problems it served without needing a log level. An explicit `algo` always launches as given. With a tuning mode set, `HIPBLASLT_TUNING_OVERRIDE_FILE` is ignored. A process in a secure execution context ignores both variables.
 
 ### Changed
 
@@ -25,6 +35,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Stream-K workspace size reported by the heuristic APIs is now smaller, and the SK grid is bounded, so `TENSILE_STREAMK_GRID_MULTIPLIER` values past that bound no longer take effect.
 * Solution cache key now includes `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` and the StreamK tile scheduling mode, so the same problem can select a different kernel than before.
 * A tuning file is now trusted one entry at a time instead of all or nothing. `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions in one build's kernel library. Previously the C API ignored the whole file when its build-version line did not match the running build, while the C++ API applied it regardless and could run kernels it was never tuned on. `hipblaslt-bench` now records a `kernel_name` beside each `solution_index` in `HIPBLASLT_TUNING_FILE`, and on both APIs a row that records a name is checked at replay and dropped only if its index no longer names that kernel. A row without a name is used only when the file's `Git Version` line matches the running build; a build made outside a git checkout has no version, so it uses no such rows. Problems whose rows are dropped fall back to normal kernel selection.
+* Extension API `initialize` compares against the size set with `setMaxWorkspaceBytes` on the `Gemm` or `GroupedGemm` instance, which defaults to 0. A caller that passes a large enough buffer without setting it is now rejected with `HIPBLAS_STATUS_INVALID_VALUE` for solutions with a fixed workspace requirement, such as GSU. Stream-K and zero-workspace solutions are unaffected.
+* Workspace limits and sizes above `UINT32_MAX` (4 GiB - 1), such as `SIZE_MAX` for no limit, are clamped to `UINT32_MAX`, because kernels address the workspace with 32-bit offsets. This applies to `HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` (which then reads back as `UINT32_MAX`), the `hipblasLtMatmul` workspace size, and the extension API `setMaxWorkspaceBytes`.
 
 ### Removed
 
@@ -37,6 +49,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed rocisa macro expansion ignoring conditions after `&&`, which could omit required final-loop LDS waits in gfx950 kernels using custom main-loop scheduling.
+* Fixed premature LDS reads when handwritten gfx950 BF16 and FP16 TN kernels skip the second global prefetch at `K=64`.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
 * Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.
@@ -77,6 +91,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * A tuning file row cut short, for example when the disk fills while `hipblaslt-bench` appends it, could be replayed with a truncated `solution_index`. A row whose cells do not line up with its header is now ignored.
 * `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.
 * The logger's destructor called `close()` on the log file, which throws out of a destructor and terminates the process at exit when the log file has failed, for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a failing `HIPBLASLT_LOG_FILE`.
+* `hipblasLtMatmul` with no `algo` could return success for a GEMM that never launched. Its status already held the result of choosing the algorithm, and an exception thrown after that returned it unchanged instead of an error.
 
 ## hipBLASLt 1.4.1 for ROCm 7.14
 

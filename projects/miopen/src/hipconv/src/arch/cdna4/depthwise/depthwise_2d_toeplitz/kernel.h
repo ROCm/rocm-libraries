@@ -25,6 +25,7 @@
 
 #include "bunnies_cdna4.hpp"
 #include "conv_kernel.h"
+#include "config_desc.h"
 #include "config_table.h"
 #include "depthwise_conv_kernel.h"
 #include "mathutil.h"
@@ -734,6 +735,8 @@ public:
 
     std::string_view name() const override { return "depthwise_2d_toeplitz"; }
 
+    KVDescriptor config_descriptor() const override { return config_fields(cfg_); }
+
     // Depthwise fp16/bf16 fprop, stride 1/2, 3x3/5x5/7x7. Channels multiple of 8.
     //
     // 3x3/7x7 (and 5x5) use the sparse 16x64 MFMA; 5x5 stride 1 may use the dense
@@ -742,7 +745,6 @@ public:
     {
         if(!DepthwiseConvKernel::is_applicable(par))
             return false;
-        // 16-bit only: the base admits tf32 for the CDNA5 1D path, which this has none.
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
         if(par.direction != Direction::Fprop)

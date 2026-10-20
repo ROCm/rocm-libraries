@@ -213,6 +213,9 @@ class TestCodegen(unittest.TestCase):
                 self.assertEqual(len(kernels), 1)
                 packed = str(pipeline in cc.PACKED_B_PIPELINES).lower()
                 self.assertIn(f"static constexpr bool Preshuffle = {packed};", kernels[0])
+                # The dispatcher must reject the partial N/K tiles the TDM launcher throws on.
+                full_nk = str(pipeline in cc.TDM_PIPELINES).lower()
+                self.assertIn(f"static constexpr bool RequiresFullNKTiles = {full_nk};", kernels[0])
 
 
 if __name__ == "__main__":

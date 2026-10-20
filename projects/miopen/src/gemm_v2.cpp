@@ -11,7 +11,7 @@
 #include <miopen/hipoc_kernel.hpp>
 
 #if MIOPEN_USE_HIPBLASLT
-#include <hipblaslt/hipblaslt.h>
+#include <miopen/hipblaslt_errors.hpp>
 // Only enable BF8 support if hipBLASLt is 0.8 or above
 #if MIOPEN_HIPBLASLT_VERSION_FLAT >= 8000
 #define ENABLE_HIPBLASLT_BF8
@@ -43,6 +43,7 @@
 #endif
 
 #include <ranges>
+#include <sstream>
 #include <tuple> // std::ignore
 
 #if MIOPEN_USE_ROCBLAS
@@ -273,6 +274,19 @@ std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc)
 
 #if MIOPEN_USE_ROCBLAS
 
+// rocBLAS provides the status name itself, so only the GEMM context is added here.
+static std::string RocblasFailureMessage(rocblas_status status,
+                                         const char* operation,
+                                         const miopen::Handle& handle,
+                                         const miopen::GemmDescriptor& gemm_desc)
+{
+    std::ostringstream message;
+    message << operation << ": rocBLAS gemm failed with " << rocblas_status_to_string(status)
+            << " (" << static_cast<int>(status) << "); device=" << handle.GetDeviceName()
+            << "; gemm_desc=" << gemm_desc;
+    return message.str();
+}
+
 inline rocblas_atomics_mode DisableRocblasAtomics(const miopen::Handle& handle)
 {
     MIOPEN_LOG_I2("");
@@ -338,15 +352,6 @@ struct HipBLASLtMemoryHandles
     }
 };
 
-static inline void check_hipblas_status(hipblasStatus_t status)
-{
-    if(status != hipblasStatus_t::HIPBLAS_STATUS_SUCCESS)
-    {
-        std::cout << "error msg" << std::endl;
-        MIOPEN_THROW(miopenStatusInternalError, "hipBlasLt error encountered");
-    }
-}
-
 template <typename DataTypeAB, typename DataTypeC>
 static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                   const miopen::GemmDescriptor& gemm_desc,
@@ -364,91 +369,114 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
 {
     HipBLASLtMemoryHandles hipBLASLtHandles;
 
-    if(gemm_desc.transA)
-    {
-        check_hipblas_status(hipblasLtMatrixLayoutCreate(
-            &hipBLASLtHandles.matA, hip_type_AB, gemm_desc.k, gemm_desc.m, gemm_desc.lda));
-    }
-    else
-    {
-        check_hipblas_status(hipblasLtMatrixLayoutCreate(
-            &hipBLASLtHandles.matA, hip_type_AB, gemm_desc.m, gemm_desc.k, gemm_desc.lda));
-    }
+    const std::size_t offered_workspace_size = user_workspace != nullptr ? user_workspace_size : 0;
+    std::size_t effective_workspace_size     = 0;
+    std::ostringstream heuristic_queries;
 
-    if(gemm_desc.transB)
-    {
-        check_hipblas_status(hipblasLtMatrixLayoutCreate(
-            &hipBLASLtHandles.matB, hip_type_AB, gemm_desc.n, gemm_desc.k, gemm_desc.ldb));
-    }
-    else
-    {
-        check_hipblas_status(hipblasLtMatrixLayoutCreate(
-            &hipBLASLtHandles.matB, hip_type_AB, gemm_desc.k, gemm_desc.n, gemm_desc.ldb));
-    }
+    const auto failure_context = [&] {
+        std::ostringstream message;
+        message << "; device=" << handle.GetDeviceName() << "; gemm_desc=" << gemm_desc
+                << "; hip_type_AB=" << static_cast<int>(hip_type_AB)
+                << "; hip_type_C=" << static_cast<int>(hip_type_C)
+                << "; skip_batches=" << skip_batches
+                << "; deterministic=" << gemm_desc.deterministic
+                << "; offered_workspace_bytes=" << offered_workspace_size
+                << "; effective_workspace_bytes=" << effective_workspace_size;
+        return message.str();
+    };
+    const auto check_hipblas_status = [&](hipblasStatus_t status, const char* operation) {
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            MIOPEN_THROW(miopenStatusInternalError,
+                         HipblasLtErrorMessage(status, operation) + failure_context());
+    };
 
-    check_hipblas_status(hipblasLtMatrixLayoutCreate(
-        &hipBLASLtHandles.matC, hip_type_C, gemm_desc.m, gemm_desc.n, gemm_desc.ldc));
-    check_hipblas_status(hipblasLtMatrixLayoutCreate(
-        &hipBLASLtHandles.matD, hip_type_C, gemm_desc.m, gemm_desc.n, gemm_desc.ldc));
+    const bool a_trans = gemm_desc.transA;
+    const bool b_trans = gemm_desc.transB;
+    check_hipblas_status(hipblasLtMatrixLayoutCreate(&hipBLASLtHandles.matA,
+                                                     hip_type_AB,
+                                                     a_trans ? gemm_desc.k : gemm_desc.m,
+                                                     a_trans ? gemm_desc.m : gemm_desc.k,
+                                                     gemm_desc.lda),
+                         "hipblasLtMatrixLayoutCreate(A)");
+    check_hipblas_status(hipblasLtMatrixLayoutCreate(&hipBLASLtHandles.matB,
+                                                     hip_type_AB,
+                                                     b_trans ? gemm_desc.n : gemm_desc.k,
+                                                     b_trans ? gemm_desc.k : gemm_desc.n,
+                                                     gemm_desc.ldb),
+                         "hipblasLtMatrixLayoutCreate(B)");
+    check_hipblas_status(
+        hipblasLtMatrixLayoutCreate(
+            &hipBLASLtHandles.matC, hip_type_C, gemm_desc.m, gemm_desc.n, gemm_desc.ldc),
+        "hipblasLtMatrixLayoutCreate(C)");
+    check_hipblas_status(
+        hipblasLtMatrixLayoutCreate(
+            &hipBLASLtHandles.matD, hip_type_C, gemm_desc.m, gemm_desc.n, gemm_desc.ldc),
+        "hipblasLtMatrixLayoutCreate(D)");
 
     if(gemm_desc.batch_count > 1 && !skip_batches)
     {
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matA,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)));
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matA,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideA,
-                                              sizeof(gemm_desc.strideA)));
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matB,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)));
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matB,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideB,
-                                              sizeof(gemm_desc.strideB)));
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matC,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)));
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matC,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideC,
-                                              sizeof(gemm_desc.strideC)));
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matD,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)));
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matD,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideC,
-                                              sizeof(gemm_desc.strideC)));
+        // D shares C's layout, so it takes C's stride.
+        const struct
+        {
+            const char* name;
+            hipblasLtMatrixLayout_t layout;
+            decltype(gemm_desc.strideA) stride;
+        } batched_layouts[]       = {{"A", hipBLASLtHandles.matA, gemm_desc.strideA},
+                                     {"B", hipBLASLtHandles.matB, gemm_desc.strideB},
+                                     {"C", hipBLASLtHandles.matC, gemm_desc.strideC},
+                                     {"D", hipBLASLtHandles.matD, gemm_desc.strideC}};
+        const auto set_batch_attr = [&](const auto& l,
+                                        hipblasLtMatrixLayoutAttribute_t attr,
+                                        const char* attr_name,
+                                        const void* value,
+                                        std::size_t size) {
+            const auto status = hipblasLtMatrixLayoutSetAttribute(l.layout, attr, value, size);
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                check_hipblas_status(status,
+                                     (std::string("hipblasLtMatrixLayoutSetAttribute(") + l.name +
+                                      ", " + attr_name + ")")
+                                         .c_str());
+        };
+        for(const auto& l : batched_layouts)
+        {
+            set_batch_attr(l,
+                           HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
+                           "BATCH_COUNT",
+                           &gemm_desc.batch_count,
+                           sizeof(gemm_desc.batch_count));
+            set_batch_attr(l,
+                           HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                           "STRIDED_BATCH_OFFSET",
+                           &l.stride,
+                           sizeof(l.stride));
+        }
     }
 
     check_hipblas_status(
-        hipblasLtMatmulDescCreate(&hipBLASLtHandles.matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F));
+        hipblasLtMatmulDescCreate(&hipBLASLtHandles.matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+        "hipblasLtMatmulDescCreate");
 
     hipblasOperation_t opTypeA = gemm_desc.transA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
     hipblasOperation_t opTypeB = gemm_desc.transB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
-    check_hipblas_status(hipblasLtMatmulDescSetAttribute(
-        hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &opTypeA, sizeof(opTypeA)));
-    check_hipblas_status(hipblasLtMatmulDescSetAttribute(
-        hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &opTypeB, sizeof(opTypeB)));
+    check_hipblas_status(
+        hipblasLtMatmulDescSetAttribute(
+            hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &opTypeA, sizeof(opTypeA)),
+        "hipblasLtMatmulDescSetAttribute(TRANSA)");
+    check_hipblas_status(
+        hipblasLtMatmulDescSetAttribute(
+            hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &opTypeB, sizeof(opTypeB)),
+        "hipblasLtMatmulDescSetAttribute(TRANSB)");
 
     hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
-    check_hipblas_status(hipblasLtMatmulDescSetAttribute(
-        hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
+    check_hipblas_status(
+        hipblasLtMatmulDescSetAttribute(
+            hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)),
+        "hipblasLtMatmulDescSetAttribute(EPILOGUE)");
 
-    size_t max_workspace_size =
-        (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
-    void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
-    check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref));
+    effective_workspace_size = gemm_desc.deterministic ? 0 : offered_workspace_size;
+    void* workspace          = (effective_workspace_size != 0) ? user_workspace : nullptr;
+    check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref),
+                         "hipblasLtMatmulPreferenceCreate");
 
     constexpr int requestSolutions = 8;
     hipblasLtMatmulHeuristicResult_t heuristicResult[requestSolutions];
@@ -461,7 +489,8 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
             hipblasLtMatmulPreferenceSetAttribute(hipBLASLtHandles.pref,
                                                   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                                   &budget,
-                                                  sizeof(budget)));
+                                                  sizeof(budget)),
+            "hipblasLtMatmulPreferenceSetAttribute(MAX_WORKSPACE_BYTES)");
         int count = 0;
         check_hipblas_status(hipblasLtMatmulAlgoGetHeuristic(handle.HipblasLtHandle().get(),
                                                              hipBLASLtHandles.matmul,
@@ -472,7 +501,9 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                              hipBLASLtHandles.pref,
                                                              requestSolutions,
                                                              heuristicResult,
-                                                             &count));
+                                                             &count),
+                             "hipblasLtMatmulAlgoGetHeuristic");
+        heuristic_queries << " [workspace_budget=" << budget << ", solutions=" << count << "]";
         for(int i = 0; i < count; ++i)
         {
             if(heuristicResult[i].workspaceSize <= budget)
@@ -481,23 +512,25 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
         return -1;
     };
 
-    int chosen_algo = first_fitting_algo(max_workspace_size);
+    int chosen_algo = first_fitting_algo(effective_workspace_size);
 
     // A workspace is an offer, not a requirement, so a problem whose solutions all want more than
     // was granted still runs on the workspace-free set.
-    if(chosen_algo < 0 && max_workspace_size != 0)
+    if(chosen_algo < 0 && effective_workspace_size != 0)
     {
-        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << max_workspace_size
+        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << effective_workspace_size
                                                      << " bytes, retrying without a workspace");
-        max_workspace_size = 0;
-        workspace          = nullptr;
-        chosen_algo        = first_fitting_algo(0);
+        effective_workspace_size = 0;
+        workspace                = nullptr;
+        chosen_algo              = first_fitting_algo(0);
     }
 
     if(chosen_algo < 0)
     {
         MIOPEN_THROW(miopenStatusInternalError,
-                     "no solution found for hipBLASLt hipBLASLtHandles.matmul");
+                     "hipblasLtMatmulAlgoGetHeuristic: no returned solution fits the workspace "
+                     "budget; queries:" +
+                         heuristic_queries.str() + failure_context());
     }
 
     float alpha       = gemm_desc.alpha;
@@ -528,7 +561,8 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                              &heuristicResult[chosen_algo].algo,
                                              workspace,
                                              algo_workspace_size,
-                                             handle.GetStream()));
+                                             handle.GetStream()),
+                             "hipblasLtMatmul");
     }
 }
 
@@ -748,8 +782,6 @@ miopenStatus_t CallGemm(const Handle& handle,
         switch(gemm_desc.dataType)
         {
         case miopenInt8: {
-            assert(gemm_desc.k % 4 == 0);
-
             auto alpha = int(gemm_desc.alpha);
             auto beta  = int(gemm_desc.beta);
 
@@ -947,7 +979,8 @@ miopenStatus_t CallGemm(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(miopenStatusInternalError,
+                         RocblasFailureMessage(rb_status, "CallGemm", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1073,7 +1106,9 @@ miopenStatus_t CallGemm(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                RocblasFailureMessage(rb_status, "CallGemm (mixed C type)", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1140,7 +1175,6 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
         switch(gemm_desc.dataType)
         {
         case miopenInt8: {
-            assert(gemm_desc.k % 4 == 0);
 
             auto alpha = int(gemm_desc.alpha);
             auto beta  = int(gemm_desc.beta);
@@ -1357,7 +1391,9 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                RocblasFailureMessage(rb_status, "CallGemmStridedBatched", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1479,7 +1515,10 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                RocblasFailureMessage(
+                    rb_status, "CallGemmStridedBatched (mixed C type)", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1762,7 +1801,9 @@ miopenStatus_t CallGemmStridedBatchedSequential(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(miopenStatusInternalError,
+                         RocblasFailureMessage(
+                             rb_status, "CallGemmStridedBatchedSequential", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1788,10 +1829,11 @@ miopenStatus_t CallGemmStridedBatchedSequential(const Handle& handle,
 }
 
 // y = w * Im2Col(x)
-GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
-                                           const TensorDescriptor& xDesc,
-                                           const TensorDescriptor& yDesc)
+GemmDescriptor CreateGemmDescriptorConvFwd(const conv::ProblemDescription& problem)
 {
+    decltype(auto) xDesc = problem.GetIn();
+    decltype(auto) wDesc = problem.GetWeights();
+    decltype(auto) yDesc = problem.GetOut();
 #ifndef NDEBUG
     assert(wDesc.GetType() == xDesc.GetType());
     if(wDesc.GetType() != miopenInt8)
@@ -1806,9 +1848,9 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
     auto out_spatial =
         yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = false;
-    bool transB     = (wDesc.GetType() == miopenInt8);
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = isColMajor;
+    bool transB     = problem.IsLayoutNHWC() ? false : (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
     int n           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
@@ -1817,8 +1859,8 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
                                                     std::size_t{1},
                                                     std::multiplies<std::size_t>()));
     int lda         = k;
-    int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? k : wDesc.GetType() == miopenInt8 ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1846,10 +1888,11 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
 }
 
 // dx = Col2Im(transpose(w) * dy)
-GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
-                                               const TensorDescriptor& dyDesc,
-                                               const TensorDescriptor& dxDesc)
+GemmDescriptor CreateGemmDescriptorConvBwdData(const conv::ProblemDescription& problem)
 {
+    decltype(auto) dyDesc = problem.GetIn();
+    decltype(auto) wDesc  = problem.GetWeights();
+    decltype(auto) dxDesc = problem.GetOut();
 #ifndef NDEBUG
     assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
 #endif
@@ -1862,8 +1905,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = true;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = !problem.IsLayoutNHWC();
     bool transB     = false;
     int m           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
                                                     wei_spatial.end(),
@@ -1873,8 +1916,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k;
     int lda         = m;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1902,10 +1945,11 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
 }
 
 // dw = dy * transpose(Im2Col(x))
-GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
-                                                 const TensorDescriptor& xDesc,
-                                                 const TensorDescriptor& dwDesc)
+GemmDescriptor CreateGemmDescriptorConvBwdWeight(const conv::ProblemDescription& problem)
 {
+    const auto& dyDesc = problem.GetIn();
+    const auto& dwDesc = problem.GetWeights();
+    const auto& xDesc  = problem.GetOut();
 #ifndef NDEBUG
     assert(dwDesc.GetType() == xDesc.GetType() && dwDesc.GetType() == dyDesc.GetType());
 #endif
@@ -1919,8 +1963,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
-    bool transA     = false;
-    bool transB     = true;
+    bool transA     = problem.IsLayoutNHWC();
+    bool transB     = !problem.IsLayoutNHWC();
     int m           = wei_k;
     int n =
         static_cast<int>(in_c) * static_cast<int>(std::accumulate(wei_spatial.begin(),
@@ -1929,8 +1973,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
                                                                   std::multiplies<std::size_t>()));
     int k           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
-    int lda         = k;
-    int ldb         = k;
+    int lda         = problem.IsLayoutNHWC() ? m : k;
+    int ldb         = problem.IsLayoutNHWC() ? n : k;
     int ldc         = n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
@@ -2233,14 +2277,12 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
 }
 
 // y = w * Im2Col(x)
-GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
-                                                const TensorDescriptor& xDesc,
-                                                const TensorDescriptor& yDesc,
-                                                int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvFwd(const conv::ProblemDescription& problem)
 {
-#ifndef NDEBUG
-    assert(wDesc.GetType() == xDesc.GetType() && wDesc.GetType() == yDesc.GetType());
-#endif
+    decltype(auto) xDesc = problem.GetIn();
+    decltype(auto) wDesc = problem.GetWeights();
+    decltype(auto) yDesc = problem.GetOut();
+    const int groupCount = problem.GetGroupCount();
 
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
@@ -2250,8 +2292,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
     auto out_spatial =
         yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = false;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = isColMajor;
     bool transB     = false;
     int m           = wei_k / groupCount;
     int n           = static_cast<int>(std::accumulate(
@@ -2261,12 +2303,12 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
                                                                    std::size_t{1},
                                                                    std::multiplies<std::size_t>()));
     int lda         = k;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m * groupCount : n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
-    auto strideC    = static_cast<long long>(m) * n;
+    auto strideC    = problem.IsLayoutNHWC() ? m : static_cast<long long>(m) * n;
     float alpha     = 1.;
     float beta      = 0.;
 
@@ -2290,11 +2332,12 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
 }
 
 // dx = Col2Im(transpose(w) * dy)
-GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDesc,
-                                                    const TensorDescriptor& dyDesc,
-                                                    const TensorDescriptor& dxDesc,
-                                                    int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const conv::ProblemDescription& problem)
 {
+    decltype(auto) dyDesc = problem.GetIn();
+    decltype(auto) wDesc  = problem.GetWeights();
+    decltype(auto) dxDesc = problem.GetOut();
+    const int groupCount  = problem.GetGroupCount();
 #ifndef NDEBUG
     assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
 #endif
@@ -2307,8 +2350,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = true;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = !problem.IsLayoutNHWC();
     bool transB     = false;
     int m           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
                                                                    wei_spatial.end(),
@@ -2318,11 +2361,11 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k / groupCount;
     int lda         = m;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb         = problem.IsLayoutNHWC() ? groupCount * k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
-    auto strideB    = static_cast<long long>(k) * n;
+    auto strideB    = problem.IsLayoutNHWC() ? k : static_cast<long long>(k) * n;
     auto strideC    = static_cast<long long>(m) * n;
     float alpha     = 1.;
     float beta      = 0.;
@@ -2347,11 +2390,13 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
 }
 
 // dw = dy * transpose(Im2Col(x))
-GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dyDesc,
-                                                      const TensorDescriptor& xDesc,
-                                                      const TensorDescriptor& dwDesc,
-                                                      int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const conv::ProblemDescription& problem)
 {
+    const auto& dyDesc     = problem.GetIn();
+    const auto& dwDesc     = problem.GetWeights();
+    const auto& xDesc      = problem.GetOut();
+    const auto& conv       = problem.GetConv();
+    const auto group_count = conv.group_count;
 #ifndef NDEBUG
     assert(dwDesc.GetType() == xDesc.GetType() && dwDesc.GetType() == dyDesc.GetType());
 #endif
@@ -2365,20 +2410,21 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dy
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
-    bool transA     = false;
-    bool transB     = true;
-    int m           = wei_k / groupCount;
-    int n           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
-                                                                   wei_spatial.end(),
-                                                                   std::size_t{1},
-                                                                   std::multiplies<std::size_t>()));
+    bool transA     = problem.IsLayoutNHWC();
+    bool transB     = !problem.IsLayoutNHWC();
+    int m           = wei_k / group_count;
+    int n =
+        (in_c / group_count) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                wei_spatial.end(),
+                                                                std::size_t{1},
+                                                                std::multiplies<std::size_t>()));
     int k           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
-    int lda         = k;
-    int ldb         = k;
+    int lda         = problem.IsLayoutNHWC() ? m * group_count : k;
+    int ldb         = problem.IsLayoutNHWC() ? n : k;
     int ldc         = n;
-    int batch_count = groupCount;
-    auto strideA    = static_cast<long long>(m) * k;
+    int batch_count = group_count;
+    auto strideA    = problem.IsLayoutNHWC() ? m : static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
     auto strideC    = static_cast<long long>(m) * n;
     float alpha     = 1.;

@@ -42,7 +42,11 @@ from enum import Enum
 import logging
 from codegen_common import PACKED_B_PIPELINES, preshuffle_pipeline_reject_reason
 
-from codegen_common import CommonTypeMappings, gfx1250_pipeline_reject_reason
+from codegen_common import (
+    CommonTypeMappings,
+    gfx1250_fp32_tile_reject_reason,
+    gfx1250_pipeline_reject_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -525,6 +529,19 @@ class ArchFilter:
 
         # LDS capacity validation
         self._validate_lds_capacity(config, result)
+
+        # gfx1250 fp32 accumulator budget: the rule the GEMM codegen and
+        # python/gemm_utils apply, for the GEMM operators only.
+        if config.operator.value.startswith("gemm"):
+            reason = gfx1250_fp32_tile_reject_reason(
+                self.gpu_arch,
+                config.datatype_a,
+                config.tile_m,
+                config.tile_n,
+                config.warp_m * config.warp_n * config.warp_k,
+            )
+            if reason:
+                result.add_error(reason)
 
         # Dimension alignment validation
         self._validate_dimension_alignment(config, result)

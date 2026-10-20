@@ -52,6 +52,15 @@ source_group( "Header Files\\Public" FILES ${hipfft_headers_public} )
 # Include sources
 include( src/CMakeLists.txt )
 
+# Add a definition for internal library targets so code can be
+# conditional on being in-library or not
+function( rocfft_add_internal_build_flag target )
+  get_target_property( target_is_imported ${target} IMPORTED )
+  if( NOT target_is_imported )
+    target_compile_definitions( ${target} PRIVATE ROCFFT_BUILD_INTERNAL )
+  endif()
+endfunction()
+
 # Create hipFFT library (and hipfftw on ROCm)
 add_library( hipfft ${hipfft_source} ${hipfft_headers_public} )
 add_library( hip::hipfft ALIAS hipfft )
@@ -89,6 +98,10 @@ else()
   list( APPEND HIPFFT_EXPORT_TARGETS hip::hipfftw )
   # hipfftw.h header uses the same hipfft-export.h as hipfft.h
   target_compile_definitions( hipfftw PRIVATE hipfft_EXPORTS )
+
+  rocfft_add_internal_build_flag( hipfft )
+  rocfft_add_internal_build_flag( hipfftw )
+
 endif()
 
 if( WIN32 )
