@@ -14,6 +14,7 @@
  */
 #include <string.h>
 
+#include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 
 /* ------------------------------------------------------------ arith constants */
@@ -121,11 +122,13 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
         return NULL;
     if(!elem)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "zero_vec elem is NULL");
+    rocke_i_refuse_packed_only_value("zero_vec", elem);
     if(rocke_type_eq(elem, rocke_f32()))
         return rocke_b_zero_vec_f32(b, n);
     if(rocke_type_eq(elem, rocke_f16()) || rocke_type_eq(elem, rocke_bf16())
-       || rocke_type_eq(elem, rocke_fp8e4m3()) || rocke_type_eq(elem, rocke_bf8e5m2())
-       || rocke_type_eq(elem, rocke_i8()) || rocke_type_eq(elem, rocke_i32()))
+       || rocke_type_eq(elem, rocke_f64()) || rocke_type_eq(elem, rocke_fp8e4m3())
+       || rocke_type_eq(elem, rocke_bf8e5m2()) || rocke_type_eq(elem, rocke_i8())
+       || rocke_type_eq(elem, rocke_i16()) || rocke_type_eq(elem, rocke_i32()))
     {
         hint = cz_hint(b, n);
         if(!hint)
@@ -180,12 +183,55 @@ rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a)
 
 rocke_value_t* rocke_b_smax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(a && c)
+    {
+        rocke_i_refuse_unsigned("smax", a->type, "umax");
+        rocke_i_refuse_unsigned("smax", c->type, "umax");
+    }
     return rocke_i_binop(b, ROCKE_OP_ARITH_SMAX, a, c, "smax");
 }
 
 rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(a && c)
+    {
+        rocke_i_refuse_unsigned("smin", a->type, "umin");
+        rocke_i_refuse_unsigned("smin", c->type, "umin");
+    }
     return rocke_i_binop(b, ROCKE_OP_ARITH_SMIN, a, c, "smin");
+}
+
+/* umax / umin take two scalar operands of one unsigned type (u8). */
+static rocke_value_t* unsigned_min_max(rocke_ir_builder_t* b,
+                                       rocke_opcode_t opcode,
+                                       const char* op_name,
+                                       rocke_value_t* a,
+                                       rocke_value_t* c)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!a || !c)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", op_name);
+    if(a->type->kind == ROCKE_TYPE_VECTOR || !rocke_type_is_unsigned(a->type)
+       || !rocke_type_eq(a->type, c->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "%s expects two operands of one unsigned integer type, got %s and %s",
+            op_name,
+            a->type->name,
+            c->type->name);
+    return rocke_i_binop(b, opcode, a, c, op_name);
+}
+
+rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    return unsigned_min_max(b, ROCKE_OP_ARITH_UMAX, "umax", a, c);
+}
+
+rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    return unsigned_min_max(b, ROCKE_OP_ARITH_UMIN, "umin", a, c);
 }
 
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
@@ -510,6 +556,7 @@ rocke_value_t* rocke_b_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "sext NULL value");
     if(!target)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "sext NULL target");
+    rocke_i_refuse_unsigned("sext", v->type, "zext");
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_SEXT, operands, 1, target, NULL, "sx");
 }
@@ -527,6 +574,34 @@ rocke_value_t* rocke_b_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rock
     return rocke_i_op1(b, ROCKE_OP_ARITH_TRUNC, operands, 1, target, NULL, "tr");
 }
 
+/* A bitcast keeps every bit of its operand, so a source and target of different
+ * widths is always a mistake; refusing it here names both types instead of
+ * leaving clang to reject the lowered IR ("invalid cast opcode"). */
+void rocke_i_check_bitcast_width(const char* verb,
+                                 const rocke_type_t* source,
+                                 const rocke_type_t* target,
+                                 const char* hint)
+{
+    if(source->kind == ROCKE_TYPE_PTR || target->kind == ROCKE_TYPE_PTR)
+        throw ckc::TypeError(
+            ckc::format_error("%s of %s to %s: a bitcast does not convert pointers",
+                              verb,
+                              source->name,
+                              target->name));
+    const int source_bits = rocke_i_type_bits(source);
+    const int target_bits = rocke_i_type_bits(target);
+    if(source_bits != target_bits)
+        throw ckc::ValueError(
+            ckc::format_error("%s of %s (%d bits) to %s (%d bits) changes the bit "
+                              "width -- a bitcast keeps every bit; %s",
+                              verb,
+                              source->name,
+                              source_bits,
+                              target->name,
+                              target_bits,
+                              hint));
+}
+
 rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target)
 {
     rocke_value_t* operands[1];
@@ -537,6 +612,8 @@ rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const ro
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "bitcast NULL value");
     if(!target)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "bitcast NULL target");
+    rocke_i_check_bitcast_width(
+        "bitcast", v->type, target, "convert the value to change its width");
     operands[0] = v;
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "target", target->name);
@@ -698,6 +775,54 @@ rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v)
             b, ROCKE_ERR_VALUE, "sitofp_f32 expects i32 input, got %s", v->type->name);
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_SITOFP_F32, operands, 1, rocke_f32(), NULL, "sitof");
+}
+
+rocke_value_t* rocke_b_uitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "uitofp_f32 NULL value");
+    if(v->type->kind == ROCKE_TYPE_VECTOR || !rocke_type_is_unsigned(v->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "uitofp_f32 expects an unsigned integer input, got %s",
+            v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_UITOFP_F32, operands, 1, rocke_f32(), NULL, "uitof");
+}
+
+/* f32 <-> f64 has its own opcode per direction rather than riding on
+ * cast_to_f32 / cast_f32_to: those two are the f16/bf16 <-> f32 hub and keep
+ * rejecting f64, so no caller widens or narrows a double by accident. */
+rocke_value_t* rocke_b_cvt_f32_to_f64(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "cvt_f32_to_f64 NULL value");
+    if(!rocke_i_type_is(v->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f32_to_f64 expects f32 input, got %s", v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F32_TO_F64, operands, 1, rocke_f64(), NULL, "f64");
+}
+
+rocke_value_t* rocke_b_cvt_f64_to_f32(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "cvt_f64_to_f32 NULL value");
+    if(!rocke_i_type_is(v->type, "f64"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f64_to_f32 expects f64 input, got %s", v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F64_TO_F32, operands, 1, rocke_f32(), NULL, "f32");
 }
 
 rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v)
@@ -867,6 +992,20 @@ rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v
             b, ROCKE_ERR_VALUE, "cvt_f32_to_i8_sat expects f32 input, got %s", v->type->name);
     operands[0] = v;
     return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F32_TO_I8_SAT, operands, 1, rocke_i8(), NULL, "qi8");
+}
+
+rocke_value_t* rocke_b_cvt_f32_to_u8_sat(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "cvt_f32_to_u8_sat NULL value");
+    if(!rocke_i_type_is(v->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f32_to_u8_sat expects f32 input, got %s", v->type->name);
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT, operands, 1, rocke_u8(), NULL, "qu8");
 }
 
 rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v)

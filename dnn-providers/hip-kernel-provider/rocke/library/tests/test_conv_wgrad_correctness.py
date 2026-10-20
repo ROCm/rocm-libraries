@@ -819,56 +819,79 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", "default")
 
-    def test_dispatch_spec_at_degree_cap_gfx1250(self):
-        """Run exactly what gfx1250 dispatch ships, at a high resolved degree.
+    def test_wide_tile_spec_at_degree_cap_gfx1250(self):
+        """Run the 2x2-warp gfx1250 split-K specs at a high resolved degree.
 
-        The sweeps above build their own 1x1-warp tiles; dispatch ships 2x2
-        warps on wider tiles, and resolves the degree itself. These requests are
-        sized so the bf16 degree lands on the slice-depth bound and fp16 on its
-        cap. The inputs are all-positive -- same-sign partials do not cancel
-        their 16-bit rounding -- so this also bounds the accuracy at that degree.
+        The sweeps above build their own 1x1-warp tiles; these are the wider
+        2x2-warp tiles, with the degree resolved by the gfx1250 split policy
+        exactly as the builder resolves ``split_k=-1``. The problems are sized
+        so the bf16 degree lands on the slice-depth bound and fp16 on its cap.
+        The inputs are all-positive -- same-sign partials do not cancel their
+        16-bit rounding -- so this also bounds the accuracy at that degree.
         """
+        from dataclasses import replace
+
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
         from kernels.common.conv_implicit_gemm_wgrad import (
             _WMMA_SPLIT_K_ATOMIC_ARCHES,
+            WgradConvSpec,
+            _wg_K,
+            _wg_M,
+            _wg_N,
         )
-        from dispatch.grouped_convolution import (
-            ConvGroupedRequest,
-            _problem,
-            dispatch_conv_grouped,
-        )
+        from rocke.helpers.split_k import select_split_k_wgrad
 
         if GPU_ARCH not in _WMMA_SPLIT_K_ATOMIC_ARCHES:
             self.skipTest(f"WMMA split-K not enabled on {GPU_ARCH}")
-        # (C, K, G, dtype, expected tile_m x tile_n, expected degree)
+        # (C, K, G, dtype, tile_m x tile_n x tile_k, expected degree)
         cases = [
-            (64, 96, 1, "bf16", (32, 64), 16),
-            (64, 128, 1, "fp16", (64, 64), 8),
-            (64, 64, 4, "bf16", (32, 32), 16),
-            (64, 64, 4, "fp16", (32, 32), 8),
+            (64, 96, 1, "bf16", (32, 64, 64), 16),
+            (64, 128, 1, "fp16", (64, 64, 64), 8),
+            (64, 64, 4, "bf16", (32, 32, 32), 16),
+            (64, 64, 4, "fp16", (32, 32, 32), 8),
         ]
         ran = 0
-        for C, K, G, dtype, tile, degree in cases:
+        for C, K, G, dtype, (tm, tn, tk), degree in cases:
             with self.subTest(C=C, K=K, G=G, dtype=dtype):
-                req = ConvGroupedRequest(
-                    arch=GPU_ARCH,
-                    dtype=dtype,
-                    direction="wgrad",
-                    N=32,
-                    C=C,
-                    K=K,
-                    Hi=32,
-                    Wi=32,
-                    Y=3,
-                    X=3,
-                    pad_h=1,
-                    pad_w=1,
-                    G=G,
+                problem = ConvProblem(
+                    N=32, Hi=32, Wi=32, C=C, K=K, Y=3, X=3, pH=1, pW=1, groups=G
                 )
-                spec = dispatch_conv_grouped(req).spec.to_wgrad_spec(_problem(req))
-                self.assertEqual((spec.tile_m, spec.tile_n), tile)
-                self.assertEqual(spec.split_k, degree)
+                spec = WgradConvSpec(
+                    problem=problem,
+                    data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+                    tile_m=tm,
+                    tile_n=tn,
+                    tile_k=tk,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=32,
+                    wave_size=32,
+                    pipeline="mem",
+                    epilogue="default",
+                    lds_k_outer=True,
+                    split_k=-1,
+                )
+                decision = select_split_k_wgrad(
+                    wg_M=_wg_M(problem),
+                    wg_N=_wg_N(problem),
+                    wg_K=_wg_K(problem),
+                    tile_m=tm,
+                    tile_n=tn,
+                    tile_k=tk,
+                    arch=GPU_ARCH,
+                    groups=spec.grid_groups,
+                    block_size=spec.block_size,
+                    dtype_d=dtype,
+                )
+                self.assertEqual(decision.split_k, degree)
+                spec = replace(spec, split_k=decision.split_k)
                 shape = _Shape(
-                    f"dispatch_N32H32W32C{C}K{K}G{G}",
+                    f"wide_N32H32W32C{C}K{K}G{G}",
                     N=32,
                     Hi=32,
                     Wi=32,
@@ -896,7 +919,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     f"{shape.id} {dtype} spk{degree}: {why}",
                 )
                 ran += 1
-        self.assertEqual(ran, len(cases), "every dispatch case must run")
+        self.assertEqual(ran, len(cases), "every case must run")
 
     def test_grouped_split_k_wmma(self):
         """Grouped wgrad under WMMA split-K atomics.
@@ -1352,26 +1375,6 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
             os.environ.pop("ROCKE_WGRAD_LDS_K_OUTER", None)
             if prev is not None:
                 os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
-
-    def test_dispatch_uses_the_same_policy(self):
-        """Dispatch must not carry its own copy of the gate.
-
-        The divergent copy compared a module constant against a tuple, which is
-        constant-true regardless of the request, and never checked wave_size.
-        """
-        try:
-            from library.dispatch.grouped_convolution import _wgrad_lds_k_outer
-        except ImportError:
-            self.skipTest("library.dispatch not importable in this environment")
-
-        class _Req:
-            def __init__(self, arch, dtype):
-                self.arch, self.dtype = arch, dtype
-
-        self.assertTrue(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx942", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "fp32"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 64))
 
     def test_policy_agrees_with_validate(self):
         """Anything the policy turns on must actually construct."""

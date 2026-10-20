@@ -334,6 +334,15 @@ target_include_directories(hipblaslt-headers
 )
 target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 
+# The measurement engine and candidate search the benchmark clients use, header-only.
+# Build tree only: nothing outside this project includes it.
+add_library(hipblaslt-benchmark INTERFACE)
+target_include_directories(hipblaslt-benchmark
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/benchmark>
+)
+target_link_libraries(hipblaslt-benchmark INTERFACE hip::host)
+
 # `hipblaslt-version.h` is consumed by `library/include/hipblaslt/hipblaslt.h`
 # (only included when HIPBLASLT_ENABLE_HOST is ON). When HOST is ON, the
 # canonical `configure_file` call in `library/include/CMakeLists.txt`

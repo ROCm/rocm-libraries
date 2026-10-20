@@ -22,6 +22,8 @@
 
 #include "rocke/arena.h"
 #include "rocke/dtypes.h"
+#include "rocke/dtypes_internal.h"
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -46,6 +48,13 @@
     }
 
 ROCKE_SCALAR_SINGLETON(rocke_i1, ROCKE_SCALAR_I1, "i1")
+/* Logical only, like fp4e2m1: no LLVM rendering; its values travel packed. */
+ROCKE_SCALAR_SINGLETON(rocke_i4, ROCKE_SCALAR_I4, "i4")
+/* Unsigned data. u8 renders as LLVM i8 (LLVM integers carry no sign), so every op
+ * whose result depends on signedness asks rocke_type_is_unsigned which form to
+ * emit; u4, like i4, is logical only and travels packed. */
+ROCKE_SCALAR_SINGLETON(rocke_u4, ROCKE_SCALAR_U4, "u4")
+ROCKE_SCALAR_SINGLETON(rocke_u8, ROCKE_SCALAR_U8, "u8")
 ROCKE_SCALAR_SINGLETON(rocke_i8, ROCKE_SCALAR_I8, "i8")
 ROCKE_SCALAR_SINGLETON(rocke_i16, ROCKE_SCALAR_I16, "i16")
 ROCKE_SCALAR_SINGLETON(rocke_i32, ROCKE_SCALAR_I32, "i32")
@@ -72,6 +81,12 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return NULL;
     if(strcmp(name, "i1") == 0)
         return rocke_i1();
+    if(strcmp(name, "i4") == 0)
+        return rocke_i4();
+    if(strcmp(name, "u4") == 0)
+        return rocke_u4();
+    if(strcmp(name, "u8") == 0)
+        return rocke_u8();
     if(strcmp(name, "i8") == 0)
         return rocke_i8();
     if(strcmp(name, "i16") == 0)
@@ -121,23 +136,41 @@ const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype)
     return rocke_scalar_by_name(info->name);
 }
 
-/* VectorType(elem, count) -> "vec<{elem}x{count}>" */
+/* Mirrors core/ir.py::dtype_to_ir_type, raising where rocke_dtype_to_ir_type
+ * returns NULL. */
+const rocke_type_t* rocke_require_ir_type(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_require_dtype_info(dtype);
+    const rocke_type_t* t = rocke_dtype_to_ir_type(info->name);
+    if(!t)
+        throw ckc::ValueError(ckc::format_error("no logical IR type for dtype '%s'", info->name));
+    return t;
+}
+
+/* VectorType(elem, count) -> "vec<{elem}x{count}>", allocated in `arena`. */
+const rocke_type_t*
+    rocke_i_vector_type_in_arena(rocke_arena_t* arena, const rocke_type_t* elem, int count)
+{
+    rocke_type_t* t = (rocke_type_t*)rocke_arena_calloc(arena, sizeof(*t));
+    if(!t)
+        return NULL;
+    t->kind = ROCKE_TYPE_VECTOR;
+    t->elem = elem;
+    t->count = count;
+    t->name = rocke_arena_printf(arena, "vec<%sx%d>", elem->name, count);
+    return t->name ? t : NULL;
+}
+
 const rocke_type_t* rocke_vector_type(rocke_ir_builder_t* b, const rocke_type_t* elem, int count)
 {
-    rocke_type_t* t;
+    const rocke_type_t* t;
     if(!rocke_i_live(b))
         return NULL;
     if(!elem)
         return (const rocke_type_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vector_type: NULL element type");
-    t = (rocke_type_t*)rocke_arena_calloc(&b->arena, sizeof(*t));
+    t = rocke_i_vector_type_in_arena(&b->arena, elem, count);
     if(!t)
-        return (const rocke_type_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "vector_type: OOM");
-    t->kind = ROCKE_TYPE_VECTOR;
-    t->elem = elem;
-    t->count = count;
-    t->name = rocke_arena_printf(&b->arena, "vec<%sx%d>", elem->name, count);
-    if(!t->name)
         return (const rocke_type_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "vector_type: OOM");
     return t;
 }
@@ -238,6 +271,32 @@ const rocke_type_t* rocke_smem_type(
     return t;
 }
 
+/* Pointer widths by address space, as the AMDGPU data layout states them (p3 is
+ * 32 bits; global, constant and flat pointers are 64). Mirrors _POINTER_BITS. */
+static int rocke_i_pointer_bits(const char* space)
+{
+    return space && strcmp(space, "lds") == 0 ? 32 : 64;
+}
+
+/* Mirrors core/ir.py::type_bits. A scalar's width comes from its format
+ * (k_dtype_info in dtypes.cpp, the one home of format widths). */
+int rocke_i_type_bits(const rocke_type_t* t)
+{
+    switch(t->kind)
+    {
+    case ROCKE_TYPE_VECTOR:
+        return t->count * rocke_i_type_bits(t->elem);
+    case ROCKE_TYPE_PTR:
+        return rocke_i_pointer_bits(t->space);
+    case ROCKE_TYPE_SMEM:
+        throw ckc::TypeError(
+            ckc::format_error("%s is an LDS allocation, not a value with a bit width", t->name));
+    case ROCKE_TYPE_SCALAR:
+        break;
+    }
+    return rocke_require_dtype_info(t->name)->encoded_bits;
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -249,6 +308,37 @@ bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
     if(!a->name || !b->name)
         return false;
     return strcmp(a->name, b->name) == 0;
+}
+
+/* Python core/ir.py::_is_unsigned. */
+bool rocke_type_is_unsigned(const rocke_type_t* t)
+{
+    const rocke_type_t* elem = (t != NULL && t->kind == ROCKE_TYPE_VECTOR) ? t->elem : t;
+    return elem != NULL && elem->kind == ROCKE_TYPE_SCALAR
+           && (elem->scalar == ROCKE_SCALAR_U8 || elem->scalar == ROCKE_SCALAR_U4);
+}
+
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out)
+{
+    static const struct
+    {
+        const char* name;
+        rocke_cache_policy_t bits;
+    } table[] = {{"all", ROCKE_CACHE_ALL},
+                 {"global", ROCKE_CACHE_GLOBAL},
+                 {"stream", ROCKE_CACHE_STREAM},
+                 {"nt", ROCKE_NON_TEMPORAL}};
+    if(!name || !out)
+        return false;
+    for(size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i)
+    {
+        if(strcmp(name, table[i].name) == 0)
+        {
+            *out = table[i].bits;
+            return true;
+        }
+    }
+    return false;
 }
 
 /* ============================== ATTR MAP ================================ */
@@ -704,7 +794,17 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "memref.global_flag_wait_eq",
 
     "vector.undef",
-    "tile.buffer_load_f16_d16"};
+    "tile.buffer_load_f16_d16",
+
+    /* arith.* f32 <-> f64 conversions */
+    "arith.cvt_f32_to_f64",
+    "arith.cvt_f64_to_f32",
+
+    /* arith.* unsigned (u8) ops */
+    "arith.umax",
+    "arith.umin",
+    "arith.uitofp_f32",
+    "arith.cvt_f32_to_u8_sat"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -973,7 +1073,17 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* memref.global_flag_wait_eq */ false,
 
     /* vector.undef               */ false,
-    /* tile.buffer_load_f16_d16   */ false};
+    /* tile.buffer_load_f16_d16   */ false,
+
+    /* arith.* f32 <-> f64 conversions */
+    /* arith.cvt_f32_to_f64       */ true,
+    /* arith.cvt_f64_to_f32       */ true,
+
+    /* arith.* unsigned (u8) ops */
+    /* arith.umax                 */ true,
+    /* arith.umin                 */ true,
+    /* arith.uitofp_f32           */ true,
+    /* arith.cvt_f32_to_u8_sat    */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
