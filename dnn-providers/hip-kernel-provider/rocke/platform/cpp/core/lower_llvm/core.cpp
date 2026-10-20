@@ -423,10 +423,13 @@ void rocke_ll_block_emitf(rocke_lower_t* L, rocke_ll_block_t* blk, const char* f
         rocke_ll_block_emit(L, blk, buf);
         return;
     }
-    /* Long line: format into the arena. */
+    /* Long line: size the buffer from vsnprintf's count rather than a fixed
+     * cap, which used to truncate lines past 8191 bytes silently (a long
+     * inline-asm template is one line). */
+    size_t need = (n >= 0) ? (size_t)n + 1 : 8192;
+    char* big = (char*)rocke_arena_alloc(&L->arena, need);
     va_start(ap, fmt);
-    char big[8192];
-    vsnprintf(big, sizeof big, fmt, ap);
+    vsnprintf(big, need, fmt, ap);
     va_end(ap);
     rocke_ll_block_emit(L, blk, big);
 }
@@ -453,9 +456,13 @@ void rocke_ll_emitf(rocke_lower_t* L, const char* fmt, ...)
         rocke_ll_block_emit(L, blk, buf);
         return;
     }
+    /* Long line: size the buffer from vsnprintf's count rather than a fixed
+     * cap, which used to truncate lines past 8191 bytes silently (a long
+     * inline-asm template is one line). */
+    size_t need = (n >= 0) ? (size_t)n + 1 : 8192;
+    char* big = (char*)rocke_arena_alloc(&L->arena, need);
     va_start(ap, fmt);
-    char big[8192];
-    vsnprintf(big, sizeof big, fmt, ap);
+    vsnprintf(big, need, fmt, ap);
     va_end(ap);
     rocke_ll_block_emit(L, blk, big);
 }
@@ -1512,109 +1519,129 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         rocke_vec_push(&L->arena, &L->smem_offsets, offsets[i], rc);
         if(rc != 0)
             rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets push");
-        rocke_vec_push(&L->arena, &L->smem_sizes, sizes[i], rc);
+        /* Python _smem_sizes: only allocations that got a pool slot. */
+        int sz = intervals[i].used ? ll_smem_seg_size(L->smem_globals.data[i].stype) : -1;
+        rocke_vec_push(&L->arena, &L->smem_sizes, sz, rc);
         if(rc != 0)
             rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: sizes push");
     }
 }
 
-/* ====================================================================== */
-/* LDS alias scopes (Python _lds_alias_suffix / _lds_alias_metadata)      */
-/* ====================================================================== */
+/* ---------------------------------------------------------------------- */
+/* LDS alias scopes (Python _lds_aa_names / _lds_aa_suffix / _lds_aa_render) */
+/* ---------------------------------------------------------------------- */
 
-/* First metadata id of the LDS alias scopes; Python _LDS_ALIAS_MD_BASE. */
-#define ROCKE_LL_LDS_ALIAS_MD_BASE 1000000
+#define ROCKE_LL_LDS_AA_BASE 900000
 
-static int ll_smem_global_index(const rocke_lower_t* L, const char* gname)
+/* Indices (into smem_globals) of the used allocations, sorted by gname. */
+static size_t ll_lds_aa_names(rocke_lower_t* L, size_t* idx)
 {
-    for(size_t i = 0; i < L->smem_globals.len; i++)
+    size_t n = 0;
+    for(size_t i = 0; i < L->smem_globals.len && i < L->smem_sizes.len; i++)
     {
-        if(L->smem_globals.data[i].gname && strcmp(L->smem_globals.data[i].gname, gname) == 0)
-            return (int)i;
+        if(L->smem_sizes.data[i] < 0)
+            continue;
+        size_t k = n++;
+        while(k > 0
+              && strcmp(L->smem_globals.data[idx[k - 1]].gname, L->smem_globals.data[i].gname) > 0)
+        {
+            idx[k] = idx[k - 1];
+            k--;
+        }
+        idx[k] = i;
     }
-    return -1;
+    return n;
 }
 
-const char* rocke_ll_lds_alias_suffix(rocke_lower_t* L, const char* gname)
+const char* rocke_ll_lds_aa_suffix(rocke_lower_t* L, const char* gname)
 {
-    if(!L->lds_alias || !gname)
+    if(!L || !L->lds_aa || !gname)
         return "";
-    int i = ll_smem_global_index(L, gname);
-    if(i < 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "lds alias scope: unknown allocation");
-    L->lds_alias_used = true;
-    int n = (int)L->smem_globals.len;
-    int base = ROCKE_LL_LDS_ALIAS_MD_BASE + 1;
-    return rocke_arena_printf(
-        &L->arena, ", !alias.scope !%d, !noalias !%d", base + n + i, base + 2 * n + i);
-}
-
-const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const char* value_name)
-{
-    if(!L->lds_alias || !value_name)
-        return NULL;
-    for(size_t i = 0; i < L->lds_prov.len; i++)
+    size_t* idx = (size_t*)rocke_arena_alloc(&L->arena, sizeof(size_t) * (L->smem_globals.len + 1));
+    size_t n = ll_lds_aa_names(L, idx);
+    for(size_t i = 0; i < n; i++)
     {
-        if(strcmp(L->lds_prov.data[i].value_name, value_name) == 0)
-            return L->lds_prov.data[i].gname;
+        if(strcmp(L->smem_globals.data[idx[i]].gname, gname) == 0)
+        {
+            L->lds_aa_used = true;
+            long long b = ROCKE_LL_LDS_AA_BASE;
+            return rocke_arena_printf(&L->arena,
+                                      ", !alias.scope !%lld, !noalias !%lld",
+                                      b + 1 + (long long)n + (long long)i,
+                                      b + 1 + 2 * (long long)n + (long long)i);
+        }
     }
-    return NULL;
+    return "";
 }
 
-void rocke_ll_lds_prov_add(rocke_lower_t* L, const char* value_name, const char* gname)
+static void ll_lds_aa_render(rocke_lower_t* L, rocke_strbuf_t* out)
 {
-    if(!L->lds_alias || !value_name || !gname)
-        return;
-    rocke_ll_smem_name_t e;
-    e.value_name = rocke_arena_strdup(&L->arena, value_name);
-    e.gname = gname;
-    int rc;
-    rocke_vec_push(&L->arena, &L->lds_prov, e, rc);
-    if(rc != 0)
-        rocke_ll_fail(L, ROCKE_ERR_OOM, "lds alias provenance push");
-}
-
-/* Domain, one scope per allocation, its scope list and its noalias list. An
- * allocation is noalias only with allocations whose pool byte ranges do not
- * overlap it (the liveness packing shares bytes between disjoint lifetimes). */
-static void ll_lds_alias_metadata(rocke_lower_t* L, rocke_strbuf_t* out)
-{
-    int dom = ROCKE_LL_LDS_ALIAS_MD_BASE;
-    int base = dom + 1;
-    int n = (int)L->smem_globals.len;
-    rocke_strbuf_appendf(out, "\n!%d = distinct !{!%d, !\"rocke.lds\"}\n", dom, dom);
-    for(int i = 0; i < n; i++)
+    size_t* idx = (size_t*)rocke_arena_alloc(&L->arena, sizeof(size_t) * (L->smem_globals.len + 1));
+    size_t n = ll_lds_aa_names(L, idx);
+    long long b = ROCKE_LL_LDS_AA_BASE;
+    rocke_strbuf_append(out, "\n");
+    rocke_strbuf_append(
+        out, rocke_arena_printf(&L->arena, "!%lld = distinct !{!%lld, !\"rocke.lds\"}\n", b, b));
+    for(size_t i = 0; i < n; i++)
+        rocke_strbuf_append(out,
+                            rocke_arena_printf(&L->arena,
+                                               "!%lld = distinct !{!%lld, !%lld, !\"%s\"}\n",
+                                               b + 1 + (long long)i,
+                                               b + 1 + (long long)i,
+                                               b,
+                                               L->smem_globals.data[idx[i]].gname));
+    for(size_t i = 0; i < n; i++)
+        rocke_strbuf_append(out,
+                            rocke_arena_printf(&L->arena,
+                                               "!%lld = !{!%lld}\n",
+                                               b + 1 + (long long)n + (long long)i,
+                                               b + 1 + (long long)i));
+    for(size_t i = 0; i < n; i++)
     {
-        const char* g = L->smem_globals.data[i].gname;
-        rocke_strbuf_appendf(out,
-                             "!%d = distinct !{!%d, !%d, !\"%s\"}\n",
-                             base + i,
-                             base + i,
-                             dom,
-                             g[0] == '@' ? g + 1 : g);
-    }
-    for(int i = 0; i < n; i++)
-        rocke_strbuf_appendf(out, "!%d = !{!%d}\n", base + n + i, base + i);
-    for(int i = 0; i < n; i++)
-    {
-        int lo = i < (int)L->smem_offsets.len ? L->smem_offsets.data[i] : 0;
-        int hi = lo + (i < (int)L->smem_sizes.len ? L->smem_sizes.data[i] : 0);
-        rocke_strbuf_appendf(out, "!%d = !{", base + 2 * n + i);
-        bool first = true;
-        for(int j = 0; j < n; j++)
+        size_t gi = idx[i];
+        int lo = L->smem_offsets.data[gi];
+        int hi = lo + L->smem_sizes.data[gi];
+        rocke_strbuf_append(
+            out,
+            rocke_arena_printf(&L->arena, "!%lld = !{", b + 1 + 2 * (long long)n + (long long)i));
+        int first = 1;
+        for(size_t j = 0; j < n; j++)
         {
             if(j == i)
                 continue;
-            int lo2 = j < (int)L->smem_offsets.len ? L->smem_offsets.data[j] : 0;
-            int hi2 = lo2 + (j < (int)L->smem_sizes.len ? L->smem_sizes.data[j] : 0);
-            if(hi <= lo2 || hi2 <= lo || hi == lo || hi2 == lo2)
+            size_t gj = idx[j];
+            int lo2 = L->smem_offsets.data[gj];
+            int hi2 = lo2 + L->smem_sizes.data[gj];
+            if(lo2 >= hi || hi2 <= lo)
             {
-                rocke_strbuf_appendf(out, first ? "!%d" : ", !%d", base + j);
-                first = false;
+                rocke_strbuf_append(
+                    out,
+                    rocke_arena_printf(
+                        &L->arena, "%s!%lld", first ? "" : ", ", b + 1 + (long long)j));
+                first = 0;
             }
         }
         rocke_strbuf_append(out, "}\n");
     }
+}
+
+void rocke_ll_lds_prov_set(rocke_lower_t* L, const rocke_value_t* v, const char* gname)
+{
+    int rc;
+    rocke_ll_lds_prov_t p;
+    p.value = v;
+    p.gname = gname;
+    rocke_vec_push(&L->arena, &L->lds_prov, p, rc);
+    if(rc != 0)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "lds_prov push");
+}
+
+const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const rocke_value_t* v)
+{
+    for(size_t i = 0; i < L->lds_prov.len; i++)
+        if(L->lds_prov.data[i].value == v)
+            return L->lds_prov.data[i].gname;
+    return NULL;
 }
 
 const char*
@@ -2191,9 +2218,9 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!5 = !{i32 1}\n");
     }
-    if(L->lds_alias_used)
+    if(L->lds_aa_used)
     {
-        ll_lds_alias_metadata(L, out);
+        ll_lds_aa_render(L, out);
     }
     if(L->debug)
     {
@@ -2254,11 +2281,6 @@ static void ll_lower_into(rocke_lower_t* L,
     {
         L->debug = rocke_ll_debug_create(L, kernel->name);
     }
-    const rocke_attr_value_t* alias_attr = rocke_attr_get(&kernel->attrs, "lds_alias_scopes");
-    L->lds_alias = alias_attr
-                   && ((alias_attr->kind == ROCKE_ATTR_BOOL && alias_attr->u.b)
-                       || (alias_attr->kind == ROCKE_ATTR_INT && alias_attr->u.i));
-
     /* Entry block (ll_make_block raises on OOM). */
     ll_make_block(L, "entry");
 
@@ -2339,9 +2361,6 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
     L.needs_nontemporal_md = false;
-    L.lds_alias = false;
-    L.lds_alias_used = false;
-    rocke_vec_init(&L.lds_prov);
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);
@@ -2349,6 +2368,9 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.smem_names);
     rocke_vec_init(&L.smem_offsets);
     rocke_vec_init(&L.smem_sizes);
+    rocke_vec_init(&L.lds_prov);
+    L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
+    L.lds_aa_used = false;
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
     rocke_vec_init(&L.yield_stack);

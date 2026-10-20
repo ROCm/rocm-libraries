@@ -55,6 +55,115 @@ inline size_t clampWorkspaceSize(const char* func, size_t workspaceBytes)
     return rocblaslt_max_workspace_bytes;
 }
 
+inline bool isW4A16ScaleFormat(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// Scale type named by a w4a16 mode, or HIPBLASLT_DATATYPE_INVALID.
+inline hipDataType w4a16ScaleType(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+        return HIP_R_16BF;
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return HIP_R_16F;
+    default:
+        return HIPBLASLT_DATATYPE_INVALID;
+    }
+}
+
+/// w4a16 checks shared by rocblaslt_matmul_valid_args and the ext setProblem paths.
+/// Returns rocblaslt_status_continue if not w4a16 or valid.
+inline rocblaslt_status
+    validateW4A16Args(hipDataType                                typeA,
+                      hipDataType                                typeB,
+                      RocblasltContractionProblem::ScalingFormat scaleAType,
+                      const void*                                scaleA,
+                      int64_t                                    numBatchesA,
+                      int64_t                                    rowsA,
+                      int64_t                                    lda)
+{
+    // int4 A and a group A-scale only make sense together.
+    const bool int4A       = (typeA == HIP_R_4I);
+    const bool blockScaleA = isW4A16ScaleFormat(scaleAType);
+    if(int4A != blockScaleA)
+    {
+        log_error(__func__,
+                  "w4a16 requires HIP_R_4I matrix A together with a "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC*_{16BF,16F}[_ZP]_EXT A scale mode; "
+                  "got a_type=",
+                  static_cast<int>(typeA),
+                  " scaleAType=",
+                  rocblaslt_scaling_format_to_string(scaleAType));
+        return rocblaslt_status_invalid_value;
+    }
+    if(int4A && scaleA == nullptr)
+    {
+        log_error(__func__, "w4a16 requires a non-null A scale pointer");
+        return rocblaslt_status_invalid_pointer;
+    }
+    // Only scales of B's type are implemented.
+    if(int4A && w4a16ScaleType(scaleAType) != typeB)
+    {
+        log_error(__func__,
+                  "w4a16 A scale mode names scale type ",
+                  static_cast<int>(w4a16ScaleType(scaleAType)),
+                  " but matrix B is type ",
+                  static_cast<int>(typeB),
+                  "; the scale type must equal B's");
+        return rocblaslt_status_invalid_value;
+    }
+    // The scale tensor has no batch dimension.
+    if(int4A && numBatchesA > 1)
+    {
+        log_error(
+            __func__, "w4a16 does not support batch_count > 1 yet (got ", numBatchesA, ")");
+        return rocblaslt_status_not_implemented;
+    }
+    // Kernels step A rows by lda >> 3 dwords.
+    if(int4A && (lda < rowsA || lda % 8 != 0))
+    {
+        log_error(__func__,
+                  "w4a16 requires lda >= rows of A and lda % 8 == 0; lda",
+                  lda,
+                  "rows_A",
+                  rowsA);
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_continue;
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -415,7 +524,11 @@ inline rocblaslt_status
     batch_stride_e = original_stride_e > 0 ? original_stride_e : original_lde * num_cols_e;
     if(E != nullptr && ((lde < num_rows_e) || (batch_stride_e < (num_cols_e * num_rows_e))))
         status = rocblaslt_status_invalid_value;
-    if(scaleAType != RocblasltContractionProblem::ScalingFormat::None
+    const bool w4a16ScalarB
+        = isW4A16ScaleFormat(scaleAType)
+          && scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar;
+    if(!w4a16ScalarB
+       && scaleAType != RocblasltContractionProblem::ScalingFormat::None
        && scaleBType != RocblasltContractionProblem::ScalingFormat::None
        && scaleAType != scaleBType)
     {
@@ -540,6 +653,16 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
             return rocblaslt_status_invalid_value;
         }
     }
+
+    if(auto status = validateW4A16Args(matA->type,
+                             matB->type,
+                             matmul_descr->scaleAType,
+                             matmul_descr->scaleA,
+                             num_batches_a,
+                             num_rows_a,
+                             lda);
+       status != rocblaslt_status_continue)
+        return status;
 
     auto matmul_status = validateMatmulArgs(m,
                                             n,

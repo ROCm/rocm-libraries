@@ -1437,10 +1437,6 @@ _DEBUG_INFO_VERSION = 3
 # taught to emit debug info too.
 _DEBUG_MD_BASE = 10
 
-# First metadata id of the LDS alias scopes (kernel attr ``lds_alias_scopes``),
-# far above anything the debug numbering reaches, so the two never collide.
-_LDS_ALIAS_MD_BASE = 1000000
-
 
 def _escape_md_string(text: str) -> str:
     r"""Escape ``text`` for an LLVM metadata string literal.
@@ -1762,21 +1758,22 @@ class _Lowerer:
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
-        # Kernel attr ``lds_alias_scopes``: give every smem allocation an alias
-        # scope and tag the LDS DMA writes and transpose reads with it. Every
-        # allocation lives in one pooled global, so without the tags LLVM's
-        # waitcnt pass cannot tell a ring buffer in flight from the one being
-        # read and drains every LDS DMA (vmcnt(0)) before each ds_read.
-        self._lds_alias: bool = bool(kernel.attrs.get("lds_alias_scopes"))
-        self._lds_alias_used: bool = False
-        # i64 LDS address value name -> the allocation it points into.
-        self._lds_prov: Dict[str, str] = {}
         # Byte size of each allocation placed in the pool.
         self._smem_sizes: Dict[str, int] = {}
         # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
         self._smem_offsets: Dict[str, int] = {}
         self._smem_pool_size: int = 0
         self._smem_pool_name: Optional[str] = None
+        # LDS alias scopes (kernel attr ``lds_alias_scopes``): one scope per
+        # smem allocation, noalias against allocations whose pooled byte
+        # ranges are disjoint. Without them SIInsertWaitcnts must assume any
+        # LDS read can alias an in-flight LDS DMA (buffer_load ... lds) and
+        # waits vmcnt(0) first; with them it waits only for DMA into the
+        # read's own allocation.
+        self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
+        # i64 LDS address value name -> the allocation it points into.
+        self._lds_prov: Dict[str, str] = {}
+        self._lds_aa_used = False
         # Cache of per-allocation base pointers already emitted, keyed by
         # (block label, global name). Lets a non-zero-offset allocation that is
         # accessed several times in the same block reuse a single byte-level
@@ -2327,6 +2324,45 @@ class _Lowerer:
 
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
         self._smem_pool_size = (pool_size + 15) & ~15
+
+    _LDS_AA_BASE = 900000
+
+    def _lds_aa_names(self) -> List[str]:
+        return sorted(self._smem_sizes)
+
+    def _lds_aa_suffix(self, gname: Optional[str]) -> str:
+        """``, !alias.scope !A, !noalias !N`` for an access to ``gname``."""
+        if not self._lds_aa or gname is None or gname not in self._smem_sizes:
+            return ""
+        self._lds_aa_used = True
+        names = self._lds_aa_names()
+        n = len(names)
+        i = names.index(gname)
+        b = self._LDS_AA_BASE
+        return f", !alias.scope !{b + 1 + n + i}, !noalias !{b + 1 + 2 * n + i}"
+
+    def _lds_aa_render(self) -> List[str]:
+        names = self._lds_aa_names()
+        n = len(names)
+        b = self._LDS_AA_BASE
+        out = [f'!{b} = distinct !{{!{b}, !"rocke.lds"}}']
+        for i, g in enumerate(names):
+            out.append(f'!{b + 1 + i} = distinct !{{!{b + 1 + i}, !{b}, !"{g}"}}')
+        for i, g in enumerate(names):
+            out.append(f"!{b + 1 + n + i} = !{{!{b + 1 + i}}}")
+        for i, g in enumerate(names):
+            lo, hi = self._smem_offsets[g], self._smem_offsets[g] + self._smem_sizes[g]
+            dis = [
+                f"!{b + 1 + j}"
+                for j, h in enumerate(names)
+                if h != g
+                and (
+                    self._smem_offsets[h] >= hi
+                    or self._smem_offsets[h] + self._smem_sizes[h] <= lo
+                )
+            ]
+            out.append(f"!{b + 1 + 2 * n + i} = !{{{', '.join(dis)}}}")
+        return out
 
     def _emit_smem_base_ptr(self, gname: str, stype: SmemType) -> str:
         """Return an addrspace(3) pointer to the start of the smem segment.
@@ -3056,8 +3092,8 @@ class _Lowerer:
         %r_i8 = trunc i32 %clamped to i8
 
         The clamp uses ``llvm.smin`` / ``llvm.smax`` so the backend can
-        fold the whole sequence into a ``v_med3_i32`` followed by a
-        single ``v_cvt_pk_i16_i32`` byte select.
+        fold it into a single ``v_med3_i32``; the low byte of the result
+        is the i8.
         """
         (v,) = op.operands
         self._need("rint.f32")
@@ -3325,57 +3361,6 @@ class _Lowerer:
     def _smem_global_name(self, smem_value: Value) -> Tuple[str, SmemType]:
         name = self._smem_storage_name[smem_value.name]
         return name, smem_value.type  # type: ignore[return-value]
-
-    def _lds_alias_index(self, gname: str) -> int:
-        return [g for g, _ in self._smem_globals].index(gname)
-
-    def _lds_alias_suffix(self, gname: Optional[str]) -> str:
-        """``!alias.scope`` / ``!noalias`` tags of an access to ``gname``.
-
-        Empty unless the kernel opted in and the access traces to one
-        allocation. The ids are fixed by the allocation's declaration index;
-        :meth:`_lds_alias_metadata` emits the nodes.
-        """
-        if not self._lds_alias or gname is None:
-            return ""
-        self._lds_alias_used = True
-        n = len(self._smem_globals)
-        i = self._lds_alias_index(gname)
-        base = _LDS_ALIAS_MD_BASE + 1
-        return f", !alias.scope !{base + n + i}, !noalias !{base + 2 * n + i}"
-
-    def _lds_alias_metadata(self) -> List[str]:
-        """Domain, one scope per allocation, its scope list and noalias list.
-
-        An allocation is declared noalias only with allocations whose pool
-        byte ranges do not overlap it: the liveness packing lets allocations
-        with disjoint lifetimes share bytes, and those must stay may-alias.
-        """
-        dom = _LDS_ALIAS_MD_BASE
-        base = dom + 1
-        names = [g for g, _ in self._smem_globals]
-        n = len(names)
-
-        def span(g: str) -> Tuple[int, int]:
-            off = self._smem_offsets.get(g, 0)
-            return off, off + self._smem_sizes.get(g, 0)
-
-        out = [f'!{dom} = distinct !{{!{dom}, !"rocke.lds"}}']
-        for i, g in enumerate(names):
-            out.append(f'!{base + i} = distinct !{{!{base + i}, !{dom}, !"{g[1:]}"}}')
-        for i, g in enumerate(names):
-            out.append(f"!{base + n + i} = !{{!{base + i}}}")
-        for i, g in enumerate(names):
-            lo, hi = span(g)
-            others = []
-            for j, h in enumerate(names):
-                if j == i:
-                    continue
-                lo2, hi2 = span(h)
-                if hi <= lo2 or hi2 <= lo or hi == lo or hi2 == lo2:
-                    others.append(f"!{base + j}")
-            out.append(f"!{base + 2 * n + i} = !{{{', '.join(others)}}}")
-        return out
 
     def _op_memref_global_load(self, op: Op) -> None:
         ptr, idx = op.operands
@@ -3712,7 +3697,7 @@ class _Lowerer:
         align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
-            f"align {align}"
+            f"align {align}{self._lds_aa_suffix(gname)}"
         )
 
     def _op_tile_smem_load_v4(self, op: Op) -> None:
@@ -3814,6 +3799,7 @@ class _Lowerer:
             scalar = self._fresh("smem.s")
             self._current().emit(
                 f"  {scalar} = load {volatile}{elem_ty}, ptr addrspace(3) {base}, align {align}"
+                f"{self._lds_aa_suffix(gname)}"
             )
             self._current().emit(
                 f"  {op.result.name} = insertelement <1 x {elem_ty}> undef, {elem_ty} {scalar}, i32 0"
@@ -3821,7 +3807,7 @@ class _Lowerer:
         else:
             self._current().emit(
                 f"  {op.result.name} = load {volatile}<{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
-                f"align {align}"
+                f"align {align}{self._lds_aa_suffix(gname)}"
             )
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
@@ -4603,20 +4589,20 @@ class _Lowerer:
         self._emit_wave_ballot(pred, op.result.name)
 
     def _op_tile_wave_all(self, op: Op) -> None:
-        # wave_all(p) = (ballot(p) == -1).
-        # On wave64 with all lanes active, ``ballot.i64`` returns
-        # ``-1 == 0xffffffffffffffff`` iff every lane voted true.
-        # Matches HIP's ``__all(p)`` which uses the same shorthand.
-        # This form is robust under wave64 with full EXEC (our standard
-        # workgroup launch profile); under a partially-predicated EXEC
-        # mask the result counts only the active lanes (still the
-        # semantics we want for "did every *active* lane vote true").
+        # wave_all(p) = (ballot(p) == full-wave mask). ``ballot.i64`` sets
+        # only the low ``wave_size`` bits, so the full mask is -1 on wave64
+        # but 0xffffffff on wave32 (comparing against -1 there is never
+        # true). Unlike HIP's ``__all(p)``, which counts only active lanes,
+        # this requires full EXEC: under partial EXEC (a divergent region or
+        # a sub-wave workgroup) it returns 0. Every rocKE kernel launches
+        # with full EXEC.
         (pred,) = op.operands
         self._need("ballot.i64")
         b_name = self._fresh("ballot")
         self._emit_wave_ballot(pred, b_name)
+        full = -1 if self._backend.arch.wave_size == 64 else (1 << 32) - 1
         eq_name = self._fresh("all_eq")
-        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, -1")
+        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, {full}")
         self._current().emit(f"  {op.result.name} = zext i1 {eq_name} to i32")
 
     def _op_tile_wave_any(self, op: Op) -> None:
@@ -5089,7 +5075,7 @@ class _Lowerer:
         raw = self._fresh("tr.raw")
         self._current().emit(
             f"  {raw} = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64("
-            f"ptr addrspace(3) {base}){self._lds_alias_suffix(gname)}"
+            f"ptr addrspace(3) {base}){self._lds_aa_suffix(gname)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         self._current().emit(
@@ -5292,20 +5278,19 @@ class _Lowerer:
         gname = self._smem_storage_name[smem.name]
         stype = smem.type
         base_ptr = self._emit_smem_base_ptr(gname, stype)
+        self._lds_prov[op.result.name] = gname
         # The global is ptr addrspace(3); cast to i64 for arithmetic.
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
-        if self._lds_alias:
-            self._lds_prov[op.result.name] = gname
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
+        if base.name in self._lds_prov:
+            self._lds_prov[op.result.name] = self._lds_prov[base.name]
         self._current().emit(
             f"  {op.result.name} = add i64 {self._operand(base)}, {self._operand(off)}"
         )
-        if self._lds_alias and base.name in self._lds_prov:
-            self._lds_prov[op.result.name] = self._lds_prov[base.name]
 
     def _op_tile_global_ptr_add(self, op: Op) -> None:
         # ptr + byte_off as a new global pointer (getelementptr i8). The
@@ -5355,7 +5340,7 @@ class _Lowerer:
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
             f"i32 0, i32 {aux})"
-            f"{self._lds_alias_suffix(self._lds_prov.get(lds_addr.name))}"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 
     def _op_tile_s_wait_asynccnt(self, op: Op) -> None:
@@ -6265,7 +6250,7 @@ class _Lowerer:
             f"i32 {self._operand(soffset)}, "
             f"i32 0, "
             f"i32 {aux})"
-            f"{self._lds_alias_suffix(self._lds_prov.get(lds_ptr.name))}"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_ptr.name))}"
         )
 
     def _op_tile_buffer_load_lds_async(self, op: Op) -> None:
@@ -7206,8 +7191,8 @@ class _Lowerer:
         if self._needs_nontemporal_md:
             out.append("!5 = !{i32 1}")
             out.append("")
-        if self._lds_alias_used:
-            out.extend(self._lds_alias_metadata())
+        if self._lds_aa_used:
+            out.extend(self._lds_aa_render())
             out.append("")
         if self._debug is not None:
             out.extend(self._debug.render())

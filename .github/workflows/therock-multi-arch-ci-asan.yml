@@ -22,7 +22,7 @@ on:
     inputs:
       linux_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
+        description: "Comma-separated Linux GPU families to build and test, ex: gfx94X,gfx120X. Use 'none' to skip Linux or 'all' for every family."
         default: ""
       pr_labels:
         type: string
