@@ -27,6 +27,15 @@ from vllm.v1.attention.backends.rocm_attn import (
 
 logger = init_logger(__name__)
 
+# The ROCKE_* reads in this file are MEASUREMENT APPARATUS, not dispatch. None
+# of them reaches the kernel registry: this is the vLLM v1 backend shim, and
+# each one exists so an A/B run can hold the backend, the plumbing and the KV
+# handling fixed while swapping exactly one thing. Every figure quoted for this
+# work came from toggling one of them between two arms of the same process.
+# Kernel selection proper lives in library/dispatch/attention/gfx1151.py, which
+# reads no environment at all. Defaults here are the shipping configuration;
+# see platform/dsl_docs/reference/env_flags.md for the full table.
+#
 # Minimum prefill seqlen to use swapqk (below this Triton is faster).
 # Raise this above the prompt length to force every request down the
 # context_attention_fwd path: that yields a matched control arm in which the
@@ -152,7 +161,7 @@ def _decode_op_ready() -> bool:
     global _DECODE_OP
     if _DECODE_OP is None:
         try:
-            from rocke.instances.gfx1151.paged_decode_splitk import (
+            from builders.gfx1151.attention.paged_decode_torch_ops import (
                 register_torch_custom_ops,
             )
 
@@ -329,8 +338,10 @@ def _launch_swapqk_for_request(
 ) -> None:
     """Launch swapqk for a single request (no batch dim).
 
-    ``paged_v`` is ``(v_cache, block_table_row, num_blocks)`` when the kernel
-    reads V out of the paged cache. That path never touches ``v`` at all -- the
+    ``paged_v`` is ``(v_cache, block_table_row, n_pages)`` -- the cache, this
+    request's row of the block table, and how many entries of that row are
+    live -- when the kernel reads V out of the paged cache. That path never
+    touches ``v`` at all -- the
     cache write already laid the tokens out transposed, so the permute below --
     which runs at a small fraction of achievable bandwidth -- is not performed.
     """
@@ -343,7 +354,7 @@ def _launch_swapqk_for_request(
     rt = entry["rt"]
 
     if paged_v is not None:
-        v_cache, bt_row, bt_num_entries = paged_v
+        v_cache, bt_row, n_pages = paged_v
         v_ptr = v_cache.data_ptr()
         v_t = None
     else:
@@ -380,7 +391,7 @@ def _launch_swapqk_for_request(
         # bt_stride is unused here (one request per launch means the kernel's
         # batch index is always 0) but must still be passed positionally.
         packed += struct.pack(
-            "<4xQii", bt_row.data_ptr(), bt_num_entries, bt_num_entries
+            "<4xQiii", bt_row.data_ptr(), n_pages, n_pages, v_cache.shape[0]
         )
     packed_buf = (ctypes.c_uint8 * len(packed)).from_buffer(bytearray(packed))
 
@@ -812,24 +823,33 @@ class RockeAttentionImpl(RocmAttentionImpl):
                     print(f"[RocKE] stats {ROCKE_STATS} seqlen={seqlen}", flush=True)
                 continue
 
+            paged_v = None
             if kv_bs:
                 # Row i of the block table maps this request's logical pages to
                 # physical ones. The kernel's batch index is 0 (one request per
                 # launch), so the ROW is handed over, not the table base.
                 n_pages = (seqlen + kv_bs - 1) // kv_bs
-                paged_v = (paged[0], block_table[i], n_pages)
-                ROCKE_STATS["paged_v"] += 1
-            else:
-                paged_v = None
-                if paged is not None:
+                if n_pages <= block_table.shape[1]:
+                    paged_v = (paged[0], block_table[i], n_pages)
+                    ROCKE_STATS["paged_v"] += 1
+                else:
+                    # seqlen and the table disagree. The row is contiguous with
+                    # the next request's, so reading past its width would gather
+                    # V from someone else's pages rather than fault. Decline.
                     ROCKE_STATS["paged_v_declined"] += 1
+            elif paged is not None:
+                ROCKE_STATS["paged_v_declined"] += 1
 
             _launch_swapqk_for_request(
                 q=query[start:end].contiguous(),
                 k=key[start:end].contiguous(),
                 # The paged path never reads this; slicing it is free, but the
                 # .contiguous() would be a copy of the whole V slice.
-                v=value[start:end] if kv_bs else value[start:end].contiguous(),
+                v=(
+                    value[start:end]
+                    if paged_v is not None
+                    else value[start:end].contiguous()
+                ),
                 out=output[start:end],
                 scale=self.scale,
                 causal=causal,

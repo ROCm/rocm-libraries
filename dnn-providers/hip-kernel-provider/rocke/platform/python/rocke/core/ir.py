@@ -4828,58 +4828,6 @@ class IRBuilder:
             result_name_hint="bld16",
         ).result
 
-    def buffer_load_d16_pack(
-        self, rsrc: Value, voffset: Value, soffset_lo: Value, soffset_hi: Value
-    ) -> Value:
-        """Pack two strided f16 buffer loads into one dword (`i32`) via inline
-        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` (hi tied to lo).
-
-        The buffer analogue of the flat ``global_load_d16_hi_b16``: writes the
-        two strided halves DIRECTLY into one register's lo/hi lanes, so the
-        per-dword ``v_mov_b16`` f16-pack (which the typed ``buffer_load_f16_d16``
-        path cannot avoid -- the backend never selects the D16-hi buffer form
-        from the intrinsic) disappears. Element 0 = load(soffset_lo), element 1
-        = load(soffset_hi); bitcast the result to ``<2 x half>``.
-
-        HAZARD: these inline-asm loads are outside the backend's ``vmcnt``
-        model. The caller MUST emit ``s_waitcnt(vmcnt=0)`` after the gather and
-        before consuming the fragment, or the WMMA reads stale registers.
-        """
-        return self._op(
-            "tile.buffer_load_d16_pack",
-            [rsrc, voffset, soffset_lo, soffset_hi],
-            [I32],
-            result_name_hint="d16pk",
-        ).result
-
-    def vmcnt0_fence(self, values: "Sequence[Value]") -> "list[Value]":
-        """Tie ``values`` through a verbatim ``s_waitcnt vmcnt(0)`` inline-asm
-        barrier and return the fenced values (same types, in order).
-
-        This is the correctness primitive for inline-asm VMEM loads (e.g.
-        :meth:`buffer_load_d16_pack`), which are OUTSIDE the backend's vmcnt
-        model: the auto-waitcnt pass neither inserts a wait before their
-        consumers NOR preserves a plain ``s_waitcnt`` intrinsic (it "knows"
-        vmcnt is already 0 because it never counted the asm loads, so it drops
-        the wait -> the consumer reads stale registers). Emitting the wait as
-        an inline-asm STRING makes it verbatim (never dropped), and tying each
-        value as an in/out operand (``=v,..,0,1,..``) forces every consumer of
-        the result to be scheduled AFTER the barrier. One drain per call.
-        """
-        vals = list(values)
-        n = len(vals)
-        if n == 0:
-            return []
-        constraints = ",".join(["=v"] * n + [str(i) for i in range(n)])
-        return self.inline_asm_multi(
-            "s_waitcnt vmcnt(0)",
-            constraints,
-            operands=vals,
-            result_types=[v.type for v in vals],
-            sideeffect=True,
-            result_name_hint="vfence",
-        )
-
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
         """Scalar bf16 buffer load via `raw_ptr_buffer_load_u16` + bitcast.
 

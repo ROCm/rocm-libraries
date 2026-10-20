@@ -5754,42 +5754,6 @@ class _Lowerer:
             f"i32 {self._operand(voffset)}, i32 {self._operand(soffset)}, i32 0)"
         )
 
-    def _op_tile_buffer_load_d16_pack(self, op: Op) -> None:
-        """Pack two strided f16 buffer loads into one dword via inline-asm
-        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` (result `i32`).
-
-        This is the buffer-path analogue of the flat ``global_load_d16_hi_b16``
-        the backend selects automatically. The typed ``raw.ptr.buffer.load.f16``
-        intrinsic will NOT select the D16-hi buffer form (verified: it always
-        lowers to ``buffer_load_u16`` + an explicit ``v_mov_b16`` pack), so the
-        only way to write both strided halves DIRECTLY into one VGPR's lo/hi
-        lanes -- eliminating the per-dword ``v_mov_b16`` -- is to pin the two
-        machine instructions with inline asm and tie the hi load's destination
-        to the lo load's result (``0`` constraint).
-
-        HAZARD: inline-asm loads are OUTSIDE the backend's ``vmcnt`` model, so
-        NO ``s_waitcnt`` is auto-inserted before the consumer. The caller MUST
-        emit an explicit ``s_waitcnt(vmcnt=0)`` fence after the gather and
-        before the WMMA that reads the fragment (see ``fmha_swapqk`` d16hi path).
-        """
-        rsrc, voffset, soffset_lo, soffset_hi = op.operands
-        voff = self._operand(voffset)
-        rs = self._operand(rsrc)
-        lo = self._fresh("d16lo")
-        # lo half: buffer_load_d16_b16 dst, voff, rsrc, soff_lo
-        self._current().emit(
-            f"  {lo} = call i32 asm sideeffect "
-            f'"buffer_load_d16_b16 $0, $1, $2, $3 offen", "=v,v,s,s"('
-            f"i32 {voff}, ptr addrspace(8) {rs}, i32 {self._operand(soffset_lo)})"
-        )
-        # hi half: buffer_load_d16_hi_b16 dst, voff, rsrc, soff_hi  (dst tied to lo)
-        self._current().emit(
-            f"  {op.result.name} = call i32 asm sideeffect "
-            f'"buffer_load_d16_hi_b16 $0, $2, $3, $4 offen", "=v,0,v,s,s"('
-            f"i32 {lo}, i32 {voff}, ptr addrspace(8) {rs}, "
-            f"i32 {self._operand(soffset_hi)})"
-        )
-
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 

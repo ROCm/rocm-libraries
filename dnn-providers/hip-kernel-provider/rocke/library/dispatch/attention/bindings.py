@@ -510,6 +510,17 @@ def bind_swapqk_torch(
         (batch, hk, d, seqlen_k) if spec.v_transposed else (batch, seqlen_k, hk, d)
     )
 
+    # Compiled once at bind time, not per launch. The module is held by this
+    # closure for the binding's lifetime instead of being unloaded after every
+    # call, so a binding reused across launches pays the compile once. Nothing
+    # here depends on the tensors, only on the spec and the request.
+    art = compile_kernel(
+        build_wmma_fmha_swapqk(spec, arch=str(request.arch)), arch=str(request.arch)
+    )
+    rt = Runtime()
+    module = rt.load_module(art.hsaco)
+    fn = module.get_function(art.kernel_name)
+
     def launch(**_kw):
         q, k, v, out = tensors["q"], tensors["k"], tensors["v"], tensors["out"]
         actual_v = _shape(v, "v")
@@ -520,11 +531,6 @@ def bind_swapqk_torch(
                 "relay a row-major V through swapqk_transpose_v, or build the "
                 "spec with v_transposed=False"
             )
-        kernel = build_wmma_fmha_swapqk(spec, arch=str(request.arch))
-        art = compile_kernel(kernel, arch=str(request.arch))
-        rt = Runtime()
-        module = rt.load_module(art.hsaco)
-        fn = module.get_function(art.kernel_name)
         packed = struct.pack(
             "<QQQQfiiiiiiiiii",
             int(q.data_ptr()),
@@ -545,7 +551,6 @@ def bind_swapqk_torch(
         )
         rt.launch(fn, grid, block, packed)
         rt.sync()
-        module.unload()
         return out
 
     return TorchBinding(launch=launch, grid=grid, block=block)

@@ -83,7 +83,6 @@ class TestSwapQKDefaults(unittest.TestCase):
             "q_lds",
             "kv_lds",
             "o_f16",
-            "d16hi",
             "o_nt",
             "q_nt",
             "static_shape",
@@ -128,6 +127,31 @@ class TestSwapQKDefaults(unittest.TestCase):
             self.assertNotIn(n, names)
             names.add(n)
         self.assertEqual(len(names), 3)
+
+
+class TestSwapQKFieldTypes(unittest.TestCase):
+    """bool/int confusion is rejected at construction, not at build time.
+
+    ``v_paged`` and ``v_transposed`` decide the kernel's parameter list, and
+    the host packs those parameters positionally -- so ``v_paged=1`` would
+    build a kernel whose ABI silently disagrees with what the caller packed.
+    ``bool`` subclasses ``int``, so only an exact type check separates them.
+    """
+
+    def test_truthy_int_is_not_accepted_for_a_flag(self):
+        for field in ("v_paged", "v_transposed", "k_lds", "qk_douter"):
+            with self.subTest(field=field):
+                with self.assertRaises(TypeError) as caught:
+                    _prod_cfg(**{field: 1})
+                self.assertIn(field, str(caught.exception))
+
+    def test_bool_is_not_accepted_for_an_int_knob(self):
+        with self.assertRaises(TypeError) as caught:
+            _prod_cfg(n_waves=True)
+        self.assertIn("n_waves", str(caught.exception))
+
+    def test_production_config_still_constructs(self):
+        self.assertTrue(_prod_cfg().v_transposed)
 
 
 class TestSwapQKValidity(unittest.TestCase):
@@ -410,7 +434,7 @@ class TestSwapQKAdaptiveBlockN(unittest.TestCase):
 
     @staticmethod
     def _pick():
-        from rocke.instances.gfx1151.wmma_fmha_swapqk import _pick_strategy
+        from builders.gfx1151.attention.swapqk_torch_ops import _pick_strategy
 
         return _pick_strategy
 
@@ -429,7 +453,7 @@ class TestSwapQKAdaptiveBlockN(unittest.TestCase):
         self.assertEqual(pick(48)[0], 0)
 
     def test_env_pin_still_honours_divisibility(self):
-        import rocke.instances.gfx1151.wmma_fmha_swapqk as inst
+        import builders.gfx1151.attention.swapqk_torch_ops as inst
 
         prev = inst._BLOCK_N
         try:
@@ -445,7 +469,7 @@ class TestSwapQKAdaptiveBlockN(unittest.TestCase):
     def test_k_lds_env_pin_gives_an_ab_control_arm(self):
         # Every A/B in the k_lds write-up was run through this pin; without it
         # the two arms cannot be compared in one process.
-        import rocke.instances.gfx1151.wmma_fmha_swapqk as inst
+        import builders.gfx1151.attention.swapqk_torch_ops as inst
 
         prev = inst._K_LDS
         try:
@@ -637,7 +661,8 @@ class TestSwapQKPagedV(unittest.TestCase):
         p_names = [p.name for p in paged.params]
         self.assertEqual(p_names[: len(b_names)], b_names)
         self.assertEqual(
-            p_names[len(b_names) :], ["VBlockTable", "bt_stride", "bt_num_entries"]
+            p_names[len(b_names) :],
+            ["VBlockTable", "bt_stride", "bt_num_entries", "v_num_blocks"],
         )
 
     def test_rejects_the_knobs_that_also_own_the_v_operand(self):

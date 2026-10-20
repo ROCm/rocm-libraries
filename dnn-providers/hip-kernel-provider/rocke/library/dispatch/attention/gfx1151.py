@@ -864,6 +864,18 @@ def _make_swapqk_candidate() -> KernelCandidate:
     Registering it makes it reachable, which is what this phase is for; making
     it a gfx1151 *default* is a separate, measured decision across the shape
     space, and ``attention_gfx1151_wmma`` already owns the auto route.
+
+    KNOB REACHABILITY IS DEFERRED, deliberately. :func:`_swapqk_cfg` forwards
+    only the four fields the request actually carries (head_size, the two head
+    counts, mask_mode) and leaves every tuning lever at its default. The
+    defaults are the swept, hardware-validated production configuration, and
+    the remaining ~30 fields are A/B levers whose legal combinations are
+    interdependent -- ``k_dual`` requires ``qk_douter``, ``block_n`` is bounded
+    by ``kv_block_size``, several are measured losses outside one shape corner.
+    Exposing them as a :class:`~rocke.dispatch.tuning.KnobSpace` axis means
+    declaring that lattice and sweeping it, which is its own change. Until
+    then a caller that wants a non-default config builds the kernel directly
+    through ``builders.gfx1151.attention``; the dispatcher serves the winner.
     """
     spec_id = "gfx1151_swapqk"
     name = "attention_gfx1151_swapqk"

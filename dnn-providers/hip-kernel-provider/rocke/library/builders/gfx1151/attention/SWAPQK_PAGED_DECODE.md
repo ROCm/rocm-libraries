@@ -920,6 +920,35 @@ MALL-resident, both kernels are fast, and there is nothing for split-K to recove
 is why `ROCKE_PAGED_DECODE_MIN_KV_MIB` defaults to 32 rather than 0 — the kernel is
 gated to the regime where it was shown to win, not enabled unconditionally and hoped for.
 
+### 9.12 `d16hi` — packing the V gather with inline asm
+
+The typed `buffer_load_f16_d16` path emits ~64 `v_mov_b16` per fragment to pack strided
+f16 pairs into VGPR lo/hi lanes. The backend will not select the D16-hi *buffer* form
+from the intrinsic (checked both ways: a minimal `llc` probe and the full-kernel ISA),
+so the only route to the packed form is inline asm pinning
+`buffer_load_d16_b16` + `buffer_load_d16_hi_b16` with the hi destination tied to the lo
+result. The ISA came out exactly as intended — 64 + 64 packed loads, zero
+`buffer_load_u16`, `v_mov_b16` down from 73 to 9.
+
+It still lost, and the reason is the part worth keeping: **inline-asm VMEM loads are
+outside the backend's `vmcnt` model**, so no wait is auto-inserted before the consumer.
+Every way of supplying the wait by hand was worse than the typed path:
+
+| fence | result |
+|---|---|
+| none | +2.8%, but NaN — the PV permute reads the fragment before the loads land |
+| one `s_waitcnt vmcnt(0)` per fragment | correct, **−5.3%** |
+| hand-rolled counting-down `vmcnt(K)` | GPU hang — uncounted asm loads make the manual accounting deadlock-prone |
+
+The coarse fence serialises the gather and destroys the load/compute overlap the typed
+path gets for free from backend-managed *partial* waits (`vmcnt(2)` interleaved with the
+PV WMMAs). The 64 `v_mov_b16` saved were cheap and already latency-hidden.
+
+The general lesson: intrinsic loads buy correct software pipelining and `vmcnt` tracking
+that inline asm cannot match, and that scheduling is usually worth more than the
+instruction count the asm saves. The knob and its two IR ops were deleted in review —
+they were off by default and had no C++ engine mirror, so they were pure divergence.
+
 ---
 
 ## 10. Measurement discipline

@@ -34,6 +34,11 @@ into ``out``.
 The out-parameter ABI is required for HIP graph replay stability, and the
 workspace is cached rather than allocated per call for the same reason -- a
 replayed graph reuses whatever pointers capture recorded.
+
+This module lives under ``library/`` rather than ``platform/python/rocke/
+instances/`` because it imports ``kernels.gfx1151.paged_decode_splitk``. The
+dependency runs ``library -> platform`` only (see rocke/AGENTS.md "Layout"):
+platform is standalone-installable and never reaches into ``kernels``.
 """
 
 from __future__ import annotations
@@ -234,6 +239,23 @@ def _launch(
     Hk, kv_block_size = v_cache.shape[1], v_cache.shape[3]
     if v_cache.shape[2] != D:
         raise RuntimeError(f"v_cache head_size {v_cache.shape[2]} != q head_size {D}")
+    if k_cache.shape[0] != v_cache.shape[0]:
+        raise RuntimeError(
+            f"k_cache and v_cache disagree on page count: "
+            f"{k_cache.shape[0]} vs {v_cache.shape[0]}"
+        )
+    # The kernel reads row seq_idx of the block table and entry seq_idx of
+    # seq_lens for every request it was launched for, so both have to cover B.
+    # Checked here rather than on device: these are host-side shapes, and a
+    # short table is a caller bug that should name itself, not clamp silently.
+    if block_table.dim() != 2:
+        raise RuntimeError(
+            f"block_table must be [B, max_blocks], got {tuple(block_table.shape)}"
+        )
+    if block_table.shape[0] < B:
+        raise RuntimeError(f"block_table has {block_table.shape[0]} rows, need {B}")
+    if seq_lens.dim() != 1 or seq_lens.shape[0] < B:
+        raise RuntimeError(f"seq_lens must be [>={B}], got {tuple(seq_lens.shape)}")
     if q.stride(-1) != 1 or out.stride(-1) != 1:
         raise RuntimeError("q and out must be contiguous along head_size")
     for name, t in (("k_cache", k_cache), ("v_cache", v_cache)):
@@ -269,12 +291,12 @@ def _launch(
     scale_log2 = float(scale * math.log2(math.e))
     block = (WAVE, 1, 1)
 
-    # ABI: 8 pointers, 1 float, 4 int32. Every field is already at its natural
-    # alignment (8 ptrs = 64 B, then f32 at 64, i32s at 68/72/76/80), so no pad
-    # byte is needed here -- unlike the swapqk paged tail, which appends a
+    # ABI: 8 pointers, 1 float, 5 int32. Every field is already at its natural
+    # alignment (8 ptrs = 64 B, then f32 at 64, i32s at 68/72/76/80/84), so no
+    # pad byte is needed here -- unlike the swapqk paged tail, which appends a
     # pointer after an odd number of i32s.
     seg_args = struct.pack(
-        "<QQQQQQQQfiiii",
+        "<QQQQQQQQfiiiii",
         q.data_ptr(),
         k_cache.data_ptr(),
         v_cache.data_ptr(),
@@ -288,6 +310,7 @@ def _launch(
         q.stride(1),
         block_table.stride(0),
         block_table.numel(),
+        k_cache.shape[0],
     )
     red_args = struct.pack(
         "<QQQQii",

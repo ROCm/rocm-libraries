@@ -47,7 +47,7 @@ from typing import Dict, List, Tuple
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from rocke.helpers.attention import warp_xor_reduce_sum
 from rocke.helpers.io import io_ir_type, load_vec_as_f32, pack_f32_to
-from rocke.helpers.spec import kernel_name_join
+from rocke.helpers.spec import kernel_name_join, validate_field_types
 
 
 __all__ = [
@@ -130,6 +130,14 @@ class PagedDecodeCfg:
     # unrolled straight-line so every workspace load is issued up front.
     reduce_unroll: int = 0
     name: str = "rocke_paged_decode_splitk"
+
+    def __post_init__(self) -> None:
+        # No bool fields today, but every int here is either baked into the
+        # kernel name or used to size a loop, and ``unroll=True`` would pass
+        # an isinstance check and build a 1-deep unroll under a name that
+        # claims otherwise. Guard the whole field list so it stays correct as
+        # fields are added.
+        validate_field_types(self)
 
     @property
     def gqa_fuse(self) -> int:
@@ -326,6 +334,9 @@ def _declare_segment_params(b: IRBuilder, cfg: PagedDecodeCfg) -> Dict[str, Valu
     P["stride_q_head"] = b.param("stride_q_head", I32)
     P["bt_stride"] = b.param("bt_stride", I32)
     P["bt_num_entries"] = b.param("bt_num_entries", I32)
+    # Page count of the KV cache, so a block id read out of the table can be
+    # clamped into range before it is scaled into a cache offset.
+    P["num_blocks"] = b.param("num_blocks", I32)
     return P
 
 
@@ -407,6 +418,14 @@ def build_paged_decode_splitk_segment(
     # split bounds -- and therefore the whole outer loop -- go vector, and the
     # block loop lowers as a divergent loop over uniform data.
     seqlen_k = b.to_sgpr_u32(b.global_load_i32(p["seq_lens"], seq_idx))
+    # A request cannot own more keys than its row of the block table covers.
+    # Rows are contiguous, so a seq_lens entry that overruns its row would walk
+    # into the NEXT request's pages -- in bounds, so it faults nothing, and the
+    # values fold silently into this request's softmax. Clamping at the source
+    # keeps num_kv_blocks and key_limit consistent: the loop simply never
+    # reaches the uncovered blocks. Truncating a bad length is visible in the
+    # output; reading a neighbour's keys is not.
+    seqlen_k = b.smin(seqlen_k, b.shl(p["bt_stride"], b.const_i32(bs_log2)))
 
     # Block-ALIGNED splits: work is partitioned in units of physical kv blocks,
     # never raw keys. That buys one block-table lookup per outer iteration and
@@ -467,6 +486,7 @@ def build_paged_decode_splitk_segment(
     blk_scale = b.const_i32(HK * D * BS)
     bt_row = b.mul(seq_idx, p["bt_stride"])
     bt_max = p["bt_num_entries"]
+    blk_max = b.sub(p["num_blocks"], c1)
 
     scale_log2 = p["scale_log2"]
 
@@ -633,6 +653,14 @@ def build_paged_decode_splitk_segment(
             # so the multiply-add lands on the SALU and the gathers keep a
             # uniform base.
             phys = b.to_sgpr_u32(raw_blk)
+            # The block table is caller-supplied memory; a stale or corrupt
+            # entry would otherwise scale straight into an out-of-range cache
+            # offset and read arbitrary device memory. Clamping into [0,
+            # num_blocks-1] keeps the gather inside the allocation -- the
+            # result is garbage for a garbage table, but it is contained
+            # garbage. Two SALU ops on an already-uniform value, off the
+            # critical path of the gather.
+            phys = b.smax(b.smin(phys, blk_max), c0)
             cache_base = b.add(b.mul(phys, blk_scale), kv_head_off)
             key0 = b.shl(blk_u, b.const_i32(bs_log2))
             key_base = key0 if KSUB == 1 else b.add(key0, sub_slot)

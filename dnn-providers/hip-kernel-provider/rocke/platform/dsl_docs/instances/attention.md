@@ -41,6 +41,24 @@ RDNA / gfx1250 WMMA forward:
   count, grids and workspace mirrored in C (`instance_gfx1151_wmma_fmha_decode.h`)
 - `library/kernels/gfx1250/wmma_attention_fwd.py`, `library/kernels/gfx1250/_wmma_attention_common.py`
 
+Strix Halo (gfx1151) attention, fp16 only -- a separate pair of kernels tuned for
+one part rather than a portable family:
+- `library/kernels/gfx1151/wmma_fmha_swapqk.py` -- transposed-QK prefill. Computing
+  `S^T = K*Q^T` puts the query on the lane, which turns the online-softmax reduction
+  into an in-lane reduce plus one `permlanex16` (no 16-lane butterfly) and makes the
+  C->operand P-transpose a register permute (no LDS round-trip). `SwapQKCfg`'s
+  defaults are the swept production configuration; the remaining fields are A/B
+  levers kept with their measurements, including the retracted ones. NOTE the
+  `v_transposed=True` default: callers hand V as `[B, H, D, S]`
+  (`swapqk_transpose_v`), or set `v_paged` to read V straight from the paged cache.
+  Dispatcher-reachable opt-in via `library/dispatch/attention/gfx1151.py`
+  (`algorithm="wmma_fmha_swapqk"`); the gfx1151 auto route is unchanged.
+- `library/kernels/gfx1151/paged_decode_splitk.py` -- split-K paged decode, built as
+  two kernels (per-split segment + reduce). `d_lanes` lanes cooperate on one dot
+  product; the rest of the wave works disjoint keys and folds in once per segment.
+  Not registered in the dispatcher: it is reached through the vLLM backend, which
+  gates it on KV bytes exceeding the 32 MiB MALL, below which it is a wash.
+
 Helpers (all under `platform/python/rocke/helpers/`):
 - `rotary.py` -- RoPE (interleaved + half layouts)
 - `rng.py` -- Philox4x32-10 RNG for dropout

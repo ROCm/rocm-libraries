@@ -502,6 +502,8 @@ if(ROCKE_INSTALL_TESTS)
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_gfx1151_wmma_fmha_swapqk.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_gfx1151_paged_decode_splitk.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
            " -v -rs --timeout=60)\n")

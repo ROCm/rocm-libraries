@@ -113,6 +113,17 @@ def _dup_locals(ll: str):
 
 
 class TestConfig(unittest.TestCase):
+    def test_bool_is_not_accepted_for_an_int_knob(self):
+        # No bool fields here today, so the hazard runs the other way:
+        # isinstance(True, int) is True, so unroll=True would pass a plain int
+        # check and build a 1-deep unroll under a kernel name claiming
+        # otherwise. The guard is an exact type check for that reason.
+        for field in ("unroll", "d_lanes", "num_splits", "heads_per_cta"):
+            with self.subTest(field=field):
+                with self.assertRaises(TypeError) as caught:
+                    _cfg(**{field: True})
+                self.assertIn(field, str(caught.exception))
+
     def test_derived_quantities(self):
         cfg = _cfg()
         self.assertEqual(cfg.gqa_fuse, 4)
@@ -195,6 +206,17 @@ class TestSegmentCodegen(unittest.TestCase):
                 with self.subTest(splits=splits, kv_block_size=kb):
                     ll = _seg(_cfg(num_splits=splits, kv_block_size=kb))
                     self.assertEqual(_calls(ll, "llvm.amdgcn.readfirstlane.i32"), 2)
+
+    def test_block_id_is_clamped_into_the_cache(self):
+        # The block table is caller memory. bt_num_entries bounds the READ; this
+        # bounds what the read RETURNS, so a stale id cannot scale into an
+        # offset past the allocation. One clamp per unrolled lookup; smax is
+        # counted rather than smin because the clamp is its only user here,
+        # whereas smin also bounds the split range and the key limit.
+        for u in (1, 2):
+            with self.subTest(unroll=u):
+                ll = _seg(_cfg(unroll=u))
+                self.assertEqual(_calls(ll, "llvm.smax.i32"), u)
 
     def test_no_lds(self):
         # The body is register-resident by design: one wave per CTA means
@@ -296,6 +318,7 @@ class TestSegmentCodegen(unittest.TestCase):
                 "stride_q_head",
                 "bt_stride",
                 "bt_num_entries",
+                "num_blocks",
             ],
         )
 

@@ -5,8 +5,8 @@
 PRODUCTION kernel (the campaign winner for dense D128 fp16 on gfx1151). There is
 one config type, :class:`SwapQKCfg`: its defaults are the swept +
 hardware-validated winner (wave2, pingpong ``s_setprio`` scheduling,
-buffer-descriptor D16 V-gather, dual-subtile gather, the transposed V layout, the
-d-outer QK loop, lazy online-softmax rescale, and fast (raw) exp2), so
+buffer-descriptor D16 V-gather, dual-subtile gather, the transposed V layout,
+lazy online-softmax rescale, and fast (raw) exp2), so
 ``SwapQKCfg(head_size=..., num_query_heads=...)`` is the production
 configuration and every other field is an opt-in lever for A/B work. Note that
 the transposed V layout means callers pass V as ``[B, H, D, S]`` -- see
@@ -74,6 +74,7 @@ from rocke.helpers import (
     wmma_mma,
 )
 from rocke.helpers.attention import apply_attention_mask
+from rocke.helpers.spec import validate_field_types
 
 __all__ = [
     "SwapQKCfg",
@@ -113,7 +114,7 @@ class SwapQKCfg:
     The production tunables are the kv tile (``block_n``), the wave count
     (``n_waves``), the QK ILP (``qk_ilp``) and the non-temporal O store
     (``o_nt``, a large-L lever). Everything experimental (pipeline, q_hoist,
-    q_lds, kv_lds, o_f16, d16hi, iglp, static_shape, prefetch_v, v_prefetch,
+    q_lds, kv_lds, o_f16, iglp, static_shape, prefetch_v, v_prefetch,
     bcast_group, k_dual, num_persistent) is off by default.
     """
 
@@ -179,9 +180,7 @@ class SwapQKCfg:
     # and 2 are within 0.3% of each other, all correct). The loop is already
     # scheduling-optimal via the pingpong s_setprio hand-tuning (the 2.25x
     # lever); the canned iglp strategy conflicts with it and does worse.
-    # sched_barrier/sched_group_barrier can't help the d16hi inline-asm path
-    # either (they reorder, but don't insert the vmcnt wait the uncounted asm
-    # loads need). Kept OFF for reference.
+    # Kept OFF for reference.
     iglp: int = -1
     qk_ilp: int = 2
     # block_n: kv tile processed per K-loop iteration (multiple of 16). Larger
@@ -384,36 +383,6 @@ class SwapQKCfg:
     # occupancy paying off. Unexplained; do not reach for o_f16 to buy waves at
     # L>=8K without profiling it first.
     o_f16: bool = False
-    # d16hi: d16_hi buffer gather (buffer_gather + dual_gather only). Pins
-    # buffer_load_d16_b16/_hi_b16 via inline asm (hi tied to lo) so each strided
-    # f16 pair packs DIRECTLY into one VGPR's lo/hi lanes, eliminating the ~64
-    # v_mov_b16 f16-pack the typed buffer_load_f16_d16 path emits -- the backend
-    # NEVER selects the D16-hi buffer form from the intrinsic (verified: minimal
-    # llc probe + full-kernel ISA both give buffer_load_u16 + v_mov_b16,
-    # regardless of insertelement shape). The flat path already gets
-    # global_load_d16_hi_b16 for free, so d16hi is a no-op there.
-    #
-    # DEAD-END (hardware-validated, L2048 dense H24 B1 D128). ISA is clean either
-    # way -- 64 buffer_load_d16_b16 + 64 _hi_b16, 0 buffer_load_u16, v_mov_b16
-    # 73->9 -- but the inline-asm loads are OUTSIDE the backend vmcnt model, and
-    # every way of adding the mandatory wait loses:
-    #   * no fence          -> +2.8% but NaN: the PV permute reads the fragment
-    #                          before the loads land (a race).
-    #   * coarse vmcnt0_fence (CURRENT, correct 1.53e-5) -> -5.3%:
-    #                          one s_waitcnt vmcnt(0) per fragment serialises the
-    #                          gather, killing the load/compute overlap the typed
-    #                          path gets from backend-managed PARTIAL waits
-    #                          (vmcnt(2) interleaved with the PV WMMAs); the 64
-    #                          v_mov_b16 saved are cheap + already latency-hidden.
-    #   * hand fine-grained partial waits (inline-asm gather + counting-down
-    #                          vmcnt(K) sequence, mimicking the backend schedule)
-    #                          -> GPU HANG: with multiple gather blocks pipelined
-    #                          the uncounted asm loads make the manual vmcnt(K)
-    #                          accounting deadlock-prone. Not safe to enable.
-    # Conclusion: intrinsic V loads get free, correct backend software-pipelining
-    # + vmcnt tracking that inline-asm d16 loads cannot match. Kept OFF; the
-    # current path is the coarse (correct) one for reference only.
-    d16hi: bool = False
     # o_nt / q_nt: streaming (non-temporal, cache-bypass) global O-store / Q-load.
     # LARGE-Sq MALL-residency levers (idea 1 / idea 2). At L>=8K the per-head KV
     # is the reused working set we WANT resident in the MALL, but the write-once
@@ -635,7 +604,11 @@ class SwapQKCfg:
     # False; the True path is kept because the d-outer nesting is still the right
     # structure to revisit if the texture-address path stops being the limiter.
     qk_douter: bool = False
-    # A NOTE on the register peak, since it is what caps this kernel. qk_douter
+    # A NOTE on the register peak, since it is what caps this kernel. The
+    # measurements below predate the retraction above and describe the qk_douter
+    # path, which is now OFF -- they are kept because the register story is what
+    # makes that path hard to revive, not because the +7.1% still stands.
+    # qk_douter
     # keeps all n_kv_sub score accumulators AND all n_kv_sub K fragments live (at
     # bn64: 32 + 32 VGPR), which pins it at 199 VGPR = 7 waves/SIMD. The 8th wave is
     # worth +3.9% MEASURED IN ISOLATION (qkdo=0 ilp1 at 192 VGPR/8 waves vs the
@@ -814,6 +787,14 @@ class SwapQKCfg:
     gqa_fuse: int = 1
     name: str = "wmma_fmha_swapqk"
 
+    def __post_init__(self) -> None:
+        # ``v_paged`` and ``v_transposed`` decide the kernel's parameter list,
+        # and the host packs those parameters positionally -- so a truthy
+        # non-bool here produces a kernel whose ABI silently disagrees with
+        # what the caller packed. Checked for the whole field list rather than
+        # for the two flags, so a new lever is covered the day it is added.
+        validate_field_types(self)
+
     @property
     def kv_heads(self) -> int:
         return self.num_kv_heads or self.num_query_heads
@@ -854,7 +835,6 @@ class SwapQKCfg:
             "kvlds" if self.kv_lds else "kvglob",
             f"qb{self.q_block}",
             "of16" if self.o_f16 else "of32",
-            "d16hi" if self.d16hi else "d16lo",
             "ont" if self.o_nt else "oct",
             "qnt" if self.q_nt else "qct",
             (
@@ -1108,6 +1088,10 @@ def _declare_params(b: IRBuilder, *, persistent: bool = False, v_paged: bool = F
         )
         P["bt_stride"] = b.param("bt_stride", I32)
         P["bt_num_entries"] = b.param("bt_num_entries", I32)
+        # bt_num_entries bounds the table READ; this bounds what the read
+        # returns. A stale entry would otherwise scale into an offset past the
+        # cache allocation.
+        P["v_num_blocks"] = b.param("v_num_blocks", I32)
     return P
 
 
@@ -1606,6 +1590,8 @@ def build_wmma_fmha_swapqk(spec: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         # and the total entry count that bounds an over-fetched lookup.
         _bt_row = b.to_sgpr_u32(b.mul(batch, p["bt_stride"]))
         _bt_max = b.to_sgpr_u32(p["bt_num_entries"])
+        # Kernarg, already uniform -- no readfirstlane needed to keep it scalar.
+        _blk_max = b.sub(p["v_num_blocks"], b.const_i32(1))
         # Per-CTA head term of the element base. Note kvh*hs*BS, NOT hs*seqlen_k:
         # seqlen_k must not appear anywhere in a paged V address.
         _v_head_off = b.mul(kv_head, b.const_i32(hs * _BS))
@@ -1664,7 +1650,12 @@ def build_wmma_fmha_swapqk(spec: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                 # readfirstlane is convergent, so LLVM will not CSE two calls on
                 # the same value, and at BS >= block_n every sub-tile shares one.
                 if add not in self._sgpr:
-                    self._sgpr[add] = b.to_sgpr_u32(self._raw[add])
+                    # Clamp after the promotion so the range check is two SALU
+                    # ops on a uniform value. The table is caller memory; a
+                    # stale id must land inside the cache allocation rather
+                    # than at an arbitrary offset from it.
+                    raw = b.to_sgpr_u32(self._raw[add])
+                    self._sgpr[add] = b.smax(b.smin(raw, _blk_max), b.const_i32(0))
                 return self._sgpr[add]
 
             def __getitem__(self, ns):
@@ -1712,24 +1703,6 @@ def build_wmma_fmha_swapqk(spec: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         if spec.buffer_gather and not spec.kv_lds:
             elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
             voff = b.mul(elem0, c2)
-
-            if spec.d16hi:
-                # d16_hi buffer gather: buffer_load_d16_b16/_hi_b16 (inline asm)
-                # pack each strided pair DIRECTLY into a VGPR lo/hi, killing the
-                # ~64 v_mov_b16 the typed buffer_load_f16_d16 path emits. The asm
-                # loads are outside the backend vmcnt model, so vmcnt0_fence ties
-                # the dwords through a verbatim s_waitcnt vmcnt(0) barrier (else
-                # the PV permute reads the fragment before the loads land -> NaN).
-                dwords = [
-                    b.buffer_load_d16_pack(
-                        v_rsrc, voff, soff_list[2 * m], soff_list[2 * m + 1]
-                    )
-                    for m in range(a_frag // 2)
-                ]
-                dwords = b.vmcnt0_fence(dwords)
-                return b.vec_bitcast(
-                    b.vec_pack(dwords, I32), VectorType(dtype_ir, a_frag)
-                )
 
             def _load(j):
                 return b.buffer_load_f16_d16(v_rsrc, voff, soff_list[j])

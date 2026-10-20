@@ -242,13 +242,14 @@ def main() -> int:
         )
         bt_stride = block_table.shape[1]
         bt_num_entries = block_table.size
+        v_num_blocks = V_dev.shape[0]
         print(
             f"[{args.arch}] paged V: cache{V_dev.shape} bs={cfg.kv_block_size} "
             f"block_table{block_table.shape} shuffled={bool(args.shuffle_blocks)}"
         )
     else:
         V_dev = swapqk_transpose_v(V) if cfg.v_transposed else V
-        block_table, bt_stride, bt_num_entries = None, 0, 0
+        block_table, bt_stride, bt_num_entries, v_num_blocks = None, 0, 0, 0
     scale_log2 = float(1.0 / math.sqrt(D) * math.log2(math.e))
 
     grid = swapqk_grid(cfg, seqlen_q=Sq, batch=B)
@@ -298,7 +299,7 @@ def main() -> int:
         # aligns each argument to its own size, and this pointer follows an ODD
         # number of i32s -- without the pad it lands 4 bytes early and the
         # kernel dereferences garbage.
-        packed += struct.pack("<4xQii", btd, bt_stride, bt_num_entries)
+        packed += struct.pack("<4xQiii", btd, bt_stride, bt_num_entries, v_num_blocks)
 
     def launch_once():
         rt.launch(fn, grid, block, packed)

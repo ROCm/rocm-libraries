@@ -125,7 +125,7 @@ def _time_op(torch, fn, warmup, iters):
 
 
 def _run_case(torch, args, B, Sk, num_splits, *, verbose=True):
-    from rocke.instances.gfx1151.paged_decode_splitk import register_torch_custom_ops
+    from .paged_decode_torch_ops import register_torch_custom_ops
 
     register_torch_custom_ops()
 

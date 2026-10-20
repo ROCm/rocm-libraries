@@ -10,7 +10,7 @@ attention output into a caller-supplied ``out`` tensor:
 
 Q  : [B, Sq, Hq, D] float16
 K  : [B, Sk, Hk, D] float16
-V  : [B, Sk, Hk, D] float16  (row-major; op transposes internally)
+V  : [B, Sk, Hk, D] float16  (row-major; op transposes on device internally)
 out: [B, Sq, Hq, D] float16  (caller-allocated, written in-place)
 scale  : float   (attention scale, e.g. 1/sqrt(D))
 causal : bool
@@ -19,6 +19,11 @@ The out-parameter ABI is required for HIP graph replay stability.
 The kernel is compiled once per (Hq, Hk, D, causal, block_n, k_lds) tuple and
 cached; the strategy pair is chosen from the key length by
 :func:`_pick_strategy`.
+
+This module lives under ``library/`` rather than ``platform/python/rocke/
+instances/`` because it imports ``kernels.gfx1151.wmma_fmha_swapqk``. The
+dependency runs ``library -> platform`` only (see rocke/AGENTS.md "Layout"):
+platform is standalone-installable and never reaches into ``kernels``.
 """
 
 from __future__ import annotations
@@ -160,20 +165,17 @@ def _launch_swapqk(q, k, v, out, scale: float, causal: bool) -> None:
         Hq, Hk, D, causal, block_n, k_lds
     )
 
-    from kernels.gfx1151.wmma_fmha_swapqk import swapqk_grid, swapqk_transpose_v
-    import numpy as np
+    from kernels.gfx1151.wmma_fmha_swapqk import swapqk_grid
 
-    # Transpose V from [B,Sk,Hk,D] to [B,Hk,D,Sk] on the device via a
-    # host-side numpy copy (acceptable for a first-pass torch op; a fused
-    # kernel can replace this later).
-    v_cpu = v.cpu().numpy()
-    # swapqk_transpose_v expects [B,Sk,Hk,D] and returns [B,Hk,D,Sk]
-    v_t_cpu = swapqk_transpose_v(v_cpu)
-    import torch
-
-    v_t = torch.from_numpy(v_t_cpu).to(
-        device=v.device, dtype=v.dtype, non_blocking=True
-    )
+    # V reaches the kernel transposed, [B,Sk,Hk,D] -> [B,Hk,D,Sk]: the device
+    # twin of swapqk_transpose_v's np.transpose(v, (0, 2, 3, 1)). permute() is a
+    # view, contiguous() is the copy, and it is issued on torch's current stream
+    # -- the same stream resolve_stream(0) hands the launch below, so the copy is
+    # ordered ahead of the kernel. The numpy round trip this replaces had to
+    # synchronize on the device every call, and produced a buffer the torch
+    # caching allocator had never seen, which is the one case where that stream
+    # ordering does not hold.
+    v_t = v.permute(0, 2, 3, 1).contiguous()
 
     scale_log2 = float(scale * math.log2(math.e))
     grid = swapqk_grid(cfg, seqlen_q=Sq, batch=B)
@@ -215,8 +217,10 @@ def _launch_swapqk(q, k, v, out, scale: float, causal: bool) -> None:
 
     rt.launch(fn, grid, block, packed_buf, stream=stream)
 
-    # Keep v_t alive until the stream drains (ctypes buffer already retained by rt).
-    del v_t
+    # v_t falls out of scope here on purpose. It is a torch-allocated tensor
+    # produced on the launch stream, so the caching allocator queues its release
+    # behind this kernel instead of handing the memory to the next torch.empty.
+    # That is exactly the guarantee the old host-staged buffer did not have.
 
 
 def fmha_swapqk_fwd_impl(q, k, v, out, scale: float, causal: bool) -> None:
