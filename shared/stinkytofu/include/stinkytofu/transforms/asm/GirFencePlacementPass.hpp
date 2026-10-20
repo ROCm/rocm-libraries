@@ -30,8 +30,10 @@ STINKYTOFU_EXPORT GirRawPlacementPlan
 computeGirRawPlacementPlan(Function& function, const GirFrameAnalysis::Result& frames,
                            const GirFrameHazardAnalysis::Result& hazards, int wmmaLead = 0);
 
-/// Moves each GIR fence inside its admissible window to the slot with the deepest counter
-/// residual, so the wait the next pass anchors on it drains as little as possible.
+/// Materializes barrier-only GIR fences before scheduling. Each fence is placed inside its
+/// admissible window at the slot with the deepest pre-schedule counter residual; implicit
+/// dependency construction then adds its frame-derived LDS tokens. GirWaitCntInsertionPass
+/// verifies the scheduled fence coverage and emits the final waits later.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createGirFencePlacementPass();
 
 }  // namespace stinkytofu

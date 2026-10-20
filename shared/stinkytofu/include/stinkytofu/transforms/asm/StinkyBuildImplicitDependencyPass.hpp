@@ -47,8 +47,9 @@ class Pass;
  *      Barriers                            — token to both src and dest
  *    This creates the dependency chain:  writer → barrier → reader.
  *
- * GIR frame-hazard scheduling disables (2): its reconstructed physical hazards are the scheduling
- * authority. Legacy pipelines retain the default token-derived dependencies.
+ * With the GIR frame pipeline, (2) is derived from GirFrameAnalysis instead of frontend
+ * MemTokenData. A materialized split GIR fence receives the same storage tokens on both its
+ * signal and wait, producing the scheduler chain writer -> signal -> wait -> reader.
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass(
     bool enableMemoryTokenDependencies = true);
