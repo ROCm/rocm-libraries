@@ -1,0 +1,5 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Artifact tests build the test suite with CMake's Ninja generator.
+ninja>=1.13.2

@@ -356,6 +356,12 @@ RPP can also be built standalone against an existing ROCm installation.
 > RPP has both GPU and CPU backends. Building it with HIP backend enables both backends.
 
 ### Running Tests
+
+Artifact tests build the packaged test suite with CMake's Ninja generator.
+Install that build tool in your test virtual environment with `python -m pip install -r utilities/test_suite/requirements-test.txt` from the RPP project directory.
+The test package includes this file at `share/rpp/test/requirements-test.txt`.
+This declaration covers Ninja; ROCm, CMake, the compiler, and the suite's other dependencies must also be available.
+
   After installing RPP, refer to the [Verify installation](#verify-installation) section below for instructions on running tests.
 
 ## Verify installation

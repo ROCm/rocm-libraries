@@ -22,6 +22,11 @@ See [Plugin Development](./PluginDevelopment.md) for the plugin boundary and the
 
 ## Development Workflow
 
+Installation and sample tests build consumer programs with CMake's Ninja generator.
+Install the Python-packaged build tool in your test virtual environment with `python -m pip install -r tests/requirements-test.txt` from `projects/hipdnn/`.
+When tests are enabled, this file is installed to `share/hipdnn/tests/requirements-test.txt` so artifact test jobs can use the component's dependency declaration.
+ROCm, the compiler, CMake, and the samples' other native dependencies must also be available.
+
 Choose the path that matches your change. Before pushing, run the affected component's `standard` tests.
 See [Building hipDNN](./Building.md) for setup, presets, targets, and platform requirements.
 

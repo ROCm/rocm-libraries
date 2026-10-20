@@ -435,4 +435,7 @@ endif()
 
 if(NOT HIPDNN_SKIP_TESTS)
     install_hipdnn_ctest_files()
+    install(FILES tests/requirements-test.txt
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn/tests
+    )
 endif()
