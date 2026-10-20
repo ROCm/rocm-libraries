@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Solution-validation guards for ``ProblemType["FusedGemmA2A"]`` on gfx942.
+"""Solution-validation guards for ``ProblemType["FusedA2A"]``.
 
 The fused GEMM + all-to-all store path is only correct inside a narrow window,
 so ``Solution.assignDerivedParameters`` rejects every configuration outside it
@@ -52,33 +52,32 @@ _MI_MT64 = [16, 16, 32, 1, 1, 2, 4, 2, 2]
 # ---------------------------------------------------------------------------
 # Module-scoped toolchain fixtures (real gfx942 caps + assembler).
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="module")
-def gfx942_iim():
+def _iim(arch):
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.Common.Capabilities import makeIsaInfoMap
     from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa(_ARCH)
+    isa = gfxToIsa(arch)
     iim = makeIsaInfoMap([isa], cxx)
     if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip(f"amdclang++ in this environment does not support {_ARCH}")
+        pytest.skip(f"amdclang++ in this environment does not support {arch}")
     return iim
+
+
+@pytest.fixture(scope="module")
+def gfx942_iim():
+    return _iim(_ARCH)
 
 
 @pytest.fixture(scope="module")
 def gfx90a_iim():
-    """Capability map for an ISA the fused path does not support."""
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
+    return _iim("gfx90a")
 
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx90a")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx90a")
-    return iim
+
+@pytest.fixture(scope="module")
+def gfx950_iim():
+    return _iim("gfx950")
 
 
 @pytest.fixture(scope="module")
@@ -115,7 +114,7 @@ def _gp_gfx942(gfx942_iim):
 # ---------------------------------------------------------------------------
 # Base solution: the fused_a2a.yaml fork permutation, retargeted to gfx942.
 # ---------------------------------------------------------------------------
-def _make_params(iim, arch=_ARCH, mi=None, **overrides):
+def _make_params(iim, arch=_ARCH, mi=None, mode="GemmA2A", **overrides):
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
@@ -136,7 +135,7 @@ def _make_params(iim, arch=_ARCH, mi=None, **overrides):
         "TransposeB": False,
         "UseBeta": True,
         "Batched": True,
-        "FusedGemmA2A": True,
+        "FusedA2A": mode,
     }
     problem_type.update(pt)
 
@@ -185,7 +184,7 @@ def _derive(iim, assembler, capsys, **overrides):
 # Positive: the fused config is accepted, and clears SupportUserGSU.
 # ---------------------------------------------------------------------------
 def test_fused_a2a_base_is_accepted(_gp_gfx942, gfx942_iim, assembler, capsys):
-    """FusedGemmA2A=1 on gfx942, bf16 D, StreamK=0, MT 128x128, GSU=1 is valid.
+    """FusedA2A=GemmA2A on gfx942, bf16 D, StreamK=0, MT 128x128, GSU=1 is valid.
 
     Without this the negative tests below could all pass on a base that was
     rejected for an unrelated reason.
@@ -201,9 +200,9 @@ def test_fused_a2a_base_is_accepted(_gp_gfx942, gfx942_iim, assembler, capsys):
 def test_fused_a2a_off_leaves_user_gsu_alone(_gp_gfx942, gfx942_iim, assembler, capsys):
     """Control: with the flag off the guard block does not run at all, so the
     same solution keeps the default SupportUserGSU. This is what makes the
-    ``FusedGemmA2A=0`` default a no-op for every shipping solution."""
+    ``FusedA2A=Disabled`` default a no-op for every shipping solution."""
     sol, out = _derive(
-        gfx942_iim, assembler, capsys, ProblemType={"FusedGemmA2A": False}
+        gfx942_iim, assembler, capsys, ProblemType={"FusedA2A": "Disabled"}
     )
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert sol["InternalSupportParams"]["SupportUserGSU"] is True
@@ -219,7 +218,7 @@ def test_fused_a2a_rejects_unsupported_isa(_gp_gfx942, gfx90a_iim, assembler, ca
     sol, out = _derive(gfx90a_iim, assembler, capsys, arch="gfx90a",
                        mi=[16, 16, 16, 1, 1, 4, 4, 2, 2])
     assert sol.get("Valid") is False
-    assert "FusedGemmA2A requires a gfx94x/gfx95x ISA" in out
+    assert "FusedA2A=GemmA2A requires a gfx94x/gfx95x ISA" in out
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +230,7 @@ def test_fused_a2a_rejects_non_bf16_d(_gp_gfx942, gfx942_iim, assembler, capsys)
         gfx942_iim, assembler, capsys, ProblemType={"DestDataType": "s"}
     )
     assert sol.get("Valid") is False
-    assert "FusedGemmA2A only supports a bf16 D" in out
+    assert "FusedA2A=GemmA2A only supports a bf16 D" in out
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +242,7 @@ def test_fused_a2a_rejects_streamk(_gp_gfx942, gfx942_iim, assembler, capsys, as
     sol, out = _derive(gfx942_iim, assembler, capsys,
                        TileProcessingStrategy="StreamK", WorkAssignment=assignment)
     assert sol.get("Valid") is False
-    assert "FusedGemmA2A requires TileProcessingStrategy=None" in out
+    assert "FusedA2A=GemmA2A requires TileProcessingStrategy=None" in out
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +253,7 @@ def test_fused_a2a_rejects_unsupported_macrotile(
 ):
     sol, out = _derive(gfx942_iim, assembler, capsys, mi=list(_MI_MT64))
     assert sol.get("Valid") is False
-    assert "FusedGemmA2A supports MacroTile0/1 in {128, 256}" in out
+    assert "FusedA2A=GemmA2A supports MacroTile0/1 in {128, 256}" in out
 
 
 # ---------------------------------------------------------------------------
@@ -266,4 +265,55 @@ def test_fused_a2a_rejects_unsupported_macrotile(
 def test_fused_a2a_rejects_non_unit_gsu(_gp_gfx942, gfx942_iim, assembler, capsys, gsu):
     sol, out = _derive(gfx942_iim, assembler, capsys, GlobalSplitU=gsu)
     assert sol.get("Valid") is False
-    assert "FusedGemmA2A requires GlobalSplitU=1" in out
+    assert "FusedA2A=GemmA2A requires GlobalSplitU=1" in out
+
+
+# ---------------------------------------------------------------------------
+# FusedA2A=A2AGemm.
+# ---------------------------------------------------------------------------
+_A2A_GEMM_GUARDS = [
+    ({}, "a gfx94x/gfx95x ISA", "gfx90a"),
+    ({"GlobalSplitU": -1}, "GlobalSplitU=1", "gfx942"),
+    ({"GlobalSplitU": 2}, "GlobalSplitU=1", "gfx942"),
+    ({"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid"},
+     "TileProcessingStrategy=None", "gfx942"),
+    ({"DirectToVgprA": True}, "DirectToVgprA=DirectToVgprB=0", "gfx942"),
+    ({"DirectToVgprB": True}, "DirectToVgprA=DirectToVgprB=0", "gfx942"),
+    ({"UseSubtileImpl": True, "DepthU": 64}, "UseSubtileImpl=0", "gfx950"),
+    ({"BufferLoad": False}, "BufferLoad=1", "gfx942"),
+]
+
+
+def _derive_a2a_gemm(request, assembler, capsys, arch="gfx942", **overrides):
+    iim = request.getfixturevalue(f"{arch}_iim")
+    return _derive(iim, assembler, capsys, arch=arch, mode="A2AGemm",
+                   PrefetchLocalRead=1, **overrides)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_a2a_gemm_base_is_accepted(_gp_gfx942, request, assembler, capsys, arch):
+    sol, out = _derive_a2a_gemm(request, assembler, capsys, arch=arch)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    # The shard loop and the block/grid tallies are sized for GSU=1, so a caller
+    # must not be able to change GSU at runtime.
+    assert sol["InternalSupportParams"]["SupportUserGSU"] is False
+
+
+@pytest.mark.parametrize("overrides, msg, arch", _A2A_GEMM_GUARDS)
+def test_a2a_gemm_rejects(_gp_gfx942, request, assembler, capsys, overrides, msg, arch):
+    sol, out = _derive_a2a_gemm(request, assembler, capsys, arch=arch, **overrides)
+    assert sol.get("Valid") is False
+    assert "FusedA2A=A2AGemm requires " + msg in out
+
+
+def test_a2a_sub_rounds_accepted_with_a2a_gemm(_gp_gfx942, request, assembler, capsys):
+    sol, out = _derive_a2a_gemm(request, assembler, capsys, A2ASubRounds=2)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+
+def test_a2a_sub_rounds_rejected_without_a2a_gemm(_gp_gfx942, request, assembler, capsys):
+    sol, out = _derive_a2a_gemm(
+        request, assembler, capsys, ProblemType={"FusedA2A": "Disabled"}, A2ASubRounds=2
+    )
+    assert sol.get("Valid") is False
+    assert "A2ASubRounds > 1 requires FusedA2A=A2AGemm" in out

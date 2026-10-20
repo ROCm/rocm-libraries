@@ -61,6 +61,7 @@ from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, 
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Problem import isFusedA2A
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
@@ -567,7 +568,7 @@ class StateValues:
 
     self.nonPostLoopSgpr = []
 
-    # FusedGemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
+    # FusedA2A=GemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
     # runtime gate + both push/local versions (default, unchanged behavior);
     # "PUSH"/"LOCAL" emit only that single version (gate hoisted to caller).
     self.fusedA2ADispatchMode = "BOTH"
@@ -3369,6 +3370,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, i))
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
+        module.add(self.openA2AShardLoop(kernel, tensorParametersA, tensorParametersB))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
       if deferInitC:
@@ -6579,6 +6581,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
     return pack
 
+  def tailReleaseMiscVgpr(self):
+    module = Module("tailReleaseMiscVgpr")
+    #add misc vgpr to vgprPool
+    self.vgprPool.add(self.states.startVgprMisc , \
+      self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
+    module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
+                      (self.states.startVgprMisc, self.states.startVgpr))
+    if self.states.a.startVgprLocalReadAddr > self.states.startVgpr:
+      # Not in the MISC. Release here.
+      self.vgprPool.add(self.states.a.startVgprLocalReadAddr , \
+        self.states.a.numVgprLocalReadAddr, "LocalReadAddrA vgpr") # Add as available
+      module.addComment1("Tail: add LocalReadAddrA Vgpr [%u...%u) to pool" % \
+                        (self.states.a.startVgprLocalReadAddr, self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr))
+    if self.states.b.startVgprLocalReadAddr > self.states.startVgpr:
+      # Not in the MISC. Release here.
+      self.vgprPool.add(self.states.b.startVgprLocalReadAddr , \
+        self.states.b.numVgprLocalReadAddr, "LocalReadAddrB vgpr") # Add as available
+      module.addComment1("Tail: add LocalReadAddrB Vgpr [%u...%u) to pool" % \
+                        (self.states.b.startVgprLocalReadAddr, self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr))
+    return module
+
   ##############################################################################
   # Kernel Body
   ##############################################################################
@@ -6653,6 +6676,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self.removeSgprVarFromPool("SrdWS")
 
+    deferMiscVgprRelease = False
     if not kernel["NoTailLoop"]:
       ########################################
       # Tail Loop
@@ -7193,23 +7217,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # FIXME: Add back.
       if mEnd == 1:
-        #add misc vgpr to vgprPool
-        self.vgprPool.add(self.states.startVgprMisc , \
-          self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
-        module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
-                          (self.states.startVgprMisc, self.states.startVgpr))
-        if self.states.a.startVgprLocalReadAddr > self.states.startVgpr:
-          # Not in the MISC. Release here.
-          self.vgprPool.add(self.states.a.startVgprLocalReadAddr , \
-            self.states.a.numVgprLocalReadAddr, "LocalReadAddrA vgpr") # Add as available
-          module.addComment1("Tail: add LocalReadAddrA Vgpr [%u...%u) to pool" % \
-                            (self.states.a.startVgprLocalReadAddr, self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr))
-        if self.states.b.startVgprLocalReadAddr > self.states.startVgpr:
-          # Not in the MISC. Release here.
-          self.vgprPool.add(self.states.b.startVgprLocalReadAddr , \
-            self.states.b.numVgprLocalReadAddr, "LocalReadAddrB vgpr") # Add as available
-          module.addComment1("Tail: add LocalReadAddrB Vgpr [%u...%u) to pool" % \
-                            (self.states.b.startVgprLocalReadAddr, self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr))
+        deferMiscVgprRelease = kernel["ProblemType"]["FusedA2A"] == "A2AGemm"
+        if not deferMiscVgprRelease:
+          module.add(self.tailReleaseMiscVgpr())
     elif self.states.tailloopInNll:
       # always emit the skip-tail-loop label for NoTailLoop + tailloopInNll
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -1, None, emitEndLabelOnly=True))
@@ -7242,6 +7252,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if self.states.dcpTokenGate:
         self._dcpAdvanceTokens("Tensor")
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, i, True))
+
+    module.add(self.a2aTransitionPhase(kernel, tensorParametersA, tensorParametersB))
+    module.add(self.closeA2AShardLoop(kernel))
+    if deferMiscVgprRelease:
+      module.add(self.tailReleaseMiscVgpr())
+    module.add(self.a2aExitTally(kernel))
 
     # Drop GlobalReadIncs* from the free pool so endSummation's store-phase SRDs don't
     # re-check-out an already-grabbed slot.
@@ -7756,7 +7772,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # doShadowInit performs initialization in the 'shadow' of the global mem prefetch
     # TODO re-enable..
-    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"]:
+    if not kernel["ForceDisableShadowInit"] and not kernel["UseSubtileImpl"] \
+       and kernel["ProblemType"]["FusedA2A"] != "A2AGemm":
       if kernel["PrefetchGlobalRead"]:
         if self.states.actualSummationLoops == 1:
           self.states.doShadowInit = 2 # 2 is both store setup and initC
@@ -10152,6 +10169,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
+    if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+      self.defineSgpr("A2AW", 1)
+      self.defineSgpr("A2AShardCounter", 1)
+      self.defineSgpr("A2AShardIdx", 1)
+      self.defineSgpr("A2AFeatIdx", 1)
+      self.defineSgpr("A2AKLocal", 1)
+      self.defineSgpr("A2ABlockLo", 1)
+      self.defineSgpr("A2ABlockCount", 1)
+      self.defineSgpr("FusedCounterPtr", 2, 2)
+
     self.defineSgpr("OrigLoopCounter", 1)
     if kernel.get("LDSSegmentBRotate"):
       # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0.
@@ -10209,7 +10236,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # Persistent copy of the grid-wide WG count for the counter3 last-WG election;
     # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
-    if kernel["ProblemType"]["FusedGemmA2A"]:
+    if kernel["ProblemType"]["FusedA2A"] == "GemmA2A":
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
       # from it by immediate offset (client/src/DeviceContext.cpp).
@@ -11337,6 +11364,34 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     return ""
 
   ##############################################################################
+  # Open A2A-GEMM Shard Loop
+  ##############################################################################
+  @abc.abstractmethod
+  def openA2AShardLoop(self, kernel, tPA, tPB):
+    return ""
+
+  ##############################################################################
+  # Close A2A-GEMM Shard Loop
+  ##############################################################################
+  @abc.abstractmethod
+  def closeA2AShardLoop(self, kernel):
+    return ""
+
+  ##############################################################################
+  # A2A-GEMM Transition Phase
+  ##############################################################################
+  @abc.abstractmethod
+  def a2aTransitionPhase(self, kernel, tPA, tPB):
+    return ""
+
+  ##############################################################################
+  # A2A-GEMM Exit Tally
+  ##############################################################################
+  @abc.abstractmethod
+  def a2aExitTally(self, kernel):
+    return ""
+
+  ##############################################################################
   # End Summation
   ##############################################################################
   @abc.abstractmethod
@@ -12224,7 +12279,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         _reg("uint64", "BatchOffset" + tensor)
 
     # One entry for the whole fixed-size fusegemmm a2a segment
-    if kernel["ProblemType"]["FusedGemmA2A"]:
+    if isFusedA2A(kernel["ProblemType"]):
       _reg("uint32", "FusedA2ASegment")
 
   def _getKernelSource(self, kernel: Solution):

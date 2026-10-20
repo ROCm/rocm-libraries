@@ -266,6 +266,7 @@ namespace
     constexpr size_t fusedWOffset       = fusedMyRankOffset + sizeof(uint32_t);
     constexpr size_t fusedDrainOffset   = fusedWOffset + sizeof(uint32_t);
     constexpr size_t fusedAMOffset      = fusedDrainOffset + sizeof(uint32_t);
+    constexpr size_t fusedNumCuOffset   = fusedAMOffset + sizeof(uint32_t);
 
     template <typename T>
     T packedAt(KernelArguments const& args, size_t offset)
@@ -281,7 +282,7 @@ namespace
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
 
         auto problem = dummyProblem();
-        problem.setFusedGemmA2A(true);
+        problem.setFusedA2A(FusedA2A::GemmA2A);
         problem.setWorld(2);
         problem.setFusedA2AExtent(256);
 
@@ -311,4 +312,6 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedNumCuOffset),
+              static_cast<uint32_t>(TensileLite::testing::_SPX_CU));
 }
