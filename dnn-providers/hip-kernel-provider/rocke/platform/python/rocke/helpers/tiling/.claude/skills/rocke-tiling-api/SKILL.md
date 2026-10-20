@@ -145,8 +145,9 @@ Sweep 2-5 need the GPU. No GPU => stop after step 1, ship a pruned unranked set.
 **Round 1 — REQUIRED, never invented. `AskUserQuestion` takes at most FOUR questions per call, so this is
 TWO calls, not one** — do not re-merge them into an instruction that cannot execute:
 - **1a:** goal (correctness / peak throughput / a target / learning) · algorithm · **ordered tensor
-  descriptors** (`A=(M×K) strides=(sM,sK)`, `B=(K×N) strides=(sK,sN)`, `C=(M×N) strides=(sM,sN)`, + dtype and
-  memory space) · **target arch**.
+  descriptors** in the one axis convention (`A=(M, K) strides=(sM, sK)`, `B=(N, K) strides=(sN, sK)`,
+  `C=(M, N) strides=(sM, sN)`, batch axes first, + dtype and memory space; the convention is
+  `docs/tiling_api_surface.md` sec 3, "One axis convention") · **target arch**.
 - **1b:** kernel name (names the output folder — layout per `docs/kernels/_TEMPLATE.md`) · caller-side
   constraints (grid/launch convention, ABI shape, batch stride, fusion it must absorb, any shared occupancy
   or LDS budget) · **"any values you want pinned?"**. "None" is a fine answer; ask anyway, because a caller
