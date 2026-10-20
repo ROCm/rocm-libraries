@@ -109,7 +109,7 @@ struct _rocblaslt_handle
     int32_t sm_count_target = 0;
 
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = 1;
 
     // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
     //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
@@ -370,9 +370,9 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
-    // Uniform summation order. 0 inherits the handle request; 1 enables.
+    // Uniform summation order. -1 inherits the handle request; 0 disables;1 enables.
     // See hipblaslt.h for the guarantee.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = -1;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
@@ -472,13 +472,13 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
 // when the handle is on.
 inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      handle,
                                                  const _rocblaslt_matmul_desc* desc,
-                                                 bool                          pref_uso = false)
+                                                 int32_t                       pref_uso = -1)
 {
-    if(pref_uso)
-        return 1;
-    if(desc && desc->uniform_summation_order)
-        return 1;
-    if(handle && handle->uniform_summation_order)
-        return 1;
-    return 0;
+    if(pref_uso != -1)
+        return pref_uso;
+    if(desc && desc->uniform_summation_order != -1)
+        return desc->uniform_summation_order;
+    if(handle)
+        return handle->uniform_summation_order;
+    return 1;
 }

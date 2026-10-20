@@ -37,9 +37,11 @@
 
 namespace
 {
-    bool uniformSummationOrderEnabled(hipblasLtHandle_t handle, bool pref)
+    int32_t uniformSummationOrderEnabled(hipblasLtHandle_t handle, int32_t pref)
     {
-        return pref || (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
+        if(pref != -1)
+            return pref;
+        return (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
     }
 }
 
@@ -54,7 +56,7 @@ namespace hipblaslt_ext
     public:
         size_t                           workspace_bytes          = 0;
         hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
-        bool                             uniform_summation_order  = false;
+        int32_t                          uniform_summation_order  = -1;
     };
 
     GemmPreference::GemmPreference()
@@ -108,12 +110,16 @@ namespace hipblaslt_ext
         return pimpl->streamk_tile_scheduling_mode;
     }
 
-    void GemmPreference::setUniformSummationOrder(bool value)
+    void GemmPreference::setUniformSummationOrder(int32_t value)
     {
+        if(value < -1 || value > 1)
+        {
+            throw std::invalid_argument("uniform summation order must be -1, 0, or 1");
+        }
         pimpl->uniform_summation_order = value;
     }
 
-    bool GemmPreference::getUniformSummationOrder() const
+    int32_t GemmPreference::getUniformSummationOrder() const
     {
         return pimpl->uniform_summation_order;
     }
