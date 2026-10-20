@@ -2,35 +2,43 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipdnnStatus.h"
+#include "ScopedBackendDescriptor.hpp"
 #include "ScopedBackendLogCapture.hpp"
 #include "TestMacros.hpp"
 #include "TestUtil.hpp"
 #include "hipdnn_backend.h"
 #include <test_plugins/TestPluginConstants.hpp>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include <gtest/gtest.h>
 
-#include <memory>
+#include <cstdint>
 #include <regex>
 #include <string>
-#include <type_traits>
 #include <vector>
+
+using hipdnn_backend::test_utilities::ScopedBackendDescriptor;
 
 namespace
 {
-struct BackendDescriptorDeleter
+// Reads the graph id that the backend stamped into the serialized graph.
+void getSerializedGraphId(hipdnnBackendDescriptor_t graph, std::string& graphId)
 {
-    void operator()(hipdnnBackendDescriptor_t descriptor) const
-    {
-        EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
-    }
-};
-
-using UniqueBackendDescriptor
-    = std::unique_ptr<std::remove_pointer_t<hipdnnBackendDescriptor_t>, BackendDescriptorDeleter>;
+    size_t size = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(graph, 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> buffer(size);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(graph, size, &size, buffer.data()),
+              HIPDNN_STATUS_SUCCESS);
+    const auto* id = hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer.data())->id();
+    ASSERT_NE(id, nullptr);
+    graphId = hipdnn_flatbuffers_sdk::utilities::formatUuid(
+        hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*id));
+}
 
 struct ExecuteLogFields
 {
@@ -277,7 +285,7 @@ TEST_F(IntegrationBackendExecuteApi, ExecuteLogsExecutionCountPerPlan)
     ASSERT_EQ(
         hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &rawOtherPlan),
         HIPDNN_STATUS_SUCCESS);
-    const UniqueBackendDescriptor otherPlan(rawOtherPlan);
+    const ScopedBackendDescriptor otherPlan(rawOtherPlan);
     ASSERT_NO_FATAL_FAILURE(test_util::populateTestExecutionPlan(
         &rawOtherPlan, &_engineConfig, &_engine, &_graphDescriptor, _handle, GIDX, true));
 
@@ -298,10 +306,12 @@ TEST_F(IntegrationBackendExecuteApi, ExecuteLogsExecutionCountPerPlan)
     EXPECT_EQ(logs[1].planId, logs[0].planId);
     EXPECT_EQ(logs[3].planId, logs[0].planId);
 
-    // Both plans come from the same graph.
+    // Both plans log the id of the graph they were finalized from.
+    std::string expectedGraphId;
+    ASSERT_NO_FATAL_FAILURE(getSerializedGraphId(_graphDescriptor, expectedGraphId));
     for(const auto& log : logs)
     {
-        EXPECT_EQ(log.graphId, logs[0].graphId);
+        EXPECT_EQ(log.graphId, expectedGraphId);
     }
 
     // Counts are per plan: the other plan starts at 1 and does not advance this plan's count.
@@ -323,7 +333,7 @@ TEST_F(IntegrationBackendExecuteApi, FailedExecuteDoesNotAdvanceExecutionCount)
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR,
                                             &rawUnfinalizedVariantPack),
               HIPDNN_STATUS_SUCCESS);
-    const UniqueBackendDescriptor unfinalizedVariantPack(rawUnfinalizedVariantPack);
+    const ScopedBackendDescriptor unfinalizedVariantPack(rawUnfinalizedVariantPack);
 
     auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_tests::ScopedBackendLogCapture logCapture(

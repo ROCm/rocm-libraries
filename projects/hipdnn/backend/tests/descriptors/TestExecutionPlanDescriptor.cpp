@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <thread>
@@ -907,22 +908,30 @@ TEST_F(TestExecutionPlanDescriptor, RecordExecutionCountsPerPlan)
 TEST_F(TestExecutionPlanDescriptor, RecordExecutionGivesDistinctCountsAcrossThreads)
 {
     constexpr size_t THREAD_COUNT = 8;
-    constexpr size_t EXECUTIONS_PER_THREAD = 1000;
+    // Enough increments per thread that the threads overlap after the start flag is set.
+    constexpr size_t EXECUTIONS_PER_THREAD = 10000;
     auto plan = getExecutionPlanDescriptor();
 
+    std::atomic<bool> startFlag{false};
     std::vector<std::vector<uint64_t>> countsPerThread(THREAD_COUNT);
     std::vector<std::thread> threads;
     threads.reserve(THREAD_COUNT);
     for(auto& counts : countsPerThread)
     {
-        threads.emplace_back([&plan, &counts]() {
+        threads.emplace_back([&plan, &counts, &startFlag]() {
             counts.reserve(EXECUTIONS_PER_THREAD);
+            // Wait so that all threads increment at the same time, not one after another.
+            while(!startFlag.load())
+            {
+                std::this_thread::yield();
+            }
             for(size_t i = 0; i < EXECUTIONS_PER_THREAD; ++i)
             {
                 counts.push_back(plan->recordExecution());
             }
         });
     }
+    startFlag.store(true);
     for(auto& thread : threads)
     {
         thread.join();
