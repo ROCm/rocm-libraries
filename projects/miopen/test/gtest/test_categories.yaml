@@ -652,13 +652,43 @@ exclude_gpu:
   exclude_gpu_gfx115X:
   #Negative patterns for gfx1150 and gfx1151 will be covered here.
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
-    test_patterns: *gfx11_common_patterns
+    test_patterns:
+      - *gfx11_common_patterns
+      # Flaky on Windows gfx1151 (ALMIOPEN-1926), same signature as gfx110X: intermittent CPU/GPU mismatch at
+      # rnn_seq_api.hpp:272, bias-enabled cases only (18 of 2,316 executions failed in PR #13107 run 39358709264).
+      - "Full/GPU_LstmMSRnn_FP32*"
     labels:
       - "quick"
       - "standard"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx115X_linux:
+    test_patterns:
+      # Fails on Linux gfx1151 (PR #13107 run 39358709264): "no fdeep .tn.model files found" in the system db.
+      # AI heuristic models ship only for gfx908/gfx90a/gfx942/gfx950, and TheRock's Linux install keeps only the
+      # runner target's db files. Passes on Windows gfx1151. Remove once the test skips archs without bundled models.
+      - "GPU_ConvAIModelLoad_FP32*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx94X:
+    test_patterns:
+      # Flaky on gfx942 (ALMIOPEN-1926): same bias-only CPU/GPU mismatch at rnn_seq_api.hpp:272 as gfx110X/gfx115X,
+      # at a lower rate (Jenkins filters /1026 and /1095 via add_gtest_negative_filter). Excluded family-wide like
+      # the RDNA archs because the failing index changes from run to run.
+      - "Full/GPU_LstmMSRnn_FP32*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx94X"
 
   exclude_gpu_gfx950:
     test_patterns:
