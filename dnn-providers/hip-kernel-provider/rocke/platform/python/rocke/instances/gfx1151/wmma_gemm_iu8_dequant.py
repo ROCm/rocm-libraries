@@ -30,7 +30,14 @@ from dataclasses import dataclass
 
 from ...core.arch import ArchTarget
 from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
-from ._wmma_common import _WAVE, _WMMA_K, wmma16_grid, wmma32_wave_guard
+from ._wmma_common import (
+    _K_PER_I32,
+    _WAVE,
+    _WMMA_K,
+    wmma16_grid,
+    wmma32_wave_guard,
+    _iu8_gemm_lane_and_acc,
+)
 
 _K_PER_I32 = 4  # int8 K-values packed per i32 fragment slot
 _OP_ID = "wmma_i32_16x16x16_iu8"
@@ -90,32 +97,7 @@ def build_wmma_gemm_iu8_dequant(
     # Combined per-tensor dequant scale, applied once per output element.
     scale = b.fmul(scale_a, scale_b)
 
-    c0 = b.const_i32(0)
-    c4 = b.const_i32(_K_PER_I32)
-    c16 = b.const_i32(_WMMA_K)
-    c32 = b.const_i32(_WAVE)
-
-    lane = b.mod(b.thread_id_x(), c32)
-    frag = b.mod(lane, c16)  # lane%16: A-frag row, B-frag col, output col
-    half = b.div(lane, c16)  # lane/16: even/odd output row selector
-
-    m0 = b.mul(b.block_id_x(), c16)
-    n0 = b.mul(b.block_id_y(), c16)
-
-    # i32-element row bases: row r starts at int8 offset r*K = i32 offset r*(K/4).
-    k4 = b.div(K, c4)  # i32 columns per row
-    a_base = b.mul(b.add(m0, frag), k4)
-    b_base = b.mul(b.add(n0, frag), k4)
-
-    # K-loop: stride 16 int8 == 4 i32 columns per WMMA step.
-    acc0 = b.zero_vec(I32, 8)
-    loop = b.scf_for_iter(c0, k4, c4, [("acc", acc0)], iv_name="k0")
-    with loop as (k0, (acc,)):
-        a_frag = b.global_load_vN(A, b.add(a_base, k0), I32, _K_PER_I32)
-        b_frag = b.global_load_vN(Bp, b.add(b_base, k0), I32, _K_PER_I32)
-        nacc = b.mma(op, a_frag, b_frag, acc)
-        b.scf_yield(nacc)
-    acc = loop.results[0]
+    frag, half, m0, n0, acc = _iu8_gemm_lane_and_acc(b, A, Bp, op, K)
 
     # Epilogue: slot i of lane l -> (row = m0 + 2*i + l/16, col = n0 + l%16).
     # Dequantize the i32 accumulator (-> f32 -> * scale) before the f16 store.

@@ -13,13 +13,43 @@ grid returns the same ceil-divided extents, and the guard returns the same
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Tuple
+
+from ...core.ir import I32, IRBuilder, Value
 
 # Fixed WMMA tile geometry: one wave (32 lanes) computes one 16x16 output tile.
 _WMMA_M = 16
 _WMMA_N = 16
 _WMMA_K = 16
 _WAVE = 32
+_K_PER_I32 = 4  # int8 K-values packed per i32 fragment slot
+
+
+def _iu8_gemm_lane_and_acc(
+    b: IRBuilder, A: Value, Bp: Value, op: Any, K: Value
+) -> tuple[Value, Value, Value, Value, Value]:
+    """Shared iu8 lane/tile setup and K-loop MFMA accumulation."""
+    c0 = b.const_i32(0)
+    c4 = b.const_i32(_K_PER_I32)
+    c16 = b.const_i32(_WMMA_K)
+    c32 = b.const_i32(_WAVE)
+    lane = b.mod(b.thread_id_x(), c32)
+    frag = b.mod(lane, c16)
+    half = b.div(lane, c16)
+    m0 = b.mul(b.block_id_x(), c16)
+    n0 = b.mul(b.block_id_y(), c16)
+    k4 = b.div(K, c4)
+    a_base = b.mul(b.add(m0, frag), k4)
+    b_base = b.mul(b.add(n0, frag), k4)
+    acc0 = b.zero_vec(I32, 8)
+    loop = b.scf_for_iter(c0, k4, c4, [("acc", acc0)], iv_name="k0")
+    with loop as (k0, (acc,)):
+        a_frag = b.global_load_vN(A, b.add(a_base, k0), I32, _K_PER_I32)
+        b_frag = b.global_load_vN(Bp, b.add(b_base, k0), I32, _K_PER_I32)
+        nacc = b.mma(op, a_frag, b_frag, acc)
+        b.scf_yield(nacc)
+    acc = loop.results[0]
+    return frag, half, m0, n0, acc
 
 
 def wmma16_grid(M: int, N: int) -> Tuple[int, int, int]:
