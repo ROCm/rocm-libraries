@@ -1,0 +1,4 @@
+# The dataset store's dependencies (pandas, and pyarrow as its Parquet engine) are declared in
+# uhd_gen's own requirements.txt. This file is kept for environments that still install it by
+# this path, such as the UHD pipeline's image build.
+-r ../requirements.txt
