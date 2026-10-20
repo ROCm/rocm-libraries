@@ -118,8 +118,7 @@ The resident workgroups per CU are taken as `floor(32 / waves_per_block)`, the
 hardware wave limit. Register-heavy kernels reach less, but they are the big
 tiles that are throughput-bound anyway: held-out regret with the bound matched
 the regret with each binary's exact occupancy. The bound needs no compiled
-binary, so dispatch, the builders and the benchmark resolve one deterministic
-answer.
+binary, so the builders and the benchmark resolve one deterministic answer.
 
 ## Finding 6: degrees off the power-of-two ladder
 
@@ -214,8 +213,8 @@ Every timed point in every run was preceded by `--verify` of that kernel at
 that degree against the torch reference, at the benchmark's declared dtype
 tolerance; failing points were never timed or ranked. The resolver itself is
 covered by CPU tests (`library/tests/test_conv_split_k.py`,
-`platform/tests/dispatch/dispatch_tests/gemm/test_split_k_planner.py`, the
-grouped-conv dispatch tests) and the GPU wgrad correctness test, which builds
+`platform/tests/dispatch/dispatch_tests/gemm/test_split_k_planner.py`) and the
+GPU wgrad correctness test, which builds
 the packed-atomic kernel at the resolver's degree.
 
 ## Results
@@ -290,7 +289,7 @@ python -m benchmarks.common.split_k_cost_fit margin --logs offladder_logs
 
 - **Keep:** the cost model for gfx950 wgrad (degree and reduction; the
   reduction choice needs more side-by-side shapes to show a clear gain), one resolver
-  for dispatch, builders and benchmark, the 16-bit atomic cap, the benchmark
+  for the builders and the benchmark, the 16-bit atomic cap, the benchmark
   timing the resolver's degree and both reductions.
 - **Keep, unchanged:** the CK formula on arches without a fitted model.
 - **Defer:** fitting gfx942 on gfx942 measurements (its constants are derived); a dgrad sweep before dgrad dispatch uses the

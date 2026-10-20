@@ -197,24 +197,24 @@ def _scaled_from_gfx950(
     )
 
 
-# gfx942 (MI300X, 304 CUs at 2.1 GHz) against the gfx950 part the model was
-# fitted on (MI350X, 256 CUs at 2.2 GHz), from public specs. Not fitted on
-# gfx942 measurements. Other gfx942 parts (MI300A: 228 CUs, MI308X: 80) share
-# the per-CU constants but not the CU count: a caller that knows its device
-# passes ``num_cus`` to :func:`split_k_cost_model`.
+# gfx942 against the gfx950 part the model was fitted on, by the ratio of
+# each throughput from public specs. Not fitted on gfx942 measurements. Other
+# gfx942 parts share the per-CU ratios but not the CU or XCD count: a caller
+# that knows its device passes ``num_cus``/``num_xcds`` to
+# :func:`split_k_cost_model`.
 _COST_MODELS["gfx942"] = _scaled_from_gfx950(
     num_cus=304,
-    # Dense bf16 MFMA per CU: 1307.4 TFLOPS / 304 vs 2307 TFLOPS / 256.
-    flops=(1307.4 / 304) / (2307.0 / 256),
+    # Dense 16-bit MFMA throughput per CU.
+    flops=0.48,
     # The fitted operand-load rate is L2-bound (its flop/byte matches L2, not
-    # HBM): the same L2 per XCD feeds 38 CUs instead of 32, at 2.1 vs 2.2 GHz.
-    load=(32 / 38) * (2.1 / 2.2),
-    # Atomics resolve in L2: same L2 per XCD, 8 XCDs, scaled by clock.
-    atomic=2.1 / 2.2,
-    # Clearing and reading back memory is HBM-bound: 5.3 vs 8 TB/s.
-    fill=5.3 / 8.0,
+    # HBM): L2 bandwidth per CU, with more CUs sharing each XCD's L2.
+    load=0.80,
+    # Atomics resolve in L2: the same L2 per XCD, scaled by clock.
+    atomic=0.95,
+    # Clearing and reading back memory is HBM-bound: HBM bandwidth.
+    fill=0.66,
     # Per-CTA dispatch overhead is clock-bound, so it costs more latency units.
-    cta=2.2 / 2.1,
+    cta=1.05,
 )
 
 
@@ -224,7 +224,7 @@ def split_k_cost_model(
     """The cost model for ``arch``, or ``None`` if it has none.
 
     ``num_cus`` and ``num_xcds`` replace the arch's defaults, for a part of the
-    arch built differently (gfx942: MI300A has 228 CUs on 6 XCDs). The per-CU
+    arch built differently (other gfx942 parts). The per-CU
     constants carry over exactly; the device-wide ones (atomic, fill and
     per-CTA costs) are kept, an approximation on a part with fewer XCDs.
     """
@@ -404,7 +404,7 @@ def _degrees(
     * a power of two -- the ladder the model was first fitted on;
     * a divisor or a multiple of the CU count -- one CTA tile then spreads
       evenly over the CUs, which matters on parts whose CU count is not a power
-      of two (gfx942: 304);
+      of two (gfx942);
     * the smallest degree for its K iterations per CTA -- any larger degree
       with the same ``ceil(k_iters / s)`` only adds CTAs, so it is never
       cheaper, and the model's optimum always lies on this set;
@@ -418,10 +418,11 @@ def _degrees(
     (at most ``cap / step`` of them, so the rules above are not needed). The
     groups of a grouped conv read the same NHWC cache lines, and an aligned
     stride puts the groups' matching K-slices on one die, so each line is
-    fetched into one L2 rather than once per die (measured on depthwise wgrad:
-    up to 1.8x). The model does not see that cost, so off the ladder only
-    aligned degrees are offered; the ladder itself stays whole, since a small
-    misaligned degree can still beat the nearest aligned one.
+    fetched into one L2 rather than once per die (misaligned degrees measured
+    up to nearly twice as slow on depthwise wgrad). The model does not see that
+    cost, so off the ladder only aligned degrees are offered; the ladder itself
+    stays whole, since a small misaligned degree can still beat the nearest
+    aligned one.
     """
     k_iters = math.ceil(problem.k / kernel.tile_k)
     group_tiles = math.ceil(problem.m / kernel.tile_m) * math.ceil(

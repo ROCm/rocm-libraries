@@ -71,7 +71,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
-from rocke.helpers.split_k_planner import SplitKKernel, SplitKProblem, SplitKReduction
+from rocke.helpers.split_k_planner import (
+    MAX_GRID_DIM_Z,
+    SplitKKernel,
+    SplitKProblem,
+    SplitKReduction,
+)
 
 _TIMED = re.compile(
     r"\]\s+[\d.]+ TFLOPS\s+([\d.]+) ms\s+(wgrad-\S+)(?: @split_k=(\d+))?\s*$",
@@ -140,6 +145,10 @@ def cmd_sweep(args: argparse.Namespace) -> int:
                     "wgrad",
                     "--split-k-degrees",
                     degrees,
+                    # Both reductions of each main loop: stage 2 of the fit
+                    # needs them side by side.
+                    "--two-stage",
+                    "always",
                     "--verify",
                     "--split-k-prune",
                     str(args.prune),
@@ -321,7 +330,7 @@ def _curves(kernels: list[_Kernel], max_degree: int) -> _Curves:
     cap = np.array([k.reduction.max_split_k or degrees[-1] for k in rows])
     feasible = (
         (degrees[None, :] <= k_iters[:, None])
-        & (batch[:, None] * degrees[None, :] <= 65535)
+        & (batch[:, None] * degrees[None, :] <= MAX_GRID_DIM_Z)
         & (degrees[None, :] <= cap[:, None])
     )
     filled = t.copy()
@@ -439,7 +448,7 @@ def _feasible_times(m: _Kernel, max_degree: int) -> dict:
     cap = min(
         max_degree,
         math.ceil(p.k / m.kernel.tile_k),
-        65535 // p.batch,
+        MAX_GRID_DIM_Z // p.batch,
         m.reduction.max_split_k or max_degree,
     )
     timed = sorted(d for d in m.times if d > 1)
@@ -730,10 +739,23 @@ def cmd_fit(args: argparse.Namespace) -> int:
             legacy_r.append(
                 _legacy_decision_regret([d.members for d in test_d], args.max_degree)
             )
-        print("  held-out decision regret, competitive main loops:")
-        print(f"    previous rule {_summary(np.concatenate(legacy_r))}")
-        print(f"    cost model    {_summary(np.concatenate(model_r))}")
+        if model_r:
+            print("  held-out decision regret, competitive main loops:")
+            print(f"    previous rule {_summary(np.concatenate(legacy_r))}")
+            print(f"    cost model    {_summary(np.concatenate(model_r))}")
+        else:
+            print("  no fold had decisions on both sides: nothing held out to score")
         x["fill_bytes_per_latency"] = float(fit_setup(decisions))
+    else:
+        # The setup cost only shows between reductions of one main loop, so
+        # without such pairs it cannot be fitted: say so rather than print a
+        # literal that silently carries the seed value.
+        print(
+            "WARNING: no main loop has both a packed-atomic and a workspace binary "
+            "timed (sweep with --two-stage always), so fill_bytes_per_latency is "
+            f"NOT fitted and keeps its seed value {x['fill_bytes_per_latency']:.6g}",
+            file=sys.stderr,
+        )
 
     fitted = _model_of(x, args.max_degree)
     # The vectorised stage-1 copy must choose what the production model chooses.

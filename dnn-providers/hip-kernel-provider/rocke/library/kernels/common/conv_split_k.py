@@ -4,11 +4,13 @@
 """Split-K resolution for the implicit-GEMM convolutions (fwd, wgrad, dgrad).
 
 The one place that turns a conv problem and a kernel tile into a split-K
-degree and a reduction path. The dispatcher, the kernel builders and the
-benchmark all call :func:`resolve_conv_split_k`, so a degree requested as
-``split_k=-1`` (auto) comes out the same wherever it is resolved -- the
-benchmark times the degree dispatch launches, and a builder never re-derives
-it from different inputs.
+degree and a reduction path. The kernel builders and the benchmark (JIT
+sweep and ``--run-from-cache``) all call :func:`resolve_conv_split_k`, so a
+degree requested as ``split_k=-1`` (auto) comes out the same wherever it is
+resolved -- the benchmark times the degree a builder would build, and a
+builder never re-derives it from different inputs. (The grouped-convolution
+dispatcher serves registered instance lists and registers no wgrad instances,
+so it does not resolve a wgrad degree.)
 
 An auto degree comes from the split-K cost model
 (:mod:`rocke.helpers.split_k_planner`) on arches that have one. This module
@@ -28,9 +30,9 @@ An explicit degree, the ``ROCKE_CONV_SPLIT_K`` override, and an auto degree on
 an arch without a cost model all go through the long-standing dispatcher rule
 instead: the CK formula (:func:`rocke.helpers.split_k.select_split_k_wgrad`)
 for auto, then the packed atomic whenever it can be built, else the workspace,
-else no split. Dispatch therefore resolves as before on those paths. The kernel
-builders and the benchmark, which used to feed the CK formula unmerged per-group
-dims, now get the dispatcher's answer (merged dims, launched group count).
+else no split. The kernel builders and the benchmark, which used to feed the CK
+formula unmerged per-group dims, get it on the launched geometry (merged dims,
+launched group count).
 
 ``ROCKE_CONV_SPLIT_K``: ``auto`` or unset resolves as above; ``off`` (or
 ``0``/``1``) forces no split; an integer ``n >= 2`` forces that degree, held to
@@ -170,11 +172,12 @@ def _resolve_wgrad(
     # drop an off-diagonal group pair, so only the workspace carries the mask.
     # The packed 16-bit atomic is emitted by the cshuffle epilogue only (the
     # direct-store one scatters the MFMA layout and has no pairs to add).
-    atomic_ok = (
-        gm == 1
-        and wgrad_atomic_epilogue_available(p, dtype, None)[0]
-        and not (epilogue == "default" and dtype in ("bf16", "fp16"))
-    )
+    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None)
+    if gm > 1:
+        atomic_why = "a merged tile reduces through the workspace only"
+    elif layout_ok and epilogue == "default" and dtype in ("bf16", "fp16"):
+        atomic_why = "the default epilogue emits no packed 16-bit atomic"
+    atomic_ok = atomic_why == "ok"
     # Deliberately unmerged: the workspace is R copies of the true dW.
     ws_ok = wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
     if reduction == "workspace" and not ws_ok:
@@ -190,6 +193,13 @@ def _resolve_wgrad(
         degree = max(1, min(requested, z_cap))
         if degree == 1:
             return ConvSplitK(1, False, requested, f"{source}: no split")
+        if reduction == "atomic" and not atomic_ok:
+            # Fixing the reduction is the caller saying its binary is the packed
+            # atomic one; it cannot be, so fail here rather than hand back a
+            # degree the builder then rejects (as for the workspace above).
+            raise ValueError(
+                f"wgrad split-K cannot be built with the packed atomic: {atomic_why}"
+            )
         if reduction == "atomic" or (reduction == "auto" and atomic_ok):
             return ConvSplitK(degree, False, requested, f"{source}: atomic")
         if ws_ok:
@@ -375,8 +385,8 @@ def resolve_conv_split_k(
             kernel) or building one that requires a split (two-stage).
         env: environment for ``ROCKE_CONV_SPLIT_K`` (default ``os.environ``).
         num_cus, num_xcds: CU and XCD counts of the device the kernel runs
-            on, for a part built differently from its arch's default (gfx942:
-            MI300A has 228 CUs on 6 XCDs, MI300X 304 on 8); ``None`` keeps the
+            on, for a part built differently from its arch's default (other
+            gfx942 parts); ``None`` keeps the
             arch default.
 
     Forward convolution has no split-K path and always resolves to 1.
@@ -414,9 +424,9 @@ def resolve_conv_split_k(
     )
 
 
-# Dispatch resolves the same (problem, kernel) several times per request, and
-# planning scores up to a few hundred degrees; the answer is a pure function of
-# the arguments.
+# A benchmark resolves the same (problem, kernel) once per binary and degree
+# list, and planning scores up to a few hundred degrees; the answer is a pure
+# function of the arguments.
 @functools.lru_cache(maxsize=4096)
 def _resolve_cached(
     direction: str,

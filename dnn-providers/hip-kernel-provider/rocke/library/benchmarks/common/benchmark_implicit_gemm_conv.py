@@ -1252,17 +1252,17 @@ def main() -> int:
 
     parser.add_argument(
         "--two-stage",
-        default="always",
+        default="auto",
         choices=["auto", "always", "never"],
         dest="two_stage",
         help=(
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
-            "always = time the two-stage kernels alongside the packed-atomic ones, so "
-            "both split-K reductions compete; "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built) -- a cheaper sweep; "
-            "never = skip two-stage entirely (default: always)"
+            "cannot be built); "
+            "always = time the two-stage kernels alongside the packed-atomic ones "
+            "(nothing is dropped), so both split-K reductions compete; "
+            "never = skip two-stage entirely (default: auto)"
         ),
     )
 
@@ -4566,11 +4566,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     )
                     continue
             if direction == "wgrad" and args.two_stage != "always":
-                # Same rule as the JIT sweep's --two-stage: "auto" runs the
-                # two-stage (scratch + reduce) kernels only when C/groups is
-                # odd -- the case the packed-atomic epilogue cannot cover;
-                # "never" drops them outright. The default ("always") keeps
-                # them, so both reductions compete.
+                # Same rule as the JIT sweep's --two-stage: by default the
+                # two-stage (scratch + reduce) kernels only run when C/groups
+                # is odd -- the case the packed-atomic epilogue cannot cover;
+                # "never" drops them outright; "always" keeps them alongside
+                # the packed-atomic ones, so both reductions compete.
                 odd = (problem.C // max(1, problem.groups)) % 2 != 0
                 if args.two_stage == "never" or not odd:
                     candidates = [c for c in candidates if not c[0].two_stage]

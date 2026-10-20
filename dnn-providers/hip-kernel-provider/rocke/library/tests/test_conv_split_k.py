@@ -557,3 +557,28 @@ def test_default_epilogue_never_resolves_to_the_packed_atomic():
         "wgrad", p, reduction="atomic", epilogue="default", **kw
     )
     assert fixed.split_k == 1
+
+
+def test_explicit_atomic_that_cannot_be_built_raises():
+    # reduction="atomic" says the caller's binary is the packed-atomic one; a
+    # problem it cannot serve must fail here, not come back with a degree the
+    # builder then rejects. Degree 1 needs no reduction and still resolves.
+    kw = dict(
+        arch="gfx950",
+        dtype="bf16",
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        block_size=256,
+        env={},
+        reduction="atomic",
+    )
+    p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    assert resolve_conv_split_k("wgrad", p, split_k=8, **kw).split_k == 8
+    with pytest.raises(ValueError, match="default epilogue"):
+        resolve_conv_split_k("wgrad", p, split_k=8, epilogue="default", **kw)
+    with pytest.raises(ValueError, match="merged tile"):
+        resolve_conv_split_k("wgrad", DEPTHWISE, split_k=8, group_merge=4, **kw)
+    with pytest.raises(ValueError, match="packed atomic"):
+        resolve_conv_split_k("wgrad", STEM, split_k=8, **kw)
+    assert resolve_conv_split_k("wgrad", STEM, split_k=1, **kw).split_k == 1
