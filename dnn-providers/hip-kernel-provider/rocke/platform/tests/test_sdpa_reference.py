@@ -16,7 +16,12 @@ import unittest
 import numpy as np
 
 from rocke.numeric.references import sdpa_reference as exported_sdpa_reference
-from rocke.numeric.sdpa_reference import keep, resolve_diagonal_band, sdpa_reference
+from rocke.numeric.sdpa_reference import (
+    _band_mask,
+    keep,
+    resolve_diagonal_band,
+    sdpa_reference,
+)
 
 INF = math.inf
 
@@ -148,6 +153,34 @@ class TestKeep(unittest.TestCase):
                                     self.assertEqual(
                                         keep(q, k, sq, skv, tl, left, right), not masked
                                     )
+
+    def test_band_mask_agrees_with_keep(self):
+        for sq in range(1, 9):
+            for skv in range(1, 9):
+                for left in (-1, 0, 1, 3):
+                    for right in (-1, 0, 1, 3):
+                        for tl in (True, False):
+                            want = [
+                                [
+                                    keep(q, k, sq, skv, tl, left, right)
+                                    for k in range(skv)
+                                ]
+                                for q in range(sq)
+                            ]
+                            np.testing.assert_array_equal(
+                                _band_mask(sq, skv, tl, left, right),
+                                want,
+                                err_msg=str((sq, skv, tl, left, right)),
+                            )
+
+    def test_band_mask_known_shapes(self):
+        np.testing.assert_array_equal(
+            _band_mask(3, 3, True, -1, 0), np.tril(np.ones((3, 3), dtype=bool))
+        )
+        # Bottom-right on 2x4 shifts the diagonal right by s_kv - s_q = 2.
+        np.testing.assert_array_equal(
+            _band_mask(2, 4, False, -1, 0), [[1, 1, 1, 0], [1, 1, 1, 1]]
+        )
 
 
 class TestResolve(unittest.TestCase):

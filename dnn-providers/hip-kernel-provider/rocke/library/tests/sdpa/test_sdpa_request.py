@@ -18,7 +18,7 @@ from dispatch.sdpa import (
     SdpaTensor,
 )
 from rocke.dispatch.core import Capability, stable_json_hash
-from sdpa.cases import CASES, bhsd, bshd, make_request, packed
+from tests.sdpa.request_cases import CASES, bhsd, bshd, make_request, packed
 
 BASE = CASES["dense_bshd"]
 

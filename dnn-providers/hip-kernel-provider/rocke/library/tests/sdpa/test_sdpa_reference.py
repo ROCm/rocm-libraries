@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""``sdpa_reference`` against independent oracles.
+"""``sdpa_reference_from_request`` against independent oracles.
 
-Two oracles, neither sharing code with the reference:
+Two oracles, neither sharing the vectorised attention math it delegates to:
 
 - a scalar fp64 loop that transliterates hipDNN's ``CpuFpReferenceSdpa::forward``
   (bias indexed the way its ``computeMaskIndex`` does, mask from ``keep``),
@@ -21,8 +21,15 @@ import numpy as np
 import pytest
 
 from dispatch.sdpa import SdpaBias, SdpaFp8, SdpaTensor
-from rocke.numeric.references import keep, sdpa_reference
-from sdpa.cases import CASES, bhsd, bshd, make_request, make_tensors, packed
+from rocke.numeric.references import keep, sdpa_reference_from_request
+from tests.sdpa.request_cases import (
+    CASES,
+    bhsd,
+    bshd,
+    make_request,
+    make_tensors,
+    packed,
+)
 
 NOT_IMPLEMENTED = {
     "alibi": "alibi",
@@ -116,7 +123,7 @@ def loop_reference(req, tensors):
 
 
 def _check(req, tensors, atol=2e-5):
-    got = sdpa_reference(req, tensors)
+    got = sdpa_reference_from_request(req, tensors)
     want_o, want_lse = loop_reference(req, tensors)
     np.testing.assert_allclose(got["o"], want_o, atol=atol, rtol=0)
     np.testing.assert_array_equal(np.isfinite(got["stats"]), np.isfinite(want_lse))
@@ -140,7 +147,7 @@ def test_case_table_matches_loop_oracle(name):
 def test_unsupported_features_raise_by_name(name):
     req = CASES[name]
     with pytest.raises(NotImplementedError, match=NOT_IMPLEMENTED[name]):
-        sdpa_reference(req, make_tensors(req))
+        sdpa_reference_from_request(req, make_tensors(req))
 
 
 @pytest.mark.parametrize("diagonal", ["top_left", "bottom_right"])
@@ -165,7 +172,7 @@ def test_mask_agrees_with_keep(diagonal, left, right, s_q, s_kv):
     )
     v = np.eye(s_kv, dtype=np.float32)[None, None]
     tensors = {"q": np.zeros((1, 1, s_q, 4)), "k": np.ones((1, 1, s_kv, 4)), "v": v}
-    o = sdpa_reference(req, tensors)["o"][0, 0]
+    o = sdpa_reference_from_request(req, tensors)["o"][0, 0]
     want = np.array(
         [
             [keep(q, k, s_q, s_kv, diagonal, left, right) for k in range(s_kv)]
@@ -205,7 +212,7 @@ def test_padding_uses_effective_lengths_for_the_diagonal():
     # Batch 0 is a 3x6 bottom-right problem: every row sees at least 4 keys, so
     # it must equal running that batch alone, unpadded.
     alone = make_request(b=1, s_q=3, s_kv=6, right_bound=0, diagonal="bottom_right")
-    solo = sdpa_reference(
+    solo = sdpa_reference_from_request(
         alone,
         {n: tensors[n][:1, :, : (3 if n == "q" else 6)] for n in ("q", "k", "v")},
     )
@@ -254,9 +261,9 @@ def test_fp8_descales_index_by_kv_head(per_head):
 def test_scale_tensor_value_is_used():
     req = CASES["scale_tensor"]
     tensors = make_tensors(req)
-    base = sdpa_reference(req, tensors)["o"]
+    base = sdpa_reference_from_request(req, tensors)["o"]
     tensors["scale"] = np.array([2.0], np.float32)
-    assert not np.allclose(sdpa_reference(req, tensors)["o"], base)
+    assert not np.allclose(sdpa_reference_from_request(req, tensors)["o"], base)
     _check(req, tensors)
 
 
@@ -278,8 +285,8 @@ def test_flat_buffers_are_read_through_strides(case):
     buffers = {
         n: _to_buffer(logical[n], getattr(req, n), pad=7) for n in ("q", "k", "v")
     }
-    want = sdpa_reference(req, logical)
-    got = sdpa_reference(req, buffers)
+    want = sdpa_reference_from_request(req, logical)
+    got = sdpa_reference_from_request(req, buffers)
     np.testing.assert_array_equal(got["o"], want["o"])
 
 
@@ -297,7 +304,9 @@ def test_ragged_equals_padded():
         for n in ("q", "k", "v")
     }
     padded.update(seq_len_q=lq, seq_len_kv=lk)
-    np.testing.assert_allclose(sdpa_reference(dense, padded)["o"], out["o"], atol=1e-6)
+    np.testing.assert_allclose(
+        sdpa_reference_from_request(dense, padded)["o"], out["o"], atol=1e-6
+    )
 
 
 def test_ragged_offsets_must_be_whole_rows():
@@ -307,7 +316,7 @@ def test_ragged_offsets_must_be_whole_rows():
     tensors["q"] = np.zeros(10_000, np.float32)
     req = replace(req, q=replace(req.q, ragged_offset_multiplier=1))
     with pytest.raises(ValueError, match="whole sequence rows"):
-        sdpa_reference(req, tensors)
+        sdpa_reference_from_request(req, tensors)
 
 
 # --- PyTorch math SDPA, the hipDNN golden generator's backend --------------------
@@ -340,7 +349,7 @@ def test_matches_torch_math_sdpa_per_batch(overrides):
         **overrides,
     )
     tensors = make_tensors(req, seed=7)
-    got = sdpa_reference(req, tensors)
+    got = sdpa_reference_from_request(req, tensors)
     q, k, v = (torch.from_numpy(tensors[n]) for n in ("q", "k", "v"))
     bias = torch.from_numpy(tensors["bias"]).reshape(1, 1, 1, -1)
     group = req.h_q // req.h_k
