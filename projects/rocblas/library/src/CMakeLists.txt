@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -237,6 +237,7 @@ set( rocblas_blas2_source
   blas2/rocblas_trsv_kernels.cpp
   blas2/rocblas_trsv_strided_batched.cpp
   blas2/rocblas_trsv_batched.cpp
+  blas2/rocblas_trsv_batched_kernels.cpp
   #
   blas2/rocblas_gemv.cpp
   blas2/rocblas_gemv_kernels.cpp

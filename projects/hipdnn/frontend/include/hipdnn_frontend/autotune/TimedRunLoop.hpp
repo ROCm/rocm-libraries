@@ -47,9 +47,9 @@ namespace hipdnn_frontend::autotune
  * A finite negative elapsed reading is not a failure: it is replaced with a fresh
  * measurement, up to two extra attempts per candidate across the whole loop. @c timings
  * therefore never contains a negative sample. A third such reading stops the loop. In a
- * stalled pass it sets @c restartUnstalled, because stalled timing can read negative for
- * short work on some runtimes (seen on Windows); in an unstalled pass it sets
- * @c benchmarkFailed.
+ * stalled pass it sets @c restartUnstalled, because the Windows HIP runtime can report
+ * negative spans persistently for short stalled work (ROCm/rocm-systems#12925); in an
+ * unstalled pass it sets @c benchmarkFailed.
  */
 struct TimedRunOutcome
 {

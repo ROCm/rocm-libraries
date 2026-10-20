@@ -40,8 +40,11 @@ namespace hipdnn_plugin_sdk::ingestor
 constexpr int BENCHMARK_WARMUP_RUNS = 1;
 constexpr int BENCHMARK_ITERATIONS = 7;
 
-/// Extra attempts per candidate to replace finite negative samples, a HIP event timing
-/// artifact. See sampleCandidate() for the policy.
+/// A finite negative elapsed time is a bad HIP event reading, not proof a candidate is
+/// broken: the Windows HIP runtime reports them (ROCm/rocm-systems#12925).
+/// sampleCandidate() discards one and re-measures the same slot, using at most this many
+/// extra attempts per candidate in each sampling pass. NaN, Inf, and a backend timing
+/// error are never retried this way.
 constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
 // With zero iterations, the reduction would report its DBL_MAX seed as a real time.
@@ -409,12 +412,12 @@ private:
     ///   the sign check, so a negative sample cannot hide them.
     /// - A missing or non-finite time scores the candidate unusable, with no retry.
     /// - A finite negative time is re-measured in the same slot, at most
-    ///   MAX_NEGATIVE_SAMPLE_RETRIES times per candidate. Negatives appear near the timer
-    ///   resolution and, for short stalled work on some runtimes (seen on Windows),
-    ///   persistently. Exhausting the budget restarts a stalled pass unstalled, because
-    ///   dropping the candidate would exclude the fastest kernels; in an unstalled pass it
-    ///   scores the candidate unusable. A negative value never reaches the ranking or
-    ///   cache.
+    ///   MAX_NEGATIVE_SAMPLE_RETRIES times per candidate in each pass. The Windows HIP
+    ///   runtime reports negative spans (ROCm/rocm-systems#12925), and for short stalled
+    ///   work it can report them persistently. Exhausting the budget restarts a stalled
+    ///   pass unstalled, because dropping the candidate would exclude the fastest
+    ///   kernels; in an unstalled pass it scores the candidate unusable. A negative value
+    ///   never reaches the ranking or cache.
     template <typename DefaultTimer>
     SampleOutcome sampleCandidate(size_t index,
                                   const THandle& handle,

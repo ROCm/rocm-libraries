@@ -339,6 +339,14 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx1153;
         }
+        else if(deviceString.find("gfx1170") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1170;
+        }
+        else if(deviceString.find("gfx1171") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1171;
+        }
         else if(deviceString.find("gfx1200") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1200;
@@ -1280,19 +1288,49 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value)
+    if(!prob.handle->isHipBLASLtForcedOn())
     {
-        if(!prob.handle->isHipBLASLtForcedOn())
+        int arch = rocblas_internal_get_arch(prob.handle);
+
+        if(arch == 950)
         {
-            // gfx950: hipBLASLt is used only for fp16/bf16/fp64
-            // TODO remove after all types are supported
-            if(rocblas_internal_get_arch(prob.handle) == 950)
+            // Enable hipBLASLt for all types on gfx950
+            return prob.handle->tryHipBLASLt();
+        }
+
+        // gfx942: the set of types defaulting to hipBLASLt depends on the device.
+        //   MI300X (304 CUs) and MI300A (228 CUs):  fp16/bf16/fp64/fp32
+        //   228-CU MI300A only:                     complex-fp64, complex-fp32
+        //   every other gfx942 configuration:       nothing, Tensile remains the default
+        // The CU count is the one reported for the visible device, so a partitioned
+        // MI300A or MI300X does not match 228 or 304 and keeps the Tensile default.
+        if(arch == 942)
+        {
+            constexpr bool MI300A_or_MI300X = sizeof(Ti) == 2 || std::is_same<Ti, double>::value
+                                              || std::is_same<Ti, float>::value;
+
+            constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
+                                         || std::is_same<Ti, rocblas_float_complex>::value;
+
+            if constexpr(only_MI300A)
+            {
+                if(prob.handle->device_properties.multiProcessorCount != 228)
+                    return false;
+            }
+            else if constexpr(MI300A_or_MI300X)
+            {
+                const int cu_count = prob.handle->device_properties.multiProcessorCount;
+                if(cu_count != 228 && cu_count != 304)
+                    return false;
+            }
+            else
+            {
                 return false;
+            }
         }
     }
 
-    bool batched = !prob.strided_batch;
-    return prob.handle->tryHipBLASLt(batched);
+    return prob.handle->tryHipBLASLt();
 #else
     return false;
 #endif

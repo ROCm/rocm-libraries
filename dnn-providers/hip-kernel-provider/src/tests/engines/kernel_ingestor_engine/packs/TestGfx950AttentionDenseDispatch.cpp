@@ -492,6 +492,7 @@ TEST(TestGfx950AttentionDenseDispatch, ReachesTheLoaderOnceTheBindingsAndOutputA
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISSING_TOKEN_MARKER), std::string::npos) << failure;
     EXPECT_EQ(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
 }
 
 /// Empty BoundTokens is what a mismatched catalog entry would hand prepare(). Without the
@@ -614,6 +615,21 @@ TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareACandidateWithoutASupport
         ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
         EXPECT_NE(failure.find(TILE_MARKER), std::string::npos) << failure;
     }
+}
+
+/// This pack supplies nothing to compile from source with, so a candidate that would be
+/// compiled from source is refused before anything is built, and the refusal names its kind.
+TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareACandidateThatIsNotKpack)
+{
+    const AttentionGraph graph;
+    auto kernel = makeKernel();
+    kernel.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    kernel.source.sourceFile = "kernels/AttentionDense.cpp";
+    kernel.source.entryPoint = "attention_dense";
+
+    const std::string failure = prepareFailure(graph, bindingsFor(graph), kernel);
+    ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+    EXPECT_NE(failure.find("'embedded_source'"), std::string::npos) << failure;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

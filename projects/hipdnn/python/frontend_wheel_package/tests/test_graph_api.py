@@ -4,6 +4,7 @@
 """API tests for Graph configuration (mostly no GPU required)."""
 
 import math
+import sys
 
 import numpy as np
 import pytest
@@ -172,19 +173,8 @@ def test_execute_timed_ext_without_compiled_plan_is_a_bad_error():
 class TestGraphExecuteTimedExt:
     """Tests for Graph.execute_timed_ext(): exactly-once, device-only-timed execution."""
 
-    def test_uid_keyed_reports_consistent_timing(self):
-        """A real HIP event measurement through the test plugin reports its method.
-
-        The stub engine enqueues no device work, so the timed span is empty. Some
-        runtimes (seen on Windows) read an empty span as a negative interval, which
-        the API reports as INVALID with no elapsed time rather than an error.
-
-        This test therefore checks only that quality and elapsed_ms agree; it
-        would pass if every result were INVALID. The valid-timing path with
-        real device work is covered in C++ by
-        IntegrationGpuTimedExecute.ReportsTimingFromActivePlan, which requires
-        a finite elapsed time greater than zero.
-        """
+    def test_uid_keyed_reports_valid_timing(self):
+        """A real HIP event measurement through the test plugin reports its method."""
         graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
         handle = build_all_plans(graph)
 
@@ -206,13 +196,17 @@ class TestGraphExecuteTimedExt:
         err, timing = graph.execute_timed_ext(handle, variant_pack, ws_ptr)
         assert err.is_good(), err.get_message()
         assert not timing.timed_out
-        if timing.quality == hipdnn.TimingQuality.INVALID:
+        if sys.platform == "win32" and timing.quality == hipdnn.TimingQuality.INVALID:
+            # On Windows, hipEventElapsedTime can return a negative value for a short
+            # span (https://github.com/ROCm/rocm-systems/issues/12925). The binding
+            # reports that as INVALID with no elapsed time, which is its documented
+            # contract. Remove this when the runtime fix ships.
             assert timing.elapsed_ms is None
             return
+        assert timing.elapsed_ms is not None
+        assert math.isfinite(timing.elapsed_ms)
+        assert timing.elapsed_ms >= 0.0
         assert timing.quality in (
             hipdnn.TimingQuality.DEVICE_ONLY,
             hipdnn.TimingQuality.UNSTALLED,
         )
-        assert timing.elapsed_ms is not None
-        assert math.isfinite(timing.elapsed_ms)
-        assert timing.elapsed_ms >= 0.0

@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The standard runner must supply native fixture coverage to both pytest passes."""
+"""The standard runner must supply native fixture coverage to both pytest passes.
+
+Each test drives ``main()`` against a fake ``subprocess.run`` and isolates the
+native pytest/ctest plumbing by opting out of every other step, so a new
+default-on step needs its ``--no-...`` flag added to the argv lists below.
+"""
 
 import importlib.util
 import json
@@ -17,7 +22,10 @@ def runner(monkeypatch):
     spec = importlib.util.spec_from_file_location("rocke_run_all", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.delenv("ROCKE_STORAGE_TEST", raising=False)
+    # Every native parity var: run_all.py exports them into its own pytest pass,
+    # and a leaked value would let these tests pass without exercising CTest.
+    for var, _, _ in module.NATIVE_PARITY_TESTS:
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("ROCKE_BACKEND", raising=False)
     return module
 
@@ -34,6 +42,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
+    ir_types = tmp_path / "Debug" / "rocke_ir_types"
+    ir_types.touch()
+    nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
+    nontemporal.touch()
     selected = tmp_path / "override" if override else executable
     if override:
         selected.touch()
@@ -42,7 +54,13 @@ def test_runner_passes_registered_fixture_to_both_backends(
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        listing = {"tests": [{"name": "rocke_storage", "command": [str(executable)]}]}
+        listing = {
+            "tests": [
+                {"name": "rocke_storage", "command": [str(executable)]},
+                {"name": "rocke_ir_types", "command": [str(ir_types)]},
+                {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
+            ]
+        }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
@@ -53,6 +71,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "run_all.py",
             "--no-guard",
             "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
             "--build-root",
             str(tmp_path),
             "--config",
@@ -65,6 +85,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
+    assert all(env["ROCKE_IR_TYPES_TEST"] == str(ir_types) for _, env in children)
+    assert all(
+        env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
+    )
     assert "ROCKE_BACKEND" not in children[0][1]
     assert children[-1][1]["ROCKE_BACKEND"] == "both"
     assert calls[0][0] == [
@@ -75,7 +99,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
         "Debug",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
-    assert any("-R" in cmd for cmd, _ in calls) is not override
+    # An explicit override skips the storage lookup; other binaries still resolve.
+    assert any("^rocke_storage$" in cmd for cmd, _ in calls) is not override
 
 
 @pytest.mark.parametrize("built", ["none", "partial", "all"])
@@ -112,6 +137,8 @@ def test_ctest_readiness_and_failure_propagation(
             "run_all.py",
             "--no-guard",
             "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -140,6 +167,8 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
             "run_all.py",
             "--no-guard",
             "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -162,6 +191,23 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
     assert "ROCKE_STORAGE_TEST" not in runner.native_pytest_env(tmp_path, "Release")
     assert "native storage parity: SKIPPED" in capsys.readouterr().out
+
+
+def test_existing_engine_archive_is_reused_by_pytest(runner, tmp_path):
+    archive = tmp_path / "librocke_core.a"
+    archive.touch()
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive.resolve())
+
+
+def test_explicit_engine_archive_override_wins(runner, monkeypatch, tmp_path):
+    built = tmp_path / "librocke_core.a"
+    built.touch()
+    override = tmp_path / "override.a"
+    override.touch()
+    monkeypatch.setenv("ROCKE_TEST_ENGINE_ARCHIVE", str(override))
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(override.resolve())
 
 
 def test_invalid_override_is_an_error(runner, monkeypatch, tmp_path):
@@ -195,7 +241,15 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
     monkeypatch.setattr(
         runner.sys,
         "argv",
-        ["run_all.py", "--no-guard", "--no-gate", "--build-root", str(tmp_path)],
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--build-root",
+            str(tmp_path),
+        ],
     )
     assert runner.main() == 1
     assert all(command[0] != runner.sys.executable for command in calls)
@@ -205,23 +259,33 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
 def test_fresh_build_prepares_entire_ctest_suite(
     runner, monkeypatch, tmp_path, override
 ):
-    if not shutil.which("cmake") or not shutil.which("ctest"):
-        pytest.skip("CMake and CTest required for fresh-build regression")
+    if not all(shutil.which(tool) for tool in ("cmake", "ctest", "ninja")):
+        pytest.skip("CMake, CTest, and Ninja required for fresh-build regression")
     source = tmp_path / "source"
     source.mkdir()
-    (source / "main.c").write_text("int main(void) { return 0; }\n")
+    # Exercise real build/discovery/execution without requiring a C toolchain.
+    # Copy CMake itself as each executable: `-E true` supplies the trivial
+    # success behavior, and the executable exists only after its target builds.
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
-        "project(runner_fixture C)\n"
+        "project(runner_fixture LANGUAGES NONE)\n"
         "enable_testing()\n"
-        "add_library(rocke_core STATIC main.c)\n"
-        "add_executable(rocke_storage main.c)\n"
-        "add_executable(rocke_dtypes main.c)\n"
-        "add_test(NAME rocke_storage COMMAND rocke_storage)\n"
-        "add_test(NAME rocke_dtypes COMMAND rocke_dtypes)\n"
+        'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
+        'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
+        "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip rocke_dtypes)\n"
+        '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
+        '  add_custom_command(OUTPUT "${output}"\n'
+        '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
+        '    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_COMMAND}" "${output}"\n'
+        "    VERBATIM)\n"
+        '  add_custom_target(${name} ALL DEPENDS "${output}")\n'
+        '  add_test(NAME ${name} COMMAND "${output}" -E true)\n'
+        "endforeach()\n"
     )
     build = tmp_path / "build"
-    subprocess.run(["cmake", "-S", str(source), "-B", str(build)], check=True)
+    subprocess.run(
+        ["cmake", "-G", "Ninja", "-S", str(source), "-B", str(build)], check=True
+    )
     # Reproduce the byte-identity gate's partial build before pytest setup.
     subprocess.run(
         ["cmake", "--build", str(build), "--target", "rocke_core"], check=True
@@ -233,6 +297,8 @@ def test_fresh_build_prepares_entire_ctest_suite(
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
+    assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
     assert runner.ctest_ready(build, "Release")

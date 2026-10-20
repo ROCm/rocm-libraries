@@ -134,7 +134,7 @@ Hard facts:
   `_DATALAYOUT_LLVM22`) rather than by architecture.
 - Wavefront mode is a compile-time capability of the exact gfx target, not a runtime switch.
   gfx942/gfx950 admit wave64 only; gfx1250 admits wave32 only. gfx1151,
-  gfx11-generic, and gfx1201 default to wave32 and can select wave64, but rocKE
+  gfx11-generic, gfx1201, and gfx12-generic default to wave32 and can select wave64, but rocKE
   records one validated mode per target in `ArchTarget`. Matrix-atom availability
   is a separate `MmaCatalog` fact; do not infer legal atoms from wave width alone.
 - Kernel authors usually compose helpers (`TensorDescriptor`, `TensorView`, `TileWindow`, `MfmaAtom`, `WarpGrid`, `CoalescedTileLoader`, `AsyncTileLoader`, `SchedulePolicy`, `SoftwarePipeline`, `DirectEpilogue`, `CShuffleEpilogue`, `block_lds_reduce`, `sweep_row_chunks`).
@@ -142,7 +142,7 @@ Hard facts:
 - Runtime is persistent: `KernelLauncher` loads HSACO once and is called repeatedly. `PipelineLauncher` chains stages on one stream. `WorkspacePool` keeps long-lived torch workspaces alive across launches. `time_launches` is the canonical HIP-event timer.
 - Buffer-resource descriptor DW3 is selected by the exact gfx ISA backend, not
   by a broad accelerator-family label. gfx90a/gfx942/gfx950 use `0x00027000`,
-  while gfx11-generic/gfx1151/gfx1201 use `0x31014000`. The gfx1250 backend
+  while gfx11-generic/gfx1151/gfx12-generic/gfx1201 use `0x31014000`. The gfx1250 backend
   currently inherits `0x31014000` as a bring-up placeholder; its 57-bit
   SRD model still requires target validation. On the established gfx9 and RDNA
   mappings, bounds-checked descriptors make OOB lanes return zero on load and

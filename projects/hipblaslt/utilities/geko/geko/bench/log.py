@@ -200,11 +200,11 @@ def verify_output(latency_file: str | Path, bench_file: str | Path) -> bool:
 # Extra fields (beyond GEMM_LOG_FIELDS) that hipblaslt-bench echoes back in its
 # raw output under the same names used in bench yaml rows/LOG_FIELDS. Ordered
 # by how likely they are to distinguish otherwise-identical GEMM shapes.
+# Note: scaleA/scaleB are already part of GEMM_LOG_FIELDS (the core merge key),
+# so they are intentionally omitted here.
 _EXTRA_MATCH_FIELDS = (
     "alpha",
     "beta",
-    "scaleA",
-    "scaleB",
     "scaleC",
     "scaleD",
     "swizzleA",
@@ -243,7 +243,9 @@ def realign_rows(rows: List[dict], df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.rename(columns={"m": "M", "n": "N", "k": "K"})
     df["compute_type"] = df["compute_type"].apply(update_compute_type)
+    ensure_scale_columns(df)
     df_rows = pd.DataFrame(rows)
+    ensure_scale_columns(df_rows)
 
     key = list(GEMM_LOG_FIELDS)
     ambiguous = df_rows.duplicated(subset=key, keep=False)

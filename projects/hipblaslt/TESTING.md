@@ -182,7 +182,8 @@ reference, and TheRock superbuild is the third option if you need the whole stac
 | TensileLite kernel-generation behavior | `tox -e unit` (includes the characterization goldens) | No |
 | Anything, before pushing | `pre-commit run --all-files` | No |
 
-The four client test tiers (`quick`, `standard`, `comprehensive`, `full`) are defined in
+The five client test tiers (`quick`, `standard`, `comprehensive`, `full`, and `stress`, which
+holds only the large-memory size-threshold and address-overflow cases) are defined in
 [`clients/tests/test_categories.yaml`](clients/tests/test_categories.yaml). When hipBLASLt is built
 inside rocm-libraries, those tiers are registered as CTest labels and a relocatable
 `CTestTestfile.cmake` is installed to `bin/hipblaslt/`, so the tiers can be run with `ctest` from
@@ -244,7 +245,9 @@ There is no separate unit-test binary. The host-only tests that do exist are com
 | `caching_library_gtest.cpp` | `CachingLibraryCollision` | Solution-cache keying under a forced hash collision |
 | `ulp_gtest.cpp` | `UlpMantissaBits`, `UlpAsDouble`, `UlpDistance`, `UlpAccumulate`, `UlpCheckGeneral` | Units-in-the-last-place error-measurement helpers, pure math with no GPU dependency |
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
+| `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
+| `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 
 That is a handful of test cases of genuinely hardware-independent logic, against a library of
 substantial size. It is not a meaningful unit-test suite; it is a few useful islands.
@@ -282,10 +285,10 @@ semantics, and multi-GPU behavior. All of that is integration territory by const
 **Suite size.** TensileLite's unit and characterization suites together run into the thousands of
 tests, across four separate CI lanes; see
 [tensilelite/TESTING.md#where-these-tests-actually-run](tensilelite/TESTING.md#where-these-tests-actually-run).
-For the C++ side there is no coverage target at all today, because with the current structure a
-target would be aspirational rather than actionable. TensileLite's own coverage floors, per-file
-ratchet, and the characterization-versus-unit distinction are covered in
-[tensilelite/TESTING.md#coverage](tensilelite/TESTING.md#coverage).
+For the C++ side there is no enforced coverage floor today, because with the current structure a
+floor would be aspirational rather than actionable (see [Coverage](#coverage) for what is measured).
+TensileLite's own coverage floors, per-file ratchet, and the characterization-versus-unit
+distinction are covered in [tensilelite/TESTING.md#coverage](tensilelite/TESTING.md#coverage).
 
 ### Integration Testing Strategy
 
@@ -320,6 +323,7 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
 
 All tiers exclude `*known_bug*`. There are currently no multi-GPU tests.
 
@@ -335,6 +339,34 @@ and epilogue fusion, and those reproduce at small sizes far more cheaply. Large 
 address-arithmetic overflow and workspace behavior specifically, and are used sparingly for that
 reason. There is real redundancy in the datatype sweeps, where many numerical variants exercise the
 same code path, and pruning that is a standing opportunity rather than an active project.
+
+**Exact checks at large sizes (`fast_check`).** For large shapes, `fast_check: 1` replaces the CPU
+reference with an exact probe check of every element of D (see
+[`clients/common/include/fast_check.hpp`](clients/common/include/fast_check.hpp)). It needs
+`initialization: integer_exact`, which today covers only A, B and C:
+
+| Operand | integer_exact values |
+| --- | --- |
+| A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
+| B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
+| bias, scaleAlpha vector | not covered: the generic integer fill, 1 to 10 |
+| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; fast_check refuses those) |
+| E (output), amaxD, bias gradient | outputs, checked exactly: E like D, relu and clamp through E, amaxD against the verified result, a bias gradient against exact sums of A or B |
+
+Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
+and refuses a case that would reach the range the compute type holds exactly (2^24 for f32, 2^11 for
+f16, 2^31 for int32). At large K, D's type is the tighter limit: integers are exact up to 256 in
+bf16, 2048 in f16, 16 in fp8 e4m3 and 8 in e5m2, and an int8 D saturates at 127. fast_check models
+the rounding into D, but each result outside D's exact range costs a K-length dot product on the
+host, so the large-K cases pick the pattern by output type:
+
+| Output | Standard pattern | Large K (28672 to 32768) |
+| --- | --- | --- |
+| f32, int32 | exact; typical results stay far below the accumulator limit | standard |
+| f16 | exact below K of about 256; rounding modelled above | `ternary` or `sparse_k` |
+| bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
+| fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
+| int8 | saturates; each saturated result is recomputed | `sparse_k` |
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has
@@ -548,7 +580,8 @@ and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags.
 one, a Python coverage run and a C++ coverage run sharing a single script, which is why it needs
 gfx950 and why it takes hours rather than minutes. It reports a check, but that check is not
 required, and a failure anywhere in it skips the codecov uploads, so a codecov number can be older
-than the commit you are looking at.
+than the commit you are looking at. Its sibling job, named only `codecov`, measures the hipBLASLt C++
+library and uploads under the `hipBLASLt` flag; see [Coverage](#coverage).
 
 TensileLite's Python tree executes in four separate CI lanes that are easy to confuse with each other
 and with three adjacent lanes that sound like them but run none of these tests (including
@@ -601,7 +634,7 @@ required-check list, in this repository, is tracked as a gap.
 - The TensileLite coverage floor and per-file ratchet, which fail their own lane but not a required
   check
 - The characterization-versus-unit coverage summary card
-- The `tensilelite-unit-codecov` check and the codecov reports
+- The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
@@ -624,22 +657,23 @@ A flaky test is not an accepted final state, and neither is an aging quarantine 
 
 ### Known Bugs and Expected Failures
 
-hipBLASLt suppresses or records known-bad behavior in eight different places. They accumulated
+hipBLASLt suppresses or records known-bad behavior in nine different places. They accumulated
 independently, they use different formats, and they are not governed as one thing. Anyone reasoning
-about "what do we currently know is broken" has to check all eight.
+about "what do we currently know is broken" has to check all nine.
 
 | Mechanism | What it suppresses | Ticket linkage | Detects its own fix? |
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
-| [`TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
-| Filename-driven marks in `Tensile/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
+| [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| Filename-driven marks in `tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
+| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/tensilelite/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
 
-This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
+This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
 quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
 this precondition checks for never exists by design (see
@@ -659,7 +693,7 @@ quarantine list, is in the blind tier.
 
 **The best-governed example is already in the tree**, and is worth copying rather than redesigning.
 The `_ROCM3994_XFAIL` marker in
-[`test_amax_true16_activation.py`](tensilelite/Tensile/Tests/unit/test_amax_true16_activation.py)
+[`test_amax_true16_activation.py`](tensilelite/tensilelite/Tests/unit/test_amax_true16_activation.py)
 carries a ticket in its reason, `strict=True` so that a fix turns the unexpected pass into a hard
 failure, `raises=AssertionError` so an unrelated crash is not absorbed, a time-box comment naming
 when to re-evaluate, and an explicit instruction to delete the marker in the fixing PR. The test
@@ -674,7 +708,7 @@ better structure: a real `ticket:` field, keys chosen so they survive library re
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
 **Known gaps.** Only one mechanism records its ticket somewhere a tool could read, and none records a
-review date. Nothing reports what is currently suppressed across all seven places, or for how long.
+review date. Nothing reports what is currently suppressed across all nine places, or for how long.
 The filename-driven marks in `config_helpers.py` are the weakest link by construction, since a path
 substring cannot carry a ticket or a reason at all, and the resulting mark is non-strict so a fix is
 invisible; they have no users in the tree
@@ -693,11 +727,52 @@ fraction of the C++ library's lines.
 
 | Scope | Tool | Measured in | Enforced |
 | --- | --- | --- | --- |
-| hipBLASLt C++ library | Optional `HIPBLASLT_ENABLE_COVERAGE=ON` build | Not run in CI | No |
+| hipBLASLt C++ library | `HIPBLASLT_ENABLE_COVERAGE=ON` build, `make coverage` (Clang source-based coverage, reported with `llvm-cov`) | Math CI `codecov` job, gfx950 only, on every pull request | No. Codecov shows an 80% project target for the `hipBLASLt` flag, but the check is not required |
 
-**No C++ coverage target exists.** For the reasons given in
-[Unit Testing Strategy](#unit-testing-strategy) — no host-only link target, internal headers not
-reachable from the test target, validation interleaved with dispatch — a target set before the
+**How the number is produced.** The Math CI `codecov` job builds hipBLASLt for gfx950 with
+`HIPBLASLT_ENABLE_COVERAGE=ON`, runs `make coverage` with `GTEST_FILTER='*smoke*:*pre_checkin*'`
+(the job configuration, which lives in the CI system, also excludes two auxiliary tests), and uploads
+`coverage-report/coverage.info` to Codecov under the `hipBLASLt` flag. `make coverage` runs
+`hipblaslt-test` through [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) in four passes:
+
+1. The `GTEST_FILTER` tests.
+2. Every test whose name carries no tier category. The category filter above never selects these,
+   which includes suites such as `MatrixTransformTest`, `ExtOpTest`, and `aux_handle_test`. CMake
+   reads the tier-category list out of `clients/tests/data/` and hands it to the script, so a
+   category added to the test data cannot quietly land in this pass.
+3. The smoke matmul tests with all logging enabled (`HIPBLASLT_LOG_MASK=255`), so the log, bench,
+   and profile formatting code runs. The log goes to `coverage-report/logs/`.
+4. The smoke matmul tests with `HIPBLASLT_CHECK_NUMERICS=2`, so the NaN/Inf output check runs.
+
+**Which passes gate.** A pass fails the coverage job when it is the only place that configuration
+runs. Passes 1, 3, and 4 gate: passes 3 and 4 are the only runs of `HIPBLASLT_LOG_MASK` and
+`HIPBLASLT_CHECK_NUMERICS` over the matmul suite anywhere in CI, so nothing else would notice a
+regression in either mode. Pass 2 is advisory, because every test it selects also runs in the
+unfiltered `precheckin` job, which gates there. A crash discards that pass's whole profile, so the
+script excludes tests known to crash under coverage, each with a ticket (see
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures)). Set
+`HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to run only the first pass locally.
+
+**What the number counts.** The report covers hipBLASLt library code only. Files under `clients/`
+(test code), `tensilelite/`, and `shared/` are excluded, the last two because TensileLite and the
+shared components (rocRoller, origami) report under their own Codecov flags. Everything linked into
+`libhipblaslt.so` from this directory is instrumented, which means the `hipblaslt` sources plus the
+two static archives folded into it, `hipblaslt-tuning-store` and the default-enabled
+`hipblaslt-rocroller` (2,574 lines across its sources and headers, 68.6% covered as of October
+2026). An archive without its own instrumentation contributes no lines at all, even when tests
+execute it. Instrumenting one also instruments whatever header-only template code its sources
+instantiate, which is what makes the `shared/` exclusion load-bearing rather than tidy: rocRoller's
+templates added 6,205 lines at 4.9% to this report, and pulled the reported number down by 15
+points, until they were excluded. The test sources are
+instrumented too, because they include library headers and so carry their own copies of the
+library's inline functions; the linker keeps one copy of each, and an uninstrumented copy would
+leave the library's calls uncounted. Numbers recorded before October 2026 counted test client code,
+lost those inline-function counts, and omitted `hipblaslt-rocroller`, so they are not comparable
+with later ones.
+
+**No enforced C++ coverage floor exists.** For the reasons given in
+[Unit Testing Strategy](#unit-testing-strategy) (no host-only link target, internal headers not
+reachable from the test target, validation interleaved with dispatch), a floor set before the
 host-side code is linkable in isolation would be aspirational rather than actionable.
 
 TensileLite Python has a considerably more developed coverage story, including enforced floors, a
@@ -765,14 +840,15 @@ the sanitizer runtime on real hardware.
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a | **Yes** |
-| **HOST_ASAN** | Same, second architecture | Opt-in via the `ci:asan` PR label, gfx942 | No, explicitly non-blocking |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | TheRock nightly and manual dispatch, gfx94X | No |
 | **TSAN** | Data races | **Nowhere.** Build options exist; no CI lane uses them | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
-at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=1`
-(required for sanitized ROCm builds). The suppression file is the thing to look at first when a leak
-report appears that seems to come from outside hipBLASLt.
+at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=0`.
+Host-only AddressSanitizer does not require GPU page-fault retry (XNACK), so this workflow disables
+it. The shared test launcher preserves the caller's XNACK setting for host-ASAN artifacts and sets
+`HSA_XNACK=1` for full-ASAN artifacts. The suppression file is the thing to look at first when a
+leak report appears that seems to come from outside hipBLASLt.
 
 **How to build it yourself.** For a standalone hipBLASLt build, `-DHIPBLASLT_ENABLE_ASAN=ON` or
 `-DHIPBLASLT_ENABLE_TSAN=ON`, with `-DTENSILELITE_ENABLE_HOST_ASAN=ON` for the TensileLite host
@@ -782,6 +858,12 @@ sanitizer options intentionally stand down when the superbuild is driving.
 **GPU-specific limitations.** Host ASAN does not instrument device code, so nothing in the generated
 kernels is checked by the gating lane. Device-side ASAN requires XNACK-capable configurations, is
 substantially slower, and is why full ASAN is nightly rather than per PR.
+
+There is currently no gfx90a device-ASAN runtime test lane. Before enabling one, runner capacity
+and stability with full ASAN and `HSA_XNACK=1` must be reviewed with DevOps. A dedicated pool,
+potentially for nightly testing, is a separate follow-up; the hang investigation remains tracked
+in [rocm-libraries #12727](https://github.com/ROCm/rocm-libraries/issues/12727) and
+[TheRock-Infra #978](https://github.com/ROCm/TheRock-Infra/issues/978).
 
 **Explicitly not covered:** thread safety (no TSAN lane, despite the build option existing);
 undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and any test outside
@@ -850,7 +932,7 @@ When adding or modifying functionality:
 ### Choosing the Right Test Type
 
 - **Can the behavior be validated without GPU hardware?**
-  - Yes, and it is in TensileLite Python: add a unit test in `tensilelite/Tensile/Tests/unit/`. Write
+  - Yes, and it is in TensileLite Python: add a unit test in `tensilelite/tensilelite/Tests/unit/`. Write
     a test that asserts what the code *should* do. Reach for a characterization golden only when you
     are pinning behavior that already exists so it can be refactored safely, not when you are adding
     behavior.
@@ -1045,7 +1127,7 @@ larger structural items (the characterization-to-unit migration and mutation tes
    and reviewers stop guessing. The lane tables in this document and in
    [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, but
    this belongs somewhere it cannot drift from the branch-protection settings themselves.
-3. **Govern known-bug entries as one thing.** Eight mechanisms suppress or record known-bad behavior
+3. **Govern known-bug entries as one thing.** Nine mechanisms suppress or record known-bad behavior
    and none of them share a convention. The proposal, which needs team agreement before it becomes
    policy, is four rules:
 
@@ -1142,7 +1224,7 @@ this table should drive.
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
 | No flaky-test tagging or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes |  |
-| Known-bad behavior is suppressed in seven places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total |  |
+| Known-bad behavior is suppressed in nine places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total |  |
 
 ### Static analysis and type checking
 
