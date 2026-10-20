@@ -498,6 +498,226 @@ TEST(TestGfx950ConvFwdGeometry, AotInstanceLaunchRefusesWhatTheBinaryCannotCompu
         aotInstanceLaunch(tall, *tallGeometry, {256, 16, 4, 1, 8, 8, 8, false, 0, 0, true}));
 }
 
+/// A group-merged instance as the gfx942 catalog packages it: grouped, no async, its
+/// derived widths recorded as 0, @p groupMerge depthwise groups per workgroup.
+AotInstance mergedInstance(int64_t groupMerge, int64_t tileN = 16, int64_t tileM = 64)
+{
+    return AotInstance{tileM, tileN, 4, 1, 0, 0, 0, false, 0, 0, true, groupMerge};
+}
+
+TEST(TestGfx950ConvFwdGeometry, MergedAotInstanceLaunchesGroupsOverGroupMergeZSlices)
+{
+    // Depthwise G=64: GEMM M = 2 * 14 * 14 = 392 is 7 M-tiles of 64; the merged GEMM N,
+    // kpg * groupMerge, fits one tile, so x is 1 and z is groups / groupMerge
+    // (Gfx950ConvFwdAotSpec.grid). The block is the instance's warps.
+    const Problem depthwise{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64};
+    const auto geometry = deriveGeometry(depthwise);
+    ASSERT_TRUE(geometry);
+    for(const auto& [groupMerge, tileN, gridZ] :
+        std::vector<std::tuple<int64_t, int64_t, unsigned int>>{
+            {2, 16, 32U}, {4, 16, 16U}, {16, 16, 4U}, {32, 32, 2U}, {64, 64, 1U}})
+    {
+        SCOPED_TRACE(groupMerge);
+        const auto instance = mergedInstance(groupMerge, tileN);
+        const auto launch = aotInstanceLaunch(depthwise, *geometry, instance);
+        ASSERT_TRUE(launch);
+        EXPECT_EQ(launch->gridX, 1U);
+        EXPECT_EQ(launch->gridY, 7U);
+        EXPECT_EQ(launch->gridZ, gridZ);
+        EXPECT_EQ(launch->blockX, 256U);
+        // aotInstanceLaunch dispatches a merged instance to mergedInstanceLaunch.
+        const auto merged = mergedInstanceLaunch(depthwise, *geometry, instance);
+        ASSERT_TRUE(merged);
+        EXPECT_EQ(merged->gridX, launch->gridX);
+        EXPECT_EQ(merged->gridY, launch->gridY);
+        EXPECT_EQ(merged->gridZ, launch->gridZ);
+        EXPECT_EQ(merged->blockX, launch->blockX);
+        // The kernel arguments stay the true problem's: p_num_pid_n = ceil(kpg / tileN).
+        const auto kernargs = implicitGemmKernargs(depthwise, *geometry, *launch);
+        ASSERT_TRUE(kernargs);
+        EXPECT_EQ(kernargs->at(37), 7);
+        EXPECT_EQ(kernargs->at(38), 1);
+    }
+
+    // Stride 2, 5x5, "same" padding over 9x9: Ho = Wo = 5, one M-tile.
+    const Problem strided{1, 48, 48, 9, 9, 5, 5, 2, 2, 2, 2, 1, 1, 48};
+    const auto stridedGeometry = deriveGeometry(strided);
+    ASSERT_TRUE(stridedGeometry);
+    const auto launch = aotInstanceLaunch(strided, *stridedGeometry, mergedInstance(16));
+    ASSERT_TRUE(launch);
+    EXPECT_EQ(launch->gridX, 1U);
+    EXPECT_EQ(launch->gridY, 1U);
+    EXPECT_EQ(launch->gridZ, 3U);
+}
+
+TEST(TestGfx950ConvFwdGeometry, MergedAotInstanceLaunchRefusesWhatTheMergedBinaryCannotCompute)
+{
+    const Problem depthwise{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64};
+    const auto geometry = deriveGeometry(depthwise);
+    ASSERT_TRUE(geometry);
+    const auto launches = [](const Problem& problem, const AotInstance& instance) {
+        const auto problemGeometry = deriveGeometry(problem);
+        return problemGeometry && aotInstanceLaunch(problem, *problemGeometry, instance)
+               && mergedInstanceLaunch(problem, *problemGeometry, instance);
+    };
+    const auto refused = [](const Problem& problem, const AotInstance& instance) {
+        const auto problemGeometry = deriveGeometry(problem);
+        return problemGeometry && !aotInstanceLaunch(problem, *problemGeometry, instance)
+               && !mergedInstanceLaunch(problem, *problemGeometry, instance);
+    };
+    const auto base = mergedInstance(16);
+    EXPECT_TRUE(launches(depthwise, base));
+
+    // Not depthwise: two channels per group on either side, or a dense graph.
+    EXPECT_TRUE(refused({2, 128, 128, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64}, base));
+    EXPECT_TRUE(refused({2, 64, 128, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64}, base));
+    EXPECT_TRUE(refused({2, 128, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64}, base));
+    EXPECT_TRUE(refused({2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1}, base));
+
+    // The merge degree must divide the group count.
+    const Problem groups24{2, 24, 24, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 24};
+    EXPECT_TRUE(refused(groups24, base));
+    EXPECT_TRUE(launches(groups24, mergedInstance(8)));
+    EXPECT_TRUE(refused({2, 8, 8, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 8}, base));
+
+    // The merged GEMM N, kpg * groupMerge = groupMerge, must fit one tile.
+    EXPECT_TRUE(refused(depthwise, mergedInstance(16, 8)));
+    EXPECT_TRUE(launches(depthwise, mergedInstance(16, 16)));
+    EXPECT_TRUE(refused(depthwise, mergedInstance(32, 16)));
+
+    // The builder derives a merged instance's widths, so the identity records 0.
+    for(const auto field : {0, 1, 2})
+    {
+        SCOPED_TRACE(field);
+        auto changed = base;
+        (field == 0 ? changed.vectorA : field == 1 ? changed.vectorB : changed.vectorC) = 1;
+        EXPECT_TRUE(refused(depthwise, changed));
+    }
+
+    // No async DMA, chunks recorded or not, and only the grouped code path.
+    auto changed = base;
+    changed.asyncDma = true;
+    EXPECT_TRUE(refused(depthwise, changed));
+    changed.asyncChunkA = changed.asyncChunkB = 1;
+    EXPECT_TRUE(refused(depthwise, changed));
+    changed = base;
+    changed.grouped = false;
+    EXPECT_TRUE(refused(depthwise, changed));
+
+    // Out-of-contract tuning.
+    EXPECT_TRUE(refused(depthwise, mergedInstance(16, 16, 0)));
+    changed = base;
+    changed.warpM = 0;
+    EXPECT_TRUE(refused(depthwise, changed));
+    changed = base;
+    changed.warpM = 4;
+    changed.warpN = 8; // 2048 threads.
+    EXPECT_TRUE(refused(depthwise, changed));
+
+    // gridDim.y: 16-row tiles over N * Ho * Wo = 2^21 outputs need 131072 workgroups.
+    const Problem tall{2048, 16, 16, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1, 16};
+    EXPECT_TRUE(refused(tall, mergedInstance(16, 16, 16)));
+    EXPECT_TRUE(launches(tall, mergedInstance(16, 16, 256)));
+}
+
+TEST(TestGfx950ConvFwdGeometry, MergedAotInstanceGridZIsGroupsOverGroupMergeWithinItsBound)
+{
+    // 65535 * 16 groups: one group per z slice exceeds gridDim.z, 16 per slice fills it.
+    constexpr int64_t AT_LIMIT = int64_t{65535} * 16;
+    const Problem atLimit{1, AT_LIMIT, AT_LIMIT, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, AT_LIMIT};
+    const auto geometry = deriveGeometry(atLimit);
+    ASSERT_TRUE(geometry);
+    const auto launch = aotInstanceLaunch(atLimit, *geometry, mergedInstance(16));
+    ASSERT_TRUE(launch);
+    EXPECT_EQ(launch->gridZ, 65535U);
+    EXPECT_FALSE(aotInstanceLaunch(atLimit, *geometry, {64, 16, 4, 1, 1, 1, 1, false, 0, 0, true}));
+
+    constexpr int64_t OVER_LIMIT = int64_t{65536} * 16;
+    const Problem overLimit{1, OVER_LIMIT, OVER_LIMIT, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, OVER_LIMIT};
+    const auto overGeometry = deriveGeometry(overLimit);
+    ASSERT_TRUE(overGeometry);
+    EXPECT_FALSE(aotInstanceLaunch(overLimit, *overGeometry, mergedInstance(16)));
+    EXPECT_FALSE(mergedInstanceLaunch(overLimit, *overGeometry, mergedInstance(16)));
+    const auto wider = aotInstanceLaunch(overLimit, *overGeometry, mergedInstance(32, 32));
+    ASSERT_TRUE(wider);
+    EXPECT_EQ(wider->gridZ, 32768U);
+}
+
+TEST(TestGfx950ConvFwdGeometry, UnmergedAotInstanceKeepsOneGroupPerZSlice)
+{
+    // groupMerge 1, stated or defaulted, is the unmerged launch: launchGeometry's grid,
+    // one z slice per group, whatever the problem.
+    const AotInstance defaulted{64, 16, 4, 1, 1, 1, 1, false, 0, 0, true};
+    const AotInstance stated{64, 16, 4, 1, 1, 1, 1, false, 0, 0, true, 1};
+    EXPECT_EQ(defaulted.groupMerge, 1);
+    for(const auto& problem : {Problem{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64},
+                               Problem{2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1, 2},
+                               Problem{2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1}})
+    {
+        const auto geometry = deriveGeometry(problem);
+        ASSERT_TRUE(geometry);
+        const auto expected = launchGeometry(problem, *geometry, 64, 16, 4, 1, 64);
+        ASSERT_TRUE(expected);
+        EXPECT_EQ(expected->gridZ, static_cast<unsigned int>(problem.groups));
+        for(const auto& instance : {defaulted, stated})
+        {
+            const auto launch = aotInstanceLaunch(problem, *geometry, instance);
+            ASSERT_TRUE(launch);
+            EXPECT_EQ(launch->gridX, expected->gridX);
+            EXPECT_EQ(launch->gridY, expected->gridY);
+            EXPECT_EQ(launch->gridZ, expected->gridZ);
+            EXPECT_EQ(launch->blockX, expected->blockX);
+        }
+        // The merged path is only for a merge degree above 1.
+        EXPECT_FALSE(mergedInstanceLaunch(problem, *geometry, stated));
+    }
+}
+
+TEST(TestGfx950ConvFwdGeometry, AotInstanceLaunchRefusesANonpositiveGroupMerge)
+{
+    const Problem depthwise{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64};
+    const auto geometry = deriveGeometry(depthwise);
+    ASSERT_TRUE(geometry);
+    for(const auto groupMerge : {int64_t{0}, int64_t{-1}, int64_t{-16}})
+    {
+        SCOPED_TRACE(groupMerge);
+        // Neither as an unmerged instance (positive widths) nor as a merged one (0).
+        EXPECT_FALSE(aotInstanceLaunch(
+            depthwise, *geometry, {64, 16, 4, 1, 1, 1, 1, false, 0, 0, true, groupMerge}));
+        EXPECT_FALSE(aotInstanceLaunch(depthwise, *geometry, mergedInstance(groupMerge)));
+    }
+    // A merged identity's 0 widths do not launch through the unmerged path.
+    EXPECT_FALSE(aotInstanceLaunch(depthwise, *geometry, mergedInstance(1)));
+}
+
+TEST(TestGfx950ConvFwdGeometry, AotInstanceScoreFillsTheEnginesDeviceSize)
+{
+    // A merged launch of 1 x 7 x 4 = 28 tiles fills 28/256 of an MI355X and 28/304 of an
+    // MI300X; its recorded widths are 0, so no width bonus is added.
+    const Problem depthwise{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 64};
+    const auto geometry = deriveGeometry(depthwise);
+    ASSERT_TRUE(geometry);
+    const auto merged = mergedInstance(16);
+    const auto launch = aotInstanceLaunch(depthwise, *geometry, merged);
+    ASSERT_TRUE(launch);
+    EXPECT_EQ(launch->gridX * launch->gridY * launch->gridZ, 28U);
+    const auto onMi355x = aotInstanceScore(depthwise, *geometry, merged, *launch);
+    const auto onMi300x = aotInstanceScore(depthwise, *geometry, merged, *launch, 304.0);
+    EXPECT_GT(onMi355x, 0.0);
+    EXPECT_DOUBLE_EQ(onMi300x * 304.0, onMi355x * 256.0);
+
+    // 448 unmerged tiles fill either device: the device size does not matter, and the
+    // width bonus is 1e-3 * (1 + 1 + 1) / 24 over the tile utilization.
+    const AotInstance unmerged{64, 16, 4, 1, 1, 1, 1, false, 0, 0, true};
+    const auto unmergedLaunch = aotInstanceLaunch(depthwise, *geometry, unmerged);
+    ASSERT_TRUE(unmergedLaunch);
+    EXPECT_EQ(unmergedLaunch->gridY * unmergedLaunch->gridZ, 448U);
+    EXPECT_DOUBLE_EQ(aotInstanceScore(depthwise, *geometry, unmerged, *unmergedLaunch, 304.0),
+                     392.0 / (7.0 * 64.0 * 16.0) + 1e-3 * 3.0 / 24.0);
+    EXPECT_DOUBLE_EQ(aotInstanceScore(depthwise, *geometry, unmerged, *unmergedLaunch),
+                     aotInstanceScore(depthwise, *geometry, unmerged, *unmergedLaunch, 304.0));
+}
+
 TEST(TestGfx950ConvFwdGeometry, DirectStdGridTilesOutputColumnsChannelsAndImages)
 {
     // ceil(Wo / block_w) x ceil(G / (64 * block_waves)) x N, 64 * block_waves threads.
