@@ -123,12 +123,11 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     ///
     /// The loop below does all the above at once.
     ///
-    /// The workspace size in a find-db record can be smaller than today's requirement. For
-    /// non-tunable solvers, GetWorkspaceSize gives the cheap, closed-form live size. For tunable
-    /// solvers, Immediate runs the config selected by the perf-db (or its default heuristic), so
-    /// use that config's solution size instead of GetWorkspaceSize's maximum across configs. This
-    /// keeps the reported size safe for the solution Immediate will run without walking every
-    /// CK instance and split-K value.
+    /// The workspace size in a find-db record can be smaller than today's requirement. Non-tunable
+    /// solvers use the direct GetWorkspaceSize result. Immediate resolves one configuration for a
+    /// tunable solver from the perf-db or its default heuristic, so use that solution's workspace
+    /// size instead of a solver-wide workspace query. This avoids walking every CK instance and
+    /// split-K value.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
