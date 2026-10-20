@@ -81,6 +81,17 @@ __all__ = ["WARP_SIZE", "fmha_warp_fwd_inner_body"]
 WARP_SIZE = 64
 
 
+def _online_softmax_update(b, partial, scale_log2, k_idx, m, lse, apply_mask_and_score):
+    """Warp-reduce the partial QK dot, mask/score it, then do the online-softmax update."""
+    dot = warp_xor_reduce_sum(b, partial, stages=6)
+    score_log2 = apply_mask_and_score(b.fmul(dot, scale_log2), k_idx)
+    m_new = b.fmax(m, score_log2)
+    alpha = b.exp2(b.fsub(m, m_new))
+    p = b.exp2(b.fsub(score_log2, m_new))
+    lse_new = b.fadd(b.fmul(lse, alpha), p)
+    return m_new, alpha, p, lse_new
+
+
 def fmha_warp_fwd_inner_body(
     b: IRBuilder,
     *,
@@ -272,13 +283,9 @@ def fmha_warp_fwd_inner_body(
             for slot in range(ept):
                 partial = b.fadd(partial, b.fmul(q_f32_list[slot], k_f32_list[slot]))
 
-            dot = warp_xor_reduce_sum(b, partial, stages=6)
-            score_log2 = _apply_mask_and_score(b.fmul(dot, scale_log2), k_idx)
-
-            m_new = b.fmax(m, score_log2)
-            alpha = b.exp2(b.fsub(m, m_new))
-            p = b.exp2(b.fsub(score_log2, m_new))
-            lse_new = b.fadd(b.fmul(lse, alpha), p)
+            m_new, alpha, p, lse_new = _online_softmax_update(
+                b, partial, scale_log2, k_idx, m, lse, _apply_mask_and_score
+            )
 
             new_yields = [m_new, lse_new]
             for slot in range(ept):
@@ -328,13 +335,9 @@ def fmha_warp_fwd_inner_body(
             partial = b.fmul(q_scalar, kd)
 
             # Warp-wide butterfly reduce: 64-lane wave64 sum = 6 stages.
-            dot = warp_xor_reduce_sum(b, partial, stages=6)
-            score_log2 = _apply_mask_and_score(b.fmul(dot, scale_log2), k_idx)
-
-            m_new = b.fmax(m, score_log2)
-            alpha = b.exp2(b.fsub(m, m_new))
-            p = b.exp2(b.fsub(score_log2, m_new))
-            lse_new = b.fadd(b.fmul(lse, alpha), p)
+            m_new, alpha, p, lse_new = _online_softmax_update(
+                b, partial, scale_log2, k_idx, m, lse, _apply_mask_and_score
+            )
             new_acc0 = b.fadd(b.fmul(acc0, alpha), b.fmul(p, vd))
             b.scf_yield(m_new, lse_new, new_acc0)
 
@@ -389,13 +392,9 @@ def fmha_warp_fwd_inner_body(
         partial = b.vector_sum(b.vector_mul(q_vec_f32, k_vec_f32))
 
         # Warp-wide butterfly reduce: 64-lane wave64 sum = 6 stages.
-        dot = warp_xor_reduce_sum(b, partial, stages=6)
-        score_log2 = _apply_mask_and_score(b.fmul(dot, scale_log2), k_idx)
-
-        m_new = b.fmax(m, score_log2)
-        alpha = b.exp2(b.fsub(m, m_new))
-        p = b.exp2(b.fsub(score_log2, m_new))
-        lse_new = b.fadd(b.fmul(lse, alpha), p)
+        m_new, alpha, p, lse_new = _online_softmax_update(
+            b, partial, scale_log2, k_idx, m, lse, _apply_mask_and_score
+        )
 
         # PV accumulator update: acc = acc * alpha + p * v.
         # The splats reduce to a single VGPR broadcast each on AMDGPU
