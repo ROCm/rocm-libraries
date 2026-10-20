@@ -142,6 +142,16 @@ def executeStepsInConfig(
         print1("# Build-only mode: skipping LibraryLogic and LibraryClient.")
         return
 
+    if globalParameters.get("AllDevices", False):
+        # All-GPU measurement mode: the client benchmarks the same workload on every
+        # visible GPU and writes per-GPU/aggregate time + FLOPS to its own sidecar CSV.
+        # It does NOT produce the standard winner CSV that LibraryLogic consumes, so
+        # skip the analysis + client-writer steps cleanly instead of crashing.
+        print1("# AllDevices (all-GPU measurement) mode: benchmarking complete.")
+        print1("# Skipping LibraryLogic and LibraryClient (measurement-only mode);")
+        print1("# per-GPU and aggregate results were written to the all-devices sidecar CSV.")
+        return
+
     ##############################################################################
     # Library Logic
     ##############################################################################

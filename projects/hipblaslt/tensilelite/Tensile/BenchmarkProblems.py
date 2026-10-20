@@ -956,6 +956,15 @@ def main(
 
                 if buildOnly:
                     print1("# Build-only mode: skipping result collection.")
+                elif globalParameters.get("AllDevices", False):
+                    print("clientExit={} {} for {}" \
+                            .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
+                            globalParameters["ConfigPath"]) )
+                    # All-GPU measurement mode does not produce the standard winner CSV;
+                    # the client wrote its own sidecar CSV. Skip copying result files into
+                    # 2_BenchmarkData (which would feed LibraryLogic).
+                    print1("# AllDevices mode: skipping standard result collection "
+                           "(see the all-devices sidecar CSV written by the client).")
                 else:
                     print("clientExit={} {} for {}" \
                             .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \

@@ -33,6 +33,8 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "DataInitialization.hpp"
+#include "ResultReporter.hpp"
+#include "MetaResultReporter.hpp"
 #include "SolutionIterator.hpp"
 
 #include <hip/hip_runtime.h>
@@ -230,15 +232,39 @@ namespace TensileLite
             const unsigned long long kGateMaxSpins = 50000000000ull;
 
             // --- Result CSV (summary, one row per problem/solution). ---
+            // Do NOT overwrite the pipeline's standard results-file: the tuning
+            // LibraryLogic step parses it and cannot read this mode's schema. Write
+            // to a sidecar CSV (<results-file>_alldevices.csv) derived from it.
             std::string resultsFile = args["results-file"].as<std::string>();
-            std::ofstream csv(resultsFile.c_str());
+            std::string sidecarFile;
+            {
+                size_t slash = resultsFile.find_last_of('/');
+                size_t dot   = resultsFile.find_last_of('.');
+                if(dot != std::string::npos && (slash == std::string::npos || dot > slash))
+                    sidecarFile
+                        = resultsFile.substr(0, dot) + "_alldevices" + resultsFile.substr(dot);
+                else
+                    sidecarFile = resultsFile + "_alldevices.csv";
+            }
+            std::ofstream csv(sidecarFile.c_str());
             bool          csvOk = csv.is_open();
+            if(csvOk)
+                std::cout << "[all-devices] writing aggregate results CSV to " << sidecarFile
+                          << std::endl;
+            else
+                std::cerr << "[all-devices] could not open sidecar results CSV '" << sidecarFile
+                          << "'" << std::endl;
             if(csvOk)
                 csv << "problem_idx,M,N,K,batch,solution_idx,solution_name,num_devices,launch_sync,"
                        "samples,time_us_median,time_us_mean,per_gpu_pflops_median,"
                        "per_gpu_pflops_mean,total_pflops_median,total_pflops_mean\n";
 
             auto solutionIterator = SolutionIterator::Default(library, hardware, args);
+            // The solution iterator's preSolution()/checkSolution() hooks report to
+            // a ResultReporter (m_reporter). Outside the normal listener chain that
+            // pointer is null, so attach an empty MetaResultReporter (all report*()
+            // calls become safe no-ops) to avoid a null-deref crash.
+            solutionIterator->setReporter(std::make_shared<MetaResultReporter>());
 
             int rc = 0;
 
