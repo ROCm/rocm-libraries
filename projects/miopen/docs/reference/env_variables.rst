@@ -67,38 +67,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | 1: Check for OOBs before sub-buffer start
         | 2: Check for OOBs after sub-buffer end
 
-hipDNN forwarding
-=================
-
-These variables exist only in builds configured with ``MIOPEN_ENABLE_HIPDNN_WRAPPER=ON``.
-For more information, see :ref:`Logging hipDNN forwarding <logging-hipdnn-forwarding>`.
-
-.. list-table::
-    :header-rows: 1
-    :widths: 70,30
-
-    * - **Environment variable**
-      - **Value**
-
-    * - | ``MIOPEN_HIPDNN_FORWARDING``
-        | Sends the entry points this build can forward to hipDNN. All other entry points still run in MIOpen.
-      - | 0: Disable (default)
-        | 1: Enable
-        | Also accepts the other boolean spellings, such as ``off`` and ``on``.
-
-    * - | ``MIOPEN_DISABLE_HIPDNN_FOR``
-        | Comma-separated list of entry points to keep on MIOpen when forwarding is enabled.
-      - | Entry point names, such as ``miopenConvolutionForward``
-        | ``*``: All entry points
-
-    * - | ``HIPDNN_BACKEND_LIBRARY_PATH``
-        | hipDNN's variable. Absolute path of a directory holding ``libhipdnn_backend.so``. It is tried before the default locations.
-      - | Absolute directory path
-
-    * - | ``HIPDNN_LOG_LEVEL``
-        | hipDNN's variable. Set it to ``error`` to see why hipDNN refused a backend.
-      - | ``error``: Print hipDNN's errors
-
 Find mode configuration
 =======================
 
