@@ -238,9 +238,10 @@ file with `--problems`:
 }
 ```
 
-K must be a multiple of the block tile K, and of 128 on gfx1250. Without
-`pad_m`/`pad_n` (none of the shipped configurations pad), M and N must be
-multiples of the block tile M and N. A kernel that rejects a problem shape is
+K must be a multiple of the block tile K, and of 128 on gfx1250. On gfx1250,
+M/N tails are supported even with `pad_m=pad_n=false`; weight preshuffle also
+requires N divisible by 16. gfx950 retains the bridge's scale-packing and native
+kernel alignment checks. A kernel that rejects a problem shape is
 reported as `SKIPPED (unsupported problem)`; it is not a failure and writes no
 CSV row.
 
