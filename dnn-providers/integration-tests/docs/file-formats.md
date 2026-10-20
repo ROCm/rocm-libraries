@@ -376,10 +376,9 @@ Rules:
   machinery: it gets no verdict, not even `unclaimed_support`. Nothing enforces
   this rule. The run treats a missing sidecar as "no claims", and
   `verify_support_claims.py` checks the sidecars that exist, not the missing
-  ones. Older bundles break the rule: most SDPA single-graph bundles and a few
-  sweeps (`quick/SdpaBackward/Default`, `quick/Reduction/Default`,
-  `quick/Pointwise/Binary`, `{quick,full}/BlockScaleDequantizeMatmul/Default`)
-  have none.
+  ones. Older bundles break the rule: most SDPA single-graph bundles and the
+  sweeps `{tier}/SdpaBackward/Default`, `{tier}/Pointwise/Binary` and
+  `{tier}/BlockScaleDequantizeMatmul/Default`, in every tier, have none.
 - Sidecars are **machine-written** by `--write-support-claims`. The form is
   stricter than valid JSON: sorted keys, 2-space indent, one array element per
   line, trailing newline, LF line endings, sorted platforms and case ids, and
