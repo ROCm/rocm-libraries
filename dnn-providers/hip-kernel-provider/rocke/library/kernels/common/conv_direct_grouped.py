@@ -673,6 +673,13 @@ def _reorg_src_dst_off(
     return src_off, safe_src, val, dst_off
 
 
+def _direct_flush_acc(b, p_dtype, acc_src, d_rsrc, safe_off, c0, accs_flat, flat, zero_acc):
+    """Shared dgrad epilogue: truncate the accumulator, store 2-wide, reset the acc slot."""
+    acc_h = _trunc_f32(b, p_dtype, acc_src)
+    _buf_store_vN(b, p_dtype, d_rsrc, safe_off, c0, acc_h, 2)
+    accs_flat[flat] = zero_acc
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -1223,9 +1230,9 @@ def build_direct_conv_16c(
                 # The 4 per-lane output elements are contiguous in NHWK:
                 # k_out = g*kpg + c4*4 + [0..3]. Store them as one 64-bit
                 # vector instead of four scalar buffer_store_short ops.
-                acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
-                _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, acc_h, 2)
-                accs_flat[flat] = zero_acc
+                _direct_flush_acc(
+                    b, p.dtype, acc_to_flush, d_rsrc, safe_d_off, c0, accs_flat, flat, zero_acc
+                )
 
         b.scf_yield(*accs_flat)
 
@@ -1526,9 +1533,9 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
                 safe_d = b.select(store_ok, b.mul(d_base, c_half_bytes), oob_sentinel)
                 # MFMA 4x4x4 wave64 per-lane output layout:
                 #   acc[i] -> D[n, ho_row, out_q, g*kpg + i]  for i in 0..3
-                acc_h = _trunc_f32(b, p.dtype, acc)
-                _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
-                accs_flat[flat] = zero_acc
+                _direct_flush_acc(
+                    b, p.dtype, acc, d_rsrc, safe_d, c0, accs_flat, flat, zero_acc
+                )
 
         b.scf_yield(*accs_flat)
 
@@ -1991,9 +1998,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
                 d_base_bytes = b.mul(d_base, c_half_bytes)
                 store_valid = b.land(b.land(out_q_valid, c4_valid), row_ok)
                 safe_d_off = b.select(store_valid, d_base_bytes, oob_sentinel)
-                acc_h = _trunc_f32(b, p.dtype, acc_to_flush)
-                _buf_store_vN(b, p.dtype, d_rsrc, safe_d_off, c0, acc_h, 2)
-                accs_flat[flat] = zero_acc
+                _direct_flush_acc(
+                    b, p.dtype, acc_to_flush, d_rsrc, safe_d_off, c0, accs_flat, flat, zero_acc
+                )
 
         b.scf_yield(*accs_flat)
 
