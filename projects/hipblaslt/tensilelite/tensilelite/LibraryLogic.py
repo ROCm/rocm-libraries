@@ -52,6 +52,20 @@ _SIX_BIT_PAIR_RE = re.compile(r"(?:FP6|BF6)_(?:FP6|BF6)")
 # winning tile changes.
 _EXACT_CUSTOM_SMALL_MN = (64, 96, 128)
 _EXACT_CUSTOM_LARGE = ((3072, 3072, 16384), (4096, 4096, 16384))
+# Pure-MX (FP8xFP8 / BF8xBF8 / FP4xFP4) adds two tile families the ladders above
+# cannot reach. Each row is only synthesized when the kernel it points at is in
+# the pool, so the F6 and mixed-MX libraries are unaffected.
+#   - A big non-WGM problem launches 256x128x128, not the 16x16x128 the
+#     m >= 256 and n >= 256 rung returns. Only MN at or above this bound takes
+#     the big tile; 1040x528x1024 stays on 16x16x128 (and 256x128 does not
+#     divide it anyway).
+_EXACT_CUSTOM_BIG_MN = 1024
+_EXACT_CUSTOM_BIG_PLAIN = ((2560, 16384, 2560),)
+#   - A small WGM problem launches 32x32x128, not the 128x128/256x256 duopoly.
+#     K is 4096 here, so _EXACT_CUSTOM_SMALL_MN (which fixes macroK at 128)
+#     cannot express it.
+_EXACT_CUSTOM_WGM_SMALL_MN = 512
+_EXACT_CUSTOM_WGM_SMALL = ((512, 512, 4096),)
 # MI355X is 75a3; 75a2 is the other gfx950 id this library must name. An
 # unsupported list (gfx942 0049/0050) would otherwise be dropped and the
 # master library would load only through the empty-DeviceNames fallback.
@@ -99,6 +113,15 @@ def _sixBitPair(solutions) -> bool:
   return False
 
 
+def _hasTile(solutions, macroM, macroN, useWgm) -> bool:
+  """True when some solution is a custom kernel with exactly this tile shape."""
+  for solution in solutions:
+    tile = customKernelTile(solution)
+    if tile is not None and tile[0] == macroM and tile[1] == macroN and tile[3] == useWgm:
+      return True
+  return False
+
+
 def preferredExactCustomKernel(m, n, k, solutions):
   """Pick the custom kernel rocRoller launches for this exact size.
 
@@ -126,6 +149,12 @@ def preferredExactCustomKernel(m, n, k, solutions):
     return None
 
   if useWgm:
+    # Pure MX at a small MN launches 32x32x128 rather than entering the
+    # 128x128 / 256x256 duopoly below, which has no small-tile rung.
+    if max(m, n) <= _EXACT_CUSTOM_WGM_SMALL_MN:
+      chosen = find(32, 32, 128)
+      if chosen is not None:
+        return chosen
     want256 = m >= 4096 or n >= 4096 or (min(m, n) >= 3072 and _sixBitPair(solutions))
     if want256:
       chosen = find(256, 256)
@@ -142,6 +171,15 @@ def preferredExactCustomKernel(m, n, k, solutions):
       chosen = find(32, 32, 64)
       if chosen is not None:
         return chosen
+    # A big non-WGM problem launches the biggest tile that divides it, not the
+    # 16x16x128 the next rung returns. Requiring divisibility is what the
+    # rocRoller walk does and is also what keeps 1040x528x1024 off 256x128.
+    if min(m, n) >= _EXACT_CUSTOM_BIG_MN:
+      for macroM, macroN in ((256, 256), (256, 128), (128, 128)):
+        if m % macroM == 0 and n % macroN == 0:
+          chosen = find(macroM, macroN)
+          if chosen is not None:
+            return chosen
     if m >= 256 and n >= 256:
       chosen = find(16, 16, 128)
       if chosen is not None:
@@ -737,6 +775,12 @@ class LogicAnalyzer:
     if any((customKernelTile(solution) or (0, 0, 0, False))[3]
            for solution in self.solutions):
       selection.extend(_EXACT_CUSTOM_LARGE)
+    # Gated on the kernel being present so the F6 and mixed-MX libraries, which
+    # have neither tile, do not grow a row that would point at a worse kernel.
+    if _hasTile(self.solutions, 256, 128, False):
+      selection.extend(_EXACT_CUSTOM_BIG_PLAIN)
+    if _hasTile(self.solutions, 32, 32, True):
+      selection.extend(_EXACT_CUSTOM_WGM_SMALL)
 
     seen = set()
     for macroM, macroN, macroK in selection:
