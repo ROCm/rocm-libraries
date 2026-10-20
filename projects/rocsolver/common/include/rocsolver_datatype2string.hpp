@@ -275,6 +275,18 @@ constexpr auto rocsolver2char_cholqr_shift(rocsolver_cholqr_shift value)
     }
     return '\0';
 }
+
+constexpr auto rocsolver2char_equilibration(rocsolver_equilibration value)
+{
+    switch(value)
+    {
+    case rocsolver_equilibration_none: return 'N';
+    case rocsolver_equilibration_row: return 'R';
+    case rocsolver_equilibration_column: return 'C';
+    case rocsolver_equilibration_both: return 'B';
+    }
+    return '\0';
+}
 /* ============================================================================================
  */
 /*  Convert lapack char constants to rocblas type. */
@@ -508,6 +520,19 @@ constexpr rocsolver_cholqr_shift char2rocsolver_cholqr_shift(char value)
     case 'C': return rocsolver_cholqr_shift_computed;
     case 'P': return rocsolver_cholqr_shift_provided;
     default: return static_cast<rocsolver_cholqr_shift>(0);
+    }
+}
+
+constexpr rocsolver_equilibration char2rocsolver_equilibration(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'N': return rocsolver_equilibration_none;
+    case 'R': return rocsolver_equilibration_row;
+    case 'C': return rocsolver_equilibration_column;
+    case 'B':
+    case 'Y': return rocsolver_equilibration_both;
+    default: return static_cast<rocsolver_equilibration>(0);
     }
 }
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES

@@ -343,6 +343,17 @@ public:
             throw std::invalid_argument("Invalid value for " + name);
     }
 
+    void validate_equed(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char equed = std::toupper(val->second.as<char>());
+        if(equed != 'N' && equed != 'R' && equed != 'C' && equed != 'B' && equed != 'Y')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
     void validate_consumed() const
     {
         if(!to_consume.empty())
