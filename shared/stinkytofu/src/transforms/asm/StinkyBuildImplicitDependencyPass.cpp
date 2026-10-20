@@ -143,6 +143,36 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
             for (const StinkyInstruction* piece : pieces) tokens[piece].insert(tokenId);
         }
     }
+
+    // A materialized split fence has no GIR action tying its two physical instructions together.
+    // enclosingFences deliberately names the signal as the logical owner, so copy the complete
+    // frame-derived token set to its paired wait. Both halves must carry the tokens for the
+    // register DAG to form producer -> signal -> wait -> consumer.
+    for (BasicBlock& block : func) {
+        StinkyInstruction* pendingSignal = nullptr;
+        for (IRBase& node : block) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (!inst) continue;
+            if (isBarrierSignal(*inst) && isSplitBarrierAllWave(*inst)) {
+                pendingSignal = inst;
+                continue;
+            }
+            if (isBarrierWait(*inst) && isSplitBarrierAllWave(*inst) && pendingSignal) {
+                std::set<int> pairedTokens;
+                if (auto signalTokens = tokens.find(pendingSignal); signalTokens != tokens.end())
+                    pairedTokens.insert(signalTokens->second.begin(), signalTokens->second.end());
+                if (auto waitTokens = tokens.find(inst); waitTokens != tokens.end())
+                    pairedTokens.insert(waitTokens->second.begin(), waitTokens->second.end());
+                if (!pairedTokens.empty()) {
+                    tokens[pendingSignal] = pairedTokens;
+                    tokens[inst] = std::move(pairedTokens);
+                }
+                pendingSignal = nullptr;
+                continue;
+            }
+            if (isBarrier(*inst)) pendingSignal = nullptr;
+        }
+    }
     return tokens;
 }
 

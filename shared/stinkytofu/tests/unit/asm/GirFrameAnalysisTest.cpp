@@ -11,6 +11,7 @@
 #include "stinkytofu/transforms/asm/GirFencePlacementPass.hpp"
 #include "stinkytofu/transforms/asm/GirWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 #include "transforms/asm/dag/RegionDAG.hpp"
 
 using namespace stinkytofu;
@@ -1158,6 +1159,7 @@ TEST(GirFrameAnalysisTest, CrossAgentRingAliasWarDrainsBeforeBarrier) {
     StinkyInstruction* read = createDsReadB128InBlock(loop, GfxArchID::Gfx1250, 0, 20);
     read->addModifier<GirActionData>(
         GirActionData{0, 0, GirActionKind::Ds, {GirAccessData{false, 0, 2, 0, 0, -1, true}}});
+    createVAddInBlock(loop, GfxArchID::Gfx1250, 40, 41, 42);
     StinkyInstruction* copy = createTensorLoadInBlock(loop, GfxArchID::Gfx1250, 0, 8);
     copy->addModifier<GirActionData>(
         GirActionData{1, 1, GirActionKind::Tensor, {GirAccessData{true, 0, 2, 0, 2, -1, true}}});
@@ -1176,6 +1178,8 @@ TEST(GirFrameAnalysisTest, CrossAgentRingAliasWarDrainsBeforeBarrier) {
     ASSERT_NE(war, hazards.hazards.end());
 
     createGirFencePlacementPass()->run(function, context, analyses);
+    createStinkyBuildImplicitDependencyPass()->run(function, context, analyses);
+    createStinkyDAGSchedulerPass()->run(function, context, analyses);
     createGirWaitCntInsertionPass()->run(function, context, analyses);
 
     std::vector<StinkyInstruction*> instructions;
@@ -1183,16 +1187,49 @@ TEST(GirFrameAnalysisTest, CrossAgentRingAliasWarDrainsBeforeBarrier) {
         if (auto* inst = dyn_cast<StinkyInstruction>(&node)) instructions.push_back(inst);
 
     bool allWarSignalsDrained = true;
+    bool allWarPairsTokenized = true;
     int warSignals = 0;
-    for (size_t i = 0; i + 1 < instructions.size(); ++i) {
-        if (!isBarrierSignal(*instructions[i]) || !isBarrierWait(*instructions[i + 1])) continue;
-        const auto* stamp = instructions[i + 1]->getModifier<CommentData>();
+    size_t pendingSignal = instructions.size();
+    for (size_t i = 0; i < instructions.size(); ++i) {
+        if (isBarrierSignal(*instructions[i]) && isSplitBarrierAllWave(*instructions[i])) {
+            pendingSignal = i;
+            continue;
+        }
+        if (!isBarrierWait(*instructions[i]) || !isSplitBarrierAllWave(*instructions[i]) ||
+            pendingSignal == instructions.size()) {
+            if (isBarrier(*instructions[i])) pendingSignal = instructions.size();
+            continue;
+        }
+        const size_t signalIndex = pendingSignal;
+        pendingSignal = instructions.size();
+        const auto* stamp = instructions[i]->getModifier<CommentData>();
         if (!stamp || stamp->comment.find("WAR") == std::string::npos) continue;
-        const auto* wait = i > 0 ? instructions[i - 1]->getModifier<SWaitCntData>() : nullptr;
+        const auto* signalTokens = instructions[signalIndex]->getModifier<MemTokenData>();
+        const auto* waitTokens = instructions[i]->getModifier<MemTokenData>();
+        allWarPairsTokenized &= signalTokens && waitTokens && !signalTokens->tokens.empty() &&
+                                signalTokens->tokens == waitTokens->tokens;
+        if (signalTokens && waitTokens) {
+            const auto hasLdsToken = [](const std::vector<StinkyRegister>& registers, int token) {
+                return std::any_of(registers.begin(), registers.end(), [&](const auto& reg) {
+                    return reg.isRegister() && reg.reg.type == RegType::LDS &&
+                           reg.reg.idx == static_cast<uint32_t>(token);
+                });
+            };
+            for (int token : signalTokens->tokens) {
+                allWarPairsTokenized &= hasLdsToken(instructions[signalIndex]->getSrcRegs(), token);
+                allWarPairsTokenized &=
+                    hasLdsToken(instructions[signalIndex]->getDestRegs(), token);
+                allWarPairsTokenized &= hasLdsToken(instructions[i]->getSrcRegs(), token);
+                allWarPairsTokenized &= hasLdsToken(instructions[i]->getDestRegs(), token);
+            }
+        }
+        const auto* wait =
+            signalIndex > 0 ? instructions[signalIndex - 1]->getModifier<SWaitCntData>() : nullptr;
         allWarSignalsDrained &= wait && wait->dlcnt == 0;
         ++warSignals;
     }
     EXPECT_GT(warSignals, 0);
+    EXPECT_TRUE(allWarPairsTokenized);
     EXPECT_TRUE(allWarSignalsDrained);
 }
 

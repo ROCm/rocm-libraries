@@ -87,6 +87,12 @@ namespace {
 // not in which passes should run.
 constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 
+bool shouldInsertGirFrameWaits(const StinkyAsmModule& module, bool enableWaitCnt) {
+    const auto& options = module.getModuleOptions();
+    return enableWaitCnt && options.EnableGirFramePipeline &&
+           options.EnableGirFrameWaitCntInsertion;
+}
+
 /// Build the gfx1250 per-region optimization passes into a PassManager.
 /// TODO: enableWaitCnt is a per-pass toggle for the
 /// bring-up phase. Once the pipeline stabilizes, pass selection should
@@ -114,7 +120,13 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     // addPeepholeOptPasses(pm, optLevel);
 
-    // Instruction scheduling
+    // Materialize GIR fences before dependency construction. The implicit-dependency pass derives
+    // each fence's LDS tokens from the frame graph, making the fence a movable scheduler node
+    // constrained by the producer -> fence -> consumer token chain. Counter waits are deliberately
+    // deferred until after scheduling, where GirWaitCntInsertionPass verifies every exact hazard
+    // path is still fenced, recomputes the FIFO ranks, and materializes the waits.
+    if (shouldInsertGirFrameWaits(module, enableWaitCnt)) pm.addPass(createGirFencePlacementPass());
+
     pm.addPass(createStinkyBuildImplicitDependencyPass());
     if (runScheduler) {
         pm.addPass(createStinkyDAGSchedulerPass());
@@ -239,18 +251,12 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             configureStandardInstrumentations(innerPM, moduleOptions,
                                               "loopWithPrefetch+noLoadLoopBody", debugStreams);
             PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
+            const bool useGirFrameWaits =
+                shouldInsertGirFrameWaits(module, moduleOptions.EnableWaitCntInsertion);
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                    runScheduler, moduleOptions.DisableWaitCntRemoval);
             PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
             if (moduleOptions.EnableWaitCntInsertion) {
-                const bool insertGirFrameWaits = moduleOptions.EnableGirFramePipeline &&
-                                                 moduleOptions.EnableGirFrameWaitCntInsertion;
-                if (insertGirFrameWaits) {
-                    // Placement first: the wait this fence carries is a residual measured at
-                    // wherever it ends up standing. Not gated on the scheduler -- it is the only
-                    // source of workgroup barriers now.
-                    innerPM.addPass(createGirFencePlacementPass());
-                }
                 WaitCntInsertionOptions waitCntOptions;
                 waitCntOptions.enableLoopCarriedTokenDeps =
                     moduleOptions.EnableLoopCarriedTokenDeps;
@@ -262,7 +268,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // Generic register waits change FIFO ranks. GIR storage waits must run afterwards
                 // so their graded dscnt/tensorcnt values credit the final wait stream rather than
                 // becoming stale when generic insertion adds an earlier, stricter wait.
-                if (insertGirFrameWaits) innerPM.addPass(createGirWaitCntInsertionPass());
+                if (useGirFrameWaits) innerPM.addPass(createGirWaitCntInsertionPass());
                 if (runScheduler && !moduleOptions.EnableGirFramePipeline)
                     innerPM.addPass(createRemoveDscntPass());
             }
