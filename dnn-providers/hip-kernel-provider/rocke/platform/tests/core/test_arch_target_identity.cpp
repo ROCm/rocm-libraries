@@ -45,6 +45,45 @@ static void check_target(const char* target, const char* base, const char* compi
     check(rocke_arch_from_isa, target, base);
 }
 
+// A processor row that takes its facts from its generic target (arch_specs.json
+// "facts_of") must be that target in every field but `gfx`, sharing the same
+// MMA array rather than a copy of it.
+static void check_facts_of(const char* gfx, const char* generic)
+{
+    const rocke_arch_target_t* t = rocke_arch_target_from_gfx(gfx);
+    const rocke_arch_target_t* g = rocke_arch_target_from_gfx(generic);
+    if(t == NULL || g == NULL)
+    {
+        fprintf(stderr, "FAIL: facts_of '%s' -> '%s': unknown target\n", gfx, generic);
+        ++failures;
+        return;
+    }
+    const rocke_memory_caps_t& m = t->memory;
+    const rocke_memory_caps_t& gm = g->memory;
+    const bool same = strcmp(t->gfx, gfx) == 0 && strcmp(t->family, g->family) == 0
+                      && strcmp(t->target_family, g->target_family) == 0
+                      && t->wave_size == g->wave_size
+                      && t->lds_capacity_bytes == g->lds_capacity_bytes
+                      && t->vmcnt_bits == g->vmcnt_bits && t->mma.ops == g->mma.ops
+                      && t->mma.num_ops == g->mma.num_ops && m.has_async_lds == gm.has_async_lds
+                      && m.has_async_global_lds == gm.has_async_global_lds
+                      && m.has_ds_read_tr == gm.has_ds_read_tr && m.has_tdm == gm.has_tdm
+                      && m.buffer_load_max_dwords == gm.buffer_load_max_dwords
+                      && m.async_lds_max_dwords == gm.async_lds_max_dwords
+                      && m.has_scalar_data_prefetch == gm.has_scalar_data_prefetch
+                      && m.has_global_prefetch == gm.has_global_prefetch
+                      && m.has_cluster_launch == gm.has_cluster_launch
+                      && m.has_multicast_load == gm.has_multicast_load
+                      && t->limits.max_threads_per_block == g->limits.max_threads_per_block
+                      && t->limits.vgprs == g->limits.vgprs && t->limits.agprs == g->limits.agprs
+                      && t->limits.sgprs == g->limits.sgprs;
+    if(!same)
+    {
+        fprintf(stderr, "FAIL: '%s' does not hold exactly the facts of '%s'\n", gfx, generic);
+        ++failures;
+    }
+}
+
 int main(int argc, char** argv)
 {
     // Query mode lets external Python/C++ comparisons use the real engine.
@@ -106,6 +145,8 @@ int main(int argc, char** argv)
     check(rocke_base_arch_from_target_id, "", "");
     check(rocke_compiler_target_from_target_id, "", "");
     check(rocke_arch_from_isa, "", "");
+    check_facts_of("gfx1151", "gfx11-generic");
+    check_facts_of("gfx1201", "gfx12-generic");
     check(rocke_generic_arch_from_target_id, "gfx1100", "gfx11-generic");
     check(rocke_generic_arch_from_target_id, "gfx1151-strict:xnack-", "gfx11-generic");
     check(rocke_generic_arch_from_target_id, "gfx11-generic", "gfx11-generic");

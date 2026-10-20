@@ -17,6 +17,7 @@ See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass, field
@@ -153,12 +154,101 @@ def _load_doc() -> dict:
         return json.load(fh)
 
 
+def _resolve_row(
+    arches: dict[str, dict], generic_targets: dict[str, tuple[str, ...]], gfx: str
+) -> dict:
+    """The raw row whose facts ``gfx`` uses: its own, or the one it points at.
+
+    A row either holds facts or is a pointer, ``{"facts_of": <generic>}`` plus an
+    optional ``_comment``. Every member of a supported generic target has a row,
+    so rocKE supports it by name; a member whose recorded facts are all its
+    generic's is a pointer, so those facts keep one home: the generic target that
+    ``generic_targets`` lists it under. A pointer must name exactly that generic,
+    and the generic must hold facts itself (one level), so every fact is written
+    once and found in one step.
+    """
+    row = arches[gfx]
+    if "facts_of" not in row:
+        return row
+    source = row["facts_of"]
+    own_facts = sorted(key for key in row if key not in ("facts_of", "_comment"))
+    if own_facts:
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} has 'facts_of' and its own facts "
+            f"{own_facts} -- a row either holds facts or names the row that does"
+        )
+    if source not in arches:
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} takes its facts from {source!r}, "
+            f"which is not a row"
+        )
+    if "facts_of" in arches[source]:
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} takes its facts from {source!r}, "
+            f"which itself takes them from {arches[source]['facts_of']!r} -- "
+            f"reference the row that holds the facts"
+        )
+    listed_under = next(
+        (generic for generic, members in generic_targets.items() if gfx in members),
+        None,
+    )
+    if source != listed_under:
+        where = repr(listed_under) if listed_under else "no generic target"
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} takes its facts from {source!r}, "
+            f"but generic_targets lists {gfx!r} under {where} -- a row may take "
+            f"its facts only from the generic target that lists it"
+        )
+    return arches[source]
+
+
 @lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
+def _load_pointers() -> dict[str, str]:
+    """Each pointer row's gfx id and the generic target it takes its facts from.
+
+    Every pointer is validated (:func:`_resolve_row`) before it is returned, so
+    this is the one place ``facts_of`` is read: no reader sees a malformed
+    pointer, whichever loader it reaches first.
+    """
     arches = _load_doc()["arches"]
-    for gfx, spec in arches.items():
-        spec["mma"] = _expand_mma_rows(gfx, spec["mma"])
-    return arches
+    generic_targets = _load_generic_targets()
+    pointers: dict[str, str] = {}
+    for gfx, row in arches.items():
+        if "facts_of" in row:
+            _resolve_row(arches, generic_targets, gfx)
+            pointers[gfx] = row["facts_of"]
+    return pointers
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> dict[str, dict]:
+    """Every arch row by gfx id, resolved: no returned row is a pointer.
+
+    The whole file is validated on first load. Fact rows have their MMA
+    declarations expanded; a pointer row becomes an independent copy of the
+    expanded row it points at (so a caller that edits one target never edits
+    another), keeping its own ``_comment``. The cached JSON document is not
+    modified. Key order follows the file, which the first-hit op_id lookups
+    rely on.
+    """
+    arches = _load_doc()["arches"]
+    pointers = _load_pointers()
+    expanded = {
+        gfx: {**row, "mma": _expand_mma_rows(gfx, row["mma"])}
+        for gfx, row in arches.items()
+        if gfx not in pointers
+    }
+    resolved: dict[str, dict] = {}
+    for gfx, row in arches.items():
+        if gfx in expanded:
+            resolved[gfx] = expanded[gfx]
+            continue
+        facts = copy.deepcopy(expanded[pointers[gfx]])
+        facts.pop("_comment", None)
+        if "_comment" in row:
+            facts["_comment"] = row["_comment"]
+        resolved[gfx] = facts
+    return resolved
 
 
 @lru_cache(maxsize=1)
