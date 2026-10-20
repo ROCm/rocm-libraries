@@ -8,12 +8,24 @@ exercised only where a toolchain exists; these tests pin the pure, machine-indep
 
 import pytest
 
+from rocke.core.ir import F16, F32, IRBuilder, PtrType
+from rocke.helpers.tiling import (
+    TileMma,
+    Tiling,
+    fill_fragment,
+    load_fragment,
+    make_fragment,
+    make_tensor_desc,
+    make_window,
+)
 from rocke.helpers.tiling.analysis import analyze_coalescing
 from rocke.helpers.tiling.coalescing_probe import (
     achieved_widths,
     gate_report,
     line_bytes_for,
+    report_for_transaction,
 )
+from rocke.helpers.tiling.tiling_recorder import record_build
 from rocke.helpers.tiling.transforms import interleave_idx
 
 
@@ -93,3 +105,47 @@ def test_gate_report_raises_when_asm_lacks_the_access():
     )
     with pytest.raises(AssertionError, match="ASM shows NO"):
         gate_report(rep, "s_nop 0\n", space="global")
+
+
+def _gemm_operand_loads():
+    """A and B of one wave-tile MMA, loaded from K-contiguous global tensors and fed to TileMma.
+
+    The wave tile is (M, N, K) = (32, 64, 8) over 32x32x8 atoms, so A's and B's tile descriptors differ
+    and the probe can attribute each load to its operand. Both tensors are written in the GEMM axis
+    order, A (M, K) and B (N, K), with stride 1 on K.
+    """
+    mma = TileMma(
+        (32, 64, 8),
+        a="f16",
+        b="f16",
+        c="f32",
+        target="gfx90a",
+        tiling=Tiling(atom_shape=(32, 32, 8)),
+    )
+    m_len, n_len, k_len = mma.shape
+    b = IRBuilder("coalescing_probe_operands")
+    a_ptr = b.param("A", PtrType(F16, "global"))
+    b_ptr = b.param("B", PtrType(F16, "global"))
+    lane = b.thread_id_x()
+    a_td = make_tensor_desc((m_len, k_len), (k_len, 1), F16)
+    b_td = make_tensor_desc((n_len, k_len), (k_len, 1), F16)
+    a_fragment = load_fragment(b, a_ptr, make_window(a_td, (0, 0)), mma.a_desc, lane)
+    b_fragment = load_fragment(b, b_ptr, make_window(b_td, (0, 0)), mma.b_desc, lane)
+    accumulator = make_fragment(mma.c_desc, F32)
+    fill_fragment(b, accumulator, 0)
+    mma(b, a_fragment, b_fragment, accumulator)
+    b.ret()
+    return b.kernel
+
+
+def test_report_names_b_axes_in_gemm_order():
+    # The probe names a recorded load's axes from the MMA operand it feeds. B's tile descriptor is
+    # (N, K), so a K-contiguous B must be reported with axes (N, K) and its stride-1 axis K; naming
+    # B's axes (K, N) would report the same strides as N-contiguous.
+    _kernel, pipeline = record_build(_gemm_operand_loads)
+    loads = [t for t in pipeline.transactions if t.kind == "load"]
+    a_report, b_report = (
+        report_for_transaction(t, arch="gfx90a", pipeline=pipeline) for t in loads
+    )
+    assert a_report.dims == ("M", "K") and a_report.stride1_axis == "K"
+    assert b_report.dims == ("N", "K") and b_report.stride1_axis == "K"
