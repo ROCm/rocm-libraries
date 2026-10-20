@@ -10,7 +10,7 @@ import pytest
 
 from geko.config_generator.config_sections_generator import (
     DUCTILE_COST_SCALE,
-    _cluster_variant_cost_offsets,
+    _mi_variant_cost_offsets,
 )
 from geko.config_generator.constants import HARDWARE_MAP
 from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
@@ -88,7 +88,7 @@ def test_cluster_variants_share_their_mi_sampling_mass() -> None:
     mi_a = [16, 16, 32, 1, 1, 8, 8, 2, 2]
     mi_b = [16, 16, 32, 1, 1, 4, 16, 4, 1]
     entries = [_entry(mi_a, (1, 1)), _entry(mi_a, (2, 1)), _entry(mi_a, (2, 2)), _entry(mi_b, (1, 1))]
-    offsets = _cluster_variant_cost_offsets(entries)
+    offsets = _mi_variant_cost_offsets(entries)
     weights = np.exp(-DUCTILE_COST_SCALE * offsets)
     assert weights[:3].sum() == pytest.approx(weights[3])
     assert weights[0] == pytest.approx(weights[1]) == pytest.approx(weights[2])
@@ -96,4 +96,34 @@ def test_cluster_variants_share_their_mi_sampling_mass() -> None:
 
 def test_entries_without_cluster_dim_keep_their_cost() -> None:
     mi = [16, 16, 32, 1, 1, 8, 8, 2, 2]
-    assert _cluster_variant_cost_offsets([_entry(mi), _entry(mi)]).tolist() == [0.0, 0.0]
+    assert _mi_variant_cost_offsets([_entry(mi), _entry(mi)]).tolist() == [0.0, 0.0]
+
+
+def _b_rotate(entry: dict, rotate: int, vector_width_b: int = 4) -> dict:
+    out = {**entry, "LDSSegmentBRotate": ForkParameter(name="LDSSegmentBRotate", values=[rotate])}
+    if rotate:
+        out["LDSSegmentInterleave"] = ForkParameter(name="LDSSegmentInterleave", values=[1])
+        out["VectorWidthB"] = ForkParameter(name="VectorWidthB", values=[vector_width_b])
+    return out
+
+
+def test_b_rotate_and_cluster_variants_share_their_mi_sampling_mass() -> None:
+    """B-rotate off and on, each with two cluster shapes, add up to one MI's mass, split evenly."""
+    mi_a = [16, 16, 32, 1, 1, 8, 8, 2, 2]
+    mi_b = [16, 16, 32, 1, 1, 4, 16, 4, 1]
+    entries = [
+        _b_rotate(_entry(mi_a, shape), rotate) for rotate in (0, 1) for shape in ((1, 1), (2, 2))
+    ] + [_entry(mi_b, (1, 1))]
+    weights = np.exp(-DUCTILE_COST_SCALE * _mi_variant_cost_offsets(entries))
+    assert weights[:4].sum() == pytest.approx(weights[4])
+    assert weights[:2].sum() == pytest.approx(weights[2:4].sum())
+
+
+def test_b_rotate_variants_without_cluster_shapes_share_their_mi_sampling_mass() -> None:
+    """gfx1250-strict couples no ClusterDim, so B-rotate is the only variant key."""
+    mi_a = [16, 16, 32, 1, 1, 8, 8, 2, 2]
+    mi_b = [16, 16, 32, 1, 1, 4, 16, 4, 1]
+    entries = [_b_rotate(_entry(mi_a), 0), _b_rotate(_entry(mi_a), 1), _entry(mi_b)]
+    weights = np.exp(-DUCTILE_COST_SCALE * _mi_variant_cost_offsets(entries))
+    assert weights[:2].sum() == pytest.approx(weights[2])
+    assert weights[0] == pytest.approx(weights[1])

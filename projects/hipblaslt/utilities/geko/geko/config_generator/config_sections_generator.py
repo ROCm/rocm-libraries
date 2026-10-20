@@ -23,18 +23,32 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # exp(-DUCTILE_COST_SCALE * cost_i) (Ductile/ductile/algorithm/ga.py).
 DUCTILE_COST_SCALE = 0.25
 
+# Keys a post-processor adds to repeat an MI group entry as variants of one MI:
+# its ClusterDim shapes and its B-rotate variant (gfx1250 post_processor.py).
+_MI_VARIANT_KEYS = frozenset(
+    {"ClusterDim", "LDSSegmentBRotate", "LDSSegmentInterleave", "VectorWidthB"}
+)
 
-def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
-    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes.
 
-    An MI group entry repeated once per ClusterDim shape would otherwise be
-    drawn as many times more often as it has shapes. Adding ln(n) / scale to
-    each of the n variants divides each variant's probability by n, so the MI
-    as a whole keeps the probability its cost gives it.
+def _mi_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
+    """Cost offsets that keep each MI's sampling mass independent of how many variants it has.
+
+    An MI group entry repeated once per variant (each ClusterDim shape, B-rotate
+    on and off) would otherwise be drawn as many times more often as it has
+    variants. Adding ln(n) / scale to each of the n variants divides each
+    variant's probability by n, so the MI as a whole keeps the probability its
+    cost gives it. Entries carrying no variant key keep their cost.
     """
     keys: List[Optional[tuple]] = [
-        tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
-        if "ClusterDim" in entry else None
+        (
+            tuple(
+                (name, repr(fp.values))
+                for name, fp in entry.items()
+                if name not in _MI_VARIANT_KEYS
+            )
+            if _MI_VARIANT_KEYS.intersection(entry)
+            else None
+        )
         for entry in mi_groups
     ]
     counts = Counter(key for key in keys if key is not None)
@@ -382,7 +396,7 @@ class ConfigSectionGenerator:
         cost = np.empty(len(mi_groups), dtype=np.float32)
         cost[non_cms_mask] = cost_matrix[:, non_cms_mask].mean(axis=0)
         cost[~non_cms_mask] = cost[non_cms_mask].min()
-        cost += _cluster_variant_cost_offsets(mi_groups)
+        cost += _mi_variant_cost_offsets(mi_groups)
         
         d = dict(
             soo=soo,

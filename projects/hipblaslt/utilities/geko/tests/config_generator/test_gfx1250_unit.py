@@ -122,6 +122,41 @@ def test_gfx1250_ga_execution_policy_none_without_streamk() -> None:
     assert profile.execution_policy(ctx) is None
 
 
+@pytest.mark.parametrize("dt", sorted(g1250_opt.SEGMENT_INTERLEAVE_AUTO_VWA))
+@pytest.mark.parametrize("streamk,library_type", [(False, "OOB"), (True, "Equality")])
+def test_gfx1250_ga_b_rotate_axis_open_where_a_non_persistent_kernel_exists(
+    dt: str, streamk: bool, library_type: str
+) -> None:
+    # Mixed F8B8 / B8F8 need an explicit output type.
+    profile = g1250_opt.GFX1250GAParams(
+        _cfg(dt=dt, dd="S", streamk=streamk, library_type=library_type)
+    )
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+    assert profile.lds_segment_b_rotate(ctx).values == [0, 1]
+
+
+@pytest.mark.parametrize("trans_a,trans_b", [("N", "N"), ("N", "T"), ("T", "T")])
+def test_gfx1250_ga_b_rotate_pinned_off_unless_tn(trans_a: str, trans_b: str) -> None:
+    # Only TN leaves both operands unroll-major in LDS, which the interleave layout needs.
+    profile = g1250_opt.GFX1250GAParams(_cfg(dt="F8", trans_a=trans_a, trans_b=trans_b))
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+    assert profile.lds_segment_b_rotate(ctx).values == [0]
+
+
+def test_gfx1250_ga_b_rotate_pinned_off_when_every_kernel_is_persistent() -> None:
+    # StreamK with an OOB library leaves no TileProcessingStrategy None entry.
+    profile = g1250_opt.GFX1250GAParams(_cfg(dt="F8", streamk=True, library_type="OOB"))
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+    assert profile.lds_segment_b_rotate(ctx).values == [0]
+
+
+@pytest.mark.parametrize("dt", ["S", "X", "D"])
+def test_gfx1250_ga_b_rotate_pinned_off_for_types_segment_interleave_rejects(dt: str) -> None:
+    profile = g1250_opt.GFX1250GAParams(_cfg(dt=dt))
+    ctx = SizeContext(M=4096, N=3072, B=1, K=65536)
+    assert profile.lds_segment_b_rotate(ctx).values == [0]
+
+
 # ---------------------------------------------------------------------------
 # post_processor.py: free helper functions
 # ---------------------------------------------------------------------------
@@ -158,6 +193,52 @@ def test_mis_keeps_only_nine_element_matrix_instructions() -> None:
     good = [16, 16, 32, 1, 1, 8, 8, 2, 2]
     groups = [_mi_entry(good), _mi_entry([1, 2, 3])]
     assert g1250_pp._mis(groups) == [good]
+
+
+@pytest.mark.parametrize(
+    "mi,dt,mx,expected",
+    [
+        # Wave tile 8 splits into two groups of 4, for MX and plain types alike.
+        ([16, 16, 128, 1, 1, 8, 8, 2, 2], "F8", False, 4),
+        ([16, 16, 128, 1, 1, 8, 8, 2, 2], "F8", True, 4),
+        # Wave tile 6: 3 per group would be odd-width, so six groups of 1.
+        ([16, 16, 32, 1, 1, 4, 6, 2, 2], "B", False, 1),
+        # Wave tile 32: 16 is not a VectorWidthB, so four groups of 8 ...
+        ([16, 16, 32, 1, 1, 4, 32, 2, 2], "B", False, 8),
+        # ... which MX rejects: it needs exactly two groups.
+        ([16, 16, 128, 1, 1, 4, 32, 2, 2], "F8", True, None),
+        # MX needs an even wave tile for two groups.
+        ([16, 16, 128, 1, 1, 8, 9, 2, 2], "F8", True, None),
+        ([16, 16, 128, 1, 1, 1, 5, 2, 2], "F8", True, None),
+        # Odd wave tile, a [1,4] wave group, and a short MatrixInstruction.
+        ([16, 16, 128, 1, 1, 8, 7, 2, 2], "F8", False, None),
+        ([16, 16, 128, 1, 1, 1, 4, 1, 4], "F8", False, None),
+        ([16, 16, 128], "F8", False, None),
+        # A is read whole only where auto VectorWidthA reaches MIWaveTile[0]:
+        # a power of two up to 8 for bf16, 16 for fp8, 32 for fp4.
+        ([16, 16, 32, 1, 1, 6, 6, 2, 2], "B", False, None),
+        ([16, 16, 32, 1, 1, 16, 4, 2, 2], "B", False, None),
+        ([16, 16, 128, 1, 1, 16, 4, 2, 2], "F8", False, 2),
+        ([16, 16, 128, 1, 1, 17, 4, 2, 2], "F8", True, None),
+        ([16, 16, 128, 1, 1, 32, 4, 2, 2], "F4", True, 2),
+        # Non-square MIs: SourceSwap either breaks the A side or, for MX, MatrixInstN 16.
+        ([32, 16, 128, 1, 1, 8, 4, 2, 2], "F4", True, None),
+        ([32, 16, 128, 1, 1, 8, 4, 2, 2], "F4", False, None),
+        ([16, 32, 128, 1, 1, 4, 4, 2, 2], "F4", True, None),
+        # Types without the interleave layout.
+        ([16, 16, 8, 1, 1, 4, 4, 2, 2], "S", False, None),
+    ],
+)
+def test_b_rotate_vector_width(mi: list, dt: str, mx: bool, expected) -> None:
+    assert g1250_pp._b_rotate_vector_width(_mi_entry(mi), dt, mx) == expected
+
+
+def test_b_rotate_vector_width_rejects_local_split_u() -> None:
+    entry = {
+        **_mi_entry([16, 16, 128, 1, 1, 8, 8, 2, 2]),
+        "WorkGroup": ForkParameter(name="WorkGroup", values=[16, 8, 2]),
+    }
+    assert g1250_pp._b_rotate_vector_width(entry, "F8", False) is None
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +426,83 @@ def test_couple_cluster_dim_expands_mi_groups_per_shape(monkeypatch: pytest.Monk
 
 
 # ---------------------------------------------------------------------------
+# _GFX1250BRotateCoupling
+# ---------------------------------------------------------------------------
+
+_ROTATABLE = [16, 16, 128, 1, 1, 8, 8, 2, 2]
+_NOT_ROTATABLE = [16, 16, 128, 1, 1, 1, 4, 1, 4]
+
+
+def _b_rotate_fork(rotate: list, interleave: list) -> dict:
+    return {
+        "LDSSegmentBRotate": ForkParameter(name="LDSSegmentBRotate", values=list(rotate)),
+        "LDSSegmentInterleave": ForkParameter(name="LDSSegmentInterleave", values=list(interleave)),
+    }
+
+
+def _values(entry: dict) -> dict:
+    return {name: fp.values for name, fp in entry.items()}
+
+
+def test_couple_b_rotate_adds_a_variant_after_each_rotatable_mi() -> None:
+    pp = _ga_pp()
+    fork = _b_rotate_fork([0, 1], [0, 1])
+    groups = [_mi_entry(_ROTATABLE), _mi_entry(_NOT_ROTATABLE)]
+    f2, g2 = pp.couple_b_rotate(fork, groups, SizeContext(M=4096, N=3072, B=1, K=65536))
+    assert "LDSSegmentBRotate" not in f2
+    assert f2["LDSSegmentInterleave"].values == [0, 1]
+    assert [_values(e) for e in g2] == [
+        {"MatrixInstruction": _ROTATABLE, "LDSSegmentBRotate": [0]},
+        {
+            "MatrixInstruction": _ROTATABLE,
+            "LDSSegmentBRotate": [1],
+            "LDSSegmentInterleave": [1],
+            "VectorWidthB": [4],
+        },
+        {"MatrixInstruction": _NOT_ROTATABLE},
+    ]
+
+
+def test_couple_b_rotate_uses_the_mx_vector_width() -> None:
+    pp = g1250_pp.GFX1250GAPostProcessor(_cfg(arch="gfx1250_96cu", dt="F8", mx=True))
+    mi = [16, 16, 128, 1, 1, 4, 32, 2, 2]  # MX rotates only with two B groups
+    groups = [_mi_entry(_ROTATABLE), _mi_entry(mi)]
+    _, g2 = pp.couple_b_rotate(
+        _b_rotate_fork([0, 1], [0, 1]), groups, SizeContext(M=1, N=1, B=1, K=1)
+    )
+    assert [_values(e).get("VectorWidthB") for e in g2] == [None, [4], None]
+
+
+def test_couple_b_rotate_pins_off_when_no_mi_can_rotate() -> None:
+    pp = _ga_pp()
+    fork = _b_rotate_fork([0, 1], [0, 1])
+    groups = [_mi_entry(_NOT_ROTATABLE)]
+    f2, g2 = pp.couple_b_rotate(fork, groups, SizeContext(M=16, N=49152, B=1, K=32768))
+    assert f2["LDSSegmentBRotate"].values == [0]
+    assert g2 is groups
+
+
+def test_couple_b_rotate_pins_off_when_interleave_was_narrowed_off() -> None:
+    pp = _ga_pp()
+    fork = _b_rotate_fork([0, 1], [0])
+    groups = [_mi_entry(_ROTATABLE)]
+    f2, g2 = pp.couple_b_rotate(fork, groups, SizeContext(M=1, N=1, B=1, K=1))
+    assert f2["LDSSegmentBRotate"].values == [0]
+    assert g2 is groups
+
+
+def test_couple_b_rotate_noop_when_the_axis_is_pinned_or_missing() -> None:
+    pp = _ga_pp()
+    groups = [_mi_entry(_ROTATABLE)]
+    ctx = SizeContext(M=1, N=1, B=1, K=1)
+    fork = _b_rotate_fork([0], [0, 1])
+    f2, g2 = pp.couple_b_rotate(fork, groups, ctx)
+    assert f2["LDSSegmentBRotate"].values == [0] and g2 is groups
+    f3, g3 = pp.couple_b_rotate({}, groups, ctx)
+    assert f3 == {} and g3 is groups
+
+
+# ---------------------------------------------------------------------------
 # End-to-end: GFX1250PostProcessor / GFX1250GAPostProcessor.apply()
 # ---------------------------------------------------------------------------
 
@@ -382,3 +540,29 @@ def test_gfx1250_ga_postprocessor_apply_runs_every_mixin(monkeypatch: pytest.Mon
     f2, g2 = pp.apply(fork, groups, (4096, 4096, 1, 16))
     assert isinstance(f2, dict)
     assert isinstance(g2, list)
+
+
+def test_gfx1250_ga_postprocessor_gives_b_rotate_variants_their_mi_cluster_shapes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        base_pp.MIDesign,
+        "calculate_mfma_parameters",
+        lambda _mi: MFMAParameters(MT0=256, MT1=256, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1),
+    )
+    pp = _ga_pp()
+    fork = {
+        **_b_rotate_fork([0, 1], [0, 1]),
+        "ClusterDim": ForkParameter(name="ClusterDim", values=[[1, 1], [2, 2]]),
+    }
+    f2, g2 = pp.apply(fork, [_mi_entry(_ROTATABLE)], (4096, 4096, 1, 16))
+    assert "LDSSegmentBRotate" not in f2 and "ClusterDim" not in f2
+    shapes = {
+        rotate: sorted(
+            tuple(e["ClusterDim"].values[0])
+            for e in g2
+            if e["LDSSegmentBRotate"].values == [rotate]
+        )
+        for rotate in (0, 1)
+    }
+    assert shapes[0] == shapes[1] and shapes[0]

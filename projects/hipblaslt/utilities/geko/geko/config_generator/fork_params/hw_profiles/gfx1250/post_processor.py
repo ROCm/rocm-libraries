@@ -9,13 +9,15 @@ gfx1250 needs none of the gfx950 post-processing steps:
 The base class's optional MT_DU filtering still runs via ``apply``.
 """
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
+from geko.config_generator.constants import mx_format
 from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
     select_cluster_dims,
     tile_grid,
 )
 from geko.config_generator.fork_params.hw_profiles.gfx1250.optimization_param import (
+    SEGMENT_INTERLEAVE_AUTO_VWA,
     GFX1250GAOrigamiPolicy,
 )
 from geko.config_generator.fork_params.post_processor import (
@@ -28,6 +30,14 @@ from geko.config_generator.shared_utils import ForkParameter, GroupDimension, Si
 MIN_MI_WAVE_TILE = 4
 
 _MI_WAVE_TILE_IDX = (5, 6)
+
+# VectorWidthB values a B-rotate variant may set, widest first: the powers of
+# two in Tensile's VectorWidthB range (Common/ValidParameters.py).
+_B_ROTATE_VECTOR_WIDTHS = (8, 4, 2, 1)
+
+# MX B-rotate needs MatrixInstN == WavefrontSize / 2, and the gfx1250 profiles
+# pin Wave32.
+_MX_B_ROTATE_MATRIX_INST_N = 16
 
 
 def _wave_tile_ok(entry: Dict[str, ForkParameter]) -> bool:
@@ -92,6 +102,69 @@ def _mi_wave_group(mi: Sequence[int]) -> Tuple[int, int]:
     miwg0 = min((wg0 // mi[0]) // block_bm, waves)
     miwg0 = max(miwg0, 1)
     return miwg0, waves // miwg0
+
+
+def _auto_vector_width(wave_tile: int, widest: int) -> int:
+    """Tensile's auto VectorWidth: the widest power of two <= *widest* dividing *wave_tile*."""
+    width = widest
+    while wave_tile % width:
+        width //= 2
+    return width
+
+
+def _b_rotate_vector_width(
+    entry: Dict[str, ForkParameter], data_type: str, mx: bool
+) -> Optional[int]:
+    """VectorWidthB for a B-rotate variant of this MI group entry; None if it cannot rotate.
+
+    Covers the part of Tensile's B-rotate gate that an MI group entry decides:
+    ``b_rotate_reason`` and the [2,2] layout of ``evaluate`` it builds on, both
+    in SolutionStructs/segment_interleave.py.
+
+    * "needs MIWaveGroup [2,2], 4 waves, wave32" -- Wave32 is pinned by the profile.
+    * "LocalSplitU>1 not supported" -- MIDesign puts LSU in ``WorkGroup[2]``.
+    * "A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit" -- the profile pins
+      TDMSplit off, so A has to be read whole: min(MatrixInstM, MatrixInstN) *
+      VectorWidthA >= MacroTile0 / 2. That takes an MI without MIBlockM and an
+      MIWaveTile[0] that Tensile's auto VectorWidthA reaches (a power of two of at
+      most 4 VGPRs of elements). Non-square MIs are left out: SourceSwap swaps
+      MatrixInstM and MatrixInstN, so at most one of the two SourceSwap values
+      the profile searches reads A whole, and for MX that one fails the
+      MatrixInstN check below. A pinned VectorWidthA would reach more wave tiles,
+      but codegen asserts on some of them (VectorWidthA 6), and an assert aborts
+      the whole GA run instead of rejecting one kernel.
+    * "MIWaveTile[1]/VectorWidthB must be even". Tensile's auto VectorWidthB, up
+      to 4 VGPRs of elements, makes the ratio 1 for almost every wave tile here,
+      so the variant sets VectorWidthB itself.
+    * MX: "needs MatrixInstN == WavefrontSize/2" and
+      "needs MIWaveTile[1]/VectorWidthB == 2".
+
+    Returns the widest width with an even ratio: two B groups where the wave tile
+    allows, which is the only split MX accepts. The LDS layout checks (component
+    stride, B reach, buffer alignment) depend on DepthU and padding, so they are
+    left to Tensile.
+    """
+    mi = entry["MatrixInstruction"].values
+    if len(mi) != 9 or mi[7] * mi[8] != 4 or _mi_wave_group(mi) != (2, 2):
+        return None
+    work_group = entry.get("WorkGroup")
+    if work_group is not None and len(work_group.values) > 2 and work_group.values[2] > 1:
+        return None
+    wave_tile_a, wave_tile_b = _mi_wave_tile(mi)
+    widest_a = SEGMENT_INTERLEAVE_AUTO_VWA.get(data_type)
+    if widest_a is None or mi[0] != mi[1] or mi[4] != 1:
+        return None
+    if _auto_vector_width(wave_tile_a, widest_a) != wave_tile_a:
+        return None
+    if mx:
+        if mi[1] != _MX_B_ROTATE_MATRIX_INST_N or wave_tile_b % 2:
+            return None
+        width = wave_tile_b // 2
+        return width if width in _B_ROTATE_VECTOR_WIDTHS else None
+    for width in _B_ROTATE_VECTOR_WIDTHS:
+        if wave_tile_b % width == 0 and (wave_tile_b // width) % 2 == 0:
+            return width
+    return None
 
 
 def _mis(mi_groups: GroupDimension) -> List[Sequence[int]]:
@@ -206,6 +279,70 @@ class _GFX1250DropMIGroupGSU:
         return fork_params, deduped
 
 
+class _GFX1250BRotateCoupling:
+    """Give each MI that can rotate B a B-rotate variant, with the VectorWidthB it needs.
+
+    Whether B-rotate can build depends on the MI geometry, and so does the
+    VectorWidthB it needs (see :func:`_b_rotate_vector_width`). A flat
+    ``LDSSegmentBRotate: [0, 1]`` axis would leave VectorWidthB on auto, which
+    Tensile rejects for B-rotate on almost every MI. So, for every MI that can
+    rotate, the base entry is kept with ``LDSSegmentBRotate: 0`` and followed by
+    a variant with ``LDSSegmentBRotate: 1``, ``LDSSegmentInterleave: 1`` (the
+    layout it builds on) and that VectorWidthB. A group entry overrides a flat
+    parameter, so the variant needs no other change. The flat parameter is then
+    removed; MIs without a variant keep Tensile's default, 0.
+
+    If no MI can rotate, or the flat LDSSegmentInterleave has been narrowed to
+    [0], the flat parameter is pinned to [0].
+
+    The cost offsets give the variant half its MI's group_0 draws, but the
+    execution-policy group is drawn independently, and Tensile rejects B-rotate
+    on every persistent kernel. With StreamK on, only draws that pair the variant
+    with the non-persistent policy entry can build: 1 in 9 on gfx1250_96cu. The
+    LDS layout checks also reject some DepthU values. Rejected solutions fail the
+    GA's validity check and are never benchmarked.
+    """
+
+    @mark_post_process
+    def couple_b_rotate(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("LDSSegmentBRotate")
+        if fp is None or not fp.active or 1 not in fp.values:
+            return fork_params, mi_groups
+        interleave = fork_params.get("LDSSegmentInterleave")
+        mx = bool(mx_format(self.config["GemmProblem"], self.config["ARCH"]))
+        coupled = []
+        n_variants = 0
+        for entry in mi_groups:
+            width = None
+            if interleave is None or 1 in interleave.values:
+                width = _b_rotate_vector_width(entry, self._gt.data_type, mx)
+            if width is None:
+                coupled.append(entry)
+                continue
+            coupled.append(
+                {**entry, "LDSSegmentBRotate": self._make_param("LDSSegmentBRotate", [0])}
+            )
+            coupled.append(
+                {
+                    **entry,
+                    "LDSSegmentBRotate": self._make_param("LDSSegmentBRotate", [1]),
+                    "LDSSegmentInterleave": self._make_param("LDSSegmentInterleave", [1]),
+                    "VectorWidthB": self._make_param("VectorWidthB", [width]),
+                }
+            )
+            n_variants += 1
+        if not n_variants:
+            fp.values = [0]
+            return fork_params, mi_groups
+        del fork_params["LDSSegmentBRotate"]
+        return fork_params, coupled
+
+
 class _GFX1250ClusterDimCoupling:
     """Move ClusterDim into the MI groups, with the shapes each MI's grid admits.
 
@@ -248,10 +385,14 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups.
+# it runs last, on the final, de-duplicated MI groups. _GFX1250BRotateCoupling
+# could run on either side of it -- a variant's cluster shapes depend only on its
+# macro tile -- and runs before it so that each MI's B-rotate-off shapes are
+# listed ahead of its B-rotate-on ones.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
+    _GFX1250BRotateCoupling,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
     _GFX1250WaveTileFilter,

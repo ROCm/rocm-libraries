@@ -19,7 +19,8 @@ Key differences vs gfx950 (MFMA) profiles:
   * No DirectToLds (absent on gfx12).
   * No MIArchVgpr (auto-forced True under WMMA).
   * PrefetchGlobalRead capped at [1,2] (PGR>=3 needs DirectToLds).
-  * Misc gfx1250 specific optimizations - ClusterDim, LDSSegmentInterleave 
+  * Misc gfx1250 specific optimizations - ClusterDim, LDSSegmentInterleave,
+    LDSSegmentBRotate (generic only)
 """
 
 from typing import Optional
@@ -41,6 +42,21 @@ from geko.config_generator.shared_utils import (
 )
 
 _SCALED_LOWP = ("F8", "F8B8", "B8F8")
+
+# The data types the LDS segment-interleave layouts take ("bf16/fp16/fp8/fp4
+# only" in Tensile's SolutionStructs/segment_interleave.py), MX included, each
+# with the widest VectorWidthA Tensile picks on auto: 4 VGPRs of A elements
+# (Solution.py, VectorWidthA -1).
+SEGMENT_INTERLEAVE_AUTO_VWA = {
+    "H": 8,
+    "B": 8,
+    "F8": 16,
+    "F8N": 16,
+    "B8": 16,
+    "F8B8": 16,
+    "B8F8": 16,
+    "F4": 32,
+}
 
 
 class GFX1250Params(BaseOptimizationParams):
@@ -912,6 +928,30 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("LDSSegmentInterleave", [0, 1])
+
+    @param
+    def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
+        """[0, 1] where a B-rotated kernel can build; otherwise pinned to [0].
+
+        B-rotate builds on the [2,2] LDSSegmentInterleave layout, so it inherits
+        that layout's data types, and its need for both operands unroll-major in
+        LDS ("not unrollMajor"), which with TransposeLDS -1 only TN gives. Tensile
+        also rejects it on every persistent kernel ("persistent / StreamK not
+        supported", ``b_rotate_reason`` in SolutionStructs/segment_interleave.py).
+        With StreamK on, an OOB library has no non-persistent entry left (see
+        :meth:`execution_policy`), so B-rotate is pinned off there.
+
+        This only declares the axis. _GFX1250BRotateCoupling in post_processor.py
+        moves it into the MI groups, alongside the VectorWidthB each MI needs, and
+        removes this flat parameter.
+        """
+        if (
+            not self._is_tn()
+            or self._gt.data_type not in SEGMENT_INTERLEAVE_AUTO_VWA
+            or self._origami_picks_wgm()
+        ):
+            return self._make_param("LDSSegmentBRotate", [0])
+        return self._make_param("LDSSegmentBRotate", [0, 1])
 
     @param
     def tdm_plus_lds_buff(self, ctx: SizeContext) -> ForkParameter:
