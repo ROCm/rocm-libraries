@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
-from ..ir import F32, I16, I32, I64, Type, VectorType, type_bits
+from ..ir import F16, F32, I1, I16, I32, I64, Type, VectorType, type_bits
 from ..lower_llvm import LLVM_FLAVOR_LLVM22
 from .matrix_operand_forms import (
     AsIs,
@@ -166,11 +166,55 @@ def _cdna_mfma(intrinsic: str, operand: RegisterType, accumulator: Type) -> Matr
     )
 
 
+def _gfx12_wmma(
+    intrinsic: str,
+    operand: Type,
+    accumulator: Type,
+    args: tuple[MatrixOperand | Imm, ...] = (
+        MatrixOperand.A,
+        MatrixOperand.B,
+        MatrixOperand.C,
+    ),
+) -> MatrixCall:
+    """A gfx12 WMMA 16x16x16: A and B in one register type, the accumulator and
+    the result in another, the arguments in ``args`` order."""
+    return MatrixCall(
+        intrinsic=f"llvm.amdgcn.{intrinsic}",
+        args=args,
+        a=AsIs(operand),
+        b=AsIs(operand),
+        c=AsIs(accumulator),
+        result=AsIs(accumulator),
+    )
+
+
+# gfx12 integer WMMA: (signed A, A, signed B, B, C, clamp). The flag before
+# each operand is 1 when it is signed; the catalog row's operands are i8, so
+# both flags are 1. The result is not clamped.
+_GFX12_IU8_ARGS = (
+    Imm(I1, 1),
+    MatrixOperand.A,
+    Imm(I1, 1),
+    MatrixOperand.B,
+    MatrixOperand.C,
+    Imm(I1, 0),
+)
+# gfx12 16-bit-output WMMA: (A, B, C, op_sel). Eight results fill the
+# <8 x half> / <8 x i16> register, so op_sel is 0, as the gfx12 builtin
+# (which has no op_sel argument) always passes.
+_GFX12_16BIT_OUT_ARGS = (
+    MatrixOperand.A,
+    MatrixOperand.B,
+    MatrixOperand.C,
+    Imm(I1, 0),
+)
+
 # Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
 # same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use).
 _FP8_X8 = FlavorType(VectorType(I32, 2), ((LLVM_FLAVOR_LLVM22, I64),))
 _F32_X4, _F32_X16 = VectorType(F32, 4), VectorType(F32, 16)
 _I32_X4, _I32_X16 = VectorType(I32, 4), VectorType(I32, 16)
+_I32_X2, _I32_X8, _F32_X8 = VectorType(I32, 2), VectorType(I32, 8), VectorType(F32, 8)
 
 # op_id -> call, for every MMA instruction lowered from data rather than by a
 # hand-written handler.
@@ -203,6 +247,37 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
         ),
         "mfma_f32_32x32x16_bf8_fp8": _cdna_mfma(
             "mfma.f32.32x32x16.bf8.fp8", _FP8_X8, _F32_X16
+        ),
+        # gfx12 fp8 / bf8 -> f32: eight 8-bit values per lane in two words.
+        "wmma_gfx12_f32_16x16x16_fp8_fp8": _gfx12_wmma(
+            "wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32", _I32_X2, _F32_X8
+        ),
+        "wmma_gfx12_f32_16x16x16_fp8_bf8": _gfx12_wmma(
+            "wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32", _I32_X2, _F32_X8
+        ),
+        "wmma_gfx12_f32_16x16x16_bf8_fp8": _gfx12_wmma(
+            "wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32", _I32_X2, _F32_X8
+        ),
+        "wmma_gfx12_f32_16x16x16_bf8_bf8": _gfx12_wmma(
+            "wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32", _I32_X2, _F32_X8
+        ),
+        # gfx12 i8 -> i32: eight i8 per lane in two words.
+        "wmma_gfx12_i32_16x16x16_iu8": _gfx12_wmma(
+            "wmma.i32.16x16x16.iu8.v8i32.v2i32", _I32_X2, _I32_X8, _GFX12_IU8_ARGS
+        ),
+        # gfx12 f16 -> f16 and bf16 -> bf16: eight 16-bit values per lane; the
+        # bf16 form takes and returns them as <8 x i16>.
+        "wmma_gfx12_f16_16x16x16_f16": _gfx12_wmma(
+            "wmma.f16.16x16x16.f16.v8f16.v8f16",
+            VectorType(F16, 8),
+            VectorType(F16, 8),
+            _GFX12_16BIT_OUT_ARGS,
+        ),
+        "wmma_gfx12_bf16_16x16x16_bf16": _gfx12_wmma(
+            "wmma.bf16.16x16x16.bf16.v8i16.v8i16",
+            VectorType(I16, 8),
+            VectorType(I16, 8),
+            _GFX12_16BIT_OUT_ARGS,
         ),
     }
 )

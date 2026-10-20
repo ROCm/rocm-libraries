@@ -55,6 +55,46 @@ static constexpr rocke_matrix_call_t
                                NULL};
 }
 
+/* A gfx12 WMMA 16x16x16 (Python _gfx12_wmma): A and B in one register type,
+ * the accumulator and the result in another, the arguments in `args` order. */
+template <int N>
+static constexpr rocke_matrix_call_t gfx12_wmma(const char* intrinsic,
+                                                const rocke_matrix_arg_t (&args)[N],
+                                                rocke_matrix_register_t operand,
+                                                rocke_matrix_register_t acc)
+{
+    return rocke_matrix_call_t{
+        intrinsic, args, N, as_is(operand), as_is(operand), as_is(acc), as_is(acc), NULL};
+}
+
+/* gfx12 fp8 / bf8 WMMA: (A, B, C). */
+static const rocke_matrix_arg_t k_gfx12_wmma_args[] = {
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+};
+
+/* gfx12 integer WMMA (Python _GFX12_IU8_ARGS): (signed A, A, signed B, B, C,
+ * clamp). The catalog row's operands are i8, so both flags are 1; the result
+ * is not clamped. */
+static const rocke_matrix_arg_t k_gfx12_iu8_args[] = {
+    {ROCKE_MATRIX_ARG_IMM, "i1", 1, true},
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 1, true},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+};
+
+/* gfx12 16-bit-output WMMA (Python _GFX12_16BIT_OUT_ARGS): (A, B, C, op_sel),
+ * op_sel 0. */
+static const rocke_matrix_arg_t k_gfx12_16bit_out_args[] = {
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+};
+
 /* Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
  * same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use). */
 static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"i64", 0}}};
@@ -91,6 +131,45 @@ static const rocke_matrix_call_entry_t k_matrix_calls[] = {
      cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.fp8.bf8", k_fp8_x8, reg("f32", 16))},
     {"mfma_f32_32x32x16_bf8_fp8",
      cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.bf8.fp8", k_fp8_x8, reg("f32", 16))},
+    /* gfx12 fp8 / bf8 -> f32: eight 8-bit values per lane in two words. */
+    {"wmma_gfx12_f32_16x16x16_fp8_fp8",
+     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32",
+                k_gfx12_wmma_args,
+                reg("i32", 2),
+                reg("f32", 8))},
+    {"wmma_gfx12_f32_16x16x16_fp8_bf8",
+     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32",
+                k_gfx12_wmma_args,
+                reg("i32", 2),
+                reg("f32", 8))},
+    {"wmma_gfx12_f32_16x16x16_bf8_fp8",
+     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32",
+                k_gfx12_wmma_args,
+                reg("i32", 2),
+                reg("f32", 8))},
+    {"wmma_gfx12_f32_16x16x16_bf8_bf8",
+     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32",
+                k_gfx12_wmma_args,
+                reg("i32", 2),
+                reg("f32", 8))},
+    /* gfx12 i8 -> i32: eight i8 per lane in two words. */
+    {"wmma_gfx12_i32_16x16x16_iu8",
+     gfx12_wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
+                k_gfx12_iu8_args,
+                reg("i32", 2),
+                reg("i32", 8))},
+    /* gfx12 f16 -> f16 and bf16 -> bf16: eight 16-bit values per lane; the
+     * bf16 form takes and returns them as <8 x i16>. */
+    {"wmma_gfx12_f16_16x16x16_f16",
+     gfx12_wmma("llvm.amdgcn.wmma.f16.16x16x16.f16.v8f16.v8f16",
+                k_gfx12_16bit_out_args,
+                reg("f16", 8),
+                reg("f16", 8))},
+    {"wmma_gfx12_bf16_16x16x16_bf16",
+     gfx12_wmma("llvm.amdgcn.wmma.bf16.16x16x16.bf16.v8i16.v8i16",
+                k_gfx12_16bit_out_args,
+                reg("i16", 8),
+                reg("i16", 8))},
 };
 
 const rocke_matrix_call_entry_t* rocke_matrix_calls(int* out_count)
