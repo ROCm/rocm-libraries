@@ -837,6 +837,77 @@ INSTANTIATE_TEST_SUITE_P(
         ForcedPipelineCase{"pagedkv", "qr_tdm", mode_enum::batch, true, 100, 500, 48, "_b128x"}));
 #endif
 
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+// Gappy paged K/V (fmha_fwd_pagedkv_args::is_gappy, group mode): each sequence starts some
+// rows into its first page, which only the TDM gathers take. pipeline, page_block_size
+class PagedKVGappy : public TestWithParam<std::tuple<const char*, int>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         PagedKVGappy,
+                         Values(std::tuple{"qr_tdm", 16},
+                                std::tuple{"qr_tdm", 7},
+                                std::tuple{"qr_tdm_sched", 64},
+                                std::tuple{"qr_tdm_pingpong", 1}));
+
+TEST_P(PagedKVGappy, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pagedkv_prefill pipelines are only supported on gfx1250";
+
+        const auto [pipeline, page_block_size] = GetParam();
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   3,
+                                                   4,
+                                                   2,
+                                                   {300, 100, 37},
+                                                   {531, 200, 97},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "b",
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "linear",
+                                                   "vllm",
+                                                   "pagedkv",
+                                                   pipeline,
+                                                   0,
+                                                   true);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_gather"), std::string::npos) << selected_kernel;
+    }
+}
+#endif
+
 #if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 INSTANTIATE_TEST_SUITE_P(
     BatchPrefill,

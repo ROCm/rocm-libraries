@@ -128,6 +128,10 @@ auto create_args(int argc, char* argv[])
                 "0",
                 "group mode, fwd/pagedkv: skip the sequences of at most this many query rows "
                 "(their O and LSE are left unwritten); 0: off")
+        .insert("kv_gappy",
+                "0",
+                "-api=pagedkv, group mode: each sequence starts some rows into its first page "
+                "(fmha_fwd_pagedkv_args::is_gappy)")
         .insert("cache_batch_idx", "0", "whether to use index map to the kvcache")
         .insert("warmup", "5", "number of iterations before benchmark the kernel")
         .insert("repeat", "20", "number of iterations to benchmark the kernel")
@@ -243,7 +247,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         arg_parser.get_str("kv_lookup"),
                                         arg_parser.get_str("api"),
                                         arg_parser.get_str("pipeline"),
-                                        arg_parser.get_int("min_seqlen_q"));
+                                        arg_parser.get_int("min_seqlen_q"),
+                                        arg_parser.get_bool("kv_gappy"));
 }
 
 int main(int argc, char* argv[])

@@ -278,7 +278,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         std::string kv_lookup_str         = "vllm",
                         std::string api                   = "auto",
                         std::string pipeline              = "",
-                        ck_tile::index_t min_seqlen_q     = 0)
+                        ck_tile::index_t min_seqlen_q     = 0,
+                        bool kv_gappy                     = false)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -722,9 +723,23 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
     }
 
+    // -kv_gappy: sequence b starts kv_page_offsets[b] rows into its first page (pagedkv_prefill
+    // group mode, is_gappy), so it may take one more page.
+    if(kv_gappy && !(api == "pagedkv" && mode == mode_enum::group && 0 < page_block_size))
+    {
+        std::cerr << "kv_gappy needs -api=pagedkv, group mode and page_block_size > 0" << std::endl;
+        return fwd_result::invalid_args;
+    }
+    std::vector<ck_tile::index_t> kv_page_offsets(batch, 0);
+    if(kv_gappy)
+        for(ck_tile::index_t wb = 0; wb < batch; ++wb)
+            kv_page_offsets[wb] = (7 * wb + 3) % page_block_size;
     const ck_tile::index_t max_num_page_blocks =
         (0 < page_block_size
-             ? batch * std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, page_block_size))
+             ? batch * std::max(1,
+                                ck_tile::integer_divide_ceil(
+                                    max_seqlen_k + (kv_gappy ? page_block_size - 1 : 0),
+                                    page_block_size))
              : 0);
 
     // legalize num_splits according to other options
@@ -1277,6 +1292,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     const bool need_seqlen_k_buf = (mode == mode_enum::batch && use_kvcache) ||
                                    has_group_k_padding || (mode == mode_enum::group && use_kvcache);
     ck_tile::DeviceMem seqlen_k_buf(need_seqlen_k_buf ? seqlen_ks.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem kv_page_offset_buf(kv_gappy ? batch * sizeof(int32_t) : 0);
     ck_tile::DeviceMem cu_seqlen_q_buf(cuq_cum.empty() ? 0
                                                        : cuq_cum.size() * sizeof(ck_tile::index_t));
     ck_tile::DeviceMem cu_seqlen_kv_buf(
@@ -1322,6 +1338,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     cu_seqlen_kv_buf.ToDevice(cukv_cum.empty() ? nullptr : cukv_cum.data());
     seqlen_q_buf.ToDevice(has_group_q_padding ? seqlen_qs.data() : nullptr);
     seqlen_k_buf.ToDevice(need_seqlen_k_buf ? seqlen_ks.data() : nullptr);
+    kv_page_offset_buf.ToDevice(kv_gappy ? kv_page_offsets.data() : nullptr);
     cache_seqlen_k_buf.ToDevice(need_append_kvcache ? cache_seqlen_ks.data() : nullptr);
     rotary_cos_buf.ToDevice(rotary_cos_host.data());
     rotary_sin_buf.ToDevice(rotary_sin_host.data());
@@ -1868,6 +1885,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ((mode == mode_enum::batch && use_kvcache) || 0 <= k_paddings_[0]
                          ? seqlen_k_buf.GetDeviceBuffer()
                          : nullptr);
+                if(kv_gappy)
+                {
+                    // seqstart_k_ptr holds each sequence's row offset into its first page
+                    args.is_gappy       = true;
+                    args.seqstart_k_ptr = kv_page_offset_buf.GetDeviceBuffer();
+                    args.seqlen_k_ptr   = seqlen_k_buf.GetDeviceBuffer();
+                }
             }
             else if constexpr(std::is_same_v<fmha_batch_prefill_args, std::decay_t<decltype(args)>>)
             {
@@ -2259,6 +2283,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             // the kernel skipped this sequence and left its O and LSE as they were
             if(real_seqlen_q <= min_seqlen_q)
                 continue;
+            // -kv_gappy: row of the sequence's first page holding its first K/V row
+            [[maybe_unused]] const ck_tile::index_t kv_page_offset = kv_page_offsets[wb];
 
             // adjust matrix index according to the mode
             const ck_tile::index_t b_idx = (mode == mode_enum::batch ? wb : 0);
@@ -2321,8 +2347,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             if(0 < page_block_size)
             {
                 // clang-format off
-                if(i_perm) k_host_ref.ForEach([&](auto& self, auto i) { self(i) = k_host(block_table_host(wb, i[1] / page_block_size), i[0] / nr, i[1] % page_block_size, i[2]); });
-                else       k_host_ref.ForEach([&](auto& self, auto i) { self(i) = k_host(block_table_host(wb, i[1] / page_block_size), i[1] % page_block_size, i[0] / nr, i[2]); });
+                if(i_perm) k_host_ref.ForEach([&](auto& self, auto i) { self(i) = k_host(block_table_host(wb, (i[1] + kv_page_offset) / page_block_size), i[0] / nr, (i[1] + kv_page_offset) % page_block_size, i[2]); });
+                else       k_host_ref.ForEach([&](auto& self, auto i) { self(i) = k_host(block_table_host(wb, (i[1] + kv_page_offset) / page_block_size), (i[1] + kv_page_offset) % page_block_size, i[0] / nr, i[2]); });
                 // clang-format on
             }
             else
@@ -2375,15 +2401,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 if(is_v_rowmajor)
                 {
                     // clang-format off
-                    if(i_perm) v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, i[2] / page_block_size), i[0] / nr, i[2] % page_block_size, i[1]); });
-                    else       v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, i[2] / page_block_size), i[2] % page_block_size, i[0] / nr, i[1]); });
+                    if(i_perm) v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, (i[2] + kv_page_offset) / page_block_size), i[0] / nr, (i[2] + kv_page_offset) % page_block_size, i[1]); });
+                    else       v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, (i[2] + kv_page_offset) / page_block_size), (i[2] + kv_page_offset) % page_block_size, i[0] / nr, i[1]); });
                     // clang-format on
                 }
                 else
                 {
                     // clang-format off
-                    if(i_perm) v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, i[2] / page_block_size), i[0] / nr, i[1], i[2] % page_block_size); });
-                    else       v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, i[2] / page_block_size), i[1], i[0] / nr, i[2] % page_block_size); });
+                    if(i_perm) v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, (i[2] + kv_page_offset) / page_block_size), i[0] / nr, i[1], (i[2] + kv_page_offset) % page_block_size); });
+                    else       v_host_ref.ForEach([&](auto& self, auto i) { self(i) = v_host(block_table_host(wb, (i[2] + kv_page_offset) / page_block_size), i[1], i[0] / nr, (i[2] + kv_page_offset) % page_block_size); });
                     // clang-format on
                 }
             }
