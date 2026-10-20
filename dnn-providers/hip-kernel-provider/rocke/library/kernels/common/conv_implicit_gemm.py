@@ -70,7 +70,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
-from rocke.helpers.geometry import _implicit_gemm_warp_grid, WarpGrid
+from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
@@ -1230,9 +1230,22 @@ def _build_implicit_gemm_conv_impl(
     # along with ``max_workgroup_size`` on the kernel attribute list.
     # Replaces ~8 lines of hand-rolled ``b.div``/``b.mod`` lane arithmetic
     # plus the manual ``block_m_off = block_id_y * block_m`` math.
-    grid, tid, lane, warp_id, warp_m_idx, warp_n_idx = _implicit_gemm_warp_grid(
-        b, op, spec, block_m, block_n, block_k
-    )
+    grid = WarpGrid.from_atom(
+        op,
+        tile_m=block_m,
+        tile_n=block_n,
+        tile_k=block_k,
+        warp_m=spec.warp_m,
+        warp_n=spec.warp_n,
+        wave_size=spec.wave_size,
+    ).bind(b, block_m_axis="y", block_n_axis="x")
+    tid = grid.tid
+    lane = grid.lane
+    warp_id = grid.warp_id
+    # The mfma cshuffle/direct epilogues consume warp_m_idx/warp_n_idx via the
+    # bound ``grid``; the WMMA direct epilogue still takes them explicitly.
+    warp_m_idx = grid.warp_m_idx
+    warp_n_idx = grid.warp_n_idx
 
     c0 = b.const_i32(0)
     c_block_k = b.const_i32(block_k)
