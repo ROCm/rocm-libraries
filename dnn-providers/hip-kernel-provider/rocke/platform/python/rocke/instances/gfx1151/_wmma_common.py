@@ -67,3 +67,15 @@ def wmma32_wave_guard(target: object, arch: str):
     if target.wave_size != _WAVE:
         return False, f"this WMMA kernel is wave32; {arch} is wave{target.wave_size}"
     return True, "ok"
+
+
+def _wmma_lane_tile_setup(b):
+    """Wave-relative lane coordinates and tile bases for the 16x16 WMMA GEMMs."""
+    c16 = b.const_i32(_WMMA_K)
+    c32 = b.const_i32(_WAVE)
+    lane = b.mod(b.thread_id_x(), c32)
+    frag = b.mod(lane, c16)
+    half = b.div(lane, c16)
+    m0 = b.mul(b.block_id_x(), c16)
+    n0 = b.mul(b.block_id_y(), c16)
+    return c16, c32, lane, frag, half, m0, n0

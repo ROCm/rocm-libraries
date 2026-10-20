@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 from ...core.ir import F16, F32, I8, I32, IRBuilder, KernelDef, PtrType
 from ._wmma_common import (
+    _wmma_lane_tile_setup,
     _WAVE,
     _WMMA_K,
     _WMMA_M,
@@ -113,16 +114,7 @@ def build_wmma_gemm_int8(spec: WmmaGemmInt8Spec, arch: str = "gfx1151") -> Kerne
     scale = b.fmul(scale_a, scale_b)
 
     c0 = b.const_i32(0)
-    c16 = b.const_i32(_WMMA_K)
-    c32 = b.const_i32(_WAVE)
-
-    # Wave-relative lane and its fragment coordinates (identical to wmma_gemm).
-    lane = b.mod(b.thread_id_x(), c32)
-    frag = b.mod(lane, c16)  # lane%16: A-frag row, B-frag row, output col
-    half = b.div(lane, c16)  # lane/16: 0 or 1, selects even/odd output rows
-
-    m0 = b.mul(b.block_id_x(), c16)  # output-tile row base
-    n0 = b.mul(b.block_id_y(), c16)  # output-tile col base
+    c16, c32, lane, frag, half, m0, n0 = _wmma_lane_tile_setup(b)
 
     a_base = b.mul(b.add(m0, frag), K)
     b_base = b.mul(b.add(n0, frag), K)
