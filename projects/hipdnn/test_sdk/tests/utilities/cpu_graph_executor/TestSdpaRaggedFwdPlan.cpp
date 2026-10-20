@@ -409,7 +409,7 @@ RunResult runPlanAndDirect(const RaggedShape& shape,
     }
     else if(options.attrs.attn_scale_value.has_value())
     {
-        expectedScale = options.attrs.attn_scale_value.value();
+        expectedScale = options.attrs.attn_scale_value;
     }
 
     const std::array<const std::optional<FloatOperandSpec>*, 3> descaleSpecs
