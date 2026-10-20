@@ -6,10 +6,7 @@ It builds and tests independently of HIP, GPU toolchains, and GPU hardware.
 
 ## Current scope
 
-The component is being introduced incrementally. This tree provides build and
-package infrastructure, a Python module, and scalar encoding metadata. Tensor
-storage, conversions, generation, numerical operations, and consumer
-integrations are demonstrated in the
+The component is being introduced incrementally. The endpoint is demonstrated in
 [prototype PR #10553](https://github.com/ROCm/rocm-libraries/pull/10553).
 
 The goal is to share CPU numerical work across hipBLASLt, TensileLite,

@@ -41,19 +41,18 @@ The remaining work is grouped by responsibility:
 
 | Stage | Scope |
 | --- | --- |
-| Tensor and datatype core | Tensor model, storage and ownership rules, scalar encodings, and conversions, with C++ tests and independent Python coverage. |
-| Numerical operations | Deterministic input generation, reference arithmetic, and comparison, with independent expected results and sanitizer coverage added alongside the implementation. |
-| Consumer migrations and removal | Migrate hipBLASLt, TensileLite, and rocRoller's GEMM paths incrementally. Remove duplicate implementations as their callers migrate, and retire `mxDataGenerator` once its remaining responsibilities and build dependencies have moved. |
+| 1. Tensor and datatype core | Tensor model, storage and ownership rules, scalar encodings, and conversions, with C++ tests and independent Python coverage. |
+| 2. Numerical operations | Deterministic input generation, reference arithmetic, and comparison, with independent expected results and sanitizer coverage added alongside the implementation. |
+| 3. Consumer migrations and removal | Migrate hipBLASLt, TensileLite, and rocRoller's GEMM paths incrementally. Remove duplicate implementations as their callers migrate, and retire `mxDataGenerator` once its remaining responsibilities and build dependencies have moved. |
 
 Keep each PR to one concept and as small as possible. Independent concepts may
 land in parallel; each slice should depend only on its actual prerequisites.
 The standalone stages develop and test HostNumerics independently of consumers
-and keep it outside the default monorepo build. The target is for the component
-build and tests to take on the order of two minutes, excluding runner queue and
-setup time.
+and keep it outside the default monorepo build.
 
 For HostNumerics PRs that have no effect on other components, add the `ci:skip`
-and `project: none` labels. Standalone HostNumerics CI still runs.
+and `project: none` labels. Standalone HostNumerics CI still runs. This should be
+the default approach during stages 1 and 2 above.
 Consumer migrations need the affected products' CI coverage.
 
 ## Consumer validation
