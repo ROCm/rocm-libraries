@@ -22,6 +22,7 @@
 * ************************************************************************ */
 
 #include "rocsparse_clients_dnmat_descr.hpp"
+#include "rocsparse_clients_log.hpp"
 template <typename T>
 void rocsparse_clients::dnmat_descr<T>::to_host()
 {
@@ -351,13 +352,14 @@ rocsparse_clients::dnmat_descr<T>::~dnmat_descr()
 
     if(this->m_device_memory)
     {
-        std::ignore           = hipFree(this->m_device_memory);
+        rocsparse_clients_log_hip_error("hipFree", hipFree(this->m_device_memory));
         this->m_device_memory = nullptr;
     }
 
     if(this->m_descr)
     {
-        std::ignore   = rocsparse_destroy_dnmat_descr(this->m_descr);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                              rocsparse_destroy_dnmat_descr(this->m_descr));
         this->m_descr = nullptr;
     }
 }

@@ -27,6 +27,7 @@
 #define ROCSPARSE_ALLOCATOR_HPP
 
 #include "rocsparse-auxiliary.h"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_random.hpp"
 #include <hip/hip_runtime_api.h>
 #ifdef GOOGLE_TEST
@@ -243,26 +244,29 @@ private:
                 init_guards(guard, PAD);
 
                 // Copy guard to device memory before allocated memory
-                EXPECT_EQ(hipMemcpy(d,
-                                    guard,
-                                    sizeof(guard),
-                                    memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)),
-                          0);
-                EXPECT_EQ(hipMemcpy(d + PAD,
-                                    guard,
-                                    sizeof(guard),
-                                    memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)),
-                          0);
+                rocsparse_clients_throw_hip_error(
+                    "hipMemcpy",
+                    hipMemcpy(d,
+                              guard,
+                              sizeof(guard),
+                              memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
+                rocsparse_clients_throw_hip_error(
+                    "hipMemcpy",
+                    hipMemcpy(d + PAD,
+                              guard,
+                              sizeof(guard),
+                              memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
 
                 // Point to allocated block
                 d += 2 * PAD;
 
                 // Copy guard to device memory after allocated memory
-                EXPECT_EQ(hipMemcpy(d + size,
-                                    guard,
-                                    sizeof(guard),
-                                    memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)),
-                          0);
+                rocsparse_clients_throw_hip_error(
+                    "hipMemcpy",
+                    hipMemcpy(d + size,
+                              guard,
+                              sizeof(guard),
+                              memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
             }
         }
         return d;
@@ -323,7 +327,26 @@ public:
         }
         }
 #ifdef GOOGLE_TEST
-        return install_guards(d, size);
+        try
+        {
+            return install_guards(d, size);
+        }
+        catch(...)
+        {
+            switch(MODE)
+            {
+            case memory_mode::host:
+                rocsparse_clients_log_hip_error("hipHostFree", rocsparse_hipHostFree(d));
+                break;
+            case memory_mode::device:
+                rocsparse_clients_log_hip_error("hipFree", rocsparse_hipFree(d));
+                break;
+            case memory_mode::managed:
+                rocsparse_clients_log_hip_error("hipFree", rocsparse_hipFreeManaged(d));
+                break;
+            }
+            throw;
+        }
 #else
         return d;
 #endif

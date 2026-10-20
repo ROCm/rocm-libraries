@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "rocsparse_clients_log.hpp"
 #ifdef WIN32
 #include <windows.h>
 #endif
@@ -160,11 +161,13 @@ std::string rocsparse_datapath()
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us(void)
 {
-    std::ignore = hipDeviceSynchronize();
-    auto now    = std::chrono::steady_clock::now();
-    // struct timeval tv;
-    // gettimeofday(&tv, NULL);
-    //  return (tv.tv_sec * 1000 * 1000) + tv.tv_usec;
+    const hipError_t status = hipDeviceSynchronize();
+    if(status != hipSuccess)
+    {
+        throw status;
+    }
+
+    auto now = std::chrono::steady_clock::now();
     auto duration
         = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     return (static_cast<double>(duration));
@@ -181,6 +184,9 @@ rocsparse_clients::timer::timer(hipStream_t stream)
     status = hipEventCreate(&this->m_stop);
     if(status != hipSuccess)
     {
+        rocsparse_clients_log_hip_error("hipEventDestroy", hipEventDestroy(this->m_start));
+        this->m_start = nullptr;
+        this->m_stop  = nullptr;
         throw status;
     }
 }
@@ -213,6 +219,12 @@ float rocsparse_clients::timer::stop()
 
 rocsparse_clients::timer::~timer()
 {
-    std::ignore = hipEventDestroy(this->m_start);
-    std::ignore = hipEventDestroy(this->m_stop);
+    if(this->m_start != nullptr)
+    {
+        rocsparse_clients_log_hip_error("hipEventDestroy", hipEventDestroy(this->m_start));
+    }
+    if(this->m_stop != nullptr)
+    {
+        rocsparse_clients_log_hip_error("hipEventDestroy", hipEventDestroy(this->m_stop));
+    }
 }

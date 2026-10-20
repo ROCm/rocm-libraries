@@ -28,6 +28,7 @@
 
 #include "rocsparse_allocator.hpp"
 #include "rocsparse_clients_float16.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_init.hpp"
 
@@ -61,9 +62,9 @@ public:
         m_val  = val;
         return *this;
     }
-    size_t   size() const;
-             operator T*();
-             operator const T*() const;
+    size_t size() const;
+    operator T*();
+    operator const T*() const;
     T*       data();
     const T* data() const;
     ~dense_vector_t();
@@ -303,7 +304,14 @@ public:
 #ifdef GOOGLE_TEST
         allocator::check_guards(this->data(), this->size());
 #endif
-        allocator::free(this->data());
+        try
+        {
+            allocator::free(this->data());
+        }
+        catch(const hipError_t& status)
+        {
+            rocsparse_clients_log_hip_error("hipFree", status);
+        }
     };
 
     hipError_t memcheck() const

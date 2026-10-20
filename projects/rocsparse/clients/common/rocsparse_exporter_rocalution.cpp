@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_exporter_rocalution.hpp"
+#include "rocsparse_clients_log.hpp"
 template <typename X, typename Y>
 rocsparse_status rocsparse_type_conversion(const X& x, Y& y);
 
@@ -160,21 +161,57 @@ rocsparse_status rocsparse_exporter_rocalution::write_sparse_csx(rocsparse_direc
     ptr_mem = nullptr;
     if(!ptr_same && (base_ != rocsparse_index_base_zero))
     {
-        std::ignore = rocsparse_hipHostMalloc(&ptr_mem, sizeof(int) * (m + 1));
+        if(rocsparse_hipHostMalloc(&ptr_mem, sizeof(int) * (m + 1)) != hipSuccess)
+        {
+            return rocsparse_status_memory_error;
+        }
     }
 
     ind_mem = nullptr;
     if(!ind_same && (base_ != rocsparse_index_base_zero))
     {
-        std::ignore = rocsparse_hipHostMalloc(&ind_mem, sizeof(int) * nnz);
+        if(rocsparse_hipHostMalloc(&ind_mem, sizeof(int) * nnz) != hipSuccess)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_hipHostFree",
+                                            rocsparse_hipHostFree(ptr_mem));
+            return rocsparse_status_memory_error;
+        }
     }
 
     val_mem = nullptr;
     if(!val_same)
     {
-        std::ignore
-            = rocsparse_hipHostMalloc(&val_mem, sizeof(double) * (is_T_complex ? (2 * nnz) : nnz));
+        if(rocsparse_hipHostMalloc(&val_mem, sizeof(double) * (is_T_complex ? (2 * nnz) : nnz))
+           != hipSuccess)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_hipHostFree",
+                                            rocsparse_hipHostFree(ind_mem));
+            rocsparse_clients_log_hip_error("rocsparse_hipHostFree",
+                                            rocsparse_hipHostFree(ptr_mem));
+            return rocsparse_status_memory_error;
+        }
     }
+
+    auto free_host_buffers = [&]() {
+        if(val_mem != nullptr)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_hipHostFree",
+                                            rocsparse_hipHostFree(val_mem));
+            val_mem = nullptr;
+        }
+        if(ind_mem != nullptr)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_hipHostFree",
+                                            rocsparse_hipHostFree(ind_mem));
+            ind_mem = nullptr;
+        }
+        if(ptr_mem != nullptr)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_hipHostFree",
+                                            rocsparse_hipHostFree(ptr_mem));
+            ptr_mem = nullptr;
+        }
+    };
 
     ptr = (ptr_same || (base_ == rocsparse_index_base_zero)) ? ((const int*)ptr_) : ptr_mem;
     ind = (ind_same || (base_ == rocsparse_index_base_zero)) ? ((const int*)ind_) : ind_mem;
@@ -201,6 +238,7 @@ rocsparse_status rocsparse_exporter_rocalution::write_sparse_csx(rocsparse_direc
 
         if(status != rocsparse_status_success)
         {
+            free_host_buffers();
             return status;
         }
     }
@@ -217,6 +255,7 @@ rocsparse_status rocsparse_exporter_rocalution::write_sparse_csx(rocsparse_direc
         }
         if(status != rocsparse_status_success)
         {
+            free_host_buffers();
             return status;
         }
         if(base_ == rocsparse_index_base_one)
@@ -235,25 +274,12 @@ rocsparse_status rocsparse_exporter_rocalution::write_sparse_csx(rocsparse_direc
 
     if(status != rocsparse_status_success)
     {
+        free_host_buffers();
         return status;
     }
 
     status = rocalution_write_sparse_csx(this->m_filename.c_str(), m, n, nnz, ptr, ind, val);
-    if(val_mem != nullptr)
-    {
-        std::ignore = rocsparse_hipFree(val_mem);
-        val_mem     = nullptr;
-    }
-    if(ind_mem != nullptr)
-    {
-        std::ignore = rocsparse_hipFree(ind_mem);
-        ind_mem     = nullptr;
-    }
-    if(ptr_mem != nullptr)
-    {
-        std::ignore = rocsparse_hipFree(ptr_mem);
-        ptr_mem     = nullptr;
-    }
+    free_host_buffers();
 
     return status;
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include "auto_testing_bad_arg_get_status.hpp"
 #include "auto_testing_bad_arg_set_invalid.hpp"
 #include "rocsparse_clients_envariables.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_test.hpp"
 #include "test_check.hpp"
 #include <fstream>
@@ -176,13 +177,17 @@ public:
     {
         if(rocsparse_clients_envariables::get(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS))
         {
-            rocsparse_argdescr_create(&argdescr);
+            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_argdescr_create(&argdescr));
         }
     }
 
     ~rocsparse_local_argdescr()
     {
-        rocsparse_argdescr_free(argdescr);
+        if(argdescr != nullptr)
+        {
+            rocsparse_clients_log_rocsparse_error("rocsparse_argdescr_free",
+                                                  rocsparse_argdescr_free(argdescr));
+        }
     }
 
     // Allow rocsparse_local_mat_descr to be used anywhere rocsparse_mat_descr is expected

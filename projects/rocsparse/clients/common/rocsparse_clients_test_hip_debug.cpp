@@ -826,13 +826,24 @@ namespace rocsparse_clients_test
     void hip_debug_t::enable()
     {
         this->m_enabled = true;
-        rocsparse_hip_debug_enable();
+        if(rocsparse_hip_debug_enable() != rocsparse_status_success)
+        {
+            std::cerr
+                << "// rocsparse_clients_test_hip_debug error: rocsparse_hip_debug_enable failed."
+                << std::endl;
+            exit(1);
+        }
     }
 
     void hip_debug_t::disable()
     {
         this->m_enabled = false;
-        rocsparse_hip_debug_disable();
+        if(rocsparse_hip_debug_disable() != rocsparse_status_success)
+        {
+            std::cerr
+                << "// rocsparse_clients_test_hip_debug error: rocsparse_hip_debug_disable failed."
+                << std::endl;
+        }
     }
 
     void hip_debug_t::set_hip_debug_report_filename(const char* value)

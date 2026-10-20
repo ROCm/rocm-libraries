@@ -1533,8 +1533,8 @@ static void host_csrmv_general(rocsparse_operation  trans,
             int             dev;
             hipDeviceProp_t prop;
 
-            std::ignore = hipGetDevice(&dev);
-            std::ignore = hipGetDeviceProperties(&prop, dev);
+            CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+            CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
             int WF_SIZE;
             J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -1681,8 +1681,8 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
         int             dev;
         hipDeviceProp_t prop;
 
-        std::ignore = hipGetDevice(&dev);
-        std::ignore = hipGetDeviceProperties(&prop, dev);
+        CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+        CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
         int WF_SIZE;
         J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -1972,8 +1972,8 @@ static void host_csr_lsolve(J                    M,
     int             dev;
     hipDeviceProp_t prop;
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
     std::vector<T> temp(prop.warpSize);
 
@@ -2082,8 +2082,8 @@ static void host_csr_usolve(J                    M,
     int             dev;
     hipDeviceProp_t prop;
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
 
     std::vector<T> temp(prop.warpSize);
 
@@ -5207,8 +5207,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -5301,8 +5301,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -8952,7 +8952,7 @@ void host_csr_to_ell(J                     M,
     size_t required_memory  = sizeof(J) * ell_nnz + sizeof(T) * ell_nnz;
     size_t total_memory     = 0;
     size_t available_memory = 0;
-    std::ignore             = hipMemGetInfo(&available_memory, &total_memory);
+    CHECK_HIP_THROW_ERROR(hipMemGetInfo(&available_memory, &total_memory));
 
     if(required_memory > available_memory)
     {
