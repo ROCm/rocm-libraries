@@ -3040,8 +3040,8 @@ class _Lowerer:
         %r_i8 = trunc i32 %clamped to i8
 
         The clamp uses ``llvm.smin`` / ``llvm.smax`` so the backend can
-        fold the whole sequence into a ``v_med3_i32`` followed by a
-        single ``v_cvt_pk_i16_i32`` byte select.
+        fold it into a single ``v_med3_i32``; the low byte of the result
+        is the i8.
         """
         (v,) = op.operands
         self._need("rint.f32")
