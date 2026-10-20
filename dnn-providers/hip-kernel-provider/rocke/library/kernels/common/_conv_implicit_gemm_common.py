@@ -60,6 +60,17 @@ from rocke.helpers.transforms import (
 _DTYPE_TO_IR: dict = {"f16": F16, "fp16": F16, "bf16": BF16, "fp32": F32}
 
 
+def _implicit_gemm_buffer_rsrcs(b, t_a, t_b, t_c, bytes_a, bytes_b, bytes_c):
+    """Create the three buffer resources for one implicit-GEMM kernel."""
+    a_buf_rsrc = make_buffer_resource(b, t_a, num_bytes=bytes_a)
+    b_buf_rsrc = make_buffer_resource(b, t_b, num_bytes=bytes_b)
+    c_buf_rsrc = make_buffer_resource(b, t_c, num_bytes=bytes_c)
+    a_rsrc = a_buf_rsrc.rsrc
+    b_rsrc = b_buf_rsrc.rsrc
+    c_rsrc = c_buf_rsrc.rsrc
+    return a_rsrc, b_rsrc, c_rsrc
+
+
 def _ir_dtype(dtype: str) -> Type:
     """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
     t = _DTYPE_TO_IR.get(dtype)
