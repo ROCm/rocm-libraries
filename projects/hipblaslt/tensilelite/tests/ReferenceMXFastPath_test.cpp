@@ -715,12 +715,3 @@ TEST(ReferenceMXBlock128Demo, BlockAlignedSlowPathChecksum)
     }
     std::cout << std::flush;
 }
-
-#else
-
-TEST(ReferenceMXFastPath, DisabledWithoutFP8Support)
-{
-    GTEST_SKIP() << "TENSILE_USE_FP8_BF8 not enabled";
-}
-
-#endif
