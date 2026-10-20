@@ -537,6 +537,48 @@ def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
             }, name
 
 
+# The runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc) runs its own pair of
+# weight transforms, which take the per-group channel counts as kernargs. No
+# list registers one yet, so the parametrized test above never meets it.
+_RTC_DGRAD = (
+    "dgrad-direct_dgrad_mfma_rtc-fp16-2d-f3x3-p1x1-s1x1-d1x1-c0k0-block_groups=1-"
+    "block_h=8-block_q=16-fold_k32=true-k_atoms=10-m_tiles=1-persistent_grid=false-"
+    "runtime_k_loop=false-waves_k=2-waves_q=1-wave64-gfx950-llvm22"
+)
+
+
+def test_launch_plan_of_the_runtime_channel_mfma_dgrad():
+    identity = KernelIdentity.from_label(_RTC_DGRAD)
+    spec = gc.ConvInstanceSpec(
+        name=_RTC_DGRAD,
+        identity=identity,
+        block=gc._instance_block(identity),
+        helpers=gc._instance_helpers(identity),
+    )
+    req = _case_req("gfx950", "dgrad", "grouped_cpg4_kpg320")
+    ok, why = gc._admits(identity, req)
+    assert ok, why
+    assert [h.algorithm for h in spec.helpers] == [
+        "direct_dgrad_transpose_rtc",
+        "direct_dgrad_reorganize_rtc",
+    ]
+    plan = gc.launch_plan_for(req, spec)
+    got = [
+        (
+            s.identity,
+            s.grid,
+            s.block,
+            [a["name"] for a in s.signature],
+            s.buffers,
+            plan.values(s, _PTRS, _SIZES),
+        )
+        for s in plan.steps
+    ]
+    want, workspaces, _ = _cache_side_plan(spec, req, _PTRS, _SIZES)
+    assert got == want
+    assert dict(plan.workspaces) == workspaces
+
+
 # ---------------------------------------------------------------------------
 # Selection and pins
 # ---------------------------------------------------------------------------
