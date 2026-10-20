@@ -241,7 +241,7 @@ TEST_F(spsort, analysis_buffer_size_is_zero_coo)
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    const rocsparse_direction dir = rocsparse_direction_row;
+    const rocsparse_direction dir   = rocsparse_direction_row;
     rocsparse_spsort_descr    descr = make_spsort_descr(handle, rocsparse_spsort_alg_default, &dir);
     ASSERT_NE(descr, nullptr);
 
@@ -347,7 +347,7 @@ TEST_F(spsort, compute_sorts_coo_out_of_place)
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    const rocsparse_direction dir = rocsparse_direction_row;
+    const rocsparse_direction dir   = rocsparse_direction_row;
     rocsparse_spsort_descr    descr = make_spsort_descr(handle, rocsparse_spsort_alg_default, &dir);
     ASSERT_NE(descr, nullptr);
 
@@ -408,14 +408,15 @@ TEST_F(spsort, null_pointer_arguments)
     size_t buffer_size = 0;
 
     // Null descr pointer.
-    EXPECT_EQ(rocsparse_spsort_buffer_size(
-                  handle, nullptr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_spsort_buffer_size(
+            handle, nullptr, mat, mat, rocsparse_spsort_stage_analysis, &buffer_size, nullptr),
+        rocsparse_status_invalid_pointer);
 
     // Null source pointer.
     EXPECT_EQ(rocsparse_spsort_buffer_size(handle,
                                            descr,
-                                           (rocsparse_const_spmat_descr)nullptr,
+                                           (rocsparse_const_spmat_descr) nullptr,
                                            mat,
                                            rocsparse_spsort_stage_analysis,
                                            &buffer_size,
@@ -500,9 +501,9 @@ TEST_F(spsort, compute_before_analysis_is_invalid_value)
 
     // buffer_size_in_bytes == 0 and buffer == nullptr satisfy the earlier
     // CHECKARGs, so the stage FSM check is reached directly.
-    EXPECT_EQ(
-        rocsparse_spsort(handle, descr, mat, mat, rocsparse_spsort_stage_compute, 0, nullptr, nullptr),
-        rocsparse_status_invalid_value);
+    EXPECT_EQ(rocsparse_spsort(
+                  handle, descr, mat, mat, rocsparse_spsort_stage_compute, 0, nullptr, nullptr),
+              rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_spsort_descr_destroy(handle, descr, nullptr), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
