@@ -22,7 +22,7 @@ _DataTypeEnum_values = [
     "Int8x4", "Int32", "BFloat16", "Int8", "Int64", "XFloat32",
     "Float8_fnuz", "BFloat8_fnuz", "Float8BFloat8_fnuz", "BFloat8Float8_fnuz",
     "Float8", "BFloat8", "Float8BFloat8", "BFloat8Float8",
-    "Float6", "BFloat6", "Float4", "E8", "E5M3",
+    "Float6", "BFloat6", "Float4", "E8", "E5M3", "Int4",
 ]
 DataTypeEnum = make_dummy_enum(f"{_P}.DataTypeEnum", _DataTypeEnum_values)
 export_enum_values(globals(), DataTypeEnum, _DataTypeEnum_values)
