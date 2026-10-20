@@ -49,8 +49,8 @@ import traceback
 import pytest
 from rocisa.code import Module
 
-from Tensile.Common.Types import makeDebugConfig, DebugConfig
-from Tensile.KernelWriter import Assert
+from tensilelite.Common.Types import makeDebugConfig, DebugConfig
+from tensilelite.KernelWriter import Assert
 
 pytestmark = pytest.mark.unit
 
