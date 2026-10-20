@@ -579,10 +579,13 @@ inline double aotInstanceScore(const Problem& problem,
                                const LaunchGeometry& launch,
                                double cuCount = 256.0)
 {
+    // Over every z slice: a merged instance's slice covers groupMerge groups.
     const auto kpg = static_cast<double>(problem.k / problem.groups);
-    const auto useful = static_cast<double>(geometry.gemmM) * kpg;
+    const auto useful
+        = static_cast<double>(geometry.gemmM) * kpg * static_cast<double>(problem.groups);
     const auto launched = static_cast<double>(launch.gridY) * static_cast<double>(instance.tileM)
-                          * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN);
+                          * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN)
+                          * static_cast<double>(launch.gridZ);
     const auto tiles = static_cast<double>(launch.gridX) * static_cast<double>(launch.gridY)
                        * static_cast<double>(launch.gridZ);
     const auto fill = tiles >= cuCount ? 1.0 : tiles / cuCount;
