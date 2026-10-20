@@ -164,7 +164,7 @@ fails, naming its missing sidecar. The root only relocates sidecars and never ma
 tree packed: given for a descriptor whose directory holds no marker, it is a usage error.
 Every tool that reads a packed tree takes that root: `--provenance-root` on
 `hkp_desk_check.py` (with `--descriptor-root`), `hkp_verify_embedded_sources.py`,
-`verify_variant_sets.py` (`LABEL=DIR`), `coverage_gate.py` and `variant_reachability.py`.
+`verify_variant_sets.py` (`LABEL=DIR`) and `coverage_gate.py`.
 
 `hsaco` names a prebuilt code object: `kernel_source: {kind: "hsaco", file, symbol}`.
 `file` resolves relative to the descriptor that names it, must stay inside the root, and
@@ -350,6 +350,13 @@ Per declared suite and per eligible arch, CMake registers
 entry is an independent process labeled `unit_test;hip-kernel-provider;host`, plus the
 tier labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns it; the installed twin carries the
 same labels as the build-tree entry.
+
+The census binary ignores `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS`. CI shards a
+component by exporting them for the whole ctest run, and a census that honoured them
+would have the other shards' cases sharded out and fail. In census mode the binary removes
+both before running, ahead of its other checks, so every entry and control behaves the
+same way and a direct run of the binary is covered too. A census is therefore run in full
+on every shard, which costs seconds.
 
 ```bash
 ctest --test-dir <build>/dnn-providers/hip-kernel-provider \

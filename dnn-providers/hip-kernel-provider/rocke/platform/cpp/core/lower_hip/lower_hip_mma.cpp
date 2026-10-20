@@ -8,9 +8,10 @@
  * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
  * (lw, op) signature from lower_hip_internal.h. Shared helpers
  * (rocke_h_emit / rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip /
- * rocke_h_hip_scalar / rocke_h_require_wmma_arch / rocke_h_require_ds_read_tr /
- * rocke_h_lower_region / rocke_h_push_indent / rocke_h_pop_indent / rocke_attr_get_* /
- * rocke_vector_type) are DEFINED elsewhere (bucket 0); only called here.
+ * rocke_h_hip_scalar / rocke_h_require_hip_scalar / rocke_h_require_wmma_arch /
+ * rocke_h_require_ds_read_tr / rocke_h_lower_region / rocke_h_push_indent /
+ * rocke_h_pop_indent / rocke_attr_get_* / rocke_vector_type) are DEFINED elsewhere
+ * (bucket 0); only called here.
  *
  * The simple handlers reproduce every _emit() format string byte-for-byte.
  * The complex matrix-engine handlers are fully ported too:
@@ -33,11 +34,13 @@
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/mfma_scale_internal.h"
+#include "rocke/mma_operand_internal.h"
 #include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 #include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
+#include <string.h> /* strcmp   */
 
 namespace ckc
 {
@@ -55,14 +58,37 @@ static int h_vcount(const rocke_type_t* t)
 }
 
 /* Python idiom `t.elem.name if isinstance(t, VectorType) else t.name`, mapped
- * to the HIP scalar spelling via _HIP_TYPE (rocke_h_hip_scalar). */
-static const char* h_elem_scalar(const rocke_type_t* t)
+ * to the HIP scalar spelling (rocke_h_require_hip_scalar). */
+static const char* h_elem_scalar(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 {
     const char* nm = (t && t->kind == ROCKE_TYPE_VECTOR) ? t->elem->name : t->name;
-    return rocke_h_hip_scalar(nm);
+    return rocke_h_require_hip_scalar(lw, nm);
 }
 
 /* ============================== mma ====================================== */
+
+/* MMA operand `role` (A or B) of `op` as the instruction's register type
+ * (Python _Lowerer._mma_operand): unchanged, or reinterpreted with one
+ * __builtin_bit_cast, as rocke_mma_operand_needs_reinterpret decides; that rule
+ * also throws for an operand it refuses. The LLVM lowering renders the same
+ * decision as a `bitcast`. */
+static const char* h_mma_operand(rocke_h_lowerer_t* lw,
+                                 const rocke_op_t* op,
+                                 const char* op_id,
+                                 rocke_mma_role_t role,
+                                 const rocke_type_t* register_type)
+{
+    const rocke_value_t* value = rocke_mma_operand_value(op, role);
+    if(!rocke_mma_operand_needs_reinterpret(op_id, role, value->type, register_type, lw->arch.gfx))
+        return rocke_h_name(lw, value);
+    const char* reinterpreted = rocke_arena_printf(&lw->b->arena,
+                                                   "__builtin_bit_cast(%s, %s)",
+                                                   rocke_h_type_to_hip(lw, register_type),
+                                                   rocke_h_name(lw, value));
+    if(!reinterpreted)
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory formatting an MMA operand");
+    return reinterpreted ? reinterpreted : "";
+}
 
 /* def _op_tile_mma(self, op):
  *     op_id = op.attrs["op_id"]
@@ -162,8 +188,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)
     {
-        if(strcmp(lw->arch.gfx, "gfx942") != 0)
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+        char tf32_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_tf32_mma_target_error(op_id, lw->arch.gfx, tf32_error, sizeof tf32_error))
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(__builtin_bit_cast(f32x2, %s), "
                       "__builtin_bit_cast(f32x2, %s), %s, 0, 0, 0);",
@@ -175,17 +202,39 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
-    /* Ordinary FP32 controls use catalog IDs that have no legacy opcode. */
+    {
+        /* The expansion exists only in the LLVM lowerer. Without this the op would
+         * reach the generic dispatcher below as tile.<op_id> and fail as though the
+         * HIP backend had merely forgotten a hardware atom. */
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(lw->arch.gfx);
+        const rocke_mma_op_t* atom
+            = target ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+        if(atom && !rocke_arch_mma_op_is_native(atom))
+        {
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "tile.mma %s: an emulated atom (%s over %s) has no HIP lowering; "
+                                "lower it through the LLVM path",
+                                op_id,
+                                atom->emulation_recipe == ROCKE_MMA_EMULATION_BF16X3 ? "bf16x3"
+                                                                                     : "unknown",
+                                rocke_arch_mma_op_physical_op_id(atom));
+        }
+    }
+    /* Ordinary FP32 controls use catalog IDs that have no legacy opcode. A and
+     * B are passed as f32 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {
         bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f32());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f32());
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
                       small ? 4 : 16,
                       rocke_h_name(lw, op->results[0]),
                       small ? "mfma_f32_16x16x4f32" : "mfma_f32_32x32x2f32",
-                      rocke_h_name(lw, op->operands[0]),
-                      rocke_h_name(lw, op->operands[1]),
+                      a_arg,
+                      b_arg,
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
@@ -711,11 +760,38 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr_b8(rocke_h_lowerer_t* lw, const
 
 /* ============================== barriers / scheduling ==================== */
 
-/* def _op_tile_sync(self, op): self._emit("__syncthreads();") */
+/* def _barrier_fence(op): the fence attr (NULL, "compiler" or "workgroup");
+ * any other value is an error. */
+static const char* rocke_h_barrier_fence(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char* fence = rocke_attr_get_str(&op->attrs, "fence");
+    if(fence && strcmp(fence, "compiler") != 0 && strcmp(fence, "workgroup") != 0)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_VALUE,
+                     "%s: unknown fence '%s'",
+                     op->name ? op->name : "tile.sync",
+                     fence);
+        return NULL;
+    }
+    return fence;
+}
+
+/* def _emit_barrier_clobber(self, op): fence attr -> compiler memory barrier
+ * after the barrier (__syncthreads carries the workgroup fences already). */
+static void rocke_h_emit_barrier_clobber(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    if(rocke_h_barrier_fence(lw, op))
+    {
+        rocke_h_emit(lw, "__asm__ volatile(\"\" ::: \"memory\");");
+    }
+}
+
+/* def _op_tile_sync(self, op): self._emit("__syncthreads();") + clobber */
 static rocke_status_t rocke_h_op_tile_sync(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    (void)op;
     rocke_h_emit(lw, "__syncthreads();");
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
@@ -735,19 +811,30 @@ static rocke_status_t rocke_h_op_tile_sync_half_block(rocke_h_lowerer_t* lw, con
 static rocke_status_t rocke_h_op_tile_sync_lds_only(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     int mask;
-    (void)op;
     mask = rocke_h_encode_waitcnt(lw, -1, -1, 0);
     rocke_h_emitf(lw, "__builtin_amdgcn_s_waitcnt(%d);", mask);
     rocke_h_emit(lw, "__syncthreads();");
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
 /* def _op_tile_s_barrier_bare(self, op):
+ *     fence attr: workgroup release / acquire fences around the barrier
  *     self._emit("__builtin_amdgcn_s_barrier();") */
 static rocke_status_t rocke_h_op_tile_s_barrier_bare(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    (void)op;
+    const char* fence = rocke_h_barrier_fence(lw, op);
+    bool workgroup = fence && strcmp(fence, "workgroup") == 0;
+    if(workgroup)
+    {
+        rocke_h_emit(lw, "__builtin_amdgcn_fence(__ATOMIC_RELEASE, \"workgroup\");");
+    }
     rocke_h_emit(lw, "__builtin_amdgcn_s_barrier();");
+    if(workgroup)
+    {
+        rocke_h_emit(lw, "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \"workgroup\");");
+    }
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
@@ -839,7 +926,7 @@ static rocke_status_t rocke_h_op_vector_extract(rocke_h_lowerer_t* lw, const roc
     rocke_attr_get_int(&op->attrs, "index", &i);
     rocke_h_emitf(lw,
                   "%s %s = %s[%d];",
-                  h_elem_scalar(v->type),
+                  h_elem_scalar(lw, v->type),
                   rocke_h_name(lw, r),
                   rocke_h_name(lw, v),
                   (int)i);
@@ -955,7 +1042,7 @@ static rocke_status_t rocke_h_op_vector_sum(rocke_h_lowerer_t* lw, const rocke_o
     const char* nice = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
     int n = h_vcount(v->type), i;
-    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(v->type), nice, vn);
+    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(lw, v->type), nice, vn);
     for(i = 1; i < n; i++)
     {
         rocke_h_emitf(lw, "%s = %s + %s[%d];", nice, nice, vn, i);
@@ -971,7 +1058,7 @@ static rocke_status_t rocke_h_op_vector_reduce_max(rocke_h_lowerer_t* lw, const 
     const char* nice = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
     int n = h_vcount(v->type), i;
-    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(v->type), nice, vn);
+    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(lw, v->type), nice, vn);
     for(i = 1; i < n; i++)
     {
         rocke_h_emitf(lw, "%s = (%s[%d] > %s) ? %s[%d] : %s;", nice, vn, i, nice, vn, i, nice);
@@ -1216,7 +1303,7 @@ static rocke_status_t rocke_h_op_vector_trunc_f32_to(rocke_h_lowerer_t* lw, cons
     {
         target = "f16";
     }
-    elem_cpp = rocke_h_hip_scalar(target);
+    elem_cpp = rocke_h_require_hip_scalar(lw, target);
     rocke_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -1325,15 +1412,11 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     }
     iv_name = (iv_full[0] == '%') ? iv_full + 1 : iv_full; /* [1:] */
     iv_type = rocke_attr_get_str(&op->attrs, "iv_type");
-    iv_ty = iv_type ? rocke_h_hip_scalar(iv_type) : NULL;
-    if(!iv_ty)
+    if(!iv_type)
     {
-        /* Python _HIP_TYPE[...] KeyError parity. */
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "scf.for: no HIP type for iv_type '%s'",
-                            iv_type ? iv_type : "<none>");
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "scf.for: missing 'iv_type' attr");
     }
+    iv_ty = rocke_h_require_hip_scalar(lw, iv_type);
 
     /* Declare for-op results in the enclosing scope (zip stops at min length). */
     for(i = 0; i < meta_n && i < op->num_results; i++)

@@ -1241,41 +1241,39 @@ class TestABottomRightWindowAcrossLengthsIsRefused:
 
 
 class TestTheOutputIsWhatTheRequestClassAccepts:
-    """`--out` is the corpus `dispatch_parity.py --shapes` hands to rocKE's frozen
+    """`--out` is the corpus `registry_enumerator.py --shapes` hands to rocKE's frozen
     `AttentionRequest`; a key that class does not declare aborts the whole run."""
 
     @pytest.fixture
-    def rocke(self, tmp_path, monkeypatch):
-        """The checkout's rocKE request class behind an echoing dispatcher, so what is
-        asserted is the request each mined shape becomes."""
+    def rocke(self, monkeypatch):
+        """The checkout's rocKE request class, so what is asserted is the request each
+        mined shape becomes."""
         monkeypatch.setattr(sys, "path", list(sys.path))
         monkeypatch.syspath_prepend(str(_MINE.parent))
-        import dispatch_parity
+        import registry_enumerator
 
         # Absolute, from this file: a copied source tree has no .git for the
         # repository-relative form to anchor on.
         provider = _MINE.parents[5] / "dnn-providers" / "hip-kernel-provider"
         try:
-            dispatch_parity._bind_provider(str(provider))
-            from dispatch.attention.common import _request_errors
-        except (dispatch_parity.ParityError, ImportError) as exc:
+            registry_enumerator.bind_provider(str(provider))
+            from dispatch.attention.common import AttentionRequest, _request_errors
+        except (registry_enumerator.EnumerationError, ImportError) as exc:
             pytest.skip(f"the rocKE library cannot be imported here ({exc})")
-        (tmp_path / "echo_dispatch.py").write_text(
-            "def resolve(request):\n    return request\n"
-        )
-        monkeypatch.syspath_prepend(str(tmp_path))
-        monkeypatch.delitem(sys.modules, "echo_dispatch", raising=False)
-        profile = {
-            "arch": "gfx950",
-            "dispatch": {"module": "echo_dispatch", "function": "resolve"},
-            "request": {
-                "module": "dispatch.attention.common",
-                "class": "AttentionRequest",
-            },
-        }
 
         def resolve(shapes: list) -> list:
-            return dispatch_parity.resolve_shapes(shapes, profile)
+            """Each shape with the request it becomes; `_`-prefixed keys are carried
+            provenance, not request fields."""
+            return [
+                (
+                    shape,
+                    AttentionRequest(
+                        arch="gfx950",
+                        **{k: v for k, v in shape.items() if not k.startswith("_")},
+                    ),
+                )
+                for shape in shapes
+            ]
 
         return resolve, _request_errors
 
@@ -1302,19 +1300,19 @@ class TestTheOutputIsWhatTheRequestClassAccepts:
 
         features = {}
         windows = []
-        for resolution in resolve(shapes):
-            request = resolution.spec
-            assert request_errors(request) == [], resolution.shape
-            origin = resolution.shape["_provenance"]
+        for shape, request in resolve(shapes):
+            assert request_errors(request) == [], shape
+            origin = shape["_provenance"]
             label = origin.get("graph") or origin["phase"]
             features.setdefault(label, set()).add(request.features())
             if label == "swa":
                 windows.append(request)
-        # A sliding window's causal edge is its right bound, not a `causal` feature.
+        # A sliding window is a band; its causal edge is its right bound, not a
+        # `causal` feature.
         assert features == {
             "br": {frozenset({"causal", "causal_bottom_right"})},
             "tl": {frozenset({"causal"})},
-            "swa": {frozenset({"sliding_window"})},
+            "swa": {frozenset({"sliding_window", "band"})},
             "prefill": {frozenset({"causal"})},
             "decode": {frozenset({"causal", "causal_bottom_right"})},
         }

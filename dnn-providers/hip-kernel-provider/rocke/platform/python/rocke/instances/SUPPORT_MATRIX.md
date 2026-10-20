@@ -136,6 +136,17 @@ as described in the notes.
 | `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
 | `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
 
+## Sparse attention (DSA lightning indexer)
+
+Added with the DSA lightning-indexer family. The kernel is arch-neutral
+(`kernels/common/lightning_indexer.py`): the ✅ cells are compile- and
+golden-verified (spec, wiring, IR sha, Python/C++ byte-identity); on-GPU numeric
+parity runs on the matching device and is not implied by the ✅ here.
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `lightning_indexer` | ✅ | ✅ | ❌ | bf16; score-only DSA scorer (no softmax/value); runtime seqlen_q/seqlen_k; scalar body (sub-tile seqlen_q / single-query decode fallback, correctness oracle) + MFMA body (tail-masked for any seqlen_q/seqlen_k; index_head_dim 16-aligned); fp8 is a later phase; gfx1151 (RDNA wave32) unsupported |
+
 ## Linear attention / recurrent-state decode
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
@@ -149,7 +160,9 @@ as described in the notes.
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `gfx1151/wmma_gemm` | ❌ | ❌ | ✅ | native WMMA GEMM (GPU-verified) |
-| `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified) |
+| `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified); kept for the hipDNN catalog, no longer selected by rocKE dispatch |
+| `gfx1151/wmma_fmha_fwd_v2` | ❌ | ❌ | ✅ | native WMMA FMHA prefill, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
+| `gfx1151/wmma_fmha_decode` | ❌ | ❌ | ✅ | native split-KV WMMA FMHA decode, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
 
 ---
 
