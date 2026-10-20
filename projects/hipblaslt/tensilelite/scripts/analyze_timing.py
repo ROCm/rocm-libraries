@@ -134,11 +134,14 @@ TIMING_HIERARCHY = {
             "solution_selection": {},
             "pre_solution": {
                 "pre_solution_listener.ReferenceValidator": {
-                    # Gate said the inputs are unchanged, reference reused (count-only marker).
+                    # DataInitialization's input epoch did not move, so the reference is reused
+                    # (count-only marker).
                     "pre_solution_ref_skipped": {},
-                    # Per-solution recompute, split by whether DataInitialization actually
-                    # regenerated the MX inputs since the reference was last computed.
-                    # "unchanged" recomputes are redundant (same inputs, same result).
+                    # Per-solution recompute because the input epoch moved (inputs were really
+                    # regenerated). "inputs_unchanged" only appears with
+                    # --verify-reference-reuse / TENSILELITE_VERIFY_REFERENCE_REUSE=1, which
+                    # recomputes anyway to check the reuse is exact; it is the old behaviour's
+                    # redundant work and also what older client builds always did.
                     "cpu_reference_gemm_per_solution_inputs_changed": {
                         "solve_cpu_fast_per_solution_inputs_changed": {},
                         "solve_cpu_slow_per_solution_inputs_changed": {},
