@@ -5,10 +5,10 @@ SPDX-License-Identifier: MIT
 
 # GPU CI with pinned rocKE reference kernels
 
-This is the methodology and extension guide. See the [SDPA](sdpa-test-reference.md)
-and [convolution](conv-test-reference.md) guides for numerical contracts and bundle status,
+This is the methodology and extension guide. See the [SDPA](../../sdpa_reference/docs/sdpa-test-reference.md)
+and [convolution](../../conv_reference/docs/conv-test-reference.md) guides for numerical contracts and bundle status,
 and the [reference workflow](gpu-reference-workflow.md) for all authoring and publication steps,
-and [GPU attention coverage](gpu-attention-test-coverage.md)
+and [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
 SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
@@ -26,7 +26,7 @@ The gfx1200 adapter uses the same compiler target but
 awaits its own GPU qualification and installation enrollment. On a gfx1200
 runner requesting both gfx120X targets, the gfx1201 pinned CTest skips with code
 77; that result is not gfx1200 pinned coverage. See
-[family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
+[family CI selection](../../sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection).
 Local packaging checks used TheRock's artifact descriptor, splitter, archive
 compression, and downloader selection to verify processor-specific payload routing
 and file-hash preservation for all five published pairs. These checks used the
@@ -34,7 +34,7 @@ Python reference installation harness and local archive transport; native provid
 execution needs separate coverage.
 Further architectures, pinned gradient replay, KDA, and GDN remain future work.
 Separate convolution gradient suites check 12 dgrad and 14 wgrad cases per
-processor directly against live NumPy oracles; see the [coverage guide](conv-coverage-roadmap.md).
+processor directly against live NumPy oracles; see the [coverage guide](../../../../docs/conv-coverage-roadmap.md).
 
 Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
@@ -351,7 +351,7 @@ The numerical requirements below supplement the common workflow.
 
 The operation-specific paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
 `engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
-now used by the [forward-convolution infrastructure](conv-test-reference.md).
+now used by the [forward-convolution infrastructure](../../conv_reference/docs/conv-test-reference.md).
 That harness has published bounded gfx942 and gfx950 forward cohorts. Further convolution coverage still needs:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
@@ -442,9 +442,9 @@ difference a regression.
 ## 9. Validation evidence and practical reproduction
 
 The current baseline, archive identity, numerical measurements, and CI results are
-recorded in the [SDPA guide](sdpa-test-reference.md#validation-evidence) and
-[convolution guide](conv-test-reference.md#validation-evidence). The
-[coverage map](gpu-attention-test-coverage.md) distinguishes declared shapes from
+recorded in the [SDPA guide](../../sdpa_reference/docs/sdpa-test-reference.md#validation-evidence) and
+[convolution guide](../../conv_reference/docs/conv-test-reference.md#validation-evidence). The
+[coverage map](../../../../docs/gpu-attention-test-coverage.md) distinguishes declared shapes from
 executed tests and retains the gaps in older Torch-dependent suites.
 
 GPU qualification and audit work used Enroot under Slurm. Request the intended GPU,
@@ -471,11 +471,11 @@ selection. A successful host-only test run cannot establish GPU qualification.
 
 ## Source anchors
 
-- [Current gfx942 tests and original tolerances](../library/tests/test_attention_dense_gfx942_numeric.py)
-- [Architecture adapter](../library/tests/sdpa_reference/architectures/gfx942/__init__.py)
-- [SDPA numerical contract](../library/tests/sdpa_reference/contract.py)
-- [Convolution forward reference and normalization](../library/tests/test_conv_fwd_correctness.py)
-- [Installed CTest registration](../platform/CMakeLists.txt)
-- [Provider test categories](../../ROCKE_ENGINE_test_categories_external.yaml)
+- [Current gfx942 tests and original tolerances](../../test_attention_dense_gfx942_numeric.py)
+- [Architecture adapter](../../sdpa_reference/architectures/gfx942/__init__.py)
+- [SDPA numerical contract](../../sdpa_reference/contract.py)
+- [Convolution forward reference and normalization](../../test_conv_fwd_correctness.py)
+- [Installed CTest registration](../../../../platform/CMakeLists.txt)
+- [Provider test categories](../../../../../ROCKE_ENGINE_test_categories_external.yaml)
 - [TheRock artifact descriptor](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/ml-libs/artifact-hipkernelprovider.toml)
-- [Existing rocKE testing strategy](../TESTING.md)
+- [Existing rocKE testing strategy](../../../../TESTING.md)

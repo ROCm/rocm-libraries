@@ -16,10 +16,10 @@ kernel, and successful GPU numerical execution are different evidence levels.
 | Backward-data | 12 explicit-spec cases | 10 production implicit-GEMM cases and 2 explicit K=33 cases |
 | Backward-weight | 14 explicit cases; atomic and two-stage split-K | 14 explicit cases; atomic, two-stage, and merged groups |
 
-The [reference guide](conv-test-reference.md) owns the numerical contracts.
+The [reference guide](../library/tests/conv_reference/docs/conv-test-reference.md) owns the numerical contracts.
 The [validation record](conv-six-lane-validation.md) distinguishes historical
 qualification from checks of the current source. Use the
-[shared workflow](gpu-reference-workflow.md) for reference publication.
+[shared workflow](../library/tests/reference_common/docs/gpu-reference-workflow.md) for reference publication.
 
 ## Production selection and explicit coverage
 

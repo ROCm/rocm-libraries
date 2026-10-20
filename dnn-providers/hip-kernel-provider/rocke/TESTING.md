@@ -154,7 +154,7 @@ the strategy's biggest holes live (see
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
   For replacement baselines and coverage changes, follow the
-  [authoritative reference workflow](docs/gpu-reference-workflow.md).
+  [authoritative reference workflow](library/tests/reference_common/docs/gpu-reference-workflow.md).
   Architecture enrollments are listed in
   [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
   used by Python qualification and verification. CMake publication is separate.
@@ -179,7 +179,7 @@ the strategy's biggest holes live (see
   Qualification accepts `--arch` and freezes the shared worker and architecture
   adapters into the new bundle. Existing bundles keep their original frozen code.
 
-- The [convolution reference lane](docs/conv-test-reference.md) implements the
+- The [convolution reference lane](library/tests/conv_reference/docs/conv-test-reference.md) implements the
   same offline qualification and GPU replay workflow for bounded gfx942 and gfx950
   forward cohorts, with 32 cases each. It shares artifact, digest, budget, snapshot,
   and worker transport code with SDPA. Both published bundles are installed by default
@@ -674,19 +674,22 @@ reference them, don't copy them here.*
 
 ## Pinned-reference documentation
 
-- [Adding or updating a reference: authoritative workflow](docs/gpu-reference-workflow.md)
+Detailed guides live in the reference harnesses' `docs/` directories under
+`library/tests/`. Start with [kernel compatibility and baseline lifecycle](library/tests/reference_common/docs/README.md).
 
-- [SDPA implementation and usage](docs/sdpa-test-reference.md)
-- [Convolution implementation and usage](docs/conv-test-reference.md)
+- [Adding or updating a reference: authoritative workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
+
+- [SDPA implementation and usage](library/tests/sdpa_reference/docs/sdpa-test-reference.md)
+- [Convolution implementation and usage](library/tests/conv_reference/docs/conv-test-reference.md)
 - [GPU attention coverage and gaps](docs/gpu-attention-test-coverage.md)
-- [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-test-reference-plan.md)
+- [Reference methodology and extension strategy](library/tests/reference_common/docs/gpu-ci-pinned-rocke-test-reference-plan.md)
 
 ## Pinned convolution references
 
 The gfx942 and gfx950 forward suites each run 32 numerical cases and three
 failure controls without Torch. Both bundles are published and installed by
-default for provider artifact builds. See the [convolution reference guide](docs/conv-test-reference.md)
-for the numerical contract and the [shared workflow](docs/gpu-reference-workflow.md)
+default for provider artifact builds. See the [convolution reference guide](library/tests/conv_reference/docs/conv-test-reference.md)
+for the numerical contract and the [shared workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
 for qualification, publication, and candidate verification.
 
 From an installed provider test directory, run the matching suite:
@@ -719,7 +722,7 @@ or kernel-pack execution. See the [six-lane validation record](docs/conv-six-lan
 
 ## Shared GPU reference artifacts
 
-Use [Adding or updating a pinned GPU reference](docs/gpu-reference-workflow.md)
+Use [Adding or updating a pinned GPU reference](library/tests/reference_common/docs/gpu-reference-workflow.md)
 for archive creation, qualification, publication, and enrollment. Both operations
 use `library/tests/reference_common/artifact.py`; archive commands require an
 explicit `--operation`, authenticate against a reviewed lock, and use only the
@@ -759,7 +762,7 @@ controls. Confirm the matching entries executed with zero selected GPU skips.
 For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
 entry with code 77. There is no installed gfx1200 pinned entry until its own
 archive is qualified and published. See
-[gfx120X family selection](docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
+[gfx120X family selection](library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
 for the distinction between a valid skip and GPU reference coverage.
 
 Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
@@ -775,7 +778,7 @@ dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/refer
 
 See the [reference inventory](platform/tests/README.md#installed-pinned-reference-suites)
 for the expected entries and cases, and the
-[WMMA runtime requirements](docs/sdpa-test-reference.md#standalone-wmma-coverage)
+[WMMA runtime requirements](library/tests/sdpa_reference/docs/sdpa-test-reference.md#standalone-wmma-coverage)
 for the tested gfx1151/gfx1201 environments.
 
 The shared launcher blocks Torch imports in baseline and current worker
@@ -800,7 +803,7 @@ and selects by the physical HIP processor when they are absent. It does not
 infer reference enrollment from family names. A processor without a published
 cohort skips the other processors' suites; this records absent pinned-reference
 coverage. Explicit candidate requests still require their bundle and lock.
-See the [processor-selection rules](docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
+See the [processor-selection rules](library/tests/reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 Adding a
 published architecture creates a separate CTest automatically. Add its exact
 test name to the provider category YAML; it also requires an adapter, qualified

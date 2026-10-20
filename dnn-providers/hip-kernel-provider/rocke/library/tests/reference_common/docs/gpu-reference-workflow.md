@@ -7,14 +7,20 @@ SPDX-License-Identifier: MIT
 
 This is the authoritative authoring and publication workflow for rocKE pinned
 GPU references. Use it when adding coverage, replacing a baseline, or enrolling
-an operation on another architecture. The [SDPA](sdpa-test-reference.md) and
-[convolution](conv-test-reference.md) guides own their numerical contracts and
+an operation on another architecture. The [SDPA](../../sdpa_reference/docs/sdpa-test-reference.md) and
+[convolution](../../conv_reference/docs/conv-test-reference.md) guides own their numerical contracts and
 coverage descriptions; they link here for the procedure.
+
+Read [kernel arguments and compatibility](README.md#kernel-arguments-and-compatibility)
+for how the current kernel and frozen baseline keep separate launch ABIs, and
+[baseline replacement](README.md#when-to-replace-the-baseline) for when a new
+qualification is needed.
 
 ## Decide what must change
 
 | Change | Required work |
 |---|---|
+| Change the current kernel or its launch arguments without changing the enrolled cases or numerical contract | Update its caller and any affected test adapter; verify against the existing baseline. Update export bindings before qualifying that revision as a future baseline |
 | Add or change cases on an existing operation/architecture | Update the cohort and coverage checks, qualify the complete resulting cohort, replace that pair's archive, lock, and DVC pointer |
 | Replace the frozen baseline implementation | Export the selected committed revision and independently qualify the complete cohort; replace the archive, lock, and pointer |
 | Change the baseline compiler target, such as gfx1201 to gfx12-generic | Recompile from a committed source revision supporting that target, independently qualify, and replace the archive, lock, and pointer |
@@ -39,7 +45,7 @@ For example, the convolution coverage request from
 [PR #13106](https://github.com/ROCm/rocm-libraries/pull/13106#discussion_r4200111867)
 motivates output-channel coverage: K=96 exercises a second N tile and its partial tail
 when tile_n=64; an odd K exercises the default epilogue. Check both FP16 and BF16.
-The [convolution guide](conv-test-reference.md#coverage-and-execution) records
+The [convolution guide](../../conv_reference/docs/conv-test-reference.md#coverage-and-execution) records
 the current cohort; its architecture adapter is the source of exact case geometry.
 Assert the intended dispatch properties in host tests and verify the exported
 kernel metadata during qualification. Different runtime geometries can share a
@@ -120,7 +126,7 @@ Keep the archive, lock, installation directory, and CTest entry keyed by the
 qualified processor (`gfx1200` or `gfx1201`). The artifact splitter recognizes
 those directories. When both are published, a family job can download both but
 runs only the matching processor's suite. Until a processor is published, its
-pinned CTest entry is absent. See [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection)
+pinned CTest entry is absent. See [family CI selection](../../sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
 for the skip and failure rules. Do not install the payload under `gfx12-generic`: that name
 does not identify a processor artifact in the existing splitter. Enrollment in
 the qualification registry alone does not publish a processor's suite; add it
@@ -151,7 +157,7 @@ ROCm GPU. Both operations set B to the largest measured baseline error bound
 against all enabled references. No fixed percentage margin is reserved; the
 comparison limit C is rounded strictly below T-B, so D<=C implies D+B<T.
 The NumPy–Torch gap remains diagnostic. Existing published bundles retain
-their old authenticated limits until replaced through this workflow. See the [SDPA contract](sdpa-test-reference.md#optional-torch-reference-agreement-during-qualification)
+their old authenticated limits until replaced through this workflow. See the [SDPA contract](../../sdpa_reference/docs/sdpa-test-reference.md#optional-torch-reference-agreement-during-qualification)
 for scope and reference-only auditing. The
 convolution oracle-only audit is:
 
@@ -237,7 +243,7 @@ must be available remotely even for a job that later skips that processor's suit
 
 For a newly published architecture, add it to
 `ROCKE_PUBLISHED_SDPA_ARCHITECTURES` or `ROCKE_PUBLISHED_CONV_ARCHITECTURES` in
-[`PublishedGpuReferences.cmake`](../platform/cmake/PublishedGpuReferences.cmake).
+[`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake).
 For new operations, add the corresponding list alongside the CMake support from
 step 1. Updating coverage on an already published pair needs no enrollment change.
 CMake consumes only standard archive and baseline-lock paths. Missing or corrupt
@@ -264,11 +270,11 @@ Run the source publication/install checks:
 python -m pytest platform/tests/test_gpu_references.py -q
 ```
 
-Follow the existing [build procedure](../BUILDING.md) to configure and install
+Follow the existing [build procedure](../../../../BUILDING.md) to configure and install
 with `ROCKE_INSTALL_TEST_GPU_REFERENCES=ON`. Fetch all published archives needed
 by that configuration. In a fresh installed tree, verify the candidate manifest
 and lock match the reviewed files, then run the
-[Torch-free installed reference procedure](../TESTING.md#running-installed-reference-tests-without-torch)
+[Torch-free installed reference procedure](../../../../TESTING.md#running-installed-reference-tests-without-torch)
 on matching hardware with source paths removed from the environment.
 
 The harness and committed locks belong in the generic test artifact. Each
@@ -309,13 +315,13 @@ another processor or permit reuse of another processor's certificate.
 
 New published pairs get separate `rocke_<operation>_gpu_<arch>_pytest` CTest
 entries. Add each new entry to the provider's
-[`ROCKE_ENGINE_test_categories_external.yaml`](../../ROCKE_ENGINE_test_categories_external.yaml)
+[`ROCKE_ENGINE_test_categories_external.yaml`](../../../../../ROCKE_ENGINE_test_categories_external.yaml)
 and verify the real provider selector includes it. Adding cases to an existing
 pair uses its existing entry. Preserve explicit architecture selection and check
 that expected GPU cases did not skip; a passing empty selection proves nothing.
 
 Update the operation's coverage description and the
-[test inventory](../platform/tests/README.md#installed-pinned-reference-suites).
+[test inventory](../../../../platform/tests/README.md#installed-pinned-reference-suites).
 Review case changes, pointer, lock, and qualification evidence together. Report
 host cases, GPU comparisons, negative controls, and skips separately. The bundle
 and matching source cohort must be available together when CI runs. Keep this

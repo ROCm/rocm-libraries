@@ -12,6 +12,9 @@ requires no Torch. Each of gfx942 and gfx950 has a published 32-case forward
 bundle with its own trusted lock and DVC pointer. Gradients use separate live
 NumPy checks and do not reuse the forward certificate.
 
+See the [shared compatibility and baseline policy](../../reference_common/docs/README.md#kernel-arguments-and-compatibility)
+for kernel argument changes, frozen replay, and when a baseline must be replaced.
+
 ## Coverage and execution
 
 Each forward cohort contains FP16 and BF16 cases for sixteen geometries:
@@ -52,7 +55,7 @@ of 0.05, with three repetitions, immutable-buffer checks, and state reset.
 
 These bounded suites exercise Python-emitted kernels. Native provider selection,
 shipped kernel packs, direct implementation sweeps, stream-K, 3-D, and additional
-processors remain outside this scope. See the [coverage inventory](conv-coverage-roadmap.md).
+processors remain outside this scope. See the [coverage inventory](../../../../docs/conv-coverage-roadmap.md).
 
 ## Numerical contract
 
@@ -111,7 +114,7 @@ atomic workspaces need initialization rather than indiscriminate NaN poisoning.
 
 ## Qualification, coverage updates, and publication
 
-Follow [Adding or updating a pinned GPU reference](gpu-reference-workflow.md)
+Follow [Adding or updating a pinned GPU reference](../../reference_common/docs/gpu-reference-workflow.md)
 for the authoritative snapshot, qualification, candidate verification, DVC
 publication, and installation procedure. Select operation `conv`. The workflow
 includes optional offline CPU Torch cross-checks and requires a separate
@@ -148,17 +151,17 @@ Selection uses physical GPU identity; family names do not imply reference
 enrollment. Missing hardware or a GPU outside the requested targets fails a
 requested processor suite, and missing or corrupt reference data fails on matching
 hardware. See the shared
-[processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs).
+[processor-selection rules](../../reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 
 Shared numeric, digest, archive, snapshot, and interpreter-transport support lives
 in `library/tests/reference_common`. Both operations import that support directly. Existing frozen SDPA bundles remain self-contained; newly qualified bundles
 also freeze the shared support needed by their replay workers.
 
-Archive packaging uses the [packing and publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
+Archive packaging uses the [packing and publication workflow](../../reference_common/docs/gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
 
 ## Validation evidence
 
-The [six-lane record](conv-six-lane-validation.md) separates the original
+The [six-lane record](../../../../docs/conv-six-lane-validation.md) separates the original
 October 14 qualification and installed checks from validation of the current
 port. Each baseline was independently qualified against NumPy over all 32 cases;
 those expanded bundles did not use the optional Torch cross-check. Do not infer
@@ -179,6 +182,6 @@ dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles
 ```
 
 For qualification, candidate verification, publication, and installed checks,
-follow the [shared workflow](gpu-reference-workflow.md). A change to cases,
+follow the [shared workflow](../../reference_common/docs/gpu-reference-workflow.md). A change to cases,
 inputs, the numerical contract, or the baseline requires complete independent
 requalification. Never edit a qualified manifest to make a new cohort pass.

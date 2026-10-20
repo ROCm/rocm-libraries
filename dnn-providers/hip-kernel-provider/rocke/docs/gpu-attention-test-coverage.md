@@ -86,7 +86,7 @@ D128 Hq16/Hkv4 with default and persistent grids; FP16 D64 Hq16/Hkv16 default;
 FP16 D128 Hq16/Hkv16 persistent; and BF16 D64 Hq16/Hkv4 persistent. All use
 B1/Sq512/Sk512 and causal masking. The adapter selects wide DMA for persistent,
 causal D128 cases.
-See the [SDPA guide](sdpa-test-reference.md#gfx950-base-dense-cohort) for exact
+See the [SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx950-base-dense-cohort) for exact
 candidates, qualification evidence, and publication status.
 
 These are equivalent configurations with different inputs from the Torch tests.
@@ -107,8 +107,8 @@ The gfx1201 replacement compiles for `gfx12-generic` and is published in DVC.
 The gfx1200 adapter uses the same compile target but has no qualified
 archive or installed pinned suite yet. On gfx1200, a gfx120X family job skips
 the gfx1201 pinned suite with code 77. That skip does not count as gfx1200
-numerical coverage; see [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
-See the [SDPA guide](sdpa-test-reference.md#standalone-wmma-coverage) for
+numerical coverage; see [family CI selection](../library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection).
+See the [SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md#standalone-wmma-coverage) for
 qualification provenance, runtime requirements, and publication status.
 
 The historical source inventory below is unchanged by this new cohort.
@@ -173,7 +173,7 @@ The reference suite uses NumPy PCG64 seed 0, standard-normal float32 samples,
 then fp16/bf16 rounding and exact digest checks. Original Torch tests generate
 random samples on the GPU through Torch. The samples differ even when the seed
 number is equal. There is one qualified input recipe per row, not a seed sweep.
-See [the SDPA guide](sdpa-test-reference.md) for the oracle and accuracy budget.
+See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md) for the oracle and accuracy budget.
 
 ## GPU test files
 
@@ -446,4 +446,4 @@ and provider C++ integration outside this GPU attention map.
 
 This map does not inventory convolution tests. A convolution reference cohort
 needs its own operation-specific coverage map, as described in the
-[strategy and extension guide](gpu-ci-pinned-rocke-test-reference-plan.md#add-convolution-or-another-operation).
+[strategy and extension guide](../library/tests/reference_common/docs/gpu-ci-pinned-rocke-test-reference-plan.md#add-convolution-or-another-operation).

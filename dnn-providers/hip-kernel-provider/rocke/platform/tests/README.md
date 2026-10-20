@@ -187,9 +187,9 @@ and architecture retains a separate archive, lock, and installed payload.
 The optional `conv_reference/check_torch_reference.py` is an explicit offline
 oracle audit. It is excluded from installation and normal pytest discovery.
 For adding cases, replacing bundles, or enrolling targets, follow the
-[authoritative reference workflow](../../docs/gpu-reference-workflow.md).
+[authoritative reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md).
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)
-and the [convolution guide](../../docs/conv-test-reference.md) for commands,
+and the [convolution guide](../../library/tests/conv_reference/docs/conv-test-reference.md) for commands,
 publication requirements, and coverage limits.
 
 The convolution gradient host contract joins `rocke_library_conv_pytest`.
