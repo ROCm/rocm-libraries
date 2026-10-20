@@ -115,6 +115,7 @@ from rocke.helpers.transforms import (
 )
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
+    _implicit_gemm_output_config,
     ConvAccumulatorEpilogue,
     ConvDataSpec,
     ConvProblem,
@@ -3867,12 +3868,9 @@ def _emit_wgrad_direct_epilogue_wmma(
     dW_desc = (
         None if p.is_pointwise else make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
     )
-    c_map = op.c_layout()
-    _fp32_out = spec.data.dtype_d == "fp32"
-    _bf16_out = spec.data.dtype_d == "bf16"
-    _elem_bytes = 4 if _fp32_out else 2
-
-    flat = 0
+    c_map, _fp32_out, _bf16_out, _elem_bytes, flat = _implicit_gemm_output_config(
+        op, spec
+    )
     for mi in range(mfmas_m):
         for ni in range(mfmas_n):
             acc = accs[flat]

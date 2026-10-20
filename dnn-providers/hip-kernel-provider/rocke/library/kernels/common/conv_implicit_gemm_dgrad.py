@@ -85,6 +85,7 @@ from rocke.helpers.transforms import (
 )
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
+    _implicit_gemm_output_config,
     ConvAccumulatorEpilogue,
     ConvDataSpec,
     ConvProblem,
@@ -2640,12 +2641,9 @@ def _emit_dgrad_direct_epilogue_wmma(
     c_M = params["p_dg_M"]
     c_N = params["p_dg_N"]
     dX_desc = make_dgrad_dx_descriptor_dynamic(b, params)
-    c_map = op.c_layout()
-    _fp32_out = spec.data.dtype_d == "fp32"
-    _bf16_out = spec.data.dtype_d == "bf16"
-    _elem_bytes = 4 if _fp32_out else 2
-
-    flat = 0
+    c_map, _fp32_out, _bf16_out, _elem_bytes, flat = _implicit_gemm_output_config(
+        op, spec
+    )
     for mi in range(mfmas_m):
         for ni in range(mfmas_n):
             acc = accs[flat]
@@ -2719,12 +2717,9 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
 
-    c_map = op.c_layout()
-    _fp32_out = spec.data.dtype_d == "fp32"
-    _bf16_out = spec.data.dtype_d == "bf16"
-    _elem_bytes = 4 if _fp32_out else 2
-
-    flat = 0
+    c_map, _fp32_out, _bf16_out, _elem_bytes, flat = _implicit_gemm_output_config(
+        op, spec
+    )
     for mi in range(mfmas_m):
         for ni in range(mfmas_n):
             acc = accs[flat]
