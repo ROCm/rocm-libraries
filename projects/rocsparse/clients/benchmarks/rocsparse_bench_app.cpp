@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ rocsparse_bench_app_base::rocsparse_bench_app_base(int argc, char** argv)
     , m_bench_cmdlines(argc, argv)
     , m_bench_timing(m_bench_cmdlines.get_nsamples(), m_bench_cmdlines.get_nruns())
 
-          {};
+{};
 
 rocsparse_status rocsparse_bench_app_base::run_case(int isample, int irun, int argc, char** argv)
 {
@@ -211,6 +211,32 @@ void rocsparse_bench_app::export_item(std::ostream& out, rocsparse_bench_timing_
 
 rocsparse_status rocsparse_bench_app::export_file()
 {
+    //
+    // Describe the device the cases actually ran on. run_case() selects it through
+    // rocsparse_bench, so the current device is the benchmarked one.
+    //
+    // This is done before the output file is opened: opening it truncates any existing
+    // file, so failing afterwards would leave a truncated, invalid json behind.
+    //
+    int              device_id  = 0;
+    const hipError_t get_status = hipGetDevice(&device_id);
+    if(get_status != hipSuccess)
+    {
+        std::cerr << "rocsparse-bench error: cannot get the current device: "
+                  << hipGetErrorString(get_status) << " (" << get_status << ")" << std::endl;
+        return rocsparse_status_internal_error;
+    }
+
+    hipDeviceProp_t  prop;
+    const hipError_t prop_status = hipGetDeviceProperties(&prop, device_id);
+    if(prop_status != hipSuccess)
+    {
+        std::cerr << "rocsparse-bench error: cannot get properties of device ID " << device_id
+                  << ": " << hipGetErrorString(prop_status) << " (" << prop_status << ")"
+                  << std::endl;
+        return rocsparse_status_internal_error;
+    }
+
     const char* ofilename = this->m_bench_cmdlines.get_ofilename();
     if(ofilename == nullptr)
     {
@@ -232,7 +258,7 @@ rocsparse_status rocsparse_bench_app::export_file()
     //
     // Write header.
     //
-    status = define_results_json(out);
+    status = define_results_json(out, prop);
     if(status != rocsparse_status_success)
     {
         std::cerr << "run_cases failed at line " << __LINE__ << std::endl;
@@ -302,7 +328,8 @@ rocsparse_status
     return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
+rocsparse_status rocsparse_bench_app::define_results_json(std::ostream&          out,
+                                                          const hipDeviceProp_t& prop)
 {
     out << "{" << std::endl;
     auto        end      = std::chrono::system_clock::now();
@@ -317,15 +344,6 @@ rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
     out << "\"date\": \"" << str << "\"," << std::endl;
     out << "\"rocSPARSE version\": \"" << rocsparse_get_version() << "\"," << std::endl;
 
-    //
-    // !!! To fix, not necessarily the gpu used from rocsparse_bench.
-    //
-    hipDeviceProp_t prop;
-    if(hipGetDeviceProperties(&prop, 0) != hipSuccess)
-    {
-        std::cerr << "rocsparse-bench error: cannot get device properties" << std::endl;
-        return rocsparse_status_internal_error;
-    }
     gpu_config g(prop);
     g.print_json(out);
 
@@ -431,9 +449,7 @@ rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
     }
     out << "]," << std::endl << std::endl;
     ;
-    out << "\""
-        << "results"
-        << "\": [";
+    out << "\"" << "results" << "\": [";
 
     return rocsparse_status_success;
 }

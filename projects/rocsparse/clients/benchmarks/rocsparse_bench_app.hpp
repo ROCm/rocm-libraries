@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 
 #include "rocsparse-types.h"
 #include "rocsparse_bench_cmdlines.hpp"
+#include <hip/hip_runtime_api.h>
 #include <iostream>
 #include <vector>
 
@@ -44,7 +45,7 @@ public:
     {
         return this->value;
     };
-    inline constexpr rocsparse_benchfile_format(){};
+    inline constexpr rocsparse_benchfile_format() {};
     inline constexpr explicit rocsparse_benchfile_format(rocsparse_int ival)
         : value((value_type)ival)
     {
@@ -121,14 +122,14 @@ struct rocsparse_bench_timing_t
         std::vector<double>      gbs{};
         std::vector<std::string> outputs{};
         std::string              outputs_legend{};
-        item_t(){};
+        item_t() {};
 
         explicit item_t(int nruns_)
             : m_nruns(nruns_)
             , msec(nruns_)
             , gflops(nruns_)
             , gbs(nruns_)
-            , outputs(nruns_){};
+            , outputs(nruns_) {};
 
         item_t& operator()(int nruns_)
         {
@@ -285,7 +286,7 @@ public:
         return s_instance;
     }
 
-    rocsparse_bench_app(const rocsparse_bench_app&) = delete;
+    rocsparse_bench_app(const rocsparse_bench_app&)            = delete;
     rocsparse_bench_app& operator=(const rocsparse_bench_app&) = delete;
 
     static bool applies(int argc, char** argv)
@@ -313,7 +314,7 @@ protected:
     void             export_item(std::ostream& out, rocsparse_bench_timing_t::item_t& item);
     rocsparse_status define_case_json(std::ostream& out, int isample, int argc, char** argv);
     rocsparse_status close_case_json(std::ostream& out, int isample, int argc, char** argv);
-    rocsparse_status define_results_json(std::ostream& out);
+    rocsparse_status define_results_json(std::ostream& out, const hipDeviceProp_t& prop);
     rocsparse_status close_results_json(std::ostream& out);
     void             confidence_interval(const double               alpha,
                                          const int                  resize,
