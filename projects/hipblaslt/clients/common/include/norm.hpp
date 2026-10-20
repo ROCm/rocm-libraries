@@ -693,11 +693,11 @@ inline bool norm_check(double norm_error, hipDataType type)
     return tol > 0.0 && norm_error < tol;
 }
 
-inline bool norm_check(double               norm_error,
-                       hipDataType          outputType,
-                       hipblasComputeType_t compute_type,
-                       hipDataType          inputTypeA = static_cast<hipDataType>(-1),
-                       hipDataType          inputTypeB = static_cast<hipDataType>(-1))
+// The norm_error limit for a GEMM; 0 means no limit is known for these types.
+inline double norm_tolerance(hipDataType          outputType,
+                             hipblasComputeType_t compute_type,
+                             hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                             hipDataType          inputTypeB = static_cast<hipDataType>(-1))
 {
     double tol = norm_tolerance(outputType);
 
@@ -709,5 +709,15 @@ inline bool norm_check(double               norm_error,
     if(static_cast<int>(inputTypeB) >= 0)
         tol = std::max(tol, norm_tolerance(inputTypeB));
 
+    return tol;
+}
+
+inline bool norm_check(double               norm_error,
+                       hipDataType          outputType,
+                       hipblasComputeType_t compute_type,
+                       hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                       hipDataType          inputTypeB = static_cast<hipDataType>(-1))
+{
+    double tol = norm_tolerance(outputType, compute_type, inputTypeA, inputTypeB);
     return tol > 0.0 && norm_error < tol;
 }

@@ -214,6 +214,16 @@ int hipblaslt_bench_datafile(const std::string& filter, bool any_stride, hipDevi
     return ret;
 }
 
+int verification_exit(int ret)
+{
+    const int code = hipblaslt_bench_options::verification_exit_code(ret);
+    if(code != ret)
+        hipblaslt_cerr << "hipblaslt-bench: " << hipblaslt_bench_options::verification_failures()
+                       << " --verify check(s) failed; exiting with code " << code
+                       << " (--verify_strict)" << std::endl;
+    return code;
+}
+
 // Replace --batch with --batch_count for backward compatibility
 void fix_batch(int argc, char* argv[])
 {
@@ -475,6 +485,11 @@ try
         ("verify,v",
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
+
+        ("verify_strict",
+         value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
+         "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
+         "failed). Implies --verify.")
 
         ("ulp",
          value<bool>(&ulp)->default_value(false),
@@ -1039,7 +1054,7 @@ try
         perf_monitor->setDeviceId(device_id);
 
     if(datafile)
-        return hipblaslt_bench_datafile(filter, any_stride, props);
+        return verification_exit(hipblaslt_bench_datafile(filter, any_stride, props));
 
     // single bench run
 
@@ -1300,7 +1315,7 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp)
+    if(verify || ulp || hipblaslt_bench_options::verify_strict())
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1330,7 +1345,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    return run_bench_test(arg, filter, any_stride, props);
+    return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
 catch(const std::invalid_argument& exp)
 {
