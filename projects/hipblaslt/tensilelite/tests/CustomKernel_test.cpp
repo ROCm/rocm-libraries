@@ -208,6 +208,113 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
 
 namespace
 {
+    // A GEMM with MX block scales attached the way tensile_host.cpp does on gfx950,
+    // i.e. with setMXScaleA/B's default padScaleTensorFreeDim = true.
+    ContractionProblemGemm mxScaleProblem(
+        size_t M, size_t N, size_t K, bool transA, bool transB, int mxBlock = 32)
+    {
+        auto problem = ContractionProblemGemm::GEMM_Strides(transA,
+                                                            transB,
+                                                            rocisa::DataType::Float4,
+                                                            rocisa::DataType::Float4,
+                                                            rocisa::DataType::BFloat16,
+                                                            rocisa::DataType::BFloat16,
+                                                            M,
+                                                            N,
+                                                            K,
+                                                            1,
+                                                            transA ? K : M,
+                                                            transA ? K * M : M * K,
+                                                            transB ? N : K,
+                                                            transB ? N * K : K * N,
+                                                            M,
+                                                            M * N,
+                                                            M,
+                                                            M * N,
+                                                            0.0);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
+        problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
+        return problem;
+    }
+
+    // The int64 this problem emits into a probe kernel's single scale-stride slot.
+    int64_t emittedScaleStride(CustomArgSemantic semantic, ContractionProblemGemm const& problem)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::int64, semantic});
+        solution.sizeMapping.globalSplitU = 1;
+
+        auto              device = probeDevice();
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+
+        auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+        EXPECT_EQ(invocation.args.size(), sizeof(int64_t));
+        int64_t stride = 0;
+        std::memcpy(&stride, invocation.args.data(), sizeof(stride));
+        return stride;
+    }
+}
+
+// setMXScaleA/B pad the scale tensor for the Tensile-generated gfx950 subtile
+// kernels, which recompute the pitch from K anyway and ignore the value they are
+// handed. An external custom kernel (rocRoller, aiter, triton) does not: it takes
+// this slot verbatim as the leading dimension of the caller's scale buffer, and the
+// caller packs that buffer compactly. Handing it the padded pitch mis-addresses
+// every scale row past the first whenever ceil(K/mxBlock) % 8 != 0.
+TEST(CustomKernelTest, ScaleStrideIsCompactNotPadded)
+{
+    // TN: K is the fast (bound) dim of both A and B, so the padded K-block count
+    // would leak straight into the stride.
+    struct
+    {
+        size_t  K;
+        int64_t compact;
+        int64_t padded;
+    } const tnCases[] = {
+        {128, 4, 8}, // ceil(K/32) = 4  -> padded to 8
+        {384, 12, 16}, // ceil(K/32) = 12 -> padded to 16
+        {256, 8, 8}, // ceil(K/32) = 8  -> already aligned, the two agree
+    };
+
+    for(auto const& c : tnCases)
+    {
+        auto problem = mxScaleProblem(64, 64, c.K, /*transA*/ true, /*transB*/ false);
+
+        // The descriptor really does carry the padding; we are diverging from it.
+        EXPECT_EQ(problem.mxsa().strides()[1], static_cast<size_t>(c.padded)) << "K=" << c.K;
+        EXPECT_EQ(problem.mxsb().strides()[1], static_cast<size_t>(c.padded)) << "K=" << c.K;
+
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), c.compact)
+            << "K=" << c.K;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), c.compact)
+            << "K=" << c.K;
+    }
+}
+
+// The fix derives the stride from boundIndices() rather than assuming K sits at
+// index 0, so it has to stay correct when the bound dim is the slow one. NN puts
+// K slow in A (stride is the unpadded free dim M) and fast in B (stride is the
+// unpadded K-block count), exercising both orientations in one problem. M=60 and
+// K=128 are both unaligned, so compact and padded differ on each side.
+TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
+{
+    auto problem = mxScaleProblem(60, 60, 128, /*transA*/ false, /*transB*/ false);
+
+    // A: bound dim is index 1, so the stride is A's free dim, padded to 32.
+    EXPECT_EQ(problem.mxsa().strides()[1], 64u);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), 60);
+
+    // B: bound dim is index 0, so the stride is the K-block count, padded to 8.
+    EXPECT_EQ(problem.mxsb().strides()[1], 8u);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), 4);
+}
+
+namespace
+{
     // Grid x and ComputeUnits kernarg of a persistent probe kernel.
     std::pair<size_t, int32_t> computeUnitsLaunch(int smCountTarget, int persistentMaxCUs)
     {
