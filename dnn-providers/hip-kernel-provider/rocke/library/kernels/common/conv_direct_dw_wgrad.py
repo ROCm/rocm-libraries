@@ -43,21 +43,21 @@ _WAVE = 64
 
 _FOLD_SLICES = 16
 _FOLD_COLS = 64
+# Partition loads each slice keeps in flight.
+_FOLD_UNROLL = 4
 
 
 @dataclass(frozen=True)
 class DwWgradFoldSpec:
+    """Fold of ``taps`` partial gradients per output channel into an fp32 dW."""
+
     taps: int
-    dtype_d: str = "fp32"
     name: str = "dw_wgrad_fold"
-    unroll: int = 4
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
-            self.name, f"t{self.taps}", f"u{self.unroll}", self.dtype_d
-        )
+        return kernel_name_join(self.name, f"t{self.taps}")
 
     def launch_geometry(self, channels: int):
         return (ceil_div(channels * self.taps, _FOLD_COLS), 1, 1), (
@@ -78,7 +78,7 @@ def dw_wgrad_fold_signature(spec: DwWgradFoldSpec) -> list:
     sb = (
         SignatureBuilder()
         .ptr("A", "fp32")
-        .ptr("D", spec.dtype_d)
+        .ptr("D", "fp32")
         .scalar("A_bytes", "i32")
         .scalar("D_bytes", "i32")
     )
@@ -90,15 +90,13 @@ def dw_wgrad_fold_signature(spec: DwWgradFoldSpec) -> list:
 def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDef:
     """Each block owns 64 outputs; 16 waves split the partition axis, meet in LDS."""
     from rocke.core.ir import I32, PtrType
-    from rocke.helpers.io import io_ir_type, store_scalar_from_f32
 
-    fp32_out = spec.dtype_d in ("fp32", "f32")
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = _FOLD_SLICES * _WAVE
     ws = b.param("A", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     dw = b.param(
         "D",
-        PtrType(F32 if fp32_out else io_ir_type(spec.dtype_d), "global"),
+        PtrType(F32, "global"),
         noalias=True,
         writeonly=True,
         align=4,
@@ -119,7 +117,7 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
     o_ok = b.cmp_lt(o, n_out)
     o_safe = b.select(o_ok, o, ci(0))
     zero = b.const_f32(0.0)
-    U = spec.unroll
+    U = _FOLD_UNROLL
     # Partition p = slc + SLICES * (U * it + j).
     n_it = b.div(b.add(parts, ci(_FOLD_SLICES * U - 1)), ci(_FOLD_SLICES * U))
     loop = b.scf_for_iter(
@@ -156,10 +154,7 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
         tap = b.div(o, chans)
         c = b.mod(o, chans)
         off = b.add(b.mul(c, ci(spec.taps)), tap)
-        if fp32_out:
-            b.global_store(dw, off, t, align=4)
-        else:
-            store_scalar_from_f32(b, dw, off, t, dtype=spec.dtype_d)
+        b.global_store(dw, off, t, align=4)
     return b.kernel
 
 
@@ -389,9 +384,8 @@ class DwWgradLdsSpec:
     lanes_w: int = 32  # lanes along columns
     cols_per_lane: int = 1
     prefetch: int = 2
-    rows_per_seg: int = 0  # 0: whole image height
+    rows_per_seg: int = 32  # output rows per segment (rounded up to the unroll)
     target_blocks: int = 1024
-    waves_per_eu: int = 0
 
     @property
     def block_c(self) -> int:
@@ -414,17 +408,13 @@ class DwWgradLdsSpec:
         return (self.block_wo - 1) * p.stride + p.KW
 
     def rps(self) -> int:
-        p = self.problem
-        rps = self.rows_per_seg or p.Ho
-        return ceil_div(rps, self.unroll) * self.unroll
+        return ceil_div(self.rows_per_seg, self.unroll) * self.unroll
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         flags = {"bf16": True} if p.dtype == "bf16" else {}
-        if self.waves_per_eu:
-            flags[f"wpe{self.waves_per_eu}"] = True
         return kernel_name_join(
             self.name,
             f"f{p.KH}x{p.KW}p{p.PAD}s{p.stride}",
@@ -481,6 +471,8 @@ def is_valid_dw_wgrad_lds_spec(spec: DwWgradLdsSpec, arch: str = "gfx950"):
         return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     if spec.prefetch < 1:
         return False, "prefetch >= 1"
+    if spec.rows_per_seg < 1:
+        return False, "rows_per_seg >= 1"
     return True, "ok"
 
 
@@ -509,8 +501,6 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = T
     b.kernel.attrs["lds_alias_scopes"] = True
-    if spec.waves_per_eu:
-        b.kernel.attrs["waves_per_eu"] = (spec.waves_per_eu, 8)
     params = emit_direct_params(b, direction="wgrad", io_type=io_type)
 
     def ci(v: int) -> Value:

@@ -71,12 +71,8 @@ class DirectWgradTiledSpec:
     rows_per_seg: int = 30
     prefetch: int = 2
     target_blocks: int = 256
-    xcd_remap: bool = True
     # Main-loop unroll override (a multiple of prefetch + 1); 0 = default.
     row_unroll: int = 0
-    # amdgpu-waves-per-eu lower bound, keeping the register budget at
-    # 512 / waves_per_eu; 0 leaves it to the compiler.
-    waves_per_eu: int = 2
     # Images packed into one 32-column strip: the MFMA reduction runs over
     # unfold_n images x 32 / unfold_n columns, so a narrow image (W = 40, say)
     # does not leave most of a 32-wide strip empty.
@@ -141,12 +137,8 @@ class DirectWgradTiledSpec:
 
         p = self.problem
         flags = {"bf16": True} if p.dtype == "bf16" else {}
-        if self.xcd_remap:
-            flags["xcd"] = True
         if self.row_unroll:
             flags[f"u{self.row_unroll}"] = True
-        if self.waves_per_eu != 2:
-            flags[f"wpe{self.waves_per_eu}"] = True
         if self.unfold_n > 1:
             flags[f"un{self.unfold_n}"] = True
         if self.q_groups > 1:
@@ -383,8 +375,8 @@ def build_direct_wgrad_tiled(
     b.kernel.attrs["max_workgroup_size"] = spec.threads_per_block
     # Separate scopes per row buffer, or the waitcnt pass drains the DMA ring.
     b.kernel.attrs["lds_alias_scopes"] = True
-    if spec.waves_per_eu:
-        b.kernel.attrs["waves_per_eu"] = (spec.waves_per_eu, 8)
+    # Two waves per SIMD: the register budget the 32x32 tile is sized for.
+    b.kernel.attrs["waves_per_eu"] = (2, 8)
     params = emit_direct_params(b, direction="wgrad", io_type=io_type)
 
     def ci(v: int) -> Value:
@@ -425,17 +417,16 @@ def build_direct_wgrad_tiled(
         b.div(b.add(ci(spec.target_blocks), b.sub(n_ch_tiles, c1)), n_ch_tiles),
     )
 
+    # Dispatch deals block ids round-robin over 8 XCDs; renumber so each XCD
+    # gets a contiguous run, i.e. the channel tiles of the same segments,
+    # which then share that XCD's L2.
     lin = b.block_id_x()
-    if spec.xcd_remap:
-        # Dispatch deals block ids round-robin over 8 XCDs; renumber so each
-        # XCD gets a contiguous run, i.e. the channel tiles of the same
-        # segments, which then share that XCD's L2.
-        n_blocks = b.mul(n_ch_tiles, n_splits)
-        xcd = b.mod(lin, ci(8))
-        pos = b.div(lin, ci(8))
-        per = b.div(n_blocks, ci(8))
-        rem = b.mod(n_blocks, ci(8))
-        lin = b.add(b.add(b.mul(xcd, per), b.smin(xcd, rem)), pos)
+    n_blocks = b.mul(n_ch_tiles, n_splits)
+    xcd = b.mod(lin, ci(8))
+    pos = b.div(lin, ci(8))
+    per = b.div(n_blocks, ci(8))
+    rem = b.mod(n_blocks, ci(8))
+    lin = b.add(b.add(b.mul(xcd, per), b.smin(xcd, rem)), pos)
     ch_tile = b.mod(lin, n_ch_tiles)
     split = b.div(lin, n_ch_tiles)
     c_tile = b.mod(ch_tile, n_c_tiles)
