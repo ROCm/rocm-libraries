@@ -122,8 +122,8 @@ def _compile_or_skip(kernel, *, arch: str):
 #     spilling is exactly the mechanism that holds occupancy constant -- so it is a
 #     distinct signal. Occupancy is the static multi-limiter estimate
 #     (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR
-#     / LDS / workgroup / wave cap, no GPU). Its per-arch caps are still PROVISIONAL
-#     (gfx942 in particular models a conservative 8 waves/SIMD) pending rocprofv3
+#     / LDS / workgroup / wave cap, no GPU). Its VGPR file matches the compiler;
+#     its AGPR, LDS and workgroup limiters are still PROVISIONAL pending rocprofv3
 #     calibration on real hardware, so treat it as a floor, not an exact oracle.
 _KERNEL_RESOURCE_BUDGETS = {
     # gfx950 dense persistent prefill: the 512-thread (8-wave) workgroup pins VGPR
