@@ -455,12 +455,13 @@ Other options: `--large` (larger tensors), `--strategy=stable|average`, and `--i
 
 Shows the runtime-load frontend target `hipdnn_frontend_dynamic`. The sample links only `hipdnn_frontend_dynamic`, not `libhipdnn_backend`. Creating the handle opens the backend at runtime. The sample runs an all-ones 1x1 convolution and checks that each output element equals the input channel count. The target is `hipdnn_sample_dynamic_backend_loading`. It takes no options.
 
-### cuDNN Compatibility Shim Samples
+## cuDNN Compatibility Shim Samples
 
-These samples are built only when hipDNN is configured with `HIPDNN_ENABLE_CUDNN_COMPATIBILITY`. They build a graph through the `hipdnn_frontend::compatibility::cudnn_frontend` shim with cuDNN-spelled types, then validate it. They are host-only and do not need a GPU. They take no options.
+Built only with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. They use cuDNN frontend spellings through the shim; see the [cuDNN shim guide](../docs/cudnn-shim.md).
 
-- [`ConvFprop`](./cudnn_shim/ConvFprop.cpp) (`hipdnn_sample_cudnn_shim_conv_fprop`)
-- [`Matmul`](./cudnn_shim/Matmul.cpp) (`hipdnn_sample_cudnn_shim_matmul`)
-- [`Layernorm`](./cudnn_shim/Layernorm.cpp) (`hipdnn_sample_cudnn_shim_layernorm`)
-- [`Pointwise`](./cudnn_shim/Pointwise.cpp) (`hipdnn_sample_cudnn_shim_pointwise`)
-- [`SdpaRoundTrip`](./cudnn_shim/SdpaRoundTrip.cpp) (`hipdnn_sample_cudnn_shim_sdpa_round_trip`): also needs `HIPDNN_ENABLE_SDPA`
+- [`cudnn_shim/ConvFprop.cpp`](./cudnn_shim/ConvFprop.cpp): builds and validates a convolution forward graph (host only).
+- [`cudnn_shim/Matmul.cpp`](./cudnn_shim/Matmul.cpp): builds and validates a batched matmul graph (host only).
+- [`cudnn_shim/Layernorm.cpp`](./cudnn_shim/Layernorm.cpp): builds and validates a layernorm forward graph (host only).
+- [`cudnn_shim/Pointwise.cpp`](./cudnn_shim/Pointwise.cpp): builds and validates a binary pointwise graph (host only).
+- [`cudnn_shim/SdpaRoundTrip.cpp`](./cudnn_shim/SdpaRoundTrip.cpp): builds and validates an SDPA forward graph (host only; also needs `HIPDNN_ENABLE_SDPA`).
+- [`cudnn_shim/HipifyConvFprop.cpp`](./cudnn_shim/HipifyConvFprop.cpp): a cuDNN frontend convolution forward program after textual hipify, with each rewritten line marked `// cuDNN:`. Runs on a GPU and checks the output.

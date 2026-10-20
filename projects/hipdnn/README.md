@@ -41,6 +41,7 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and extending the framework
 - **[Environment Configuration](./docs/Environment.md)** - Runtime configuration and logging setup
 - **[Operation Support](./docs/OperationSupport.md)** - Currently supported operations and their status
+- **[cuDNN Compatibility Shim](./docs/cudnn-shim.md)** - Compile cuDNN frontend v9 source against hipDNN
 - **[Samples](./samples/README.md)** - Frontend usage examples
 - **[API Reference](#api-documentation)** - Doxygen-generated API documentation
 
