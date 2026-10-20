@@ -124,3 +124,81 @@ and for template-sweep bundles:
 - `golden.path` validation and per-case tensor file/NaN/size checks (input and output tensors)
 - per-case metadata field validation
 - a directory with only one of `graph.template.json`/`sweep.json`
+
+## `generate_sdpa_bwd_golden.py`
+
+Generates a paired SDPA **forward** bundle and **backward** (`SdpaBwdNode`)
+bundle from one seeded pipeline run, with PyTorch as the independent reference
+source (RFC 0011). The CPU and GPU backward references are otherwise checked
+mainly against each other, so a shared misunderstanding passes those gate
+tests; golden data from a third source catches it.
+
+One run performs the whole pipeline, as RFC 0011 requires for backward
+operations:
+
+1. draw `Q`, `K`, `V` and `dO` from a single seeded RNG stream;
+2. run the forward pass to get `O` and `LSE`, and save the forward bundle;
+3. run the backward pass on **that** `O` and `LSE`, and save the backward
+   bundle, recording `forward_source` in its metadata.
+
+### Usage
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_golden.py \
+  --base-filename <dir>/quick/SdpaBackward/bhsd/bf16/Default/Default \
+  --forward-base-filename <dir>/quick/SdpaFwd/bhsd/bf16/Default/Default \
+  --q-dims 1 2 128 64 --v-dims 1 2 128 64 --attn-scale 0.125
+```
+
+`--forward-base-filename` is required: the forward pass whose `O` and `LSE` the
+backward bundle consumes must itself be saved as a bundle. Add `--right-bound 0`
+for a causal mask, `--left-bound N` for a sliding window, and
+`--diagonal-alignment bottom_right` to anchor the diagonal to the bottom-right
+corner. `--validate` cross-checks the gradients against PyTorch autograd.
+
+### Precision and reproducibility
+
+`reference_strategy` is `matched_precision`, RFC 0011's strategy for SDPA
+backward: inputs and gradients are stored in the bundle's IO dtype and every
+intermediate and accumulation is FP32. Softmax probabilities are recovered from
+the saved forward `LSE` rather than re-softmaxed, so the reference is anchored
+to the forward statistics the way a flash-attention kernel is. Backward is
+computed from the IO-dtype-rounded `O` that is written to the bundle, not from a
+higher-precision pre-conversion value. Rounded intermediates (ALMIOPEN-2704) are
+not modelled yet, which `intermediate_rounding: "none"` records.
+
+Regenerating with the same seed and PyTorch version reproduces byte-identical
+tensors. The RNG draw order (`Q`, `K`, `V`, `dO`) is part of that contract.
+
+### Supported feature surface
+
+Deliberately narrow; each unsupported feature fails loudly rather than emitting
+a wrong golden. Supported: BHSD layout, FP16/BF16, equal query and key/value
+head counts, independent `D_qk`/`D_v`, and the causal/sliding-window diagonal
+band with either alignment. Not supported yet: GQA, FP8, BSHD and ragged
+layouts, GROUP mode, dropout, bias/dBias, and ALiBi. Configurations that leave a
+query row fully masked are rejected, because the resulting `-inf` LSE makes
+every dependent gradient NaN.
+
+Mask semantics, stride computation, the forward pass and the LSE come from
+`utilities/sdpa_common.py`, which `generate_sdpa_fwd_golden.py` also uses, so
+the two generators cannot drift apart.
+
+### Tests
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/tests/test_generate_sdpa_bwd_golden.py
+```
+
+```bash
+ctest -R hipdnn_golden_bwd_generator_python_tests --output-on-failure
+```
+
+The tests skip themselves when PyTorch is not installed. They cover that one run
+writes both bundles, that the backward bundle's `forward_source` points at the
+forward bundle it was produced from, the `matched_precision` strategy, the graph
+node's gradient outputs and rank-4 FP32 stats tensor, tensor payload sizes,
+seed reproducibility, acceptance by `verify_golden_bundles.py --require-data`,
+rejection of unsupported configurations, and agreement with PyTorch autograd.
+They also assert that the paired forward bundle is byte-identical to what
+`generate_sdpa_fwd_golden.py` produces for the same configuration.
