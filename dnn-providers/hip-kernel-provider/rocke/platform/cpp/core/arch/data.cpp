@@ -2266,72 +2266,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x16_bf16"},
 };
 
-/* ----------------------------- gfx1151 (RDNA3.5) ------------------------- */
-static const rocke_mma_op_t k_mma_gfx1151[] = {
-    {"wmma",
-     "fp16",
-     "fp16",
-     "fp32",
-     16,
-     16,
-     16,
-     "wmma_f32_16x16x16_f16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_16x16x16_a,
-     &lm_wmma_16x16x16_b,
-     &lm_wmma_16x16x16_c},
-    {"wmma",
-     "bf16",
-     "bf16",
-     "fp32",
-     16,
-     16,
-     16,
-     "wmma_f32_16x16x16_bf16",
-     16,
-     16,
-     8,
-     32,
-     &lm_wmma_16x16x16_a,
-     &lm_wmma_16x16x16_b,
-     &lm_wmma_16x16x16_c},
-    {"wmma",
-     "i8",
-     "i8",
-     "i32",
-     16,
-     16,
-     16,
-     "wmma_i32_16x16x16_iu8",
-     4,
-     4,
-     8,
-     32,
-     &lm_wmma_iu8_a,
-     &lm_wmma_iu8_b,
-     &lm_wmma_iu8_c},
-    {"wmma",
-     "i4",
-     "i4",
-     "i32",
-     16,
-     16,
-     16,
-     "wmma_i32_16x16x16_iu4",
-     2,
-     2,
-     8,
-     32,
-     &lm_wmma_iu4_a,
-     &lm_wmma_iu4_b,
-     &lm_wmma_iu4_c},
-};
-
-/* ----------------------------- gfx1201 (RDNA4) -------------------------- */
-static const rocke_mma_op_t k_mma_gfx1201[] = {
+/* --------------------------- gfx12-generic (RDNA4) ---------------------- */
+static const rocke_mma_op_t k_mma_gfx12_generic[] = {
     {"wmma",
      "fp16",
      "fp16",
@@ -2812,54 +2748,6 @@ static const rocke_arch_target_t k_target_gfx950 = {
     .limits = {.max_threads_per_block = 1024, .vgprs = 512, .agprs = 256, .sgprs = 102},
 };
 
-static const rocke_arch_target_t k_target_gfx1151 = {
-    .gfx = "gfx1151",
-    .family = "rdna",
-    .target_family = "gfx11_rdna",
-    .wave_size = 32,
-    .lds_capacity_bytes = 65536,
-    .vmcnt_bits = 6,
-    .mma = {.ops = k_mma_gfx1151, .num_ops = K_NUM(k_mma_gfx1151)},
-    .memory = {
-        .has_async_lds = false,
-        .has_async_global_lds = false,
-        .has_ds_read_tr = false,
-        .has_tdm = false,
-        .buffer_load_max_dwords = 4,
-        .async_lds_max_dwords = 0,
-        .has_scalar_data_prefetch = false,
-        .has_global_prefetch = false,
-        .has_cluster_launch = false,
-        .has_multicast_load = false,
-        .has_global_float_atomic_add = false,
-    },
-    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
-};
-
-static const rocke_arch_target_t k_target_gfx1201 = {
-    .gfx = "gfx1201",
-    .family = "rdna",
-    .target_family = "gfx12_rdna",
-    .wave_size = 32,
-    .lds_capacity_bytes = 65536,
-    .vmcnt_bits = 6,
-    .mma = {.ops = k_mma_gfx1201, .num_ops = K_NUM(k_mma_gfx1201)},
-    .memory = {
-        .has_async_lds = false,
-        .has_async_global_lds = false,
-        .has_ds_read_tr = false,
-        .has_tdm = false,
-        .buffer_load_max_dwords = 4,
-        .async_lds_max_dwords = 0,
-        .has_scalar_data_prefetch = false,
-        .has_global_prefetch = false,
-        .has_cluster_launch = false,
-        .has_multicast_load = false,
-        .has_global_float_atomic_add = false,
-    },
-    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
-};
-
 static const rocke_arch_target_t k_target_gfx1250 = {
     .gfx = "gfx1250",
     .family = "cdna",
@@ -2884,7 +2772,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 
-static const rocke_arch_target_t k_target_gfx11_generic = {
+static constexpr rocke_arch_target_t k_target_gfx11_generic = {
     .gfx = "gfx11-generic",
     .family = "rdna",
     .target_family = "gfx11_rdna",
@@ -2908,16 +2796,14 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
     .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 
-/* gfx12-generic (RDNA4): the same WMMA atoms as gfx1201, so it shares that
- * catalog. */
-static const rocke_arch_target_t k_target_gfx12_generic = {
+static constexpr rocke_arch_target_t k_target_gfx12_generic = {
     .gfx = "gfx12-generic",
     .family = "rdna",
     .target_family = "gfx12_rdna",
     .wave_size = 32,
     .lds_capacity_bytes = 65536,
     .vmcnt_bits = 6,
-    .mma = {.ops = k_mma_gfx1201, .num_ops = K_NUM(k_mma_gfx1201)},
+    .mma = {.ops = k_mma_gfx12_generic, .num_ops = K_NUM(k_mma_gfx12_generic)},
     .memory = {
         .has_async_lds = false,
         .has_async_global_lds = false,
@@ -2934,6 +2820,21 @@ static const rocke_arch_target_t k_target_gfx12_generic = {
     .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };
 #pragma GCC diagnostic pop
+
+/* Rows that take their facts from another row (arch_specs.json "facts_of"):
+ * a member of a supported generic target whose recorded facts are all those
+ * of the generic target listing it. Its target is the generic's target with only
+ * `gfx` replaced, so every fact has one home in this engine too. The generic
+ * targets above are constexpr so these copies are made at compile time, never
+ * by a static initialiser another translation unit could race. */
+static constexpr rocke_arch_target_t facts_of(rocke_arch_target_t generic, const char* gfx)
+{
+    generic.gfx = gfx;
+    return generic;
+}
+
+static constexpr rocke_arch_target_t k_target_gfx1151 = facts_of(k_target_gfx11_generic, "gfx1151");
+static constexpr rocke_arch_target_t k_target_gfx1201 = facts_of(k_target_gfx12_generic, "gfx1201");
 
 /* =========================================================================
  * Shared registry + known-arches (sorted by gfx token).
