@@ -20,11 +20,14 @@ target_include_directories(rocthrust
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
+set(ROCTHRUST_EXPORT_DEPENDS)
+
 if(${LINK_HIP_DEVICE_LIBS})
   target_link_libraries(rocthrust
     INTERFACE
     roc::rocprim_hip
   )
+  list(APPEND ROCTHRUST_EXPORT_DEPENDS PACKAGE rocprim)
 endif()
 
 if(ROCTHRUST_USE_LIBHIPCXX AND TARGET libhipcxx::libhipcxx)
@@ -32,6 +35,7 @@ if(ROCTHRUST_USE_LIBHIPCXX AND TARGET libhipcxx::libhipcxx)
     INTERFACE
     libhipcxx::libhipcxx
   )
+  list(APPEND ROCTHRUST_EXPORT_DEPENDS PACKAGE libhipcxx)
 endif()
 
 # hipstdpar header target
@@ -65,16 +69,13 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-if(${LINK_HIP_DEVICE_LIBS})
-  # Export targets
-  rocm_export_targets(
-    TARGETS roc::rocthrust
-    DEPENDS PACKAGE rocprim
-    NAMESPACE roc::
-  )
-else()
-  rocm_export_targets(
-    TARGETS roc::rocthrust
-    NAMESPACE roc::
-  )
+# Export targets; generates find_dependency() for each PACKAGE in rocthrust-config.cmake
+set(ROCTHRUST_EXPORT_DEPENDS_ARGS)
+if(ROCTHRUST_EXPORT_DEPENDS)
+  set(ROCTHRUST_EXPORT_DEPENDS_ARGS DEPENDS ${ROCTHRUST_EXPORT_DEPENDS})
 endif()
+rocm_export_targets(
+  TARGETS roc::rocthrust
+  ${ROCTHRUST_EXPORT_DEPENDS_ARGS}
+  NAMESPACE roc::
+)
