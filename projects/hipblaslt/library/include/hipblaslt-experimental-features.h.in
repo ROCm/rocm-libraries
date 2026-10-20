@@ -1,0 +1,16 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Generated from library/experimental/features.cmake; do not edit.
+//
+// Experimental features in this build (each may change or be removed in any release):
+/*
+@HIPBLASLT_EXPERIMENTAL_BANNER@ */
+
+#pragma once
+
+#ifndef HIPBLASLT_EXPERIMENTAL_API_VERSION
+#error "include <hipblaslt/hipblaslt-experimental.h> instead"
+#endif
+
+@HIPBLASLT_EXPERIMENTAL_INCLUDES@
