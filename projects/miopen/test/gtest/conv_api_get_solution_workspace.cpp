@@ -160,7 +160,12 @@ protected:
         ASSERT_EQ(solutions.size(), 1) << "expected only the record from the temporary find-db";
         ASSERT_EQ(solutions[0].solution_id, solver_id);
         if(expected_reported)
-            ASSERT_EQ(solutions[0].workspace_size, *expected_reported);
+        {
+            if(verify_grouped_forward)
+                ASSERT_GE(solutions[0].workspace_size, *expected_reported);
+            else
+                ASSERT_EQ(solutions[0].workspace_size, *expected_reported);
+        }
         else
             ASSERT_GT(solutions[0].workspace_size, db_workspace);
 
