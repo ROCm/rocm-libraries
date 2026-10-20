@@ -63,6 +63,20 @@ DVC_REMOTE="golden-data"
 SHAPE_HD128=(--q-dims 1 1 256 128 --v-dims 1 1 256 128 --attn-scale "$SCALE_D128")
 SHAPE_HD192=(--q-dims 1 1 256 192 --v-dims 1 1 256 128 --attn-scale "$SCALE_D192")
 
+# Order the payloads of a bundle deterministically. Glob expansion sorts by the
+# ambient collation, which puts tensor12 before tensor1 in some locales and after
+# it in others -- enough to make the committed pointer differ between machines
+# even when every md5 matches. Sorting by the numeric UID removes that.
+sorted_tensor_bins() {
+    local bin uid
+    for bin in "$@"; do
+        uid="$(basename "$bin")"
+        uid="${uid##*tensor}"   # Small.tensor12.bin -> 12.bin
+        uid="${uid%%.bin}"
+        printf '%s\t%s\n' "$uid" "$bin"
+    done | sort -n -k1,1 | cut -f2-
+}
+
 # Emit one `outs:` entry for a tensor payload. DVC's hash for a file output is
 # the plain MD5 of its contents, so the pointer can be written complete here
 # rather than left for `dvc commit` to fill in -- which matters because the
@@ -89,9 +103,9 @@ write_dvc_pointer() {
     local bin
     {
         echo "outs:"
-        for bin in "$bundle_dir/$name".tensor*.bin; do
+        while IFS= read -r bin; do
             write_dvc_out "$bin"
-        done
+        done < <(sorted_tensor_bins "$bundle_dir/$name".tensor*.bin)
     } > "$bundle_dir/$name.tensors.dvc"
 }
 
@@ -131,9 +145,9 @@ write_sweep_dvc_pointer() {
     local bin
     {
         echo "outs:"
-        for bin in "$golden_dir"/tensor*.bin; do
+        while IFS= read -r bin; do
             write_dvc_out "$bin"
-        done
+        done < <(sorted_tensor_bins "$golden_dir"/tensor*.bin)
     } > "$golden_dir/tensors.dvc"
 }
 
