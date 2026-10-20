@@ -6,6 +6,7 @@ ROCm/rocMLIR@rocm-5.5.0 -H sha256:a5f62769d28a73e60bc8d61022820f050e97c977c8f6f6
 nlohmann/json@v3.11.2 -DJSON_MultipleHeaders=ON -DJSON_BuildTests=Off
 ROCm/FunctionalPlus@v0.2.22
 ROCm/eigen@3.4.0
-ROCm/frugally-deep@38c52448b1a4996b3e0e435a877d02441098b1dd
+# Temporary draft pin pending https://github.com/Dobiasd/frugally-deep/pull/468
+flferretti/frugally-deep@16e8edd8cd21544bdd4448531daa6cb3fb60a15f
 ../composablekernel/ -DCMAKE_BUILD_TYPE=Release #composable_kernel
 google/googletest@v1.14.0
