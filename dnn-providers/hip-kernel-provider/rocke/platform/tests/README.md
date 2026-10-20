@@ -131,17 +131,20 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 `run_all.py --build-root <build>` builds all configured targets before pytest,
 then obtains each native parity executable from CTest, as listed in
 `NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`),
-`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`) and `rocke_nontemporal_hip`
-(`ROCKE_NONTEMPORAL_HIP_TEST`). Both pytest passes receive those paths, so the
-storage IR/HIP parity, serialization, C++ builder type-rule parity and
-nontemporal HIP-source parity tests run automatically. `--config` selects the native test
-configuration (default `Release`). A build or fixture-discovery failure stops the
-runner instead of silently skipping coverage.
+`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`), `rocke_nontemporal_hip`
+(`ROCKE_NONTEMPORAL_HIP_TEST`) and `rocke_unsigned_int_ops`
+(`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
+storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
+HIP-source parity and unsigned integer op C API parity tests run automatically.
+The installed `rocke_pytest` ctest sets `ROCKE_UNSIGNED_INT_OPS_CLI` itself.
+`--config` selects the native test configuration (default `Release`). A build
+or fixture-discovery failure stops the runner instead of silently skipping
+coverage.
 
 An explicit `ROCKE_STORAGE_TEST` / `ROCKE_IR_TYPES_TEST` /
-`ROCKE_NONTEMPORAL_HIP_TEST` overrides
-discovery for that binary and must name an existing executable; it does not skip
-the configured build. With no configured build or explicit override, the runner
+`ROCKE_NONTEMPORAL_HIP_TEST` / `ROCKE_UNSIGNED_INT_OPS_CLI` overrides discovery
+for that binary and must name an existing executable; it does not skip the
+configured build. With no configured build or explicit override, the runner
 reports that parity as skipped; direct pytest invocations can use the same
 overrides.
 
