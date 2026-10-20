@@ -103,9 +103,8 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        gfx942_only = (
-            d.get("emit_lse", False)
-            or any(k in d for k in ("use_cfvst", "lds_num_buffers", "v_reg_prefetch"))
+        gfx942_only = d.get("emit_lse", False) or any(
+            k in d for k in ("use_cfvst", "lds_num_buffers", "v_reg_prefetch")
         )
         spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
@@ -322,8 +321,7 @@ def _cases():
             emit_lse=True, use_cfvst=True, v_reg_prefetch=True
         ),
         "attention_dense_gfx942/lse_kdbvpf_d128_bf16_causal": mk(
-            emit_lse=True, use_cfvst=True,
-            lds_num_buffers=2, v_reg_prefetch=True
+            emit_lse=True, use_cfvst=True, lds_num_buffers=2, v_reg_prefetch=True
         ),
     }
 

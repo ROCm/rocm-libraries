@@ -2244,10 +2244,7 @@ def _build_attention_dense_single_buffer(
                     load_pipeline_k(next_kbuf, next_j)
                 if USE_VPF:
                     # Only V data (not addresses) stays live across softmax/PV.
-                    v_next = [
-                        (x0, x1)
-                        for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)
-                    ]
+                    v_next = [(x0, x1) for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)]
                 m_new, l_new, o_acc = softmax_pv(
                     s, j, m_i, l_i, o_acc, masked=True, lower=False
                 )
@@ -2261,10 +2258,7 @@ def _build_attention_dense_single_buffer(
                     load_pipeline_k(next_kbuf, next_j)
                 if not USE_VPF:
                     # No V prefetch: issue V[j+1] loads only after current PV.
-                    v_next = [
-                        (x0, x1)
-                        for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)
-                    ]
+                    v_next = [(x0, x1) for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)]
                 # Drain next K async-DMA and next V VMEM loads before V LDS
                 # publication; then rendezvous before any next-tile QK/PV.
                 b.s_waitcnt(vmcnt=0)

@@ -91,6 +91,7 @@ class _DenseTuningArch:
     num_persistent_over_tiles: bool = False
     production_crossed: Tuple[str, ...] = ()
 
+
 def _gfx942_cfvst_tuning_scope(s) -> bool:
     """CFVST can be tuned where the default enables it or
     where BF16 D128 standard causal attention supports opt-in CFVST.

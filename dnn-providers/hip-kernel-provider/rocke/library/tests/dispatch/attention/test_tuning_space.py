@@ -885,9 +885,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         from kernels.gfx942.attention_dense import build_attention_dense
 
         # These pipeline knobs are tunable now, not classified as untunable.
-        self.assertEqual(
-            DENSE_UNTUNABLE_KNOBS["gfx942"], frozenset({"lazy_rescale"})
-        )
+        self.assertEqual(DENSE_UNTUNABLE_KNOBS["gfx942"], frozenset({"lazy_rescale"}))
         base = gfx942_dense_spec(_gfx942_request())
 
         def ir(spec):
@@ -937,9 +935,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         }
         for expected in (
             (False, 1, False),  # default
-            (True, 1, False),   # CFVST only
-            (True, 2, False),   # CFVST + KDB
-            (True, 1, True),    # CFVST + VPF
+            (True, 1, False),  # CFVST only
+            (True, 2, False),  # CFVST + KDB
+            (True, 1, True),  # CFVST + VPF
         ):
             self.assertIn(expected, modes)
         self.assertNotIn((True, 2, True), modes)
@@ -961,9 +959,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 selected = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
                 spec = selected.kernel_spec
                 self.assertTrue(spec.resolved_use_cfvst())
-                self.assertEqual(
-                    spec.lds_num_buffers, knobs.get("lds_num_buffers", 1)
-                )
+                self.assertEqual(spec.lds_num_buffers, knobs.get("lds_num_buffers", 1))
                 self.assertEqual(
                     spec.v_reg_prefetch, knobs.get("v_reg_prefetch", False)
                 )

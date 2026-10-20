@@ -354,12 +354,19 @@ _INJECTIVITY_BASES = {
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d128_bf16_cfvst": dict(head_size=128, dtype="bf16", use_cfvst=True),
     "d128_bf16_kdbvpf": dict(
-        head_size=128, dtype="bf16", use_cfvst=True,
-        lds_num_buffers=2, v_reg_prefetch=True
+        head_size=128,
+        dtype="bf16",
+        use_cfvst=True,
+        lds_num_buffers=2,
+        v_reg_prefetch=True,
     ),
     "d128_bf16_kdbvpf_iglp": dict(
-        head_size=128, dtype="bf16", use_cfvst=True,
-        lds_num_buffers=2, v_reg_prefetch=True, iglp=True
+        head_size=128,
+        dtype="bf16",
+        use_cfvst=True,
+        lds_num_buffers=2,
+        v_reg_prefetch=True,
+        iglp=True,
     ),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
@@ -1058,7 +1065,14 @@ def test_bf16_cfvst_kdb_vpf_are_separate_opt_in_variants():
         ({"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": True}, 51200),
         ({"dtype": "fp16"}, 33792),  # unchanged upstream FP16 CFVST
     ],
-    ids=["bf16-naive", "bf16-cfvst", "bf16-kdb", "bf16-vpf", "bf16-kdb-vpf", "fp16-upstream"],
+    ids=[
+        "bf16-naive",
+        "bf16-cfvst",
+        "bf16-kdb",
+        "bf16-vpf",
+        "bf16-kdb-vpf",
+        "fp16-upstream",
+    ],
 )
 def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
     spec = _spec(**overrides)
@@ -1078,8 +1092,15 @@ def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
         {"v_reg_prefetch": 1},
         {"v_reg_prefetch": None},
     ],
-    ids=["cfvst-str", "cfvst-int", "nbuf-float", "nbuf-bool",
-         "vpf-str", "vpf-int", "vpf-none"],
+    ids=[
+        "cfvst-str",
+        "cfvst-int",
+        "nbuf-float",
+        "nbuf-bool",
+        "vpf-str",
+        "vpf-int",
+        "vpf-none",
+    ],
 )
 def test_cfvst_kdb_vpf_knobs_reject_non_exact_types(overrides):
     """The spec rejects a knob of the wrong type instead of coercing it into a
@@ -2089,7 +2110,14 @@ _CODEGEN_KNOB_DEFAULTS = {
     "causal_diag_split": False,
 }
 _CODEGEN_KNOB_TOKENS = (
-    "_kdb1", "_vpf1", "_iglpm", "_pvkmaj", "_osw", "_prio", "_fence", "_dsplit"
+    "_kdb1",
+    "_vpf1",
+    "_iglpm",
+    "_pvkmaj",
+    "_osw",
+    "_prio",
+    "_fence",
+    "_dsplit",
 )
 
 
