@@ -17,6 +17,7 @@ coverage descriptions; they link here for the procedure.
 |---|---|
 | Add or change cases on an existing operation/architecture | Update the cohort and coverage checks, qualify the complete resulting cohort, replace that pair's archive, lock, and DVC pointer |
 | Replace the frozen baseline implementation | Export the selected committed revision and independently qualify the complete cohort; replace the archive, lock, and pointer |
+| Change the baseline compiler target, such as gfx1201 to gfx12-generic | Recompile from a committed source revision supporting that target, independently qualify, and replace the archive, lock, and pointer |
 | Add an architecture | Implement its adapter, enroll qualification support, qualify on that target, then enroll publication and provider test selection |
 | Add an operation | Define its numerical contract, oracle, adapter, and replay support before following qualification and publication below |
 | Reorganize host tests, documentation, or installation without changing the qualified contract | Validate the affected code; no replacement bundle solely for that reorganization |
@@ -46,7 +47,7 @@ kernel binary while still exercising distinct address calculations.
 
 For existing operations, edit
 `library/tests/<operation>_reference/architectures/<arch>/__init__.py` and its
-`CASES`. The adapter exports `NAME`, `FAMILIES`, `CASES`, `CASE_BY_ID`, `prepare`,
+`CASES`. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`, `prepare`,
 `launch`, and `exported_kernel`. It must use the production dispatch/launch path
 and freeze the complete replay ABI. Keep the independent oracle independent of
 production indexing and geometry helpers.
@@ -98,6 +99,33 @@ invoking checkout's reference contract and adapter with those baseline productio
 sources, and freezes replay support into the bundle. Retain the authoring revision
 and any pending reference changes with the evidence, as well as the baseline SHA.
 Select a newer committed baseline if the added cases need newer kernel support.
+
+### Generic code objects and processor qualification
+
+The gfx1200 and gfx1201 SDPA adapters compile the same WMMA cohort for
+`gfx12-generic`. `--arch` still selects the **execution processor**, not the
+compiler target. Qualify separately on each processor: a generic code object
+being loadable does not establish identical output bits or error bounds there.
+
+The manifest records the actual HIP target, including features, in
+`device_target`, and the WMMA kernel's compile target in
+`kernel.compiler_target`. Verification requires the selected processor's
+certificate, its qualified output digest, matching old/current device features,
+and the generic compiler target. A gfx1201 certificate cannot be relabeled as
+gfx1200, and the old gfx1201-specific archive cannot serve as a generic baseline.
+Use a committed source snapshot containing generic WMMA support; the original
+`c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed` baseline predates that support.
+
+Keep the archive, lock, installation directory, and CTest entry keyed by the
+qualified processor (`gfx1200` or `gfx1201`). The artifact splitter recognizes
+those directories. When both are published, a family job can download both but
+runs only the matching processor's suite. Until a processor is published, its
+pinned CTest entry is absent. See [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection)
+for the skip and failure rules. Do not install the payload under `gfx12-generic`: that name
+does not identify a processor artifact in the existing splitter. Enrollment in
+the qualification registry alone does not publish a processor's suite; add it
+to the CMake publication list and provider categories only after qualification
+and archive publication.
 
 ## 3. Qualify against independent references
 
@@ -155,8 +183,10 @@ python -m pytest "library/tests/test_${REFERENCE_OPERATION}_pinned_reference.py"
   --rocke-reference-lock "$REFERENCE_WORK/bundle/qualification-lock.json" -v -rs
 ```
 
-Explicit operation/architecture selection makes the suite required, including
-failure on a missing bundle. Bundle and lock overrides require that selection; a lock
+Explicit operation/architecture selection makes the matching processor's suite
+required, including failure on a missing bundle. A suite for another processor
+in the job's requested artifact list skips before loading its bundle. Bundle and
+lock overrides require that selection; a lock
 override also requires a bundle path. Without a lock override, verification uses
 the committed lock. Without either path override, tests use the standard bundle
 location and committed lock. The selected operation's GPU fixture alone consumes
@@ -194,6 +224,9 @@ isolated checkout with an empty DVC cache and validate the downloaded archive
 against the reviewed lock. Do not delete an existing working cache to perform
 this check. `dvc add` may stage metadata automatically in this repository.
 Commit the pointer and lock, not the archive or extracted payload.
+Committing a replacement pointer does not upload its archive. CI fetches DVC
+objects during source preparation, before GPU suite selection, so the replacement
+must be available remotely even for a job that later skips that processor's suite.
 
 For a newly published architecture, add it to
 `ROCKE_PUBLISHED_SDPA_ARCHITECTURES` or `ROCKE_PUBLISHED_CONV_ARCHITECTURES` in
@@ -236,6 +269,36 @@ payload belongs under
 `bin/hip_kernel_provider/engines/test_arch_content/rocke/<operation>/<arch>/` in
 its architecture's test artifact, outside release library payloads. Test the
 assembled generic and matching architecture artifacts when validating packaging.
+
+### Processor selection in TheRock jobs
+
+TheRock owns build-family membership and expands it into the job's
+`AMDGPU_TARGETS`. Reference tests consume that comma-separated list of concrete
+processors; they do not define their own family aliases or infer qualification
+from `AMDGPU_FAMILIES`. A family name describes build and artifact selection,
+not a promise that every member has a qualified reference bundle.
+
+The shared test artifact contains CTest entries for all published reference
+pairs. Before accessing a bundle, each entry checks its processor against the
+requested targets and the actual GPU:
+
+| Condition | Result |
+|---|---|
+| The suite's processor is outside `AMDGPU_TARGETS` | Skip with exit 77 |
+| The GPU is another processor in `AMDGPU_TARGETS` | Skip with exit 77, even if that GPU has no reference cohort or published bundle |
+| The GPU matches the suite's processor | Run; missing or corrupt required reference data fails |
+| The suite's processor is requested, but the GPU is absent or outside `AMDGPU_TARGETS` | Fail with a required-GPU error |
+
+When `AMDGPU_TARGETS` is absent, selection uses the actual processor: a different
+GPU skips the suite, and a missing GPU fails an explicitly selected suite.
+Family-name spelling does not change those decisions. Source pytest without an
+explicit operation/architecture request also skips processors without an enrolled
+cohort or installed bundle. An explicit candidate-verification request still
+requires its own qualified bundle and lock, including on qualification-only
+processors such as gfx1200. A skip records absent coverage; it does not qualify
+another processor or permit reuse of another processor's certificate.
+
+### Enroll provider test selection
 
 New published pairs get separate `rocke_<operation>_gpu_<arch>_pytest` CTest
 entries. Add each new entry to the provider's

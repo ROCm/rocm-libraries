@@ -59,7 +59,9 @@ helper Z".
 | §6.2 Wide vector loads/stores | `buffer_load_vN_f16`, `buffer_store_vN_f16`, `global_store_vN_f16` (N ∈ {1,2,4} dwords) |
 | §6.3 Async DRAM→LDS | `AsyncTileLoader` (wraps `async_buffer_load_lds_addr` with per-wave LDS base) |
 | §6.3 LDS bank-conflict avoidance | `ImplicitGemmConvSpec.lds_k_pad` (default `+8` sync, `0` async) plus manual consumer-side read swizzle when async requires packed LDS |
+| §6.4a XOR swizzle without padding (async copies) | permute each lane's DMA source chunk so the async copies land XOR-swizzled in LDS, and read with the same permutation (`use_kv_lds_swizzle` in the tiled 3D attention specs) |
 | §6.4 LDS double-buffer | `pipeline="compv4"` in `UniversalGemmSpec`; second `smem_alloc` for the ping-pong slot |
+| §6.6 Caches: cache policy of async DRAM→LDS copies | `coherency=cache_policy_from_name(name)` on `async_buffer_load_lds_addr` (`rocke.core.ir`, names in `CACHE_POLICY_NAMES`); `"stream"` (non-temporal) for read-once streams such as decode K/V (`kv_cache_policy` in the tiled 2D/3D attention specs) |
 
 ## §7 Matrix-instruction selection
 

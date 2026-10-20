@@ -451,6 +451,7 @@ class _LazyProblemType:
     useScaleAlphaVec = False
     sparse = 0
     metadataLayout = 0
+    scaleBlockSizesA = ()
     f32XdlMathOp = _FakeType("f32", single=True)
     supportDeviceUserArguments = False
 
@@ -495,6 +496,9 @@ class _LazyProblemType2:
     useScaleAlphaVec = True
     sparse = 2                               # -> _SPB
     metadataLayout = 1
+    scaleBlockSizesA = [32, 64, 128]         # runtime-group -> _SABBG32x64x128
+    scaleZeroPointA = True                   # -> _ZP1
+    int4EncodingA = "Signed"
     f32XdlMathOp = _FakeType("xf32", single=False)
     supportDeviceUserArguments = True
 
@@ -521,7 +525,7 @@ def test_from_state_lazy_all_suffix_toggles(monkeypatch):
     )
     name = next(iter(rv.lazyLibraries))
     for frag in ("_A", "_MXA", "_MXB", "_STA", "_STB", "_Bias", "_Grad", "_GG",
-                 "_SAB", "_SCD", "_SAV", "_SPB", "_UA"):
+                 "_SAB", "_SABBG32x64x128_ZP1_Signed", "_SCD", "_SAV", "_SPB", "_UA"):
         assert frag in name, frag
 
 

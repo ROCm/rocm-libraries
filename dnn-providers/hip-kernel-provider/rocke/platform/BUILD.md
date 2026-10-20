@@ -93,9 +93,9 @@ convenient interactively. Prefer the target when the resulting library needs to
 be identifiable — CI points `ROCKE_ONLINE_LIB` at it, and a named library that
 does not exist is now an error rather than a cue to go and find another one.
 
-> **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
-> emitted IR flavor must match it: set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2
-> `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
+> **Toolchain/runtime flags.** AUTO queries the loaded COMGR compiler’s LLVM
+> version to select the emitted IR flavor. An explicit `ROCKE_LLVM_FLAVOR`
+> supports offline emission; it does not select COMGR or bypass compiler checks.
 > Full flag list: [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
 > The two engines must stay byte-identical — see the parity rule in
 > [`dsl_docs/development/engine_parity.md`](dsl_docs/development/engine_parity.md).
