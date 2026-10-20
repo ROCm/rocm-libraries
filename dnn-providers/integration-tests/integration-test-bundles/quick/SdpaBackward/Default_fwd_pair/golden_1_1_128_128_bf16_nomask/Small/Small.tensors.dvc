@@ -16,7 +16,7 @@ outs:
   hash: md5
 - path: Small.tensor3.bin
   remote: golden-data
-  md5: 3d1e10c767e79bc997c00f2db2f0f9ee
+  md5: ab64e68822bc893900d7772d573e3a9f
   size: 32768
   hash: md5
 - path: Small.tensor4.bin

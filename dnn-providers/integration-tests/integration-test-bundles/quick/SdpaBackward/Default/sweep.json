@@ -1045,7 +1045,7 @@
                 "generator": "generate_sdpa_bwd_golden.py",
                 "generator_version": "1.1.0",
                 "generator_sha256": "010e9ae84fbd929c8ac7ea11a770f8050bb0a0e4a7e6d07bc5e6961d7c4f761e",
-                "generated_at": "2026-10-20T13:32:24Z",
+                "generated_at": "2026-10-20T13:47:41Z",
                 "reference_source": "PyTorch 2.14.1+cu130",
                 "reference_backend": "pytorch_explicit_fp32_backward",
                 "reference_strategy": "matched_precision",
@@ -1078,7 +1078,7 @@
                 "forward_source": {
                     "method": "pytorch_math_backend",
                     "version": "2.14.1+cu130",
-                    "generated_at": "2026-10-20T13:32:24Z",
+                    "generated_at": "2026-10-20T13:47:41Z",
                     "bundle": "../../../Default_fwd_pair/golden_1_1_128_128_bf16_nomask/Small/Small.json"
                 }
             }
@@ -1247,7 +1247,7 @@
                 "generator": "generate_sdpa_bwd_golden.py",
                 "generator_version": "1.1.0",
                 "generator_sha256": "010e9ae84fbd929c8ac7ea11a770f8050bb0a0e4a7e6d07bc5e6961d7c4f761e",
-                "generated_at": "2026-10-20T13:32:26Z",
+                "generated_at": "2026-10-20T13:47:43Z",
                 "reference_source": "PyTorch 2.14.1+cu130",
                 "reference_backend": "pytorch_explicit_fp32_backward",
                 "reference_strategy": "matched_precision",
@@ -1280,7 +1280,7 @@
                 "forward_source": {
                     "method": "pytorch_math_backend",
                     "version": "2.14.1+cu130",
-                    "generated_at": "2026-10-20T13:32:26Z",
+                    "generated_at": "2026-10-20T13:47:43Z",
                     "bundle": "../../../Default_fwd_pair/golden_1_1_128_128_bf16_causal/Small/Small.json"
                 }
             }
@@ -1449,7 +1449,7 @@
                 "generator": "generate_sdpa_bwd_golden.py",
                 "generator_version": "1.1.0",
                 "generator_sha256": "010e9ae84fbd929c8ac7ea11a770f8050bb0a0e4a7e6d07bc5e6961d7c4f761e",
-                "generated_at": "2026-10-20T13:32:31Z",
+                "generated_at": "2026-10-20T13:47:49Z",
                 "reference_source": "PyTorch 2.14.1+cu130",
                 "reference_backend": "pytorch_explicit_fp32_backward",
                 "reference_strategy": "matched_precision",
@@ -1482,7 +1482,7 @@
                 "forward_source": {
                     "method": "pytorch_math_backend",
                     "version": "2.14.1+cu130",
-                    "generated_at": "2026-10-20T13:32:31Z",
+                    "generated_at": "2026-10-20T13:47:49Z",
                     "bundle": "../../../Default_fwd_pair/golden_1_1_128_128_fp16_nomask/Small/Small.json"
                 }
             }
@@ -1651,7 +1651,7 @@
                 "generator": "generate_sdpa_bwd_golden.py",
                 "generator_version": "1.1.0",
                 "generator_sha256": "010e9ae84fbd929c8ac7ea11a770f8050bb0a0e4a7e6d07bc5e6961d7c4f761e",
-                "generated_at": "2026-10-20T13:32:33Z",
+                "generated_at": "2026-10-20T13:47:51Z",
                 "reference_source": "PyTorch 2.14.1+cu130",
                 "reference_backend": "pytorch_explicit_fp32_backward",
                 "reference_strategy": "matched_precision",
@@ -1684,7 +1684,7 @@
                 "forward_source": {
                     "method": "pytorch_math_backend",
                     "version": "2.14.1+cu130",
-                    "generated_at": "2026-10-20T13:32:33Z",
+                    "generated_at": "2026-10-20T13:47:51Z",
                     "bundle": "../../../Default_fwd_pair/golden_1_1_128_128_fp16_causal/Small/Small.json"
                 }
             }
