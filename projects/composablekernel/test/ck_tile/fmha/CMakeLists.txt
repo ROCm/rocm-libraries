@@ -246,6 +246,32 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
                 -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         endforeach()
     endforeach()
+
+    # Batch prefill with a physical page size independent of the N128 tile. One kernel per
+    # binary, compiled with the scheduled-TDM FMHA flags, so that each tested code object is the
+    # one a single-instance build produces: with several of these kernels in one translation
+    # unit the compiler emitted different code for some of them, and the P16 residency limit
+    # these tests guard is an empirical property of the generated code.
+    foreach(page IN ITEMS 16 128 256 1024)
+        foreach(head_dim IN ITEMS 64 128)
+            foreach(mask IN ITEMS dense causal)
+                set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask})
+                add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+                if(mask STREQUAL "causal")
+                    set(causal 1)
+                else()
+                    set(causal 0)
+                endif()
+                target_compile_definitions(${target} PRIVATE
+                    CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+                    CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+                    CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal})
+                # fmha_reference.hpp compares floats exactly by design.
+                target_compile_options(${target} PRIVATE -Wno-float-equal
+                    -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+            endforeach()
+        endforeach()
+    endforeach()
 endif()
 
 # The independent arithmetic reference is a host test on every FMHA architecture.
