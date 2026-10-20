@@ -434,6 +434,35 @@ class MlaPrefillSpec:
             raise ValueError(
                 f"MLA prefill supports bf16 only, got dtype={self.dtype!r}"
             )
+        # Exact types, never coerced: "false" is truthy and True == 1, so a
+        # loose value would silently build a different kernel.
+        for name in ("agpr_acc", "absorbed_query"):
+            value = getattr(self, name)
+            if type(value) is not bool:
+                raise TypeError(
+                    f"{name} must be a bool, got {type(value).__name__} {value!r}"
+                )
+        for name in (
+            "num_heads",
+            "d_nope",
+            "d_rope",
+            "d_v",
+            "r_kv",
+            "block_q",
+            "block_k",
+            "r_kv_tile",
+            "num_warps",
+            "page_block_size",
+            "binary_search_iters",
+            "heads_per_wg",
+            "q_tiles_per_wg",
+            "num_xcds",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int:
+                raise TypeError(
+                    f"{name} must be an int, got {type(value).__name__} {value!r}"
+                )
         positive = (
             "num_heads",
             "d_nope",
@@ -773,10 +802,10 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec) -> tuple[bool, str]:
             f"block_q={spec.block_q}"
         )
     if spec.agpr_acc:
-        from rocke.core.lower_llvm import _resolve_llvm_flavor
+        from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
 
         flavor = _resolve_llvm_flavor()
-        if flavor not in ("llvm22", "llvm23"):
+        if not _is_modern_flavor(flavor):
             return False, (
                 "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
                 f"keep the backend out of the AGPR file), got {flavor}"

@@ -68,6 +68,41 @@ class TestMlaPrefillSpec(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "num_warps must be one of"):
             _spec(num_warps=3)
 
+    def test_bool_fields_reject_non_bool(self):
+        # "false" is truthy: coerced, it would build the other kernel.
+        for name in ("absorbed_query", "agpr_acc"):
+            for value in ("false", 0, 1, None):
+                with (
+                    self.subTest(name=name, value=value),
+                    self.assertRaisesRegex(TypeError, f"{name} must be a bool"),
+                ):
+                    _spec(**{name: value})
+
+    def test_int_fields_reject_bool_float_and_str(self):
+        # True == 1 and 1.0 == 1 would otherwise pass every range check.
+        for name in (
+            "num_heads",
+            "d_nope",
+            "d_rope",
+            "d_v",
+            "r_kv",
+            "block_q",
+            "block_k",
+            "r_kv_tile",
+            "num_warps",
+            "page_block_size",
+            "binary_search_iters",
+            "heads_per_wg",
+            "q_tiles_per_wg",
+            "num_xcds",
+        ):
+            for value in (True, 1.0, "1"):
+                with (
+                    self.subTest(name=name, value=value),
+                    self.assertRaisesRegex(TypeError, f"{name} must be an int"),
+                ):
+                    _spec(**{name: value})
+
 
 class TestMlaPrefillGate(unittest.TestCase):
     """``supports_*`` reports rather than raises, and only on arch/atom fit."""
@@ -547,11 +582,11 @@ class TestAgprAccResources(unittest.TestCase):
             pass
         try:
             from rocke.analysis.isa import analyze_hsaco
-            from rocke.core.lower_llvm import _resolve_llvm_flavor
+            from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
             from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise unittest.SkipTest(f"comgr/resource tools unavailable: {exc}")
-        if _resolve_llvm_flavor() not in ("llvm22", "llvm23"):
+        if not _is_modern_flavor(_resolve_llvm_flavor()):
             raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
         try:
             art = compile_kernel(

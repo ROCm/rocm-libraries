@@ -105,13 +105,17 @@ _GATE_HEADS = 8
 # ---------------------------------------------------------------------------
 
 
-def _resolve(shape: MLAShape, *, arch: str, build: bool) -> dict:
+def _resolve(
+    shape: MLAShape, *, arch: str, build: bool, absorbed_query: bool = False
+) -> dict:
     """Resolve one shape; never raise, so one bad shape does not hide the rest."""
     from dispatch.mla import dispatch_mla
 
     row: dict = {"shape": shape.signature, "regime": shape.regime}
     try:
-        result = dispatch_mla(shape.to_request(arch=arch))
+        result = dispatch_mla(
+            shape.to_request(arch=arch, absorbed_query=absorbed_query)
+        )
     except ValueError as exc:
         row["status"] = "unsupported"
         row["detail"] = str(exc)
@@ -415,8 +419,62 @@ def _run_aiter_live(
 # ---------------------------------------------------------------------------
 
 
+def parse_spec_overrides(pairs) -> dict:
+    """``KEY=VAL`` strings as typed :class:`MlaPrefillSpec` field overrides.
+
+    Each value is parsed by the field's declared type, so it reaches the
+    spec's exact-type checks as that type: a bool field takes only
+    ``true``/``false`` (any case), an int field takes what ``int()`` parses,
+    and a str field takes the text. An unknown field, a missing ``=`` or an
+    unparseable value raises :class:`ValueError` naming it.
+    """
+    import dataclasses
+    import typing
+
+    from kernels.mla.mla_prefill_gfx942 import MlaPrefillSpec
+
+    types = typing.get_type_hints(MlaPrefillSpec)
+    names = [f.name for f in dataclasses.fields(MlaPrefillSpec)]
+    overrides = {}
+    for kv in pairs:
+        key, sep, val = kv.partition("=")
+        key = key.strip()
+        if not sep:
+            raise ValueError(f"--spec-override {kv!r}: expected KEY=VAL")
+        if key not in types:
+            raise ValueError(
+                f"--spec-override {key!r}: not an MlaPrefillSpec field "
+                f"(fields: {', '.join(names)})"
+            )
+        if key == "absorbed_query":
+            # The request flag selects the absorbed kernel, and the report's
+            # unfused split keys on it; an override would desynchronize them.
+            raise ValueError(
+                "--spec-override absorbed_query: use --absorbed-query instead"
+            )
+        kind = types[key]
+        if kind is bool:
+            if val.strip().lower() not in ("true", "false"):
+                raise ValueError(
+                    f"--spec-override {key}={val!r}: {key} is a bool, "
+                    "expected true or false"
+                )
+            overrides[key] = val.strip().lower() == "true"
+        elif kind is int:
+            try:
+                overrides[key] = int(val)
+            except ValueError:
+                raise ValueError(
+                    f"--spec-override {key}={val!r}: {key} is an int, "
+                    "expected an integer"
+                ) from None
+        else:
+            overrides[key] = val
+    return overrides
+
+
 class SpecRefused(ValueError):
-    """The ``--absorbed-query`` / ``--spec-override`` spec failed admission."""
+    """The ``--absorbed-query`` request or ``--spec-override`` spec was refused."""
 
 
 def _build_rocke_kernel(
@@ -429,12 +487,13 @@ def _build_rocke_kernel(
     """Build (compile to HSACO) the rocke MLA prefill kernel for ``shape``.
 
     Returns ``(DispatchResult, Artifact)`` where ``Artifact`` has ``.hsaco``
-    and ``.kernel_name`` attributes. ``absorbed_query`` swaps the dispatched
-    spec for its unfused twin (see ``MlaPrefillSpec.absorbed_query``) and
-    ``spec_overrides`` replaces further spec fields; the dispatcher itself
-    selects neither, so the swapped spec is re-admitted here -- the kernel's
-    admission and the request's 32-bit extents -- and the result carries its
-    own signature and grid. A refusal raises :class:`SpecRefused`.
+    and ``.kernel_name`` attributes. ``absorbed_query`` goes on the request,
+    so dispatch selects the unfused kernel (see ``MLARequest.absorbed_query``)
+    and its result carries that kernel's signature and grid; a dispatch
+    refusal of it raises :class:`SpecRefused`. ``spec_overrides`` replaces
+    further fields of the dispatched spec, which the dispatcher never selects,
+    so that spec is re-admitted here -- the kernel's admission and the
+    request's 32-bit extents -- and a refusal raises :class:`SpecRefused`.
     """
     import dataclasses
 
@@ -447,14 +506,17 @@ def _build_rocke_kernel(
     )
     from rocke import compile_kernel
 
-    req = shape.to_request(arch=arch)
-    result = dispatch_mla(req)
-    if absorbed_query or spec_overrides:
+    req = shape.to_request(arch=arch, absorbed_query=absorbed_query)
+    try:
+        result = dispatch_mla(req)
+    except ValueError as exc:
+        if not absorbed_query:
+            raise
+        raise SpecRefused(f"absorbed_query dispatch refused: {exc}") from None
+    if spec_overrides:
         try:
-            spec = dataclasses.replace(
-                result.spec, absorbed_query=absorbed_query, **(spec_overrides or {})
-            )
-        except ValueError as exc:
+            spec = dataclasses.replace(result.spec, **spec_overrides)
+        except (TypeError, ValueError) as exc:
             raise SpecRefused(f"spec rejected: {exc}") from None
         ok, why = supports_mla_prefill(spec, arch=arch)
         if ok:
@@ -891,17 +953,14 @@ def main(argv=None) -> int:
         action="append",
         default=[],
         metavar="KEY=VAL",
-        help="override a dispatched MlaPrefillSpec field (int/bool), repeatable",
+        help="override a dispatched MlaPrefillSpec field, parsed by its type "
+        "(int, or true/false for a bool), repeatable",
     )
     args = parser.parse_args(argv)
-    spec_overrides = {}
-    for kv in args.spec_override:
-        key, val = kv.split("=", 1)
-        spec_overrides[key] = (
-            val.lower() in ("1", "true")
-            if val.lower() in ("0", "1", "true", "false")
-            else int(val)
-        )
+    try:
+        spec_overrides = parse_spec_overrides(args.spec_override)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.mode in ("resolve", "build"):
         shapes = filter_shapes(
@@ -919,7 +978,12 @@ def main(argv=None) -> int:
             return 0
 
         rows = [
-            _resolve(shape, arch=args.arch, build=args.mode == "build")
+            _resolve(
+                shape,
+                arch=args.arch,
+                build=args.mode == "build",
+                absorbed_query=args.absorbed_query,
+            )
             for shape in shapes
         ]
         return _report_resolve(rows)

@@ -31,17 +31,36 @@ implementable; this module follows it.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import List
+from typing import Any, List
 
 from rocke.dispatch.core import OperatorRequest, selector_matches
+from rocke.dispatch.tuning.identity import normalize_knobs
 
 FAMILY = "mla"
 MLA_ABI_VERSION = "hipkg-mla/v1"
 
 #: Features an MLA candidate may declare. ``causal`` is the bottom-right runtime
-#: mask the prefill kernel implements; a request asking for anything outside this
-#: set is refused by ``Capability`` rather than silently ignored.
-MLA_FEATURES = frozenset({"causal"})
+#: mask the prefill kernel implements; ``absorbed_query`` is the unfused-projection
+#: ABI (:attr:`MLARequest.absorbed_query`). A request asking for anything outside
+#: a candidate's set is refused by ``Capability`` rather than silently ignored.
+MLA_FEATURES = frozenset({"causal", "absorbed_query"})
+
+#: Integer request fields: exact ``int`` (not ``bool``, not ``float``/``str``).
+_POSITIVE_INT_FIELDS = (
+    "num_heads",
+    "total_q",
+    "num_seqs",
+    "max_seqlen_k",
+    "d_nope",
+    "d_rope",
+    "d_v",
+    "kv_lora_rank",
+    "page_block_size",
+)
+_NONNEGATIVE_INT_FIELDS = ("num_kv_blocks",)
+# Type-checked only: <= 0 means "unknown" (see ``MLARequest.num_cus``).
+_ANY_INT_FIELDS = ("num_cus",)
+_BOOL_FIELDS = ("causal", "absorbed_query")
 
 #: Every gateable integer an MLA capability may constrain. The registry rejects a
 #: ``ShapeRange`` naming a dim outside this set, so the vocabulary is the single
@@ -100,6 +119,21 @@ class MLARequest(OperatorRequest):
     dtype: str = "bf16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # Same fields as ``AttentionRequest`` so the shared pin/tuning plumbing in
+    # :mod:`rocke.dispatch.core` treats every family alike. MLA has no knob
+    # axes yet, so ``_request_errors`` refuses anything but the defaults.
+    tuning_id: str = "auto"
+    tuning_knobs: tuple[tuple[str, Any], ...] = ()
+    # Unfused head projections: the kernel takes the absorbed query
+    # ``[total_q, H, kv_lora_rank + d_rope]`` and writes the normalized latent
+    # output plus the LSE (``MlaPrefillSpec.absorbed_query``). Two-heads
+    # layouts only, so an odd head count is refused.
+    absorbed_query: bool = False
+
+    def __post_init__(self) -> None:
+        # Callers rebuild pins from stored JSON; a bad value fails here, with
+        # its name, rather than as an unhashable key inside a cache.
+        object.__setattr__(self, "tuning_knobs", normalize_knobs(self.tuning_knobs))
 
     @property
     def hdim_qk(self) -> int:
@@ -108,25 +142,54 @@ class MLARequest(OperatorRequest):
 
     def normalized(self) -> dict:
         d = asdict(self)
-        d["dtype"] = self.dtype.lower()
+        # ``Capability.check`` normalizes before any predicate runs; a non-str
+        # dtype is refused there ("dtype ... not in"), not raised here.
+        if isinstance(self.dtype, str):
+            d["dtype"] = self.dtype.lower()
         return d
 
+    def _dim(self, name: str) -> int:
+        """``name`` if it is an exact ``int``, else a stand-in.
+
+        ``Capability.check`` reads :meth:`dims` before the candidate predicate,
+        and every MLA predicate starts with ``_request_errors``, which names a
+        mistyped field ("num_heads must be an int, got NoneType None"). So a
+        mistyped value is replaced with one that passes the shipped capability
+        -- the field's default, or 1 for the required fields -- rather than
+        coerced (which raises on ``None`` / ``"abc"`` / ``[1]``) or dropped
+        (which would refuse it as a missing dim). The stand-in never reaches a
+        spec: the predicate refuses the request first.
+        """
+        value = getattr(self, name)
+        if type(value) is int:
+            return value
+        default = type(self).__dataclass_fields__[name].default
+        return default if type(default) is int else 1
+
     def dims(self) -> dict[str, int]:
+        d_nope, d_rope = self._dim("d_nope"), self._dim("d_rope")
         return {
-            "num_heads": int(self.num_heads),
-            "d_nope": int(self.d_nope),
-            "d_rope": int(self.d_rope),
-            "d_v": int(self.d_v),
-            "hdim_qk": int(self.hdim_qk),
-            "kv_lora_rank": int(self.kv_lora_rank),
-            "page_block_size": int(self.page_block_size),
-            "total_q": int(self.total_q),
-            "max_seqlen_k": int(self.max_seqlen_k),
-            "num_seqs": int(self.num_seqs),
+            "num_heads": self._dim("num_heads"),
+            "d_nope": d_nope,
+            "d_rope": d_rope,
+            "d_v": self._dim("d_v"),
+            "hdim_qk": d_nope + d_rope,
+            "kv_lora_rank": self._dim("kv_lora_rank"),
+            "page_block_size": self._dim("page_block_size"),
+            "total_q": self._dim("total_q"),
+            "max_seqlen_k": self._dim("max_seqlen_k"),
+            "num_seqs": self._dim("num_seqs"),
         }
 
     def features(self) -> frozenset[str]:
-        return frozenset({"causal"}) if self.causal else frozenset()
+        active = set()
+        # ``is not False``: a non-bool ``causal`` (0, None) must pass the
+        # capability prefilter so ``_request_errors`` names the type error.
+        if self.causal is not False:
+            active.add("causal")
+        if self.absorbed_query:
+            active.add("absorbed_query")
+        return frozenset(active)
 
 
 def _request_errors(req: OperatorRequest) -> List[str]:
@@ -140,24 +203,34 @@ def _request_errors(req: OperatorRequest) -> List[str]:
     if not isinstance(req, MLARequest):
         return [f"expected an MLARequest, got {type(req).__name__}"]
     errors: List[str] = []
-    for name in (
-        "num_heads",
-        "total_q",
-        "num_seqs",
-        "max_seqlen_k",
-        "d_nope",
-        "d_rope",
-        "d_v",
-        "kv_lora_rank",
-        "page_block_size",
-    ):
+    # Exact types, never coerced: "false" is truthy, True == 1 and 1.5 would
+    # truncate, so a loose value would silently select a different kernel.
+    for name in _BOOL_FIELDS:
         value = getattr(req, name)
-        if int(value) <= 0:
+        if type(value) is not bool:
+            errors.append(
+                f"{name} must be a bool, got {type(value).__name__} {value!r}"
+            )
+    for name in _POSITIVE_INT_FIELDS + _NONNEGATIVE_INT_FIELDS + _ANY_INT_FIELDS:
+        value = getattr(req, name)
+        if type(value) is not int:
+            errors.append(
+                f"{name} must be an int, got {type(value).__name__} {value!r}"
+            )
+        elif name in _POSITIVE_INT_FIELDS and value <= 0:
             errors.append(f"{name} must be positive, got {value}")
-    if int(req.num_kv_blocks) < 0:
-        errors.append(f"num_kv_blocks must be >= 0, got {req.num_kv_blocks}")
-    if not str(req.arch).strip():
+        elif name in _NONNEGATIVE_INT_FIELDS and value < 0:
+            errors.append(f"{name} must be >= 0, got {value}")
+    if not isinstance(req.arch, str) or not req.arch.strip():
         errors.append("arch must be a non-empty architecture name")
+    if not isinstance(req.tuning_id, str):
+        errors.append(f"tuning_id must be a str, got {type(req.tuning_id).__name__}")
+    elif (req.tuning_id.strip() or "auto") != "auto" or req.tuning_knobs:
+        errors.append(
+            "MLA prefill has no tuning knobs yet: tuning_id must be 'auto' and "
+            f"tuning_knobs empty, got tuning_id={req.tuning_id!r}, "
+            f"tuning_knobs={req.tuning_knobs!r}"
+        )
     return errors
 
 

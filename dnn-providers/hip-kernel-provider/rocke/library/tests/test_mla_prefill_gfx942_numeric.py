@@ -21,8 +21,9 @@ odd ones, and agpr_acc for batches averaging >= 320 query rows per sequence
 shapes: agpr_acc forced on for short / ragged batches, and the unfused
 ``absorbed_query`` composition.
 
-Every test is marked ``gpu`` and skips without a gfx942 device and ROCm torch
-(torch also runs the ``absorbed_query`` lane's head projections). Run:
+The numeric tests are marked ``gpu`` and skip without a gfx942 device and ROCm
+torch (torch also runs the ``absorbed_query`` lane's head projections); the
+scenario-table and dispatch checks run on CPU. Run:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_mla_prefill_gfx942_numeric.py
 """
@@ -114,9 +115,9 @@ def _run(name: str, *, absorbed_query: bool = False, agpr=None):
 
 
 def _agpr_flavor_ok() -> bool:
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
+    from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
 
-    return _resolve_llvm_flavor() in ("llvm22", "llvm23")
+    return _is_modern_flavor(_resolve_llvm_flavor())
 
 
 def test_scenario_lists_match_probe_table():
@@ -150,6 +151,47 @@ def test_mla_prefill_numeric_absorbed_query(name):
     assert (
         _run(name, absorbed_query=True) is True
     ), f"{name} absorbed_query: see captured stdout"
+
+
+def test_absorbed_lane_runs_the_spec_dispatch_selects():
+    """The absorbed lane asks dispatch for ``absorbed_query`` on the request,
+    so the spec it runs is the dispatched one, not a post-dispatch swap; the
+    single-head layout has no absorbed kernel, so dispatch refuses H=5."""
+    probe = _probe()
+    for name in _ABSORBED:
+        sc = probe.SCENARIOS[name]
+        spec = probe._dispatched_spec(
+            sc.heads, sc.q_lens, sc.k_lens, "gfx942", absorbed_query=True
+        )
+        assert spec.absorbed_query and spec.heads_per_wg == 2, name
+        assert spec.fwd_kernel_name().endswith("_aq"), name
+    sc = probe.SCENARIOS["single_head_h5"]
+    spec = probe._dispatched_spec(
+        sc.heads, sc.q_lens, sc.k_lens, "gfx942", absorbed_query=True
+    )
+    ok, why = probe.supports_mla_prefill(spec, arch="gfx942")
+    assert not ok and "absorbed_query" in why
+
+
+def test_packed_absorbed_refusal_is_a_failure_not_a_skip():
+    """An even-head absorbed request dispatch refuses (here the 576-wide query
+    extent) must surface its reason, not fall back to the single-head SKIP."""
+    probe = _probe()
+    with pytest.raises(ValueError, match="query extent"):
+        probe._dispatched_spec(128, [30000], [30000], "gfx942", absorbed_query=True)
+    result = probe.run_case(
+        "extent_h128",
+        128,
+        [30000],
+        [30000],
+        mode="full",
+        arch="gfx942",
+        seed=0,
+        tol=probe.BF16_ATTN_ATOL,
+        dry_run=False,
+        absorbed_query=True,
+    )
+    assert result is False
 
 
 @requires_gfx942_gpu

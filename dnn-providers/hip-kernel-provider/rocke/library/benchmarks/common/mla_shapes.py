@@ -103,13 +103,19 @@ class MLAShape:
         )
 
     def to_request(
-        self, *, arch: str, causal: bool = True, num_kv_blocks: int | None = None
+        self,
+        *,
+        arch: str,
+        causal: bool = True,
+        num_kv_blocks: int | None = None,
+        absorbed_query: bool = False,
     ):
         """Build the dispatcher request for this shape.
 
         ``num_kv_blocks`` is the paged KV pool size (``c_kv.shape[0]``); a
         caller holding the tensors passes it, otherwise it defaults to the
-        shape's own :attr:`num_kv_blocks`.
+        shape's own :attr:`num_kv_blocks`. ``absorbed_query`` requests the
+        unfused-projection kernel (``MLARequest.absorbed_query``).
 
         Imported lazily so that loading and inspecting shapes does not require
         the dispatch package -- listing a shape file is useful even where the
@@ -133,6 +139,7 @@ class MLAShape:
             num_kv_blocks=(
                 self.num_kv_blocks if num_kv_blocks is None else int(num_kv_blocks)
             ),
+            absorbed_query=absorbed_query,
         )
 
 

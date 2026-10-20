@@ -24,6 +24,9 @@ Covers both entry points in the family and both shipped head counts:
   * ``fwd_h128_agpr`` -- the agpr_acc layout built directly. Admission refuses
     it on llvm20, which the golden records as an expected failure for that
     flavor rather than a case.
+  * ``*_aq`` -- the unfused ``absorbed_query`` kernel, which a request reaches
+    through ``MLARequest.absorbed_query``: the dispatched default layout and
+    the agpr_acc layout (the latter refused on llvm20 like ``fwd_h128_agpr``).
 
 There is no C++ *builder* mirror for this family, but the C++ lowerer is
 family-agnostic: ``test_attention_ir_cpp_parity.py`` lowers these same cases
@@ -78,7 +81,7 @@ def _cases():
             MlaPrefillSpec(num_heads=num_heads), arch=_ARCH
         )
 
-    def agpr(num_heads):
+    def agpr(num_heads, absorbed_query=False):
         # The shipped long-key layout, built directly so llvm20's refusal is
         # recorded rather than hidden behind dispatch's fallback.
         return lambda: build_mla_prefill_fwd(
@@ -89,6 +92,7 @@ def _cases():
                 num_warps=4,
                 block_q=64,
                 agpr_acc=True,
+                absorbed_query=absorbed_query,
             ),
             arch=_ARCH,
         )
@@ -99,7 +103,7 @@ def _cases():
             MlaPrefillSpec(num_heads=num_heads, block_q=16), arch=_ARCH
         )
 
-    def dispatched(num_heads, total_q=64, max_k=96):
+    def dispatched(num_heads, total_q=64, max_k=96, absorbed_query=False):
         def build():
             from dispatch.mla import MLARequest, dispatch_mla
 
@@ -115,6 +119,7 @@ def _cases():
                     num_cus=228,
                     # Two sequences of ceil(max_k / 16) pages each.
                     num_kv_blocks=2 * -(-max_k // 16),
+                    absorbed_query=absorbed_query,
                 )
             )
             return result.candidate.built(result.spec, _ARCH)
@@ -133,6 +138,9 @@ def _cases():
         # refuses it and dispatch falls back to 16 rows per wave).
         "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),
         "mla_prefill_gfx942/fwd_h128_agpr": agpr(128),
+        # The absorbed_query kernel: rule-picked default layout, and agpr_acc.
+        "mla_prefill_gfx942/dispatch_fwd_h128_aq": dispatched(128, absorbed_query=True),
+        "mla_prefill_gfx942/fwd_h128_agpr_aq": agpr(128, absorbed_query=True),
     }
 
 
@@ -224,18 +232,24 @@ def test_mla_prefill_gfx942_golden_covers_every_case():
 
 
 def test_mla_prefill_gfx942_golden_expected_failures_are_the_llvm20_agpr_refusal():
-    """The only refusal the golden may hold is agpr_acc at llvm20; anything
-    else recorded as an expected failure is a failed bless, not a golden."""
+    """The only refusals the golden may hold are the agpr_acc cases at llvm20;
+    anything else recorded as an expected failure is a failed bless, not a
+    golden."""
     from rocke.core.ir_golden import GOLDEN_FLAVORS
 
+    agpr_cases = {
+        "mla_prefill_gfx942/fwd_h128_agpr",
+        "mla_prefill_gfx942/fwd_h128_agpr_aq",
+    }
     golden = _golden()
     for flavor in GOLDEN_FLAVORS:
         refused = golden["flavors"][flavor].get("expected_failures", {})
         if flavor == "llvm20":
-            assert set(refused) == {"mla_prefill_gfx942/fwd_h128_agpr"}
-            entry = refused["mla_prefill_gfx942/fwd_h128_agpr"]
-            assert entry["type"] == "NotImplementedError"
-            assert "agpr_acc" in entry["message"]
+            assert set(refused) == agpr_cases
+            for cid in agpr_cases:
+                entry = refused[cid]
+                assert entry["type"] == "NotImplementedError"
+                assert "agpr_acc" in entry["message"]
         else:
             assert not refused, f"{flavor}: unexpected refusals {sorted(refused)}"
 
@@ -277,6 +291,28 @@ def test_dispatch_case_tracks_the_shipped_spec():
             block_q=32,
             num_xcds=6,
         )
+    # The ``dispatch_fwd_h128_aq`` case: the same spec plus the request's flag.
+    absorbed = dispatch_mla(
+        MLARequest(
+            num_heads=128,
+            total_q=64,
+            num_seqs=2,
+            max_seqlen_k=96,
+            arch=_ARCH,
+            num_cus=228,
+            num_kv_blocks=12,
+            absorbed_query=True,
+        )
+    )
+    assert absorbed.spec == MlaPrefillSpec(
+        num_heads=128,
+        heads_per_wg=2,
+        q_tiles_per_wg=2,
+        num_warps=4,
+        block_q=32,
+        num_xcds=6,
+        absorbed_query=True,
+    )
 
 
 if __name__ == "__main__":

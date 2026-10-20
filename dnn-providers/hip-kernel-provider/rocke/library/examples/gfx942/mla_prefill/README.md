@@ -801,8 +801,10 @@ registers, four consecutive `r` per 8 B store. The verifier (`--absorbed-query`)
 composes it with `torch.bmm` absorb and `W_UV` against the same oracle, and the
 live benchmark times the composition and its per-stage split. Most of the
 removed prologue and epilogue already overlapped the other workgroup's loop, so
-the kernel-only gain is concentrated on long shapes. Dispatch keeps the fused
-kernel until the provider API carries the absorbed query.
+the kernel-only gain is concentrated on long shapes. Dispatch serves it when
+the request sets `MLARequest(absorbed_query=True)` (odd head counts are
+refused: the single-head layout has no absorbed variant); the default stays
+the fused kernel, since the provider API does not carry the absorbed query yet.
 
 On a node where torch's hipBLASLt path stalls, set
 `TORCH_BLAS_PREFER_HIPBLASLT=0` before any run that goes through `torch.bmm`.

@@ -124,6 +124,38 @@ class TestEveryShapeDispatches(unittest.TestCase):
                 result = dispatch_mla(shape.to_request(arch="gfx942"))
                 self.assertEqual(result.candidate.name, "mla_prefill_fwd_gfx942")
 
+    def test_absorbed_query_reaches_the_dispatched_spec(self):
+        from dispatch.mla import dispatch_mla
+
+        for shape in load_mla_shapes(_PREFILL_SHAPES):
+            with self.subTest(shape=shape.signature):
+                req = shape.to_request(arch="gfx942", absorbed_query=True)
+                self.assertTrue(req.absorbed_query)
+                if shape.num_query_heads % 2:
+                    # Single-head layout: no absorbed kernel.
+                    with self.assertRaises(ValueError):
+                        dispatch_mla(req)
+                    continue
+                spec = dispatch_mla(req).spec
+                self.assertTrue(spec.absorbed_query)
+                self.assertTrue(spec.fwd_kernel_name().endswith("_aq"))
+
+    def test_resolve_mode_honours_absorbed_query(self):
+        from benchmarks.gfx942.attention.prefill import (
+            benchmark_mla_prefill_live as drv,
+        )
+
+        for shape in load_mla_shapes(_PREFILL_SHAPES):
+            if shape.num_query_heads % 2:
+                continue
+            with self.subTest(shape=shape.signature):
+                fused = drv._resolve(shape, arch="gfx942", build=False)
+                absorbed = drv._resolve(
+                    shape, arch="gfx942", build=False, absorbed_query=True
+                )
+                self.assertFalse(fused["kernel"].endswith("_aq"))
+                self.assertTrue(absorbed["kernel"].endswith("_aq"))
+
     def test_grid_follows_the_packed_block_numbering(self):
         from dispatch.mla import dispatch_mla
 
@@ -133,6 +165,73 @@ class TestEveryShapeDispatches(unittest.TestCase):
                 expected = shape.total_q // result.spec.block_q + shape.batch
                 heads = shape.num_query_heads // result.spec.heads_per_wg
                 self.assertEqual(result.grid, (expected, heads, 1))
+
+
+class TestSpecOverrideParsing(unittest.TestCase):
+    """``--spec-override`` values are parsed by the spec field's type."""
+
+    @staticmethod
+    def _parse(*pairs):
+        from benchmarks.gfx942.attention.prefill import (
+            benchmark_mla_prefill_live as drv,
+        )
+
+        return drv.parse_spec_overrides(pairs)
+
+    def test_int_fields_parse_to_ints_and_the_spec_is_admitted(self):
+        import dataclasses
+
+        from dispatch.mla import MLARequest, dispatch_mla
+        from kernels.mla.mla_prefill_gfx942 import supports_mla_prefill
+
+        overrides = self._parse("num_xcds=0", "q_tiles_per_wg=2")
+        self.assertEqual(overrides, {"num_xcds": 0, "q_tiles_per_wg": 2})
+        self.assertIs(type(overrides["num_xcds"]), int)
+        base = dispatch_mla(
+            MLARequest(
+                num_heads=128,
+                total_q=64,
+                num_seqs=2,
+                max_seqlen_k=96,
+                arch="gfx942",
+                num_cus=304,
+                num_kv_blocks=12,
+            )
+        ).spec
+        spec = dataclasses.replace(base, **overrides)
+        self.assertEqual(supports_mla_prefill(spec, arch="gfx942"), (True, ""))
+        # q_tiles_per_wg=1: the two-heads layout with one 16-row tile per head.
+        # "1" must stay the int 1; parsed as True it fails the exact-int check.
+        one = self._parse("q_tiles_per_wg=1", "num_warps=2", "block_q=16")
+        self.assertEqual(one, {"q_tiles_per_wg": 1, "num_warps": 2, "block_q": 16})
+        self.assertIs(type(one["q_tiles_per_wg"]), int)
+        spec = dataclasses.replace(base, **one)
+        self.assertEqual(supports_mla_prefill(spec, arch="gfx942"), (True, ""))
+
+    def test_bool_field_parses_true_false(self):
+        self.assertEqual(self._parse("agpr_acc=true"), {"agpr_acc": True})
+        self.assertEqual(self._parse("agpr_acc=FALSE"), {"agpr_acc": False})
+
+    def test_bad_values_are_rejected_with_the_field_named(self):
+        for pair, needle in (
+            ("num_xcds=abc", "num_xcds is an int"),
+            ("agpr_acc=1", "agpr_acc is a bool"),
+            ("no_such_field=1", "not an MlaPrefillSpec field"),
+            ("absorbed_query=true", "use --absorbed-query"),
+            ("num_xcds", "expected KEY=VAL"),
+        ):
+            with self.subTest(pair=pair):
+                with self.assertRaises(ValueError) as ctx:
+                    self._parse(pair)
+                self.assertIn(needle, str(ctx.exception))
+
+    def test_cli_rejects_a_bad_override(self):
+        from benchmarks.gfx942.attention.prefill import (
+            benchmark_mla_prefill_live as drv,
+        )
+
+        with self.assertRaises(SystemExit):
+            drv.main(["--mode", "resolve", "--spec-override", "agpr_acc=1"])
 
 
 class TestDriver(unittest.TestCase):

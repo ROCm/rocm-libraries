@@ -228,9 +228,11 @@ class TestGate(unittest.TestCase):
         )
         self.assertFalse(MLA_REGISTRY.get(_NAME).admits(foreign)[0])
 
-    def test_capability_is_a_superset_of_the_predicate(self):
+    def test_residual_predicate_implies_capability(self):
         # The direction that must never invert: anything the predicate accepts,
         # the capability prefilter must also have accepted.
+        # Calls ``_supports`` directly on purpose: predicate <= capability needs
+        # the residual predicate without the capability prefilter ``admits`` runs.
         candidate = MLA_REGISTRY.get(_NAME)
         for req in (_req(), _req(num_heads=64), _req(total_q=1, num_seqs=1)):
             with self.subTest(req=req):
@@ -345,20 +347,18 @@ class TestExtentAdmission(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("query extent", why)
 
-    def test_absorbed_query_extent(self):
-        import dataclasses
-
-        from kernels.mla.mla_prefill_gfx942 import check_mla_prefill_extents
-
+    def test_absorbed_query_extent_through_dispatch(self):
+        candidate = MLA_REGISTRY.get(_NAME)
         for h, top in self._ABSORBED_MAX_Q:
             with self.subTest(num_heads=h):
-                spec = dataclasses.replace(
-                    dispatch_mla(_req(num_heads=h)).spec, absorbed_query=True
+                self.assertTrue(
+                    candidate.admits(
+                        _req(num_heads=h, total_q=top, absorbed_query=True)
+                    )[0]
                 )
-                self.assertEqual(
-                    check_mla_prefill_extents(spec, total_q=top), (True, "")
+                ok, why = candidate.admits(
+                    _req(num_heads=h, total_q=top + 1, absorbed_query=True)
                 )
-                ok, why = check_mla_prefill_extents(spec, total_q=top + 1)
                 self.assertFalse(ok)
                 self.assertIn("query extent", why)
 
@@ -393,22 +393,18 @@ class TestExtentAdmission(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("c_kv extent", why)
 
-    def test_paged_kv_extent_absorbed(self):
-        import dataclasses
-
-        from kernels.mla.mla_prefill_gfx942 import check_mla_prefill_extents
-
-        spec = dataclasses.replace(dispatch_mla(_req()).spec, absorbed_query=True)
+    def test_paged_kv_extent_absorbed_through_dispatch(self):
+        candidate = MLA_REGISTRY.get(_NAME)
         self.assertTrue(
-            check_mla_prefill_extents(
-                spec, total_q=64, num_kv_blocks=self._MAX_KV_BLOCKS
+            candidate.admits(
+                _req(num_kv_blocks=self._MAX_KV_BLOCKS, absorbed_query=True)
             )[0]
         )
-        self.assertFalse(
-            check_mla_prefill_extents(
-                spec, total_q=64, num_kv_blocks=self._MAX_KV_BLOCKS + 1
-            )[0]
+        ok, why = candidate.admits(
+            _req(num_kv_blocks=self._MAX_KV_BLOCKS + 1, absorbed_query=True)
         )
+        self.assertFalse(ok)
+        self.assertIn("c_kv extent", why)
 
     def test_unknown_pool_is_refused(self):
         ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_kv_blocks=0))
@@ -947,6 +943,260 @@ class TestSupportImpliesBuildable(unittest.TestCase):
         result = dispatch_mla(_req())
         kernel = result.candidate.built(result.spec, result.request.arch)
         self.assertGreaterEqual(kernel.max_workgroup_size, result.block[0])
+
+
+class TestRequestTypes(unittest.TestCase):
+    """``_request_errors`` rejects loose types rather than coercing them."""
+
+    def _refused(self, **overrides):
+        from dispatch.mla.common import _request_errors
+
+        req = _req(**overrides)
+        errors = _request_errors(req)
+        # Every entry point refuses it, not only the family check.
+        self.assertFalse(MLA_REGISTRY.get(_NAME).admits(req)[0])
+        self.assertEqual(mla_sweep_space(req), ())
+        self.assertEqual(registered_mla_combos(req), ())
+        self.assertEqual(dispatch_mla_all(req), ())
+        with self.assertRaises(ValueError):
+            dispatch_mla(req)
+        return "; ".join(errors)
+
+    def test_bool_fields(self):
+        for name in ("causal", "absorbed_query"):
+            for value in ("false", "true", 0, 1, None):
+                with self.subTest(name=name, value=value):
+                    self.assertIn(
+                        f"{name} must be a bool", self._refused(**{name: value})
+                    )
+
+    def test_int_fields(self):
+        for name in (
+            "num_heads",
+            "total_q",
+            "num_seqs",
+            "max_seqlen_k",
+            "d_nope",
+            "d_rope",
+            "d_v",
+            "kv_lora_rank",
+            "page_block_size",
+            "num_kv_blocks",
+            "num_cus",
+        ):
+            for value in (True, 1.0, "64"):
+                with self.subTest(name=name, value=value):
+                    self.assertIn(
+                        f"{name} must be an int", self._refused(**{name: value})
+                    )
+
+    def test_named_cases(self):
+        for overrides, field in (
+            ({"absorbed_query": "false"}, "absorbed_query"),
+            ({"causal": "false"}, "causal"),
+            ({"num_heads": True}, "num_heads"),
+            ({"total_q": 1.0}, "total_q"),
+        ):
+            with self.subTest(**overrides):
+                self.assertIn(field, self._refused(**overrides))
+
+    def test_falsy_non_bool_causal_reports_the_type_error(self):
+        # Not "missing required features": the capability prefilter lets it
+        # through so the refusal names the real problem.
+        for value in (0, None):
+            with self.subTest(value=value):
+                ok, why = MLA_REGISTRY.get(_NAME).admits(_req(causal=value))
+                self.assertFalse(ok)
+                self.assertIn("causal must be a bool", why)
+
+    def test_uncoercible_values_are_refused_not_raised(self):
+        # dims() must not int() these before _request_errors names them.
+        for name, value in (
+            ("num_heads", None),
+            ("total_q", "abc"),
+            ("num_seqs", [1]),
+            ("d_rope", None),
+        ):
+            with self.subTest(name=name, value=value):
+                ok, why = MLA_REGISTRY.get(_NAME).admits(_req(**{name: value}))
+                self.assertFalse(ok)
+                self.assertIn(f"{name} must be an int", why)
+                self.assertIn(f"{name} must be an int", self._refused(**{name: value}))
+
+    def test_non_str_dtype_is_refused_not_raised(self):
+        ok, why = MLA_REGISTRY.get(_NAME).admits(_req(dtype=None))
+        self.assertFalse(ok)
+        self.assertIn("dtype", why)
+
+    def test_well_formed_request_has_no_errors(self):
+        from dispatch.mla.common import _request_errors
+
+        self.assertEqual(_request_errors(_req()), [])
+        self.assertEqual(_request_errors(_req(absorbed_query=True)), [])
+
+
+class TestTuningFields(unittest.TestCase):
+    """``tuning_id`` / ``tuning_knobs`` match ``AttentionRequest``; MLA has no
+    knob axes, so anything but the defaults is refused, not ignored."""
+
+    def test_fields_match_the_attention_request(self):
+        import dataclasses
+
+        from dispatch.attention import AttentionRequest
+
+        mla = {f.name: f for f in dataclasses.fields(MLARequest)}
+        attn = {f.name: f for f in dataclasses.fields(AttentionRequest)}
+        for name in ("tuning_id", "tuning_knobs"):
+            with self.subTest(name=name):
+                self.assertEqual(mla[name].default, attn[name].default)
+
+    def test_defaults_normalize_and_hash(self):
+        req = _req()
+        self.assertEqual(req.tuning_id, "auto")
+        self.assertEqual(req.tuning_knobs, ())
+        normalized = req.normalized()
+        self.assertEqual(normalized["tuning_id"], "auto")
+        self.assertEqual(normalized["tuning_knobs"], ())
+
+    def test_knobs_normalize_like_attention(self):
+        # A mapping (as JSON stores it) becomes sorted pairs at construction.
+        req = _req(tuning_knobs={"b": 1, "a": 2})
+        self.assertEqual(req.tuning_knobs, (("a", 2), ("b", 1)))
+
+    def test_non_default_tuning_is_refused(self):
+        from dispatch.mla.common import _request_errors
+
+        for overrides in (
+            {"tuning_id": "gfx942_mla_x"},
+            {"tuning_knobs": (("block_q", 64),)},
+            {"tuning_id": 3},
+        ):
+            with self.subTest(**overrides):
+                req = _req(**overrides)
+                self.assertTrue(_request_errors(req))
+                ok, why = MLA_REGISTRY.get(_NAME).admits(req)
+                self.assertFalse(ok)
+                self.assertIn("tuning", why)
+                with self.assertRaises(ValueError):
+                    dispatch_mla(req)
+
+    def test_request_hash_covers_the_tuning_fields(self):
+        from rocke.dispatch.core import stable_json_hash
+
+        a = stable_json_hash(_req().normalized(), n=16)
+        b = stable_json_hash(_req(tuning_id="x").normalized(), n=16)
+        self.assertNotEqual(a, b)
+
+    def test_dispatch_unchanged_with_defaults(self):
+        explicit = dispatch_mla(_req(tuning_id="auto", tuning_knobs=()))
+        default = dispatch_mla(_req())
+        self.assertEqual(explicit.kernel_id, default.kernel_id)
+        self.assertEqual(explicit.spec, default.spec)
+
+
+class TestAbsorbedQueryRequest(unittest.TestCase):
+    """``absorbed_query`` on the request selects the unfused kernel."""
+
+    @staticmethod
+    def _pin(name, **overrides):
+        c = MLA_REGISTRY.get(name)
+        return _req(algorithm=c.algorithm, spec_id=c.spec_id, **overrides)
+
+    def _check_absorbed(self, result):
+        from kernels.mla.mla_prefill_gfx942 import (
+            mla_prefill_block,
+            mla_prefill_fwd_grid,
+            mla_prefill_fwd_signature,
+        )
+
+        spec = result.spec
+        self.assertTrue(spec.absorbed_query)
+        self.assertTrue(spec.fwd_kernel_name().endswith("_aq"))
+        self.assertEqual(result.signature, tuple(mla_prefill_fwd_signature(spec)))
+        self.assertEqual(len(result.signature), 12)
+        self.assertEqual(
+            [a["name"] for a in result.signature[:3]],
+            ["out_ptr", "lse_ptr", "qa_ptr"],
+        )
+        self.assertEqual(result.block, mla_prefill_block(spec))
+        req = result.request
+        self.assertEqual(
+            result.grid,
+            mla_prefill_fwd_grid(
+                spec, num_q_blocks=num_q_blocks_for(req, spec.block_q)
+            ),
+        )
+
+    def test_default_is_fused(self):
+        result = dispatch_mla(_req())
+        self.assertFalse(result.spec.absorbed_query)
+        self.assertEqual(len(result.signature), 13)
+
+    def test_rule_picked_layouts(self):
+        # Below and above the agpr_acc rows-per-sequence threshold.
+        for (total_q, seqs), agpr in (((64, 2), False), ((512, 1), True)):
+            with self.subTest(total_q=total_q, seqs=seqs), _flavor("llvm22"):
+                result = dispatch_mla(
+                    _req(total_q=total_q, num_seqs=seqs, absorbed_query=True)
+                )
+                self.assertEqual(result.candidate.name, _NAME)
+                self.assertEqual(result.spec.agpr_acc, agpr)
+                self._check_absorbed(result)
+
+    def test_pinned_layouts(self):
+        with _flavor("llvm22"):
+            for name, agpr in ((_AGPR_NAME, True), (_ROW16_NAME, False)):
+                with self.subTest(name=name):
+                    result = dispatch_mla(self._pin(name, absorbed_query=True))
+                    self.assertEqual(result.candidate.name, name)
+                    self.assertEqual(result.spec.agpr_acc, agpr)
+                    self._check_absorbed(result)
+
+    def test_absorbed_spec_is_the_fused_spec_plus_the_flag(self):
+        import dataclasses
+
+        fused = dispatch_mla(_req()).spec
+        absorbed = dispatch_mla(_req(absorbed_query=True)).spec
+        self.assertEqual(absorbed, dataclasses.replace(fused, absorbed_query=True))
+
+    def test_single_head_layout_is_refused(self):
+        ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_heads=5, absorbed_query=True))
+        self.assertFalse(ok)
+        self.assertIn("absorbed_query", why)
+        with self.assertRaises(ValueError):
+            dispatch_mla(_req(num_heads=5, absorbed_query=True))
+        self.assertEqual(mla_sweep_space(_req(num_heads=5, absorbed_query=True)), ())
+
+    def test_sweep_entry_points_carry_it(self):
+        with _flavor("llvm22"):
+            req = _req(absorbed_query=True)
+            specs = mla_sweep_space(req)
+            self.assertEqual(len(specs), 2)
+            self.assertTrue(all(s.absorbed_query for s in specs))
+            combos = registered_mla_combos(req)
+            self.assertEqual(len(combos), 2)
+            self.assertTrue(all(s.absorbed_query for _, s in combos))
+            results = dispatch_mla_all(req)
+            self.assertEqual(len(results), 2)
+            for result in results:
+                with self.subTest(candidate=result.candidate.name):
+                    self.assertTrue(result.request.absorbed_query)
+                    self._check_absorbed(result)
+
+    def test_request_hash_and_compile_key_differ(self):
+        fused = dispatch_mla(_req()).kernel_id
+        absorbed = dispatch_mla(_req(absorbed_query=True)).kernel_id
+        self.assertNotEqual(fused.request_hash, absorbed.request_hash)
+        self.assertNotEqual(fused.compile_key, absorbed.compile_key)
+
+    def test_absorbed_kernel_builds_with_the_reported_signature(self):
+        result = dispatch_mla(_req(absorbed_query=True))
+        kernel = result.candidate.built(result.spec, result.request.arch)
+        self.assertEqual(kernel.name, result.spec.fwd_kernel_name())
+        self.assertEqual(
+            [p.name for p in kernel.params],
+            [arg["name"] for arg in result.signature],
+        )
 
 
 if __name__ == "__main__":

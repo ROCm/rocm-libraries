@@ -179,8 +179,9 @@ def _spec_for(
 
     The workgroup order is XCD-aware when the device's XCD count is known. If
     the head count is odd, the remaining levers stay at their
-    :class:`MlaPrefillSpec` defaults, the single-head layout. Nothing else is
-    tuned per request.
+    :class:`MlaPrefillSpec` defaults, the single-head layout. Every layout
+    takes ``absorbed_query`` from the request, and the single-head layout's
+    admission refuses it. Nothing else is tuned per request.
 
     Admission runs once per candidate spec here, and the verdict of the spec
     returned is handed back so :func:`support` does not run it again.
@@ -201,6 +202,9 @@ def _spec_for(
         page_block_size=req.page_block_size,
         block_k=req.page_block_size,
         dtype=req.dtype.lower(),
+        # Carried into every layout below (they derive from ``base``); the
+        # single-head layout does not implement it, so its admission refuses.
+        absorbed_query=req.absorbed_query,
     )
     if req.num_heads % _HEADS_PER_WG:
         if layout is not None:
@@ -272,7 +276,7 @@ def _make_gfx942_mla_prefill_candidate(*, layout: str | None = None) -> KernelCa
             )
         try:
             spec, (ok, why) = _spec_for(req, layout=layout)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             # ``MlaPrefillSpec.__post_init__`` rejects specs impossible on any
             # arch. Report it rather than propagate: a dispatcher asking "can
             # you serve this?" wants a no, not an exception.
@@ -323,11 +327,11 @@ def _make_gfx942_mla_prefill_candidate(*, layout: str | None = None) -> KernelCa
                 ShapeRange("num_seqs", min=1, max=MLA_MAX_NUM_SEQS),
             ),
             supports_features=MLA_FEATURES,
-            # Not merely *supported* -- required. The kernel applies the
-            # bottom-right causal mask unconditionally, so a non-causal request
-            # must be refused rather than served a masked result it did not ask
-            # for.
-            requires_features=MLA_FEATURES,
+            # ``causal`` is not merely *supported* -- required. The kernel
+            # applies the bottom-right causal mask unconditionally, so a
+            # non-causal request must be refused rather than served a masked
+            # result it did not ask for. ``absorbed_query`` is optional.
+            requires_features=frozenset({"causal"}),
         ),
         _supports=support,
         select_spec=select,

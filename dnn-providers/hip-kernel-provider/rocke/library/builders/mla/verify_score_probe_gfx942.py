@@ -71,7 +71,6 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import dataclasses
 import math
 import struct
 import sys
@@ -993,13 +992,20 @@ def describe_problem(spec: MlaPrefillSpec, p: Problem) -> str:
 
 
 def _dispatched_spec(
-    heads: int, q_lens, k_lens, arch, agpr: bool | None = None
+    heads: int,
+    q_lens,
+    k_lens,
+    arch,
+    agpr: bool | None = None,
+    absorbed_query: bool = False,
 ) -> MlaPrefillSpec:
     """The forward spec the MLA dispatcher selects for this case.
 
     ``agpr`` forces dispatch's agpr_acc choice on (True) or off (False) through
     its ``_AGPR_FORCE`` hook; None applies the shipped rule. A forced layout
     admission refuses (e.g. the llvm20 flavor) falls back as dispatch would.
+    ``absorbed_query`` goes on the request, so dispatch selects the unfused
+    kernel itself.
     """
     from dispatch.mla import MLARequest, dispatch_mla
     from dispatch.mla import gfx942 as _mla_gfx942
@@ -1016,12 +1022,18 @@ def _dispatched_spec(
                 arch=arch or "gfx942",
                 # make_problem's pool at the request's default 16-key page.
                 num_kv_blocks=pool_blocks(k_lens, MLARequest.page_block_size),
+                absorbed_query=absorbed_query,
             )
         ).spec
     except ValueError:
+        if absorbed_query and heads % 2 == 0:
+            # A packed-layout absorbed request dispatch refused for a real
+            # reason (e.g. the query extent); the single-head fallback below
+            # would turn that into the single-head SKIP.
+            raise
         # Nothing admits the request; fall back to the default so the
         # admission check below reports why.
-        return MlaPrefillSpec(num_heads=heads)
+        return MlaPrefillSpec(num_heads=heads, absorbed_query=absorbed_query)
     finally:
         _mla_gfx942._AGPR_FORCE = saved
 
@@ -1075,15 +1087,19 @@ def run_case(
     if mode == "scores":
         spec = MlaPrefillSpec(num_heads=heads, block_q=16)
     else:
-        spec = _dispatched_spec(heads, q_lens, k_lens, arch, agpr=agpr)
-        if absorbed_query:
-            spec = dataclasses.replace(spec, absorbed_query=True)
+        try:
+            spec = _dispatched_spec(
+                heads, q_lens, k_lens, arch, agpr=agpr, absorbed_query=absorbed_query
+            )
+        except ValueError as exc:
+            print(f"[{name}] unsupported: {exc}")
+            return False
     # --dry-run reports problem geometry, which is arch-independent, so it stays
     # runnable on a host with no device.
     if not dry_run:
         ok, reason = supports_mla_prefill(spec, arch=arch)
         if not ok:
-            if absorbed_query and layout_name(spec).startswith("single_head"):
+            if absorbed_query and heads % 2:
                 print(f"[{name}] SKIP absorbed_query: {reason}")
                 return None
             print(f"[{name}] unsupported: {reason}")
