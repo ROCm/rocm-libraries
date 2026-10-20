@@ -2685,6 +2685,7 @@ namespace TensileLite
                     case rocisa::DataType::E8:
                         prop.value = getValue<E8>(prop.init, prop.freeValue);
                         break;
+                    case rocisa::DataType::Int4:
                     case rocisa::DataType::E5M3:
                     case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
