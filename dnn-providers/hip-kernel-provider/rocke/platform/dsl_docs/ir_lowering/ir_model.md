@@ -92,7 +92,7 @@ const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
-zero_vec(elem, n)          # f32 / f16 / bf16
+zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i16 / i32
 ```
 
 ### Arithmetic / compare / cast
@@ -111,6 +111,8 @@ masked_select                              # alias for select
 sitofp_f32(v)                              # i32 -> f32 (LLVM sitofp)
 cast_to_f32(v)                             # f16/bf16 -> f32
 cast_f32_to(v, target)                     # f32 -> f16/bf16
+cvt_f32_to_f64(v)                          # f32 -> f64 (fpext, exact)
+cvt_f64_to_f32(v)                          # f64 -> f32 (fptrunc, round to nearest even)
 trunc_f32_to_f16(v)                        # f32 -> f16 (fptrunc with attrs)
 bitcast(v, target)                         # scalar bitcast of equal size
 vec_bitcast(v, target_vec_type)            # vector bitcast (e.g. <2xi32> <-> <4xf16>)
@@ -198,7 +200,7 @@ smem_ptr_add(lds_addr, byte_off)              # i64 LDS address arithmetic
 smem_load_f16(smem, indices)
 smem_load_vN_f16(smem, *indices, n in {1,2,4,8})
 smem_load_v4_f16(smem, row, col)
-smem_load_vN(smem, *indices, dtype, n)        # f16/bf16
+smem_load_vN(smem, *indices, dtype, n)        # 8/16/32/64-bit dtypes; see the docstring
 smem_store_f16(smem, indices, value)
 smem_store_vN_f16(smem, indices, value, n)    # ds_write_b{16,32,64,128}
 smem_store_vN(smem, indices, value, n)        # n in {1,2,4,8}

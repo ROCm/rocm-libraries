@@ -57,6 +57,7 @@ Kernel-shape abstractions (GEMM / conv / attention infrastructure):
  - `DirectEpilogue` - per-lane vector global stores
  - `CShuffleEpilogue` - LDS-staged wide-vector global stores
  - `compile_kernel` - one-shot IR -> LLVM IR -> HSACO pipeline
+ - `compile_module` - several kernels (`KernelModule`) -> ONE HSACO
  - `make_gemm_manifest` - the standard manifest.json schema
  - `make_conv_manifest` - manifest schema for convolution kernels
 
@@ -122,7 +123,13 @@ from .attention import (
     wave_reduce_stages,
     wave_reduce_sum,
 )
-from .compile import KernelArtifact, compile_kernel
+from .compile import (
+    KernelArtifact,
+    KernelModule,
+    ModuleArtifact,
+    compile_kernel,
+    compile_module,
+)
 from .mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -535,7 +542,10 @@ __all__ = [
     "run_fusion_validation_matrix",
     # Compile
     "KernelArtifact",
+    "KernelModule",
+    "ModuleArtifact",
     "compile_kernel",
+    "compile_module",
     # Manifest
     "MANIFEST_SCHEMA",
     "attention_args_signature",

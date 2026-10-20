@@ -103,7 +103,9 @@ hsaco, timings = build_hsaco_from_llvm_ir(
 )
 ```
 
-Returns `(bytes, ComgrTimings)`. `ComgrTimings(bc, relocatable, executable)` carries per-stage seconds; `.total` is the sum.
+Returns `(bytes, ComgrTimings)`. `ComgrTimings(bc, link, relocatable, executable)` carries per-stage seconds; `.total` is the sum. Construct it by keyword.
+
+`build_hsaco_from_llvm_modules(ir_texts, isa=..., options=...)` compiles several modules into one code object: each is compiled to bitcode, the bitcode is linked (`LINK_BC_TO_BC`, timed as `link`; 0.0 for a single module) and code-generated once. `compile_module(KernelModule(...))` in `helpers/compile.py` uses it to ship companion kernels beside a primary.
 
 Errors from any stage raise `ComgrError(f"{where}: status={s} ({status_string(s)})")`. The actual error message comes from `amd_comgr_status_string`.
 
