@@ -1319,6 +1319,28 @@ def _implicit_gemm_output_config(op, spec):
     return c_map, _fp32_out, _bf16_out, _elem_bytes, flat
 
 
+def _c_lane_rows_cols(b, atom, lane, kc_m1, kc_nlane, c_per_lane):
+    """Decode the per-lane (row, col) pairs for a warp tile's C accumulator slots."""
+    from rocke.helpers.atoms import make_c_warp_dstr_encoding
+    from rocke.helpers.distribution import make_static_tile_distribution
+
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+
+    c_nlane = b.const_i32(kc_nlane)
+    n_in_atom = b.mod(lane, c_nlane)
+    m_blk = b.div(lane, c_nlane)
+    p_lane = [m_blk, n_in_atom]
+
+    rows: List[Value] = []
+    cols: List[Value] = []
+    for i in range(c_per_lane):
+        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+        rows.append(x_row)
+        cols.append(x_col)
+    return rows, cols
+
+
 def emit_direct_epilogue_wmma(
     b,
     spec,

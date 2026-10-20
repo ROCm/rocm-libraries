@@ -115,6 +115,7 @@ from rocke.helpers.transforms import (
 )
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
+    _c_lane_rows_cols,
     _implicit_gemm_output_config,
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -3478,21 +3479,7 @@ def _emit_wgrad_split_k_epilogue(
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
     _, __, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
-
-    c_nlane = b.const_i32(kc_nlane)
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
-    # Decode all (row, col) pairs for the c_per_lane accumulator slots.
-    rows: List[Value] = []
-    cols: List[Value] = []
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        rows.append(x_row)
-        cols.append(x_col)
+    rows, cols = _c_lane_rows_cols(b, atom, lane, kc_m1, kc_nlane, c_per_lane)
 
     wg_M_v = params["p_wg_M"]
     wg_N_v = params["p_wg_N"]
@@ -4099,19 +4086,7 @@ def _emit_wgrad_workspace_store_epilogue(
     from rocke.helpers.distribution import make_static_tile_distribution
 
     _, __, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
-    c_nlane = b.const_i32(kc_nlane)
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
-    rows: List[Value] = []
-    cols: List[Value] = []
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        rows.append(x_row)
-        cols.append(x_col)
+    rows, cols = _c_lane_rows_cols(b, atom, lane, kc_m1, kc_nlane, c_per_lane)
 
     flat = 0
     for mi in range(mfmas_m):
