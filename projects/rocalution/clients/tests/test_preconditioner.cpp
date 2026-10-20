@@ -112,3 +112,18 @@ INSTANTIATE_TEST_CASE_P(preconditioner,
                         parameterized_preconditioner,
                         testing::Combine(testing::ValuesIn(preconditioner_size),
                                          testing::ValuesIn(preconditioner_type)));
+
+int itilu0_history_size[] = {7, 50};
+
+class parameterized_itilu0_history : public parameterized_preconditioner
+{
+};
+
+GENERATE_P_TEST_CASES_DEVICE(parameterized_itilu0_history,
+                             testing_itilu0_convergence_history,
+                             convergence_history);
+
+INSTANTIATE_TEST_CASE_P(preconditioner,
+                        parameterized_itilu0_history,
+                        testing::Combine(testing::ValuesIn(itilu0_history_size),
+                                         testing::Values(std::string("ItILU0"))));
