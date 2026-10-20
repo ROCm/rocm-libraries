@@ -16,7 +16,12 @@ import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
+from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.conv.direct_variants import (
+    DIRECT_WAVE_PARAMETRIC,
+    direct_mfma_knobs_reason,
+)
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
@@ -367,7 +372,7 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         assert set(plan.workspaces) == {"ws_t"}
 
 
-@pytest.mark.parametrize("cpg,kpg", dks._DENSE_MFMA_DGRAD_CHANNELS)
+@pytest.mark.parametrize("cpg,kpg", _DENSE_MFMA_DGRAD_CHANNELS)
 def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
     """Each tuned dense (cpg, kpg) row in ``_DENSE_MFMA_DGRAD_CHANNELS`` must
     reach the MFMA dgrad pipeline for a real problem with those channel
@@ -390,7 +395,7 @@ def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
         caps = dks.DirectCaps(**job.caps)
         probe = dks.probe_problem(caps, dks.DIRECT_DTYPE, "direct_grouped_dgrad_mfma")
         assert (
-            dks._mfma_knobs_reason(probe, job.spec_kwargs) is None
+            direct_mfma_knobs_reason(probe, job.spec_kwargs) is None
         ), job.identity.label()
 
     # The spec that computed the wrong dX on gfx950 is rejected; halving its
@@ -406,8 +411,8 @@ def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
         persistent_grid=False,
         fold_k32=True,
     )
-    assert "spill" in dks._mfma_knobs_reason(problem, knobs)
-    assert dks._mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
+    assert "spill" in direct_mfma_knobs_reason(problem, knobs)
+    assert direct_mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
 
 
 @pytest.mark.parametrize(
@@ -674,7 +679,7 @@ def wave32_jobs():
 def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_jobs):
     """The MFMA variants are wave64 and drop out; the depthwise ones are built
     at wave_size 32, which the identity records and the spec carries."""
-    assert {j.identity.algorithm for j in wave32_jobs} == dks._WAVE_PARAMETRIC
+    assert {j.identity.algorithm for j in wave32_jobs} == DIRECT_WAVE_PARAMETRIC
     for job in wave32_jobs:
         assert job.identity.wave_size == 32
         variant = job.identity.algorithm

@@ -403,12 +403,10 @@ def build_attention_3d(
     **kw,
 ):
     def _build():
-        from kernels import (
-            UnifiedAttention3DTiledSpec,
-            build_unified_attention_3d_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttention3DTiledSpec(
+        SpecCls, _, build_fn, _, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             block_size=block_size,
             num_query_heads=num_query_heads,
@@ -420,7 +418,7 @@ def build_attention_3d(
             num_segments=num_segments,
             **kw,
         )
-        return build_unified_attention_3d_tiled(spec)
+        return build_fn(spec, arch=arch)
 
     return _build
 
@@ -429,19 +427,17 @@ def build_attention_reduce(
     name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
 ):
     def _build():
-        from kernels import (
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_reduce_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttentionReduceTiledSpec(
+        _, SpecCls, _, build_fn, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
             num_segments=num_segments,
         )
-        return build_unified_attention_reduce_tiled(spec)
+        return build_fn(spec, arch=arch)
 
     return _build
 
