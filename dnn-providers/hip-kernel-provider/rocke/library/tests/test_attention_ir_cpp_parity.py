@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""C++/Python byte-identity gate for the dense + D256 attention kernels.
+"""C++/Python byte-identity gate for the library attention kernels.
 
 The IR-sha256 golden for these kernels lives in the platform parity harness
 (``platform/tests/instances/rocke_ir_parity_harness.py``, families
@@ -17,6 +17,11 @@ The original cases are read back from the harness rather than redeclared.
 Importing the harness is the allowed ``library -> platform`` direction (the
 reverse is forbidden); it is reached by path because the harness ships in the
 platform *test* tree, not inside the ``rocke`` package.
+
+The gfx942 MLA prefill kernels get the same check over their own golden's case
+table (``test_mla_prefill_gfx942_golden._cases``), at every LLVM flavor that
+golden records: MLA is not a harness family, but the C++ lowerer is
+family-agnostic, so its IR must match the Python lowering byte for byte too.
 """
 
 from __future__ import annotations
@@ -199,6 +204,63 @@ def test_attention_ir_cpp_python_byte_identity():
         pytest.skip("CPP_UNPORTED_ARCHES cases not gated:\n  " + "\n  ".join(gaps))
 
 
+def test_mla_prefill_ir_cpp_python_byte_identity():
+    """Every MLA golden case, at every golden flavor, lowers to identical IR
+    through both engines. Same outcome classification as the test above. A
+    case the flavor's admission refuses (agpr_acc at llvm20) is the golden's
+    expected failure, so there is nothing to lower and it is not compared."""
+    import pytest
+
+    try:
+        from rocke.core.backend import BackendCoverageGap, BackendError
+        from rocke.core.ir_golden import GOLDEN_FLAVORS
+        from rocke.helpers.compile import _lower_llvm_via_backend
+    except ImportError as e:  # pragma: no cover
+        pytest.skip(f"backend lowering unavailable: {e}")
+    import test_mla_prefill_gfx942_golden as mla
+
+    prev = os.environ.get("ROCKE_CPP_STRICT")
+    os.environ["ROCKE_CPP_STRICT"] = "1"
+    mism = []
+    gaps = []
+    compared = 0
+    try:
+        for flavor in GOLDEN_FLAVORS:
+            # Both engines resolve the flavor from the environment, and the
+            # build's admission reads it too.
+            with mla._flavor_env(flavor):
+                for cid, build in mla._cases().items():
+                    try:
+                        kernel = build()
+                    except NotImplementedError:
+                        continue
+                    py = _lower_llvm_via_backend(
+                        kernel, arch=mla._ARCH, backend="python", spec=None
+                    )
+                    try:
+                        cpp = _lower_llvm_via_backend(
+                            kernel, arch=mla._ARCH, backend="cpp", spec=None
+                        )
+                    except BackendCoverageGap:
+                        gaps.append(f"{flavor}/{cid}")
+                        continue
+                    except BackendError as e:
+                        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+                    compared += 1
+                    if py != cpp:
+                        mism.append(f"{flavor}/{cid}")
+    finally:
+        if prev is None:
+            os.environ.pop("ROCKE_CPP_STRICT", None)
+        else:
+            os.environ["ROCKE_CPP_STRICT"] = prev
+    assert not mism, "MLA cpp/python IR byte-mismatch:\n  " + "\n  ".join(mism)
+    assert compared, "no MLA case was compared"
+    if gaps:
+        pytest.skip("CPP_UNPORTED_ARCHES cases not gated:\n  " + "\n  ".join(gaps))
+
+
 if __name__ == "__main__":
     test_attention_ir_cpp_python_byte_identity()
+    test_mla_prefill_ir_cpp_python_byte_identity()
     print("PASS")
