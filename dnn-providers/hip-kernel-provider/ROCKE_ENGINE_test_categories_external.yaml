@@ -53,6 +53,7 @@ test_categories:
       - "rocke_sdpa_gpu_gfx1201_pytest"
       - "rocke_conv_reference_unit_pytest"
       - "rocke_conv_gpu_gfx942_pytest"
+      - "rocke_conv_gpu_gfx950_pytest"
     labels:
       - "quick"
       - "pre-commit"
@@ -89,5 +90,6 @@ test_categories:
       - "rocke_sdpa_gpu_gfx1201_pytest"
       - "rocke_conv_reference_unit_pytest"
       - "rocke_conv_gpu_gfx942_pytest"
+      - "rocke_conv_gpu_gfx950_pytest"
     labels:
       - "ffm-full"

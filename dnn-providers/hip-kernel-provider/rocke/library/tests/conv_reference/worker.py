@@ -144,13 +144,14 @@ def run(request: dict, output: Path) -> None:
             from rocke.core.lower_llvm import _resolve_llvm_flavor
             from rocke.runtime.comgr import _resolve_lib
 
+            code, kernel = target.exported_kernel(spec)
+            identity = kernel.get("dispatch_spec", {}).get("identity", {})
             compiler = Path(str(_resolve_lib()._name))
             report["compiler"] = {
                 "library": compiler.name,
                 "sha256": file_digest(compiler) if compiler.is_file() else None,
-                "llvm_flavor": _resolve_llvm_flavor(),
+                "llvm_flavor": identity.get("llvm_flavor") or _resolve_llvm_flavor(),
             }
-            code, kernel = target.exported_kernel(spec)
             hsaco = Path(request["export"])
             hsaco.write_bytes(code)
             report["kernel"] = dict(kernel, sha256=file_digest(hsaco))

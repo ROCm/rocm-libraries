@@ -8,39 +8,51 @@ SPDX-License-Identifier: MIT
 The convolution harness compares current GPU kernels with precompiled baseline
 kernels qualified offline against an independent NumPy reference. Ordinary
 verification computes neither CPU reference answers nor replacement budgets and
-requires no Torch. This is infrastructure for a bounded gfx942 forward cohort;
-the gfx942 baseline lock and DVC pointer identify its published bundle. The
-publication registry enables default provider installation alongside SDPA;
-the offline CLI accepts explicit bundle and lock paths to verify replacement candidates.
+requires no Torch. Each of gfx942 and gfx950 has a published 32-case forward
+bundle with its own trusted lock and DVC pointer. Gradients use separate live
+NumPy checks and do not reuse the forward certificate.
 
 ## Coverage and execution
 
-The cohort contains sixteen cases: FP16 and BF16 for each of padded 3x3,
-pointwise 1x1, stride-2, dilation-2, groups=2, asymmetric spatial dimensions,
-K=96 output channels, and K=33 output channels.
+Each forward cohort contains FP16 and BF16 cases for sixteen geometries:
+padded 3x3, pointwise 1x1, stride-2, dilation-2, groups=2, asymmetric spatial
+dimensions, K=96, K=33, C=33, stem C=3, larger spatial/channel dimensions,
+5x5 reduction, odd per-group channels, depthwise, anisotropic filter, and one
+output pixel. Exact geometry lives in the architecture adapters.
+Inputs are NHWC, weights KYXC with C/groups channels, and outputs NHWK.
 
-The K=96 cases exercise two output-channel tiles, including a partial second
-tile, with the cshuffle epilogue. K=33 exercises the default epilogue with odd
-output-channel counts. Host checks assert these production dispatch properties;
-GPU qualification and replay check the resulting kernels and their launch ABI.
-Exact geometry is in
-[`architectures/gfx942/__init__.py`](../library/tests/conv_reference/architectures/gfx942/__init__.py).
-Inputs are NHWC, weights KYXC with C/groups channels, and outputs NHWK. These are
-selected configurations, not a replacement for the existing convolution sweeps.
+The gfx942 current adapter uses an explicit 64x64x64 implicit-GEMM configuration;
+there is no registered production forward instance list for that processor.
+The gfx950 adapter requests `algorithm="implicit_gemm"` from production dispatch,
+builds the selected instance, and uses its production launch plan. This keeps
+implicit-GEMM coverage even when default dispatch prefers a direct depthwise
+kernel. It preserves the selected instance's LLVM lowering flavor during
+compilation. Current compilers still need to support the target and that flavor.
 
-The current worker calls production `dispatch_conv_grouped`, builds the selected
-forward spec with the Python engine, and launches through the convolution AOT
-argument ABI. It covers Python-emitted implicit-GEMM kernels and production
-selection/argument construction; it does not exercise the C++ provider or shipped
-kernel-pack lookup. Direct convolution, backward-data, backward-weight, 3-D,
-additional architectures, and pipeline sweeps are outside this first cohort.
+K=96 exercises two output-channel tiles with a partial second tile and cshuffle.
+K=33 exercises the default epilogue. Host checks assert these properties and
+complete scalar/pointer bindings. Kernel configurations can differ between
+processors and current versus baseline implementations.
 
 Qualification freezes the code object, signature, grid, block, every scalar AOT
-argument, pointer-to-operand bindings, selected dispatch spec, and old Python
+argument, pointer-to-operand bindings, selected configuration, and old Python
 runtime/worker. Replay replaces pointers with live allocations and does not
 import current convolution geometry or dispatch. Both workers poison output with
 NaNs, count launches, synchronize, check all outputs, and check unchanged inputs.
 Baseline and current interpreters remain separate even when reused across cases.
+
+The separate gradient suite contains 12 dgrad and 14 wgrad cases per processor,
+including grouped/strided/dilated geometry and odd channels. gfx950 dgrad uses
+production implicit-GEMM selection for ten cases; its two K=33 cases and all
+gfx942 dgrad cases are explicitly configured. All wgrad cases are explicit
+configurations because no wgrad instance lists are registered. They cover atomic
+split-K, two-stage workspace reduction, and gfx950 merged groups. Each execution
+is checked against a live float64 NumPy oracle at a normalized max-error limit
+of 0.05, with three repetitions, immutable-buffer checks, and state reset.
+
+These bounded suites exercise Python-emitted kernels. Native provider selection,
+shipped kernel packs, direct implementation sweeps, stream-K, 3-D, and additional
+processors remain outside this scope. See the [coverage inventory](conv-coverage-roadmap.md).
 
 ## Numerical contract
 
@@ -108,12 +120,12 @@ The umbrella option defaults ON for provider artifact builds and OFF for the
 rocm-libraries superbuild, which does not fetch the bundles. CMake installs each
 published operation/architecture bundle separately. The
 installed bundle is beneath
-`engines/test_arch_content/rocke/conv/gfx942/`, preserving architecture-specific,
+`engines/test_arch_content/rocke/conv/<processor>/`, preserving architecture-specific,
 test-only artifact packaging. The generic artifact contains the harness and trusted
-lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entry
-`rocke_conv_gpu_gfx942_pytest` registers only when reference installation is enabled and a
-published bundle passes validation. Both entries are
-in the provider category YAML.
+lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entries
+`rocke_conv_gpu_gfx942_pytest` and `rocke_conv_gpu_gfx950_pytest` register only when
+reference installation is enabled and their published bundles pass validation.
+Both entries are in the provider category YAML.
 
 Test a replacement candidate before publication with the offline CLI's `verify`
 command, passing explicit `--bundle` and `--lock` paths. CMake installs only the
@@ -122,11 +134,11 @@ locks. After publication, check the installed layout through the normal CMake pa
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF` registers no pinned-reference GPU entries
 for any operation. A job running on another processor in `AMDGPU_TARGETS` skips
-the gfx942 suite, including when convolution has no reference bundle for that
+the other processor's suite, including when convolution has no reference bundle for that
 processor. Without `AMDGPU_TARGETS`, a different detected processor also skips.
 Selection uses physical GPU identity; family names do not imply reference
 enrollment. Missing hardware or a GPU outside the requested targets fails a
-requested gfx942 suite, and missing or corrupt reference data fails on matching
+requested processor suite, and missing or corrupt reference data fails on matching
 hardware. See the shared
 [processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 
@@ -138,39 +150,27 @@ Archive packaging uses the [packing and publication workflow](gpu-reference-work
 
 ## Validation evidence
 
-On 2026-10-07, the expanded gfx942 cohort passed offline qualification and
-Torch-free installed validation:
-
-- All sixteen cases qualified with three deterministic baseline executions each,
-  checked against NumPy float64 and CPU Torch float64/float32 references.
-- Exported metadata confirmed two N tiles with a partial tail for K=96 and the
-  default epilogue for K=33, in both FP16 and BF16.
-- The source convolution GPU suite passed sixteen comparisons and three failure
-  controls using the candidate bundle and lock in an environment without Torch.
-- A fresh installation passed all five reference CTest suites with Torch absent:
-  153 host checks, 11 SDPA GPU checks, and 19 convolution GPU checks. The source
-  CMake suite also passed seven publication/install checks.
-- The replacement archive was uploaded to DVC, downloaded into an empty cache,
-  and authenticated against the updated committed lock.
-
-These checks cover the installed Python reference harness and Python-emitted
-kernels. They do not establish native C++ provider execution or a completed
-downstream CI run. Qualification uses the committed production sources named in
-the lock and the expanded reference adapter frozen in the bundle.
+The [six-lane record](conv-six-lane-validation.md) separates the original
+October 14 qualification and installed checks from validation of the current
+port. Each baseline was independently qualified against NumPy over all 32 cases;
+those expanded bundles did not use the optional Torch cross-check. Do not infer
+current GPU validation from a successful replay of the old branch history.
 
 ## Bundle identity
 
-The authoritative baseline revision and manifest digest are in the
-[committed lock](../library/tests/conv_reference/architectures/gfx942/baseline_lock.json).
-The archive's content identity and size are in its
-[DVC pointer](../library/tests/reference_bundles/conv/gfx942.tar.gz.dvc).
-Keep those files together when updating coverage; do not maintain a second copy
-of their hashes in this document. The bundle manifest records per-case bounds,
-input/output identities, compiler information, and offline oracle checks.
+Each architecture's committed `baseline_lock.json` is the authoritative source
+revision and manifest identity. Its matching DVC pointer records the archive
+hash and size. Keep the lock and pointer together; a branch refresh or a current
+adapter change does not itself replace the frozen baseline.
 
-Fetch the published archive from the rocm-libraries root before provider
-configuration:
+Fetch both archives from the rocm-libraries root before provider configuration:
 
 ```bash
-dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx942.tar.gz.dvc
+dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx942.tar.gz.dvc \
+  dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx950.tar.gz.dvc
 ```
+
+For qualification, candidate verification, publication, and installed checks,
+follow the [shared workflow](gpu-reference-workflow.md). A change to cases,
+inputs, the numerical contract, or the baseline requires complete independent
+requalification. Never edit a qualified manifest to make a new cohort pass.

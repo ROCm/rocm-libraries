@@ -249,16 +249,30 @@ def test_verification_uses_gpu_outputs_and_frozen_scale_only(
         assert calls == ["replay", "source"]
 
 
-def test_source_adapter_pins_the_qualified_configuration_without_torch():
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
+    from conv_reference.architectures.common import convolution_request
+    from dispatch.grouped_convolution import dispatch_conv_grouped, launch_plan_for
     from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
 
-    target = get_architecture("gfx942")
+    target = get_architecture(architecture)
+    assert len(target.CASES) == 32
     for case in target.CASES:
-        spec = target.kernel_spec(case)
-        grid = implicit_gemm_conv_grid(spec)
-        assert (spec.tile_m, spec.tile_n, spec.tile_k) == (64, 64, 64)
-        assert (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) == (16, 16, 16)
-        assert spec.pipeline == "mem"
+        if architecture == "gfx942":
+            spec = target.kernel_spec(case)
+            grid = implicit_gemm_conv_grid(spec)
+            assert (spec.tile_m, spec.tile_n, spec.tile_k) == (64, 64, 64)
+            assert spec.pipeline == "mem"
+        else:
+            request = convolution_request(case, architecture)
+            assert request.algorithm == "implicit_gemm"
+            selected = dispatch_conv_grouped(request)
+            spec = selected.spec.identity
+            assert spec.algorithm == "implicit_gemm"
+            assert spec.direction == "fwd"
+            plan = launch_plan_for(request, selected.spec)
+            assert len(plan.steps) == 1 and not plan.workspaces
+            grid = plan.steps[0].grid
         assert all(v > 0 for v in grid)
         if case.name == "multi-tile":
             assert grid[0] == 2
@@ -267,10 +281,22 @@ def test_source_adapter_pins_the_qualified_configuration_without_torch():
         elif case.name == "odd-channels":
             assert case.K % 2 == 1
             assert spec.epilogue == "default"
+        elif case.name == "large":
+            assert grid == (2, 7, 1)
+            assert case.Y * case.X * case.C % spec.tile_k == 0
+        elif case.name == "grouped-odd":
+            assert case.C // case.groups == case.K // case.groups == 33
+        elif case.name == "depthwise":
+            assert grid[2] == 64
+        elif case.name == "out-1x1":
+            assert case.output_shape[1:3] == (1, 1)
 
 
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)
-def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(case, monkeypatch):
+def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(
+    case, monkeypatch, architecture
+):
     from types import SimpleNamespace
     import rocke
     import rocke.runtime
@@ -279,7 +305,7 @@ def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(case, monkey
     captured = []
 
     def compile_kernel(kernel, **kwargs):
-        assert kwargs == {"arch": "gfx942", "backend": "python"}
+        assert kwargs == {"arch": architecture, "backend": "python"}
         captured.append(kernel)
         return SimpleNamespace(hsaco=b"host-abi-fixture", kernel_name="fixture")
 
@@ -298,12 +324,17 @@ def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(case, monkey
 
     monkeypatch.setattr(rocke, "compile_kernel", compile_kernel)
     monkeypatch.setattr(rocke.runtime, "KernelLauncher", Launcher)
-    target = get_architecture("gfx942")
+    target = get_architecture(architecture)
     prepared = target.prepare(case, str(Path(kernels.__file__).parent.parent))
     target.launch(prepared, {"a": 11, "b": 22, "out": 33})
     code, metadata = target.exported_kernel(prepared)
     assert len(captured) == 1
     assert code == b"host-abi-fixture"
+    if architecture == "gfx950":
+        assert metadata["dispatch_spec"]["identity"]["arch"] == architecture
+        assert metadata["dispatch_spec"]["identity"]["algorithm"] == "implicit_gemm"
+    else:
+        assert metadata["kernel_spec"]["tile_m"] == 64
     assert set(metadata["bindings"]) == {"A", "B", "D"}
     assert not set(metadata["scalars"]) & set(metadata["bindings"])
     json.dumps(metadata, allow_nan=False)
@@ -368,9 +399,59 @@ def test_qualification_freezes_self_contained_replay_support(
             "-c",
             "import sys; sys.path.insert(0, sys.argv[1]); "
             "import conv_reference.worker; "
+            "from conv_reference.architectures import get_architecture; "
+            "get_architecture('gfx942'); "
+            "get_architecture('gfx950'); "
+            "assert 'kernels' not in sys.modules; "
+            "assert 'dispatch' not in sys.modules; "
             "assert 'torch' not in sys.modules",
             str(bundle / "payload/runner"),
         ],
         cwd=tmp_path,
         check=True,
     )
+
+
+@pytest.mark.parametrize("package", ["kernels", "dispatch"])
+def test_adapter_rejects_production_imports_outside_selected_tree(
+    tmp_path, monkeypatch, package
+):
+    import importlib
+    from conv_reference.architectures.common import validate_library_root
+
+    for name in ("kernels", "dispatch"):
+        module = importlib.import_module(name)
+        root = tmp_path if name == package else tmp_path / "selected"
+        monkeypatch.setattr(module, "__file__", str(root / name / "__init__.py"))
+    with pytest.raises(RuntimeError, match="outside the selected library"):
+        validate_library_root(str(tmp_path / "selected"))
+
+
+@pytest.mark.parametrize("previous", [None, "llvm23"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_instance_compilation_uses_identity_flavor_and_restores_environment(
+    monkeypatch, previous, fail
+):
+    import os
+    import rocke
+    from conv_reference.architectures.common import compile_reference_kernel
+
+    if previous is None:
+        monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    else:
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", previous)
+
+    def compile_kernel(kernel, **kwargs):
+        assert os.environ["ROCKE_LLVM_FLAVOR"] == "llvm22"
+        assert kwargs == {"arch": "gfx950", "backend": "python"}
+        if fail:
+            raise RuntimeError("compiler failure")
+        return kernel
+
+    monkeypatch.setattr(rocke, "compile_kernel", compile_kernel)
+    if fail:
+        with pytest.raises(RuntimeError, match="compiler failure"):
+            compile_reference_kernel("kernel", "gfx950", "llvm22")
+    else:
+        assert compile_reference_kernel("kernel", "gfx950", "llvm22") == "kernel"
+    assert os.environ.get("ROCKE_LLVM_FLAVOR") == previous

@@ -173,20 +173,23 @@ the strategy's biggest holes live (see
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
   not publication status. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201,
-  and convolution/gfx942 are published. Adding another
+  and convolution/gfx942 and convolution/gfx950 are published. Adding another
   published pair requires its adapter, independently qualified lock, retrievable
   bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
   adapters into the new bundle. Existing bundles keep their original frozen code.
 
 - The [convolution reference lane](docs/conv-test-reference.md) implements the
-  same offline qualification and GPU replay workflow for a bounded gfx942
-  forward cohort. It shares artifact, digest, budget, snapshot, and worker
-  transport code with SDPA. Its published gfx942 bundle is installed by default
+  same offline qualification and GPU replay workflow for bounded gfx942 and gfx950
+  forward cohorts, with 32 cases each. It shares artifact, digest, budget, snapshot,
+  and worker transport code with SDPA. Both published bundles are installed by default
   alongside SDPA. Verify replacement candidates with explicit bundle and lock
   paths through the offline CLI. Both operations use NumPy and ROCm without
   Torch in CI.
   Optional Torch cross-checking belongs only to offline convolution qualification.
+  Separate gradient tests run 12 dgrad and 14 wgrad cases per processor against
+  live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md) distinguishes
+  production-selected instances from explicit kernel configurations.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -680,11 +683,39 @@ reference them, don't copy them here.*
 
 ## Pinned convolution references
 
-A Torch-free gfx942 forward-convolution qualification and GPU replay harness is
-available alongside SDPA. Both gfx942 bundles are listed in the publication
-registry and installed by default for provider artifact builds. See [the convolution reference guide](docs/conv-test-reference.md)
-for the cohort and numerical contract. Use the
-[reference workflow](docs/gpu-reference-workflow.md) to add coverage or replace a bundle.
+The gfx942 and gfx950 forward suites each run 32 numerical cases and three
+failure controls without Torch. Both bundles are published and installed by
+default for provider artifact builds. See the [convolution reference guide](docs/conv-test-reference.md)
+for the numerical contract and the [shared workflow](docs/gpu-reference-workflow.md)
+for qualification, publication, and candidate verification.
+
+From an installed provider test directory, run the matching suite:
+
+```bash
+ctest -R '^rocke_conv_gpu_gfx942_pytest$' --output-on-failure
+# On gfx950:
+ctest -R '^rocke_conv_gpu_gfx950_pytest$' --output-on-failure
+```
+
+The shared selector consumes TheRock's concrete `AMDGPU_TARGETS` and detected
+processor. Another requested processor's suite skips with exit 77; matching
+hardware requires its own valid bundle. Build-family names do not enroll a
+processor or authorize reuse of another processor's certificate.
+
+Gradient host checks join `rocke_library_conv_pytest`; gradient GPU checks join
+`rocke_library_gpu_pytest`. They use live NumPy oracles, including atomic and
+two-stage execution, with three repetitions per case. Inspect that all 26
+matching gradient cases executed; aggregate passes in the omnibus suite can
+include host checks and skip unrelated GPU tests. For a focused installed run:
+
+```bash
+python -m pytest tests/library/tests/test_conv_gradient_correctness.py \
+  --rocke-reference-operation conv --rocke-reference-arch gfx942 -v -rs
+```
+
+Use `gfx950` on that processor. Gradients do not need a pinned bundle. Their
+source and installed checks cover Python-emitted kernels, not native provider
+or kernel-pack execution. See the [six-lane validation record](docs/conv-six-lane-validation.md).
 
 ## Shared GPU reference artifacts
 
@@ -715,14 +746,14 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx942)_pytest$' --output-on-failure --no-tests=error
+ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx(942|950))_pytest$' --output-on-failure --no-tests=error
 ```
 
 Inspect the selected tests: disabling reference installation omits the GPU
 entries, and entries for other architectures skip. A successful CTest command
 alone does not establish GPU coverage. On the matching GPU, expect eight SDPA
 comparisons on gfx942, gfx1151, or gfx1201, or seven on gfx950, plus three failure
-controls. The gfx942 convolution entry adds sixteen comparisons and three failure
+controls. Each matching convolution entry adds 32 comparisons and three failure
 controls. Confirm the matching entries executed with zero selected GPU skips.
 
 For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
@@ -732,7 +763,7 @@ archive is qualified and published. See
 for the distinction between a valid skip and GPU reference coverage.
 
 Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
-and the gfx942 convolution bundle. Fetch all five DVC archives before configuring;
+and two convolution bundles (gfx942, gfx950). Fetch all six DVC archives before configuring;
 missing published archives fail configuration.
 
 The generic gfx1201 replacement is published. A fresh anonymous download matches

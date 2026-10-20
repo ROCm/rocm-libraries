@@ -522,7 +522,7 @@ def test_reference_family_label_does_not_hide_a_missing_gpu(monkeypatch):
 
 @pytest.mark.parametrize(
     "operation,architecture",
-    [("sdpa", "gfx1100"), ("conv", "gfx950"), ("conv", "gfx1151")],
+    [("sdpa", "gfx1100"), ("conv", "gfx1151")],
 )
 def test_reference_fixture_skips_supported_gpu_without_cohort(
     operation, architecture, monkeypatch
@@ -553,7 +553,13 @@ def test_reference_fixture_skips_supported_gpu_without_cohort(
 
 @pytest.mark.parametrize(
     "operation,architecture",
-    [("sdpa", "gfx942"), ("sdpa", "gfx1200"), ("sdpa", "gfx1201"), ("conv", "gfx942")],
+    [
+        ("sdpa", "gfx942"),
+        ("sdpa", "gfx1200"),
+        ("sdpa", "gfx1201"),
+        ("conv", "gfx942"),
+        ("conv", "gfx950"),
+    ],
 )
 @pytest.mark.parametrize("candidate", [False, True])
 def test_reference_fixture_selects_explicit_paths(

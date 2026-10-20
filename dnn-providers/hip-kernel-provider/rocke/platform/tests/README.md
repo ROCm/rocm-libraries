@@ -173,10 +173,11 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_sdpa_gpu_gfx950_pytest` | Seven gfx950 numerical cases and three failure checks | When the gfx950 SDPA bundle is installed |
 | `rocke_sdpa_gpu_gfx1151_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1151 SDPA bundle is installed |
 | `rocke_sdpa_gpu_gfx1201_pytest` | Eight FP16 WMMA cases compiled for gfx12-generic and three failure checks | When the gfx1201 SDPA bundle is installed |
-| `rocke_conv_gpu_gfx942_pytest` | Sixteen gfx942 forward cases and three failure checks | When the convolution bundle is installed |
+| `rocke_conv_gpu_gfx942_pytest` | 32 gfx942 forward cases and three failure checks | When the gfx942 convolution bundle is installed |
+| `rocke_conv_gpu_gfx950_pytest` | 32 gfx950 forward cases and three failure checks | When the gfx950 convolution bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 are enrolled
+operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 and convolution/gfx950 are enrolled
 for installation by default in provider builds. Publication is listed in
 `platform/cmake/PublishedGpuReferences.cmake` relative to the rocKE root. CMake
 uses the standard archives and committed locks; verify replacement candidates
@@ -190,3 +191,11 @@ For adding cases, replacing bundles, or enrolling targets, follow the
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)
 and the [convolution guide](../../docs/conv-test-reference.md) for commands,
 publication requirements, and coverage limits.
+
+The convolution gradient host contract joins `rocke_library_conv_pytest`.
+`rocke_library_gpu_pytest` also runs 12 dgrad and 14 wgrad cases on each of
+gfx942/gfx950 against live NumPy oracles, with three executions per case.
+These gradients are not pinned-reference replay. Their buffers, auxiliary
+tables, and workspaces have explicit initialization and integrity checks.
+See the [coverage inventory](../../docs/conv-coverage-roadmap.md) for explicit
+versus production-selected configurations.

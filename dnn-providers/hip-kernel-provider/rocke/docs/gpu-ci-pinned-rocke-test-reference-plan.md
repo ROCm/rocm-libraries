@@ -12,9 +12,9 @@ and [GPU attention coverage](gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
 SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
-each on gfx1151 and gfx1201. Convolution has sixteen qualified gfx942
-forward cases; the operation guides and DVC pointers record the current bundle
-identities. All five pairs are enrolled for default installation. Both operations share
+each on gfx1151 and gfx1201. Convolution has 32 qualified forward cases on each of
+gfx942 and gfx950; the operation guides and DVC pointers record the current bundle
+identities. All six pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging were validated in CI for
 gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
@@ -32,7 +32,9 @@ compression, and downloader selection to verify processor-specific payload routi
 and file-hash preservation for all five published pairs. These checks used the
 Python reference installation harness and local archive transport; native provider
 execution needs separate coverage.
-Further architectures, convolution gradients, KDA, and GDN remain future work.
+Further architectures, pinned gradient replay, KDA, and GDN remain future work.
+Separate convolution gradient suites check 12 dgrad and 14 wgrad cases per
+processor directly against live NumPy oracles; see the [coverage guide](conv-coverage-roadmap.md).
 
 Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
@@ -277,7 +279,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | Component | Responsibility |
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
-| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942 for convolution |
+| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942/gfx950 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
 | `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
@@ -288,7 +290,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
 | `../reference_common/targets.py` / `pytest_support.py` | Physical processor identity and suite selection, independent of generic compiler/catalog targets |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 and convolution/gfx950 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
@@ -343,7 +345,7 @@ The numerical requirements below supplement the common workflow.
 The operation-specific paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
 `engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
 now used by the [forward-convolution infrastructure](conv-test-reference.md).
-That harness has a published bounded gfx942 forward cohort. Further convolution coverage still needs:
+That harness has published bounded gfx942 and gfx950 forward cohorts. Further convolution coverage still needs:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
    separately. Record dimensions, groups, strides, padding, dilation, layouts,
