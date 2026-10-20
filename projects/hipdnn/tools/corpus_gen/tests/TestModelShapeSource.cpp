@@ -151,13 +151,17 @@ TEST(TestModelShapeSource, AValueTheDeclarationDoesNotAcceptIsRefusedRatherThanC
 
     const std::string bad
         = kHeader
-          + std::string("mistyped,1,64,8,4096,4096,128,true,top_left,fp8_e4m3\n"
+          + std::string("mistyped,1,64,8,4096,4096,128,true,top_left,false,fp8_e4m3\n"
                         "not a number,1,64,8,4096,4096,many,true,top_left,false,bf16\n");
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", bad), report);
 
     EXPECT_TRUE(entries.empty());
     EXPECT_EQ(report.unusable, 2);
+    // The first row is complete, so it is refused for its dtype, not for a missing field.
+    EXPECT_NE(report.firstProblem.find("'dtype' is not a declared value: 'fp8_e4m3'"),
+              std::string::npos)
+        << report.firstProblem;
 }
 
 TEST(TestModelShapeSource, AQuotedFieldMayCarryACommaWithoutSplittingTheRow)

@@ -4,15 +4,13 @@
 #pragma once
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
 #include <hipdnn_corpus_gen/CorpusOutput.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
+#include <hipdnn_tools/GraphContentKey.hpp>
 
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -60,20 +58,7 @@ inline std::string graphIdentity(const uint8_t* data, size_t size)
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(graphIdentityBytes(data, size));
 }
 
-/// @brief The content key of a serialized graph (or of the graph inside a graph-and-plan
-/// container), as `hipdnn_bench` reports it: `GraphContentKey::hash()` in decimal.
-inline std::string graphContentKey(const uint8_t* data, size_t size)
-{
-    const auto graph
-        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(data,
-                                                                                         size);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey key{graph};
-    if(!key.isUsable())
-    {
-        throw std::runtime_error("graph has no verifiable serialized content to key");
-    }
-    return std::to_string(key.hash());
-}
+using hipdnn_tools::graphContentKey;
 
 /// The bytes of one graph and the identities it now carries.
 struct IdentifiedGraph

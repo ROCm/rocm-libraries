@@ -91,7 +91,7 @@ binding decides everything below:
    proposed problem to the engine on the GPU); `--keep q.p=v` narrows to a facet
    ([onboarding.md](onboarding.md)):
    ```bash
-   <build>/bin/hipdnn_corpus_gen --operations <checkout>/projects/hipdnn/tools/corpus_gen/operations \
+   <build>/bin/hipdnn_corpus_gen \
      --operation <op> --engine-name <engine> --plugin-dir <abs plugin dir> \
      --output <store>/corpora/<engine>/<device>/<set>/<op> --count <tier count> \
      --seed <unused seed> --bench-path <build>/bin/hipdnn_bench \

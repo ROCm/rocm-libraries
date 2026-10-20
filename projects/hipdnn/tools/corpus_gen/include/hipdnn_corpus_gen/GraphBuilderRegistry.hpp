@@ -1208,7 +1208,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                                                  *b,
                                                  *bScale,
                                                  *c,
-                                                 {static_cast<int32_t>(block)},
+                                                 static_cast<int32_t>(block),
                                                  detail::graphTypesFrom(resolved, *type)),
                      ""};
          }},

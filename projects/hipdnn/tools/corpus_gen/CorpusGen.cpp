@@ -21,6 +21,7 @@
 #include <hipdnn_corpus_gen/RegimeFocus.hpp>
 #include <hipdnn_corpus_gen/RegimeLabel.hpp>
 #include <hipdnn_corpus_gen/ServedExtent.hpp>
+#include <hipdnn_tools/CliArguments.hpp>
 #include <hipdnn_tools/CliNumbers.hpp>
 
 #include <hipdnn_frontend.hpp>
@@ -171,7 +172,8 @@ struct Options
 void printHelp(const char* program)
 {
     std::cout << "Usage: " << program << " --operations <dir> --output <dir> [options]\n\n"
-              << "  --operations <dir>     Directory of *.opmeta.json declarations\n"
+              << "  --operations <dir>     Directory of *.opmeta.json declarations (default:\n"
+              << "                         the shipped ones installed beside this tool)\n"
               << "  --engine-name <name>   REQUIRED. Engine to generate for, e.g.\n"
               << "                         hipkernel:ConvFwd. Every problem is offered to it,\n"
               << "                         so the corpus is what that engine actually serves.\n"
@@ -256,47 +258,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
     {
         const std::string& arg = args[i];
         // A following flag is not a value: `--output --count 5` must not write to "--count".
-        bool missingValue = false;
-        const auto next = [&]() {
-            if(i + 1 >= args.size() || args[i + 1].rfind("--", 0) == 0)
-            {
-                missingValue = true;
-                return std::string();
-            }
-            return args[++i];
-        };
-        // The whole value is the number, or the argument is refused: `--count abc` (or an
-        // empty value) must not run as `--count 0` (the whole pool). A number below the
-        // option's least is refused too: `--ceiling 0` leaves the search no extent to propose.
-        std::optional<std::string> badNumber;
-        std::string least;
-        const auto number = [&](auto& target, const auto& parse, auto atLeast) {
-            const auto text = next();
-            if(missingValue)
-            {
-                return;
-            }
-            const auto value = parse(text);
-            if(!value)
-            {
-                badNumber = text;
-            }
-            else if(*value < atLeast)
-            {
-                badNumber = text;
-                std::ostringstream bound;
-                bound << atLeast;
-                least = bound.str();
-            }
-            else
-            {
-                target = static_cast<std::remove_reference_t<decltype(target)>>(*value);
-            }
-        };
-        const auto integer = [&](auto& target, int64_t atLeast) {
-            number(target, hipdnn_tools::parseInteger, atLeast);
-        };
-        const auto share = [&](double& target) { number(target, hipdnn_tools::parseReal, 0.0); };
+        // A number is the whole value or the argument is refused: `--count abc` (or an empty
+        // value) must not run as `--count 0` (the whole pool), nor `--ceiling 0` leave the
+        // search no extent to propose.
+        hipdnn_tools::OptionReader reader(args, i);
+        const auto next = [&reader]() { return reader.next(); };
 
         if(arg == "--help" || arg == "-h")
         {
@@ -319,7 +285,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--engine-id")
         {
-            number(
+            reader.number(
                 options.engineId, hipdnn_tools::parseEngineId, std::numeric_limits<int64_t>::min());
             options.haveEngineId = true;
         }
@@ -345,11 +311,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--count")
         {
-            integer(options.count, 0);
+            reader.integer(options.count, 0);
         }
         else if(arg == "--per-combination")
         {
-            integer(options.exploration.pointsPerCombination, 1);
+            reader.integer(options.exploration.pointsPerCombination, 1);
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {
@@ -361,15 +327,15 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--model-share")
         {
-            share(options.shares["model"]);
+            reader.real(options.shares["model"], 0.0);
         }
         else if(arg == "--kernel-share")
         {
-            share(options.shares["kernel"]);
+            reader.real(options.shares["kernel"], 0.0);
         }
         else if(arg == "--sweep-share")
         {
-            share(options.shares["sweep"]);
+            reader.real(options.shares["sweep"], 0.0);
         }
         else if(arg == "--keep")
         {
@@ -406,7 +372,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--regime-floor")
         {
-            integer(options.regimeFloor, 0);
+            reader.integer(options.regimeFloor, 0);
         }
         else if(arg == "--include-extremes")
         {
@@ -414,11 +380,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--budget")
         {
-            integer(options.exploration.budgetPerCombination, 1);
+            reader.integer(options.exploration.budgetPerCombination, 1);
         }
         else if(arg == "--ceiling")
         {
-            integer(options.exploration.numericCeiling, 1);
+            reader.integer(options.exploration.numericCeiling, 1);
         }
         else if(arg == "--probe")
         {
@@ -426,23 +392,24 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--restarts")
         {
-            integer(options.exploration.restarts, 1);
+            reader.integer(options.exploration.restarts, 1);
         }
         else if(arg == "--steps")
         {
-            integer(options.exploration.stepsPerStart, 1);
+            reader.integer(options.exploration.stepsPerStart, 1);
         }
         else if(arg == "--max-bytes")
         {
-            integer(options.maxBytes, 0);
+            reader.integer(options.maxBytes, 0);
         }
         else if(arg == "--max-skeleton")
         {
-            integer(options.exploration.maxSkeleton, 1);
+            reader.integer(options.exploration.maxSkeleton, 1);
         }
         else if(arg == "--seed")
         {
-            integer(options.exploration.seed, std::numeric_limits<int64_t>::min());
+            // Non-negative, so the recorded (unsigned) seed passes back through --seed.
+            reader.integer(options.exploration.seed, 0);
         }
         else
         {
@@ -450,15 +417,8 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             printHelp(args[0].c_str());
             return ParseOutcome::INVALID;
         }
-        if(missingValue)
+        if(reader.refused(arg, std::cerr))
         {
-            std::cerr << arg << " needs a value\n";
-            return ParseOutcome::INVALID;
-        }
-        if(badNumber)
-        {
-            std::cerr << arg << " needs a number" << (least.empty() ? "" : " of at least " + least)
-                      << ", not '" << *badNumber << "'\n";
             return ParseOutcome::INVALID;
         }
     }
@@ -566,8 +526,11 @@ int runGenerator(const std::vector<std::string>& args)
     }
     if(options.operationsDir.empty())
     {
-        std::cerr << "--operations is required\n";
-        return 1;
+        // The declarations installed beside the tool.
+        options.operationsDir = (hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                                 / HIPDNN_CORPUS_GEN_DEFAULT_OPERATIONS_RELDIR)
+                                    .lexically_normal()
+                                    .string();
     }
     if(!options.quotaError.empty())
     {
@@ -1072,6 +1035,32 @@ int runGenerator(const std::vector<std::string>& args)
     // read its fields.
     const auto packPaths = hipdnn_corpus_gen::discoverPacks(options.packRoots);
 
+    // A mistyped path is a request the run would silently ignore: refuse it before generating.
+    for(const auto& root : options.packRoots)
+    {
+        if(!std::filesystem::exists(root))
+        {
+            std::cerr << "--kdp-root " << root << " does not exist\n";
+            release();
+            return 1;
+        }
+    }
+    if(!options.packRoots.empty() && packPaths.empty())
+    {
+        std::cerr << "No *.kdp.json found under the --kdp-root paths given\n";
+        release();
+        return 1;
+    }
+    for(const auto& path : options.modelShapes)
+    {
+        if(!std::ifstream(path))
+        {
+            std::cerr << "--model-shapes " << path << " cannot be read\n";
+            release();
+            return 1;
+        }
+    }
+
     int64_t total = 0;
     int64_t requested = 0;
     std::vector<hipdnn_corpus_gen::ManifestEntry> manifestRows;
@@ -1349,6 +1338,15 @@ int runGenerator(const std::vector<std::string>& args)
 
         // Under-filled regimes are searched again with their declared equalities pinned, for
         // the shortfall only, through the same engine and filters.
+        // One graph, one key: two points a builder renders identically (one differing only in
+        // a parameter the graph does not carry) share the content key stamped at admission.
+        const auto contentKey = [&](const ProblemPoint& point) {
+            const auto described
+                = result.operation + "|" + hipdnn_corpus_gen::detail::describe(point);
+            const auto found = stamped.find(described);
+            return found != stamped.end() ? found->second.key : described;
+        };
+
         const auto quotas = quotasFor.find(result.operation);
         std::map<std::string, hipdnn_corpus_gen::RegimeSearchResult> focused;
         std::map<std::string, int64_t> pooledBefore;
@@ -1361,9 +1359,9 @@ int runGenerator(const std::vector<std::string>& args)
             {
                 for(const auto& entry : pool.second)
                 {
-                    const auto key = hipdnn_corpus_gen::detail::describe(entry.point);
-                    byRegime[entry.regime].insert(key);
-                    everything.insert(key);
+                    // Counted as the deduplication below counts them, by graph.
+                    byRegime[entry.regime].insert(contentKey(entry.point));
+                    everything.insert(hipdnn_corpus_gen::detail::describe(entry.point));
                     anchors.push_back(entry.point);
                 }
             }
@@ -1469,12 +1467,7 @@ int runGenerator(const std::vector<std::string>& args)
         // a parameter the graph does not carry) are one problem, whatever their names.
         const auto deduplicated = hipdnn_corpus_gen::deduplicate(
             pools, options.shares, dropped, [&](const hipdnn_corpus_gen::PoolEntry& entry) {
-                const auto found = stamped.find(result.operation + "|"
-                                                + hipdnn_corpus_gen::detail::describe(entry.point));
-                return found != stamped.end()
-                           ? found->second.key
-                           : result.operation + "|"
-                                 + hipdnn_corpus_gen::detail::describe(entry.point);
+                return contentKey(entry.point);
             });
 
         // 0 means everything the pools hold. Larger requests are never filled: `allocate` is
@@ -1520,6 +1513,9 @@ int runGenerator(const std::vector<std::string>& args)
                 {"found_by_focus", focusSearched ? search->second.problems.size() : 0},
                 {"focus_proposals", focusSearched ? search->second.proposed : 0},
                 {"focus_proposals_in_regime", focusSearched ? search->second.inRegime : 0},
+                // The declaration's own constraints exclude every point of this regime.
+                {"excluded_by_constraints",
+                 focusSearched && search->second.inRegime > 0 && search->second.admissible == 0},
                 {"saturated", saturated},
                 {"search_capped", focusSearched && search->second.searchCapped}};
             if(outcome.taken < outcome.asked && !saturated && !floor)
@@ -1527,7 +1523,7 @@ int runGenerator(const std::vector<std::string>& args)
                 quotaShort.push_back(result.operation + " " + regime + ": "
                                      + std::to_string(outcome.taken) + " of "
                                      + std::to_string(outcome.asked)
-                                     + (searched && search->second.searchCapped
+                                     + (focusSearched && search->second.searchCapped
                                             ? " (focused search stopped at its budget limit while "
                                               "still finding points; raise --budget)"
                                             : " (not shown saturated)"));
@@ -1606,6 +1602,20 @@ int runGenerator(const std::vector<std::string>& args)
                      << "\n";
             ++total;
         }
+        index.close();
+        if(!index)
+        {
+            throw std::runtime_error("Failed to write "
+                                     + (root / (result.operation + ".problems.csv")).string());
+        }
+    }
+    if(commands.is_open())
+    {
+        commands.close();
+    }
+    if(!options.outputDir.empty() && !commands)
+    {
+        throw std::runtime_error("Failed to write " + (root / "commands.txt").string());
     }
 
     if(!heldOutIds.empty())

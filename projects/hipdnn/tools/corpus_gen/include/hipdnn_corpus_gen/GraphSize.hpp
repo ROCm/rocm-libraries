@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_corpus_gen/GraphBuilders.hpp>
+#include <hipdnn_tools/TensorSpan.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -51,9 +52,10 @@ inline int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 
 /// @brief Total bytes the tensors of @p bytes need allocated (the §4.3.2 bench ceiling).
 ///
-/// Each tensor is charged its strided span, `1 + sum((dim_i - 1) * stride_i)` elements, to
-/// match hipdnn_bench::elementSpan. Saturates at INT64_MAX on overflow or on a tensor that
-/// cannot be sized (non-positive extent, negative stride, rank-mismatched strides).
+/// Charges what hipdnn_bench allocates: each tensor's strided span
+/// (hipdnn_tools::elementSpan), skipping virtual intermediates and scalars carried by value,
+/// which get no buffer. Saturates at INT64_MAX on overflow or on a tensor that cannot be
+/// sized (non-positive extent, negative stride, rank-mismatched strides).
 inline int64_t graphBytes(const builders::GraphBytes& bytes)
 {
     constexpr auto SATURATED = std::numeric_limits<int64_t>::max();
@@ -68,32 +70,21 @@ inline int64_t graphBytes(const builders::GraphBytes& bytes)
     for(const auto* tensor : *graph->tensors())
     {
         const auto* dims = tensor->dims();
-        if(dims == nullptr)
+        if(dims == nullptr || tensor->virtual_() || tensor->value() != nullptr)
         {
             continue;
         }
         const auto* strides = tensor->strides();
-        if(strides == nullptr || strides->size() != dims->size())
+        if(strides == nullptr)
         {
             return SATURATED;
         }
-
-        int64_t furthest = 0;
-        for(flatbuffers::uoffset_t i = 0; i < dims->size(); ++i)
+        const auto span = hipdnn_tools::elementSpan({dims->begin(), dims->end()},
+                                                    {strides->begin(), strides->end()});
+        if(span == 0)
         {
-            const auto dim = dims->Get(i);
-            const auto stride = strides->Get(i);
-            if(dim <= 0 || stride < 0)
-            {
-                return SATURATED;
-            }
-            if(stride > 0 && dim - 1 > (SATURATED - 1 - furthest) / stride)
-            {
-                return SATURATED;
-            }
-            furthest += (dim - 1) * stride;
+            return SATURATED;
         }
-        const auto span = furthest + 1;
 
         const auto width = elementBytes(tensor->data_type());
         if(span > SATURATED / width || total > SATURATED - (span * width))

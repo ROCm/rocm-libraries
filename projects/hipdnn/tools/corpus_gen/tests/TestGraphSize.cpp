@@ -14,6 +14,7 @@
 #include <hipdnn_corpus_gen/GraphSize.hpp>
 
 #include <limits>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -120,6 +121,34 @@ TEST(TestGraphSize, AnEnormousProblemSaturatesRatherThanWrapping)
               std::numeric_limits<int64_t>::max());
     EXPECT_EQ(graphBytes(graphOf({huge}, fb::DataType::DOUBLE)),
               std::numeric_limits<int64_t>::max());
+}
+
+TEST(TestGraphSize, AFusedGraphIsChargedOnlyTheTensorsTheBenchAllocates)
+{
+    // The two dequantized operands are virtual: produced and consumed inside the graph, never
+    // allocated by the bench, so they must not count against the ceiling.
+    const auto tensor = [](int64_t uid,
+                           std::vector<int64_t> dims,
+                           std::vector<int64_t> strides,
+                           fb::DataType type) {
+        builders::TensorSpec spec;
+        spec.uid = uid;
+        spec.name = "t" + std::to_string(uid);
+        spec.dims = std::move(dims);
+        spec.strides = std::move(strides);
+        spec.dataType = type;
+        return spec;
+    };
+    const auto a = tensor(1, {64, 128}, {128, 1}, fb::DataType::FP8_E4M3);
+    const auto aScale = tensor(2, {64, 4}, {4, 1}, fb::DataType::FP8_E8M0);
+    const auto b = tensor(3, {128, 32}, {32, 1}, fb::DataType::FP8_E4M3);
+    const auto bScale = tensor(4, {4, 32}, {32, 1}, fb::DataType::FP8_E8M0);
+    const auto c = tensor(5, {64, 32}, {32, 1}, fb::DataType::FLOAT);
+
+    const auto graph = builders::blockScaledMatmul(
+        a, aScale, b, bScale, c, 32, builders::GraphTypes::uniform(fb::DataType::FLOAT));
+    const int64_t allocated = (64 * 128) + (64 * 4) + (128 * 32) + (4 * 32) + (64 * 32 * 4);
+    EXPECT_EQ(graphBytes(graph), allocated);
 }
 
 } // namespace hipdnn_corpus_gen

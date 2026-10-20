@@ -12,10 +12,12 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 /// @file ProblemSpace.hpp
@@ -154,38 +156,75 @@ struct ProblemCorpus
 namespace detail
 {
 
-/// The cross product of every categorical parameter's declared values, truncated to @p limit;
-/// @p total receives the untruncated size. Declaration order keeps the result reproducible.
+/// The cross product of every categorical parameter's declared values, at most @p limit of it
+/// plus whatever keeps every declared value present; @p total receives the full size.
+///
+/// Past the limit the product is sampled evenly by index, not cut to a prefix (a prefix keeps
+/// only the first values of the earliest parameters), and each value the sample missed gets a
+/// combination of its own, so a model trained on the corpus has seen every value (§5.2).
+/// Declaration order keeps the result reproducible.
 inline std::vector<ProblemPoint>
     categoricalCombinations(const std::vector<Parameter>& parameters, size_t limit, size_t& total)
 {
-    std::vector<ProblemPoint> combinations{ProblemPoint{}};
+    std::vector<std::pair<std::string, std::vector<ParameterValue>>> axes;
     total = 1;
-
     for(const auto& parameter : parameters)
     {
-        const auto values = parameter.enumerable();
+        auto values = parameter.enumerable();
         if(values.empty())
         {
             continue;
         }
-        total *= values.size();
+        total = total > std::numeric_limits<size_t>::max() / values.size()
+                    ? std::numeric_limits<size_t>::max()
+                    : total * values.size();
+        axes.emplace_back(parameter.name, std::move(values));
+    }
 
-        std::vector<ProblemPoint> expanded;
-        for(const auto& base : combinations)
+    // Combination `index`, the first parameter most significant.
+    const auto at = [&axes](size_t index) {
+        ProblemPoint point;
+        for(size_t axis = axes.size(); axis > 0; --axis)
         {
-            for(const auto& value : values)
-            {
-                auto point = base;
-                point[parameter.name] = value;
-                expanded.push_back(std::move(point));
-            }
+            const auto& values = axes[axis - 1].second;
+            point[axes[axis - 1].first] = values[index % values.size()];
+            index /= values.size();
         }
-        combinations = std::move(expanded);
+        return point;
+    };
 
-        if(combinations.size() > limit)
+    std::vector<ProblemPoint> combinations;
+    if(total <= limit || limit == 0)
+    {
+        combinations.reserve(total);
+        for(size_t index = 0; index < total; ++index)
         {
-            combinations.resize(limit);
+            combinations.push_back(at(index));
+        }
+        return combinations;
+    }
+
+    combinations.reserve(limit);
+    const auto step = static_cast<double>(total) / static_cast<double>(limit);
+    for(size_t i = 0; i < limit; ++i)
+    {
+        combinations.push_back(at(static_cast<size_t>(static_cast<double>(i) * step)));
+    }
+    for(const auto& axis : axes)
+    {
+        const auto& name = axis.first;
+        for(const auto& value : axis.second)
+        {
+            const bool present
+                = std::any_of(combinations.begin(), combinations.end(), [&](const auto& point) {
+                      return point.at(name) == value;
+                  });
+            if(!present)
+            {
+                auto point = combinations.front();
+                point[name] = value;
+                combinations.push_back(std::move(point));
+            }
         }
     }
     return combinations;
@@ -273,33 +312,37 @@ inline std::vector<Shape> regimeSkeleton(const OperationMetadata& metadata,
         choices.push_back(std::move(values));
     }
 
-    std::vector<Shape> skeleton{Shape{}};
-    for(const auto& values : choices)
-    {
-        std::vector<Shape> expanded;
-        for(const auto& base : skeleton)
+    // Shape `index` of the product, first parameter most significant, decoded without
+    // materialising the product (which reaches hundreds of thousands of shapes).
+    const auto shapeAt = [&choices](size_t index) {
+        Shape shape(choices.size());
+        for(size_t d = choices.size(); d > 0; --d)
         {
-            for(const auto value : values)
-            {
-                auto point = base;
-                point.push_back(value);
-                expanded.push_back(std::move(point));
-            }
+            const auto& values = choices[d - 1];
+            shape[d - 1] = values[index % values.size()];
+            index /= values.size();
         }
-        skeleton = std::move(expanded);
-    }
+        return shape;
+    };
 
-    if(skeleton.size() > limit && limit > 0)
+    std::vector<Shape> skeleton;
+    if(total <= limit || limit == 0)
+    {
+        skeleton.reserve(total);
+        for(size_t i = 0; i < total; ++i)
+        {
+            skeleton.push_back(shapeAt(i));
+        }
+    }
+    else
     {
         // Strided, not truncated: a prefix would keep only the smallest early parameters.
-        std::vector<Shape> sampled;
-        sampled.reserve(limit);
-        const auto step = static_cast<double>(skeleton.size()) / static_cast<double>(limit);
+        skeleton.reserve(limit);
+        const auto step = static_cast<double>(total) / static_cast<double>(limit);
         for(size_t i = 0; i < limit; ++i)
         {
-            sampled.push_back(skeleton[static_cast<size_t>(static_cast<double>(i) * step)]);
+            skeleton.push_back(shapeAt(static_cast<size_t>(static_cast<double>(i) * step)));
         }
-        skeleton = std::move(sampled);
     }
     return skeleton;
 }
@@ -433,6 +476,21 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         };
     };
 
+    // The skeleton depends on the numeric window only, which no categorical value changes.
+    size_t skeletonTotal = 0;
+    const auto skeleton = numericWindow.empty() ? std::vector<Shape>{}
+                                                : detail::regimeSkeleton(metadata,
+                                                                         numericWindow,
+                                                                         corpus.numericParameters,
+                                                                         request.maxSkeleton,
+                                                                         skeletonTotal);
+    if(skeletonTotal > skeleton.size())
+    {
+        corpus.skippedCombinations.push_back(
+            std::to_string(skeletonTotal - skeleton.size()) + " of " + std::to_string(skeletonTotal)
+            + " declared regime combinations not tried (maxSkeleton bound)");
+    }
+
     for(size_t index = 0; index < combinations.size(); ++index)
     {
         const auto& categorical = combinations[index];
@@ -442,27 +500,25 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
         if(numericWindow.empty())
         {
-            // All-categorical operation: one problem per combination.
-            if(admits(categorical))
+            // All-categorical operation: one problem per combination, through the same
+            // constraint and held-out checks as a searched point.
+            if(!detail::satisfiesConstraints(metadata, categorical))
             {
-                result.problems.push_back(categorical);
+                ++corpus.constraintRejections;
+            }
+            else if(!isHeld(categorical))
+            {
+                ++corpus.constraintAdmissions;
+                if(admits(categorical))
+                {
+                    result.problems.push_back(categorical);
+                }
             }
             corpus.combinations.push_back(std::move(result));
             continue;
         }
 
         const auto oracle = oracleFor(index);
-
-        size_t skeletonTotal = 0;
-        const auto skeleton = detail::regimeSkeleton(
-            metadata, numericWindow, corpus.numericParameters, request.maxSkeleton, skeletonTotal);
-        if(skeletonTotal > skeleton.size() && index == 0)
-        {
-            corpus.skippedCombinations.push_back(
-                std::to_string(skeletonTotal - skeleton.size()) + " of "
-                + std::to_string(skeletonTotal)
-                + " declared regime combinations not tried (maxSkeleton bound)");
-        }
 
         FeasibleSetRequest search;
         search.seeds = skeleton;

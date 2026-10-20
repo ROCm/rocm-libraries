@@ -329,11 +329,18 @@ inline nlohmann::json writeCorpusManifest(const std::filesystem::path& root,
 {
     const auto manifest = corpusManifest(entries, context);
 
-    std::ofstream json(root / "manifest.json");
-    json << manifest.dump(2) << "\n";
-
-    std::ofstream csv(root / "manifest.csv");
-    csv << corpusManifestCsv(entries);
+    // A truncated manifest reads as a smaller corpus, so a failed write is an error.
+    const auto write = [](const std::filesystem::path& path, const std::string& text) {
+        std::ofstream out(path);
+        out << text;
+        out.close();
+        if(!out)
+        {
+            throw std::runtime_error("Failed to write " + path.string());
+        }
+    };
+    write(root / "manifest.json", manifest.dump(2) + "\n");
+    write(root / "manifest.csv", corpusManifestCsv(entries));
 
     return manifest;
 }

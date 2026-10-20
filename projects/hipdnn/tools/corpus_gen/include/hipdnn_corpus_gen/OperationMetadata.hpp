@@ -190,7 +190,7 @@ struct Neighbourhood
         SCALE, ///< multiply by one of `factors` (rounded, kept >= 1)
         MULTIPLE, ///< move by whole steps of `of`
         VALUES, ///< take one of an explicit list
-        MIRROR ///< follow another parameter, optionally times one of `ratios`
+        MIRROR ///< follow another parameter at the anchor's proportion to it, times one of `ratios`
     };
 
     std::string parameter;
@@ -200,7 +200,7 @@ struct Neighbourhood
     std::vector<int64_t> steps; ///< MULTIPLE: how many multiples to move
     std::vector<int64_t> values; ///< VALUES
     std::string mirrors; ///< MIRROR: the parameter followed
-    std::vector<double> ratios; ///< MIRROR: permitted ratios to it
+    std::vector<double> ratios; ///< MIRROR: spreads applied to the anchor's proportion
 };
 
 /// Values recorded from a real workload (§12.2, §12.3), one list per parameter. A draw picks

@@ -164,9 +164,14 @@ inline std::optional<ProblemPoint> drawFromArchetype(const OperationMetadata& me
 }
 
 /// One numeric parameter moved within its declared neighbourhood.
+///
+/// A MIRROR keeps the anchor's own proportion to the parameter it follows and spreads it by
+/// one of the declared ratios: a decode anchor (seqlen_q 1, seqlen_k 4096) stays a decode
+/// shape when seqlen_q moves.
 inline int64_t perturbOne(const Parameter& parameter,
                           const Neighbourhood& hood,
                           int64_t base,
+                          const ProblemPoint& anchor,
                           const ProblemPoint& drawnSoFar,
                           std::mt19937_64& rng)
 {
@@ -210,9 +215,15 @@ inline int64_t perturbOne(const Parameter& parameter,
         {
             return clampToRange(parameter, base);
         }
+        const auto anchorFollowed = integerAt(anchor, hood.mirrors);
+        const auto proportion
+            = anchorFollowed.has_value() && *anchorFollowed != 0
+                  ? static_cast<double>(base) / static_cast<double>(*anchorFollowed)
+                  : 1.0;
         const auto ratio = hood.ratios.empty() ? 1.0 : hood.ratios.at(choose(hood.ratios.size()));
-        return clampToRange(
-            parameter, static_cast<int64_t>(std::llround(static_cast<double>(*followed) * ratio)));
+        return clampToRange(parameter,
+                            static_cast<int64_t>(
+                                std::llround(static_cast<double>(*followed) * proportion * ratio)));
     }
     default:
         return clampToRange(parameter, base);
@@ -248,7 +259,7 @@ inline ProblemPoint perturbWithinNeighbourhood(const OperationMetadata& metadata
         {
             continue;
         }
-        point[parameter.name] = perturbOne(parameter, hood->second, *base, point, rng);
+        point[parameter.name] = perturbOne(parameter, hood->second, *base, anchor, point, rng);
     }
     return point;
 }
