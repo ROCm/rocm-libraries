@@ -31,7 +31,7 @@ def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
         from .implementations.wmma import replay_values as wmma_replay_values
 
         values = wmma_replay_values(metadata, buffers)
-    elif abi == "dense-v1":
+    elif abi in ("dense-v1", "dense-v2"):
         values = {
             "q_ptr": buffers["q"],
             "k_ptr": buffers["k"],
@@ -39,7 +39,9 @@ def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
             "o_ptr": buffers["out"],
             "scale": case.scale,
         }
-        if metadata["runtime_shape"]:
+        if abi == "dense-v2":
+            values.update(metadata["scalars"])
+        elif metadata["runtime_shape"]:
             values.update(
                 batch=case.batch,
                 seqlen_q=case.sequence_length,

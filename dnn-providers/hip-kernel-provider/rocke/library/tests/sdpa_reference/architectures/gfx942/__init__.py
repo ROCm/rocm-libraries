@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ...contract import Case
@@ -35,10 +36,16 @@ CASE_BY_ID = {case.id: case for case in CASES}
 def prepare(case: Case, library_root: str) -> Gfx942AttentionDenseSpec:
     """Select the current kernel through gfx942's production dispatch policy."""
     validate_library_root(library_root)
-    from dispatch.attention import tuning_spec_with_knobs
+    import dispatch.attention as attention
 
-    return tuning_spec_with_knobs(
-        attention_request(case, NAME),
+    request = attention_request(case, NAME)
+    tuning = getattr(attention, "tuning_spec_with_knobs", None)
+    if tuning is None:
+        # Published baseline sources select this knob through the request.
+        request = replace(request, dense_persistent="on" if case.persistent else "off")
+        return attention.dense_spec_for_request(request)
+    return tuning(
+        request,
         "gfx942_dense",
         {"persistent": case.persistent},
     ).kernel_spec

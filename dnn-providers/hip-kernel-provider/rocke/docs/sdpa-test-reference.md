@@ -41,6 +41,22 @@ GPU random generator. Their intended distribution is similar, but their sample
 values and generation path differ. Multiple executions repeat this fixed corpus;
 they do not add random seeds. Generator incompatibility fails the digest check.
 
+## Dense replay compatibility
+
+New gfx942/gfx950 qualifications record the `dense-v2` replay ABI and freeze the
+runtime shape and indexing scalars alongside the exported signature. gfx942
+uses the production runtime-argument helper, including head counts and the
+persistent grid's fast-division parameters. Older dense sources expose only
+batch and sequence-length scalars. Qualification rejects a signature with
+unbound arguments before writing a certificate. Replay binds fresh HIP pointers,
+uses the enrolled case's scale, and restores the frozen runtime scalars.
+
+Existing bundles without an ABI marker, or with `dense-v1`, retain their original
+shape-binding behavior. Their authenticated contents and numerical gates do not
+change. The gfx942 qualification adapter also supports the published baseline's
+older `dense_spec_for_request` API, selecting persistence explicitly through its
+request; current sources continue through the tuning API.
+
 ## gfx950 base dense cohort
 
 The gfx950 lane covers the seven base configurations from

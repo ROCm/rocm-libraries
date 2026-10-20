@@ -61,6 +61,46 @@ def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
         assert spec.head_size == case.head_dim
 
 
+def test_gfx942_source_adapter_supports_published_dispatch_api(monkeypatch):
+    from dataclasses import dataclass
+
+    import dispatch.attention as attention
+    import kernels
+
+    # Published source snapshots predate the tuning API and select persistence
+    # through the request. Exercise both sides of that request contract.
+    @dataclass(frozen=True)
+    class LegacyRequest(attention.AttentionRequest):
+        dense_persistent: str = "auto"
+
+    tuning = attention.tuning_spec_with_knobs
+
+    def legacy_factory(request):
+        assert request.dense_persistent in ("on", "off")
+        return tuning(
+            request,
+            "gfx942_dense",
+            {"persistent": request.dense_persistent == "on"},
+        ).kernel_spec
+
+    monkeypatch.setattr(attention, "AttentionRequest", LegacyRequest)
+    monkeypatch.setattr(
+        attention, "dense_spec_for_request", legacy_factory, raising=False
+    )
+    monkeypatch.delattr(attention, "tuning_spec_with_knobs")
+    root = str(Path(kernels.__file__).resolve().parent.parent)
+    for case in CASES:
+        spec = get_architecture("gfx942").prepare(case, root)
+        assert spec.persistent is case.persistent
+        assert spec.dtype == case.dtype
+        assert spec.head_size == case.head_dim
+        assert (spec.num_query_heads, spec.num_kv_heads) == (
+            case.query_heads,
+            case.kv_heads,
+        )
+        assert spec.causal is case.causal
+
+
 def test_gfx950_cohort_preserves_existing_sdpa_parameterizations():
     source = Path(__file__).with_name("test_attention_dense_gfx950_numeric.py")
     module = ast.parse(source.read_text())
@@ -669,13 +709,87 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
         )
         code, metadata = target.exported_kernel(spec)
         assert code is launcher._hsaco
+        if architecture == "gfx942":
+            scalars = module.attention_dense_runtime_args(spec)
+        else:
+            scalars = (
+                dict(
+                    batch=case.batch,
+                    seqlen_q=case.sequence_length,
+                    seqlen_kv=case.sequence_length,
+                )
+                if spec.runtime_shape
+                else {}
+            )
         assert metadata == {
+            "abi": "dense-v2",
             "name": launcher.kernel_name,
             "signature": launcher.signature,
             "grid": module.attention_dense_grid(spec),
             "block": module.attention_dense_block(spec),
             "runtime_shape": spec.runtime_shape,
+            "scalars": scalars,
         }
+
+
+@pytest.mark.parametrize(
+    "architecture,case",
+    [
+        (arch, case)
+        for arch in ("gfx942", "gfx950")
+        for case in get_architecture(arch).CASES
+    ],
+    ids=lambda value: value.id if isinstance(value, Case) else value,
+)
+def test_dense_export_replays_production_launch_arguments(
+    architecture, case, monkeypatch
+):
+    import importlib
+
+    import kernels
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from rocke.runtime.packing import pack_args
+    from sdpa_reference.worker import replay_values
+
+    target = get_architecture(architecture)
+    module = importlib.import_module(f"kernels.{architecture}.attention_dense")
+    spec = target.prepare(case, str(Path(kernels.__file__).resolve().parent.parent))
+    buffers = dict(q=0x1000, k=0x2000, v=0x3000, out=0x4000)
+    launched = []
+
+    class RecordingLauncher:
+        _hsaco = b"executed-code-object"
+        kernel_name = "executed_kernel"
+        signature = module.attention_dense_signature(spec)
+
+        def __call__(self, values, *, config):
+            launched.append(pack_args(self.signature, values))
+
+    launcher = RecordingLauncher()
+    monkeypatch.setattr(
+        module,
+        "_DENSE_LAUNCHER_CACHE",
+        {attention_dense_cache_key(spec, arch=architecture): launcher},
+    )
+    target.launch(spec, buffers, case.scale)
+    _, metadata = target.exported_kernel(spec)
+    metadata = json.loads(json.dumps(metadata))
+    replayed = replay_values(metadata, buffers, case)
+    assert launched == [pack_args(metadata["signature"], replayed)]
+    assert metadata["abi"] == "dense-v2"
+    assert set(replayed) == {arg["name"] for arg in metadata["signature"]}
+    # Runtime dimensions must come from the certificate, not the replay caller.
+    assert (
+        replay_values(metadata, buffers, replace(case, batch=case.batch + 1))
+        == replayed
+    )
+    # An ABI expansion must be frozen completely or fail qualification.
+    launcher.signature = [
+        *launcher.signature,
+        {"name": "unbound_scalar", "type": "i32"},
+    ]
+    with pytest.raises(ValueError, match="scalar.*signature"):
+        target.exported_kernel(spec)
 
 
 def test_frozen_runner_imports_all_adapters_without_source_checkout(tmp_path):
