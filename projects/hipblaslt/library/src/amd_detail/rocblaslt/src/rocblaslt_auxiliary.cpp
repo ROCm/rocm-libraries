@@ -2547,6 +2547,25 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+    // No algorithm can take these sizes or strides; report none rather than search at all.
+    if(!problemFitsKernelArgs(matD->m,
+                              matD->n,
+                              matmul_desc->op_A == HIPBLAS_OP_N ? matA->n : matA->m,
+                              matA->ld,
+                              matB->ld,
+                              matC->ld,
+                              matD->ld,
+                              matA->batch_count,
+                              matA->batch_stride,
+                              matB->batch_stride,
+                              matC->batch_stride,
+                              matD->batch_stride))
+    {
+        log_error(__func__,
+                  "sizes, leading dimensions and batch strides of 2^32 elements or more are not "
+                  "supported");
+        return rocblaslt_status_success;
+    }
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
