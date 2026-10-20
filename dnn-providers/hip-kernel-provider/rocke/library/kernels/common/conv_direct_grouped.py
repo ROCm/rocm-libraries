@@ -549,6 +549,23 @@ def is_valid_spec_16c(
     return True, "ok"
 
 
+def _direct_dgrad_params_read(params):
+    """Unpack the dgrad dY-extent parameter bindings."""
+    A = params["A"]
+    Bp = params["B"]
+    D = params["D"]
+    A_bytes = params["A_bytes"]
+    B_bytes = params["B_bytes"]
+    D_bytes = params["D_bytes"]
+    p_Hi = params["p_Hi"]
+    p_Wi = params["p_Wi"]
+    # The dY extents bound the gather: an input position only receives a
+    # gradient from output positions that exist, so these are runtime too.
+    p_Ho = params["p_Ho"]
+    p_Wo = params["p_Wo"]
+    return A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -5252,18 +5269,9 @@ def build_direct_conv_dgrad(
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
     params = emit_direct_params(b, direction="dgrad", io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
-    p_Hi = params["p_Hi"]
-    p_Wi = params["p_Wi"]
-    # The dY extents bound the gather: an input position only receives a
-    # gradient from output positions that exist, so these are runtime too.
-    p_Ho = params["p_Ho"]
-    p_Wo = params["p_Wo"]
+    (
+        A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
+    ) = _direct_dgrad_params_read(params)
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
@@ -5586,18 +5594,9 @@ def build_direct_depthwise_dgrad(
     io_type = _io_type(p.dtype)
 
     params = emit_direct_params(b, direction="dgrad", io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
-    p_Hi = params["p_Hi"]
-    p_Wi = params["p_Wi"]
-    # The dY extents bound the gather: an input position only receives a
-    # gradient from output positions that exist, so these are runtime too.
-    p_Ho = params["p_Ho"]
-    p_Wo = params["p_Wo"]
+    (
+        A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
+    ) = _direct_dgrad_params_read(params)
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
