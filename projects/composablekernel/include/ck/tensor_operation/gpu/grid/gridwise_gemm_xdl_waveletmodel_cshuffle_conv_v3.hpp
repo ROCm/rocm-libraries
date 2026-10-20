@@ -685,6 +685,50 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
     }
 
+    template <typename DeviceArch>
+    __device__ static constexpr auto MakeAThreadClusterLength_DirectLoad(DeviceArch)
+    {
+        if constexpr(!is_same_v<DeviceArch, gfx950_t> ||
+                     is_same_v<tensor_layout::gemm::RowMajor, ALayout>)
+        {
+            return ABlockTransferThreadClusterLengths_AK0_M_AK1{};
+        }
+        else
+        {
+            // M contiguous
+            constexpr index_t cluster_length_k1 =
+                64 / ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<1>{});
+            constexpr index_t cluster_length_k0 =
+                ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<0>{}) *
+                (ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<2>{}) / cluster_length_k1);
+            constexpr index_t cluster_length_m =
+                ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<1>{});
+            return Sequence<cluster_length_k0, cluster_length_m, cluster_length_k1>{};
+        }
+    }
+
+    template <typename DeviceArch>
+    __device__ static constexpr auto MakeBThreadClusterLength_DirectLoad(DeviceArch)
+    {
+        if constexpr(!is_same_v<DeviceArch, gfx950_t> ||
+                     is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
+        {
+            return BBlockTransferThreadClusterLengths_BK0_N_BK1{};
+        }
+        else
+        {
+            // N contiguous
+            constexpr index_t cluster_length_k1 =
+                64 / BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<1>{});
+            constexpr index_t cluster_length_k0 =
+                BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<0>{}) *
+                (BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<2>{}) / cluster_length_k1);
+            constexpr index_t cluster_length_n =
+                BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<1>{});
+            return Sequence<cluster_length_k0, cluster_length_n, cluster_length_k1>{};
+        }
+    }
+
     // =========================================================================
     // Run: wave-specialized GEMM kernel
     // =========================================================================
@@ -1027,25 +1071,32 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         {
             constexpr index_t VectorDimA = UseLdsTransposeA ? 1 : 2;
 
-            auto a_blockwise_copy = ThreadGroupTensorSliceTransfer_DirectLoad<
-                TileLoadThreadGroup,
-                Sequence<AK0Number, MPerBlock, AK1Number>,
-                ABlockTransferThreadClusterLengths_AK0_M_AK1,
-                ABlockTransferThreadClusterArrangeOrder,
-                ADataType,
-                ADataType,
-                decltype(a_grid_desc_ak0_m_ak1),
-                decltype(a_block_desc_ak0_m_ak1),
-                ABlockTransferSrcAccessOrder,
-                ABlockTransferSrcVectorDim,
-                VectorDimA,
-                ABlockTransferSrcScalarPerVector,
-                true>(a_grid_desc_ak0_m_ak1,
-                      make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
-                      a_block_desc_ak0_m_ak1,
-                      make_multi_index(0, 0, 0));
+            using a_thread_cluster_length =
+                decltype(MakeAThreadClusterLength_DirectLoad(get_device_arch()));
+
+            auto a_blockwise_copy =
+                ThreadGroupTensorSliceTransfer_DirectLoad<TileLoadThreadGroup,
+                                                          Sequence<AK0Number, MPerBlock, AK1Number>,
+                                                          a_thread_cluster_length,
+                                                          ABlockTransferThreadClusterArrangeOrder,
+                                                          ADataType,
+                                                          ADataType,
+                                                          decltype(a_grid_desc_ak0_m_ak1),
+                                                          decltype(a_block_desc_ak0_m_ak1),
+                                                          ABlockTransferSrcAccessOrder,
+                                                          ABlockTransferSrcVectorDim,
+                                                          VectorDimA,
+                                                          ABlockTransferSrcScalarPerVector,
+                                                          true>(
+                    a_grid_desc_ak0_m_ak1,
+                    make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
+                    a_block_desc_ak0_m_ak1,
+                    make_multi_index(0, 0, 0));
 
             constexpr index_t VectorDimB = UseLdsTransposeB ? 1 : 2;
+
+            using b_thread_cluster_length =
+                decltype(MakeBThreadClusterLength_DirectLoad(get_device_arch()));
 
             const auto get_b_blockwise_copy = [&]() {
                 if constexpr(!UseTdmB)
@@ -1053,7 +1104,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                     return ThreadGroupTensorSliceTransfer_DirectLoad<
                         TileLoadThreadGroup,
                         Sequence<BK0Number, NPerBlock, BK1Number>,
-                        BBlockTransferThreadClusterLengths_BK0_N_BK1,
+                        b_thread_cluster_length,
                         BBlockTransferThreadClusterArrangeOrder,
                         BDataType,
                         BDataType,
