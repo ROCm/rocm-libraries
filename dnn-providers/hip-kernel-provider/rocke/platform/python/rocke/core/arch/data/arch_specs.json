@@ -2,6 +2,11 @@
   "version": 1,
   "_comment": "ROCKE-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on real hardware (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
   "_comment_async_lds_max_dwords": "Widest per-lane DRAM->LDS DMA the buffer_load_lds family can do, in dwords; 0 where the arch has no such instruction. This is NOT buffer_load_max_dwords: that one is the *register* vector buffer-load width (4 everywhere), while the load-*to-LDS* form is narrower. CDNA3 (gfx942) has only the dword form; the b96/b128 forms (dwords 3 and 4) arrived with CDNA4 (gfx950). Emitting a wider one than the arch supports does not produce a diagnostic -- the AMDGPU backend aborts the process with 'LLVM ERROR: Do not know how to expand this operator's operand!'.",
+  "generic_targets": {
+    "_comment": "LLVM generic processors catalogued in arches, mapped to the concrete processors whose devices load their code objects (llvm.org/docs/AMDGPUUsage.html, generic processor table). Single source of membership for target.py; mirrored by rocke_ati_generic_targets in cpp/core/arch/data.cpp.",
+    "gfx11-generic": ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
+    "gfx12-generic": ["gfx1200", "gfx1201"]
+  },
   "arches": {
     "gfx90a": {
       "_comment": "CDNA2 (gfx90a). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on gfx90a series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",
@@ -121,7 +126,9 @@
         {"family": "mfma_scaled", "a": "fp4e2m1", "b": "bf8e5m2", "c": "fp32", "m": 32, "n": 32, "k": 64, "op_id": "mfma_gfx950_f32_32x32x64_fp4_bf8_scale_e8m0_e8m0_k32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32},
         {"family": "mfma_scaled", "a": "fp4e2m1", "b": "fp6e2m3", "c": "fp32", "m": 32, "n": 32, "k": 64, "op_id": "mfma_gfx950_f32_32x32x64_fp4_fp6_scale_e8m0_e8m0_k32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32},
         {"family": "mfma_scaled", "a": "fp4e2m1", "b": "fp6e3m2", "c": "fp32", "m": 32, "n": 32, "k": 64, "op_id": "mfma_gfx950_f32_32x32x64_fp4_bf6_scale_e8m0_e8m0_k32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32},
-        {"family": "mfma_scaled", "a": "fp4e2m1", "b": "fp4e2m1", "c": "fp32", "m": 32, "n": 32, "k": 64, "op_id": "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32}
+        {"family": "mfma_scaled", "a": "fp4e2m1", "b": "fp4e2m1", "c": "fp32", "m": 32, "n": 32, "k": 64, "op_id": "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32},
+        {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "mfma_f32_16x16x32_xf32", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_16x16x32_bf16"}},
+        {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_xf32", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_32x32x16_bf16"}}
       ]
     },
     "gfx1151": {
@@ -146,12 +153,12 @@
       "mma": [
         {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
         {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"},
-        {"family": "wmma", "a": "iu8", "b": "iu8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
-        {"family": "wmma", "a": "iu4", "b": "iu4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
+        {"family": "wmma", "a": "i8", "b": "i8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
+        {"family": "wmma", "a": "i4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
       ]
     },
     "gfx1201": {
-      "_comment": "RDNA4 (gfx1201). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. Lane maps HYPOTHESIS — verify with examples/gfx1201/wmma_probe.py before trusting matmul_nbits.",
+      "_comment": "RDNA4 (gfx1201). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. The f16/bf16 A/B/C lane maps are exercised on gfx1200/gfx1201 hardware by the WMMA attention numeric suite (library/tests/test_wmma_fmha_fwd_v2_numeric.py); examples/gfx1201/wmma_probe.py remains the per-atom probe.",
       "family": "rdna",
       "target_family": "gfx12_rdna",
       "wave_size": 32,
@@ -215,60 +222,36 @@
         {"family": "wmma", "a": "fp8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_fp8_bf8"},
         {"family": "wmma", "a": "bf8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_fp8"},
         {"family": "wmma", "a": "bf8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_bf8"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_bf8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_bf6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_fp8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_fp6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_bf8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_bf6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_bf8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_fp6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e8m0_e8m0_k32"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_bf8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_bf6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp4_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_fp8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_fp6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_fp4_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_bf8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_bf6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp6", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp6_fp4_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_fp8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_bf8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_fp6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "bf6", "b": "fp4", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf6_fp4_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_fp8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_bf8_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "fp6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_fp6_scale_e8m0_e8m0_k16"},
-        {"family": "wmma_scaled", "a": "fp4", "b": "bf6", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp4_bf6_scale_e8m0_e8m0_k16"}
+        {
+          "generate": "gfx1250_wmma_scaled_v1",
+          "family": "wmma_scaled",
+          "input_dtypes": [
+            "fp8",
+            "bf8",
+            "fp6",
+            "bf6",
+            "fp4"
+          ],
+          "scale_dtypes": [
+            "e8m0",
+            "e5m3",
+            "e4m3"
+          ],
+          "block_k": [
+            32,
+            16
+          ],
+          "shape": [
+            16,
+            16,
+            128
+          ],
+          "c": "fp32"
+        }
       ]
     },
     "gfx11-generic": {
-      "_comment": "RDNA3 family generic target (amdgcn-amd-amdhsa--gfx11-generic). Code objects load on any gfx11xx/gfx115x device whose specific gfxNNNN is not in this ROCm. Same WMMA/wave32 ABI as gfx1151; used for boards whose driver reports a stepping the toolchain can't name (e.g. gfx115E on Windows).",
+      "_comment": "RDNA3/3.5 family generic target (amdgcn-amd-amdhsa--gfx11-generic, code object v6). Code objects load on every generic_targets member, so one build serves gfx1100-gfx1153, including boards whose driver reports a stepping the toolchain can't name. Same WMMA/wave32 ABI as gfx1151.",
       "family": "rdna",
       "target_family": "gfx11_rdna",
       "wave_size": 32,
@@ -289,8 +272,32 @@
       "mma": [
         {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
         {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"},
-        {"family": "wmma", "a": "iu8", "b": "iu8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
-        {"family": "wmma", "a": "iu4", "b": "iu4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
+        {"family": "wmma", "a": "i8", "b": "i8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
+        {"family": "wmma", "a": "i4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
+      ]
+    },
+    "gfx12-generic": {
+      "_comment": "RDNA4 family generic target (amdgcn-amd-amdhsa--gfx12-generic). Code objects load on gfx1200 and gfx1201. Same split-K WMMA/wave32 ABI and catalog as gfx1201.",
+      "family": "rdna",
+      "target_family": "gfx12_rdna",
+      "wave_size": 32,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "async_lds_max_dwords": 0,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_bf16"}
       ]
     }
   }

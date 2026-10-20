@@ -118,7 +118,8 @@ template <typename QDataType,
           typename KDataType,
           typename VDataType,
           typename ODataType,
-          typename ComputeDataType = float>
+          typename ComputeDataType = float,
+          typename MaskDataType = float>
 class GpuSdpaFwdPlan : public IGpuGraphNodePlanExecutor
 {
 public:
@@ -138,7 +139,7 @@ public:
         hipdnn_gpu_ref::ShallowGpuTensor<ODataType> oTensor(
             variantPack.at(_params.oTensor.uid), _params.oTensor.dims, _params.oTensor.strides);
 
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> attnMaskTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<MaskDataType>> attnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
             attnMaskTensor.emplace(variantPack.at(_params.attnMaskTensor->uid),
@@ -166,7 +167,7 @@ public:
         }
 
         hipdnn_gpu_ref::GpuFpReferenceSdpa::
-            fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+            fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskDataType>(
                 qTensor,
                 kTensor,
                 vTensor,
@@ -187,7 +188,9 @@ private:
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
+          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
 class GpuSdpaFwdPlanBuilder : public IGpuGraphNodePlanBuilder
 {
 public:
@@ -195,6 +198,8 @@ public:
     using KDataType = hipdnn_test_sdk::utilities::DataTypeToNative<KDataTypeEnum>;
     using VDataType = hipdnn_test_sdk::utilities::DataTypeToNative<VDataTypeEnum>;
     using ODataType = hipdnn_test_sdk::utilities::DataTypeToNative<ODataTypeEnum>;
+    // UNSET (no mask) maps to a placeholder float: the plan then always passes a null mask.
+    using MaskDataType = hipdnn_test_sdk::utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -217,6 +222,26 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
+
+        // The mask dtype is part of the plan: the UNSET builder takes graphs without a mask,
+        // every other builder takes graphs whose mask tensor has exactly that dtype.
+        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+        {
+            if(nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
+        }
 
         // Ragged tensors need the ragged plan; read as dense they would give wrong results.
         CHECK_NO_RAGGED_TENSORS(tensorMap);
@@ -381,7 +406,8 @@ public:
             isTopLeft = false;
         }
 
-        return std::make_unique<GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float>>(
+        return std::make_unique<
+            GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float, MaskDataType>>(
             GpuSdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                              *tensorMap.at(nodeAttributes->k_tensor_uid()),
                              *tensorMap.at(nodeAttributes->v_tensor_uid()),

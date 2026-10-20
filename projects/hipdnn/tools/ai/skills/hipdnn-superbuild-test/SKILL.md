@@ -1,6 +1,6 @@
 ---
 name: hipdnn-superbuild-test
-description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite. Handles Windows DLL PATH automatically.
+description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite. Handles Windows DLL PATH automatically. This skill executes targets; for what the cross-provider suite actually runs and how to read its result, defer to the hipdnn-integration-testing skill.
 argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|external-integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
@@ -56,7 +56,7 @@ Infer options from the user request:
    ```bash
    python3 <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
    ```
-   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
+   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it emits **one `<component>:<target>` line and one `<component>:command:<cmdline>` line for each registered external suite**. A provider can register several suites. For example, hip-kernel-provider registers one suite for each engine: `hip-kernel-provider-external-integration-check` for `HIP_MLOPS_ENGINE` and `hip-kernel-provider-asm-sdpa-external-integration-check` for `ASM_SDPA_ENGINE`. Do not assume a single line. Each command is the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` removed so that you can supply your own. The `--test-engine` value shows which suite a line belongs to.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
 
    For an ingestor engine the discovery component is **`hip-kernel`**, not
@@ -100,8 +100,13 @@ Infer options from the user request:
      ```bash
      python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
      ```
+   - **Before reporting the result, load the `hipdnn-integration-testing`
+     skill.** This suite is the only place where exit code 0 is often
+     meaningless. That skill applies the suite's own documentation to the
+     output. This includes the signals that the suite prints but that never
+     fail a run.
 
-9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.
+9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY". Never report only the exit code. A run that skips 100% of tests is green, but it does not show that the engine still works.
 
 ## Direct Binary Mapping
 
@@ -154,7 +159,7 @@ neither SDPA reference supports a sink UID. Record **BLOCKED** when no capable r
 exists; a skip, automatic fallback exhaustion or unverified golden output cannot pass.
 
 The corpus sweep interface is `<PY> <GEN>/tools/sweep.py --config <absolute-YAML>` with
-`configs/sweep-isolation.sweep.yaml.example`. Correctness is separate from timing,
+`configs/reduction.sweep.yaml.example`. Correctness is separate from timing,
 engine attribution is exact, and resume is bound to current input content. `SWEEP_DONE`
 is validated completion; explicit `correctness.enabled: false` yields
 `SWEEP_TIMING_ONLY`, never final acceptance; unmet gates yield `SWEEP_INCOMPLETE`. After
@@ -183,3 +188,12 @@ If a requested component has no matching target, say that it was not present in 
 - The build's `stage_shadowed_rocm_dlls` target (`projects/hipdnn/cmake/WindowsDllStaging.cmake` and `dnn-providers/cmake/WindowsDllStaging.cmake`) is the primary mechanism for app-local staging. `cmake_run.py`'s staging is kept on purpose rather than as a leftover: it covers build trees configured before that target existed, and a newly discovered System32-shadowed DLL can be added to `stage_shadowed_dlls.py` right away, ahead of the matching CMake change. When you add a DLL to one, add it to the other.
 - Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
 - Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.
+
+## See also
+
+- `hipdnn-integration-testing` skill — the doc-driven reference behind the
+  `external-integration` scope. It loads the suite's documentation
+  (`dnn-providers/integration-tests/docs/`) and applies it to what a run did
+  and printed. **Load it before interpreting any result from step 8, and
+  before concluding an engine did or did not regress.** This skill executes;
+  that one explains.

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from fractions import Fraction
 
 from dispatch.attention import (
@@ -22,8 +23,35 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # does not implement it.
 # ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
 # kernels write LSE, so every other candidate must keep declining it.
-_GFX950_DENSE_FEATURES = {"causal", "lse", "sinks", "sliding_window"}
+_GFX950_DENSE_FEATURES = {
+    "band",
+    "causal",
+    "full_attention",
+    "lse",
+    "sinks",
+    "sliding_window",
+}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_RDNA_WMMA_FEATURES = {
+    "causal",
+    "causal_bottom_right",
+    "sliding_window",
+    "window_bounds",
+    "noncausal_window",
+    "lse",
+    "sinks",
+    "fp8",
+    "softcap",
+    "alibi",
+    "qq_bias",
+    "window_right",
+    "attn_bias",
+    "layout_dense",
+    "layout_bhsd",
+    "layout_ragged",
+    "layout_paged",
+    "runtime_head_dims",
+}
 EXPECTED_FEATURES = {
     "attention_strided_decode": {
         "strided_kv",
@@ -37,25 +65,13 @@ EXPECTED_FEATURES = {
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
-    "attention_gfx1151_wmma": {
-        "causal",
-        "causal_bottom_right",
-        "sliding_window",
-        "window_bounds",
-        "noncausal_window",
-        "lse",
-        "sinks",
-        "fp8",
-        "softcap",
-        "alibi",
-        "qq_bias",
-        "window_right",
-        "lse",
-        "attn_bias",
-        "layout_dense",
-        "layout_bhsd",
-        "layout_ragged",
-        "layout_paged",
+    "attention_rdna_wmma_prefill": _RDNA_WMMA_FEATURES,
+    "attention_rdna_wmma_decode": _RDNA_WMMA_FEATURES,
+    # The opt-in tuned RDNA WMMA candidates serve exactly what the auto routes do.
+    **{
+        f"attention_{arch}_wmma_{kind}": _RDNA_WMMA_FEATURES
+        for arch in ("gfx11_generic", "gfx1151", "gfx12_generic", "gfx1201")
+        for kind in ("prefill", "decode")
     },
     "attention_gfx942_dense_pipe": {
         "causal",
@@ -65,15 +81,19 @@ EXPECTED_FEATURES = {
     },
     "attention_gfx950_d256": {"causal", "causal_bottom_right"},
     "attention_unified_2d": {
+        "band",
         "causal",
         "causal_bottom_right",
+        "full_attention",
         "fp8",
         "sinks",
         "sliding_window",
     },
     "attention_unified_3d": {
+        "band",
         "causal",
         "causal_bottom_right",
+        "full_attention",
         "fp8",
         "sinks",
         "sliding_window",
@@ -86,20 +106,38 @@ EXPECTED_FEATURES = {
 _ENABLE_FEATURE = {
     "causal": {"mask_type": 1},
     "causal_bottom_right": {"mask_type": AttentionMaskType.BOTTOM_RIGHT_CAUSAL},
-    "sliding_window": {"sliding_window": 256},
+    # A window on a causal mask; ``band`` is the non-causal one (NO_MASK + a window).
+    "sliding_window": {
+        "sliding_window": 256,
+        "mask_type": AttentionMaskType.TOP_LEFT_CAUSAL,
+    },
+    "band": {"sliding_window": 256, "right_bound": 64},
+    # No bound on either side; the base case is a causal mask.
+    "full_attention": {"mask_type": AttentionMaskType.NO_MASK},
     "sinks": {"use_sinks": True},
     "fp8": {"use_fp8": True},
 }
 
 # Features the dispatch spec (hence kernel_name / spec hash) actually encodes.
 # ``fp8`` is carried on AttentionSpec; ``sliding_window`` reroutes 3d->2d and
-# path is in the name. ``causal`` and ``sinks`` are a PRE-EXISTING gap: the spec
-# is built from (path, head_size, block_size, dtype, gqa, use_fp8) only, so
-# toggling the mask or sinks does not change kernel_name today. That fix belongs
-# on the consumers that key a compile cache on kernel_name() and is out of scope
-# here; the gap is frozen below so a future fix trips the test instead of
-# passing silently.
-_IDENTITY_ENCODED = {"causal_bottom_right", "fp8", "sliding_window"}
+# path is in the name. On gfx950 the mask is encoded too: ``causal`` as the top-left
+# ``tl`` token (see ``AttentionSpec.causal_top_left``) and ``band`` as ``rbu`` /
+# ``rb<R>`` -- which is what this test's ``causal`` / ``band`` cases exercise.
+# ``sinks`` is a PRE-EXISTING gap: the spec is built from (path, head_size,
+# block_size, dtype, gqa, use_fp8) only, so toggling sinks does not change
+# kernel_name today. That fix belongs on the consumers that key a compile cache
+# on kernel_name() and is out of scope here; the gap is frozen below so a future
+# fix trips the test instead of passing silently. (On gfx942 / gfx1250 the tiled
+# kernels are still unconditionally causal, so NO_MASK keeps the bottom-right name
+# there; gfx950 selects a distinct body for it.)
+_IDENTITY_ENCODED = {
+    "band",
+    "causal",
+    "causal_bottom_right",
+    "full_attention",
+    "fp8",
+    "sliding_window",
+}
 
 
 def _attn(arch="gfx950", **kw):
@@ -164,7 +202,14 @@ class TestAttentionMaskType(unittest.TestCase):
             with self.subTest(ordinal=ordinal):
                 req = _attn(mask_type=_IntegerLike(ordinal))
                 self.assertEqual(req.normalized()["mask_type"], ordinal)
-                dispatch_attention(req)
+                if ordinal == AttentionMaskType.SLIDING_WINDOW:
+                    # Valid ordinal, but it names a band: with no bound at all there
+                    # is nothing to serve.
+                    with self.assertRaisesRegex(ValueError, "names a band"):
+                        dispatch_attention(req)
+                    dispatch_attention(replace(req, sliding_window=256))
+                else:
+                    dispatch_attention(req)
 
     def test_non_integer_and_unknown_ordinals_are_rejected_clearly(self):
         invalid = (
@@ -253,7 +298,14 @@ class TestAttentionDispatch(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "unified_2d")
 
     def test_sliding_window_routes_2d(self):
-        r = dispatch_attention(_attn(seqlen_q=128, seqlen_k=4096, sliding_window=256))
+        r = dispatch_attention(
+            _attn(
+                seqlen_q=128,
+                seqlen_k=4096,
+                sliding_window=256,
+                mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+            )
+        )
         self.assertEqual(r.spec.path, "2d")
 
     def test_long_kv_small_grid_routes_3d(self):
@@ -337,8 +389,8 @@ class TestAttentionDispatch(unittest.TestCase):
 
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the
-        # spec encodes must change kernel_name; the frozen causal/sinks gap must
-        # not (until the consumer-side fix lands, which will flip these).
+        # spec encodes must change kernel_name; the frozen sinks gap must not
+        # (until the consumer-side fix lands, which will flip it).
         self.assertEqual(set(_ENABLE_FEATURE), set(ATTENTION_FEATURES))
         for feature in sorted(ATTENTION_FEATURES):
             with self.subTest(feature=feature):
@@ -359,6 +411,9 @@ class TestAttentionDispatch(unittest.TestCase):
                         algorithm="attention_dense_grid",
                         spec_id="gfx950_dense_grid",
                     )
+                    base_kw["mask_type"] = AttentionMaskType.TOP_LEFT_CAUSAL
+                elif feature in ("sliding_window", "full_attention"):
+                    # Same causal mask on the base side: only the feature toggles.
                     base_kw["mask_type"] = AttentionMaskType.TOP_LEFT_CAUSAL
                 base = _attn(**common, **base_kw)
                 variant = _attn(**common, **_ENABLE_FEATURE[feature])

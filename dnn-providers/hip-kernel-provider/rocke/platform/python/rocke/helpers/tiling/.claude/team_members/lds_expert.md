@@ -167,9 +167,29 @@ per-width floor table, with the contiguity derivation behind it, is `lds_banks.m
 **Always** confirm a fix with the SAME counters + bit-exact + wall-time — report achieved `conflicts/access`
 AND whether TFLOPS actually moved (they don't always move together).
 
+### The LDS buffer is flat; its descriptor is its layout
+
+In the tiling layer an LDS buffer is a flat, typed allocation, `b.smem_alloc(td.dtype, [lds_element_span(td, lds_swizzle)])`
+(the descriptor's span, or the built-in swizzle's reach into the last row's padding),
+and its layout lives only in the tensor descriptor `td` the verbs address it through (one home:
+`docs/tiling_api_surface.md` sec 3, "LDS buffers"). Read every LDS fact off that descriptor, never off an
+allocation shape:
+- **Address:** element index = `sum(position * stride)`, the same index helper as global memory (lane base
+  once + a compile-time offset per register run). `lds_conflict.addr_map` evaluates that same helper, so the
+  bank model sees the emitted addresses.
+- **Pad = a larger outer stride:** a `(rows, cols)` tile padded by `pad` elements is strides `(cols + pad, 1)`.
+  Its cost is the growth of `element_span` it causes (times the element size, for each staged operand).
+- **Stages = a leading axis positioned by the window origin:** a `[stage][K][F]` buffer is
+  `(stages, F, K)` with strides `(K * F, 1, F)`, read with an unswapped rank-2 `(F, K)` tile. The cooperative
+  descriptor `lds_tile_desc` is `(buffers * free, K)` with strides `(1, buffers * free)`: buffers sit side by
+  side on the free axis, the stride-1 axis is axis 0.
+- **Swizzle:** the built-in `lds_swizzle=True` needs the stride-1 axis last; any other descriptor takes a
+  swizzle callable (same policy on store and read, a bijection).
+
 ### What to Check
 - Confirm `NB`, bank width, wave width, counter semantics for the SPECIFIC arch (don't assume).
-- Derive the address→bank map from the real LDS shape/stride + the store/read distribution.
+- Derive the address-to-bank map from the LDS tensor descriptor's lengths and strides (not an allocation shape)
+  + the store/read distribution.
 - Floor vs FIXABLE (uneven pile-up)? Build/validate the per-served-group×phase simulator against measured counters
   BEFORE stating a cause.
 - Determine the binding stage; decide if the conflict is even worth fixing before recommending.
