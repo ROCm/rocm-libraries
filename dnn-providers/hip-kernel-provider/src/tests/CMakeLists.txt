@@ -275,6 +275,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 CarriesNoGraphScopedMatcher
                 CarriesExactlyOneSharedKernelScopedMatcher
         )
+
+        # Hand-written companion census over the same shard: every shipped kernel's tile
+        # passes the engine's own isSupportedGfx950AttentionDenseTile() check. Its own call
+        # because a pin names one suite's cases.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionDenseCatalogTiles
+            EXPECTED_CASES
+                EveryShippedKernelsTileIsOneTheEngineLaunches
+        )
     else()
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "

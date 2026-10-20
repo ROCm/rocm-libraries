@@ -2,6 +2,8 @@
 
 This guide helps developers migrate cuDNN Frontend code to hipDNN. It focuses on practical API differences, common patterns, and working examples.
 
+To compile existing cuDNN frontend source without porting it, use the [cuDNN compatibility shim](./cudnn-shim.md).
+
 ## Table of Contents
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)

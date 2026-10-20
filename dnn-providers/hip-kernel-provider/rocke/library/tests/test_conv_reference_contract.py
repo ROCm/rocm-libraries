@@ -249,38 +249,24 @@ def test_verification_uses_gpu_outputs_and_frozen_scale_only(
         assert calls == ["replay", "source"]
 
 
-def test_source_adapter_selects_supported_production_cohort_without_torch():
-    from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
+def test_source_adapter_pins_the_qualified_configuration_without_torch():
+    from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
 
-    for case in get_architecture("gfx942").CASES:
-        request = ConvGroupedRequest(
-            N=case.N,
-            C=case.C,
-            K=case.K,
-            Hi=case.Hi,
-            Wi=case.Wi,
-            Y=case.Y,
-            X=case.X,
-            G=case.groups,
-            arch="gfx942",
-            dtype=case.dtype,
-            stride_h=case.sH,
-            stride_w=case.sW,
-            pad_h=case.pH,
-            pad_w=case.pW,
-            dilation_h=case.dH,
-            dilation_w=case.dW,
-        )
-        selected = dispatch_conv_grouped(request)
-        assert selected.spec.direction == "fwd"
-        assert all(v > 0 for v in selected.grid)
+    target = get_architecture("gfx942")
+    for case in target.CASES:
+        spec = target.kernel_spec(case)
+        grid = implicit_gemm_conv_grid(spec)
+        assert (spec.tile_m, spec.tile_n, spec.tile_k) == (64, 64, 64)
+        assert (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) == (16, 16, 16)
+        assert spec.pipeline == "mem"
+        assert all(v > 0 for v in grid)
         if case.name == "multi-tile":
-            assert selected.grid[0] == 2
-            assert case.K % selected.spec.tile_n != 0
-            assert selected.spec.epilogue == "cshuffle"
+            assert grid[0] == 2
+            assert case.K % spec.tile_n != 0
+            assert spec.epilogue == "cshuffle"
         elif case.name == "odd-channels":
             assert case.K % 2 == 1
-            assert selected.spec.epilogue == "default"
+            assert spec.epilogue == "default"
 
 
 @pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)

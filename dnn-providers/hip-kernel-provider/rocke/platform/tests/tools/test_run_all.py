@@ -42,6 +42,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
+    ir_types = tmp_path / "Debug" / "rocke_ir_types"
+    ir_types.touch()
     nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
     nontemporal.touch()
     selected = tmp_path / "override" if override else executable
@@ -55,6 +57,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
         listing = {
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
+                {"name": "rocke_ir_types", "command": [str(ir_types)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
             ]
         }
@@ -69,6 +72,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--build-root",
             str(tmp_path),
             "--config",
@@ -81,6 +85,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
+    assert all(env["ROCKE_IR_TYPES_TEST"] == str(ir_types) for _, env in children)
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
     )
@@ -133,6 +138,7 @@ def test_ctest_readiness_and_failure_propagation(
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -162,6 +168,7 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -239,6 +246,7 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--build-root",
             str(tmp_path),
         ],
@@ -264,7 +272,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_nontemporal_hip rocke_dtypes)\n"
+        "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
         '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
@@ -289,6 +297,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)

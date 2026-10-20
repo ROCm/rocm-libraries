@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Logical TF32 contracts and strict native parity, independent of GPU access."""
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.core.verify import verify
 from rocke.examples.gfx942.tf32_numerics import rne_bits
+from rocke.tests.engines import assert_both_engines_reject
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
     Tf32MmaProbeSpec,
@@ -67,7 +69,13 @@ def test_catalog_isolation(m, k, acc):
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=m, n=m, k=k
     )
     for gfx in ("gfx950", "gfx1151", "gfx1250"):
-        assert not any(op.a_dtype == "tf32" for op in ArchTarget.from_gfx(gfx).mma.ops)
+        tf32_ops = [
+            op for op in ArchTarget.from_gfx(gfx).mma.ops if op.a_dtype == "tf32"
+        ]
+        # Native XF32 is gfx942-only. gfx950 offers the same logical atom only as
+        # the BF16x3 emulation, and the others offer none at all.
+        assert not any(op.is_native for op in tf32_ops)
+        assert gfx == "gfx950" or not tf32_ops
 
     class Integers:
         const_i32 = staticmethod(int)
@@ -122,13 +130,14 @@ def test_mma_requires_logical_tf32(dtype, n):
 @pytest.mark.parametrize("gfx", ["gfx950", "gfx1151", "gfx1250"])
 def test_rejects_unsupported_target(gfx):
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec())
-    with pytest.raises(ValueError, match="gfx942"):
-        _lower_kernel_to_llvm_python(kernel, arch=gfx)
-    with pytest.raises(ValueError, match="gfx942"):
+    message = (
+        f"no MMA instruction found for 'mfma_f32_16x16x8_xf32' on '{gfx}' -- the "
+        "target's MMA catalog does not list it; it is listed for gfx942"
+    )
+    assert_both_engines_reject(kernel, gfx, ValueError, message)
+    # The C++ HIP lowerer is checked against the same text by the rocke_tf32 ctest.
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
         lower_kernel_to_hip(kernel, arch=gfx)
-    native = pytest.importorskip("rocke_engine")
-    with pytest.raises(Exception):
-        native.lower_serialized_ir(serialize(kernel), arch=gfx)
 
 
 def test_arithmetic_rejected_after_serialization():
@@ -137,10 +146,10 @@ def test_arithmetic_rejected_after_serialization():
     b.add(v, v)
     b.ret()
     with pytest.raises(ValueError, match="TF32 arithmetic"):
-        _lower_kernel_to_llvm_python(b.kernel)
+        _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception):
-        native.lower_serialized_ir(serialize(b.kernel))
+        native.lower_serialized_ir(serialize(b.kernel), arch="gfx950")
 
 
 @pytest.mark.parametrize(
@@ -188,12 +197,12 @@ def test_vector_arithmetic_rejected_after_serialization(operation):
     message = "TF32 arithmetic requires an explicit conversion to f32"
     assert any(message in str(d) for d in verify(kernel))
     with pytest.raises(ValueError, match=message):
-        _lower_kernel_to_llvm_python(kernel)
+        _lower_kernel_to_llvm_python(kernel, arch="gfx950")
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel)
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception, match=message):
-        native.lower_serialized_ir(ir)
+        native.lower_serialized_ir(ir, arch="gfx950")
 
 
 def test_vector_payload_operations_remain_supported():
@@ -215,8 +224,8 @@ def test_vector_payload_operations_remain_supported():
     assert "i32x4" in lower_kernel_to_hip(kernel)
     native = pytest.importorskip("rocke_engine")
     for flavor in ("llvm20", "llvm22", "llvm23"):
-        ll = _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
-        assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
+        assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
 @pytest.mark.parametrize("n", [2, 3, 4, 8])
@@ -238,10 +247,10 @@ def test_global_vector_load(n, align):
         assert "__builtin_memcpy" in hip
     native = pytest.importorskip("rocke_engine")
     for flavor in ("llvm20", "llvm22", "llvm23"):
-        ll = _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         assert f"load <{n} x i32>" in ll
         assert f"align {expected_align}" in ll
-        assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+        assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
 @pytest.mark.parametrize("n", [0, 1, 6, 16])
@@ -263,10 +272,10 @@ def test_transport():
     b.ret()
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
-    ll = _lower_kernel_to_llvm_python(b.kernel)
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
     assert "load i32" in ll and "store i32" in ll
     native = pytest.importorskip("rocke_engine")
-    assert native.lower_serialized_ir(ir) == ll
+    assert native.lower_serialized_ir(ir, arch="gfx950") == ll
 
 
 def test_rne_reference_edges():
@@ -332,14 +341,14 @@ def test_lds_and_loop_transport(n):
     b.ret()
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
-    ll = _lower_kernel_to_llvm_python(b.kernel)
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
     assert "[256 x i8]" in ll
     assert f"phi <{n} x i32>" in ll
     assert "int smem" in lower_kernel_to_hip(
         b.kernel
     ) or "int shared" in lower_kernel_to_hip(b.kernel)
     native = pytest.importorskip("rocke_engine")
-    assert native.lower_serialized_ir(ir) == ll
+    assert native.lower_serialized_ir(ir, arch="gfx950") == ll
 
 
 def test_fp32_atom_rejects_tf32_carrier():
@@ -445,11 +454,11 @@ def test_global_vector_store(n, align, dtype):
         assert "*reinterpret_cast<" in hip
     native = pytest.importorskip("rocke_engine")
     for flavor in ("llvm20", "llvm22", "llvm23"):
-        ll = _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         store = next(line for line in ll.splitlines() if "store <" in line)
         assert f"store <{n} x {'float' if dtype == F32 else 'i32'}>" in store
         assert store.endswith(f"align {expected_align}")
-        assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+        assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
 @pytest.mark.parametrize("align", [0, -4, 3, 12])
@@ -470,9 +479,9 @@ def test_global_vector_store_rejects_invalid_alignment(align):
     native = pytest.importorskip("rocke_engine")
     for flavor in ("llvm20", "llvm22", "llvm23"):
         with pytest.raises(ValueError, match=message):
-            _lower_kernel_to_llvm_python(kernel, llvm_flavor=flavor)
+            _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         with pytest.raises(Exception, match=message):
-            native.lower_serialized_ir(ir, flavor=flavor)
+            native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor)
 
 
 @pytest.mark.parametrize("m", [16, 32])

@@ -217,6 +217,9 @@ _GOOD_STUB = """
         n: int
         label: str = "x"
 
+    def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+        return True, ""
+
     def build_stub(spec: StubSpec, *, arch="gfx950"):
         return ("kernel", spec, arch)
 """
@@ -357,6 +360,9 @@ def test_adapter_invalid_spec_post_init(tmp_path, monkeypatch):
                 if self.n < 0:
                     raise ValueError("n must be non-negative")
 
+        def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+            return True, ""
+
         def build_stub(spec: StubSpec, *, arch="gfx950"):
             return ("kernel", spec, arch)
     """
@@ -374,6 +380,9 @@ def test_adapter_arch_not_supported(tmp_path, monkeypatch):
         @dataclasses.dataclass
         class StubSpec:
             n: int
+
+        def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+            return True, ""
 
         def build_stub(spec: StubSpec, *, arch="gfx950"):
             if arch != "gfx950":
@@ -409,6 +418,9 @@ def test_adapter_builder_call_failure_wrapped(tmp_path, monkeypatch):
         @dataclasses.dataclass
         class StubSpec:
             n: int
+
+        def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+            return True, ""
 
         def build_stub(spec: StubSpec, *, arch="gfx950"):
             raise ValueError("builder blew up")
@@ -643,6 +655,9 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
             class StubSpec:
                 n: int
 
+            def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+                return True, ""
+
             def build_stub(spec: StubSpec, *, arch="gfx950"):
                 return ("kernel", spec, arch)
             """
@@ -774,7 +789,7 @@ _TARGET_STUB = """
     class StubSpec:
         n: int
 
-    def is_valid_spec(spec, arch):
+    def is_valid_spec(spec: StubSpec, arch):
         SEEN.append(("predicate", arch))
         return True
 
