@@ -80,6 +80,14 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "runs LibraryLogic, which picks winners from timed results",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/a2a_gemm_loop.yaml",
+        "runs LibraryLogic, which picks winners from timed results",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/a2a_gemm_loop_s2.yaml",
+        "runs LibraryLogic, which picks winners from timed results",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/gemm/fp8nfp16mix_hfp8ns.yaml",
         "LibraryLogic requires benchmark data to build the library table",
     ),

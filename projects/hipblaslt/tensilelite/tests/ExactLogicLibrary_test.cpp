@@ -256,7 +256,7 @@ TEST(ExactLogicLibraryTest, EqualityTableKeysOnWorld)
     const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
     auto         problem = ContractionProblemGemm::GEMM(
         true, false, 3072, 512, 2048, 2048, 2048, 3072, 0.0, false, 1);
-    problem.setFusedGemmA2A(true);
+    problem.setFusedA2A(FusedA2A::GemmA2A);
     problem.setFusedA2AExtent(2048);
 
     problem.setWorld(2);

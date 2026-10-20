@@ -25,7 +25,7 @@
 //
 // Successive launches alternate the communicator's kChannels flag regions.
 //
-// Needs a device library holding a FusedGemmA2A solution; no such solution
+// Needs a device library holding a FusedA2A: GemmA2A solution; no such solution
 // ships in the logic tree. Run with:
 //
 //   HIP_VISIBLE_DEVICES=<kWorld peer-capable cards> \

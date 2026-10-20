@@ -28,6 +28,7 @@
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/Tensile.hpp>
 
@@ -113,7 +114,7 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
-            bool                             m_fusedGemmA2A;
+            FusedA2A                         m_fusedA2A;
             std::vector<int>                 m_worlds;
             std::vector<int>                 m_fusedA2AExtents;
             int                              m_metadataLayout;

@@ -107,7 +107,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -345,7 +345,7 @@ class ProblemType:
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
 
-        rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
+        rv.fusedA2A = d.get('FusedA2A', 'Disabled')
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
@@ -493,8 +493,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
-            predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
-            if self.fusedGemmA2A and self.batched:
+            predicates.append(ProblemPredicate("FusedA2A", value=self.fusedA2A))
+            if self.fusedA2A != 'Disabled' and self.batched:
                 predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
@@ -691,7 +691,7 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
-        if state['ProblemType']['FusedGemmA2A']:
+        if state['ProblemType']['FusedA2A'] == 'GemmA2A':
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
@@ -719,6 +719,9 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
+
+        if state['ProblemType']['FusedA2A'] == 'A2AGemm':
+            rv += [cls('A2AGemmShape', value=state['DepthU'] * state['A2ASubRounds'])]
 
         return rv
 
@@ -829,7 +832,8 @@ class SizeMapping:
                  'ExpertSchedulingMode',
                  'clusterDim',
                  'BufferLoad',
-                 'BufferStore'
+                 'BufferStore',
+                 'a2aSubRounds'
                  ]
 
     @classmethod
@@ -944,7 +948,8 @@ class SizeMapping:
                    # the other newly-added-but-optional fields above (e.g.
                    # PrefetchAcrossPersistent, TemporalHintA/B).
                    BufferLoad               = bool(d.get('BufferLoad', True)),
-                   BufferStore              = bool(d.get('BufferStore', True))
+                   BufferStore              = bool(d.get('BufferStore', True)),
+                   a2aSubRounds             = d.get('A2ASubRounds', 1)
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

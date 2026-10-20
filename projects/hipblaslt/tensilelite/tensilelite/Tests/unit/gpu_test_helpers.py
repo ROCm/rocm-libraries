@@ -203,7 +203,7 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
             "DataTypeB": dtype,
             "ComputeDataType": _mock_dtype(4),
             # Non-fused store-D default; GlobalWriteBatch reads this key unconditionally.
-            "FusedGemmA2A": False,
+            "FusedA2A": "Disabled",
         },
     }
 
