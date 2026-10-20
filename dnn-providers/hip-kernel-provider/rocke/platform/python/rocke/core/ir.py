@@ -4737,6 +4737,11 @@ class IRBuilder:
         eb = _elem_bytes.get(dtype.name)
         if eb is None:
             raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
+        if n <= 0 or (n * eb) % 4 != 0:
+            raise ValueError(
+                f"buffer_load_vN: n={n} dtype={dtype.name} is not a whole number "
+                "of dwords"
+            )
         dwords = (n * eb) // 4
         if dwords not in (1, 2, 4):
             raise ValueError(
