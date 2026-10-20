@@ -1068,7 +1068,13 @@ TEST_CASE("launch plans reach rank_top, the tier-2 cascade, a bounded cache and 
     const std::vector<std::size_t> plans = rec->asked;
     rec->asked.clear();
     CHECK(same_results(set.rank_top(p, hw, {}, k), scored_prefix(full, k)));
+#if TW_LEVER_MEMO && !TW_LEVER_MEMO_CHECK
+    // The re-rank memo without its plan check answers rank_top(1) from the
+    // whitelist tier the rank before it scored, and asks for no plan.
+    CHECK(rec->asked == (k == 1 ? std::vector<std::size_t>{} : plans));
+#else
     CHECK(rec->asked == plans);
+#endif
     CHECK(asked_once(*rec));
   }
 

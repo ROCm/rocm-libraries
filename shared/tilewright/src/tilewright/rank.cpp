@@ -24,6 +24,14 @@
 #include <utility>
 #include <vector>
 
+// Selection-time options, off by default (README.md, Building and testing),
+// each on when defined to a nonzero value: TW_LEVER_PREFETCH, and
+// TW_LEVER_MEMO, whose plan check TW_LEVER_MEMO_CHECK is on wherever
+// assertions are unless it is defined to 0 (model_impl.hpp sets it).
+#if TW_LEVER_MEMO
+#include <atomic>
+#endif
+
 namespace tilewright {
 namespace detail {
 
@@ -195,6 +203,36 @@ inline void prefetch(const void* p) {
   (void)p;
 #endif
 }
+
+#if TW_LEVER_PREFETCH
+// Every cache line of the `bytes` bytes at `p`.
+inline void prefetch_bytes(const void* p, std::size_t bytes) {
+  if (p == nullptr || bytes == 0) return;
+  const std::uintptr_t end = reinterpret_cast<std::uintptr_t>(p) + bytes;
+  for (std::uintptr_t at = reinterpret_cast<std::uintptr_t>(p) & ~std::uintptr_t{63}; at < end;
+       at += 64)
+    prefetch(reinterpret_cast<const void*>(at));
+}
+
+template <class V>
+inline void prefetch_vector(const V& v) {
+  prefetch_bytes(v.data(), v.size() * sizeof(typename V::value_type));
+}
+
+inline void prefetch_blocks(const BlockMatrix& m) {
+  prefetch_vector(m.f32);
+  prefetch_vector(m.bf16);
+  prefetch_vector(m.int8);
+}
+
+// The first and the last cache line of an element of `size` bytes at `p`,
+// which are all of its lines only when it spans at most two (a `Config` may
+// span three).
+inline void prefetch_object(const void* p, std::size_t size) {
+  prefetch(p);
+  prefetch(static_cast<const char*>(p) + size - 1);
+}
+#endif
 
 bool finite(float v) {
   std::uint32_t bits;
@@ -486,6 +524,17 @@ class CellCacheSource {
   // the data types of `p` and the device `hw`, or nullptr when they are not
   // the ones the pool's values were computed for.
   virtual const float* inter_kernel(const Problem& p, const HwView& hw) const = 0;
+#if TW_LEVER_MEMO
+  // Distinct for every source of the process, so that a ranking remembered
+  // for one never answers for another built at the same address.
+  const std::uint64_t serial = next_serial();
+
+ private:
+  static std::uint64_t next_serial() {
+    static std::atomic<std::uint64_t> count{0};
+    return count.fetch_add(1, std::memory_order_relaxed) + 1;
+  }
+#endif
 };
 
 namespace {
@@ -528,6 +577,35 @@ struct Scratch {
   std::vector<LaunchPlan> plans;
   std::vector<std::uint64_t> ordered, spare;
   BatchBuffer x_batch, h_batch;
+#if TW_LEVER_MEMO
+  // The thread's last ranking whose scored tier was a cell whitelist alone:
+  // its scores stay in `score`, its tier in `tier1`, the launch plans the
+  // scores read in `plans` (one per key of `tier1`), and scored[key] ==
+  // `epoch` marks the keys with a finite score. A ranking of the same problem
+  // over the same pool and launch model that would score the same tier
+  // (min_scored at most `tier1_configs`, no prior) orders those scores
+  // instead of computing them again, whether or not the two rankings belong
+  // to one call of the integration. That is exact while the launch model
+  // plans each config alike for equal problems and contexts, as the scores
+  // were computed with its earlier plans; TW_LEVER_MEMO_CHECK asks it again
+  // and ranks afresh when a plan differs.
+  struct Memo {
+    bool valid                = false;
+    const void* source        = nullptr;
+    std::uint64_t serial      = 0;
+    const Model* model        = nullptr;
+    const PoolKeys* keys      = nullptr;
+    const LaunchModel* launch = nullptr;  // the pool's, whether or not it was asked
+    bool planned              = false;    // the remembered ranking asked it for plans
+    std::size_t cell          = 0;
+    std::size_t tier1_configs = 0;
+    std::uint32_t epoch       = 0;
+    Problem problem;
+    Hardware hardware;
+    ExecutionContext context;
+    MemoCounts counts;
+  } memo;
+#endif
 
   // The epoch of a new call over `nk` keys.
   std::uint32_t next_epoch(std::size_t nk) {
@@ -550,6 +628,139 @@ Scratch& scratch() {
   return s;
 }
 
+#if TW_LEVER_MEMO
+// Whether the remembered ranking's inputs equal `p`, `h` and `c`, every field
+// of each. The bindings name every field once, so that a field added to
+// Problem, Dim3, Hardware or ExecutionContext stops this from compiling until
+// a binding names it. The build cannot tell whether the field is compared:
+// compare it here too, and give it its own change in tests/test_levers.cpp.
+bool same_ranking_inputs(const Scratch::Memo& m,
+                         const Problem& p,
+                         const Hardware& h,
+                         const ExecutionContext& c) {
+  [[maybe_unused]] const auto& [size, batch, at, bt, a_dt, b_dt, c_dt, d_dt, mi_dt] = p;
+  [[maybe_unused]] const auto& [size_m, size_n, size_k]                             = p.size;
+  [[maybe_unused]] const auto& [n_cu, lds, l2]                                      = h;
+  [[maybe_unused]] const auto& [cu_budget, schedule]                                = c;
+
+  const Problem& q = m.problem;
+  return q.size.m == p.size.m && q.size.n == p.size.n && q.size.k == p.size.k &&
+         q.batch == p.batch && q.a_transpose == p.a_transpose && q.b_transpose == p.b_transpose &&
+         q.a_dtype == p.a_dtype && q.b_dtype == p.b_dtype && q.c_dtype == p.c_dtype &&
+         q.d_dtype == p.d_dtype && q.mi_dtype == p.mi_dtype && m.hardware.N_CU == h.N_CU &&
+         m.hardware.lds_capacity == h.lds_capacity && m.hardware.L2_capacity == h.L2_capacity &&
+         m.context.cu_budget == c.cu_budget && m.context.schedule == c.schedule;
+}
+
+#if TW_LEVER_MEMO_CHECK
+// Whether `launch` plans the first config of every key of the remembered
+// tier as it did for the remembered ranking, in every field of LaunchPlan
+// (a field added to it stops the bindings from compiling until they name it;
+// compare it here too).
+bool same_plans(const Scratch& s,
+                const LaunchModel& launch,
+                const std::vector<Config>& configs,
+                const PoolKeys& keys,
+                const Problem& problem,
+                const ExecutionContext& context) {
+  for (std::size_t i = 0; i < s.tier1.size(); ++i) {
+    const LaunchPlan now   = launch.plan(configs[keys.first[s.tier1[i]]], problem, context);
+    const LaunchPlan& then = s.plans[i];
+    [[maybe_unused]] const auto& [dynamic_queue, grid_wgs, partial_reduction] = then;
+    if (now.dynamic_queue != then.dynamic_queue || now.grid_wgs != then.grid_wgs ||
+        now.partial_reduction != then.partial_reduction)
+      return false;
+  }
+  return true;
+}
+#endif
+
+// What rank_in_cell writes for the remembered ranking (Scratch::memo), with
+// no prior: its tier's keys with a finite score, ordered as rank_tier orders
+// them, then the results.
+void replay_memo(Scratch& s,
+                 const Cell& cell,
+                 const Problem& problem,
+                 const std::vector<Config>& configs,
+                 const PoolKeys& keys,
+                 const Output& out) {
+  const std::size_t n            = configs.size();
+  const std::size_t nk           = keys.first.size();
+  const std::uint32_t remembered = s.memo.epoch;
+  const std::uint32_t epoch      = s.next_epoch(nk);
+  ++s.memo.counts.replays;
+  std::vector<float>& score        = s.score;
+  std::vector<std::size_t>& order  = s.order;
+  std::vector<std::size_t>& ranked = s.ranked;
+  std::vector<std::size_t>& run    = s.run;
+  order.clear();
+  order.reserve(s.memo.tier1_configs);
+  ranked.clear();
+  for (const std::size_t key : s.tier1)
+    if (s.scored[key] == remembered) {
+      s.scored[key] = epoch;
+      ranked.push_back(key);
+    }
+  const auto better = [&](std::size_t a, std::size_t b) {
+    return score[a] > score[b] || (!(score[b] > score[a]) && a < b);
+  };
+  const std::size_t want = out.limit - order.size();
+  std::size_t end        = ranked.size();
+  if (want < end) {
+    const auto mid = ranked.begin() + static_cast<std::ptrdiff_t>(want);
+    std::partial_sort(ranked.begin(), mid, ranked.end(), better);
+    const float last = score[*(mid - 1)];
+    const auto tied =
+        std::partition(mid, ranked.end(), [&](std::size_t key) { return score[key] == last; });
+    std::sort(mid, tied);
+    end = static_cast<std::size_t>(tied - ranked.begin());
+  } else {
+    std::sort(ranked.begin(), ranked.end(), better);
+  }
+  for (std::size_t i = 0; i < end && order.size() < out.limit;) {
+    std::size_t j = i + 1;
+    while (j < end && score[ranked[j]] == score[ranked[i]]) ++j;
+    if (j == i + 1) {
+      const std::size_t key = ranked[i];
+      order.insert(order.end(),
+                   keys.members.begin() + static_cast<std::ptrdiff_t>(keys.member_begin[key]),
+                   keys.members.begin() + static_cast<std::ptrdiff_t>(keys.member_begin[key + 1]));
+    } else {
+      run.clear();
+      for (std::size_t r = i; r < j; ++r)
+        for (std::size_t m = keys.member_begin[ranked[r]]; m < keys.member_begin[ranked[r] + 1];
+             ++m)
+          run.push_back(keys.members[m]);
+      std::sort(run.begin(), run.end());
+      order.insert(order.end(), run.begin(), run.end());
+    }
+    i = j;
+  }
+  if (order.size() > out.limit) order.resize(out.limit);
+
+  if (env_knobs().pick_log && !order.empty())
+    log_pick(
+        problem, cell, configs[order.front()], score[keys.key_of[order.front()]], order.front(), n);
+
+  std::vector<Result>& results = out.results;
+  results.clear();
+  if (!out.unscored) {
+    results.reserve(order.size());
+    for (std::size_t ci : order)
+      results.push_back(Result{ci, static_cast<double>(score[keys.key_of[ci]]), true});
+    TILEWRIGHT_STAGE_END(Results);
+    return;
+  }
+  results.resize(n);
+  std::size_t pos = 0;
+  for (std::size_t ci : order)
+    results[pos++] = Result{ci, static_cast<double>(score[keys.key_of[ci]]), true};
+  for (std::size_t j = 0; j < n; ++j)
+    if (s.scored[keys.key_of[j]] != epoch) results[pos++] = Result{j, 0.0, false};
+  TILEWRIGHT_STAGE_END(Results);
+}
+#endif
+
 // `prior` orders equal scores when non-null.
 void rank_in_cell(const Model& model,
                   std::size_t cell_index,
@@ -563,6 +774,26 @@ void rank_in_cell(const Model& model,
                   const CellCacheSource* source,
                   const LaunchModel* launch,
                   const Output& out) {
+#if TW_LEVER_MEMO
+  const LaunchModel* const pool_launch = launch;
+  {
+    Scratch& sm      = scratch();
+    Scratch::Memo& m = sm.memo;
+    bool hit         = m.valid && source != nullptr && prior == nullptr && m.source == source &&
+               m.serial == source->serial && m.model == &model && m.keys == &keys &&
+               m.launch == launch && m.cell == cell_index && min_scored <= m.tier1_configs &&
+               m.epoch == sm.epoch && sm.epoch < Scratch::kMaxEpoch &&
+               same_ranking_inputs(m, problem, hardware, context);
+    m.valid = false;
+#if TW_LEVER_MEMO_CHECK
+    if (hit && m.planned && !same_plans(sm, *launch, configs, keys, problem, context)) {
+      ++m.counts.plan_changes;
+      hit = false;
+    }
+#endif
+    if (hit) return replay_memo(sm, model.cells[cell_index], problem, configs, keys, out);
+  }
+#endif
   const std::size_t n                              = configs.size();
   const std::size_t nk                             = keys.first.size();
   const FeatureCatalog& cat                        = *model.catalog;
@@ -580,6 +811,33 @@ void rank_in_cell(const Model& model,
   };
 
   const std::uint32_t epoch = s.next_epoch(nk);
+#if TW_LEVER_PREFETCH
+  // A whitelist tier's ranking reads, per whitelisted key, lines scattered
+  // over the pool's arrays and this thread's marks, then the query tower's
+  // tensors in order: all are asked for here, before the first is needed.
+  // The scoring's tensors are asked for during the query tower (below).
+  if (cache != nullptr && has_whitelist(model, cell)) {
+    for (const std::size_t key : cache->whitelist_keys) {
+      prefetch(&s.feasible[key]);
+      prefetch(&s.in_tier1[key]);
+      prefetch(&s.scored[key]);
+      if (key < s.score.size()) prefetch(&s.score[key]);
+      prefetch_object(&keys.shape[key], sizeof(KernelShape));
+      prefetch(&cache->slot[key]);
+      prefetch(&keys.first[key]);
+    }
+    prefetch_vector(w.q_mean);
+    prefetch_vector(w.q_scale);
+    prefetch_vector(w.q_lo);
+    prefetch_vector(w.q_hi);
+    prefetch_blocks(w.q_w0);
+    prefetch_vector(w.q_b0);
+    prefetch_blocks(w.q_w2);
+    prefetch_vector(w.q_b2);
+    prefetch_blocks(w.q_w4);
+    prefetch_vector(w.q_b4);
+  }
+#endif
   const Feasibility rules(problem, hardware, keys.nt_a, keys.nt_b, model.soft_rules);
   const auto feasible = [&](std::size_t key) {
     std::uint32_t& f = s.feasible[key];
@@ -769,6 +1027,29 @@ void rank_in_cell(const Model& model,
   i_emb.resize(e);
   h0.resize(cell.hidden_dim);
   h2.resize(cell.hidden_dim);
+#if TW_LEVER_PREFETCH
+  // The configs and kernel features of the tier's keys, which only their
+  // first-config indices locate, during the query tower.
+  if (tier1_is_whitelist) {
+    for (const std::size_t key : tier1) {
+      prefetch_object(&configs[keys.first[key]], sizeof(Config));
+      if (x_kernel != nullptr)
+        prefetch_object(x_kernel + key * cat.inter_kernel_dim,
+                        cat.inter_kernel_dim * sizeof(float));
+    }
+    // The scoring's tensors, during the query tower.
+    prefetch_vector(w.x_mean);
+    prefetch_vector(w.x_scale);
+    prefetch_vector(w.x_lo);
+    prefetch_vector(w.x_hi);
+    prefetch_vector(w.x_w0);
+    prefetch_vector(w.x_b0);
+    prefetch_vector(w.x_w2);
+    if (cache != nullptr) prefetch_vector(cache->whitelist_emb);
+    prefetch_vector(s.x_batch);
+    prefetch_vector(s.h_batch);
+  }
+#endif
   TILEWRIGHT_STAGE_LAP(Setup);
   cat.query(problem, hw, q_feat.data());
   if (x_kernel != nullptr) {
@@ -1116,6 +1397,24 @@ void rank_in_cell(const Model& model,
     TILEWRIGHT_STAGE_LAP(Results);
   };
   rank_tier(tier1, scored && !tier1_is_whitelist);
+#if TW_LEVER_MEMO
+  if (source != nullptr && prior == nullptr && tier1_is_whitelist && tier2.empty()) {
+    Scratch::Memo& m = s.memo;
+    m.valid          = true;
+    m.source         = source;
+    m.serial         = source->serial;
+    m.model          = &model;
+    m.keys           = &keys;
+    m.launch         = pool_launch;
+    m.planned        = launch != nullptr;
+    m.cell           = cell_index;
+    m.tier1_configs  = tier1_configs;
+    m.epoch          = epoch;
+    m.problem        = problem;
+    m.hardware       = hardware;
+    m.context        = context;
+  }
+#endif
   if (!tier2.empty() && order.size() < out.limit) rank_tier(tier2, scored && tier1_is_whitelist);
   if (order.size() > out.limit) order.resize(out.limit);
 
@@ -1229,7 +1528,14 @@ void set_rank_epoch(std::uint32_t epoch) noexcept {
   for (std::vector<std::uint32_t>* v : {&s.feasible, &s.in_tier1, &s.scored, &s.listed})
     std::fill(v->begin(), v->end(), 0u);
   s.epoch = std::min(epoch, Scratch::kMaxEpoch);
+#if TW_LEVER_MEMO
+  s.memo.valid = false;
+#endif
 }
+
+#if TW_LEVER_MEMO
+MemoCounts memo_counts() noexcept { return scratch().memo.counts; }
+#endif
 
 void check_launch(const Model& model, const LaunchModel* launch) {
   const std::string& want = model.provenance.launch_model;

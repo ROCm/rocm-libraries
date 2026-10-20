@@ -281,6 +281,24 @@ std::vector<CellBounds> cell_bounds(const Model& model);
 // reach its wrap-around.
 void set_rank_epoch(std::uint32_t epoch) noexcept;
 
+#if TW_LEVER_MEMO
+// The memo's plan check TW_LEVER_MEMO_CHECK is on wherever assertions are
+// unless defined to 0; set here, in the header the engine and its white-box
+// tests both include, so that a test expects what the engine compiled.
+#if !defined(TW_LEVER_MEMO_CHECK) && !defined(NDEBUG)
+#define TW_LEVER_MEMO_CHECK 1
+#endif
+
+// The calling thread's re-rank memo (TW_LEVER_MEMO): the rankings it answered,
+// and those it left to a fresh ranking because the launch model planned a
+// remembered key differently (TW_LEVER_MEMO_CHECK).
+struct MemoCounts {
+  std::uint64_t replays      = 0;
+  std::uint64_t plan_changes = 0;
+};
+MemoCounts memo_counts() noexcept;
+#endif
+
 // Throws std::invalid_argument when the model's provenance names a launch
 // model and `launch` is null or has another id.
 void check_launch(const Model& model, const LaunchModel* launch);

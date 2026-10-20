@@ -638,11 +638,54 @@ ctest --test-dir build --output-on-failure
 | `TILEWRIGHT_ENABLE_PYTHON` | OFF | Build the Python module |
 | `TILEWRIGHT_ENABLE_INSTALL` | ON standalone, OFF as a subproject | Install the library, headers and CMake package |
 | `TILEWRIGHT_ENABLE_FETCH` | ON | Fetch Catch2 (and nanobind for CMake builds of the bindings) when they are not installed |
+| `TILEWRIGHT_LEVER_PREFETCH` | OFF | Define `TW_LEVER_PREFETCH` for the engine and what links it (see below) |
+| `TILEWRIGHT_LEVER_MEMO` | OFF | Define `TW_LEVER_MEMO` for the engine and what links it (see below) |
 
 The tests use `find_package(Catch2 3)` and fetch Catch2 only when it is missing
 and fetching is enabled. They write their own synthetic models; the real-model
 tests additionally load every shipped model. The environment-variable tests run
 as separate ctest entries because the knobs are read once per process.
+
+Two compile-time options shorten a ranking call without changing any result:
+every ranking stays bit-identical, and without them the engine compiles
+exactly as before. Each is on when its macro is defined to a nonzero value,
+and off when it is undefined or 0.
+
+- `TW_LEVER_PREFETCH`: a ranking whose first tier is a cell whitelist asks,
+  as it starts, for the scattered per-key data it is about to read and for
+  the query tower's tensors, and during the query tower for the whitelisted
+  keys' configs and kernel features and the scoring tensors, so that a call
+  with cold caches waits less. As it changes no result, no test can see it:
+  only timing ranking calls with cold caches shows whether it still helps.
+- `TW_LEVER_MEMO`: when the thread's last ranking scored a cell whitelist
+  alone, a ranking of the same problem, hardware and context over the same
+  candidate set and launch model that needs no more configs than that tier
+  holds (no prior) orders the remembered scores instead of computing them
+  again. The memo serves once and is forgotten by the thread's next ranking
+  that scores. This is TensileLite's re-rank, which asks
+  `rank(..., min_scored = 1)` right after `rank_top(k = 1)` when its own
+  predicates reject the top kernel. The two rankings need not belong to one
+  call, though: the memo can also answer the first ranking of TensileLite's
+  next call on the thread, when that call ranks an equal problem. The scores
+  read the launch model's plans, so the memo requires `LaunchModel::plan` to
+  return the same plan for the same config, problem and context on that
+  thread between the two rankings, across calls too. `TW_LEVER_MEMO_CHECK`,
+  on by default when `NDEBUG` is not defined and off when defined to 0, makes
+  the memo ask the launch model again for every plan its scores read and rank
+  afresh when one differs; without it, a ranking the memo answers asks the
+  launch model for no plan.
+
+The ctest entries `tilewright-levers` and `tilewright-levers-nocheck` each run
+the whole suite in one process against a second build of the engine with both
+options, with the memo check and without it (as a release build compiles the
+memo). Under `training_pipeline/scripts/experiments`, `rerank_check` and
+`memo_check` hash TensileLite's re-rank and pairs of rankings the memo may or
+must not answer, for comparing two builds on shipped models.
+
+With the CMake options on, the other ctest entries test the engine with them
+too, and read the macros it was compiled with: the options define them for
+what links the engine as well, and `model_impl.hpp`, which the white-box tests
+include, sets the default of `TW_LEVER_MEMO_CHECK`.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static
 library `roc::tilewright`. An installed tilewright is found with
