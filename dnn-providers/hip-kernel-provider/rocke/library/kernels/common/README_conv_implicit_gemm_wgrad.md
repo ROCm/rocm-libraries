@@ -223,8 +223,7 @@ per lane); gfx1250 wave32 admits only the `16x16x32` atom and
 **Not a knob.** The spec field still defaults `False` (existing goldens are
 unmoved); the value is deduced by the keyword-only
 `WgradConvSpec.default_lds_k_outer(*, arch, dtype_a, dtype_b, warp_tile_m,
-warp_tile_n, wave_size=64)`, which both library dispatch
-(`library/dispatch/grouped_convolution.py`) and the sweep driver call.
+warp_tile_n, wave_size=64)`, which the sweep driver calls.
 
 ### Async DMA on the K-outer tile
 
@@ -245,6 +244,42 @@ the K-outer row pad to 0. It remains incompatible with `pipeline="basic"`.
 Both loops that Python-unroll the K iteration — `pipeline="basic"` and
 `async_dma` — are bounded by `_MAX_UNROLLED_K_ITERS` (128). Over the cap the spec
 is rejected; raise `split_k` or `tile_k` rather than the constant.
+
+### Derived LDS row pad (`default_lds_k_pad`)
+
+Left unset, the M-outer tile takes a flat `lds_k_pad` of 8 for every
+`tile_k >= 16`. That is not a derived number: the row stride is `tile_k + pad`,
+and the stride is what decides how many of the 32 banks an operand fetch
+touches. `WgradConvSpec.default_lds_k_pad` derives it instead, from two
+constraints — the `ds_read_b64` fragment must stay 8-byte aligned on every row
+(`pad % 4 == 0`), and the stride in dwords should share as little as possible
+with the 32-dword bank period (`tile_k + pad ≡ 4 mod 8`, giving 16 banks). The
+flat 8 reaches only 8 on the whole `tile_k` ladder. Among the pads satisfying
+both, the smallest wins: the pad is charged per row of *both* operand tiles, so
+a larger one can cost an occupancy step.
+
+It is selection policy, not a body change — the field still defaults to `None`,
+so untouched specs keep their name and golden. Callers that build specs
+(dispatch, the sweep driver, the AOT cache grid) ask it what to pass, the same
+arrangement as `default_lds_k_outer`.
+
+Gated on `arch` rather than on `wave_size` alone: gfx950 is wave64 CDNA too,
+but has 64 banks and a 64-dword `ds_read_b64` period, so the congruence above
+solves for the wrong modulus there. Relying on gfx950 deducing the K-outer
+layout to keep it out is not enough — the AOT cache grid leaves `lds_k_outer`
+at its `False` default for every arch, so gfx950 does reach the M-outer path.
+
+### LDS budget is a max, not a sum
+
+`is_valid_wgrad_spec` charged `ab_lds + c_lds`. The cshuffle C tile is built
+with `no_alias=False` (wgrad never passes the flag), so `make_lds_view` gives it
+`exclusive=False` and it *aliases* onto the A/B bytes rather than adding to
+them. Charging the sum rejected specs that fit — it capped `tile_k` well below
+what the emitted code object actually asks for, and `tile_k` is what amortises
+the K-loop address decode over each LDS row. Now `max(ab_lds, c_lds)`, matching
+what the forward and dgrad validators already did; wgrad was the outlier. The
+one case that would genuinely be additive, `pipeline="wavelet"`, is rejected for
+wgrad earlier in the same function.
 
 ### Stream-K (`streamk`, `streamk_reduction`, `streamk_ctas`)
 

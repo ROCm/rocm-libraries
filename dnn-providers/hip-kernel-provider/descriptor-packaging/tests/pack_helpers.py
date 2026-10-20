@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack import provenance_sidecar
-from hkp_pack.pipeline import run_pipeline
+from hkp_pack import pipeline, provenance_sidecar
+from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets
 
 PACKAGING = Path(__file__).resolve().parent.parent
 
@@ -27,6 +27,17 @@ ARCH = "gfx942"
 ROCKE_ARCH = "gfx950"
 
 EXAMPLE_ROOT = PACKAGING / "examples" / "descriptors"
+
+
+#: The shipped generic target table, as the path the packer and its tools take and as
+#: the loaded table the library entry points take.
+GENERIC_TARGETS_JSON = DEFAULT_TABLE_PATH
+GENERIC_TARGETS = GenericTargets.load(GENERIC_TARGETS_JSON)
+
+
+def run_pipeline(**kwargs):
+    """`pipeline.run_pipeline` with the shipped generic target table."""
+    return pipeline.run_pipeline(generic_targets_json=GENERIC_TARGETS_JSON, **kwargs)
 
 
 def _read(path):
@@ -164,7 +175,15 @@ def _run_cli(*args, mode="structural"):
     """The CLI as an agent runs it. The mode is always explicit, because the tool
     requires it."""
     return subprocess.run(
-        [sys.executable, str(_TOOL), "--mode", mode, *args],
+        [
+            sys.executable,
+            str(_TOOL),
+            "--mode",
+            mode,
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            *args,
+        ],
         capture_output=True,
         text=True,
     )

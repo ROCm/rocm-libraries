@@ -28,6 +28,7 @@
  *   target_id_from_isa(isa)           rocke_target_id_from_isa()
  *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
  *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
+ *   generic_arch_from_target_id(id)   rocke_generic_arch_from_target_id()
  *
  * The Python loader reads core/arch/data/arch_specs.json at import time. The C99
  * port embeds that frozen SSOT as static tables (libc-only: no JSON parser), so
@@ -112,6 +113,17 @@ typedef enum rocke_mma_scale_block_k
     ROCKE_MMA_SCALE_K32 = 32
 } rocke_mma_scale_block_k_t;
 
+/* How an emulated atom expands into physical matrix instructions. NONE is the
+ * natively-encoded sentinel, so zero-init means "native". Mirrors
+ * MmaEmulationRecipe. BF16X3 is three BF16 MMAs over a Dekker-style split of
+ * each fp32 operand, threading one fp32 accumulator; the small*small cross term
+ * is dropped as it is the same order as the split's own error. */
+typedef enum rocke_mma_emulation_recipe
+{
+    ROCKE_MMA_EMULATION_NONE = 0,
+    ROCKE_MMA_EMULATION_BF16X3 = 1
+} rocke_mma_emulation_recipe_t;
+
 /* Complete scale query: independent A/B types, shared K-group size.
  * {NULL, NULL, 0} selects unscaled atoms. */
 typedef struct rocke_mma_scale_filter
@@ -152,6 +164,18 @@ typedef struct rocke_mma_op
     int b_scale_frag_len;
     const rocke_layout_map_t* a_scale_layout; /* may be NULL */
     const rocke_layout_map_t* b_scale_layout; /* may be NULL */
+    /* Expansion descriptor for an atom with no native encoding. Both fields are
+     * NULL/NONE on a natively-encoded atom, which is every atom that predates
+     * XF32; zero-init therefore gives the right answer for all of them.
+     * emulation_physical_op_id names the instruction actually issued, and is the
+     * SSOT for this row's frag lengths, wave size and layout maps: Python derives
+     * them from it at catalog-build time, and because this static table has no
+     * build step its rows restate them, pinned equal by
+     * tests/core/test_mma_catalog_lookup.cpp (and test_xf32_catalog_rows.py on
+     * the Python side). Test via
+     * rocke_arch_mma_op_is_native. Appended ABI fields: consumers must rebuild. */
+    rocke_mma_emulation_recipe_t emulation_recipe;
+    const char* emulation_physical_op_id;
 } rocke_mma_op_t;
 
 /* MmaOp.shape -> (m, n, k) via out params. */
@@ -293,7 +317,9 @@ const rocke_mma_op_t*
 
 /* Accumulator fragment length for op_id -- the c_frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
- * target._frag_info(op_id).c_frag_len). Returns 0 for an unknown atom (the
+ * target._frag_info(op_id).c_frag_len). An emulated atom's logical op_id
+ * resolves through the physical atom it expands into
+ * (rocke_arch_mma_op_id_physical_op_id). Returns 0 for an unknown atom (the
  * zero-length _FragInfo fallback). */
 int rocke_arch_mma_c_frag_len(const char* op_id);
 
@@ -303,6 +329,30 @@ int rocke_arch_mma_c_frag_len(const char* op_id);
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
+
+/* True when the hardware encodes this atom directly, mirroring MmaOp.is_native.
+ * A NULL op is reported native: callers that lost the row have no expansion to
+ * perform. Prefer this over comparing emulation_recipe yourself. */
+bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op);
+
+/* The op_id of the instruction an emulated atom actually issues, mirroring
+ * MmaOp.emulation.physical_op_id. Returns NULL for a native atom (and for a
+ * NULL op), which is the same answer: nothing else to issue. Do not free. */
+const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op);
+
+/* The bare-op_id twin of rocke_arch_mma_op_physical_op_id, mirroring
+ * target._op_id_physical_op_id()[op_id]: the first catalog row that emulates
+ * op_id wins; natively-encoded rows contribute nothing. Returns NULL for an
+ * op_id that no catalog emulates. Do not free. */
+const char* rocke_arch_mma_op_id_physical_op_id(const char* op_id);
+
+/* Operand fragment lengths of an emulated TF32 atom, mirroring
+ * target._op_id_emulated_tf32_operands()[op_id]: the first catalog row that
+ * emulates op_id with TF32 operands wins. Writes the A, B and accumulator
+ * fragment lengths through the (optional) out params and returns true; returns
+ * false, writing nothing, for every other op_id -- which is every ordinary atom,
+ * so the verifier's hot path is one failed lookup. */
+bool rocke_arch_mma_op_id_emulated_operands(const char* op_id, int* a_len, int* b_len, int* c_len);
 
 /* Target-independent family projection. Unknown/NULL IDs return NULL;
  * conflicting families for one ID raise ROCKE_ERR_VALUE. */
@@ -383,12 +433,19 @@ void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
 const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap);
 
 /* Remove features and profiles for catalog lookup, preserving catalog names
- * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942. */
+ * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942.
+ * A generic-target member without its own row uses the generic row (gfx1100 ->
+ * gfx11-generic, gfx1200 -> gfx12-generic). */
 const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
 
 /* Remove profiles but preserve compiler features: gfx1250-strict:xnack-
  * becomes gfx1250:xnack-. */
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* Catalogued LLVM generic processor whose code objects load on target_id:
+ * gfx1100 and gfx1151:xnack- become gfx11-generic; a generic name maps to
+ * itself. Returns NULL (out untouched) when no generic target covers it. */
+const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
 
 /* Extract the target ID from an ISA name, then derive its base architecture. */
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap);

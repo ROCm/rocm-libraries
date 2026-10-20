@@ -254,6 +254,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uU7RIE5c9F9
   KernelNameMin: wvSpltK_bf16_tn_m1
   SolutionNameMin: wvSpltK_bf16_tn_m1
   AssertSizeEqual: {1: 1, 2: 1}
@@ -334,6 +335,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 1
+  SolutionUID: 0uU7RIE4qza0
   KernelNameMin: wvSpltK_bf16_tn_m2
   SolutionNameMin: wvSpltK_bf16_tn_m2
   AssertSizeEqual: {1: 2, 2: 1}
@@ -414,6 +416,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 2
+  SolutionUID: 0uU7RIE57JbQ
   KernelNameMin: wvSpltK_bf16_tn_m4
   SolutionNameMin: wvSpltK_bf16_tn_m4
   AssertSizeEqual: {2: 1}

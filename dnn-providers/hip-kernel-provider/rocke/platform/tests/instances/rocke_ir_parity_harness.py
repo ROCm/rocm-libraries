@@ -400,14 +400,13 @@ def build_attention_3d(
     num_segments,
     sliding_window=0,
     has_softcap=False,
+    **kw,
 ):
     def _build():
-        from kernels import (
-            UnifiedAttention3DTiledSpec,
-            build_unified_attention_3d_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttention3DTiledSpec(
+        SpecCls, _, build_fn, _, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             block_size=block_size,
             num_query_heads=num_query_heads,
@@ -417,8 +416,9 @@ def build_attention_3d(
             sliding_window=sliding_window,
             has_softcap=has_softcap,
             num_segments=num_segments,
+            **kw,
         )
-        return build_unified_attention_3d_tiled(spec)
+        return build_fn(spec, arch=arch)
 
     return _build
 
@@ -427,19 +427,55 @@ def build_attention_reduce(
     name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
 ):
     def _build():
-        from kernels import (
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_reduce_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttentionReduceTiledSpec(
+        _, SpecCls, _, build_fn, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
             num_segments=num_segments,
         )
-        return build_unified_attention_reduce_tiled(spec)
+        return build_fn(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_scalar(name, arch, *, three_d=False, **problem):
+    """Scalar (correctness-oracle) unified attention, 2D or split-3D segment kernel.
+
+    ``problem`` patches a small ``UnifiedAttentionProblem``; the band fields
+    (``causal_top_left``, ``right_bound``, ``sliding_window``) select the mask.
+    """
+
+    def _build():
+        from kernels import (
+            UnifiedAttention2DSpec,
+            UnifiedAttention3DSpec,
+            UnifiedAttentionProblem,
+            build_unified_attention_2d,
+            build_unified_attention_3d,
+        )
+
+        fields = dict(
+            total_q=64,
+            num_seqs=1,
+            num_query_heads=4,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=64,
+            max_seqlen_k=64,
+            dtype="fp16",
+        )
+        fields.update(problem)
+        p = UnifiedAttentionProblem(**fields)
+        if three_d:
+            return build_unified_attention_3d(
+                UnifiedAttention3DSpec(p, num_segments=8), arch=arch
+            )
+        return build_unified_attention_2d(UnifiedAttention2DSpec(p), arch=arch)
 
     return _build
 
@@ -2718,6 +2754,23 @@ def cases():
     )
     add(
         "deep_fused_conv",
+        "deep/gfx12_generic/h16w16_k32",
+        "gfx12-generic",
+        build_deep(
+            "gfx1201",
+            "gfx12-generic",
+            h=16,
+            w=16,
+            c=16,
+            k0=32,
+            k1=32,
+            pool_tile_h=4,
+            pool_tile_w=4,
+            epilogue="cshuffle",
+        ),
+    )
+    add(
+        "deep_fused_conv",
         "deep/gfx1151/native_h16w16",
         "gfx1151",
         build_deep(
@@ -3144,6 +3197,55 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
+        # band on the top-left diagonal. causal=False is the unbounded right side.
+        # Non-causal (left-only) window: default + persistent grids.
+        ("noncausal_window_sq512", {"causal": False, "sliding_window": 128}),
+        (
+            "persist_noncausal_window_sq512",
+            {
+                "causal": False,
+                "sliding_window": 128,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        # Two-sided window and plain lookahead (right_bound > 0 needs causal=True).
+        (
+            "two_sided_window_sq512",
+            {"sliding_window": 128, "right_bound": 64},
+        ),
+        ("lookahead_sq512", {"right_bound": 64}),
+        (
+            "persist_lookahead_sq512",
+            {"right_bound": 64, "persistent": True, "num_persistent": 256},
+        ),
+        # Cross-attention between different lengths: full attention, ragged both ways,
+        # and top-left causal with seqlen_q > seqlen_kv (key-pad mask on a causal body).
+        (
+            "full_ragged_cross_197x400",
+            {"seqlen_q": 197, "seqlen_kv": 400, "ragged": True, "causal": False},
+        ),
+        (
+            "top_left_ragged_cross_400x197",
+            {"seqlen_q": 400, "seqlen_kv": 197, "ragged": True},
+        ),
+        # Rows with no visible key (window past the keys): the zero-output guard and
+        # the start-tile clamp, on both grids.
+        (
+            "window_empty_rows_1024x512",
+            {"seqlen_q": 1024, "seqlen_kv": 512, "sliding_window": 128},
+        ),
+        (
+            "persist_window_empty_rows_1024x512",
+            {
+                "seqlen_q": 1024,
+                "seqlen_kv": 512,
+                "sliding_window": 128,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
         # --- Sinks ---
         # Full-sink (use_sinks=True, no sliding window): D64 and D128, default + persistent
         ("sinks_d64_sq512", {"use_sinks": True, "head_size": 64}),
@@ -3208,6 +3310,114 @@ def cases():
             f"attention_dense/gfx950/{_variant}",
             "gfx950",
             build_attention_dense("gfx950", **_over),
+        )
+
+    # Attention band on the unified kernels: top-left alignment, full attention
+    # (right_bound=-1), lookahead and non-causal / two-sided windows. These bodies have
+    # no C++ mirror yet, so this golden is the only pin of their lowered IR.
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("rb16", dict(right_bound=16)),
+        (
+            "top_left_sw64",
+            dict(causal_top_left=True, sliding_window=64),
+        ),
+        (
+            "left_only_sw64",
+            dict(causal_top_left=True, right_bound=-1, sliding_window=64),
+        ),
+        (
+            "two_sided_sw64_rb16",
+            dict(causal_top_left=True, right_bound=16, sliding_window=64),
+        ),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_fp16_d128_b64_{_case}",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_fp16_{_case}",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="fp16",
+                **_kw,
+            ),
+        )
+    # The transposed-32x32 combo path (mask_once / mask_limit / peel sites).
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("rb16", dict(right_bound=16)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_fp16_d64_b32_gqa8_combo_{_case}",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_fp16_d64_combo_{_case}",
+                "gfx950",
+                head_size=64,
+                block_size=32,
+                num_query_heads=64,
+                num_kv_heads=8,
+                dtype="fp16",
+                **_sink_combo_kw,
+                **_kw,
+            ),
+        )
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("rb16", dict(right_bound=16)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/3d_bf16_d128_b64_{_case}",
+            "gfx950",
+            build_attention_3d(
+                f"irhash_attn_950_3d_bf16_{_case}",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                num_segments=4,
+                **_kw,
+            ),
+        )
+    # Scalar oracle kernels (arch-neutral, lowered for gfx950).
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("sw16_rb8", dict(sliding_window=16, right_bound=8)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/scalar2d_fp16_d128_{_case}",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar2d_{_case}", "gfx950", **_kw
+            ),
+        )
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("sw16_rb8", dict(sliding_window=16, right_bound=8)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/scalar3d_fp16_d128_{_case}",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar3d_{_case}",
+                "gfx950",
+                three_d=True,
+                **_kw,
+            ),
         )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
