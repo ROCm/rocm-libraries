@@ -653,3 +653,51 @@ def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
     assert not _rtc(plans)
     reasons = [r for i, r in rejected if i.algorithm == "direct_dgrad_mfma_rtc"]
     assert reasons and any(why in r for r in reasons), reasons[:3]
+
+
+# ---------------------------------------------------------------------------
+# A wave32 target (gfx1250): only the wave-parametric depthwise forward
+# kernels exist there, and they are built and launched at its wave size.
+# ---------------------------------------------------------------------------
+_WAVE32_ARCH = "gfx1250"
+
+
+@pytest.fixture(scope="module")
+def wave32_jobs():
+    return dks.enumerate_direct_jobs(
+        arch=_WAVE32_ARCH,
+        target=ArchTarget.from_gfx(_WAVE32_ARCH),
+        directions=("fwd",),
+    )
+
+
+def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_jobs):
+    """The MFMA variants are wave64 and drop out; the depthwise ones are built
+    at wave_size 32, which the identity records and the spec carries."""
+    assert {j.identity.algorithm for j in wave32_jobs} == dks._WAVE_PARAMETRIC
+    for job in wave32_jobs:
+        assert job.identity.wave_size == 32
+        variant = job.identity.algorithm
+        caps = dks.DirectCaps(**job.caps)
+        spec = dks.make_spec(
+            variant,
+            dks.probe_problem(caps, dks.DIRECT_DTYPE, variant, job.spec_kwargs),
+            job.spec_kwargs,
+            job.identity.wave_size,
+        )
+        assert spec.wave_size == 32, job.identity.label()
+
+
+@pytest.mark.parametrize("groups", [9, 192])
+def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
+    c = KernelCache(tmp_path, _WAVE32_ARCH)
+    for job in wave32_jobs:
+        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
+    problem = _problem(H=56, W=56, groups=groups, cpg=1, kpg=1)
+    plans, _ = dks.direct_plans(c, problem, "fwd", _WAVE32_ARCH)
+    assert plans
+    assert ("direct_depthwise_spatial" in _variants(plans)) == (groups < 32)
+    for plan in plans:
+        (step,) = plan.steps
+        waves = json.loads(plan.identity.knobs)["block_waves"]
+        assert step.block == (waves * 32, 1, 1), plan.identity.label()

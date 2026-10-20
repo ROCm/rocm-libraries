@@ -536,15 +536,35 @@ def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
 # ---------------------------------------------------------------------------
 
 
-def make_spec(variant: str, problem, knobs: dict):
+# Variants whose kernel is written for any wave size (scalar FMA, one lane per
+# channel or per channel and column): their spec takes the target's wave size,
+# so the binary matches the wave size the identity records (and the tiled and
+# column-streamed validators require it). Every other variant is a wave64 MFMA
+# kernel and keeps its spec default, which its validator checks against the
+# target.
+_WAVE_PARAMETRIC = frozenset(
+    {
+        "direct_depthwise",
+        "direct_depthwise_spatial",
+        "direct_depthwise_tiled",
+        "direct_depthwise_col",
+    }
+)
+
+
+def make_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     """The spec ``variant`` builds for ``problem``.
 
     For the MFMA dgrad pipeline this is the spec of its compute pass (a
     forward kernel on the transposed problem); the weight transforms are
-    derived from the original problem separately.
+    derived from the original problem separately. ``wave_size`` is the
+    target's; only the :data:`_WAVE_PARAMETRIC` variants take it.
     """
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_nongrouped as dn
+
+    if variant in _WAVE_PARAMETRIC:
+        knobs = dict(knobs, wave_size=wave_size)
 
     if variant == "direct_grouped":
         return dc.DirectConvSpec(problem=problem, name="rocke_direct_conv", **knobs)
@@ -966,7 +986,7 @@ def _caps_jobs(
                 continue
         if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs):
             continue
-        spec = make_spec(variant, probe, knobs)
+        spec = make_spec(variant, probe, knobs, wave_size)
         if not validate_spec(variant, spec, arch)[0]:
             continue
         if variant == "direct_nongrouped" and _nongrouped_spills(spec, arch):
@@ -1134,7 +1154,7 @@ def build_direct_job(job: BuildJob, arch: str, dtype: str):
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
-    spec = make_spec(variant, probe, job.spec_kwargs)
+    spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
@@ -1186,7 +1206,7 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         # computes (a dilated grouped kernel, say): ask the kernel's validator.
         variant = identity.algorithm
         probe = probe_problem(caps, identity.dtype_a, variant, knobs)
-        spec = make_spec(variant, probe, knobs)
+        spec = make_spec(variant, probe, knobs, identity.wave_size)
         ok, why = validate_spec(variant, spec, identity.arch)
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")
@@ -1356,7 +1376,7 @@ def plan_for(
         why = _mfma_knobs_reason(problem, knobs)
         if why:
             return None, why
-    spec = make_spec(variant, problem, knobs)
+    spec = make_spec(variant, problem, knobs, identity.wave_size)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         return None, why

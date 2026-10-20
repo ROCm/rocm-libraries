@@ -59,6 +59,9 @@ enum
  * 5 must-reject ones; the parametric DirectConvSpec + dgrad weight-transform
  * configs follow them. */
 #define GENERIC_CFG_BASE 75
+/* Depthwise forward on a wave32 target (gfx1250): see _wave32_spec in the
+ * Python emitter. */
+#define WAVE32_CFG_BASE 95
 
 static rocke_direct_conv_problem_t
     mk_dw_problem(int N, int H, int W, int groups, int KH, int PAD, int stride, const char* dtype)
@@ -523,6 +526,69 @@ static int make_reject_cfg(int idx,
         s16->problem = p;
         s16->block_groups = 4;
         *kind = KIND_16C;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Config WAVE32_CFG_BASE + idx (see _wave32_spec in the Python emitter): the
+ * preloading, spatial, tiled and column-streamed depthwise forward kernels at
+ * wave_size 32 on gfx1250, then the preloading kernel at wave_size 64 (a
+ * logical wave the wave32 target runs as two hardware waves). Returns 0 on
+ * success, -1 past the last one. */
+static int make_wave32_cfg(int idx,
+                           int* kind,
+                           rocke_direct_depthwise_spec_t* sdw,
+                           rocke_direct_depthwise_spatial_spec_t* ssp,
+                           rocke_direct_depthwise_tiled_spec_t* stiled,
+                           rocke_direct_depthwise_col_spec_t* sdwc,
+                           const char** arch)
+{
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 2;
+        sdw->wave_size = 32;
+        *kind = KIND_DW;
+        return 0;
+    case 1:
+        *ssp = rocke_direct_depthwise_spatial_spec_default();
+        ssp->problem = mk_dw_problem(2, 14, 14, 3, 3, 1, 2, "bf16");
+        ssp->block_waves = 2;
+        ssp->wave_size = 32;
+        *kind = KIND_SPATIAL;
+        return 0;
+    case 2:
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 16, 16, 96, 5, 2, 1, "bf16");
+        stiled->block_w = 8;
+        stiled->block_h = 2;
+        stiled->block_waves = 2;
+        stiled->wave_size = 32;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 3:
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = mk_dw_problem(2, 12, 12, 96, 3, 1, 2, "fp16");
+        sdwc->block_h = 8;
+        sdwc->block_w = 2;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        sdwc->wave_size = 32;
+        *kind = KIND_DWCOL;
+        return 0;
+    case 4:
+        /* wave64 (logical) spec on the wave32 target. */
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 1;
+        *kind = KIND_DW;
         return 0;
     default:
         return -1;
@@ -1368,8 +1434,16 @@ int main(int argc, char** argv)
     rocke_direct_transpose_weights_dgrad_spec_t stp;
     rocke_direct_reorganize_weights_spec_t sreorg;
     const char* arch = "gfx950";
-    if(idx >= GENERIC_CFG_BASE
-       && make_generic_cfg(idx - GENERIC_CFG_BASE, &kind, &sgen, &stp, &sreorg) == 0)
+    if(idx >= WAVE32_CFG_BASE)
+    {
+        if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= GENERIC_CFG_BASE
+            && make_generic_cfg(idx - GENERIC_CFG_BASE, &kind, &sgen, &stp, &sreorg) == 0)
     {
         /* selected above */
     }

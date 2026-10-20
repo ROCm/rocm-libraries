@@ -33,8 +33,7 @@ Three arch families are supported, each with its own hard-coded tile config:
       tile 64×64×64, warp 2×2, atom 32×32×16, pipeline ``mem``
 * **gfx1250** (wave32, WMMA) — WMMA 16×16×32 atom:
       tile 32×32×32, warp 2×2, atom 16×16×32, pipeline ``mem``
-  (gfx1250 restricts WMMA conv to pipeline=``mem``, groups=1, no cshuffle
-  override, and wgrad is not yet supported)
+  (gfx1250 restricts WMMA conv to pipeline=``mem``)
 
 DEFERRED -- per-problem divisibility and MMA atom selection
 ------------------------------------------------------------
@@ -253,7 +252,7 @@ _GFX950_WGRAD_SCALARB_PIPELINE = "compv3"
 # :func:`_wgrad_merge_degree` is the kernel's own admissibility rule and nothing
 # more. See its docstring for why no knob survived the fit.
 
-# gfx1250 — wave32, WMMA 16x16x32; pipeline must be "mem", groups=1 only
+# gfx1250 — wave32, WMMA 16x16x32; pipeline must be "mem"
 _GFX1250_TILE_M = 32
 _GFX1250_TILE_N = 32
 _GFX1250_TILE_K = 32
@@ -952,11 +951,12 @@ def _make_gfx950_fwd_candidate() -> KernelCandidate:
 
 
 def _make_gfx1250_fwd_candidate() -> KernelCandidate:
-    """Forward conv for gfx1250: 32×32×32, 2×2, 16×16×32 WMMA, groups=1 only.
+    """Forward conv for gfx1250: 32×32×32, 2×2, 16×16×32 WMMA.
 
-    gfx1250 WMMA conv is restricted to pipeline=``mem``, no cshuffle epilogue
-    override (``is_valid_spec`` gates cshuffle on WMMA; epilogue is derived
-    from vec_size_c as usual), and groups=1.
+    gfx1250 WMMA conv is restricted to pipeline=``mem``; the epilogue is
+    derived from vec_size_c as usual. Grouped and depthwise problems run
+    grid-per-group, as on gfx950: the group index rides ``block_id_z`` and the
+    group-aware loads and epilogue are family-neutral.
     """
     name = "implicit_gemm_conv_gfx1250"
     spec_id = "igemm_conv_fwd_gfx1250_32x32"
@@ -1002,8 +1002,6 @@ def _make_gfx1250_fwd_candidate() -> KernelCandidate:
             return False, f"gfx1250 candidate requires arch=gfx1250 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
-        if int(req.G) != 1:
-            return False, "WMMA conv on gfx1250 supports only groups=1"
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why

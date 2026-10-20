@@ -544,10 +544,14 @@ def _run_depthwise_sweep(
     from rocke.runtime.hip_module import HipError
 
     p = problem
-    # Use spatial kernel when groups fit in one wave (better thread utilisation).
-    # Derive wave_size from the spec default so this stays correct on wave32 targets
-    # (groups == wave_size would leave zero W-positions per wave — not valid).
-    _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
+    from rocke.core.arch import ArchTarget
+
+    # Every depthwise variant is built at the target's wave size (64 on CDNA,
+    # 32 on gfx1250), as the AOT cache does; the tiled and column-streamed
+    # validators reject any other.
+    _wave_size = ArchTarget.from_gfx(arch).wave_size
+    # Use spatial kernel when groups fit in one wave (better thread utilisation;
+    # groups == wave_size would leave zero W-positions per wave — not valid).
     _use_spatial = p.groups < _wave_size
 
     # All three variants take fp16 and bf16 -- preload and spatial off
@@ -617,6 +621,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseTiledSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_tiled",
+                wave_size=_wave_size,
                 block_w=block_w,
                 block_h=block_h,
                 block_waves=block_waves,
@@ -628,6 +633,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseSpatialSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_spatial",
+                wave_size=_wave_size,
                 block_waves=block_waves,
             )
             ok, _ = is_valid_depthwise_spatial_spec(spec, arch=arch)
@@ -636,6 +642,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseColSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_col",
+                wave_size=_wave_size,
                 block_h=block_h,
                 block_w=block_w,
                 block_waves=block_waves,
@@ -647,6 +654,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise",
+                wave_size=_wave_size,
                 block_w=block_w,
                 block_waves=block_waves,
             )

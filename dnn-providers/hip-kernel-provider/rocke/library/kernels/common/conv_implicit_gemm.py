@@ -547,11 +547,9 @@ def fwd_group_merge_available(
             f"index to ride alongside a real channel index on both N and K, "
             f"which is not covered, so it is gated off."
         )
-    if spec.wave_size != 64:
-        return False, (
-            f"group_merge is MFMA-only (wave_size 64); got wave_size="
-            f"{spec.wave_size}"
-        )
+    # No wave-size term: the merge lives in the A/B addressing, the diagonal
+    # mask on the B load and the epilogue's N bound, none of which depend on
+    # the MMA family, so MFMA (wave64) and WMMA (wave32) build it alike.
     if spec.async_dma:
         return False, (
             "group_merge is incompatible with async_dma=True: AsyncTileLoader "
