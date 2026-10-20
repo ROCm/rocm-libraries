@@ -557,6 +557,16 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 1800)\n")
 
+    # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
+    # one above) so its runtime does not eat into that entry's timeout.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 1200)\n")
+
     # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
     # dense numeric and extended-parity attention tests run only in
     # rocke_library_attention_gpu_pytest above, not again here.

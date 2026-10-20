@@ -6,10 +6,14 @@
 Drives ``run_unified_attention_torch`` with an fp32 additive bias on both the 2D
 tiled (``backend="tiled"``) and 3D split-KV (``backend="3d"``) paths and checks
 max_abs against an fp32 torch reference of
-``softmax(Q @ K^T * scale + bias, causal) @ V``. The 2D lane covers both score
+``softmax(softcap(Q @ K^T * scale) + bias, causal/window) @ V`` -- the bias is
+added after the softcap, as for ALiBi/QQ bias. The 2D lane covers both score
 paths: short prefill (16x16) and long prefill (max_seqlen_q > 256, multi- and
-single-batch), which selects the transposed 32x32 path; those long cases
-assert the selected spec so the coverage cannot silently drift.
+single-batch), which selects the transposed 32x32 path, plus a multi-batch
+group past max_seqlen_q=512 that compiles through hipcc. Softcap and
+sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
+covers the transposed 32x32 combo stack. Every 2D group asserts its score path
+and compile backend so the coverage cannot silently drift.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
@@ -62,7 +66,54 @@ _CASES = {
     "tiled_long_1seq": ("tiled", [(384, 640)]),
     "3d": ("3d", [(1, 300), (3, 517), (1, 64)]),
 }
-_TRANSPOSED_CASES = {"tiled_long", "tiled_long_1seq"}
+
+# Extra paths: case -> (backend, seq_lens, features). ``tiled_long_hipcc`` is
+# multi-batch prefill past max_seqlen_q=512, which compiles through hipcc
+# instead of LLVM-direct. The softcap and sliding-window groups pin the score
+# order and the masked bias load under a window, on 2D and 3D; the single-seq
+# fp16 window case lands on the transposed 32x32 path. The softcap is small
+# enough that ``softcap(QK*scale) + bias`` and ``softcap(QK*scale + bias)``
+# differ. Each group runs on two bias layouts (a padded full layout and a
+# broadcast one) to bound the lane's runtime; _CASES covers all seven layouts.
+_EXTRA_CASES = {
+    "tiled_long_hipcc": ("tiled", [(640, 640), (768, 900)], {}),
+    "tiled_softcap": ("tiled", [(300, 420), (512, 512)], {"softcap": 2.0}),
+    "tiled_window": ("tiled", [(300, 420), (512, 512)], {"sliding_window": 64}),
+    "tiled_window_1seq": ("tiled", [(384, 640)], {"sliding_window": 64}),
+    "3d_softcap": ("3d", [(1, 300), (3, 517), (1, 64)], {"softcap": 2.0}),
+    "3d_window": ("3d", [(1, 300), (3, 517), (1, 64)], {"sliding_window": 64}),
+}
+_EXTRA_BIAS_MODES = ("full_padded_sq", "bcast_hsq")
+
+# The d64 / block 32 / GQA-8 bf16 prefill cohort takes the transposed 32x32 combo
+# stack (scalar softmax state, skipped legacy Q gather; 64/8 heads also use the
+# fast paged-KV descriptor). With bias its mask-once / mask-limit opts stay off.
+_COMBO_SEQ_LENS = [(512, 512), (300, 420)]
+_COMBO_HEADS = {"gqa8_h32": (32, 4), "gqa8_h64": (64, 8)}
+_COMBO_KNOBS = {
+    "use_transposed_scalar_state": True,
+    "use_mfma32_skip_legacy_qreg": True,
+    "use_transposed_mask_once": False,
+}
+
+# Pinned 2D routing so coverage cannot silently drift:
+# case -> {dtype: (score path, compile backend)}.
+_ROUTES = {
+    "tiled": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
+    "tiled_long": {"fp16": ("transposed32", "llvm"), "bf16": ("transposed32", "llvm")},
+    "tiled_long_1seq": {
+        "fp16": ("transposed32", "llvm"),
+        "bf16": ("transposed32", "llvm"),
+    },
+    "tiled_long_hipcc": {
+        "fp16": ("transposed32", "hipcc"),
+        "bf16": ("transposed32", "hipcc"),
+    },
+    "tiled_softcap": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
+    "tiled_window": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
+    "tiled_window_1seq": {"fp16": ("transposed32", "llvm"), "bf16": ("16x16", "llvm")},
+    "tiled_combo": {"bf16": ("transposed32", "llvm")},
+}
 
 # bias layouts: name -> (broadcast batch, broadcast head, broadcast Sq,
 # extra Sk padding). ``bcast_hsq`` is the [B, 1, 1, Sk] key-padding shape.
@@ -79,15 +130,17 @@ _BIAS_MODES = {
 _HEADS = {"mha": (8, 8), "gqa": (8, 2)}
 
 
-def _make_inputs(seq_lens, hq, hkv, dtype, seed=0):
+def _make_inputs(
+    seq_lens, hq, hkv, dtype, seed=0, head_size=_HEAD_SIZE, block_size=_BLOCK_SIZE
+):
     torch.manual_seed(seed)
     tdt = getattr(torch, _TORCH_DT[dtype])
     query_lens = [s[0] for s in seq_lens]
     kv_lens = [s[1] for s in seq_lens]
-    max_blocks = (max(kv_lens) + _BLOCK_SIZE - 1) // _BLOCK_SIZE
+    max_blocks = (max(kv_lens) + block_size - 1) // block_size
     num_blocks = len(seq_lens) * max_blocks
-    q = torch.randn(sum(query_lens), hq, _HEAD_SIZE, dtype=tdt, device="cuda")
-    k = torch.randn(num_blocks, _BLOCK_SIZE, hkv, _HEAD_SIZE, dtype=tdt, device="cuda")
+    q = torch.randn(sum(query_lens), hq, head_size, dtype=tdt, device="cuda")
+    k = torch.randn(num_blocks, block_size, hkv, head_size, dtype=tdt, device="cuda")
     v = torch.randn_like(k)
     # Disjoint shuffled pages so every sequence reads distinct KV.
     block_table = (
@@ -121,25 +174,51 @@ def _make_bias(mode, num_seqs, hq, max_q, max_k):
     return storage, batch_stride, head_stride, sq_stride, full_view
 
 
-def _reference(q, k, v, block_table, seq_lens, scale, bias_full):
-    """fp32 causal paged attention with an additive bias (bottom-right causal)."""
+def _reference(
+    q,
+    k,
+    v,
+    block_table,
+    seq_lens,
+    scale,
+    bias_full,
+    softcap=0.0,
+    sliding_window=0,
+    bias_inside_softcap=False,
+):
+    """fp32 paged attention (bottom-right causal) in the kernels' order:
+    ``softcap(QK*scale) + bias``, then the causal and sliding-window masks.
+
+    ``bias_inside_softcap`` computes the other order, ``softcap(QK*scale +
+    bias)``, only to show a softcap case can tell the two apart.
+    """
     hq, hkv = q.shape[1], k.shape[2]
+    block_size, head_size = k.shape[1], k.shape[3]
     outs = []
     start = 0
     for i, (q_len, kv_len) in enumerate(seq_lens):
-        n_blk = (kv_len + _BLOCK_SIZE - 1) // _BLOCK_SIZE
+        n_blk = (kv_len + block_size - 1) // block_size
         blocks = block_table[i, :n_blk].long()
-        ks = k[blocks].reshape(-1, hkv, _HEAD_SIZE)[:kv_len].float()
-        vs = v[blocks].reshape(-1, hkv, _HEAD_SIZE)[:kv_len].float()
+        ks = k[blocks].reshape(-1, hkv, head_size)[:kv_len].float()
+        vs = v[blocks].reshape(-1, hkv, head_size)[:kv_len].float()
         ks = torch.repeat_interleave(ks, hq // hkv, dim=1)
         vs = torch.repeat_interleave(vs, hq // hkv, dim=1)
         qs = q[start : start + q_len].float()
         s = torch.einsum("qhd,khd->hqk", qs, ks) * scale
-        if bias_full is not None:
+        if bias_full is not None and bias_inside_softcap:
+            s = s + bias_full[i, :, :q_len, :kv_len]
+        if softcap > 0:
+            s = softcap * torch.tanh(s / softcap)
+        if bias_full is not None and not bias_inside_softcap:
             s = s + bias_full[i, :, :q_len, :kv_len]
         mask = torch.triu(
             torch.ones(q_len, kv_len, device=q.device), diagonal=kv_len - q_len + 1
         ).bool()
+        if sliding_window > 0:
+            # The kernels keep key k for query position q_abs iff q_abs - k < window.
+            q_abs = torch.arange(q_len, device=q.device)[:, None] + (kv_len - q_len)
+            k_pos = torch.arange(kv_len, device=q.device)[None, :]
+            mask |= (q_abs - k_pos) >= sliding_window
         s = s.masked_fill(mask, float("-inf"))
         p = torch.softmax(s, dim=-1)
         outs.append(torch.einsum("hqk,khd->qhd", p, vs))
@@ -147,19 +226,45 @@ def _reference(q, k, v, block_table, seq_lens, scale, bias_full):
     return torch.cat(outs, dim=0)
 
 
-@requires_gfx950_gpu
-@pytest.mark.gpu
-@pytest.mark.parametrize("heads", sorted(_HEADS))
-@pytest.mark.parametrize("bias_mode", list(_BIAS_MODES))
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("case", list(_CASES))
-def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
-    hq, hkv = _HEADS[heads]
-    backend, seq_lens = _CASES[case]
-    q, k, v, block_table, cu_q, seqused_k = _make_inputs(seq_lens, hq, hkv, dtype)
+def _2d_route(problem):
+    from kernels.common.attention_unified import (
+        _select_2d_compile_backend,
+        _tiled_spec_from_problem,
+    )
+
+    spec = _tiled_spec_from_problem(problem, "gfx950")
+    assert spec.use_additive_bias
+    if spec.use_mfma_32x32 and spec.use_transposed_qk_32x32:
+        assert spec.block_m_per_warp == 32
+        path = "transposed32"
+    elif spec.use_mfma_32x32:
+        path = "32x32"
+    else:
+        path = "16x16"
+    return path, _select_2d_compile_backend(problem, "gfx950"), spec
+
+
+def _check_case(
+    case,
+    backend,
+    seq_lens,
+    features,
+    dtype,
+    bias_mode,
+    heads,
+    head_size=_HEAD_SIZE,
+    block_size=_BLOCK_SIZE,
+    spec_knobs=None,
+):
+    hq, hkv = {**_HEADS, **_COMBO_HEADS}[heads]
+    softcap = float(features.get("softcap", 0.0))
+    sliding_window = int(features.get("sliding_window", 0))
+    q, k, v, block_table, cu_q, seqused_k = _make_inputs(
+        seq_lens, hq, hkv, dtype, head_size=head_size, block_size=block_size
+    )
     max_q = max(s[0] for s in seq_lens)
     max_k = max(s[1] for s in seq_lens)
-    scale = _HEAD_SIZE**-0.5
+    scale = head_size**-0.5
     storage, b_stride, h_stride, sq_stride, bias_full = _make_bias(
         bias_mode, len(seq_lens), hq, max_q, max_k
     )
@@ -169,26 +274,25 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
         num_seqs=len(seq_lens),
         num_query_heads=hq,
         num_kv_heads=hkv,
-        head_size=_HEAD_SIZE,
-        block_size=_BLOCK_SIZE,
+        head_size=head_size,
+        block_size=block_size,
         max_seqlen_q=max_q,
         max_seqlen_k=max_k,
         dtype=dtype,
+        sliding_window=sliding_window,
+        softcap=softcap,
         use_additive_bias=True,
         num_kv_blocks=int(k.shape[0]),
     )
-    if case in _TRANSPOSED_CASES:
-        # Pin the routing so these cases cannot silently fall back to 16x16.
-        from kernels.common.attention_unified import _tiled_spec_from_problem
-
-        spec = _tiled_spec_from_problem(problem, "gfx950")
-        assert spec.use_additive_bias
-        assert spec.use_mfma_32x32 and spec.use_transposed_qk_32x32, (
-            f"{case}/{dtype}/{heads}: expected the transposed 32x32 path, got "
-            f"use_mfma_32x32={spec.use_mfma_32x32} "
-            f"use_transposed_qk_32x32={spec.use_transposed_qk_32x32}"
+    if backend == "tiled":
+        *route, spec = _2d_route(problem)
+        route = tuple(route)
+        for knob, want in (spec_knobs or {}).items():
+            assert getattr(spec, knob) == want, f"{case}/{dtype}/{heads}: {knob}"
+        assert route == _ROUTES[case][dtype], (
+            f"{case}/{dtype}/{heads}: expected (path, compile backend) "
+            f"{_ROUTES[case][dtype]}, got {route}"
         )
-        assert spec.block_m_per_warp == 32
     out = torch.empty_like(q)
     run_unified_attention_torch(
         problem=problem,
@@ -200,7 +304,7 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
         seqused_k=seqused_k,
         softmax_scale=scale,
         block_table=block_table,
-        softcap=0.0,
+        softcap=softcap,
         additive_bias=storage,
         additive_bias_batch_stride=b_stride,
         additive_bias_head_stride=h_stride,
@@ -209,8 +313,10 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
     )
     torch.cuda.synchronize()
 
-    ref = _reference(q, k, v, block_table, seq_lens, scale, bias_full)
-    ref_nobias = _reference(q, k, v, block_table, seq_lens, scale, None)
+    ref_args = (q, k, v, block_table, seq_lens, scale)
+    feats = dict(softcap=softcap, sliding_window=sliding_window)
+    ref = _reference(*ref_args, bias_full, **feats)
+    ref_nobias = _reference(*ref_args, None, **feats)
     tol = _TOL[dtype]
     max_abs = (ref - out.float()).abs().max().item()
     assert (
@@ -219,6 +325,54 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
     # Guard against a silently ignored bias: the bias must move the output.
     shift = (ref - ref_nobias).abs().max().item()
     assert shift > 10 * tol, f"bias too weak to be observable (shift={shift:.3e})"
+    if softcap > 0:
+        # Guard the order: a kernel that put the bias inside the softcap would be
+        # off by about ``gap``, so the gap must clear the tolerance with margin
+        # for this case to catch the other order.
+        wrong = _reference(*ref_args, bias_full, bias_inside_softcap=True, **feats)
+        gap = (ref - wrong).abs().max().item()
+        assert gap > 3 * tol, f"softcap too weak to pin the order (gap={gap:.3e})"
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("heads", sorted(_HEADS))
+@pytest.mark.parametrize("bias_mode", list(_BIAS_MODES))
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("case", list(_CASES))
+def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
+    backend, seq_lens = _CASES[case]
+    _check_case(case, backend, seq_lens, {}, dtype, bias_mode, heads)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("heads", sorted(_HEADS))
+@pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("case", list(_EXTRA_CASES))
+def test_additive_bias_with_features_matches_reference(case, dtype, bias_mode, heads):
+    backend, seq_lens, features = _EXTRA_CASES[case]
+    _check_case(case, backend, seq_lens, features, dtype, bias_mode, heads)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
+@pytest.mark.parametrize("heads", sorted(_COMBO_HEADS))
+def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
+    _check_case(
+        "tiled_combo",
+        "tiled",
+        _COMBO_SEQ_LENS,
+        {},
+        "bf16",
+        bias_mode,
+        heads,
+        head_size=64,
+        block_size=32,
+        spec_knobs=_COMBO_KNOBS,
+    )
 
 
 # Host-side argument validation. These raise before any compile or launch, so
@@ -287,16 +441,27 @@ def test_additive_bias_sq_stride_accepted(sq_stride):
     from kernels.common.attention_unified import _validate_additive_bias
 
     bias = torch.zeros(4, 71, **_BIAS)
-    assert _validate_additive_bias(_bias_problem(), bias, 0, 0, sq_stride) == sq_stride
+    assert (
+        _validate_additive_bias(_bias_problem(), bias, 0, 0, sq_stride, bias.device)
+        == sq_stride
+    )
 
 
 def test_additive_bias_off_needs_no_sq_stride():
     from kernels.common.attention_unified import _validate_additive_bias
 
-    assert _validate_additive_bias(_bias_problem(False), None, 0, 0, None) == 0
+    assert _validate_additive_bias(_bias_problem(False), None, 0, 0, None, None) == 0
 
 
-# The reviewer's shape: H=16, Sq=Sk=8192 -> a full [B,H,Sq,Sk] bias is 2**30
+def test_additive_bias_device_mismatch_rejected():
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    bias = torch.zeros(4, 64, **_BIAS)  # cpu
+    with pytest.raises(ValueError, match="same device as q"):
+        _validate_additive_bias(_bias_problem(), bias, 0, 0, 64, torch.device("meta"))
+
+
+# i32 boundary shape: H=16, Sq=Sk=8192 -> a full [B,H,Sq,Sk] bias is 2**30
 # elements per sequence, so B=2 tops out at index 2**31 - 1 and B=3 wraps i32.
 _LONG = 8192
 _LONG_HEAD = _LONG * _LONG
@@ -328,6 +493,7 @@ def _validate_long(num_seqs, batch_stride, numel=1):
         batch_stride,
         _LONG_HEAD,
         _LONG,
+        torch.device("meta"),
     )
 
 
@@ -349,10 +515,9 @@ def test_additive_bias_i32_index_limit_accepted(num_seqs, batch_stride, numel):
 def test_additive_bias_stride_range_rejected(batch_stride):
     from kernels.common.attention_unified import _validate_additive_bias
 
+    bias = torch.zeros(4, 64, **_BIAS)
     with pytest.raises(ValueError, match="additive_bias_batch_stride"):
-        _validate_additive_bias(
-            _bias_problem(), torch.zeros(4, 64, **_BIAS), batch_stride, 0, 64
-        )
+        _validate_additive_bias(_bias_problem(), bias, batch_stride, 0, 64, bias.device)
 
 
 # _bias_problem reads index 3*sq_stride + 63 at most, so sq_stride=64 needs 256
@@ -370,7 +535,8 @@ def test_additive_bias_stride_range_rejected(batch_stride):
 def test_additive_bias_storage_bounds(make_bias, ok):
     from kernels.common.attention_unified import _validate_additive_bias
 
-    args = (_bias_problem(), make_bias(), 0, 0, 64)
+    bias = make_bias()
+    args = (_bias_problem(), bias, 0, 0, 64, bias.device)
     if ok:
         assert _validate_additive_bias(*args) == 64
     else:

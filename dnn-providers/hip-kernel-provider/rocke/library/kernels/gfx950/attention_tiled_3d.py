@@ -28,6 +28,10 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -160,6 +164,11 @@ class UnifiedAttention3DTiledSpec:
     right_bound: int = 0
 
     def __post_init__(self):
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
         if self.kv_layout == "strided" and (
@@ -417,13 +426,7 @@ def build_unified_attention_3d_tiled(
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
-    if USE_ADDITIVE_BIAS:
-        additive_bias_ptr = b.param(
-            "additive_bias_ptr", PtrType(F32, "global"), readonly=True, align=4
-        )
-        additive_bias_batch_stride_p = b.param("additive_bias_batch_stride", I32)
-        additive_bias_head_stride_p = b.param("additive_bias_head_stride", I32)
-        additive_bias_sq_stride_p = b.param("additive_bias_sq_stride", I32)
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
     if spec.kv_layout == "strided":
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")
@@ -984,23 +987,20 @@ def build_unified_attention_3d_tiled(
                     )
                     s_scaled = b.fadd(s_scaled, b.fmul(qq_v, rcp_ln2))
                 if USE_ADDITIVE_BIAS:
-                    # Per-row query head (GQA-correct); ``m_ok`` keeps padding
-                    # rows and tail columns (col_abs >= seq_len) off the buffer.
-                    ab_base = b.add(
-                        b.mul(additive_bias_batch_stride_p, seq_idx),
-                        b.mul(additive_bias_head_stride_p, hoist_qh_r[reg]),
+                    # Per-row query head (GQA-correct). Under ``m_ok``, padding
+                    # rows and tail columns (col_abs >= seq_len) load element 0
+                    # instead of an out-of-range index.
+                    s_scaled = add_additive_bias(
+                        b,
+                        s_scaled,
+                        additive_bias,
+                        seq_idx=seq_idx,
+                        q_head=hoist_qh_r[reg],
+                        q_row=qp_r,
+                        col=col_abs,
+                        mask=m_ok,
+                        rcp_ln2=rcp_ln2,
                     )
-                    ab_row = b.add(ab_base, b.mul(additive_bias_sq_stride_p, qp_r))
-                    ab_idx = b.add(ab_row, col_abs)
-                    ab_v = b.masked_global_load(
-                        additive_bias_ptr,
-                        ab_idx,
-                        m_ok,
-                        b.const_f32(0.0),
-                        dtype=F32,
-                        align=4,
-                    )
-                    s_scaled = b.fadd(s_scaled, b.fmul(ab_v, rcp_ln2))
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         m_new = []

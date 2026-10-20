@@ -139,17 +139,22 @@ additive bias to the scaled QK scores before the online softmax, on both the
 `S[q, k] += bias[seq*batch_stride + q_head*head_stride + q_local*sq_stride + k]`,
 where `q_head` is the *query* head (GQA-correct), `q_local` is the query
 position within its sequence, and `k` is the absolute key position (Sk stride
-is 1).  A stride of 0 broadcasts that dimension, so `[B,H,Sq,Sk]`,
+is 1).  Like ALiBi/QQ bias it is added after the softcap, so the score is
+`softcap(QK * scale) + bias`.  A stride of 0 broadcasts that dimension, so `[B,H,Sq,Sk]`,
 `[1,H,Sq,Sk]`, `[B,1,Sq,Sk]` and `[1,1,Sq,Sk]` layouts are all supported, and
 `sq_stride` may exceed `max_seqlen_k` for a padded row.  The bias load is
-predicated on the same row/causal mask as the score, so masked rows and tail
-columns never read the buffer.  Gfx950 spec only (field-presence guard);
+predicated on the same row/causal mask as the score: masked lanes (padding rows,
+tail columns) load element 0 instead of an out-of-range index, and the value is
+discarded.  Gfx950 spec only (field-presence guard);
 `supports_native_unified_attention_tiled` / `_3d_tiled` reject it on other
 arches.  Default OFF: the bias pointer and its three strides are appended to the
 end of the kernel ABI only when ON (kernel name gains an `addb` token), so the
-non-bias IR is unchanged.  `__post_init__` rejects it together with the
-transposed softmax VALU opts, `use_grouped_kv2_softmax` and `use_register_pv`,
-and the selector keeps those knobs off when `problem.use_additive_bias` is set.
+non-bias IR is unchanged.  On 2D the bias is emitted only on the 16x16 path and
+the plain transposed 32x32 path: `__post_init__` rejects it together with
+`use_transposed_mask_limit`, `use_transposed_invariant_hoist`,
+`use_transposed_mask_once`, the non-transposed 32x32 path,
+`use_grouped_kv2_softmax` and `use_register_pv`, and the selector keeps those
+knobs off when `problem.use_additive_bias` is set.
 Enabled by `UnifiedAttentionProblem.use_additive_bias`; the tensor and strides
 are passed to `run_unified_attention_torch(additive_bias=...,
 additive_bias_batch_stride=..., additive_bias_head_stride=...,

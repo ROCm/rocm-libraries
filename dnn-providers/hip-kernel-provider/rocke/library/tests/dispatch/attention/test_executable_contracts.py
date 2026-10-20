@@ -429,6 +429,51 @@ class TestRegistrySplit(unittest.TestCase):
             binding.launch()
         self.assertFalse(any(k.startswith("additive_bias") for k in captured))
 
+    def test_runner_rejects_tuning_spec_bias_mismatch(self):
+        """``run_unified_attention_torch(tuning_spec=...)`` is a public entry too.
+        A spec and problem that disagree on ``use_additive_bias`` would misalign
+        the positional kernargs, so the runner refuses them before launch."""
+        from kernels.common import attention_unified as au
+
+        for prefix in (
+            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+            "attention_gfx950_u3d_splitkv_seg16_t1xb",
+        ):
+            candidate = next(
+                c for c in attention_execution_candidates() if c.name.startswith(prefix)
+            )
+            req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+            spec = candidate.select_spec(req)
+            bias_spec = replace(
+                spec, kernel_spec=replace(spec.kernel_spec, use_additive_bias=True)
+            )
+            problem = _problem(req)
+            for case, prob, tspec in (
+                (
+                    "bias_problem_plain_spec",
+                    replace(problem, use_additive_bias=True),
+                    spec,
+                ),
+                ("plain_problem_bias_spec", problem, bias_spec),
+            ):
+                with self.subTest(candidate=prefix, case=case), mock.patch.object(
+                    au, "_resolve_attention_arch", return_value="gfx950"
+                ):
+                    with self.assertRaisesRegex(ValueError, "disagrees with problem"):
+                        au.run_unified_attention_torch(
+                            problem=prob,
+                            q=None,
+                            k=None,
+                            v=None,
+                            out=None,
+                            cu_seqlens_q=None,
+                            seqused_k=None,
+                            softmax_scale=1.0,
+                            block_table=None,
+                            softcap=0.0,
+                            tuning_spec=tspec,
+                        )
+
 
 if __name__ == "__main__":
     unittest.main()
