@@ -92,7 +92,7 @@ int parseArgs(int                       argc,
                     return EXIT_FAILURE;
                 }
 
-                *initialization = string2hipblaslt_initialization(initStr);
+                *initialization = string2hipblaslt_initialization(initStr).value();
             }
         }
         else

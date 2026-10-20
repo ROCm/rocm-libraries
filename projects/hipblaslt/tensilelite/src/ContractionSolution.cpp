@@ -40,9 +40,6 @@
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
 #include <optional>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <mxDataGenerator/PreSwizzle.hpp>
-#endif
 #include <origami/streamk.hpp>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 
