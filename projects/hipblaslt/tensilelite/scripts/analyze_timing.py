@@ -101,10 +101,35 @@ TIMING_HIERARCHY = {
                 },
             },
             "validate_warmups": {
-                "validate_gpu_sync": {},
-                "validate_gpu_readback": {},
-                "validate_element_comparison": {},
-                "validate_mismatch_printing": {},
+                # validate_warmups runs every listener's validateWarmups(); one row per listener.
+                "validate_warmups_listener.ReferenceValidator": {
+                    "validate_inputs_copy": {},
+                    "validate_setup": {},
+                    "validate_result_buffer_alloc": {},
+                    "validate_gpu_readback": {},
+                    "validate_element_comparison": {},
+                    "validate_mismatch_printing": {},
+                    "validate_report": {},
+                },
+                "validate_warmups_listener.SynchronizerValidator": {
+                    # Per validation: read the Synchronizer buffer back and scan it for residue.
+                    # Only solutions that may use the Synchronizer (StreamK, MBSK, GSU partial
+                    # reduction, amaxD) do the readback and scan; the rest are "inactive".
+                    "validate_synchronizer_check": {
+                        "validate_synchronizer_readback": {},
+                        "validate_synchronizer_scan": {},
+                        "validate_synchronizer_inactive": {},
+                        "validate_synchronizer_no_buffer": {},
+                    },
+                },
+                "validate_warmups_listener.BenchmarkTimer": {
+                    "validate_gpu_sync": {},
+                },
+                "validate_warmups_listener.DataInitialization": {},
+                "validate_warmups_listener.MetaResultReporter": {},
+                "validate_warmups_listener.AllSolutionsIterator": {},
+                "validate_warmups_listener.ProgressListener": {},
+                "validate_warmups_listener.HardwareMonitorListener": {},
             },
             "gpu_input_preparation": {
                 "gpu_input_prep_fast_reset_output": {},
@@ -302,6 +327,9 @@ OVERLAPPING_TOTALS_ORDER = [
     "problem_total",
     "solution_total",
     "run_iteration_total",
+    # ReferenceValidator's validateSolution(): wraps the per-tensor timers below it.
+    "validate_total",
+    "validate_check_results_typed",
 ]
 OVERLAPPING_TOTALS = set(OVERLAPPING_TOTALS_ORDER)
 
