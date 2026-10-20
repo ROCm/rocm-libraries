@@ -227,8 +227,9 @@ class StateValues:
   invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
-  # Pool size behind a deferred SGPR overflow; 0 once resolveDeferredSgprOverflow rules.
-  sgprOverflowPendingRA: int             = 0
+  # The overflow code reopened for register allocation to settle, or 0 once
+  # resolveDeferredRegisterOverflow has ruled on it.
+  overflowPendingRA: int                 = 0
   ## Schedule
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
@@ -7106,7 +7107,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Judge, defer, act. The middle step is this path's alone: it runs the
     # allocation pipeline below and resolves the deferral.
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
-    self.deferSgprOverflowForAllocation(kernel)
+    self.deferRegisterOverflowForAllocation(kernel)
     self.applyOverflowVerdict(kernel, moduleKernelBody)
 
     # Tensile instruction pass, temporarily disable due to build time.
@@ -7290,21 +7291,34 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
-      # Pay off the deferral: the verdict now comes from what the emitted code
-      # declares, not from the pool estimate. The guard is defensive -- error is
-      # always 0 here -- because a resolver that accepts would erase a rejection.
+      # Tensile's own assembly, for the comparison ENABLE_DEBUG_STINKYTOFU_ASM
+      # writes below. Taken before the budget is re-judged, because that sets
+      # the kernel body's declared counts to the ones StinkyTofu emitted, which
+      # would leave both files declaring the same registers.
+      debugAsm = os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None
+      if debugAsm:
+        t_str_start = time.perf_counter()
+        orig_asm_str = str(moduleKernelBody)
+        t_str_end = time.perf_counter()
+        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+
+      # Pay off the deferral, and realign the recorded counts and the occupancy
+      # with them: both now come from what the emitted code declares, not from
+      # the pool estimate. The guard is defensive -- error is always 0 here --
+      # because a resolver that accepts would erase a rejection.
       if error == 0:
-        error = self.resolveDeferredSgprOverflow(kernel, moduleKernelBody,
-                                                 stModule.getDeclaredSgprCount())
+        error = self.resolveDeferredRegisterOverflow(kernel, moduleKernelBody,
+                                                     stModule.getDeclaredVgprCount(),
+                                                     stModule.getDeclaredSgprCount())
         if error != 0:
-          # Rejected after all, so the skipped stub is due: ForceGenerateKernel
+          # Rejected after all, so the skipped verdict is due: ForceGenerateKernel
           # builds this source, so replace it with the stubbed rocisa module.
-          self.applyOverflowStub(moduleKernelBody)
+          self.applyOverflowVerdict(kernel, moduleKernelBody, afterAllocation=True)
           st_asm = str(moduleKernelBody)
       else:
-        self.states.sgprOverflowPendingRA = 0
+        self.states.overflowPendingRA = 0
 
-      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+      if debugAsm:
         t3_start = time.perf_counter()
         import hashlib, fcntl
         os.makedirs("cmpasm/orig", exist_ok=True)
@@ -7321,11 +7335,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
           st_path = f"cmpasm/st/{base_name}_{suffix}.s"
           suffix += 1
-
-        t_str_start = time.perf_counter()
-        orig_asm_str = str(moduleKernelBody)
-        t_str_end = time.perf_counter()
-        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
         with open(orig_path, "w") as f:
           f.write(orig_asm_str)
@@ -7350,12 +7359,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Unreachable: the mode gates a deferral on the same two questions the
       # conversion gate above asks. Kept, and loud, because a deferral nothing
       # resolves would silently accept an over-budget kernel.
-      if self.states.sgprOverflowPendingRA:
-        printWarning("%s: deferred SGPR overflow but no StinkyTofu module; the mode and "
-                     "the conversion gate disagree" % self.states.kernelName)
-        self.states.sgprOverflowPendingRA = 0
-        self.states.overflowedResources = 2
-        error = 2
+      if self.states.overflowPendingRA:
+        printWarning("%s: deferred register overflow but no StinkyTofu module; the mode "
+                     "and the conversion gate disagree" % self.states.kernelName)
+        error = self.states.overflowPendingRA
+        self.states.overflowPendingRA = 0
+        self.states.overflowedResources = error
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
@@ -10679,13 +10688,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     pass
 
   def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
-    """Effective scalar allocation mode from the kernel parameter: 0 off, 1 shadow,
+    """Effective register allocation mode from the kernel parameter: 0 off, 1 shadow,
     2 apply, 3 force apply, higher clamping to 3, and 0 whenever the StinkyTofu
     path will not run -- the module is built on the same conditions checked here,
     so mode 3 guarantees the resolver is reached, which is what makes deferring safe.
 
-    Only mode 3 defers: shadow could not lower a count, and plain apply keeps the
-    old accept set, so enabling allocation cannot change which solutions survive.
+    Only mode 3 defers, because only it needs to: shadow could not lower a count,
+    and plain apply admits no kernel the pool estimate rejected, since a verdict
+    it reaches was never set aside to begin with.
+
+    Every mode is still re-judged on the counts the emitted code declares, mode 0
+    included -- emitAssembly() rewrites those counts whether or not allocation
+    ran, and raises as well as lowers them. So any mode can newly *reject* a
+    kernel the pool estimate admitted, which is the kernel no longer fitting
+    rather than a policy this mode chose.
     """
     if kernel.get("_StinkyTofuOptLevel") is None:
       return 0
@@ -10695,21 +10711,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     configured = int(kernel.get("StinkyTofuRegisterAllocation", 0))
     return max(0, min(configured, 3))
 
-  def deferSgprOverflowForAllocation(self, kernel) -> None:
-    """Override in KernelWriterAssembly to defer an SGPR verdict to allocation."""
+  def deferRegisterOverflowForAllocation(self, kernel) -> None:
+    """Override in KernelWriterAssembly to defer a budget verdict to allocation."""
     pass
 
-  def applyOverflowVerdict(self, kernel, mkb) -> None:
+  def applyOverflowVerdict(self, kernel, mkb, afterAllocation: bool = False) -> None:
     """Override in KernelWriterAssembly to report and act on an overflow."""
     pass
 
-  def resolveDeferredSgprOverflow(self, kernel, mkb, declaredSgprs: int) -> int:
-    """Override in KernelWriterAssembly to judge a deferred SGPR overflow."""
+  def resolveDeferredRegisterOverflow(self, kernel, mkb, declaredVgprs: int, \
+                                      declaredSgprs: int) -> int:
+    """Override in KernelWriterAssembly to re-judge the budget after allocation."""
     return 0
-
-  def applyOverflowStub(self, mkb) -> None:
-    """Override in KernelWriterAssembly to stub out a rejected kernel's body."""
-    pass
 
   ##############################################################################
   # Check Resources

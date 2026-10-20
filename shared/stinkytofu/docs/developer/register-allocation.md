@@ -353,8 +353,14 @@ pm.addPass(createRegisterAllocationPass(RegisterAllocationOptions{
 
 A production pipeline that opts in via `ModuleOptions::RegisterAllocation`
 (TensileLite's `StinkyTofuRegisterAllocation`) lifts and colours SGPRs:
-0 off, 1 shadow, 2 apply. The backend runs `greedy-compact` over the whole
-function after schedule and waitcnt. SSA / before / after dumps stay commented
+0 off, 1 shadow, 2 apply. TensileLite reads a fourth value, 3, as "apply, and
+let a kernel the pool estimate called over-budget reach allocation so the
+emitted counts decide"; the pipeline clamps it to apply, since nothing here
+changes. That fourth value covers the VGPR budget as well as the SGPR one even
+though the backend colours only SGPRs, because the count a deferred verdict is
+re-judged on comes from `refreshVgprCount` — which runs as part of emitting,
+whatever was coloured — and not from the colouring. The backend runs
+`greedy-compact` over the whole function after schedule and waitcnt. SSA / before / after dumps stay commented
 so a multi-kernel build does not overwrite a single fixed path. When reproducing
 one kernel, uncomment them:
 
@@ -883,7 +889,7 @@ That last point is also why `physicalIR()` is useless for testing this. Every na
 
 | Gap | Consequence |
 |---|---|
-| `reg.offset` is stale the same way | destruction rewrites `type` and `idx` and leaves `offset`. When the converter bakes MSB (`msb * -256`) in before allocation, moving a VGPR across a 256 boundary can mis-address |
+| `reg.offset` is stale the same way | destruction rewrites `type` and `idx` and leaves `offset`. Closed for the backend path and listed because the shape of the hazard remains: were the converter to bake MSB (`msb * -256`) into `offset` before allocation, moving a VGPR across a 256 boundary would mis-address. It does not — `toStinkyRegister` leaves `offset` free of bank bias, and `InsertVgprMsbPass` derives MSB from the final index, after allocation (section 12). Anything that reintroduces a pre-allocation bias reopens this |
 | a `.set` outside the extracted region is invisible | under `--from-label` / `--to-label` the preamble is not part of the function, so a `.set` above the start label never reaches `collectAsmSetSymbolInfo`, and every name using it is stripped. Stripping is the safe direction, so this costs readability rather than correctness, and the backend path is unaffected because the `.set` block is inside the kernel body there. The name-keeping fixtures put their `.set` inside the region for this reason; `register_symbol_sync_strip_note.s` puts it outside on purpose, which is how it forces a strip |
 | rewriting a `.set` moves non-register references too | the classifier only sees register operands, so a symbol that is both a register name and part of an immediate expression (`s_mov_b32 s0, sgprTmp*4`) would have that expression silently revalued. Not observed in Tensile output; treating such symbols as splits is the conservative fix |
 | an unresolved `.set` right-hand side counts as resolved | `sgprBase+2` and `MT0*2` enter the map with `value = 0` when resolution fails, and sync trusts `definitionCount == 1` |

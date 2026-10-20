@@ -1580,6 +1580,17 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return signature_ ? signature_->kernelDescriptor.getNextFreeSgpr() : 0;
         }
 
+        /// VGPRs the descriptor declares, as `.amdhsa_next_free_vgpr`.
+        ///
+        /// The counterpart of getDeclaredSgprCount(), with one caveat a caller
+        /// judging an occupancy from it has to know: where AGPRs share the
+        /// register file this field covers both classes, and setDeclaredVgprs
+        /// declines to touch it, so the answer there is the producer's own
+        /// number rather than anything allocation arrived at.
+        int getDeclaredVgprCount() const {
+            return signature_ ? signature_->kernelDescriptor.getNextFreeVgpr() : 0;
+        }
+
         // Plugin data forwarding
         void setPluginDataI64(const std::string& key, int64_t value) {
             module_->setPluginDataI64(key, value);
@@ -1623,6 +1634,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         .def("getDeclaredSgprCount", &StinkyAsmModuleWithSignature::getDeclaredSgprCount,
              "SGPRs the descriptor declares (.amdhsa_next_free_sgpr). Ask after emitAssembly() "
              "for the count the emitted code uses rather than the producer's estimate")
+        .def("getDeclaredVgprCount", &StinkyAsmModuleWithSignature::getDeclaredVgprCount,
+             "VGPRs the descriptor declares (.amdhsa_next_free_vgpr). Ask after emitAssembly() "
+             "for the count the emitted code uses rather than the producer's estimate; where "
+             "AGPRs share the register file the field covers both and is left as the producer "
+             "set it")
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
              "Set full kernel name for output files (e.g. cost file); should match .o basename")
