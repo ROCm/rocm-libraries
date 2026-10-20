@@ -46,6 +46,15 @@ if(BUILD_TESTING)
   install(TARGETS rocke_storage RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_storage)
 
+  add_executable(rocke_ir_types core/test_ir_types.cpp)
+  target_link_libraries(rocke_ir_types PRIVATE rocke_core)
+  add_test(NAME rocke_ir_types COMMAND rocke_ir_types)
+  set_tests_properties(rocke_ir_types PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_types)
+  set_target_properties(rocke_ir_types PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_ir_types RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_types)
+
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
   add_test(NAME rocke_dtypes COMMAND rocke_dtypes)
@@ -156,6 +165,22 @@ if(BUILD_TESTING)
                  rocke_tanh_lowering)
   endif()
 
+  # Fenced barriers (fence attr of tile.sync / sync_lds_only / s_barrier_bare).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_barrier_fence.cpp")
+    add_executable(rocke_barrier_fence core/test_barrier_fence.cpp)
+    target_link_libraries(rocke_barrier_fence PRIVATE rocke_core)
+    add_test(NAME rocke_barrier_fence COMMAND rocke_barrier_fence)
+    set_tests_properties(rocke_barrier_fence
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_barrier_fence)
+    set_target_properties(rocke_barrier_fence
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_barrier_fence
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_barrier_fence)
+  endif()
+
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_xf32_bf16x3_lowering.cpp")
     add_executable(rocke_xf32_bf16x3_lowering core/test_xf32_bf16x3_lowering.cpp)
@@ -186,6 +211,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_f64_lowering)
+  endif()
+
+  # Pins every opcode's value, name and purity: rocke_opcode_t is C ABI.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_opcode_values.cpp")
+    add_executable(rocke_opcode_values core/test_opcode_values.cpp)
+    target_link_libraries(rocke_opcode_values PRIVATE rocke_core)
+    add_test(NAME rocke_opcode_values COMMAND rocke_opcode_values)
+    set_tests_properties(rocke_opcode_values
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_opcode_values)
+    set_target_properties(rocke_opcode_values
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_opcode_values
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_opcode_values)
   endif()
 
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.

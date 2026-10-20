@@ -71,7 +71,7 @@ from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.schedule import SchedulePolicy
-from rocke.helpers.spec import kernel_name_join
+from rocke.helpers.spec import ceil_div, kernel_name_join
 from rocke.helpers.tensor_view import make_buffer_resource
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -123,10 +123,6 @@ def _dg_K(p: ConvProblem) -> int:
     return p.Y * p.X * p.kpg
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
-
-
 def _floor_div(a: int, b: int) -> int:
     return a // b
 
@@ -162,10 +158,10 @@ def compute_tilde(p: ConvProblem) -> TildeDecomposition:
     gcd_w = _gcd(p.sW, p.dW)
     y_tilde = p.sH // gcd_h
     x_tilde = p.sW // gcd_w
-    y_dot = _ceil_div(p.Y, y_tilde)
-    x_dot = _ceil_div(p.X, x_tilde)
-    h_tilde = p.Ho + _ceil_div(p.dH * (p.Y - 1), p.sH) if p.Y > 1 else p.Ho
-    w_tilde = p.Wo + _ceil_div(p.dW * (p.X - 1), p.sW) if p.X > 1 else p.Wo
+    y_dot = ceil_div(p.Y, y_tilde)
+    x_dot = ceil_div(p.X, x_tilde)
+    h_tilde = p.Ho + ceil_div(p.dH * (p.Y - 1), p.sH) if p.Y > 1 else p.Ho
+    w_tilde = p.Wo + ceil_div(p.dW * (p.X - 1), p.sW) if p.X > 1 else p.Wo
     return TildeDecomposition(
         gcd_h=gcd_h,
         gcd_w=gcd_w,
@@ -258,8 +254,8 @@ def enumerate_sub_gemms(
 
     for i_yt in range(tilde.y_tilde):
         for i_xt in range(tilde.x_tilde):
-            y_dot_slice = _ceil_div(p.Y - i_yt, tilde.y_tilde)
-            x_dot_slice = _ceil_div(p.X - i_xt, tilde.x_tilde)
+            y_dot_slice = ceil_div(p.Y - i_yt, tilde.y_tilde)
+            x_dot_slice = ceil_div(p.X - i_xt, tilde.x_tilde)
             if y_dot_slice <= 0 or x_dot_slice <= 0:
                 continue
 
@@ -268,14 +264,14 @@ def enumerate_sub_gemms(
             )
             h_tilde_slice_end = min(
                 tilde.h_tilde,
-                _ceil_div(p.pH + p.Hi - 1, p.sH) + 1,
+                ceil_div(p.pH + p.Hi - 1, p.sH) + 1,
             )
             w_tilde_slice_begin = _floor_div(
                 max(0, p.pW - p.dW * (tilde.x_tilde - 1)), p.sW
             )
             w_tilde_slice_end = min(
                 tilde.w_tilde,
-                _ceil_div(p.pW + p.Wi - 1, p.sW) + 1,
+                ceil_div(p.pW + p.Wi - 1, p.sW) + 1,
             )
 
             h_tilde_slice = h_tilde_slice_end - h_tilde_slice_begin
@@ -287,8 +283,8 @@ def enumerate_sub_gemms(
             gemm_n = p.cpg
             gemm_k = y_dot_slice * x_dot_slice * p.kpg
 
-            num_m_tiles = _ceil_div(gemm_m, tile_m)
-            num_n_tiles = _ceil_div(gemm_n, tile_n)
+            num_m_tiles = ceil_div(gemm_m, tile_m)
+            num_n_tiles = ceil_div(gemm_n, tile_n)
             num_tiles = num_m_tiles * num_n_tiles
 
             block_start = cumulative_tiles
@@ -319,7 +315,7 @@ def enumerate_sub_gemms(
                 d_h_offset=p.dH * i_yt + p.sH * h_tilde_slice_begin - p.pH,
                 d_w_stride=p.sW,
                 d_w_offset=p.dW * i_xt + p.sW * w_tilde_slice_begin - p.pW,
-                gemm_k_padded=_ceil_div(gemm_k, tile_k * split_k) * (tile_k * split_k),
+                gemm_k_padded=ceil_div(gemm_k, tile_k * split_k) * (tile_k * split_k),
             )
             sub_gemms.append(sg)
 
@@ -372,8 +368,8 @@ def pack_sub_gemm_buffer(
     buf: List[int] = []
     for sg in sub_gemms:
         record = sg.pack_i32()
-        record[1] = _ceil_div(sg.gemm_m, tile_m)
-        record[2] = _ceil_div(sg.gemm_n, tile_n)
+        record[1] = ceil_div(sg.gemm_m, tile_m)
+        record[2] = ceil_div(sg.gemm_n, tile_n)
         buf.extend(record)
     for sg in sub_gemms:
         buf.extend(sub_gemm_magic_pairs(sg))
@@ -1060,12 +1056,6 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"(max_sub_gemms); raise max_sub_gemms to build a kernel that "
             f"can serve it"
         )
-    if p.groups > 1 and p.cpg == 1:
-        return False, (
-            "depthwise dgrad (channels-per-group == 1) is not supported by the "
-            "implicit-GEMM grouped path"
-        )
-
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
     if spec.tile_n % (spec.warp_n * spec.warp_tile_n):

@@ -121,6 +121,8 @@
     "smax.i32": "llvm.smax.i32",
     "smin.i32": "llvm.smin.i32",
     "sqrt.f32": "llvm.sqrt.f32",
+    "umax.i8": "llvm.umax.i8",
+    "umin.i8": "llvm.umin.i8",
     "update.dpp.i32": "llvm.amdgcn.update.dpp.i32",
     "wmma.f32.16x16x16.bf16": "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
     "wmma.f32.16x16x16.f16": "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
@@ -6659,6 +6661,76 @@
       "gfx950": {
         "evidence": "not an intrinsic in llvm20",
         "status": "name_absent",
+        "verified_on": "llvm20"
+      }
+    },
+    "umax.i8": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "umin.i8": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm20"
       }
     },

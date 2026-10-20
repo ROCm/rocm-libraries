@@ -614,13 +614,15 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
     {
         return "ptr addrspace(3)";
     }
-    /* scalar */
+    /* scalar. No packed-only type has an entry: rocke_i_refuse_packed_only_value
+     * keeps its values out of the IR. */
     const char* n = t->name;
     if(n)
     {
         if(strcmp(n, "i1") == 0)
             return "i1";
-        if(strcmp(n, "i8") == 0)
+        /* LLVM integers carry no sign; signedness lives in the operations. */
+        if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0)
             return "i8";
         if(strcmp(n, "i16") == 0)
             return "i16";
@@ -953,6 +955,20 @@ const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v)
     return rocke_arena_printf(&L->arena, "%s %s", ty, op);
 }
 
+const char* rocke_ll_reinterpret(rocke_lower_t* L,
+                                 const rocke_value_t* v,
+                                 const rocke_type_t* register_type)
+{
+    /* The fresh name is taken before the operand is rendered, as in Python. */
+    const char* reinterpreted = rocke_ll_fresh(L, "reg");
+    rocke_ll_emitf(L,
+                   "  %s = bitcast %s to %s",
+                   reinterpreted,
+                   rocke_ll_operand_with_type(L, v),
+                   rocke_ll_llvm_type(L, register_type));
+    return reinterpreted;
+}
+
 /* ====================================================================== */
 /* Shared binary-op helpers (Python _binop / _vector_binop)               */
 /* ====================================================================== */
@@ -991,6 +1007,34 @@ void rocke_ll_vector_binop(rocke_lower_t* L, const rocke_op_t* op, const char* l
                    rocke_ll_llvm_type(L, a->type),
                    rocke_ll_operand(L, a),
                    rocke_ll_operand(L, b));
+}
+
+const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
+                                    const char* op_name,
+                                    const char* pred,
+                                    const rocke_type_t* t)
+{
+    static const struct
+    {
+        const char* pred;
+        const char* signed_form;
+        const char* unsigned_form;
+    } k_icmp[] = {
+        {"lt", "slt", "ult"},
+        {"le", "sle", "ule"},
+        {"gt", "sgt", "ugt"},
+        {"ge", "sge", "uge"},
+        {"eq", "eq", "eq"},
+        {"ne", "ne", "ne"},
+    };
+    for(const auto& row : k_icmp)
+    {
+        if(strcmp(pred, row.pred) == 0)
+        {
+            return rocke_type_is_unsigned(t) ? row.unsigned_form : row.signed_form;
+        }
+    }
+    rocke_ll_fail(L, ROCKE_ERR_KEY, "%s: unknown pred %s", op_name, pred);
 }
 
 /* ====================================================================== */
@@ -1224,14 +1268,17 @@ static void
     }
 }
 
-/* Size of one smem allocation in bytes (Python _seg_size). */
+/* Size of one smem allocation in bytes (Python _seg_size).
+ * No packed-only type has an entry: rocke_i_refuse_packed_only_value refuses
+ * its LDS tiles. */
 static int ll_smem_seg_size(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
         return 0;
     const char* n = stype->elem->name;
     int eb;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+       || strcmp(n, "bf8e5m2") == 0)
         eb = 1;
     else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
         eb = 2;
@@ -1247,7 +1294,8 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
     return seg;
 }
 
-/* Alignment for one smem allocation (Python _align). */
+/* Alignment for one smem allocation (Python _align). A packed-only type never
+ * reaches here: rocke_i_refuse_packed_only_value refuses its LDS tiles. */
 static int ll_smem_align(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
@@ -1255,7 +1303,8 @@ static int ll_smem_align(const rocke_type_t* stype)
     const char* n = stype->elem->name;
     if(strcmp(n, "f64") == 0)
         return 8;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+       || strcmp(n, "bf8e5m2") == 0)
         return 16;
     return 4;
 }
