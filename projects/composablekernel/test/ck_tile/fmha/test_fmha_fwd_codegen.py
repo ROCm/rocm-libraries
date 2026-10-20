@@ -2005,5 +2005,82 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
         self.assertEqual(run(**square, pipeline="qr_nope"), [-1])
 
 
+class TestGfx125PagedKVCodegen(unittest.TestCase):
+    """pagedkv_prefill on gfx1250: the TDM pipelines of fmha_fwd, each tile as a page view
+    and a TDM gather instance, before qr_pagedkv, which keeps its pages of 128."""
+
+    def test_tdm_instances_and_dispatch(self):
+        from codegen.ops.fmha_pagedkv_prefill import get_fwd_blobs as get_pagedkv_blobs
+
+        pool, kernels = get_pagedkv_blobs(
+            ["gfx1250"], "*d128_bf16*", 0, [128], "simplified"
+        )
+        tags = Counter(k.F_pipeline.tag for k in kernels)
+        self.assertEqual(
+            set(tags), {"qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong", "qr_pagedkv"}
+        )
+        for kernel in kernels:
+            with self.subTest(kernel=kernel.name):
+                tdm = kernel.F_pipeline.tag != "qr_pagedkv"
+                self.assertEqual(
+                    kernel.name.endswith("_gather"),
+                    kernel.F_pipeline.F_kv_gather == "t",
+                )
+                self.assertTrue(tdm or kernel.F_pipeline.F_kv_gather == "f")
+                source = kernel.template
+                if tdm:
+                    self.assertIn("BlockFmhaFwdPagedKVTdmPipelineProblem", source)
+                    self.assertEqual(
+                        "LdsShuffle2DEpilogue" in source,
+                        kernel.F_pipeline.tag == "qr_tdm_pingpong",
+                    )
+                else:
+                    self.assertIn("BlockFmhaFwdPagedKVPipelineProblem", source)
+        # Every TDM page view instance has a gather twin.
+        view = {
+            k.name
+            for k in kernels
+            if k.F_pipeline.F_kv_gather == "f" and k.F_pipeline.tag != "qr_pagedkv"
+        }
+        gather = {
+            k.name[: -len("_gather")]
+            for k in kernels
+            if k.F_pipeline.F_kv_gather == "t"
+        }
+        self.assertEqual(view, gather)
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            from codegen.ops.fmha_pagedkv_prefill import (
+                write_fwd_api as write_pagedkv_api,
+            )
+
+            write_pagedkv_api(pool, Path(output_dir))
+            api = (Path(output_dir) / "fmha_fwd_pagedkv_api.cpp").read_text()
+        self.assertIn("(a.page_block_size % 128 == 0)", api)
+        # page view: a warp's 16 (qr_tdm, qr_tdm_pingpong) or 32 (qr_tdm_sched) K/V rows
+        self.assertIn(
+            "(a.page_block_size % 16 == 0) && !(t.is_group_mode && a.is_gappy)", api
+        )
+        self.assertIn(
+            "(a.page_block_size % 32 == 0) && !(t.is_group_mode && a.is_gappy)", api
+        )
+        self.assertIn("(a.batch_stride_k % a.stride_k == 0)", api)
+        # pingpong, then sched, then qr_tdm, then qr_pagedkv; page view before gather
+        order = [
+            api.index(f't.pipeline == "{tag}"')
+            for tag in ("qr_tdm_pingpong", "qr_tdm_sched", "qr_tdm", "qr_pagedkv")
+        ]
+        self.assertEqual(order, sorted(order))
+
+    def test_other_archs_keep_qr_pagedkv(self):
+        from codegen.ops.fmha_pagedkv_prefill import get_fwd_blobs as get_pagedkv_blobs
+
+        for target in ("gfx950", "gfx1201"):
+            with self.subTest(target=target):
+                _, kernels = get_pagedkv_blobs([target], "", 0, [-1], "simplified")
+                self.assertTrue(kernels)
+                self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_pagedkv"})
+
+
 if __name__ == "__main__":
     unittest.main()
