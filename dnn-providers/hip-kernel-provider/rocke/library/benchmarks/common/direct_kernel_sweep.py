@@ -34,8 +34,10 @@ launches the plan.
 
 from __future__ import annotations
 
+import collections
 import itertools
 import json
+import struct
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
@@ -305,6 +307,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad, s, dh, dw in _NONGROUPED_DILATED
         ),
     ),
+    # Grouped forward through the non-grouped kernel's LDS-halo pipeline:
+    # groups and per-group channels runtime, small cpg merged into one MFMA
+    # problem with block-diagonal weights (knob group_merge).
+    "direct_grouped_halo": (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product(_NONGROUPED_FILTERS, _STRIDES)
+        ),
+    ),
     # Depthwise forward: square odd filters 3..11, stride 1 and 2, plus the
     # large stride-1 filters.
     # The weight-preloading kernel holds KH*KW taps per lane, so 31x31 does
@@ -408,6 +420,15 @@ _REORGANIZE = "direct_dgrad_reorganize"
 _TRANSPOSE_RTC = "direct_dgrad_transpose_rtc"
 _REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
 _MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
+# Variants built by conv_direct_nongrouped (dense, and grouped via merging).
+_HALO_VARIANTS = ("direct_nongrouped", "direct_grouped_halo")
+# Second pass of a split-C non-grouped forward kernel: folds the fp32 partial
+# sums into the output. Shape-independent (one binary per split_c and dtype),
+# cached under its own direction and found by exact identity.
+_SPLIT_REDUCE = "direct_split_reduce"
+_FWD_HELPER = "direct_fwd_helper"
+# Capabilities of the split reduction: it bakes no filter or channel count.
+_NO_CAPS = DirectCaps(KH=0, PAD=0, stride=0, cpg=0, kpg=0)
 # variant -> (transpose helper, reorganize helper)
 _MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (_TRANSPOSE, _REORGANIZE),
@@ -450,12 +471,25 @@ def dgrad_rtc_vgprs(knobs: dict, KH: int, KW: int) -> int:
     return acc + KH * KW * per_wave * knobs["m_tiles"] * (load_vec // 2)
 
 
-def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
+def _knob_grid(
+    variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
+) -> Iterator[dict]:
     if variant == "direct_nongrouped":
-        from kernels.common.conv_direct_nongrouped import nongrouped_knobs
+        from kernels.common.conv_direct_nongrouped import (
+            nongrouped_knobs,
+            nongrouped_split_knobs,
+        )
 
         # Every width (no Wo to pick from): plan_for keeps those that fit.
         yield from nongrouped_knobs(arch, dtype)
+        # The split-C rows serve small images with many channels; the dilated
+        # rows (DeepLab-style, large maps) never need them.
+        if caps is None or (caps.dil_h, caps.dil_w) == (1, 1):
+            yield from nongrouped_split_knobs(arch, dtype)
+    elif variant == "direct_grouped_halo":
+        from kernels.common.conv_direct_nongrouped import grouped_knobs
+
+        yield from grouped_knobs(arch, dtype)
     elif variant == "direct_grouped":
         for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
             yield dict(block_q=bq, block_groups=bg, double_buffer=db)
@@ -552,6 +586,10 @@ def make_spec(variant: str, problem, knobs: dict):
         return dn.DirectNongroupedConvSpec(
             problem=problem, name="rocke_direct_conv_nongrouped", **knobs
         )
+    if variant == "direct_grouped_halo":
+        return dn.DirectNongroupedConvSpec(
+            problem=problem, name="rocke_direct_conv_grouped_halo", **knobs
+        )
     if variant == "direct_depthwise":
         return dc.DirectDepthwiseSpec(
             problem=problem, name="rocke_direct_depthwise", **knobs
@@ -602,6 +640,8 @@ def make_spec(variant: str, problem, knobs: dict):
             runtime_channels=True,
             **knobs,
         )
+    if variant == _SPLIT_REDUCE:
+        return dn.DirectSplitReduceSpec(dtype=problem.dtype, **knobs)
     if variant == _TRANSPOSE:
         return dc.DirectTransposeWeightsDgradSpec(problem=problem)
     if variant == _REORGANIZE:
@@ -703,7 +743,7 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
     from kernels.common import conv_direct_nongrouped as dn
 
     try:
-        if variant == "direct_nongrouped":
+        if variant in _HALO_VARIANTS:
             return dn.is_valid_nongrouped_spec(spec, arch=arch)
         if variant in ("direct_grouped",) + _MFMA_DGRAD:
             spec.validate()
@@ -726,6 +766,9 @@ def validate_spec(variant: str, spec, arch: str) -> Tuple[bool, str]:
             return dc.is_valid_wgrad_spec(spec, arch=arch)
         if variant in (_TRANSPOSE, _REORGANIZE, _TRANSPOSE_RTC, _REORGANIZE_RTC):
             return True, "ok"
+        if variant == _SPLIT_REDUCE:
+            spec.validate()
+            return True, "ok"
     except ValueError as e:
         return False, str(e)
     raise ValueError(f"unknown direct conv variant {variant!r}")
@@ -738,6 +781,7 @@ def _build_kernel(variant: str, spec, arch: str):
     builders = {
         "direct_grouped": dc.build_direct_conv,
         "direct_nongrouped": dn.build_direct_conv_nongrouped,
+        "direct_grouped_halo": dn.build_direct_conv_nongrouped,
         "direct_grouped_dgrad_mfma": dc.build_direct_conv,
         "direct_dgrad_mfma_rtc": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
@@ -751,6 +795,7 @@ def _build_kernel(variant: str, spec, arch: str):
         _REORGANIZE: dc.build_direct_reorganize_weights,
         _TRANSPOSE_RTC: dc.build_direct_transpose_weights_dgrad,
         _REORGANIZE_RTC: dc.build_direct_reorganize_weights,
+        _SPLIT_REDUCE: dn.build_direct_conv_split_reduce,
     }
     return builders[variant](spec, arch=arch)
 
@@ -827,6 +872,30 @@ def _helper_identity(
     )
 
 
+def _split_reduce_identity(
+    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    return _identity(
+        arch,
+        wave_size,
+        _SPLIT_REDUCE,
+        _FWD_HELPER,
+        _NO_CAPS,
+        {"split_c": split_c},
+        dtype,
+    )
+
+
+def _split_reduce_job(
+    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+) -> BuildJob:
+    return _job(
+        _split_reduce_identity(arch, wave_size, split_c, dtype),
+        _NO_CAPS,
+        {"split_c": split_c},
+    )
+
+
 def _caps_of(identity: KernelIdentity) -> DirectCaps:
     return DirectCaps(
         KH=identity.filter_h,
@@ -856,7 +925,8 @@ def probe_problem(
     stride-2 output wider than the widest W tile. Runtime channel counts
     (``cpg == 0``: the non-grouped forward kernel and wgrad) take one group of
     256: a multiple of every channel chunk and of every channel tile, and as
-    many 16-channel tiles as the widest wgrad ``waves_c``.
+    many 16-channel tiles as the widest wgrad ``waves_c`` -- 1024 for the
+    non-grouped kernel, whose split-C rows need a chunk per split.
 
     The runtime-channel MFMA dgrad bakes its channel *tile counts* instead,
     so its probe takes them from ``knobs``: ``k_atoms`` full K-atoms of dY
@@ -880,14 +950,34 @@ def probe_problem(
             stride=caps.stride,
             dtype=dtype,
         )
+    if variant == "direct_grouped_halo":
+        # Runtime groups and channels: 64 channels per group are a multiple of
+        # every chunk and channel tile at every merge degree, and 16 groups a
+        # multiple of every degree.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=16,
+            cpg=64,
+            kpg=64,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
     if caps.cpg == 0:
+        # The non-grouped kernel's split-C rows need a whole chunk per split:
+        # 1024 channels cover the deepest split (16 x ck 64).
+        channels = 1024 if variant == "direct_nongrouped" else 256
         return DirectConvProblem(
             N=1,
             H=64,
             W=64,
             groups=1,
-            cpg=256,
-            kpg=256,
+            cpg=channels,
+            kpg=channels,
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
@@ -958,7 +1048,7 @@ def _caps_jobs(
     rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
     # The runtime-channel dgrad probe follows each knob's tile counts.
     probe = None if rtc_dgrad else probe_problem(caps, dtype, variant)
-    for knobs in _knob_grid(variant, arch, dtype):
+    for knobs in _knob_grid(variant, arch, dtype, caps):
         n_raw += 1
         if rtc_dgrad:
             probe = probe_problem(caps, dtype, variant, knobs)
@@ -969,7 +1059,7 @@ def _caps_jobs(
         spec = make_spec(variant, probe, knobs)
         if not validate_spec(variant, spec, arch)[0]:
             continue
-        if variant == "direct_nongrouped" and _nongrouped_spills(spec, arch):
+        if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
             continue
         if variant == "direct_depthwise" and _depthwise_stream_spills(spec):
             continue
@@ -982,6 +1072,8 @@ def _caps_jobs(
                 knobs,
             )
         ]
+        if variant == "direct_nongrouped" and knobs.get("split_c", 1) > 1:
+            cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
         if variant in _MFMA_DGRAD:
             transpose, reorganize = _MFMA_HELPERS[variant]
             cell.append(
@@ -1016,9 +1108,10 @@ def count_direct_jobs(
     """Raw candidate count :func:`enumerate_direct_jobs` walks (the progress
     denominator): capabilities times tuning knobs, before validation."""
     return sum(
-        len(caps_list) * sum(1 for _ in _knob_grid(variant, arch, dtype))
+        sum(1 for _ in _knob_grid(variant, arch, dtype, caps))
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
+        for caps in caps_list
     )
 
 
@@ -1123,6 +1216,13 @@ def enumerate_direct_jobs(
     return out
 
 
+@dataclass(frozen=True)
+class _DtypeOnly:
+    """The only problem field a shape-independent helper's spec reads."""
+
+    dtype: str
+
+
 def build_direct_job(job: BuildJob, arch: str, dtype: str):
     """Build one direct job's kernel IR. Returns ``(kernel, meta)``.
 
@@ -1133,6 +1233,9 @@ def build_direct_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
+    if variant == _SPLIT_REDUCE:
+        spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
+        return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
     spec = make_spec(variant, probe, job.spec_kwargs)
     ok, why = validate_spec(variant, spec, arch)
@@ -1157,6 +1260,23 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         )
     caps = _caps_of(identity)
     knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if identity.direction == _FWD_HELPER:
+        split_c = knobs.get("split_c")
+        rebuilt = (
+            _split_reduce_identity(
+                identity.arch, identity.wave_size, split_c, identity.dtype_a
+            )
+            if identity.algorithm == _SPLIT_REDUCE and isinstance(split_c, int)
+            else None
+        )
+        if (
+            rebuilt is None
+            or replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity
+        ):
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _NO_CAPS, {"split_c": split_c})
     if identity.direction == "direct_dgrad_helper":
         rebuilt = _helper_identity(
             identity.arch,
@@ -1224,16 +1344,17 @@ def compile_all_direct(
         f"AOT compile-all: enumerating direct variants for {arch}/{dtype} "
         f"({', '.join(directions)})"
     )
-    return compile_jobs(
+    all_jobs = enumerate_direct_jobs(
+        arch=arch,
+        target=target,
+        directions=directions,
+        dtype=dtype,
+        jobs=jobs,
+        log=log,
+    )
+    rc = compile_jobs(
         cache=cache,
-        all_jobs=enumerate_direct_jobs(
-            arch=arch,
-            target=target,
-            directions=directions,
-            dtype=dtype,
-            jobs=jobs,
-            log=log,
-        ),
+        all_jobs=all_jobs,
         build=build_direct_job,
         arch=arch,
         dtype=dtype,
@@ -1242,6 +1363,116 @@ def compile_all_direct(
         limit=limit,
         log=log,
     )
+    if "fwd" in directions:
+        prune_halo_entries(cache, all_jobs, log=log)
+    return rc
+
+
+def _elf_code_facts(hsaco: bytes) -> Optional[Tuple[bytes, int]]:
+    """``(code, scratch bytes)`` of an ELF64 code object, or None for anything else.
+
+    ``code`` is the ``.text`` section followed by every kernel descriptor
+    (``<kernel>.kd``): what the GPU executes and how it is launched, so two
+    binaries with equal ``code`` run identically whatever their symbol names.
+    ``scratch`` is the largest descriptor's private segment size -- non-zero
+    when the kernel spills.
+    """
+    if hsaco[:5] != b"\x7fELF\x02" or len(hsaco) < 64:
+        return None
+    (shoff,) = struct.unpack_from("<Q", hsaco, 0x28)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", hsaco, 0x3A)
+    secs = [
+        struct.unpack_from("<IIQQQQII", hsaco, shoff + i * shentsize)
+        for i in range(shnum)
+    ]
+    # (name, type, flags, addr, offset, size, link, info)
+    strtab_off = secs[shstrndx][4]
+
+    def cstr(off: int) -> str:
+        return hsaco[off : hsaco.index(b"\0", off)].decode()
+
+    text = b""
+    kds = []
+    for name_off, sh_type, _, _, off, size, link, _ in secs:
+        if cstr(strtab_off + name_off) == ".text":
+            text = hsaco[off : off + size]
+        if sh_type != 2:  # SHT_SYMTAB
+            continue
+        names = secs[link][4]
+        for sym in range(off, off + size, 24):
+            st_name, _, _, shndx, value, st_size = struct.unpack_from(
+                "<IBBHQQ", hsaco, sym
+            )
+            if not cstr(names + st_name).endswith(".kd") or shndx >= shnum:
+                continue
+            _, _, _, addr, sec_off, _, _, _ = secs[shndx]
+            at = sec_off + value - addr
+            kd = hsaco[at : at + st_size]
+            # Bytes 16..24 locate the entry point relative to the descriptor:
+            # file layout, not behaviour, so they are left out.
+            kds.append(kd[:16] + kd[24:])
+    if not kds:
+        return None
+    scratch = max(struct.unpack_from("<I", kd, 4)[0] for kd in kds)
+    return text + b"".join(sorted(kds)), scratch
+
+
+def prune_halo_entries(cache: KernelCache, jobs: Sequence[BuildJob], log=print) -> int:
+    """Drop the cached grouped-halo and split-C forward entries no sweep should
+    be offered (the dense unsplit grid is left as it is).
+
+    Two kinds, both only visible in the compiled code: binaries that spill to
+    scratch (never the best of their shape), and ``waves_per_eu=3`` binaries
+    whose code equals their ``waves_per_eu=None`` twin's -- the hint changed
+    nothing, so the twin already is that kernel. The binaries stay in the blob
+    store: a later ``--compile-all`` re-links those entries without compiling
+    and this drops them again. Returns the number of entries dropped.
+    """
+    wanted = {
+        j.identity
+        for j in jobs
+        if j.identity.direction == "direct_fwd"
+        and (
+            j.identity.algorithm == "direct_grouped_halo"
+            or (
+                j.identity.algorithm == "direct_nongrouped"
+                and json.loads(j.identity.knobs).get("split_c", 1) > 1
+            )
+        )
+    }
+    present = {
+        ident: path for ident, path in cache.list_all("direct_fwd") if ident in wanted
+    }
+    facts = {
+        ident: _elf_code_facts(path.read_bytes()) for ident, path in present.items()
+    }
+    drop: Dict[KernelIdentity, str] = {}
+    twins: Dict[KernelIdentity, Dict[object, KernelIdentity]] = {}
+    for ident, fact in facts.items():
+        if fact is not None and fact[1] > 0:
+            drop[ident] = "spills"
+        knobs = json.loads(ident.knobs)
+        we = knobs.pop("waves_per_eu", None)
+        key = replace(ident, knobs=json.dumps(knobs, sort_keys=True))
+        twins.setdefault(key, {})[we] = ident
+    for pair in twins.values():
+        hinted, plain = pair.get(3), pair.get(None)
+        if hinted is None or plain is None or hinted in drop:
+            continue
+        a, b = facts[hinted], facts[plain]
+        if a is not None and b is not None and a[0] == b[0]:
+            drop[hinted] = "same code as waves_per_eu=None"
+    for ident in drop:
+        cache.discard(ident)
+    if drop:
+        reasons = collections.Counter(drop.values())
+        log(
+            f"AOT compile-all: dropped {len(drop)} of {len(present)} grouped-halo "
+            "and split-C forward entries ("
+            + ", ".join(f"{n} {why}" for why, n in sorted(reasons.items()))
+            + ")"
+        )
+    return len(drop)
 
 
 # ---------------------------------------------------------------------------
@@ -1288,6 +1519,10 @@ class DirectStep:
     buffers: Tuple[str, Optional[str], str]
     conv_args: object = None
     scalars: Tuple[Tuple[str, int], ...] = ()
+    # Per A/B/D slot, ``(byte offset, byte size)`` of the window of its
+    # buffer the step binds, or None for the whole buffer: a batch-split
+    # launch sees only its images (see _batch_chunks).
+    views: Tuple[Optional[Tuple[int, int]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1329,6 +1564,28 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     )
 
 
+def _batch_chunks(problem) -> Optional[List[int]]:
+    """Images per launch for a forward problem the LDS-halo kernels can only
+    run in pieces, or None when one launch serves it.
+
+    Those kernels address every operand through one 32-bit buffer resource and
+    redirect masked accesses past ``_OOB_BASE``, so no operand may reach it
+    (a 768x768x256 bf16 batch of 8 is 2.4 GB). The images are independent, so
+    the batch is split into launches whose activation and output windows each
+    fit; the chunks are balanced rather than greedy.
+    """
+    from kernels.common.conv_direct_nongrouped import _OOB_BASE
+
+    in_img = 2 * problem.H * problem.W * problem.total_c
+    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    per_launch = _OOB_BASE // max(in_img, out_img)
+    if problem.N <= per_launch or per_launch < 1:
+        return None
+    n_steps = -(-problem.N // per_launch)
+    base, extra = divmod(problem.N, n_steps)
+    return [base + (i < extra) for i in range(n_steps)]
+
+
 def plan_for(
     cache: KernelCache,
     identity: KernelIdentity,
@@ -1356,11 +1613,20 @@ def plan_for(
         why = _mfma_knobs_reason(problem, knobs)
         if why:
             return None, why
+    chunks = None
+    if variant in _HALO_VARIANTS and identity.direction == "direct_fwd":
+        chunks = _batch_chunks(problem)
+        if chunks is not None:
+            if knobs.get("split_c", 1) > 1:
+                return None, "a batch-split launch does not take split-C kernels"
+            return _batch_split_plan(
+                cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
+            )
     spec = make_spec(variant, problem, knobs)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         return None, why
-    if variant == "direct_nongrouped":
+    if variant in _HALO_VARIANTS:
         # The cache holds every width; offer only those a sweep for this
         # shape would try, so no binary spends MFMA work past the image edge
         # when one that does not is cached.
@@ -1372,6 +1638,11 @@ def plan_for(
                 f"tile_w={spec.tile_w} does not fit Wo={problem.Wo} "
                 f"(widths tried for it: {widths})"
             )
+    if variant == "direct_grouped_halo" and spec.tile_k > spec.merged_k:
+        return None, (
+            f"tile_k={spec.tile_k} exceeds the {spec.merged_k} output channels "
+            f"of a merged block"
+        )
 
     if variant == "direct_wgrad":
         # As the JIT sweep: no C tile wider than the problem's channels, so no
@@ -1383,6 +1654,34 @@ def plan_for(
                 f"of cpg={problem.cpg}"
             )
 
+    if identity.direction == "direct_fwd" and getattr(spec, "split_c", 1) > 1:
+        # Split-C: the conv pass writes fp32 partial sums into a workspace,
+        # and the reduction folds them into y. Both take the forward ABI.
+        from kernels.common.conv_args import ConvArgs
+
+        reduce_id = _split_reduce_identity(
+            identity.arch, identity.wave_size, spec.split_c, identity.dtype_a
+        )
+        entry = cache.get(reduce_id)
+        if entry is None:
+            return None, f"missing cached {_SPLIT_REDUCE} helper (rebuild the cache)"
+        reduce_spec = make_spec(_SPLIT_REDUCE, problem, {"split_c": spec.split_c})
+        conv = _conv_step(
+            identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "ws_split")
+        )
+        fold = DirectStep(
+            kernel_name=entry[1]["kernel_name"],
+            hsaco_path=cache.hsaco_path(reduce_id),
+            signature=conv.signature,
+            grid=reduce_spec.grid(problem),
+            block=(reduce_spec.threads, 1, 1),
+            buffers=("ws_split", "w", "y"),
+            conv_args=ConvArgs.from_problem(problem, direction="fwd"),
+        )
+        return (
+            DirectPlan(identity, (conv, fold), {"ws_split": spec.workspace_bytes}),
+            "ok",
+        )
     if identity.direction == "direct_fwd":
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "y")
@@ -1464,6 +1763,34 @@ def plan_for(
     return DirectPlan(identity, tuple(steps), workspaces), "ok"
 
 
+def _batch_split_plan(
+    cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
+) -> Tuple[Optional[DirectPlan], str]:
+    """One forward launch per batch chunk (see :func:`_batch_chunks`)."""
+    from kernels.common.conv_direct_nongrouped import tile_w_candidates
+
+    widths = tile_w_candidates(
+        problem.Wo, make_spec(identity.algorithm, problem, knobs).atom_tile
+    )
+    if knobs["tile_w"] not in widths:
+        return None, f"tile_w={knobs['tile_w']} does not fit Wo={problem.Wo}"
+    in_img = 2 * problem.H * problem.W * problem.total_c
+    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    steps = []
+    n0 = 0
+    for n in chunks:
+        sub = replace(problem, N=n)
+        spec = make_spec(identity.algorithm, sub, knobs)
+        ok, why = validate_spec(identity.algorithm, spec, arch)
+        if not ok:
+            return None, why
+        step = _conv_step(identity, hsaco_path, meta, spec, sub, "fwd", ("x", "w", "y"))
+        views = ((n0 * in_img, n * in_img), None, (n0 * out_img, n * out_img))
+        steps.append(replace(step, views=views))
+        n0 += n
+    return DirectPlan(identity, tuple(steps)), "ok"
+
+
 def direct_plans(
     cache: KernelCache, problem, direction: str, arch: str
 ) -> Tuple[List[DirectPlan], List[Tuple[KernelIdentity, str]]]:
@@ -1485,6 +1812,10 @@ def direct_plans(
         # grouped problem would bury the grouped kernels' reasons in noise.
         if identity.algorithm == "direct_nongrouped" and problem.groups != 1:
             continue
+        # ... and the grouped LDS-halo kernel only for more than one; on a
+        # dense problem it is the non-grouped kernel with extra divides.
+        if identity.algorithm == "direct_grouped_halo" and problem.groups == 1:
+            continue
         plan, why = plan_for(cache, identity, hsaco_path, meta, problem, arch)
         if plan is None:
             rejected.append((identity, why))
@@ -1498,14 +1829,23 @@ def launch_values(
 ) -> dict:
     """Kernarg values of ``step`` with its buffers bound to ``ptrs``/``sizes``."""
     a, b, d = step.buffers
+
+    def bind(slot: int, name: str) -> Tuple[int, int]:
+        view = step.views[slot] if step.views else None
+        if view is None:
+            return ptrs[name], sizes[name]
+        return ptrs[name] + view[0], view[1]
+
+    (a_ptr, a_bytes), (d_ptr, d_bytes) = bind(0, a), bind(2, d)
     if step.conv_args is None:
         return {
-            "A": ptrs[a],
-            "D": ptrs[d],
-            "A_bytes": sizes[a],
-            "D_bytes": sizes[d],
+            "A": a_ptr,
+            "D": d_ptr,
+            "A_bytes": a_bytes,
+            "D_bytes": d_bytes,
             **dict(step.scalars),
         }
+    b_ptr, b_bytes = bind(1, b)
     return step.conv_args.to_launch_values(
-        ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d]
+        a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes
     )

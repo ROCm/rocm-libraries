@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -163,13 +164,17 @@ def test_padding_zero_is_a_baked_value(cache):
 
 @pytest.mark.parametrize("groups", [1, 3, 16, 48])
 def test_group_count_is_runtime(cache, groups):
-    """Any group count is served; only tiles that do not divide it drop out."""
+    """Any group count is served; only tiles that do not divide it drop out.
+
+    The LDS-halo kernels (dense, and grouped through merging) have shape rules
+    of their own -- merge degree, chunk and tile fits -- so they are left out.
+    """
     plans, rejected = dks.direct_plans(cache, _problem(groups=groups), "fwd", _ARCH)
     assert plans
     assert all(
         "block_groups" in why
         for ident, why in rejected
-        if ident.algorithm != "direct_nongrouped"
+        if ident.algorithm not in dks._HALO_VARIANTS
     )
 
 
@@ -263,8 +268,75 @@ def test_nongrouped_channels_are_runtime(cache, C, K, H, W):
             "direct_nongrouped", problem, json.loads(plan.identity.knobs)
         )
         assert spec.tile_w in tile_w_candidates(problem.Wo, spec.atom_tile)
+        if spec.split_c == 1:
+            (step,) = plan.steps
+            assert step.grid == spec.grid()
+            continue
+        # Split-C: the conv pass fills the fp32 workspace, the reduction
+        # folds it into y.
+        conv, fold = plan.steps
+        assert conv.grid == spec.grid()
+        assert conv.buffers == ("x", "w", "ws_split")
+        assert fold.buffers == ("ws_split", "w", "y")
+        assert plan.workspaces == {"ws_split": spec.workspace_bytes}
+
+
+def test_every_split_kernel_has_its_reduction(jobs):
+    """A split-C kernel is useless without the reduction of its degree, so the
+    grid builds one per degree it uses -- and only those."""
+    degrees = {
+        json.loads(j.identity.knobs).get("split_c", 1)
+        for j in jobs
+        if j.identity.algorithm == "direct_nongrouped"
+    } - {1}
+    assert degrees
+    reduces = [j for j in jobs if j.identity.algorithm == "direct_split_reduce"]
+    assert {json.loads(j.identity.knobs)["split_c"] for j in reduces} == degrees
+    for job in reduces:
+        assert dks.direct_job_for_identity(job.identity) == job
+
+
+def test_grouped_halo_serves_grouped_problems_only(cache):
+    """The grouped LDS-halo kernel is offered to grouped problems, with merge
+    degrees that make the merged channels fit its chunks; a dense problem gets
+    the non-grouped kernel instead."""
+    problem = _problem(groups=32, cpg=4, kpg=4, H=56, W=56)
+    plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
+    halo = [p for p in plans if p.identity.algorithm == "direct_grouped_halo"]
+    assert halo
+    for plan in halo:
+        knobs = json.loads(plan.identity.knobs)
+        spec = dks.make_spec("direct_grouped_halo", problem, knobs)
+        assert (problem.cpg * knobs["group_merge"]) % spec.ck == 0
+        assert spec.tile_k <= spec.merged_k
         (step,) = plan.steps
         assert step.grid == spec.grid()
+    dense = dks.direct_plans(cache, _problem(groups=1, cpg=64, kpg=64), "fwd", _ARCH)[0]
+    assert "direct_grouped_halo" not in _variants(dense)
+
+
+def test_large_batch_is_split_into_launches(cache):
+    """A batch whose activations pass the kernels' 32-bit buffer range runs as
+    balanced per-chunk launches over windows of the same buffers."""
+    problem = _problem(N=8, H=768, W=768, groups=1, cpg=256, kpg=128)
+    assert dks._batch_chunks(problem) == [4, 4]
+    assert dks._batch_chunks(replace(problem, N=2)) is None
+    plans = _nongrouped(dks.direct_plans(cache, problem, "fwd", _ARCH)[0])
+    assert plans
+    in_img = 2 * 768 * 768 * 256
+    out_img = 2 * 768 * 768 * 128
+    for plan in plans:
+        assert json.loads(plan.identity.knobs).get("split_c", 1) == 1
+        assert [st.views for st in plan.steps] == [
+            ((0, 4 * in_img), None, (0, 4 * out_img)),
+            ((4 * in_img, 4 * in_img), None, (4 * out_img, 4 * out_img)),
+        ]
+        values = dks.launch_values(
+            plan.steps[1], {"x": 0x1000, "w": 0x2000, "y": 0x3000}, {"w": 1 << 20}
+        )
+        assert values["A"] == 0x1000 + 4 * in_img
+        assert values["A_bytes"] == 4 * in_img
+        assert values["p_N"] == 4
 
 
 def test_nongrouped_grid_skips_spilling_tiles(jobs):
@@ -306,6 +378,107 @@ def test_nongrouped_grid_skips_spilling_tiles(jobs):
     assert "accumulator file" in nongrouped_register_reason(full, _ARCH)
 
 
+def _code_object(text: bytes, scratch: int = 0, entry: int = 0) -> bytes:
+    """A minimal ELF64 code object: ``.text`` and one 64-byte ``k.kd``."""
+    import struct
+
+    kd = bytearray(64)
+    struct.pack_into("<I", kd, 4, scratch)
+    struct.pack_into("<q", kd, 16, entry)
+    kd_addr = 0x1000
+    strtab = b"\0k.kd\0"
+    symtab = bytes(24) + struct.pack("<IBBHQQ", 1, 0x11, 0, 2, kd_addr, 64)
+    names = [b".text", b".rodata", b".symtab", b".strtab", b".shstrtab"]
+    shstrtab = b"\0" + b"".join(n + b"\0" for n in names)
+    name_off = [1 + sum(len(n) + 1 for n in names[:i]) for i in range(len(names))]
+    blobs = [text, bytes(kd), symtab, strtab, shstrtab]
+    # (type, addr, link): .text, .rodata, .symtab -> .strtab, .strtab, .shstrtab
+    kinds = [(1, 0, 0), (1, kd_addr, 0), (2, 0, 4), (3, 0, 0), (3, 0, 0)]
+    body, offsets = b"", []
+    for blob in blobs:
+        offsets.append(64 + len(body))
+        body += blob
+    shoff = 64 + len(body)
+    sections = bytes(64)
+    for (sh_type, addr, link), off, blob, name in zip(kinds, offsets, blobs, name_off):
+        sections += struct.pack(
+            "<IIQQQQIIQQ", name, sh_type, 0, addr, off, len(blob), link, 0, 1, 0
+        )
+    header = b"\x7fELF\x02\x01\x01" + bytes(9)
+    header += struct.pack(
+        "<HHIQQQIHHHHHH", 3, 224, 1, 0, 0, shoff, 0, 64, 0, 0, 64, 6, 5
+    )
+    return header + body + sections
+
+
+def test_code_facts_read_text_descriptor_and_scratch():
+    code, scratch = dks._elf_code_facts(_code_object(b"\x01\x02", scratch=12))
+    assert scratch == 12
+    assert code.startswith(b"\x01\x02")
+    # The entry-point offset is file layout, not code.
+    assert dks._elf_code_facts(_code_object(b"\x01\x02", entry=256))[0] == (
+        dks._elf_code_facts(_code_object(b"\x01\x02"))[0]
+    )
+    assert dks._elf_code_facts(_code_object(b"\x01\x03"))[0] != code
+    assert dks._elf_code_facts(b"placeholder") is None
+
+
+def _hint_pairs(jobs, kind):
+    """``(waves_per_eu=None, waves_per_eu=3)`` identity pairs of one kernel kind:
+    ``halo`` (grouped), ``split`` (split-C) or ``dense`` (unsplit non-grouped)."""
+    by_key = {}
+    for job in jobs:
+        ident = job.identity
+        if ident.algorithm not in dks._HALO_VARIANTS:
+            continue
+        knobs = json.loads(ident.knobs)
+        if ident.algorithm == "direct_grouped_halo":
+            this = "halo"
+        else:
+            this = "split" if knobs.get("split_c", 1) > 1 else "dense"
+        if this != kind:
+            continue
+        we = knobs.pop("waves_per_eu", None)
+        key = replace(ident, knobs=json.dumps(knobs, sort_keys=True))
+        by_key.setdefault(key, {})[we] = ident
+    return [(p[None], p[3]) for p in by_key.values() if set(p) == {None, 3}]
+
+
+def test_prune_drops_spilling_and_hint_duplicate_new_entries(tmp_path, jobs):
+    """A grouped-halo or split-C waves_per_eu=3 entry whose code equals its
+    default twin's goes, as does one that spills; a hint that changed the code
+    stays, entries without an ELF binary are left alone, and the dense unsplit
+    grid is never touched."""
+    (same_none, same_3), (diff_none, diff_3) = _hint_pairs(jobs, "halo")[:2]
+    (spill_none, spill_3), (split_none, split_3) = _hint_pairs(jobs, "split")[:2]
+    (dense_none, dense_3) = _hint_pairs(jobs, "dense")[0]
+    c = KernelCache(tmp_path, _ARCH)
+    binaries = {
+        same_none: _code_object(b"\x01"),
+        same_3: _code_object(b"\x01", entry=64),
+        diff_none: _code_object(b"\x02"),
+        diff_3: _code_object(b"\x03"),
+        spill_none: _code_object(b"\x04", scratch=8),
+        spill_3: b"placeholder",
+        split_none: _code_object(b"\x05"),
+        split_3: _code_object(b"\x05"),
+        dense_none: _code_object(b"\x06", scratch=8),
+        dense_3: _code_object(b"\x06", scratch=8),
+    }
+    for ident, blob in binaries.items():
+        c.put(ident, blob, {"kernel_name": ident.label()})
+    assert dks.prune_halo_entries(c, jobs, log=lambda _: None) == 3
+    assert {i for i, _ in c.list_all("direct_fwd")} == {
+        same_none,
+        diff_none,
+        diff_3,
+        spill_3,
+        split_none,
+        dense_none,
+        dense_3,
+    }
+
+
 def test_nongrouped_only_serves_one_group(cache):
     plans, rejected = dks.direct_plans(cache, _problem(groups=16), "fwd", _ARCH)
     assert not _nongrouped(plans)
@@ -339,9 +512,14 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
 
 
 def test_capabilities_outside_the_list_are_not_served(cache):
-    assert dks.direct_plans(cache, _problem(cpg=24, kpg=24), "fwd", _ARCH)[0] == []
-    # Grouped forward stride 2 has no rocke kernel.
-    assert dks.direct_plans(cache, _problem(stride=2), "fwd", _ARCH)[0] == []
+    # The baked-channel grouped kernels cover cpg in {4, 8, 16, 32} at stride
+    # 1; anything else grouped is left to the runtime-channel LDS-halo kernel.
+    for problem in (_problem(cpg=24, kpg=24), _problem(stride=2)):
+        plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
+        assert plans
+        assert _variants(plans) == {"direct_grouped_halo"}
+    # A filter no fwd row carries has no kernel at all.
+    assert dks.direct_plans(cache, _problem(KH=5, KW=5, PAD=2), "fwd", _ARCH)[0] == []
 
 
 def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
@@ -431,7 +609,7 @@ def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
 def test_plans_pack_against_their_signatures(cache, direction, problem):
     plans, _ = dks.direct_plans(cache, problem, direction, _ARCH)
     assert plans
-    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa")
+    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split")
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:

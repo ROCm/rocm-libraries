@@ -1007,6 +1007,9 @@ def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
         double_buffer=spec.double_buffer,
         iglp=spec.iglp,
         waves_per_eu=spec.waves_per_eu,
+        split_c=getattr(spec, "split_c", 1),
+        grouped=getattr(spec, "grouped", False),
+        group_merge=getattr(spec, "group_merge", 1),
     )
 
 

@@ -2154,6 +2154,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
             "direct_fwd",
             "direct_dgrad",
             "direct_dgrad_helper",
+            "direct_fwd_helper",
             "direct_wgrad",
         ),
     )
