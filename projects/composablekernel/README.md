@@ -1,4 +1,7 @@
 # Composable Kernel
+> [!WARNING]
+> In `release/rocm-rel-7.0.2.1`, this in-tree copy is not linked by the release manifest. The build uses the separate `ROCm/composable_kernel` project pinned by that manifest. Changes here do not affect the 7.0.2.1 packages.
+
 
 > [!NOTE]
 > The published documentation is available at [Composable Kernel](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
