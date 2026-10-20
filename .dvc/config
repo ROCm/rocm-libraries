@@ -7,3 +7,6 @@
 ['remote "golden-data"']
     url = s3://therock-dvc/rocm-libraries/hipdnn/golden-data
     allow_anonymous_login = true
+['remote "ingestor"']
+    url = s3://therock-dvc/rocm-libraries/hipdnn/ingestor
+    allow_anonymous_login = true

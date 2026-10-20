@@ -45,7 +45,7 @@ from builders.common.conv_reference import wgrad_reference as _wgrad_reference_s
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
 # ---------------------------------------------------------------------------
 
-from benchmarks.common.direct_kernel_sweep import (
+from kernels.conv.direct_aot_jobs import (
     BLOCK_GROUPS as _BLOCK_GROUPS,
     BLOCK_Q as _BLOCK_Q,
     DGRAD_BLOCK_H as _DGRAD_BLOCK_H,
@@ -2180,7 +2180,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
@@ -2552,7 +2552,7 @@ def main() -> int:
 
     args = parser.parse_args()
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
     if args.dtype is None:

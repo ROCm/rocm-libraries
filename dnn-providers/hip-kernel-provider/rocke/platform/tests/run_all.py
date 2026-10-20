@@ -133,6 +133,7 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 # instead of skipping: (env var, CTest name, label).
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
     (
         "ROCKE_NONTEMPORAL_HIP_TEST",
         "rocke_nontemporal_hip",

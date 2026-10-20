@@ -89,6 +89,31 @@ Coverage: fp16 / bf16, head_size in `{64, 128, 256}`, block_size in `{16, 64}`, 
 
 FP8 K/V cache + output scale/clamp is wired through `UnifiedAttentionProblem.use_fp8` (the kernel takes per-tensor `k_scale` / `v_scale` and stores the cache as `fp8e4m3`); see attention parity README.
 
+## Attention Backward Family (SDPA dQ / dK / dV)
+
+Library builders under `library/kernels/` (Python-only; see the C++-engine
+statement in `instances/attention_bwd.md` section 0.3). The `fmha_bwd.py`
+row above is a separate, older scalar backward.
+
+| File | Spec / entry points | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `common/attention_bwd.py` | `AttnBwdSpec`, `validate_attn_bwd_spec`, `build_attn_bwd_main` (layout-general main kernel) | `instances/attention_bwd.md` |
+| `common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `build_attn_bwd_dq` (split dQ kernel) | `instances/attention_bwd.md` |
+| `common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, `build_attn_bwd_prep`, `build_attn_bwd_convert`, `build_attn_bwd_reduce`, `build_attn_bwd_page_zero`, `build_attn_bwd_page_convert` | `instances/attention_bwd.md` |
+| `common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy` | `instances/attention_bwd.md` |
+| `common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | launch glue, the on-disk code-object cache, the torch-free production comgr pin | `instances/attention_bwd.md` |
+| `common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`; `gfx942/attention_dense_bwd.py`, `gfx950/attention_dense_bwd.py` | `AttentionDenseBwdSpec`, `ArchAttentionDenseBwdSpec` (bound per target by `Gfx942AttentionDenseBwdSpec`, `Gfx950AttentionDenseBwdSpec`), `build_attention_dense_bwd`, `AttentionDenseBwdDqSpec`, `attn_dense_bwd_plan` (dense family) | `instances/attention_bwd.md` (8.2) |
+| `common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | `AttnBwdUnifiedSpec`, `build_attn_bwd_unified_main`, `AttnBwdUnifiedRequest`, `attn_bwd_unified_support`, `attn_bwd_unified_plan` (paged KV) | `instances/attention_bwd_unified.md` |
+| `common/_attention_bwd_*.py`, `_attention_dense_bwd_shell.py`, `_lse_store.py` | family glue (tile step, LDS planner, rings, schedules, addressing, sinks, refusals); the forward LSE store | `instances/attention_bwd.md` (0.2) |
+
+Routing, tuning and the dispatcher: `library/dispatch/attention_bwd/`
+(`tuning_common.py`, `dense_tuning.py`, `unified_tuning.py`,
+`gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py`,
+`registry.py`). Coverage: fp16 / bf16, head sizes 32 / 64 / 128 (d = 256
+declined); general family on gfx942, gfx950, gfx1151, gfx1201; dense and
+split dQ on gfx942 / gfx950; unified served on gfx942 / gfx950 (built on
+RDNA, declined `ARCH_NOT_VALIDATED` there).
+
 ## Linear Attention Family
 
 A gated delta-rule recurrence rather than softmax attention, so it shares no

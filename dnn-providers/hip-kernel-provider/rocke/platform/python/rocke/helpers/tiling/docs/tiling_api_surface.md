@@ -35,8 +35,9 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 
 | Surface | What it is | Constructed with `b`? | Default source |
 |---|---|---|---|
-| `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip) |
+| `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor, global or LDS (sec 3) | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip); axes in the one convention (sec 3) |
 | `make_window(tensor, origin, bounds=None)` | positioned + bounded window | no | `bounds` = clip per axis (overrides the desc lengths); `None` = desc lengths |
+| `check_gemm_shapes(a, b, c=None)` | build-time check that one GEMM's tensors agree on their extents (sec 3) | no (emits no IR) | reads A `(M, K)`, B `(N, K)`, C `(M, N)` positionally, batch axes first |
 | `make_tile_desc(shape=, thread_dist=, thread_tile=, ...)` | author a logical->register layout (quantity-major) | no | for MMA operands use `mma.a/b/c_desc` instead |
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
 | `make_fragment(tile_desc, dtype)` | realized per-lane registers | no (value filled by verbs) | dtype from the operand |
@@ -85,24 +86,100 @@ accumulator width. See sec 8 for the full "you didn't have to say it" list.
 
 Built with `make_tensor_desc(lengths, strides, dtype)`; `ptr` binds later at the verb. `lengths`
 are the valid (compute) extent and double as the default clip bound; `strides` are the physical
-layout (a stride-1 axis is the memory-contiguous one).
+layout (a stride-1 axis is the memory-contiguous one). The same description serves global memory
+and LDS: an element's index is `sum(position * stride)` in both (see "LDS buffers" below).
 
 ### Default: lengths = valid extent, strides = the data layout
 ```python
-a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A(M,K) row-major
+a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A (M, K), K-contiguous
 ```
 - `dtype` is the element type of memory; `load_fragment` reads it, `store_fragment` casts to it.
 - `strides` ARE the data layout -- one generic verb serves A/B/C; the operand difference is
   entirely the strides + the layout, never the verb.
 
-### Override: express any data layout via strides (RCR shown)
+### One axis convention
+
+This is the one home of the rule; other docs point here. Every tensor is written in one axis order,
+and nothing in the tiling layer reads what an axis means (there are no axis labels):
+
+- **Batch axes first, the reduction axis last.** A GEMM's K and a reduction's reduced axis sit last.
+- **Memory layout in the strides only.** The axis order never changes with the layout; the stride-1
+  axis is the contiguous one.
+- **A rank-`r` tile covers the tensor's LAST `r` axes.** For a rank-`R` tensor, tile axis `i` is
+  tensor axis `R - r + i`. Each leading axis is positioned by the window origin alone: tile extent 1,
+  address term `origin * stride`, not clipped (its origin is trusted to lie inside its length). A tile
+  whose rank exceeds the tensor's is refused, and so is a window `bounds` entry for a leading axis: with
+  extent 1 a tile is wholly inside or outside it, so there is nothing to clip.
+- **Another axis order goes through `permute`** -- a strides view of the same bytes. Anything more
+  general (merged or split axes, an implicit-GEMM convolution) goes through a transform graph.
+
 ```python
-a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), F16)   # A row-major   (m,k) . (K,1)
-b_td = make_tensor_desc((N_LEN, K_LEN), (1, N_LEN), F16)   # B col-ordered (n,k) . (1,N)
-c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F16)   # C row-major   (m,n) . (N,1)
+a3 = make_tensor_desc((BATCH, M, K), (M * K, K, 1), F16)   # (G, M, K), K-contiguous
+a_win = make_window(a3, (batch, m_base, k))                # the batch axis is positioned by its origin
+a_frag = load_fragment(b, a_ptr, a_win, mma.a_desc, lane)  # rank-2 (M, K) tile over the last two axes
 ```
-A logical view onto a physically-transposed operand is a pure re-label: `a_td.permute([1, 0])`
-(the 2-D swap) reads the same bytes with the axes reordered.
+
+**The GEMM reading.** A `(M, K)`, B `(N, K)`, C `(M, N)`; batched `(G, M, K)`, `(G, N, K)`,
+`(G, M, N)`, batch first. It is the order the tile descriptors already use (`mma.a_desc` `(M, K)`,
+`mma.b_desc` `(N, K)`, `mma.c_desc` `(M, N)`), GEMM "RCR", and conv NHWC / KYXC. CuTe / CUTLASS 3 and
+CK contraction use the same `(N, K)` B; CuTe puts its batch axis last (its `L` mode), rocKE puts it
+first.
+
+**Say K-contiguous, N-contiguous, M-contiguous -- never row- or column-major.** "Row-major" is relative
+to the order a tensor was written in, so for B it names opposite axes depending on whether B was
+written `(K, N)` or `(N, K)`. The contiguous axis is unambiguous in every library. How B translates:
+
+| B in memory | BLAS | Triton TMA | PyTorch | rocWMMA `matrix_b` | CuTe | rocKE |
+|---|---|---|---|---|---|---|
+| K-contiguous (N rows of K; an `nn.Linear` weight) | `transB=N`, `ldb=K` | `shape=[N,K]`, then `b.T` | `W.T`, strides `(1, K)` | `col_major`, `ldm=K` | `(N,K)`, stride `(ldB,_1)` | `make_tensor_desc((N, K), (K, 1), F16)` |
+| N-contiguous (K rows of N) | `transB=T`, `ldb=N` | `shape=[K,N]` | `B`, strides `(N, 1)` | `row_major`, `ldm=N` | `(N,K)`, stride `(_1,ldB)` | `make_tensor_desc((N, K), (1, N), F16)` |
+
+From PyTorch in one line: rocKE's B description is torch's `B.T` view,
+`make_tensor_desc(tuple(B.T.shape), tuple(B.T.stride()), dtype)`.
+
+Anti-example: `make_tensor_desc((K, N), ...)` for a GEMM's B. Read positionally, its "K" is the N
+extent -- refused by `check_gemm_shapes` when the extents differ, caught only by a bit-exact test when
+they do not. Write `(N, K)` and put the memory order in the strides.
+
+### `check_gemm_shapes(a, b, c=None)` -- the tensors of one GEMM agree
+
+A pure build-time check (emits no IR). It reads its tensors positionally as A `(batch..., M, K)`,
+B `(batch..., N, K)` and, when given, C `(batch..., M, N)`: equal ranks of at least 2, one extent per
+batch axis across the tensors, A's K is B's K, A's M is C's M, B's N is C's N. Two extents agree when
+they are equal integers (Python or numpy), or one and the same extent object.
+```python
+check_gemm_shapes(a_td, b_td, c_td)       # once per GEMM, on the logical tensors
+check_gemm_shapes(q_td, k_td)             # c=None: the A / B pair alone (a fused chain's Q*K^T)
+```
+- **When to call it.** Once per GEMM whose A, B and C are tensors, on the logical tensors: on the
+  `(M, N)` C the verbs see (`c_td.permute([1, 0])` where a kernel spells C `(N, M)`), and for a kernel
+  that crosses A and B, on the C before the crossed view. With `c=None` on each A / B tensor pair whose
+  C is never a tensor. Nothing calls it for you (`TileMma` sees no tensors).
+- **Its domain** is GEMMs whose A, B and C are plain-window tensors in that shape family, their batch
+  axes shared one to one. Two GEMMs are outside it and make no call:
+  - one that reaches its operands through a transform graph (an implicit-GEMM convolution): its
+    tensors are the conv's own and the graph defines M, N and K (K = `Y * X * C`), so read positionally
+    the wrong axes would be compared -- a correct conv refused, or passed by coincidence;
+  - one that sums over a batch axis (A `(G, M, K)`, B `(G, N, K)`, C `(M, N)`): C has no `G`, so the
+    rank rule refuses it. Check its A / B pair with `c=None`.
+
+  With no axis labels the check cannot tell such a tensor from a mistake, so respecting the domain is
+  the caller's job. A GEMM with a register operand (`P*V`) has no tensor to check.
+- **What it catches:** a transposed or mis-sized operand whenever the swapped extents differ, and every
+  batch-extent mismatch. **What it cannot:** a square transposed operand (M = N = K) or a forgotten
+  call -- bit-exact tests on integer inputs stay the backstop.
+- Tensors are compared in logical elements. Mixed-width MMA operands hold the same number of logical K
+  elements, so the comparison is right for them; a packed sub-byte tensor is described in elements,
+  never bytes or words. Scale tensors are not A or B and are not passed to it.
+
+### Override: express any data layout via strides
+```python
+a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), F16)   # A (M, K), K-contiguous
+b_td = make_tensor_desc((N_LEN, K_LEN), (1, N_LEN), F16)   # B (N, K), N-contiguous
+c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F16)   # C (M, N), N-contiguous
+```
+`permute` presents the same bytes in another axis order: on the N-contiguous B above,
+`b_td.permute([1, 0])` is its `(K, N)` view with strides `(N_LEN, 1)` -- a view, not the operand order.
 
 ### Override: dtype is whatever the pointer is (no dtype baked into verbs)
 ```python
@@ -110,25 +187,53 @@ a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), BF16)  # bf16 in
 c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F32)   # f32 store (no narrowing cast)
 ```
 
-### Override: N-D tensors -- axis roles + `at_index` / `squeeze`
+### LDS buffers: a flat allocation, described by its descriptor
 
-An MMA consumes a rank-2 `(free, K)` operand, but a tensor can be rank-N (a batched GEMM is
-`(batch, M, K)`). Declare a per-axis ROLE, then reduce the batch axes to reach rank-2:
+An LDS buffer is a flat (rank-1) allocation. Its layout lives in an ordinary `TensorDesc` -- logical
+axes in the convention order, int lengths, int strides -- and nowhere else. Size the buffer from the
+descriptor with core's typed allocation and hand both to the same verbs as global memory:
 ```python
-a3 = make_tensor_desc((BATCH, M, K), (M*K, K, 1), F16,
-                      ("batch", "free", "contraction"))    # role per axis
-a_win = make_window(a3, (0, m_base, 0)).at_index(0, batch)  # pin batch -> rank-2 (free, K) window
-# TensorDesc.squeeze(axis) drops a length-1 batch axis instead.
+b_lds_td = make_tensor_desc((N, K), (1, N), F16)               # B staged as [K][N], written (N, K)
+smem = b.smem_alloc(b_lds_td.dtype, [b_lds_td.element_span])   # flat, typed, sized in elements
+store_fragment(b, smem, make_window(b_lds_td, (n0, k0)), b_frag, lane)
+b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lane)
 ```
-`at_index`/`squeeze` are TYPED: they reduce a `batch` axis only (they refuse the free/contraction
-axis -- that would silently drop matmul terms -- and refuse an un-roled tensor, never a bare `rank==2`
-check). Strides are preserved; the pinned batch offset rides the window so the reduced view still
-addresses the right element. `TensorDesc.assert_mma_operand()` is the boundary gate (rank-2, one free
-+ one contraction, either order -- A is `(M,K)`, B is `(K,N)`); `load_fragment` runs it automatically
-for any roled tensor. Worked example: `kernels/tiling_gemm_batched_demo.py`.
+- **Addressing.** The verbs see an LDS buffer and compute `sum(position * stride)` exactly as for
+  global memory: the lane's base index once, plus a compile-time offset per register run. The vector
+  width follows the same rule as global: a register run on a stride-1 axis is consecutive elements.
+- **`TensorDesc.element_span`** is `1 + sum((length - 1) * stride)`: the elements from the first to the
+  last element the description can address. Static (int lengths and strides); a negative stride is
+  refused. The LDS budget stays a byte count: the span times the element size.
+- **`lds_element_span(td, lds_swizzle)`** is the size to allocate: `element_span`, except that the
+  built-in `lds_swizzle=True` moves an element of the last axis within its 64-element group, so the last
+  row reaches the end of its group. A `(8, 48)` buffer with strides `(64, 1)` spans 496 elements but
+  needs 512 swizzled. A swizzle callable must keep every position inside the descriptor's lengths.
+- **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
+  `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
+- **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
+  divides every stride except the stride-1 axis's, leading axes included (in global memory too): a pad
+  or batch stride that is not a multiple of the natural vector narrows the access.
+- **Stages** are a leading axis positioned by the window origin: a `[stage][K][F]` buffer is the
+  rank-3 `make_tensor_desc((stages, F, K), (K * F, 1, F), dtype)`, written and read with an unswapped
+  rank-2 `(F, K)` tile at origin `(stage, f0, k0)`. Derive both operands' stage origins from one stage
+  index.
+- **Checks.** Before emitting, the verbs refuse an LDS buffer that is not rank 1, whose element type is
+  not the tensor's dtype, or that holds fewer than `lds_element_span` elements; the built-in
+  `lds_swizzle=True` needs the stride-1 axis last and every other stride at least the swizzled row
+  (the last length rounded up to 64), so rows cannot overlap (otherwise pad the stride or pass a
+  swizzle callable). LDS accesses are
+  unclipped, so a disagreement is refused rather than masked. Window origins are trusted, as for every
+  LDS access.
+- **The cooperative-load bridge** (`memory.py`, toolbox). `lds_tile_desc(coop_desc, dtype, *, buffers,
+  n_waves, wave_size=64)` returns the full-tile LDS descriptor of a cooperative-load operand in the
+  convention order `(free, K)`: lengths `(buffers * free, K)`, strides `(1, buffers * free)`, buffer `i`
+  starting at free position `i * free`. `lds_store` / `lds_read` take the cooperative and read tiles
+  unswapped, at origins `(free_position, k)`, and check each tile extent against the descriptor's
+  lengths. Its stride-1 axis is axis 0, so a swizzle on it is a swizzle callable.
+- **Why no allocation verb.** `smem_alloc(dtype, [count])` already takes the two values the descriptor
+  gives; a tiling wrapper would be a second home for them.
 
 ### Reserved (post-M1)
-- LDS-space descriptors for staging.
 - per-load `coherency=` (param exists on the verbs; ignored in M1).
 
 ---
@@ -308,8 +413,9 @@ buffer-descriptor `num_records` path for wide vectorized tail loads.
 
 - `False` (default) — no swizzle; the natural contiguous vector width is used.
 - `True` — the built-in block-preserving swizzle (`_swizzle_lds_positions`).
-- a **callable policy** `(builder, positions) -> positions` that remaps the LDS index. It declares its
-  granularity via a `vw_elems` attribute (the block width, in elements, it keeps contiguous); the emit
+- a **callable policy** `(builder, positions) -> positions` that remaps the LDS index. `positions` holds one
+  position per tensor axis, leading axes (their window origins) first, so an element gets one address
+  whatever the rank of the tile that reaches it. It declares its granularity via a `vw_elems` attribute (the block width, in elements, it keeps contiguous); the emit
   resolves the access width to `min(vw_elems, natural_run)` and **range-checks it to `[1, natural_run]`**
   (`_swizzle_vw`) — so a policy can only relocate whole blocks of its own granularity, never widen past what
   the layout is contiguous for. Store and read MUST use the same policy (a bijection → bit-exact).
@@ -475,7 +581,7 @@ designed-in seam, not yet implemented.
 | Axis | Default | Override options | Status |
 |---|---|---|---|
 | operand dtype | -- | f16, bf16, f32, f8/bf8 (via desc + `a/b/c=`) | BUILT (f16->f32 proven; casts honest/fail-fast) |
-| data layout | -- | any via `make_tensor_desc(..., strides)` + `.permute([...])` (RCR shown) | BUILT |
+| data layout | -- | any via `make_tensor_desc(..., strides)` + `.permute([...])`, axes in the one convention (sec 3) | BUILT |
 | tile distribution | `mma.a/b/c_desc` | author any via `make_tile_desc(...)` (quantity-major) | BUILT |
 | atom selection | single MMA (`None`) | shape tuple (agnostic) / intrinsic name (pinned) | BUILT |
 | wave tile size | == atom | any integer multiple of atom (M and/or N and/or K) | BUILT |
@@ -486,7 +592,7 @@ designed-in seam, not yet implemented.
 | C transpose | off | `c_transpose=True` on `TileMma` (-> C^T, `c_desc` = (N,M)) | PLANNED (analyzed; Part D) |
 | interleaved layout | `style=` (default `CanonicalStyle`) | `TileMma(..., style=InterleavedStyle())` | BUILT (dense square atoms; see `tiling_interleaving_design.md`) |
 | operand layout | `mma.a/b/c_layout` | `make_tile_desc(...)` / `custom_layout(...)` | BUILT (make_tile_desc) / RESERVED (custom_layout) |
-| memory space | global | LDS view (`space="lds"`) | RESERVED |
+| memory space | global | LDS: a `TensorDesc` over a flat `smem_alloc` buffer, same verbs (sec 3, "LDS buffers") | BUILT |
 | coherency | default | `CACHE_STREAM` / `NON_TEMPORAL` per load | RESERVED (param present) |
 | kind | dense | `sparse(...)` / `scaled(...)` (+index/scale operands) | RESERVED |
 
@@ -574,5 +680,5 @@ and you can always see the one the MMA object produced.
 | clipping | desc `lengths` (auto zero-pad) | `make_window(tensor, origin, bounds)` |
 | target | -- | `target=`/`arch=` (agnostic) |
 | coherency | default | `coherency=` (reserved) |
-| memory space | global | LDS desc (reserved) |
+| memory space | global | LDS: `TensorDesc` + flat `smem_alloc(td.dtype, [td.element_span])` |
 | kind | dense | `sparse`/`scaled` (reserved) |

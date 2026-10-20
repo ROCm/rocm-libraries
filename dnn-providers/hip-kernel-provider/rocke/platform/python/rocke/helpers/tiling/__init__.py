@@ -16,6 +16,7 @@ adding to it -- read ``docs/tiling_api_contract.md``.
 FRONT DOOR -- what you reach for by default:
     ``TileMma``   resolve a concrete intrinsic + A/B/C layouts and drive the atom grid.
     ``make_tensor_desc`` / ``make_window``   where a tensor sits + which sub-box a tile covers.
+    ``check_gemm_shapes``   check at build time that a GEMM's A, B (and C) agree on their extents.
     ``make_tile_desc``   author a custom (non-MMA) tile layout; for MMA operands use
         ``mma.a_desc`` / ``b_desc`` / ``c_desc``.
     ``make_fragment``    a ``TileDesc`` bound to a dtype + its SSA registers.
@@ -28,9 +29,9 @@ TOOLBOX -- the primitives the front door composes, callable directly for finer c
         these to hold the resolved layouts (plan) or drive the atom grid (driver) yourself.
     ``LayoutStyle`` / ``CanonicalStyle`` / ``InterleavedStyle``   the operand-layout STRATEGY -- pass
         ``style=`` to pick a profile (default canonical), or subclass to add one (docs/tiling_api_contract.md).
-    ``cooperative_load_desc`` / ``cooperative_load_width`` / ``lds_tile_alloc`` / ``lds_store`` /
-        ``lds_read``   the style-agnostic global->LDS memory bridge a style composes (full-tile alloc,
-        unmasked LDS verbs, extent-vs-allocation guard).
+    ``cooperative_load_desc`` / ``cooperative_load_width`` / ``lds_tile_desc`` / ``lds_store`` /
+        ``lds_read``   the style-agnostic global->LDS memory bridge a style composes (full-tile LDS
+        descriptor, unmasked LDS verbs, extent-vs-descriptor guard).
     ``TensorDesc`` / ``TensorWindow`` / ``TileDesc`` / ``Fragment`` / ``fragment_length``   the value types.
     ``load_mma_traits`` / ``MmaTraits`` / ``MmaTraitsCatalog`` / ``DEFAULT_TRAITS_PATH``   the atom SSOT.
     ``describe`` / ``render_forward_map`` / ``render_inverse_map``   see a layout instead of decoding it.
@@ -50,10 +51,17 @@ solver core): import from its own module only if you are extending the layer.
 
 from __future__ import annotations
 
-from .descriptors import TensorDesc, TensorWindow, make_tensor_desc, make_window
+from .descriptors import (
+    TensorDesc,
+    TensorWindow,
+    check_gemm_shapes,
+    make_tensor_desc,
+    make_window,
+)
 from .emit import (
     emit_tensor_coordinates,
     fill_fragment,
+    lds_element_span,
     load_fragment,
     store_fragment,
 )
@@ -73,7 +81,7 @@ from .mma import (
 from .memory import (
     cooperative_load_desc,
     cooperative_load_width,
-    lds_tile_alloc,
+    lds_tile_desc,
     lds_store,
     lds_read,
 )
@@ -104,8 +112,10 @@ __all__ = [
     "TileMma",
     "make_tensor_desc",
     "make_window",
+    "check_gemm_shapes",
     "make_tile_desc",
     "make_fragment",
+    "lds_element_span",
     "load_fragment",
     "store_fragment",
     "fill_fragment",
@@ -120,7 +130,7 @@ __all__ = [
     "InterleavedStyle",
     "cooperative_load_desc",
     "cooperative_load_width",
-    "lds_tile_alloc",
+    "lds_tile_desc",
     "lds_store",
     "lds_read",
     "TensorDesc",
