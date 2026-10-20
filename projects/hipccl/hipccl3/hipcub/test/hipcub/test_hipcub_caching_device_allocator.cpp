@@ -28,28 +28,11 @@
  ******************************************************************************/
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include "hipcub/util_allocator.hpp"
 #include <cstdlib>
 #include <hipcub/util_allocator.hpp>
-
-#if __has_include(<valgrind/valgrind.h>)
-    #include <valgrind/valgrind.h>
-    #define HAS_VALGRIND_H 1
-#else
-    #define HAS_VALGRIND_H 0
-#endif
-
-#if defined(__SANITIZE_ADDRESS__)
-    #define IS_ASAN_BUILD 1
-#elif defined(__has_feature)
-    #if __has_feature(address_sanitizer)
-        #define IS_ASAN_BUILD 1
-    #endif
-#endif
-#ifndef IS_ASAN_BUILD
-    #define IS_ASAN_BUILD 0
-#endif
 
 // Borrowing upstream blocking_kernel for host-side control of kernel lifetimes.
 // This kernel does very bad things that violate the HIP programming model, but
@@ -58,46 +41,46 @@
 // Once launched, this kernel will block the stream until `flag` updates to non-zero.
 __global__ void block_stream(const volatile int32_t* flag)
 {
-	while (!(*flag))
-	{
-	}
+    while (!(*flag))
+    {
+    }
 }
 
 struct blocking_kernel
 {
-	blocking_kernel(const hipStream_t& stream)
-	  : m_stream(stream)
-	{
-		HIP_CHECK(hipHostRegister(&m_host_flag, sizeof(m_host_flag), hipHostRegisterMapped));
-		HIP_CHECK(hipHostGetDevicePointer((void**)&m_device_flag, &m_host_flag, 0));
-	}
-	~blocking_kernel()
-	{
-		HIP_CHECK(hipHostUnregister(&m_host_flag));
-	}
+    blocking_kernel(const hipStream_t& stream)
+      : m_stream(stream)
+    {
+        HIP_CHECK(hipHostRegister(&m_host_flag, sizeof(m_host_flag), hipHostRegisterMapped));
+        HIP_CHECK(hipHostGetDevicePointer((void**)&m_device_flag, &m_host_flag, 0));
+    }
+    ~blocking_kernel()
+    {
+        HIP_CHECK(hipHostUnregister(&m_host_flag));
+    }
 
-	void block()
-	{
-		printf("Blocking Stream %lld\n", (long long) m_stream);
-		m_host_flag = 0;
-		hipLaunchKernelGGL(
-				HIP_KERNEL_NAME(block_stream),
-				dim3(1), dim3(1), 0, m_stream,
-				m_device_flag
-			);		
-	}
+    void block()
+    {
+        printf("Blocking Stream %lld\n", (long long) m_stream);
+        m_host_flag = 0;
+        hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(block_stream),
+                dim3(1), dim3(1), 0, m_stream,
+                m_device_flag
+            );        
+    }
 
-	void unblock()
-	{
-		volatile int32_t& flag = m_host_flag;
-		flag                              = 1;
-		printf("Unblocking Stream %lld\n", (long long) m_stream);
-	}
+    void unblock()
+    {
+        volatile int32_t& flag = m_host_flag;
+        flag                              = 1;
+        printf("Unblocking Stream %lld\n", (long long) m_stream);
+    }
 
 private:
-	int32_t m_host_flag{};
-	int32_t* m_device_flag{};
-	hipStream_t m_stream{0};
+    int32_t m_host_flag{};
+    int32_t* m_device_flag{};
+    hipStream_t m_stream{0};
 };
 
 __global__
@@ -106,22 +89,11 @@ void EmptyKernel()
 
 // Hipified test/test_allocator.cu
 
-TEST(HipcubCachingDeviceAllocatorTests, Test1)
+class HipcubCachingDeviceAllocatorTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubCachingDeviceAllocatorTests, Test1)
 {
-
-    // This test is very timing sensitive. Valgrind and ASAN slow down
-    // kernel execution and therefore messes up the timing of the test. 
-    // If valgrind or ASAN is being used we disable this test otherwise
-    // it will fail.
-#if HAS_VALGRIND_H
-    if (RUNNING_ON_VALGRIND) {
-        GTEST_SKIP() << "Skipping test under Valgrind";
-    }
-#endif //HAS_VALGRIND_H
-#if IS_ASAN_BUILD
-    GTEST_SKIP() << "Skipping test under ASAN";
-#endif
-
     // Get number of GPUs and current GPU
     int num_gpus;
     int initial_gpu;
@@ -146,9 +118,9 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     char *d_999B_stream0_b;
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_a, 999, 0));
 
-	// Run a kernel on stream 0
-	blocking_kernel block_0_a(0);
-	block_0_a.block();
+    // Run a kernel on stream 0
+    blocking_kernel block_0_a(0);
+    block_0_a.block();
     HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream0_a
@@ -164,8 +136,8 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     ASSERT_EQ(allocator.cached_blocks.size(), 0u);
 
     // Launch another kernel on stream 0
-	blocking_kernel block_0_b(0);
-	block_0_b.block();	
+    blocking_kernel block_0_b(0);
+    block_0_b.block();    
     HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream0_b
@@ -183,17 +155,17 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     ASSERT_EQ(allocator.cached_blocks.size(), 1u);
 
     // Now run a kernel in other_stream
-	blocking_kernel block_other(other_stream);
-	block_other.block();	
+    blocking_kernel block_other(other_stream);
+    block_other.block();    
     HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream_other
     HIP_CHECK(allocator.DeviceFree(d_999B_stream_other_a));
 
     // Check that we can now use both allocations in stream 0 after unblocking both kernels:
-	block_0_a.unblock();
-	block_0_b.unblock();
-	block_other.unblock();	
+    block_0_a.unblock();
+    block_0_b.unblock();
+    block_other.unblock();    
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_a, 999, 0));
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_b, 999, 0));
@@ -220,7 +192,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     ASSERT_EQ(allocator.cached_blocks.size(), 0u);
 
     // Run some big kernel in other_stream
-	block_other.block();	
+    block_other.block();    
     HIP_CHECK(hipGetLastError());
 
     // Free d_999B_stream_other_a and d_999B_stream_other_b
@@ -229,7 +201,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
 
     // Check that we can now use both allocations in stream 0 after synchronizing the device and destroying the other stream
     block_other.unblock();
-	HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipStreamDestroy(other_stream));
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_a, 999, 0));
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_b, 999, 0));
