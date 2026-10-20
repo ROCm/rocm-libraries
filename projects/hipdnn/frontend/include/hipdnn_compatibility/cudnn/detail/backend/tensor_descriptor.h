@@ -5,74 +5,34 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hipdnn_compatibility/cudnn/detail/backend/attribute_table.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/records.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
 {
 
-// Finalize helpers shared with parameter_descriptors.h.
+// Attribute name as a v8 core message label; the table names have static
+// storage.
+inline std::string_view attributeLabel(cudnnBackendAttributeName_t name)
+{
+    const std::optional<AttributeInfo> info = attributeInfo(name);
+    return info ? std::string_view(info->name) : std::string_view("unknown attribute");
+}
 
 template <typename T>
 T requireAttribute(const std::optional<T>& value, cudnnBackendAttributeName_t name)
 {
-    if(!value)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, attributeName(name) + " is required");
-    }
-    return *value;
-}
-
-template <typename T>
-std::vector<T> requireNonEmpty(std::vector<T> values, cudnnBackendAttributeName_t name)
-{
-    if(values.empty())
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, attributeName(name) + " is required (non-empty)");
-    }
-    return values;
-}
-
-template <typename CEnum>
-[[noreturn]] void throwUnsupportedValue(CEnum value, cudnnBackendAttributeName_t name)
-{
-    throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                    attributeName(name) + " value " + std::to_string(static_cast<int>(value))
-                        + " is not supported by the hipDNN cuDNN shim");
-}
-
-// cuDNN value -> shim FE enum, for values that are stored but never lowered.
-template <typename CEnum>
-auto requireFe(CEnum value, cudnnBackendAttributeName_t name)
-{
-    const auto mapped = toFe(value);
-    if(!mapped)
-    {
-        throwUnsupportedValue(value, name);
-    }
-    return *mapped;
-}
-
-// cuDNN value -> shim FE enum that hipDNN can also represent; anything else is
-// NOT_SUPPORTED.
-template <typename CEnum>
-auto requireLowerable(CEnum value, cudnnBackendAttributeName_t name)
-{
-    const auto mapped = requireFe(value, name);
-    if(!hasHipdnnCounterpart(mapped))
-    {
-        throwUnsupportedValue(value, name);
-    }
-    return mapped;
+    return v8::requireValue(value, attributeLabel(name));
 }
 
 class TensorDescriptor final : public Descriptor
@@ -83,50 +43,51 @@ public:
     {
     }
 
+    // Null until finalized.
+    const std::shared_ptr<const v8::TensorRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
     // Lowering facts; valid once finalized.
     DataType_t dataType() const noexcept
     {
-        return _dataType;
+        return _record->dataType();
     }
 
     const std::vector<std::int64_t>& dimensions() const noexcept
     {
-        return _dimensions;
+        return _record->dimensions();
     }
 
     const std::vector<std::int64_t>& strides() const noexcept
     {
-        return _strides;
+        return _record->strides();
     }
 
     std::int64_t uniqueId() const noexcept
     {
-        return _uniqueId;
+        return _record->uniqueId();
     }
 
     bool isVirtual() const noexcept
     {
-        return _isVirtual;
+        return _record->isVirtual();
     }
 
-    // cuDNN's alignment is a lower bound and 16 is hipDNN's default, so only a
-    // smaller value is forwarded.
     std::optional<std::int64_t> forwardedAlignment() const noexcept
     {
-        return _alignment < HIPDNN_DEFAULT_ALIGNMENT ? std::optional<std::int64_t>(_alignment)
-                                                     : std::nullopt;
+        return _record->forwardedAlignment();
     }
 
-    // IS_BY_VALUE without CONSTANT_VALUE; a constant lowers to the tensor value
-    // only.
     bool isRuntimePassByValue() const noexcept
     {
-        return _isByValue && !_constantValue;
+        return _record->isRuntimePassByValue();
     }
 
     const std::optional<std::vector<std::byte>>& constantValue() const noexcept
     {
-        return _constantValue;
+        return _record->constantValue();
     }
 
     const std::shared_ptr<TensorDescriptor>& raggedOffset() const noexcept
@@ -137,66 +98,16 @@ public:
 protected:
     void finalizeImpl() override
     {
-        const auto rawType
-            = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_TENSOR_DATA_TYPE),
-                               CUDNN_ATTR_TENSOR_DATA_TYPE);
-        std::vector<std::int64_t> dimensions
-            = requireNonEmpty(arrayAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_DIMENSIONS),
-                              CUDNN_ATTR_TENSOR_DIMENSIONS);
-        std::vector<std::int64_t> strides = requireNonEmpty(
-            arrayAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_STRIDES), CUDNN_ATTR_TENSOR_STRIDES);
-        if(dimensions.size() != strides.size())
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            "CUDNN_ATTR_TENSOR_DIMENSIONS has " + std::to_string(dimensions.size())
-                                + " elements but CUDNN_ATTR_TENSOR_STRIDES has "
-                                + std::to_string(strides.size()));
-        }
-        for(std::size_t i = 0; i < dimensions.size(); ++i)
-        {
-            if(dimensions[i] <= 0 || strides[i] < 0)
-            {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                                "tensor dimension " + std::to_string(i) + " is "
-                                    + std::to_string(dimensions[i]) + " with stride "
-                                    + std::to_string(strides[i])
-                                    + "; dimensions must be positive and strides non-negative");
-            }
-        }
-        const std::int64_t uniqueId
-            = requireAttribute(scalarAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_UNIQUE_ID),
-                               CUDNN_ATTR_TENSOR_UNIQUE_ID);
-        if(uniqueId < 0)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, "CUDNN_ATTR_TENSOR_UNIQUE_ID must be >= 0");
-        }
-        const std::int64_t alignment
-            = requireAttribute(scalarAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT),
-                               CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT);
-        if(alignment <= 0)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, "CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT must be > 0");
-        }
-
-        const DataType_t dataType = requireLowerable(rawType, CUDNN_ATTR_TENSOR_DATA_TYPE);
-        if(scalarAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_VECTOR_COUNT).value_or(1) != 1)
-        {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            "CUDNN_ATTR_TENSOR_VECTOR_COUNT other than 1 is not supported");
-        }
-        if(scalarAttribute<cudnnBackendTensorReordering_t>(CUDNN_ATTR_TENSOR_REORDERING_MODE)
-               .value_or(CUDNN_TENSOR_REORDERING_NONE)
-           != CUDNN_TENSOR_REORDERING_NONE)
-        {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            "CUDNN_ATTR_TENSOR_REORDERING_MODE other than NONE is not supported");
-        }
-
-        std::optional<std::vector<std::byte>> constantValue;
-        if(hasAttribute(CUDNN_ATTR_TENSOR_CONSTANT_VALUE))
-        {
-            constantValue = copyConstant(dataType);
-        }
+        static const v8::TensorLabels s_labels{
+            attributeLabel(CUDNN_ATTR_TENSOR_DATA_TYPE),
+            attributeLabel(CUDNN_ATTR_TENSOR_DIMENSIONS),
+            attributeLabel(CUDNN_ATTR_TENSOR_STRIDES),
+            attributeLabel(CUDNN_ATTR_TENSOR_UNIQUE_ID),
+            attributeLabel(CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT),
+            attributeLabel(CUDNN_ATTR_TENSOR_VECTOR_COUNT),
+            attributeLabel(CUDNN_ATTR_TENSOR_REORDERING_MODE),
+            attributeLabel(CUDNN_ATTR_TENSOR_CONSTANT_VALUE),
+        };
 
         std::shared_ptr<TensorDescriptor> raggedOffset;
         if(std::shared_ptr<Descriptor> referent
@@ -206,60 +117,47 @@ protected:
             raggedOffset = std::static_pointer_cast<TensorDescriptor>(std::move(referent));
         }
 
-        _dataType = dataType;
-        _dimensions = std::move(dimensions);
-        _strides = std::move(strides);
-        _uniqueId = uniqueId;
-        _alignment = alignment;
-        _isVirtual = scalarAttribute<bool>(CUDNN_ATTR_TENSOR_IS_VIRTUAL).value_or(false);
-        _isByValue = scalarAttribute<bool>(CUDNN_ATTR_TENSOR_IS_BY_VALUE).value_or(false);
-        _constantValue = std::move(constantValue);
-        _raggedOffset = std::move(raggedOffset);
-        if(_constantValue)
+        v8::TensorInputs inputs;
+        inputs.dataType = scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_TENSOR_DATA_TYPE);
+        inputs.dimensions = arrayAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_DIMENSIONS);
+        inputs.strides = arrayAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_STRIDES);
+        inputs.uniqueId = scalarAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_UNIQUE_ID);
+        inputs.alignment = scalarAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT);
+        inputs.vectorCount
+            = scalarAttribute<std::int64_t>(CUDNN_ATTR_TENSOR_VECTOR_COUNT).value_or(1);
+        inputs.reorderingMode
+            = scalarAttribute<cudnnBackendTensorReordering_t>(CUDNN_ATTR_TENSOR_REORDERING_MODE)
+                  .value_or(CUDNN_TENSOR_REORDERING_NONE);
+        inputs.isVirtual = scalarAttribute<bool>(CUDNN_ATTR_TENSOR_IS_VIRTUAL).value_or(false);
+        inputs.isByValue = scalarAttribute<bool>(CUDNN_ATTR_TENSOR_IS_BY_VALUE).value_or(false);
+        if(hasAttribute(CUDNN_ATTR_TENSOR_CONSTANT_VALUE))
+        {
+            inputs.constantValue
+                = scalarAttribute<const void*>(CUDNN_ATTR_TENSOR_CONSTANT_VALUE).value_or(nullptr);
+        }
+        if(raggedOffset)
+        {
+            inputs.raggedOffset = raggedOffset->record();
+        }
+
+        std::shared_ptr<const v8::TensorRecord> record
+            = v8::makeTensorRecord(std::move(inputs), s_labels);
+        if(record->constantValue())
         {
             // GET must not hand back the caller's pointer: it refers to builder
             // storage that is gone once the builder is.
-            const void* owned = _constantValue->data();
+            const void* owned = record->constantValue()->data();
             storeComputed(CUDNN_ATTR_TENSOR_CONSTANT_VALUE,
                           CUDNN_TYPE_VOID_PTR,
                           1,
                           static_cast<const void*>(&owned));
         }
+        _record = std::move(record);
+        _raggedOffset = std::move(raggedOffset);
     }
 
 private:
-    static constexpr std::int64_t HIPDNN_DEFAULT_ALIGNMENT = 16;
-
-    // CONSTANT_VALUE holds a pointer to builder-owned bytes, so they are copied
-    // here; the element size is rounded up to whole bytes (upstream stores a
-    // bool constant as one byte).
-    std::vector<std::byte> copyConstant(DataType_t dataType) const
-    {
-        const void* source
-            = scalarAttribute<const void*>(CUDNN_ATTR_TENSOR_CONSTANT_VALUE).value_or(nullptr);
-        if(source == nullptr)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, "CUDNN_ATTR_TENSOR_CONSTANT_VALUE is null");
-        }
-        const std::size_t size = (get_element_size_in_bits(dataType) + 7) / 8;
-        if(size == 0)
-        {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            "CUDNN_ATTR_TENSOR_CONSTANT_VALUE: the tensor data type has no size");
-        }
-        std::vector<std::byte> bytes(size);
-        std::memcpy(bytes.data(), source, size);
-        return bytes;
-    }
-
-    DataType_t _dataType = DataType_t::NOT_SET;
-    std::vector<std::int64_t> _dimensions;
-    std::vector<std::int64_t> _strides;
-    std::int64_t _uniqueId = -1;
-    std::int64_t _alignment = 0;
-    bool _isVirtual = false;
-    bool _isByValue = false;
-    std::optional<std::vector<std::byte>> _constantValue;
+    std::shared_ptr<const v8::TensorRecord> _record;
     std::shared_ptr<TensorDescriptor> _raggedOffset;
 };
 

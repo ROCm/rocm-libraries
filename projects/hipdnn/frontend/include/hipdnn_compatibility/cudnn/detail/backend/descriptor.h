@@ -20,48 +20,14 @@
 
 #include <hipdnn_compatibility/cudnn/detail/backend/attribute_table.h>
 #include <hipdnn_compatibility/cudnn/detail/status_translation.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/error.h>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
 {
 
-// Shim-originated failure. Carries the cuDNN status directly so the entry-point
-// catch ladder never has to translate it.
-class ShimError : public std::runtime_error
-{
-public:
-    ShimError(cudnnStatus_t status, const std::string& message)
-        : std::runtime_error(message)
-        , _status(status)
-    {
-    }
-
-    cudnnStatus_t status() const noexcept
-    {
-        return _status;
-    }
-
-private:
-    cudnnStatus_t _status;
-};
-
-// Converts a failed hipDNN call into a ShimError. The backend message is drained
-// immediately because reading it clears it.
-// `context` is a view so that a literal costs nothing on the success path.
-inline void checkHipdnn(hipdnnStatus_t status, std::string_view context)
-{
-    if(status == HIPDNN_STATUS_SUCCESS)
-    {
-        return;
-    }
-    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendMessage{};
-    hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(backendMessage.data(),
-                                                                 backendMessage.size());
-    std::string message(context);
-    message += ": ";
-    message += backendMessage.data();
-    throw ShimError(toCudnnStatus(status), message);
-}
+using v8::checkHipdnn;
+using v8::ShimError;
 
 class Descriptor;
 

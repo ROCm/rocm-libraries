@@ -10,13 +10,11 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
-#include <optional>
-#include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -25,214 +23,35 @@
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/parameter_descriptors.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/tensor_descriptor.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/records.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
 {
 
-// The hipDNN graph node a finalized operation lowers to; named after the
-// hipdnn_frontend attribute class it fills.
-enum class OperationTarget : std::uint8_t
-{
-    NOT_SET,
-    CONVOLUTION_FPROP,
-    CONVOLUTION_DGRAD,
-    CONVOLUTION_WGRAD,
-    POINTWISE,
-    MATMUL,
-    REDUCTION,
-    RESAMPLE_FWD,
-    RESAMPLE_BWD,
-    BATCHNORM,
-    BATCHNORM_INFERENCE,
-    BATCHNORM_BACKWARD,
-    LAYERNORM,
-    LAYERNORM_BACKWARD,
-    RMSNORM,
-    RMSNORM_BACKWARD
-};
+using v8::OperationTarget;
+using v8::PointwiseModeClass;
 
-// Pointwise mode classes from upstream Operation_v8 (is_pointwise_*_op); the
-// port count alone does not decide the class (EXP is activation-forward, ERF is
-// math).
-enum class PointwiseModeClass : std::uint8_t
-{
-    MATH,
-    IDENTITY,
-    ACTIVATION_FORWARD,
-    ACTIVATION_BACKWARD
-};
-
-struct PointwiseModeTraits
-{
-    PointwiseModeClass modeClass;
-    std::int64_t portCount; // upstream get_pointwise_mode_port_count
-};
-
-constexpr std::optional<PointwiseModeTraits> pointwiseModeTraits(PointwiseMode_t mode) noexcept
-{
-    switch(mode)
-    {
-    case PointwiseMode_t::ADD:
-    case PointwiseMode_t::MUL:
-    case PointwiseMode_t::DIV:
-    case PointwiseMode_t::SUB:
-    case PointwiseMode_t::ADD_SQUARE:
-    case PointwiseMode_t::MIN:
-    case PointwiseMode_t::MAX:
-    case PointwiseMode_t::MOD:
-    case PointwiseMode_t::POW:
-    case PointwiseMode_t::CMP_EQ:
-    case PointwiseMode_t::CMP_NEQ:
-    case PointwiseMode_t::CMP_GT:
-    case PointwiseMode_t::CMP_GE:
-    case PointwiseMode_t::CMP_LT:
-    case PointwiseMode_t::CMP_LE:
-    case PointwiseMode_t::LOGICAL_AND:
-    case PointwiseMode_t::LOGICAL_OR:
-        return PointwiseModeTraits{PointwiseModeClass::MATH, 3};
-    case PointwiseMode_t::SQRT:
-    case PointwiseMode_t::RSQRT:
-    case PointwiseMode_t::SIN:
-    case PointwiseMode_t::COS:
-    case PointwiseMode_t::TAN:
-    case PointwiseMode_t::LOG:
-    case PointwiseMode_t::NEG:
-    case PointwiseMode_t::ABS:
-    case PointwiseMode_t::CEIL:
-    case PointwiseMode_t::FLOOR:
-    case PointwiseMode_t::LOGICAL_NOT:
-    case PointwiseMode_t::GEN_INDEX:
-    case PointwiseMode_t::ERF:
-    case PointwiseMode_t::RECIPROCAL:
-        return PointwiseModeTraits{PointwiseModeClass::MATH, 2};
-    case PointwiseMode_t::BINARY_SELECT:
-        return PointwiseModeTraits{PointwiseModeClass::MATH, 4};
-    case PointwiseMode_t::IDENTITY:
-        return PointwiseModeTraits{PointwiseModeClass::IDENTITY, 2};
-    case PointwiseMode_t::RELU_FWD:
-    case PointwiseMode_t::TANH_FWD:
-    case PointwiseMode_t::SIGMOID_FWD:
-    case PointwiseMode_t::ELU_FWD:
-    case PointwiseMode_t::GELU_FWD:
-    case PointwiseMode_t::GELU_APPROX_TANH_FWD:
-    case PointwiseMode_t::SOFTPLUS_FWD:
-    case PointwiseMode_t::SWISH_FWD:
-    case PointwiseMode_t::EXP:
-        return PointwiseModeTraits{PointwiseModeClass::ACTIVATION_FORWARD, 2};
-    case PointwiseMode_t::RELU_BWD:
-    case PointwiseMode_t::TANH_BWD:
-    case PointwiseMode_t::SIGMOID_BWD:
-    case PointwiseMode_t::ELU_BWD:
-    case PointwiseMode_t::GELU_BWD:
-    case PointwiseMode_t::GELU_APPROX_TANH_BWD:
-    case PointwiseMode_t::SOFTPLUS_BWD:
-    case PointwiseMode_t::SWISH_BWD:
-        return PointwiseModeTraits{PointwiseModeClass::ACTIVATION_BACKWARD, 3};
-    case PointwiseMode_t::NOT_SET:
-    case PointwiseMode_t::COUNT:
-    default:
-        return std::nullopt;
-    }
-}
-
-inline const char* pointwiseModeClassName(PointwiseModeClass modeClass) noexcept
-{
-    switch(modeClass)
-    {
-    case PointwiseModeClass::MATH:
-        return "math";
-    case PointwiseModeClass::IDENTITY:
-        return "identity";
-    case PointwiseModeClass::ACTIVATION_FORWARD:
-        return "activation-forward";
-    case PointwiseModeClass::ACTIVATION_BACKWARD:
-        return "activation-backward";
-    default:
-        return "unknown";
-    }
-}
-
-enum class NormFamily : std::uint8_t
-{
-    BATCH,
-    LAYER,
-    RMS
-};
-
-inline NormFamily requireNormFamily(cudnnBackendNormMode_t mode, cudnnBackendAttributeName_t name)
-{
-    const char* unsupported = "an unknown mode";
-    switch(mode)
-    {
-    case CUDNN_BATCH_NORM:
-        return NormFamily::BATCH;
-    case CUDNN_LAYER_NORM:
-        return NormFamily::LAYER;
-    case CUDNN_RMS_NORM:
-        return NormFamily::RMS;
-    case CUDNN_ADA_LAYER_NORM:
-        unsupported = "CUDNN_ADA_LAYER_NORM";
-        break;
-    case CUDNN_GROUP_NORM:
-        unsupported = "CUDNN_GROUP_NORM";
-        break;
-    case CUDNN_INSTANCE_NORM:
-        unsupported = "CUDNN_INSTANCE_NORM";
-        break;
-    default:
-        break;
-    }
-    throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                    attributeName(name) + " " + unsupported
-                        + " is not supported by the hipDNN cuDNN shim");
-}
-
-// hipDNN's layernorm normalized-dim count, derived from the scale shape exactly
-// as LayerNormNode::infer_properties_node does: the trailing non-1 scale dims of
-// a full-rank scale (at least 1), else every scale dim.
-inline std::int64_t layernormNormalizedDimCount(const TensorDescriptor& x,
-                                                const TensorDescriptor& scale)
-{
-    const std::vector<std::int64_t>& scaleDims = scale.dimensions();
-    const auto rank = static_cast<std::int64_t>(scaleDims.size());
-    if(x.dimensions().size() != scaleDims.size())
-    {
-        return rank;
-    }
-    std::int64_t count = 1;
-    for(std::int64_t i = rank - 1; i >= 0; --i)
-    {
-        if(scaleDims[static_cast<std::size_t>(i)] == 1)
-        {
-            break;
-        }
-        count = rank - i;
-    }
-    return count;
-}
-
-// Common base of every CUDNN_BACKEND_OPERATION_* class. Finalize follows one
-// order in every subclass: unsupported type, mode classification, required
-// attributes (BAD_PARAM), attributes the mode does not use (BAD_PARAM),
-// alpha/beta (NOT_SUPPORTED), set-but-unlowerable attributes (NOT_SUPPORTED).
+// Common base of every CUDNN_BACKEND_OPERATION_* class. Finalize reads the
+// stored attributes into the v8 factory inputs; the factory owns the rules.
+// Tensor slot accessors return the referenced descriptor of the record's slot.
 class OperationDescriptor : public Descriptor
 {
 public:
-    // Valid once finalized.
     OperationTarget target() const noexcept
     {
-        return _target;
+        return _record ? _record->target() : OperationTarget::NOT_SET;
+    }
+
+    // Null until finalized.
+    const std::shared_ptr<const v8::OperationRecord>& operationRecord() const noexcept
+    {
+        return _record;
     }
 
 protected:
     using Descriptor::Descriptor;
-
-    void setTarget(OperationTarget target) noexcept
-    {
-        _target = target;
-    }
 
     template <typename T>
     std::shared_ptr<T> referent(cudnnBackendAttributeName_t name,
@@ -247,79 +66,63 @@ protected:
         return std::static_pointer_cast<T>(std::move(value));
     }
 
-    template <typename T>
-    std::shared_ptr<T> requireReferent(cudnnBackendAttributeName_t name,
-                                       cudnnBackendDescriptorType_t referentType) const
-    {
-        std::shared_ptr<T> value = referent<T>(name, referentType);
-        if(!value)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, attributeName(name) + " is required");
-        }
-        return value;
-    }
-
     std::shared_ptr<TensorDescriptor> tensor(cudnnBackendAttributeName_t name) const
     {
         return referent<TensorDescriptor>(name, CUDNN_BACKEND_TENSOR_DESCRIPTOR);
     }
 
-    std::shared_ptr<TensorDescriptor> requireTensor(cudnnBackendAttributeName_t name) const
+    template <typename T>
+    static auto recordOf(const std::shared_ptr<T>& descriptor)
+        -> std::remove_cv_t<std::remove_reference_t<decltype(descriptor->record())>>
     {
-        return requireReferent<TensorDescriptor>(name, CUDNN_BACKEND_TENSOR_DESCRIPTOR);
+        return descriptor ? descriptor->record() : nullptr;
     }
 
-    // All of `names` or none of them; the message names the first missing one.
-    void requireAllOrNone(std::initializer_list<cudnnBackendAttributeName_t> names) const
-    {
-        const cudnnBackendAttributeName_t* present = nullptr;
-        const cudnnBackendAttributeName_t* missing = nullptr;
-        for(const cudnnBackendAttributeName_t& name : names)
-        {
-            if(hasAttribute(name))
-            {
-                present = present != nullptr ? present : &name;
-            }
-            else
-            {
-                missing = missing != nullptr ? missing : &name;
-            }
-        }
-        if(present != nullptr && missing != nullptr)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            attributeName(*missing) + " is required when " + attributeName(*present)
-                                + " is set");
-        }
-    }
-
-    // Alpha/beta: absent means the default; any other value cannot be lowered.
-    void requireScaling(cudnnBackendAttributeName_t name, double expected) const
-    {
-        const std::optional<double> value = realAttribute(name);
-        if(value && *value != expected)
-        {
-            // Default stream formatting matches %g: "0.5", "1", "nan".
-            std::ostringstream message;
-            message << attributeName(name) << " = " << *value
-                    << " is not supported by the hipDNN cuDNN shim; only " << expected << " is";
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED, message.str());
-        }
-    }
-
-    void rejectUnlowerable(cudnnBackendAttributeName_t name, const char* context) const
+    // Set with at least one element; descriptor-valued scalars always hold one.
+    bool isSet(cudnnBackendAttributeName_t name) const
     {
         const StoredAttribute* value = findAttribute(name);
-        if(value != nullptr && value->count > 0)
+        return value != nullptr && value->count > 0;
+    }
+
+    void commit(std::shared_ptr<const v8::OperationRecord> record,
+                std::initializer_list<std::shared_ptr<TensorDescriptor>> tensors)
+    {
+        _tensors.clear();
+        for(const std::shared_ptr<TensorDescriptor>& tensor : tensors)
         {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            attributeName(name) + " is not supported by the hipDNN cuDNN shim"
-                                + context);
+            if(tensor)
+            {
+                _tensors.push_back(tensor);
+            }
         }
+        _record = std::move(record);
+    }
+
+    template <typename RecordT>
+    const RecordT& typedRecord() const
+    {
+        return v8::recordAs<RecordT>(*_record);
+    }
+
+    std::shared_ptr<TensorDescriptor> descriptorOf(const v8::TensorPtr& tensor) const
+    {
+        if(tensor)
+        {
+            for(const std::shared_ptr<TensorDescriptor>& candidate : _tensors)
+            {
+                if(candidate->record() == tensor)
+                {
+                    return candidate;
+                }
+            }
+        }
+        return nullptr;
     }
 
 private:
-    OperationTarget _target = OperationTarget::NOT_SET;
+    std::shared_ptr<const v8::OperationRecord> _record;
+    std::vector<std::shared_ptr<TensorDescriptor>> _tensors;
 };
 
 // Tag-checked downcast to the operation base; every operation descriptor type
@@ -351,12 +154,12 @@ protected:
     }
 };
 
-// The three convolution operations differ only in their attribute names and
-// which tensor is the output.
+// The three convolution operations differ only in their attribute names, the
+// record they produce and which tensor is the output. `tensors` is in the
+// record's slot order.
 class ConvolutionOperationBase : public OperationDescriptor
 {
 public:
-    // Valid once finalized.
     const std::shared_ptr<ConvolutionDescriptor>& convolution() const noexcept
     {
         return _convolution;
@@ -371,156 +174,169 @@ protected:
         std::array<cudnnBackendAttributeName_t, 3> tensors;
     };
 
+    using MakeRecord
+        = std::shared_ptr<const v8::OperationRecord> (*)(const v8::ConvolutionOperationInputs&,
+                                                         const v8::ConvolutionOperationLabels&);
+
     ConvolutionOperationBase(cudnnBackendDescriptorType_t type,
-                             OperationTarget target,
-                             const AttributeNames& names)
+                             const AttributeNames& names,
+                             MakeRecord makeRecord)
         : OperationDescriptor(type)
         , _names(names)
-        , _loweredTarget(target)
+        , _labels{attributeLabel(names.convolution),
+                  attributeLabel(names.alpha),
+                  attributeLabel(names.beta),
+                  {attributeLabel(names.tensors[0]),
+                   attributeLabel(names.tensors[1]),
+                   attributeLabel(names.tensors[2])},
+                  attributeLabel(CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS)}
+        , _makeRecord(makeRecord)
     {
     }
 
     void finalizeImpl() override
     {
-        std::shared_ptr<ConvolutionDescriptor> convolution = requireReferent<ConvolutionDescriptor>(
+        std::shared_ptr<ConvolutionDescriptor> convolution = referent<ConvolutionDescriptor>(
             _names.convolution, CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR);
-        std::array<std::shared_ptr<TensorDescriptor>, 3> tensors;
-        for(std::size_t i = 0; i < tensors.size(); ++i)
-        {
-            tensors[i] = requireTensor(_names.tensors[i]);
-        }
-        const std::size_t rank = static_cast<std::size_t>(convolution->spatialDims()) + 2;
-        for(std::size_t i = 0; i < tensors.size(); ++i)
-        {
-            const std::size_t actual = tensors[i]->dimensions().size();
-            if(actual != rank)
-            {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                                attributeName(_names.tensors[i]) + " has rank "
-                                    + std::to_string(actual)
-                                    + ", expected CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS + 2 = "
-                                    + std::to_string(rank));
-            }
-        }
-        requireScaling(_names.alpha, 1.0);
-        requireScaling(_names.beta, 0.0);
-
+        const std::array<std::shared_ptr<TensorDescriptor>, 3> tensors{
+            tensor(_names.tensors[0]), tensor(_names.tensors[1]), tensor(_names.tensors[2])};
+        std::shared_ptr<const v8::OperationRecord> record
+            = _makeRecord({recordOf(convolution),
+                           {recordOf(tensors[0]), recordOf(tensors[1]), recordOf(tensors[2])},
+                           realAttribute(_names.alpha),
+                           realAttribute(_names.beta)},
+                          _labels);
         _convolution = std::move(convolution);
-        _tensors = std::move(tensors);
-        setTarget(_loweredTarget);
-    }
-
-    const std::shared_ptr<TensorDescriptor>& tensorAt(std::size_t index) const noexcept
-    {
-        return _tensors[index];
+        commit(std::move(record), {tensors[0], tensors[1], tensors[2]});
     }
 
 private:
     AttributeNames _names;
-    OperationTarget _loweredTarget;
+    v8::ConvolutionOperationLabels _labels;
+    MakeRecord _makeRecord;
     std::shared_ptr<ConvolutionDescriptor> _convolution;
-    std::array<std::shared_ptr<TensorDescriptor>, 3> _tensors;
+};
+
+template <typename RecordT>
+class ConvolutionOperationOf : public ConvolutionOperationBase
+{
+protected:
+    ConvolutionOperationOf(cudnnBackendDescriptorType_t type, const AttributeNames& names)
+        : ConvolutionOperationBase(type, names, &makeRecord)
+    {
+    }
+
+    const RecordT& record() const
+    {
+        return typedRecord<RecordT>();
+    }
+
+private:
+    static std::shared_ptr<const v8::OperationRecord>
+        makeRecord(const v8::ConvolutionOperationInputs& inputs,
+                   const v8::ConvolutionOperationLabels& labels)
+    {
+        return v8::makeOperationRecord<RecordT>(inputs, labels);
+    }
 };
 
 // Lowers to ConvFpropAttributes: X, W -> Y.
-class ConvolutionForwardOperation final : public ConvolutionOperationBase
+class ConvolutionForwardOperation final
+    : public ConvolutionOperationOf<v8::ConvolutionForwardOperationRecord>
 {
 public:
     ConvolutionForwardOperation()
-        : ConvolutionOperationBase(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
-                                   OperationTarget::CONVOLUTION_FPROP,
-                                   {CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_CONV_DESC,
-                                    CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_ALPHA,
-                                    CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_BETA,
-                                    {CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y}})
+        : ConvolutionOperationOf(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+                                 {CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_CONV_DESC,
+                                  CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_ALPHA,
+                                  CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_BETA,
+                                  {CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                   CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                                   CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y}})
     {
     }
 
-    const std::shared_ptr<TensorDescriptor>& x() const noexcept
+    std::shared_ptr<TensorDescriptor> x() const
     {
-        return tensorAt(0);
+        return descriptorOf(record().x());
     }
 
-    const std::shared_ptr<TensorDescriptor>& w() const noexcept
+    std::shared_ptr<TensorDescriptor> w() const
     {
-        return tensorAt(1);
+        return descriptorOf(record().w());
     }
 
-    const std::shared_ptr<TensorDescriptor>& y() const noexcept
+    std::shared_ptr<TensorDescriptor> y() const
     {
-        return tensorAt(2);
+        return descriptorOf(record().y());
     }
 };
 
 // Lowers to ConvDgradAttributes: DY, W -> DX.
-class ConvolutionBackwardDataOperation final : public ConvolutionOperationBase
+class ConvolutionBackwardDataOperation final
+    : public ConvolutionOperationOf<v8::ConvolutionBackwardDataOperationRecord>
 {
 public:
     ConvolutionBackwardDataOperation()
-        : ConvolutionOperationBase(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
-                                   OperationTarget::CONVOLUTION_DGRAD,
-                                   {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_CONV_DESC,
-                                    CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_ALPHA,
-                                    CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_BETA,
-                                    {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX}})
+        : ConvolutionOperationOf(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
+                                 {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_CONV_DESC,
+                                  CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_ALPHA,
+                                  CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_BETA,
+                                  {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
+                                   CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
+                                   CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX}})
     {
     }
 
-    const std::shared_ptr<TensorDescriptor>& dy() const noexcept
+    std::shared_ptr<TensorDescriptor> dy() const
     {
-        return tensorAt(0);
+        return descriptorOf(record().dy());
     }
 
-    const std::shared_ptr<TensorDescriptor>& w() const noexcept
+    std::shared_ptr<TensorDescriptor> w() const
     {
-        return tensorAt(1);
+        return descriptorOf(record().w());
     }
 
-    const std::shared_ptr<TensorDescriptor>& dx() const noexcept
+    std::shared_ptr<TensorDescriptor> dx() const
     {
-        return tensorAt(2);
+        return descriptorOf(record().dx());
     }
 };
 
 // Lowers to ConvWgradAttributes: DY, X -> DW.
-class ConvolutionBackwardFilterOperation final : public ConvolutionOperationBase
+class ConvolutionBackwardFilterOperation final
+    : public ConvolutionOperationOf<v8::ConvolutionBackwardFilterOperationRecord>
 {
 public:
     ConvolutionBackwardFilterOperation()
-        : ConvolutionOperationBase(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
-                                   OperationTarget::CONVOLUTION_WGRAD,
-                                   {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_CONV_DESC,
-                                    CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_ALPHA,
-                                    CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_BETA,
-                                    {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW}})
+        : ConvolutionOperationOf(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+                                 {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_CONV_DESC,
+                                  CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_ALPHA,
+                                  CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_BETA,
+                                  {CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY,
+                                   CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
+                                   CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW}})
     {
     }
 
-    const std::shared_ptr<TensorDescriptor>& dy() const noexcept
+    std::shared_ptr<TensorDescriptor> dy() const
     {
-        return tensorAt(0);
+        return descriptorOf(record().dy());
     }
 
-    const std::shared_ptr<TensorDescriptor>& x() const noexcept
+    std::shared_ptr<TensorDescriptor> x() const
     {
-        return tensorAt(1);
+        return descriptorOf(record().x());
     }
 
-    const std::shared_ptr<TensorDescriptor>& dw() const noexcept
+    std::shared_ptr<TensorDescriptor> dw() const
     {
-        return tensorAt(2);
+        return descriptorOf(record().dw());
     }
 };
 
-// Lowers to PointwiseAttributes. Slot map: forward classes X -> IN_0,
-// B -> IN_1, T -> IN_2, Y -> OUT_0; activation-backward DY -> IN_0, X -> IN_1,
-// DX -> OUT_0.
+// Lowers to PointwiseAttributes; the slot map lives in the record.
 class PointwiseOperation final : public OperationDescriptor
 {
 public:
@@ -529,133 +345,85 @@ public:
     {
     }
 
-    // Valid once finalized.
     const std::shared_ptr<PointwiseDescriptor>& pointwise() const noexcept
     {
         return _pointwise;
     }
 
-    PointwiseModeClass modeClass() const noexcept
+    PointwiseModeClass modeClass() const
     {
-        return _traits.modeClass;
+        return record().modeClass();
     }
 
-    std::int64_t portCount() const noexcept
+    std::int64_t portCount() const
     {
-        return _traits.portCount;
+        return record().portCount();
     }
 
-    const std::shared_ptr<TensorDescriptor>& in0() const noexcept
+    std::shared_ptr<TensorDescriptor> in0() const
     {
-        return _in0;
+        return descriptorOf(record().in0());
     }
 
-    // Null for unary modes.
-    const std::shared_ptr<TensorDescriptor>& in1() const noexcept
+    std::shared_ptr<TensorDescriptor> in1() const
     {
-        return _in1;
+        return descriptorOf(record().in1());
     }
 
-    // Null unless the mode takes three inputs (BINARY_SELECT).
-    const std::shared_ptr<TensorDescriptor>& in2() const noexcept
+    std::shared_ptr<TensorDescriptor> in2() const
     {
-        return _in2;
+        return descriptorOf(record().in2());
     }
 
-    const std::shared_ptr<TensorDescriptor>& out0() const noexcept
+    std::shared_ptr<TensorDescriptor> out0() const
     {
-        return _out0;
+        return descriptorOf(record().out0());
     }
 
 protected:
     void finalizeImpl() override
     {
-        std::shared_ptr<PointwiseDescriptor> pointwise = requireReferent<PointwiseDescriptor>(
+        static const v8::PointwiseOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_XDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_BDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_TDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_YDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_DYDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_DXDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_ALPHA1),
+            attributeLabel(CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2),
+        };
+        std::shared_ptr<PointwiseDescriptor> pointwise = referent<PointwiseDescriptor>(
             CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR, CUDNN_BACKEND_POINTWISE_DESCRIPTOR);
-        const std::optional<PointwiseModeTraits> traits = pointwiseModeTraits(pointwise->mode());
-        if(!traits)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            "CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR has no pointwise mode");
-        }
-        const bool backward = traits->modeClass == PointwiseModeClass::ACTIVATION_BACKWARD;
-
-        std::shared_ptr<TensorDescriptor> x = requireTensor(CUDNN_ATTR_OPERATION_POINTWISE_XDESC);
-        std::shared_ptr<TensorDescriptor> in0;
-        std::shared_ptr<TensorDescriptor> in1;
-        std::shared_ptr<TensorDescriptor> in2;
-        std::shared_ptr<TensorDescriptor> out0;
-        if(backward)
-        {
-            in0 = requireTensor(CUDNN_ATTR_OPERATION_POINTWISE_DYDESC);
-            out0 = requireTensor(CUDNN_ATTR_OPERATION_POINTWISE_DXDESC);
-            in1 = std::move(x);
-        }
-        else
-        {
-            out0 = requireTensor(CUDNN_ATTR_OPERATION_POINTWISE_YDESC);
-            if(traits->portCount >= 3)
-            {
-                in1 = requireTensor(CUDNN_ATTR_OPERATION_POINTWISE_BDESC);
-            }
-            if(traits->portCount >= 4)
-            {
-                in2 = requireTensor(CUDNN_ATTR_OPERATION_POINTWISE_TDESC);
-            }
-            in0 = std::move(x);
-        }
-
-        if(backward)
-        {
-            rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_YDESC, *traits);
-            rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_BDESC, *traits);
-            rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_TDESC, *traits);
-        }
-        else
-        {
-            rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_DYDESC, *traits);
-            rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_DXDESC, *traits);
-            // Upstream sends BDESC only for port >= 3 and TDESC only for port 4.
-            if(traits->portCount < 3)
-            {
-                rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_BDESC, *traits);
-            }
-            if(traits->portCount < 4)
-            {
-                rejectUnusedSlot(CUDNN_ATTR_OPERATION_POINTWISE_TDESC, *traits);
-            }
-        }
-
-        requireScaling(CUDNN_ATTR_OPERATION_POINTWISE_ALPHA1, 1.0);
-        requireScaling(CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2, 1.0);
-
+        const std::shared_ptr<TensorDescriptor> x = tensor(CUDNN_ATTR_OPERATION_POINTWISE_XDESC);
+        const std::shared_ptr<TensorDescriptor> b = tensor(CUDNN_ATTR_OPERATION_POINTWISE_BDESC);
+        const std::shared_ptr<TensorDescriptor> t = tensor(CUDNN_ATTR_OPERATION_POINTWISE_TDESC);
+        const std::shared_ptr<TensorDescriptor> y = tensor(CUDNN_ATTR_OPERATION_POINTWISE_YDESC);
+        const std::shared_ptr<TensorDescriptor> dy = tensor(CUDNN_ATTR_OPERATION_POINTWISE_DYDESC);
+        const std::shared_ptr<TensorDescriptor> dx = tensor(CUDNN_ATTR_OPERATION_POINTWISE_DXDESC);
+        std::shared_ptr<const v8::PointwiseOperationRecord> record = v8::makeOperationRecord(
+            v8::PointwiseOperationInputs{recordOf(pointwise),
+                                         recordOf(x),
+                                         recordOf(b),
+                                         recordOf(t),
+                                         recordOf(y),
+                                         recordOf(dy),
+                                         recordOf(dx),
+                                         realAttribute(CUDNN_ATTR_OPERATION_POINTWISE_ALPHA1),
+                                         realAttribute(CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2)},
+            s_labels);
         _pointwise = std::move(pointwise);
-        _traits = *traits;
-        _in0 = std::move(in0);
-        _in1 = std::move(in1);
-        _in2 = std::move(in2);
-        _out0 = std::move(out0);
-        setTarget(OperationTarget::POINTWISE);
+        commit(std::move(record), {x, b, t, y, dy, dx});
     }
 
 private:
-    void rejectUnusedSlot(cudnnBackendAttributeName_t name, const PointwiseModeTraits& traits) const
+    const v8::PointwiseOperationRecord& record() const
     {
-        if(hasAttribute(name))
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            attributeName(name) + " is not used by a pointwise "
-                                + pointwiseModeClassName(traits.modeClass) + " mode with "
-                                + std::to_string(traits.portCount) + " ports");
-        }
+        return typedRecord<v8::PointwiseOperationRecord>();
     }
 
     std::shared_ptr<PointwiseDescriptor> _pointwise;
-    PointwiseModeTraits _traits{PointwiseModeClass::MATH, 0};
-    std::shared_ptr<TensorDescriptor> _in0;
-    std::shared_ptr<TensorDescriptor> _in1;
-    std::shared_ptr<TensorDescriptor> _in2;
-    std::shared_ptr<TensorDescriptor> _out0;
 };
 
 // Lowers to MatmulAttributes: A, B -> C.
@@ -667,55 +435,63 @@ public:
     {
     }
 
-    // Valid once finalized.
     const std::shared_ptr<MatmulDescriptor>& matmul() const noexcept
     {
         return _matmul;
     }
 
-    const std::shared_ptr<TensorDescriptor>& a() const noexcept
+    std::shared_ptr<TensorDescriptor> a() const
     {
-        return _a;
+        return descriptorOf(record().a());
     }
 
-    const std::shared_ptr<TensorDescriptor>& b() const noexcept
+    std::shared_ptr<TensorDescriptor> b() const
     {
-        return _b;
+        return descriptorOf(record().b());
     }
 
-    const std::shared_ptr<TensorDescriptor>& c() const noexcept
+    std::shared_ptr<TensorDescriptor> c() const
     {
-        return _c;
+        return descriptorOf(record().c());
     }
 
 protected:
     void finalizeImpl() override
     {
-        std::shared_ptr<MatmulDescriptor> matmul = requireReferent<MatmulDescriptor>(
+        static const v8::MatmulOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_ADESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_BDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_CDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_GEMM_M_OVERRIDE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_GEMM_N_OVERRIDE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_MATMUL_GEMM_K_OVERRIDE_DESC),
+        };
+        std::shared_ptr<MatmulDescriptor> matmul = referent<MatmulDescriptor>(
             CUDNN_ATTR_OPERATION_MATMUL_DESC, CUDNN_BACKEND_MATMUL_DESCRIPTOR);
-        std::shared_ptr<TensorDescriptor> a = requireTensor(CUDNN_ATTR_OPERATION_MATMUL_ADESC);
-        std::shared_ptr<TensorDescriptor> b = requireTensor(CUDNN_ATTR_OPERATION_MATMUL_BDESC);
-        std::shared_ptr<TensorDescriptor> c = requireTensor(CUDNN_ATTR_OPERATION_MATMUL_CDESC);
-        for(const cudnnBackendAttributeName_t name :
-            {CUDNN_ATTR_OPERATION_MATMUL_GEMM_M_OVERRIDE_DESC,
-             CUDNN_ATTR_OPERATION_MATMUL_GEMM_N_OVERRIDE_DESC,
-             CUDNN_ATTR_OPERATION_MATMUL_GEMM_K_OVERRIDE_DESC})
-        {
-            rejectUnlowerable(name, "");
-        }
-
+        const std::shared_ptr<TensorDescriptor> a = tensor(CUDNN_ATTR_OPERATION_MATMUL_ADESC);
+        const std::shared_ptr<TensorDescriptor> b = tensor(CUDNN_ATTR_OPERATION_MATMUL_BDESC);
+        const std::shared_ptr<TensorDescriptor> c = tensor(CUDNN_ATTR_OPERATION_MATMUL_CDESC);
+        std::shared_ptr<const v8::MatmulOperationRecord> record = v8::makeOperationRecord(
+            v8::MatmulOperationInputs{recordOf(matmul),
+                                      recordOf(a),
+                                      recordOf(b),
+                                      recordOf(c),
+                                      isSet(CUDNN_ATTR_OPERATION_MATMUL_GEMM_M_OVERRIDE_DESC),
+                                      isSet(CUDNN_ATTR_OPERATION_MATMUL_GEMM_N_OVERRIDE_DESC),
+                                      isSet(CUDNN_ATTR_OPERATION_MATMUL_GEMM_K_OVERRIDE_DESC)},
+            s_labels);
         _matmul = std::move(matmul);
-        _a = std::move(a);
-        _b = std::move(b);
-        _c = std::move(c);
-        setTarget(OperationTarget::MATMUL);
+        commit(std::move(record), {a, b, c});
     }
 
 private:
+    const v8::MatmulOperationRecord& record() const
+    {
+        return typedRecord<v8::MatmulOperationRecord>();
+    }
+
     std::shared_ptr<MatmulDescriptor> _matmul;
-    std::shared_ptr<TensorDescriptor> _a;
-    std::shared_ptr<TensorDescriptor> _b;
-    std::shared_ptr<TensorDescriptor> _c;
 };
 
 // Lowers to ReductionAttributes: X -> Y.
@@ -727,40 +503,46 @@ public:
     {
     }
 
-    // Valid once finalized.
     const std::shared_ptr<ReductionDescriptor>& reduction() const noexcept
     {
         return _reduction;
     }
 
-    const std::shared_ptr<TensorDescriptor>& x() const noexcept
+    std::shared_ptr<TensorDescriptor> x() const
     {
-        return _x;
+        return descriptorOf(record().x());
     }
 
-    const std::shared_ptr<TensorDescriptor>& y() const noexcept
+    std::shared_ptr<TensorDescriptor> y() const
     {
-        return _y;
+        return descriptorOf(record().y());
     }
 
 protected:
     void finalizeImpl() override
     {
-        std::shared_ptr<ReductionDescriptor> reduction = requireReferent<ReductionDescriptor>(
+        static const v8::ReductionOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_REDUCTION_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_REDUCTION_XDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_REDUCTION_YDESC),
+        };
+        std::shared_ptr<ReductionDescriptor> reduction = referent<ReductionDescriptor>(
             CUDNN_ATTR_OPERATION_REDUCTION_DESC, CUDNN_BACKEND_REDUCTION_DESCRIPTOR);
-        std::shared_ptr<TensorDescriptor> x = requireTensor(CUDNN_ATTR_OPERATION_REDUCTION_XDESC);
-        std::shared_ptr<TensorDescriptor> y = requireTensor(CUDNN_ATTR_OPERATION_REDUCTION_YDESC);
-
+        const std::shared_ptr<TensorDescriptor> x = tensor(CUDNN_ATTR_OPERATION_REDUCTION_XDESC);
+        const std::shared_ptr<TensorDescriptor> y = tensor(CUDNN_ATTR_OPERATION_REDUCTION_YDESC);
+        std::shared_ptr<const v8::ReductionOperationRecord> record = v8::makeOperationRecord(
+            v8::ReductionOperationInputs{recordOf(reduction), recordOf(x), recordOf(y)}, s_labels);
         _reduction = std::move(reduction);
-        _x = std::move(x);
-        _y = std::move(y);
-        setTarget(OperationTarget::REDUCTION);
+        commit(std::move(record), {x, y});
     }
 
 private:
+    const v8::ReductionOperationRecord& record() const
+    {
+        return typedRecord<v8::ReductionOperationRecord>();
+    }
+
     std::shared_ptr<ReductionDescriptor> _reduction;
-    std::shared_ptr<TensorDescriptor> _x;
-    std::shared_ptr<TensorDescriptor> _y;
 };
 
 // Lowers to ResampleFwdAttributes: X -> Y, plus the optional INDEX output
@@ -773,53 +555,63 @@ public:
     {
     }
 
-    // Valid once finalized.
     const std::shared_ptr<ResampleDescriptor>& resample() const noexcept
     {
         return _resample;
     }
 
-    const std::shared_ptr<TensorDescriptor>& x() const noexcept
+    std::shared_ptr<TensorDescriptor> x() const
     {
-        return _x;
+        return descriptorOf(record().x());
     }
 
-    const std::shared_ptr<TensorDescriptor>& y() const noexcept
+    std::shared_ptr<TensorDescriptor> y() const
     {
-        return _y;
+        return descriptorOf(record().y());
     }
 
     // Null when unset.
-    const std::shared_ptr<TensorDescriptor>& index() const noexcept
+    std::shared_ptr<TensorDescriptor> index() const
     {
-        return _index;
+        return descriptorOf(record().index());
     }
 
 protected:
     void finalizeImpl() override
     {
-        std::shared_ptr<ResampleDescriptor> resample = requireReferent<ResampleDescriptor>(
+        static const v8::ResampleForwardOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_ALPHA),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_BETA),
+        };
+        std::shared_ptr<ResampleDescriptor> resample = referent<ResampleDescriptor>(
             CUDNN_ATTR_OPERATION_RESAMPLE_FWD_DESC, CUDNN_BACKEND_RESAMPLE_DESCRIPTOR);
-        std::shared_ptr<TensorDescriptor> x
-            = requireTensor(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC);
-        std::shared_ptr<TensorDescriptor> y
-            = requireTensor(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC);
-        std::shared_ptr<TensorDescriptor> index = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC);
-        requireScaling(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_ALPHA, 1.0);
-        requireScaling(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_BETA, 0.0);
-
+        const std::shared_ptr<TensorDescriptor> x = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC);
+        const std::shared_ptr<TensorDescriptor> y = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC);
+        const std::shared_ptr<TensorDescriptor> index
+            = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC);
+        std::shared_ptr<const v8::ResampleForwardOperationRecord> record = v8::makeOperationRecord(
+            v8::ResampleForwardOperationInputs{
+                recordOf(resample),
+                recordOf(x),
+                recordOf(y),
+                recordOf(index),
+                realAttribute(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_ALPHA),
+                realAttribute(CUDNN_ATTR_OPERATION_RESAMPLE_FWD_BETA)},
+            s_labels);
         _resample = std::move(resample);
-        _x = std::move(x);
-        _y = std::move(y);
-        _index = std::move(index);
-        setTarget(OperationTarget::RESAMPLE_FWD);
+        commit(std::move(record), {x, y, index});
     }
 
 private:
+    const v8::ResampleForwardOperationRecord& record() const
+    {
+        return typedRecord<v8::ResampleForwardOperationRecord>();
+    }
+
     std::shared_ptr<ResampleDescriptor> _resample;
-    std::shared_ptr<TensorDescriptor> _x;
-    std::shared_ptr<TensorDescriptor> _y;
-    std::shared_ptr<TensorDescriptor> _index;
 };
 
 // Lowers to ResampleBwdAttributes: DY, INDEX -> DX.
@@ -831,63 +623,70 @@ public:
     {
     }
 
-    // Valid once finalized.
     const std::shared_ptr<ResampleDescriptor>& resample() const noexcept
     {
         return _resample;
     }
 
-    const std::shared_ptr<TensorDescriptor>& dx() const noexcept
+    std::shared_ptr<TensorDescriptor> dx() const
     {
-        return _dx;
+        return descriptorOf(record().dx());
     }
 
-    const std::shared_ptr<TensorDescriptor>& dy() const noexcept
+    std::shared_ptr<TensorDescriptor> dy() const
     {
-        return _dy;
+        return descriptorOf(record().dy());
     }
 
     // Null when unset; always set for MAXPOOL.
-    const std::shared_ptr<TensorDescriptor>& index() const noexcept
+    std::shared_ptr<TensorDescriptor> index() const
     {
-        return _index;
+        return descriptorOf(record().index());
     }
 
 protected:
     void finalizeImpl() override
     {
-        std::shared_ptr<ResampleDescriptor> resample = requireReferent<ResampleDescriptor>(
+        static const v8::ResampleBackwardOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_ALPHA),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_BETA),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_XDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_YDESC),
+        };
+        std::shared_ptr<ResampleDescriptor> resample = referent<ResampleDescriptor>(
             CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DESC, CUDNN_BACKEND_RESAMPLE_DESCRIPTOR);
-        std::shared_ptr<TensorDescriptor> dx
-            = requireTensor(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC);
-        std::shared_ptr<TensorDescriptor> dy
-            = requireTensor(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC);
-        std::shared_ptr<TensorDescriptor> index = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC);
-        // hipDNN's max-pool backward needs the forward pass's argmax indices.
-        if(resample->mode() == ResampleMode_t::MAXPOOL && !index)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            "CUDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC is required for "
-                            "CUDNN_RESAMPLE_MAXPOOL");
-        }
-        requireScaling(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_ALPHA, 1.0);
-        requireScaling(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_BETA, 0.0);
-        // hipDNN's resample backward has no X or Y slot.
-        rejectUnlowerable(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_XDESC, " for resample backward");
-        rejectUnlowerable(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_YDESC, " for resample backward");
-
+        const std::shared_ptr<TensorDescriptor> dx
+            = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC);
+        const std::shared_ptr<TensorDescriptor> dy
+            = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC);
+        const std::shared_ptr<TensorDescriptor> index
+            = tensor(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC);
+        std::shared_ptr<const v8::ResampleBackwardOperationRecord> record = v8::makeOperationRecord(
+            v8::ResampleBackwardOperationInputs{
+                recordOf(resample),
+                recordOf(dx),
+                recordOf(dy),
+                recordOf(index),
+                realAttribute(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_ALPHA),
+                realAttribute(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_BETA),
+                isSet(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_XDESC),
+                isSet(CUDNN_ATTR_OPERATION_RESAMPLE_BWD_YDESC)},
+            s_labels);
         _resample = std::move(resample);
-        _dx = std::move(dx);
-        _dy = std::move(dy);
-        _index = std::move(index);
-        setTarget(OperationTarget::RESAMPLE_BWD);
+        commit(std::move(record), {dx, dy, index});
     }
 
 private:
+    const v8::ResampleBackwardOperationRecord& record() const
+    {
+        return typedRecord<v8::ResampleBackwardOperationRecord>();
+    }
+
     std::shared_ptr<ResampleDescriptor> _resample;
-    std::shared_ptr<TensorDescriptor> _dx;
-    std::shared_ptr<TensorDescriptor> _dy;
-    std::shared_ptr<TensorDescriptor> _index;
 };
 
 // Lowers, by target(), to BatchnormAttributes (BATCH + TRAINING),
@@ -901,209 +700,161 @@ public:
     {
     }
 
-    // Valid once finalized.
-    NormFwdPhase_t phase() const noexcept
+    NormFwdPhase_t phase() const
     {
-        return _phase;
+        return record().phase();
     }
 
-    // cuDNN norm operations carry no compute type; every hipDNN norm node needs
-    // one.
     static constexpr DataType_t computeType() noexcept
     {
-        return DataType_t::FLOAT;
+        return v8::NormForwardOperationRecord::computeType();
     }
 
-    // LAYERNORM only (0 otherwise); hipDNN has no cuDNN counterpart attribute.
-    std::int64_t normalizedDimCount() const noexcept
+    std::int64_t normalizedDimCount() const
     {
-        return _normalizedDimCount;
+        return record().normalizedDimCount();
     }
 
-    const std::shared_ptr<TensorDescriptor>& x() const noexcept
+    std::shared_ptr<TensorDescriptor> x() const
     {
-        return _tensors.x;
+        return descriptorOf(record().x());
     }
 
-    const std::shared_ptr<TensorDescriptor>& scale() const noexcept
+    std::shared_ptr<TensorDescriptor> scale() const
     {
-        return _tensors.scale;
+        return descriptorOf(record().scale());
     }
 
-    // Optional for RMSNORM.
-    const std::shared_ptr<TensorDescriptor>& bias() const noexcept
+    std::shared_ptr<TensorDescriptor> bias() const
     {
-        return _tensors.bias;
+        return descriptorOf(record().bias());
     }
 
-    // Null for BATCHNORM_INFERENCE: hipDNN's batchnorm inference has no epsilon.
-    const std::shared_ptr<TensorDescriptor>& epsilon() const noexcept
+    std::shared_ptr<TensorDescriptor> epsilon() const
     {
-        return _tensors.epsilon;
+        return descriptorOf(record().epsilon());
     }
 
-    const std::shared_ptr<TensorDescriptor>& y() const noexcept
+    std::shared_ptr<TensorDescriptor> y() const
     {
-        return _tensors.y;
+        return descriptorOf(record().y());
     }
 
-    // Outputs except for BATCHNORM_INFERENCE, where they are inputs. RMSNORM
-    // never has a mean; its inverse variance lowers to INV_RMS.
-    const std::shared_ptr<TensorDescriptor>& mean() const noexcept
+    std::shared_ptr<TensorDescriptor> mean() const
     {
-        return _tensors.mean;
+        return descriptorOf(record().mean());
     }
 
-    const std::shared_ptr<TensorDescriptor>& invVariance() const noexcept
+    std::shared_ptr<TensorDescriptor> invVariance() const
     {
-        return _tensors.invVariance;
+        return descriptorOf(record().invVariance());
     }
 
-    // BATCHNORM only, all or none. The exponential average factor lowers to
-    // MOMENTUM.
-    const std::shared_ptr<TensorDescriptor>& inputRunningMean() const noexcept
+    std::shared_ptr<TensorDescriptor> inputRunningMean() const
     {
-        return _tensors.inputRunningMean;
+        return descriptorOf(record().inputRunningMean());
     }
 
-    const std::shared_ptr<TensorDescriptor>& inputRunningVariance() const noexcept
+    std::shared_ptr<TensorDescriptor> inputRunningVariance() const
     {
-        return _tensors.inputRunningVariance;
+        return descriptorOf(record().inputRunningVariance());
     }
 
-    const std::shared_ptr<TensorDescriptor>& expAvgFactor() const noexcept
+    std::shared_ptr<TensorDescriptor> expAvgFactor() const
     {
-        return _tensors.expAvgFactor;
+        return descriptorOf(record().expAvgFactor());
     }
 
-    const std::shared_ptr<TensorDescriptor>& outputRunningMean() const noexcept
+    std::shared_ptr<TensorDescriptor> outputRunningMean() const
     {
-        return _tensors.outputRunningMean;
+        return descriptorOf(record().outputRunningMean());
     }
 
-    const std::shared_ptr<TensorDescriptor>& outputRunningVariance() const noexcept
+    std::shared_ptr<TensorDescriptor> outputRunningVariance() const
     {
-        return _tensors.outputRunningVariance;
+        return descriptorOf(record().outputRunningVariance());
     }
 
 protected:
     void finalizeImpl() override
     {
-        const NormFamily family
-            = requireNormFamily(requireAttribute(scalarAttribute<cudnnBackendNormMode_t>(
-                                                     CUDNN_ATTR_OPERATION_NORM_FWD_MODE),
-                                                 CUDNN_ATTR_OPERATION_NORM_FWD_MODE),
-                                CUDNN_ATTR_OPERATION_NORM_FWD_MODE);
-        const cudnnBackendNormFwdPhase_t rawPhase = requireAttribute(
-            scalarAttribute<cudnnBackendNormFwdPhase_t>(CUDNN_ATTR_OPERATION_NORM_FWD_PHASE),
-            CUDNN_ATTR_OPERATION_NORM_FWD_PHASE);
-        const NormFwdPhase_t phase = requireFe(rawPhase, CUDNN_ATTR_OPERATION_NORM_FWD_PHASE);
-        OperationTarget target = OperationTarget::RMSNORM;
-        if(family == NormFamily::BATCH)
-        {
-            target = rawPhase == CUDNN_NORM_FWD_TRAINING ? OperationTarget::BATCHNORM
-                                                         : OperationTarget::BATCHNORM_INFERENCE;
-        }
-        else if(family == NormFamily::LAYER)
-        {
-            target = OperationTarget::LAYERNORM;
-        }
+        static const v8::NormForwardOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_MODE),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_PHASE),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_XDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_SCALE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_BIAS_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_EPSILON_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_YDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_MEAN_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_INV_VARIANCE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_MEAN_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_VAR_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_EXP_AVG_FACTOR_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_MEAN_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_VAR_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_FWD_PEER_STAT_DESCS),
+        };
+        const std::shared_ptr<TensorDescriptor> x = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_XDESC);
+        const std::shared_ptr<TensorDescriptor> scale
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_SCALE_DESC);
+        const std::shared_ptr<TensorDescriptor> bias
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_BIAS_DESC);
+        const std::shared_ptr<TensorDescriptor> epsilon
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_EPSILON_DESC);
+        const std::shared_ptr<TensorDescriptor> y = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_YDESC);
+        const std::shared_ptr<TensorDescriptor> mean
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_MEAN_DESC);
+        const std::shared_ptr<TensorDescriptor> invVariance
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_INV_VARIANCE_DESC);
+        const std::shared_ptr<TensorDescriptor> inputRunningMean
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_MEAN_DESC);
+        const std::shared_ptr<TensorDescriptor> inputRunningVariance
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_VAR_DESC);
+        const std::shared_ptr<TensorDescriptor> expAvgFactor
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_EXP_AVG_FACTOR_DESC);
+        const std::shared_ptr<TensorDescriptor> outputRunningMean
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_MEAN_DESC);
+        const std::shared_ptr<TensorDescriptor> outputRunningVariance
+            = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_VAR_DESC);
 
-        Tensors tensors;
-        tensors.x = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_XDESC);
-        tensors.scale = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_SCALE_DESC);
-        if(target == OperationTarget::BATCHNORM_INFERENCE)
-        {
-            tensors.mean = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_MEAN_DESC);
-            tensors.invVariance = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_INV_VARIANCE_DESC);
-        }
-        if(target != OperationTarget::RMSNORM)
-        {
-            tensors.bias = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_BIAS_DESC);
-        }
-        if(target != OperationTarget::BATCHNORM_INFERENCE)
-        {
-            tensors.epsilon = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_EPSILON_DESC);
-        }
-        tensors.y = requireTensor(CUDNN_ATTR_OPERATION_NORM_FWD_YDESC);
-        if(target == OperationTarget::BATCHNORM || target == OperationTarget::LAYERNORM)
-        {
-            requireAllOrNone({CUDNN_ATTR_OPERATION_NORM_FWD_MEAN_DESC,
-                              CUDNN_ATTR_OPERATION_NORM_FWD_INV_VARIANCE_DESC});
-        }
-        if(target == OperationTarget::BATCHNORM)
-        {
-            requireAllOrNone({CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_MEAN_DESC,
-                              CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_VAR_DESC,
-                              CUDNN_ATTR_OPERATION_NORM_FWD_EXP_AVG_FACTOR_DESC,
-                              CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_MEAN_DESC,
-                              CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_VAR_DESC});
-        }
-
-        rejectUnlowerable(CUDNN_ATTR_OPERATION_NORM_FWD_PEER_STAT_DESCS, "");
-        if(target != OperationTarget::BATCHNORM)
-        {
-            for(const cudnnBackendAttributeName_t name :
-                {CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_MEAN_DESC,
-                 CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_VAR_DESC,
-                 CUDNN_ATTR_OPERATION_NORM_FWD_EXP_AVG_FACTOR_DESC,
-                 CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_MEAN_DESC,
-                 CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_VAR_DESC})
-            {
-                rejectUnlowerable(name, " for this normalization mode and phase");
-            }
-        }
-        if(target == OperationTarget::RMSNORM)
-        {
-            rejectUnlowerable(CUDNN_ATTR_OPERATION_NORM_FWD_MEAN_DESC, " for CUDNN_RMS_NORM");
-            tensors.bias = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_BIAS_DESC);
-        }
-        if(target != OperationTarget::BATCHNORM_INFERENCE)
-        {
-            tensors.mean = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_MEAN_DESC);
-            tensors.invVariance = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_INV_VARIANCE_DESC);
-        }
-        if(target == OperationTarget::BATCHNORM)
-        {
-            tensors.inputRunningMean
-                = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_MEAN_DESC);
-            tensors.inputRunningVariance
-                = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_INPUT_RUNNING_VAR_DESC);
-            tensors.expAvgFactor = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_EXP_AVG_FACTOR_DESC);
-            tensors.outputRunningMean
-                = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_MEAN_DESC);
-            tensors.outputRunningVariance
-                = tensor(CUDNN_ATTR_OPERATION_NORM_FWD_OUTPUT_RUNNING_VAR_DESC);
-        }
-
-        _normalizedDimCount = target == OperationTarget::LAYERNORM
-                                  ? layernormNormalizedDimCount(*tensors.x, *tensors.scale)
-                                  : 0;
-        _phase = phase;
-        _tensors = std::move(tensors);
-        setTarget(target);
+        v8::NormForwardOperationInputs inputs;
+        inputs.mode = scalarAttribute<cudnnBackendNormMode_t>(CUDNN_ATTR_OPERATION_NORM_FWD_MODE);
+        inputs.phase
+            = scalarAttribute<cudnnBackendNormFwdPhase_t>(CUDNN_ATTR_OPERATION_NORM_FWD_PHASE);
+        inputs.x = recordOf(x);
+        inputs.scale = recordOf(scale);
+        inputs.bias = recordOf(bias);
+        inputs.epsilon = recordOf(epsilon);
+        inputs.y = recordOf(y);
+        inputs.mean = recordOf(mean);
+        inputs.invVariance = recordOf(invVariance);
+        inputs.inputRunningMean = recordOf(inputRunningMean);
+        inputs.inputRunningVariance = recordOf(inputRunningVariance);
+        inputs.expAvgFactor = recordOf(expAvgFactor);
+        inputs.outputRunningMean = recordOf(outputRunningMean);
+        inputs.outputRunningVariance = recordOf(outputRunningVariance);
+        inputs.hasPeerStats = isSet(CUDNN_ATTR_OPERATION_NORM_FWD_PEER_STAT_DESCS);
+        commit(v8::makeOperationRecord(inputs, s_labels),
+               {x,
+                scale,
+                bias,
+                epsilon,
+                y,
+                mean,
+                invVariance,
+                inputRunningMean,
+                inputRunningVariance,
+                expAvgFactor,
+                outputRunningMean,
+                outputRunningVariance});
     }
 
 private:
-    struct Tensors
+    const v8::NormForwardOperationRecord& record() const
     {
-        std::shared_ptr<TensorDescriptor> x;
-        std::shared_ptr<TensorDescriptor> scale;
-        std::shared_ptr<TensorDescriptor> bias;
-        std::shared_ptr<TensorDescriptor> epsilon;
-        std::shared_ptr<TensorDescriptor> y;
-        std::shared_ptr<TensorDescriptor> mean;
-        std::shared_ptr<TensorDescriptor> invVariance;
-        std::shared_ptr<TensorDescriptor> inputRunningMean;
-        std::shared_ptr<TensorDescriptor> inputRunningVariance;
-        std::shared_ptr<TensorDescriptor> expAvgFactor;
-        std::shared_ptr<TensorDescriptor> outputRunningMean;
-        std::shared_ptr<TensorDescriptor> outputRunningVariance;
-    };
-
-    NormFwdPhase_t _phase = NormFwdPhase_t::NOT_SET;
-    std::int64_t _normalizedDimCount = 0;
-    Tensors _tensors;
+        return typedRecord<v8::NormForwardOperationRecord>();
+    }
 };
 
 // Lowers, by target(), to BatchnormBackwardAttributes,
@@ -1117,147 +868,114 @@ public:
     {
     }
 
-    // Valid once finalized.
     static constexpr DataType_t computeType() noexcept
     {
-        return DataType_t::FLOAT;
+        return v8::NormBackwardOperationRecord::computeType();
     }
 
-    // LAYERNORM_BACKWARD only (0 otherwise).
-    std::int64_t normalizedDimCount() const noexcept
+    std::int64_t normalizedDimCount() const
     {
-        return _normalizedDimCount;
+        return record().normalizedDimCount();
     }
 
-    const std::shared_ptr<TensorDescriptor>& x() const noexcept
+    std::shared_ptr<TensorDescriptor> x() const
     {
-        return _tensors.x;
+        return descriptorOf(record().x());
     }
 
-    const std::shared_ptr<TensorDescriptor>& dy() const noexcept
+    std::shared_ptr<TensorDescriptor> dy() const
     {
-        return _tensors.dy;
+        return descriptorOf(record().dy());
     }
 
-    const std::shared_ptr<TensorDescriptor>& scale() const noexcept
+    std::shared_ptr<TensorDescriptor> scale() const
     {
-        return _tensors.scale;
+        return descriptorOf(record().scale());
     }
 
-    // Never set for RMSNORM_BACKWARD.
-    const std::shared_ptr<TensorDescriptor>& mean() const noexcept
+    std::shared_ptr<TensorDescriptor> mean() const
     {
-        return _tensors.mean;
+        return descriptorOf(record().mean());
     }
 
-    // Lowers to INV_RMS for RMSNORM_BACKWARD.
-    const std::shared_ptr<TensorDescriptor>& invVariance() const noexcept
+    std::shared_ptr<TensorDescriptor> invVariance() const
     {
-        return _tensors.invVariance;
+        return descriptorOf(record().invVariance());
     }
 
-    // LAYERNORM_BACKWARD only: hipDNN's batchnorm backward has no epsilon.
-    const std::shared_ptr<TensorDescriptor>& epsilon() const noexcept
+    std::shared_ptr<TensorDescriptor> epsilon() const
     {
-        return _tensors.epsilon;
+        return descriptorOf(record().epsilon());
     }
 
-    const std::shared_ptr<TensorDescriptor>& dx() const noexcept
+    std::shared_ptr<TensorDescriptor> dx() const
     {
-        return _tensors.dx;
+        return descriptorOf(record().dx());
     }
 
-    const std::shared_ptr<TensorDescriptor>& dscale() const noexcept
+    std::shared_ptr<TensorDescriptor> dscale() const
     {
-        return _tensors.dscale;
+        return descriptorOf(record().dscale());
     }
 
-    // Optional for RMSNORM_BACKWARD (compute_dbias follows its presence).
-    const std::shared_ptr<TensorDescriptor>& dbias() const noexcept
+    std::shared_ptr<TensorDescriptor> dbias() const
     {
-        return _tensors.dbias;
+        return descriptorOf(record().dbias());
     }
 
 protected:
     void finalizeImpl() override
     {
-        const NormFamily family
-            = requireNormFamily(requireAttribute(scalarAttribute<cudnnBackendNormMode_t>(
-                                                     CUDNN_ATTR_OPERATION_NORM_BWD_MODE),
-                                                 CUDNN_ATTR_OPERATION_NORM_BWD_MODE),
-                                CUDNN_ATTR_OPERATION_NORM_BWD_MODE);
-        OperationTarget target = OperationTarget::RMSNORM_BACKWARD;
-        if(family == NormFamily::BATCH)
-        {
-            target = OperationTarget::BATCHNORM_BACKWARD;
-        }
-        else if(family == NormFamily::LAYER)
-        {
-            target = OperationTarget::LAYERNORM_BACKWARD;
-        }
+        static const v8::NormBackwardOperationLabels s_labels{
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_MODE),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_XDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_DYDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_SCALE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_MEAN_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_INV_VARIANCE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_EPSILON_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_DXDESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_DSCALE_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_DBIAS_DESC),
+            attributeLabel(CUDNN_ATTR_OPERATION_NORM_BWD_PEER_STAT_DESCS),
+        };
+        const std::shared_ptr<TensorDescriptor> x = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_XDESC);
+        const std::shared_ptr<TensorDescriptor> dy = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_DYDESC);
+        const std::shared_ptr<TensorDescriptor> scale
+            = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_SCALE_DESC);
+        const std::shared_ptr<TensorDescriptor> mean
+            = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_MEAN_DESC);
+        const std::shared_ptr<TensorDescriptor> invVariance
+            = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_INV_VARIANCE_DESC);
+        const std::shared_ptr<TensorDescriptor> epsilon
+            = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_EPSILON_DESC);
+        const std::shared_ptr<TensorDescriptor> dx = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_DXDESC);
+        const std::shared_ptr<TensorDescriptor> dscale
+            = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_DSCALE_DESC);
+        const std::shared_ptr<TensorDescriptor> dbias
+            = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_DBIAS_DESC);
 
-        Tensors tensors;
-        tensors.x = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_XDESC);
-        tensors.dy = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_DYDESC);
-        tensors.scale = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_SCALE_DESC);
-        // Without saved statistics hipDNN's batchnorm backward would need the
-        // epsilon, which it cannot take.
-        if(target == OperationTarget::BATCHNORM_BACKWARD)
-        {
-            tensors.mean = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_MEAN_DESC);
-        }
-        if(target != OperationTarget::LAYERNORM_BACKWARD)
-        {
-            tensors.invVariance = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_INV_VARIANCE_DESC);
-        }
-        tensors.dx = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_DXDESC);
-        tensors.dscale = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_DSCALE_DESC);
-        if(target != OperationTarget::RMSNORM_BACKWARD)
-        {
-            tensors.dbias = requireTensor(CUDNN_ATTR_OPERATION_NORM_BWD_DBIAS_DESC);
-        }
-        if(target == OperationTarget::LAYERNORM_BACKWARD)
-        {
-            requireAllOrNone({CUDNN_ATTR_OPERATION_NORM_BWD_MEAN_DESC,
-                              CUDNN_ATTR_OPERATION_NORM_BWD_INV_VARIANCE_DESC});
-        }
-
-        rejectUnlowerable(CUDNN_ATTR_OPERATION_NORM_BWD_PEER_STAT_DESCS, "");
-        if(target == OperationTarget::RMSNORM_BACKWARD)
-        {
-            rejectUnlowerable(CUDNN_ATTR_OPERATION_NORM_BWD_MEAN_DESC, " for CUDNN_RMS_NORM");
-            tensors.dbias = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_DBIAS_DESC);
-        }
-        if(target == OperationTarget::LAYERNORM_BACKWARD)
-        {
-            tensors.mean = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_MEAN_DESC);
-            tensors.invVariance = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_INV_VARIANCE_DESC);
-            tensors.epsilon = tensor(CUDNN_ATTR_OPERATION_NORM_BWD_EPSILON_DESC);
-        }
-
-        _normalizedDimCount = target == OperationTarget::LAYERNORM_BACKWARD
-                                  ? layernormNormalizedDimCount(*tensors.x, *tensors.scale)
-                                  : 0;
-        _tensors = std::move(tensors);
-        setTarget(target);
+        v8::NormBackwardOperationInputs inputs;
+        inputs.mode = scalarAttribute<cudnnBackendNormMode_t>(CUDNN_ATTR_OPERATION_NORM_BWD_MODE);
+        inputs.x = recordOf(x);
+        inputs.dy = recordOf(dy);
+        inputs.scale = recordOf(scale);
+        inputs.mean = recordOf(mean);
+        inputs.invVariance = recordOf(invVariance);
+        inputs.epsilon = recordOf(epsilon);
+        inputs.dx = recordOf(dx);
+        inputs.dscale = recordOf(dscale);
+        inputs.dbias = recordOf(dbias);
+        inputs.hasPeerStats = isSet(CUDNN_ATTR_OPERATION_NORM_BWD_PEER_STAT_DESCS);
+        commit(v8::makeOperationRecord(inputs, s_labels),
+               {x, dy, scale, mean, invVariance, epsilon, dx, dscale, dbias});
     }
 
 private:
-    struct Tensors
+    const v8::NormBackwardOperationRecord& record() const
     {
-        std::shared_ptr<TensorDescriptor> x;
-        std::shared_ptr<TensorDescriptor> dy;
-        std::shared_ptr<TensorDescriptor> scale;
-        std::shared_ptr<TensorDescriptor> mean;
-        std::shared_ptr<TensorDescriptor> invVariance;
-        std::shared_ptr<TensorDescriptor> epsilon;
-        std::shared_ptr<TensorDescriptor> dx;
-        std::shared_ptr<TensorDescriptor> dscale;
-        std::shared_ptr<TensorDescriptor> dbias;
-    };
-
-    std::int64_t _normalizedDimCount = 0;
-    Tensors _tensors;
+        return typedRecord<v8::NormBackwardOperationRecord>();
+    }
 };
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
