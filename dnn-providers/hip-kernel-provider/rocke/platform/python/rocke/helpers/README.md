@@ -18,6 +18,11 @@ top-level skeleton that names what's special about the kernel (the
 shape, the atom, the descriptor for non-bijective addressing) and
 leaves the boilerplate to the helpers.
 
+That only holds if each new kernel adds the helpers it needs. When a
+kernel needs logic nothing here covers, write the helper in the same
+PR, even for a new family. Where it goes and what it needs (C++ mirror,
+byte-identity): [platform/AGENTS.md](../../../AGENTS.md#helpers-placement).
+
 ## What's here
 
 ```text

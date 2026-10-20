@@ -83,6 +83,10 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **Write helpers as you write kernels** — repeated or detail-heavy IR becomes a
+  named helper in the same PR, new families included. The C++ mirror is not a
+  reason to inline: inlined IR is mirrored too. Placement:
+  [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
