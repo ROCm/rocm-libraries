@@ -1764,6 +1764,8 @@ namespace TensileLite
             if(m_mxDataGenerator == 1)
                 throw std::runtime_error("mx-data-generator=1 is not supported for grouped GEMM");
 
+            // May rewrite the host inputs the reference reads; over-reporting is safe.
+            ++m_inputEpoch;
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 if(m_problemDependentData)
@@ -1841,6 +1843,8 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGemm const& problem)
         {
+            // May rewrite the host inputs the reference reads; over-reporting is safe.
+            ++m_inputEpoch;
             // Always drive mxDataGenerator for MX sides so data and scales stay
             // coordinated. initializeMXData also produces the arch-appropriate
             // swizzled scale into gpuInput.valid (when m_mxScaleLayout selects
@@ -2105,6 +2109,7 @@ namespace TensileLite
                                   m_vdata[i].init,
                                   p.second.cpuInput.valid.get(),
                                   tensors[i]);
+                        ++m_inputEpoch; // host input rewritten
                     }
                 }
             };
@@ -2250,7 +2255,7 @@ namespace TensileLite
 
                   // Past the cache checks: A/B data and scales are really regenerated below.
                   sideOutcome.name = "pre_solution_mx_side_regenerate";
-                  ++m_mxInputGeneration;
+                  ++m_inputEpoch;
 
                   if(pristineData.initDescriptor.size() == 1)
                       pristineData.initDescriptor[0] = dataDesc;

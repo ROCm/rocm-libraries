@@ -37,12 +37,32 @@
 
 #include <cstddef>
 #include <iostream>
+#include <cstdlib>
+#include <cstring>
 #include <sstream>
+#include <stdexcept>
+#include <vector>
 
 namespace TensileLite
 {
     namespace Client
     {
+        namespace
+        {
+            // Routes the SolveCPU timers to the per-solution categories for its lifetime.
+            struct PerSolutionRefScope
+            {
+                explicit PerSolutionRefScope(PerSolutionRefKind kind)
+                {
+                    g_perSolutionRefKind = kind;
+                }
+                ~PerSolutionRefScope()
+                {
+                    g_perSolutionRefKind = PerSolutionRefKind::None;
+                }
+            };
+        }
+
         ReferenceValidator::ReferenceValidator(po::variables_map const&                    args,
                                                std::vector<std::shared_ptr<DeviceContext>> devices)
             : m_devices(std::move(devices))
@@ -50,6 +70,11 @@ namespace TensileLite
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
             m_printValids        = args["print-valids"].as<bool>();
             m_printMax           = args["print-max"].as<int>();
+            m_verifyReferenceReuse = args.count("verify-reference-reuse")
+                                     && args["verify-reference-reuse"].as<bool>();
+            // Also settable from the environment so the pytest-driven client runs can enable it.
+            if(char const* env = std::getenv("TENSILELITE_VERIFY_REFERENCE_REUSE"))
+                m_verifyReferenceReuse = m_verifyReferenceReuse || std::string(env) == "1";
 
             m_printTensorA             = args["print-tensor-a"].as<bool>();
             m_printTensorB             = args["print-tensor-b"].as<bool>();
@@ -134,9 +159,10 @@ namespace TensileLite
                     for(auto const& reference : m_referenceInputs)
                         SolveCPU(problem, reference.get(), m_elementsToValidate);
                 }
-                m_referenceInputGeneration.clear();
+                // The references now match the inputs as of these epochs.
+                m_referenceInputEpoch.clear();
                 for(auto const& ctx : m_devices)
-                    m_referenceInputGeneration.push_back(ctx->dataInit->mxInputGeneration());
+                    m_referenceInputEpoch.push_back(ctx->dataInit->inputEpoch());
             }
         }
 
@@ -154,46 +180,56 @@ namespace TensileLite
 
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                // Match DataInitialization MX gate.
-                if(!isMXProblem(*gemm))
-                    return;
-                // Only recompute when DataInitialization actually refreshes MX
-                // inputs for this solution (solution-dependent HostPreSwizzle).
-                // Otherwise the preProblem reference is unchanged, so reuse it
-                // instead of paying a full dense reference GEMM per solution.
+                // DataInitialization::preSolution() has already refreshed the inputs for this
+                // solution (it is registered before this listener; inputEpoch() throws if not).
+                // The reference only needs recomputing if that actually rewrote them. The epoch
+                // is the single source of truth for that; do not re-derive it from arch/format.
                 for(size_t d = 0; d < m_devices.size(); d++)
                 {
-                    auto& dataInit = *m_devices[d]->dataInit;
-                    if(!dataInit.referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    auto const epoch = m_devices[d]->dataInit->inputEpoch(solution);
+                    if(epoch == m_referenceInputEpoch[d])
                     {
-                        // Gate said "inputs are unchanged": reference reused. Count-only marker.
-                        ScopedTimer timer("pre_solution_ref_skipped");
+                        if(m_verifyReferenceReuse)
+                            verifyReferenceReuse(*gemm, d);
+                        else
+                        {
+                            // Inputs unchanged: the existing reference is still correct
+                            // (count-only marker).
+                            ScopedTimer timer("pre_solution_ref_skipped");
+                        }
                         continue;
                     }
+                    m_referenceInputEpoch[d] = epoch;
 
-                    // This check only says the inputs *could* change for this solution. Compare
-                    // the generation counter to see whether DataInitialization actually
-                    // regenerated them since the reference was last computed. The recompute below
-                    // happens either way; the category tells necessary and redundant ones apart.
-                    size_t const generation    = dataInit.mxInputGeneration();
-                    bool const   inputsChanged = generation != m_referenceInputGeneration[d];
-                    m_referenceInputGeneration[d] = generation;
-
-                    ScopedTimer timer(inputsChanged
-                                          ? "cpu_reference_gemm_per_solution_inputs_changed"
-                                          : "cpu_reference_gemm_per_solution_inputs_unchanged");
-                    struct PerSolutionScope
-                    {
-                        PerSolutionScope(bool changed)
-                        {
-                            g_perSolutionRefKind = changed ? PerSolutionRefKind::InputsChanged
-                                                           : PerSolutionRefKind::InputsUnchanged;
-                        }
-                        ~PerSolutionScope() { g_perSolutionRefKind = PerSolutionRefKind::None; }
-                    } perSolutionScope(inputsChanged);
+                    ScopedTimer timer("cpu_reference_gemm_per_solution_inputs_changed");
+                    PerSolutionRefScope perSolutionScope(PerSolutionRefKind::InputsChanged);
                     SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
                 }
             }
+        }
+
+        void ReferenceValidator::verifyReferenceReuse(ContractionProblemGemm const& problem,
+                                                      size_t                        device)
+        {
+            auto* ref = dynamic_cast<ContractionInputs*>(m_referenceInputs[device].get());
+            if(ref == nullptr || ref->d == nullptr)
+                return;
+
+            size_t const         bytes = problem.d().totalAllocatedBytes();
+            std::vector<uint8_t> reused(bytes);
+            std::memcpy(reused.data(), ref->d, bytes);
+
+            {
+                ScopedTimer timer("cpu_reference_gemm_per_solution_inputs_unchanged");
+                PerSolutionRefScope perSolutionScope(PerSolutionRefKind::InputsUnchanged);
+                SolveCPU(m_problem, m_referenceInputs[device].get(), m_elementsToValidate);
+            }
+
+            if(std::memcmp(reused.data(), ref->d, bytes) != 0)
+                throw std::runtime_error(
+                    "Stale CPU reference: DataInitialization reported unchanged inputs "
+                    "(input epoch not advanced) but recomputing the reference gave a "
+                    "different result. A writer of the host inputs is missing an epoch bump.");
         }
 
         bool ReferenceValidator::needMoreRunsInSolution() const

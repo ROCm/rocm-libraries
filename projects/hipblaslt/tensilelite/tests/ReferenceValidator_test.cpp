@@ -146,6 +146,10 @@ namespace
             auto validator = std::make_unique<ReferenceValidator>(
                 args, std::vector<std::shared_ptr<DeviceContext>>{device});
             validator->setReporter(reporter);
+            // DataInitialization is registered before the validator, as in main: the
+            // validator reads the input epoch of a solution DataInitialization has seen.
+            dataInit->preProblem(problem);
+            dataInit->preSolution(&solution);
             validator->preProblem(problem);
             validator->preSolution(&solution);
             gpu = std::dynamic_pointer_cast<ContractionInputs>(dataInit->prepareGPUInputs(problem));
