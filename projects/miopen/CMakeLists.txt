@@ -240,6 +240,11 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     HIP HIPOC HIPNOGPU)
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    message(FATAL_ERROR
+        "The OpenCL backend was removed from MIOpen in ROCm 7.0.2.1. "
+        "Configure with a supported backend: HIP, HIPOC, or HIPNOGPU.")
+endif()
 
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
