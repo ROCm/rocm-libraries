@@ -314,7 +314,14 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsyncGfx11Policy
         constexpr index_t v_buffer = lds_seq.at(number<k0_loops + k1_loops - 1>{});
         constexpr index_t slot_elements = Parent::template GetSingleSmemElementSpaceSize<Problem>();
         static_assert(GetIndependentVElementSpaceSize<Problem>() <= slot_elements);
-        return v_buffer * slot_elements * sizeof(typename Problem::VDataType);
+        constexpr index_t offset = v_buffer * slot_elements * sizeof(typename Problem::VDataType);
+        // K buffers are packed from offset 0 with their own stride, not by slot, so the
+        // slot-based placement alone does not keep V clear of the K prefetch.
+        constexpr index_t k_bytes =
+            MakeKLdsLoadBlockDescriptor<Problem>().get_element_space_size() *
+            sizeof(typename Problem::KDataType);
+        static_assert(offset >= k_bytes, "independent-V LDS tile overlaps the K buffers");
+        return offset;
     }
 
     template <typename Problem>
@@ -365,7 +372,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsyncGfx11Policy
 
         if constexpr(Problem::kKVMemoryLayout ==
                          BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
-                     kKPerBlock == 32 && (kNPerBlock == 32 || kNPerBlock == 256))
+                     kKPerBlock == 32 && kNPerBlock == 32)
         {
             return make_naive_tensor_descriptor(
                 make_tuple(number<Parent::Base::NumKVLdsBuffers * kNPerBlock>{},
@@ -395,6 +402,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsyncGfx11Policy
         constexpr index_t N2 = get_warp_size() / K0;
         constexpr index_t N1 = kBlockSize / get_warp_size();
         constexpr index_t N0 = kNPerBlock / (N2 * N1);
+        // GetAlignmentK depends on CK_TILE_FMHA_BATCH_PREFILL_GFX11_DISABLE_KVEC4, so check
+        // that the chosen vector still tiles the K block exactly.
+        static_assert((kNPerBlock * kKPerBlock) % kBlockSize == 0 && kKPerBlock % K1 == 0 &&
+                          get_warp_size() % K0 == 0 && kNPerBlock % (N2 * N1) == 0,
+                      "K DRAM tile does not divide evenly across the block");
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<1>,

@@ -602,12 +602,8 @@ def main():
                     run_kwargs["num_splits"] = ns
                 if api_family == "batch_prefill":
                     run_kwargs["page_size"] = config.page_size
-                    run_kwargs["kv_layout"] = _KV_LAYOUT_INT.get(
-                        config.kv_memory_layout, 0
-                    )
-                    run_kwargs["kv_lookup"] = _KV_LOOKUP_INT.get(
-                        config.kv_lookup_table, 0
-                    )
+                    run_kwargs["kv_layout"] = _KV_LAYOUT_INT[config.kv_memory_layout]
+                    run_kwargs["kv_lookup"] = _KV_LOOKUP_INT[config.kv_lookup_table]
                 bench_jobs.append(
                     (config, setup, run_kwargs, ns, api_family, is_causal)
                 )

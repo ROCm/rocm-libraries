@@ -43,11 +43,9 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
         problem.requested_family == FmhaKernelFamily::FwdSplitKvCombine ||
         sig.family == FmhaKernelFamily::BatchPrefill ||
         problem.requested_family == FmhaKernelFamily::BatchPrefill;
-    const bool compare_kv_layout_lookup =
-        sig.family == FmhaKernelFamily::BatchPrefill ||
-        problem.requested_family == FmhaKernelFamily::BatchPrefill;
-    const bool exact_page_size = sig.family == FmhaKernelFamily::BatchPrefill ||
-                                 problem.requested_family == FmhaKernelFamily::BatchPrefill;
+    // Batch prefill compares KV layout/lookup and needs an exact page size.
+    const bool is_batch_prefill = sig.family == FmhaKernelFamily::BatchPrefill ||
+                                  problem.requested_family == FmhaKernelFamily::BatchPrefill;
 
     if(!(sig.family == problem.requested_family && sig.data_type == problem.data_type &&
          sig.is_group_mode == problem.is_group_mode && sig.is_v_rowmajor == problem.is_v_rowmajor &&
@@ -65,7 +63,7 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
         return false;
     }
 
-    if(compare_kv_layout_lookup)
+    if(is_batch_prefill)
     {
         if(sig.kv_memory_layout != problem.kv_memory_layout ||
            sig.kv_lookup_table != problem.kv_lookup_table)
@@ -75,7 +73,7 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
     }
 
     if(compare_page_size && sig.page_size != problem.page_size &&
-       (exact_page_size || sig.page_size > 1))
+       (is_batch_prefill || sig.page_size > 1))
     {
         return false;
     }

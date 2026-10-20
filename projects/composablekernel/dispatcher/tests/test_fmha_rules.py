@@ -260,6 +260,30 @@ class TestValidateConfig(unittest.TestCase):
         self.assertFalse(r.valid)
         self.assertTrue(any("N0=32" in e for e in r.errors), r.errors)
 
+    def test_gfx1100_batch_prefill_gfx11_rejects_unbuilt_shapes(self):
+        """Each of these passes every per-clause check, so only the shape set catches it.
+
+        A GEMM0 split along N is the dangerous one: PermuteWarpGemmCToA's buffer-size
+        assertion still holds, but each warp owns P columns that gemm1 needs elsewhere.
+        """
+        cases = {
+            "gemm0 split along N": {"wave": [4, 2, 1, 8, 1, 1, 1, 1, 1]},
+            "gemm1 split along N": {"wave": [8, 1, 1, 4, 2, 1, 1, 1, 1]},
+            "gemm0 fewer warps than gemm1": {"wave": [4, 1, 1, 8, 1, 1, 1, 1, 1]},
+            "M0=256": {"tile": [256, 32, 32, 128, 32, 128]},
+            "M0=64": {"tile": [64, 32, 32, 128, 32, 128]},
+            "32x32x8 warp tile": {"warp": [32, 32, 8, 32, 32, 8, 16, 16, 16]},
+        }
+        for name, override in cases.items():
+            with self.subTest(name):
+                cfg = _gfx11_batch_prefill_config()
+                cfg["algorithm"].update(override)
+                r = validate_config(cfg, SPECS)
+                self.assertFalse(r.valid)
+                self.assertTrue(
+                    any("tile/wave/warp shapes" in e for e in r.errors), r.errors
+                )
+
     def test_splitkv_combine_bn1_must_be_32(self):
         cfg = _base_config(family="fwd_splitkv_combine", pipeline="qr")
         cfg["algorithm"]["tile"][3] = 64

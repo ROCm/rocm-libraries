@@ -253,6 +253,27 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
+    // Clang reports only the first failing static_assert of a class, so the specific
+    // gfx11 checks come before the general UseIndependentVBuffer one.
+#if !CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V
+    static_assert(!Policy::kUseSyncKLoad,
+                  "batch_prefill_gfx11 has no fallback gemm1; "
+                  "CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V must stay 1");
+#endif
+    // PermuteWarpGemmCToA moves P within a warp only, so both gemms need the same
+    // M-only warp layout; the permute and the K LDS layout also assume 16x16x16 WMMA
+    // and K0=32.
+    static_assert(
+        !Policy::kUseSyncKLoad ||
+            (BlockFmhaShape::kK0 == 32 &&
+             std::is_same_v<typename BlockFmhaShape::Gemm0BlockWarps,
+                            typename BlockFmhaShape::Gemm1BlockWarps> &&
+             BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1 &&
+             BlockFmhaShape::Gemm0BlockWarps::at(number<2>{}) == 1 &&
+             std::is_same_v<typename BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 16>> &&
+             std::is_same_v<typename BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 16>>),
+        "batch_prefill_gfx11 requires K0=32, the same M-only block warps for both gemms "
+        "and 16x16x16 warp tiles");
 #if defined(__gfx11__)
     // Device-only: kBlockSize uses get_warp_size(), which is 64 on the host pass.
     // The gfx11 policy has no fallback gemm1 - ARegBSmem cannot consume a gfx11 WMMA P tile.

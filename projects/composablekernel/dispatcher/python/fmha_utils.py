@@ -863,6 +863,17 @@ class FmhaRunner:
                     success=False,
                     error="batch_prefill runner packs linear KV only",
                 )
+            # The C runner sizes its host->device copies from prob, not from these arrays.
+            for name, arr, want in (
+                ("Q", Q_c, prob.q_shape()),
+                ("K", K_c, prob.k_shape()),
+                ("V", V_c, prob.v_shape()),
+            ):
+                if arr.shape != want:
+                    return FmhaResult(
+                        success=False,
+                        error=f"batch_prefill {name} shape {arr.shape} != problem {want}",
+                    )
             K_c = _pack_linear_paged(K_c)
             V_c = _pack_linear_paged(V_c)
             Q_api = np.ascontiguousarray(np.transpose(Q_c, (0, 2, 1, 3)))
