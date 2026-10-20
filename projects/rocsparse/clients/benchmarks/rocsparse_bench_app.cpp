@@ -27,6 +27,7 @@
 #include "rocsparse_random.hpp"
 #include <chrono>
 #include <fstream>
+#include <sstream>
 
 rocsparse_bench_app* rocsparse_bench_app::s_instance = nullptr;
 
@@ -211,32 +212,6 @@ void rocsparse_bench_app::export_item(std::ostream& out, rocsparse_bench_timing_
 
 rocsparse_status rocsparse_bench_app::export_file()
 {
-    //
-    // Describe the device the cases actually ran on. run_case() selects it through
-    // rocsparse_bench, so the current device is the benchmarked one.
-    //
-    // This is done before the output file is opened: opening it truncates any existing
-    // file, so failing afterwards would leave a truncated, invalid json behind.
-    //
-    int              device_id  = 0;
-    const hipError_t get_status = hipGetDevice(&device_id);
-    if(get_status != hipSuccess)
-    {
-        std::cerr << "rocsparse-bench error: cannot get the current device: "
-                  << hipGetErrorString(get_status) << " (" << get_status << ")" << std::endl;
-        return rocsparse_status_internal_error;
-    }
-
-    hipDeviceProp_t  prop;
-    const hipError_t prop_status = hipGetDeviceProperties(&prop, device_id);
-    if(prop_status != hipSuccess)
-    {
-        std::cerr << "rocsparse-bench error: cannot get properties of device ID " << device_id
-                  << ": " << hipGetErrorString(prop_status) << " (" << prop_status << ")"
-                  << std::endl;
-        return rocsparse_status_internal_error;
-    }
-
     const char* ofilename = this->m_bench_cmdlines.get_ofilename();
     if(ofilename == nullptr)
     {
@@ -248,22 +223,23 @@ rocsparse_status rocsparse_bench_app::export_file()
         ofilename = "a.json";
     }
 
-    std::ofstream out(ofilename);
-
     int   sample_argc;
     char* sample_argv[64];
 
-    rocsparse_status status;
-
     //
-    // Write header.
+    // Write the header before opening the file. define_results_json queries the
+    // current device, and opening the file truncates any existing json.
     //
-    status = define_results_json(out, prop);
+    std::ostringstream header;
+    rocsparse_status   status = define_results_json(header);
     if(status != rocsparse_status_success)
     {
         std::cerr << "run_cases failed at line " << __LINE__ << std::endl;
         return status;
     }
+
+    std::ofstream out(ofilename);
+    out << header.str();
 
     //
     // Loop over cases.
@@ -328,9 +304,28 @@ rocsparse_status
     return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse_bench_app::define_results_json(std::ostream&          out,
-                                                          const hipDeviceProp_t& prop)
+rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
 {
+    // The current device is the one run_case() selected, not device 0.
+    int              device_id  = 0;
+    const hipError_t get_status = hipGetDevice(&device_id);
+    if(get_status != hipSuccess)
+    {
+        std::cerr << "rocsparse-bench error: cannot get the current device: "
+                  << hipGetErrorString(get_status) << " (" << get_status << ")" << std::endl;
+        return rocsparse_status_internal_error;
+    }
+
+    hipDeviceProp_t  prop{};
+    const hipError_t prop_status = hipGetDeviceProperties(&prop, device_id);
+    if(prop_status != hipSuccess)
+    {
+        std::cerr << "rocsparse-bench error: cannot get properties of device ID " << device_id
+                  << ": " << hipGetErrorString(prop_status) << " (" << prop_status << ")"
+                  << std::endl;
+        return rocsparse_status_internal_error;
+    }
+
     out << "{" << std::endl;
     auto        end      = std::chrono::system_clock::now();
     std::time_t end_time = std::chrono::system_clock::to_time_t(end);
