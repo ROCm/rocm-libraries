@@ -587,6 +587,30 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // IsEdgeTile for callers that never store rows at or beyond y_total: the padding rows of
+    // the last query tile do not make a tile an edge tile. With a bottom-right causal mask
+    // (y == y_total) IsEdgeTile reports every key tile of a partial last query tile as an edge
+    // tile, which forces the per-pixel check on the whole key loop of that tile.
+    template <index_t TileHeight, index_t TileWidth>
+    CK_TILE_HOST_DEVICE constexpr auto
+    IsEdgeTileForValidRows(index_t i_y, index_t i_x, number<TileHeight>, number<TileWidth>) const
+    {
+        if constexpr(!IsMasking)
+        {
+            return (i_x + TileWidth) > x_total;
+        }
+        else
+        {
+            index_t i_x_end = i_x + TileWidth;
+            index_t i_y_end = min(i_y + TileHeight, y_total);
+
+            bool top_right_edge   = i_x_end > min(i_y + x, x_total);
+            bool bottom_left_edge = i_y_end > min(i_x + y, y_total);
+
+            return top_right_edge || bottom_left_edge;
+        }
+    }
+
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
     CK_TILE_HOST_DEVICE constexpr index_t GetYTotal() const { return y_total; }
