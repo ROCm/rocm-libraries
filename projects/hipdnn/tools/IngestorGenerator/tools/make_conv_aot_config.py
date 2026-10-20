@@ -19,11 +19,12 @@ exits non-zero, unless ``--skip-unsupported`` is given. Entries
 are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
 key that ties a packaged kernel back to the identity it was built from.
 
-The shipped catalog is rocKE's full forward sweep, one list per dtype
-(``configs/gfx950_conv_fwd_aot_<dtype>.instances.json``), written by
-``tools/enumerate_conv_aot_instances.py``; ``--instances`` takes them all as one
-catalog, packaged as the shipped engine of the identities' architecture
-(``configs/gfx942_conv_fwd_aot_<dtype>.instances.json`` for gfx942).
+Each shipped catalog is a curated list of rocKE sweep kernels
+(``configs/<arch>_conv_fwd_aot.labels.txt``), one instance list per dtype
+(``configs/<arch>_conv_fwd_aot_<dtype>.instances.json``) written by
+``tools/enumerate_conv_aot_instances.py --arch <arch>``; ``--instances`` takes them
+all as one catalog, packaged as the shipped engine of the identities' architecture
+(:data:`TARGETS`: hipkernel:Gfx950ConvFwdAot or hipkernel:Gfx942ConvFwdAot).
 ``--engine-name`` emits the same instances as another engine over the
 shipped engine's native code: the test-only seed is
 ``configs/gfx950_conv_fwd_aot_seed.instances.json`` as
@@ -40,6 +41,10 @@ keyed by kernel UUID, so this tool re-derives each kernel's UUID from its
         --output "$WORK"/aot.yaml
     python generate.py --config "$WORK"/aot.yaml --output-dir "$GENERATED" --force
     python tools/make_conv_aot_config.py --stabilize-ids "$GENERATED"/<...>/*.kdp.json
+
+``--stabilize-ids`` derives the ids of ``--engine-name``, hipkernel:Gfx950ConvFwdAot
+when it is not given: for the gfx942 bundle pass
+``--engine-name hipkernel:Gfx942ConvFwdAot``.
 
 The config splits the catalog into packs, so KDPs, by ``--sharding``
 (:data:`SHARDINGS`): by default one per dtype, pipeline and K loop, plus one per

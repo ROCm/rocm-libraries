@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for tools/make_conv_aot_config.py and the shipped hipkernel:Gfx950ConvFwdAot bundle."""
+"""Tests for tools/make_conv_aot_config.py and the shipped hipkernel:Gfx950ConvFwdAot
+and hipkernel:Gfx942ConvFwdAot bundles."""
 
 import copy
 import dataclasses
@@ -35,6 +36,8 @@ _PROVIDER = (
     _REPO / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
 )
 _SHIPPED_DIR = _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_aot"
+_GFX942_ENGINE = "hipkernel:Gfx942ConvFwdAot"
+_GFX942_DIR = _PROVIDER / "descriptors/rocKE/gfx942_conv_fwd_aot"
 _SEED_DIR = _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed"
 #: One small shipped shard, for the tests that rewrite a KDP.
 _SEED_KDP = _SEED_DIR / "gfx950_conv_fwd_aot_seed_fp16.kdp.json"
@@ -54,7 +57,21 @@ _BUNDLES = {
         "k-loop",
     ),
     "seed": (_SEED_ENGINE, _SEED_DIR, [_INSTANCES], "dtype"),
+    "gfx942": (
+        _GFX942_ENGINE,
+        _GFX942_DIR,
+        [
+            _CONFIGS / f"gfx942_conv_fwd_aot_{dtype}.instances.json"
+            for dtype in ("bf16", "fp16")
+        ],
+        "k-loop",
+    ),
 }
+#: The architecture each bundle is packaged for, and so whose native code it runs.
+_BUNDLE_ARCH = {"product": "gfx950", "seed": "gfx950", "gfx942": "gfx942"}
+#: What a promoted UHD model adds to a shipped bundle after generation: its model files
+#: under heuristics/, and its id in the UED's sort_kernel_catalog default.
+_PROMOTED_MODELS = "heuristics"
 #: Worker processes that convert a catalog.
 _JOBS = min(32, os.cpu_count() or 1)
 
@@ -104,6 +121,15 @@ def bundle(request, catalogs):
     return engine, folder, catalogs[request.param], sharding
 
 
+def _shipped_files(folder):
+    """The bundle's descriptor files; a promoted model's directory is not one."""
+    for path in sorted(folder.iterdir()):
+        if path.is_dir():
+            assert path.name == _PROMOTED_MODELS, path
+            continue
+        yield path
+
+
 def test_seed_config_is_what_the_tool_generates(seed_specs):
     assert yaml.safe_load(_CONFIG.read_text()) == tool.build_config(
         seed_specs, _SEED_ENGINE
@@ -127,14 +153,16 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
         expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
         assert kernel["kernel_source"]["spec"] == expected
         assert kernel["metadata"] == expected
-        assert kernel["kernel_source"]["builder"] == "build_gfx950_conv_fwd_aot"
+        assert kernel["kernel_source"]["builder"] == (
+            tool.TARGETS[spec.ARCH]["builder"]
+        )
         assert kernel["id"] == tool.kernel_uuid(spec.instance_id, engine)
 
 
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
-    names = sorted(path.name for path in folder.iterdir())
+    names = sorted(path.name for path in _shipped_files(folder))
     shards = {tool.shard_name(spec, sharding) for spec in specs}
     assert names == sorted(
         [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
@@ -142,7 +170,7 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
         + ["kernel_dtype_matches_graph.umd.json"]
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
-    for path in folder.iterdir():
+    for path in _shipped_files(folder):
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
     # No operation-scoped matcher: every shard names the shared kernel matcher only.
     for kdp in folder.glob("*.kdp.json"):
@@ -150,23 +178,31 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
 
 
 def test_committed_instance_lists_and_census_are_below_the_hosting_size_limit():
-    census = (
+    packs = (
         _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
-        "/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks.cpp"
+        "/kernel_ingestor_engine/packs"
     )
-    for path in _BUNDLES["product"][2] + [census]:
+    censuses = [packs / "TestGfx950ConvFwdAotPacks.cpp"]
+    censuses += [packs / "TestGfx942ConvFwdAotPacks.cpp"]
+    for path in _BUNDLES["product"][2] + _BUNDLES["gfx942"][2] + censuses:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
 
 
 def test_every_bundle_runs_the_shipped_engines_native_code():
-    for engine, folder, _, _ in _BUNDLES.values():
+    for name, (engine, folder, _, _) in _BUNDLES.items():
+        prefix = tool.TARGETS[_BUNDLE_ARCH[name]]["prefix"]
         ued = json.loads((folder / f"{tool.engine_slug(engine)}.ued.json").read_text())
         assert ued["name"] == engine
-        assert ued["graph_match"] == {
-            "native": "hipkernel.gfx950_conv_fwd_aot.graph_match"
-        }
+        assert ued["graph_match"] == {"native": f"hipkernel.{prefix}.graph_match"}
         udd = json.loads((folder / f"{tool.engine_slug(engine)}.udd.json").read_text())
-        assert udd["dispatch_symbol"] == "hipkernel.gfx950_conv_fwd_aot.dispatch"
+        assert udd["dispatch_symbol"] == f"hipkernel.{prefix}.dispatch"
+
+
+def test_every_bundle_holds_its_architectures_specs(catalogs):
+    """Each committed catalog converts to the spec class of its architecture."""
+    for name, specs in catalogs.items():
+        target = tool.TARGETS[_BUNDLE_ARCH[name]]
+        assert {type(spec).__name__ for spec in specs} == {target["spec_class"]}
 
 
 def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
@@ -265,7 +301,8 @@ def test_generated_config_expands_to_one_kernel_per_instance(tmp_path, seed_spec
     ("change", "reason"),
     [
         ({"direction": "wgrad"}, "forward implicit-GEMM"),
-        ({"arch": "gfx942"}, "forward implicit-GEMM"),
+        ({"arch": "gfx90a"}, "forward implicit-GEMM"),
+        ({"arch": "gfx942"}, "warp_tile"),
         ({"algorithm": "direct_grouped"}, "forward implicit-GEMM"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
@@ -351,12 +388,12 @@ def forward_direct_identities():
     ]
 
 
-#: Forward identities per dtype and algorithm in rocKE's direct sweep grid.
+#: Forward identities per dtype and algorithm in rocKE's gfx950 direct sweep grid.
 _DIRECT_GRID = {
-    "direct_depthwise": 54,
-    "direct_depthwise_spatial": 30,
+    "direct_depthwise": 57,
+    "direct_depthwise_spatial": 36,
     "direct_depthwise_tiled": 1536,
-    "direct_depthwise_col": 540,
+    "direct_depthwise_col": 594,
     "direct_grouped": 80,
     "direct_nongrouped": 3058,
 }
@@ -438,7 +475,7 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
 @pytest.mark.parametrize(
     ("algorithm", "change", "reason"),
     [
-        ("direct_depthwise", {"arch": "gfx942"}, "gfx950"),
+        ("direct_depthwise", {"arch": "gfx90a"}, "not a forward direct identity"),
         (
             "direct_depthwise",
             {"algorithm": "direct_depthwise_dgrad"},
@@ -525,12 +562,15 @@ def test_direct_instances_are_variants_stating_their_own_fields(
         for f in dataclasses.fields(Gfx950ConvFwdAotSpec)
         if f.name in defaults
     } == defaults
+    # group_merge, last, is a gfx942 KMD field only (test_the_gfx942_config_*).
     assert [f.name for f in dataclasses.fields(Gfx950ConvFwdAotSpec)] == list(
-        tool.SPEC_ORDER + tuple(defaults)
+        tool.SPEC_ORDER + tuple(defaults) + ("group_merge",)
     )
     assert config["engine"]["knobs"] == list(tool.ENGINE_KNOBS)
     kmd = {field["name"] for field in config["kmd_fields"]}
     assert set(tool.ENGINE_KNOBS) <= kmd
+    assert "group_merge" not in kmd
+    assert "group_merge" not in config["specialization"]["metadata_fields"]
 
 
 def test_the_seed_runs_every_direct_variant_knob(
@@ -991,3 +1031,282 @@ def test_native_direct_launch_cases_are_the_adapters():
         for v in ("TILED", "COL", "GROUPED", "NONGROUPED")
         for ok in (True, False)
     }
+
+
+# ---- Regenerating a shipped bundle ----
+
+
+def _unpromoted(ued):
+    """``ued`` as the generator emits it: a promoted UHD model is listed after the
+    generated native selector in its sort_kernel_catalog default."""
+    default = ued.get("sort_kernel_catalog", {}).get("default")
+    if isinstance(default, list):
+        ued = dict(ued, sort_kernel_catalog=dict(ued["sort_kernel_catalog"]))
+        ued["sort_kernel_catalog"]["default"] = default[0]
+    return ued
+
+
+def test_shipped_bundle_is_what_the_tools_regenerate(tmp_path, bundle):
+    """make_conv_aot_config.py, generate.py and --stabilize-ids, the documented flow,
+    reproduce every shipped descriptor of the bundle byte for byte from the committed
+    instance lists. The generator mints new document ids on every run, so those are
+    mapped to the shipped ones (by file) first; a promoted model's additions are not
+    the generator's."""
+    from codegen.generator import IngestorGenerator
+
+    engine, folder, specs, sharding = bundle
+    config_path = tmp_path / "aot.yaml"
+    config_path.write_text(
+        tool.dump_config(tool.build_config(specs, engine, sharding=sharding))
+    )
+    templates = Path(__file__).resolve().parent.parent / "templates"
+    IngestorGenerator(templates).render(load_config(config_path), tmp_path / "gen")
+    slug = tool.engine_slug(engine)
+    generated = tmp_path / "gen" / "descriptors" / "rocKE" / slug
+    for kdp in generated.glob("*.kdp.json"):
+        tool.stabilize_ids(kdp, engine)
+
+    shipped = {path.name: path for path in _shipped_files(folder)}
+    assert sorted(path.name for path in generated.iterdir()) == sorted(shipped)
+    document_ids = {
+        json.loads(path.read_text())["id"]: json.loads(shipped[path.name].read_text())[
+            "id"
+        ]
+        for path in generated.iterdir()
+    }
+    for path in sorted(generated.iterdir()):
+        text = tool._UUID.sub(
+            lambda match: document_ids.get(match.group(0), match.group(0)),
+            path.read_text(),
+        )
+        expected = shipped[path.name].read_text()
+        if path.name == f"{slug}.ued.json":
+            assert json.loads(text) == _unpromoted(json.loads(expected)), path.name
+        else:
+            assert text == expected, path.name
+
+
+# ---- hipkernel:Gfx942ConvFwdAot ----
+
+
+@pytest.fixture(scope="module")
+def gfx942_identities():
+    return _listed(_BUNDLES["gfx942"][2])
+
+
+def test_the_gfx942_config_is_the_gfx942_engine(catalogs):
+    """A gfx942 catalog is packaged as hipkernel:Gfx942ConvFwdAot, built by its own
+    builder, with the gfx950 engine's KMD, knobs and metadata plus group_merge."""
+    from builders.common.convolution_forward import Gfx942ConvFwdAotSpec
+
+    specs = catalogs["gfx942"]
+    config = tool.build_config(specs, sharding="k-loop")
+    assert config["engine"]["name"] == _GFX942_ENGINE
+    assert tool.TARGETS["gfx942"]["engine"] == _GFX942_ENGINE
+    assert "native_symbols_from" not in config["engine"]
+    assert config["authored_subpath"] == "rocKE/gfx942_conv_fwd_aot"
+    for pack in config["packs"]:
+        assert pack["arch"] == ["gfx942"]
+        assert pack["kernel_defaults"]["builder"] == "build_gfx942_conv_fwd_aot"
+
+    gfx950 = tool.build_config(catalogs["product"], sharding="k-loop")
+    assert config["kmd_fields"] == gfx950["kmd_fields"] + [
+        {
+            "name": "group_merge",
+            "type": "int",
+            "default_value": 1,
+            "builder_default": True,
+        }
+    ]
+    assert config["engine"]["knobs"] == list(tool.ENGINE_KNOBS) + ["group_merge"]
+    metadata = config["specialization"]["metadata_fields"]
+    assert metadata == gfx950["specialization"]["metadata_fields"] + ["group_merge"]
+    assert config["specialization"]["bindings"]["group_merge"] == {
+        "field": "group_merge"
+    }
+    # The KMD default is the spec's: an unmerged descriptor omits it.
+    defaults = {f.name: f.default for f in dataclasses.fields(Gfx942ConvFwdAotSpec)}
+    assert defaults["group_merge"] == tool.GROUP_MERGE_DEFAULT == 1
+
+    # Another engine name over the gfx942 catalog borrows the gfx942 engine's symbols.
+    other = tool.build_config(specs[:3], "hipkernel:Gfx942ConvFwdAotSubset")
+    assert other["engine"]["native_symbols_from"] == _GFX942_ENGINE
+    explicit = tool.build_config(specs[:3], _GFX942_ENGINE)
+    assert "native_symbols_from" not in explicit["engine"]
+
+
+def test_gfx942_merged_instances_are_their_own_variant(catalogs):
+    """Merged instances, 30 per dtype, are the gfx942_conv_fwd_aot_gm_ variant, which
+    states group_merge last; no other variant states it, so an unmerged descriptor
+    leaves it to its KMD default."""
+    specs = catalogs["gfx942"]
+    merged = {spec.instance_id for spec in specs if spec.is_merged}
+    assert len(merged) == 60
+    assert sum(spec.is_merged for spec in specs if spec.dtype == "fp16") == 30
+    config = tool.build_config(specs, sharding="k-loop")
+    seen = set()
+    for pack in config["packs"]:
+        for variant in pack["variants"]:
+            name = variant["name"]
+            ids = {shape["instance_id"] for shape in variant["shapes"]}
+            assert name.startswith("gfx942_conv_fwd_aot_"), name
+            if name == "gfx942_conv_fwd_aot_gm_{dtype}_{instance_id}":
+                assert variant["spec_order"] == list(tool.SPEC_ORDER) + ["group_merge"]
+                assert variant["metadata"] == variant["spec_order"]
+                for shape in variant["shapes"]:
+                    assert shape["group_merge"] in (4, 16, 32), shape
+                    # The builder derives the widths; the identity records 0.
+                    assert (
+                        shape["vector_size_a"],
+                        shape["vector_size_b"],
+                        shape["vector_size_c"],
+                    ) == (0, 0, 0)
+                seen |= ids
+            else:
+                assert not ids & merged, name
+                assert "group_merge" not in variant["spec_order"], name
+    assert seen == merged
+
+
+def test_gfx942_merged_and_unmerged_tiles_are_separate_instances(gfx942_identities):
+    """group_merge is part of the identity: a merged instance and the unmerged
+    instance of the same tile have different instance ids and kernel symbols."""
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    identity = next(i for i in gfx942_identities if i.get("group_merge", 1) > 1)
+    spec, why = tool.instance_spec(identity)
+    assert spec is not None and spec.is_merged, why
+    assert spec.group_merge == identity["group_merge"]
+    unmerged = KernelIdentity.from_dict(dict(identity, group_merge=1))
+    assert unmerged.stable_hash() != spec.instance_id
+
+
+def test_one_catalog_packages_one_architecture(catalogs):
+    with pytest.raises(ValueError, match="one architecture"):
+        tool.build_config(catalogs["seed"][:2] + catalogs["gfx942"][:2])
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"streamk": "on"}, "streamk"),
+        ({"streamk_reduction": "atomic"}, "streamk_reduction"),
+        ({"prefetch_addr": True}, "prefetch_addr"),
+        ({"uniform_k_decode": True}, "uniform_k_decode"),
+        ({"split_k": 2}, "split_k"),
+    ],
+)
+def test_gfx942_identity_fields_outside_the_launch_are_refused(
+    gfx942_identities, change, reason
+):
+    identity = next(
+        i
+        for i in gfx942_identities
+        if i["algorithm"] == "implicit_gemm" and i.get("group_merge", 1) == 1
+    )
+    assert tool.instance_spec(identity)[0] is not None
+    spec, why = tool.instance_spec(dict(identity, **change))
+    assert spec is None and f"{reason}=" in why, why
+
+
+def test_group_merge_is_packaged_only_for_gfx942(gfx942_identities):
+    """The gfx950 engine has no merged instances: its KMD has no group_merge, so a
+    merged gfx950 identity is refused, as before."""
+    identity = next(i for i in gfx942_identities if i.get("group_merge", 1) > 1)
+    spec, why = tool.instance_spec(dict(identity, arch="gfx950"))
+    assert spec is None and "group_merge=" in why, why
+
+
+def test_gfx942_kernel_ids_are_in_their_own_namespace(catalogs):
+    """The gfx942 engine is not PRODUCT_ENGINE, so --stabilize-ids derives its ids
+    under a namespace of its own name: an id never repeats across the two engines,
+    which load into one process."""
+    for spec in catalogs["gfx942"][:20]:
+        own = tool.kernel_uuid(spec.instance_id, _GFX942_ENGINE)
+        assert own != tool.kernel_uuid(spec.instance_id)
+        namespace = uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, _GFX942_ENGINE)
+        assert own == str(uuid.uuid5(namespace, spec.instance_id))
+
+
+_GFX942_PROFILE = _CONFIGS / "gfx942_conv_fwd_aot.profile.yaml"
+
+
+def test_the_gfx942_profile_is_the_engines(catalogs):
+    """configs/gfx942_conv_fwd_aot.profile.yaml names the gfx942 engine, its knobs and
+    adapter entry points, and its launch surfaces pass launch_surface.py --check."""
+    from builders.common import convolution_forward
+
+    profile = yaml.safe_load(_GFX942_PROFILE.read_text())
+    config = tool.build_config(catalogs["gfx942"])
+    target = tool.TARGETS["gfx942"]
+    assert profile["engine"]["name"] == config["engine"]["name"]
+    assert profile["engine"]["knobs"] == config["engine"]["knobs"]
+    assert profile["builder"] == target["builder"]
+    assert (profile["slug"], profile["arch"]) == (target["prefix"], "gfx942")
+    assert profile["authored_subpath"] == config["authored_subpath"]
+    kmd = {field["name"]: field for field in config["kmd_fields"]}
+    for field in profile["kmd_fields"]:
+        assert field == kmd[field["name"]], field
+    for scope in ("dispatch", "predicate"):
+        assert callable(getattr(convolution_forward, profile[scope]["function"]))
+    failures, unguarded = launch_surface.check(profile, _REPO)
+    assert (failures, unguarded) == ([], [])
+
+
+# ---- The gfx942 GPU suite's selected counts ----
+
+
+def _gfx942_suite_graphs():
+    """gfx942AotGraphs(): name, problem, the direct and implicit counts selected."""
+    text = _GPU_SUITE.read_text()
+    start = text.index("gfx942AotGraphs()\n{")
+    rows = _SEED_GRAPH_ROW.findall(text[start : text.index("return s_graphs", start)])
+    assert len(rows) >= 24, "gfx942AotGraphs() rows not found; keep one row per line"
+    for name, problem, *row in rows:
+        values = tuple(int(v) for v in problem.split(","))
+        yield name, values, tuple(int(v) for v in row)
+
+
+def _gfx942_selected(specs, problem, dtype):
+    from builders.common.convolution_forward import (
+        gfx942_conv_fwd_aot_runtime_candidates,
+    )
+
+    return gfx942_conv_fwd_aot_runtime_candidates(
+        _runtime_problem(problem, dtype), [s for s in specs if s.dtype == dtype]
+    )
+
+
+def test_gfx942_gpu_suite_counts_are_the_python_runtime_candidates(catalogs):
+    """IntegrationGpuGfx942ConvFwdAot states, per graph, how many instances of each
+    family the engine selects, the same in both dtypes; they must be what
+    gfx942_conv_fwd_aot_runtime_candidates counts over the committed lists, never more
+    than serve, with every serving direct instance kept."""
+    specs = catalogs["gfx942"]
+    for name, problem, row in _gfx942_suite_graphs():
+        for dtype in ("fp16", "bf16"):
+            selected = _gfx942_selected(specs, problem, dtype)
+            direct = sum(spec.is_direct for spec in selected)
+            counted = (direct, len(selected) - direct)
+            assert counted == row, (name, dtype)
+            serving = _serving_counts(specs, problem, dtype)
+            assert counted[0] == serving[0] and counted[1] <= serving[1], (name, dtype)
+
+
+def test_gfx942_gpu_suite_selects_every_instance_for_some_graph(catalogs):
+    """The suite pins every selected instance of each graph, so every instance of the
+    catalog, merged ones included, has to be selected for at least one graph."""
+    specs = catalogs["gfx942"]
+    graphs = [problem for _, problem, _ in _gfx942_suite_graphs()]
+    for dtype in ("fp16", "bf16"):
+        selected = {
+            spec.instance_id
+            for problem in graphs
+            for spec in _gfx942_selected(specs, problem, dtype)
+        }
+        missing = [
+            spec
+            for spec in specs
+            if spec.dtype == dtype and spec.instance_id not in selected
+        ]
+        assert not missing, (dtype, missing)

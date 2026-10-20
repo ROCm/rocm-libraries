@@ -8,9 +8,9 @@ The catalog is a curated list of rocKE kernels (:data:`CATALOG_LABELS`): one
 back into the identity. Implicit-GEMM entries must be identities of the AOT sweep
 grid (``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
 direct sweep grid (``benchmarks/common/direct_kernel_sweep.py``), for the architecture
-(``--arch``: gfx950, the default, or gfx942), forward, fp16 or bf16. Every entry must also convert: an identity
-``make_conv_aot_config.py`` refuses, because the packaged launch does not run it,
-fails the run. Nothing is dropped silently.
+(``--arch``: gfx950, the default, or gfx942), forward, fp16 or bf16. Every entry must
+also convert: an identity ``make_conv_aot_config.py`` refuses, because the packaged
+launch does not run it, fails the run. Nothing is dropped silently.
 
 Which instance serves a given problem, and which serving instances run, is decided
 at runtime, not here.
@@ -25,6 +25,11 @@ plain default, plus every field that differs from its default;
 
     python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" \\
         --output-dir configs
+    python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" \\
+        --arch gfx942 --output-dir configs
+
+Identities hash their LLVM flavor, so run it under the flavor the lists record
+(``ROCKE_LLVM_FLAVOR=llvm22`` for the shipped ones).
 """
 
 from __future__ import annotations

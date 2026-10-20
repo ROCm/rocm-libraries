@@ -96,10 +96,33 @@ def _label(identity):
     return KernelIdentity.from_dict(identity).label()
 
 
+def _labels(arch):
+    return Path(tool.CATALOG_LABELS.format(arch=arch))
+
+
 @pytest.fixture(scope="module")
-def catalog():
-    """The committed catalog's identities, in file order."""
-    return tool.read_labels(tool.CATALOG_LABELS)
+def catalogs():
+    """Each architecture's committed catalog, its identities in file order."""
+    return {arch: tool.read_labels(_labels(arch)) for arch in tool.ARCHES}
+
+
+@pytest.fixture(scope="module")
+def catalog(catalogs):
+    """The gfx950 catalog, the default architecture's."""
+    return catalogs[tool.ARCH]
+
+
+def _skip_unless_flavor(flavor):
+    """Identities hash their LLVM flavor, so the committed ones are only this
+    process's sweep identities when it lowers to the same flavor."""
+    from benchmarks.common.kernel_cache import current_llvm_flavor
+
+    if flavor != current_llvm_flavor():
+        pytest.skip(
+            f"the catalog is for LLVM flavor {flavor}, this process lowers to "
+            f"{current_llvm_flavor()}, so every identity differs "
+            "(set ROCKE_LLVM_FLAVOR)"
+        )
 
 
 def test_the_catalog_lists_568_kernels_per_dtype_the_same_in_both(catalog):
@@ -125,24 +148,66 @@ def test_the_catalog_lists_568_kernels_per_dtype_the_same_in_both(catalog):
     )
 
 
-def test_every_catalog_entry_is_a_forward_sweep_identity(catalog):
-    """Each entry is a gfx950 forward identity of rocKE's implicit-GEMM AOT grid or of
-    its direct grid."""
+def test_the_gfx942_catalog_lists_553_kernels_per_dtype_the_same_in_both(catalogs):
+    """372 implicit-GEMM kernels per dtype, 30 of them group-merged, and 181 direct
+    ones over all six direct algorithms; the two dtypes list the same kernels, all
+    gfx942."""
+    by_dtype = collections.defaultdict(list)
+    for identity in catalogs["gfx942"]:
+        by_dtype[identity["dtype_a"]].append(identity)
+    assert sorted(by_dtype) == sorted(tool.DTYPES)
+    for identities in by_dtype.values():
+        assert {i["arch"] for i in identities} == {"gfx942"}
+        kinds = collections.Counter(
+            (i["algorithm"], i.get("group_merge", 1) > 1) for i in identities
+        )
+        assert kinds == {
+            ("implicit_gemm", False): 342,
+            ("implicit_gemm", True): 30,
+            ("direct_nongrouped", False): 98,
+            ("direct_depthwise_tiled", False): 64,
+            ("direct_grouped", False): 11,
+            ("direct_depthwise", False): 4,
+            ("direct_depthwise_spatial", False): 3,
+            ("direct_depthwise_col", False): 1,
+        }
+
+    def without_dtype(identity):
+        return tuple(
+            sorted((k, v) for k, v in identity.items() if not k.startswith("dtype_"))
+        )
+
+    assert sorted(map(without_dtype, by_dtype["fp16"])) == sorted(
+        map(without_dtype, by_dtype["bf16"])
+    )
+
+
+@pytest.mark.parametrize("arch", tool.ARCHES)
+def test_every_catalog_entry_is_a_forward_sweep_identity(catalogs, arch):
+    """Each entry is a forward identity of rocKE's implicit-GEMM AOT grid or of its
+    direct grid, for the catalog's architecture."""
+    _skip_unless_flavor(catalogs[arch][0]["llvm_flavor"])
     jobs = min(16, os.cpu_count() or 1)
     for dtype in tool.DTYPES:
-        swept = tool.sweep_hashes(dtype, jobs)
-        listed = [i for i in catalog if i["dtype_a"] == dtype]
+        swept = tool.sweep_hashes(dtype, jobs, arch)
+        listed = [i for i in catalogs[arch] if i["dtype_a"] == dtype]
         assert all(tool.stable_hash(i) in swept for i in listed), dtype
 
 
-def test_every_catalog_entry_converts(catalog):
-    """The packaged launch runs every listed kernel: the converter refuses none."""
+@pytest.mark.parametrize("arch", tool.ARCHES)
+def test_every_catalog_entry_converts(catalogs, arch):
+    """The packaged launch runs every listed kernel: the converter refuses none, and
+    packages each as the spec class of the catalog's architecture."""
     import make_conv_aot_config
 
+    catalog = catalogs[arch]
     assert tool.validate(catalog, min(16, os.cpu_count() or 1)) == []
     for identity in catalog:
         spec, _ = make_conv_aot_config.instance_spec(identity)
         assert spec.is_direct == (identity["algorithm"] != "implicit_gemm")
+        assert spec.ARCH == arch
+        assert type(spec).__name__ == make_conv_aot_config.TARGETS[arch]["spec_class"]
+        assert spec.group_merge == identity.get("group_merge", 1)
 
 
 def test_read_labels_skips_comments_and_blank_lines(tmp_path, synthetic_grid):
@@ -211,22 +276,35 @@ def test_written_instances_are_one_compact_entry_per_line(tmp_path, synthetic_gr
     ]
 
 
-def _fake_main(tmp_path, monkeypatch, identities, swept=None):
+def _fake_main(tmp_path, monkeypatch, identities, swept=None, arch=None):
     """Run main() over a label file of ``identities``, every one of them a sweep
-    identity unless ``swept`` says otherwise. Returns main()'s status and the written
-    lists, by dtype."""
+    identity unless ``swept`` says otherwise, for ``arch`` (main()'s default when
+    None). Returns main()'s status and the written lists, by dtype."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     labels = tmp_path / "labels.txt"
     labels.write_text("".join(f"{_label(i)}\n" for i in identities))
     hashes = {tool.stable_hash(i) for i in identities} if swept is None else swept
-    monkeypatch.setattr(tool, "sweep_hashes", lambda dtype, jobs: hashes)
+    asked = []
+
+    def fake_sweep_hashes(dtype, jobs, arch=tool.ARCH):
+        asked.append(arch)
+        return hashes
+
+    monkeypatch.setattr(tool, "sweep_hashes", fake_sweep_hashes)
     out = tmp_path / "lists"
     argv = ["--rocke-root", str(_ROCKE), "--labels", str(labels)]
+    argv += ["--arch", arch] if arch else []
     status = tool.main(argv + ["--output-dir", str(out), "--jobs", "1"])
+    # The sweeps checked are the requested architecture's.
+    assert set(asked) <= {arch or tool.ARCH}
     if not out.exists():
         return status, None
     return status, {
-        dtype: json.loads((out / tool.INSTANCE_LIST.format(dtype=dtype)).read_text())
+        dtype: json.loads(
+            (
+                out / tool.INSTANCE_LIST.format(arch=arch or tool.ARCH, dtype=dtype)
+            ).read_text()
+        )
         for dtype in tool.DTYPES
     }
 
@@ -298,28 +376,80 @@ def test_main_refuses_a_dtype_the_catalog_does_not_package(
     assert "fp32" in capsys.readouterr().err
 
 
-def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
-    """The shipped catalog's lists are the tool's output for the committed labels and
+@pytest.mark.parametrize("arch", tool.ARCHES)
+def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path, arch):
+    """Each shipped catalog's lists are the tool's output for its committed labels and
     the rocKE tree beside them: a change to either has to regenerate the lists (and
-    the bundle make_conv_aot_config.py builds from them)."""
-    from benchmarks.common.kernel_cache import current_llvm_flavor
-
+    the bundle make_conv_aot_config.py builds from them). The gfx950 run takes the
+    default architecture and labels, as the documented command does."""
     committed = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)
         for dtype in tool.DTYPES
     }
     with committed["fp16"].open() as handle:
         handle.readline()
         flavor = json.loads(handle.readline().rstrip(",\n"))["llvm_flavor"]
-    if flavor != current_llvm_flavor():
-        pytest.skip(
-            f"the lists are for LLVM flavor {flavor}, this process lowers to "
-            f"{current_llvm_flavor()}, so every identity differs"
-        )
+    _skip_unless_flavor(flavor)
     out = tmp_path / "lists"
     jobs = str(min(16, os.cpu_count() or 1))
     argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", jobs]
+    if arch != tool.ARCH:
+        argv += ["--arch", arch]
     assert tool.main(argv) == 0
+    assert sorted(path.name for path in out.iterdir()) == sorted(
+        path.name for path in committed.values()
+    )
     for dtype, path in committed.items():
-        written = out / tool.INSTANCE_LIST.format(dtype=dtype)
+        written = out / tool.INSTANCE_LIST.format(arch=arch, dtype=dtype)
         assert written.read_bytes() == path.read_bytes(), dtype
+
+
+def test_main_writes_the_lists_of_the_requested_arch(tmp_path, monkeypatch, catalogs):
+    """--arch gfx942 checks the gfx942 sweeps and writes gfx942_* lists."""
+    fp16 = [i for i in catalogs["gfx942"] if i["dtype_a"] == "fp16"]
+    implicit = [i for i in fp16 if i["algorithm"] == "implicit_gemm"]
+    merged = [i for i in implicit if i.get("group_merge", 1) > 1][:2]
+    direct = [i for i in fp16 if i["algorithm"] != "implicit_gemm"][:2]
+    picked = [i for i in implicit if i.get("group_merge", 1) == 1][:3] + merged + direct
+    assert len(picked) == 7
+    status, written = _fake_main(
+        tmp_path, monkeypatch, _both_dtypes(picked), arch="gfx942"
+    )
+    assert status == 0
+    for dtype, entries in written.items():
+        assert {e["arch"] for e in entries} == {"gfx942"}
+        assert {tool.stable_hash(e) for e in entries} == {
+            tool.stable_hash(dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype))
+            for i in picked
+        }
+    assert not list((tmp_path / "lists").glob("gfx950_*"))
+
+
+def test_main_refuses_a_kernel_of_another_arch(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    """A gfx950 label in a catalog enumerated for gfx942 is an error, before any sweep
+    is asked, and nothing is written."""
+    status, written = _fake_main(
+        tmp_path, monkeypatch, _both_dtypes(synthetic_grid[:2]), arch="gfx942"
+    )
+    assert status == 1 and written is None
+    assert "are not gfx942" in capsys.readouterr().err
+
+
+def test_main_reads_the_labels_of_the_requested_arch(monkeypatch):
+    """Without --labels, main() reads <arch>_conv_fwd_aot.labels.txt."""
+    read = []
+
+    def fake_read_labels(path):
+        read.append(Path(path).name)
+        raise ValueError("stop")
+
+    monkeypatch.setattr(tool, "read_labels", fake_read_labels)
+    for arch in tool.ARCHES:
+        argv = ["--rocke-root", str(_ROCKE), "--output-dir", "/nonexistent"]
+        assert tool.main(argv + ["--arch", arch]) == 1
+    assert tool.main(["--rocke-root", str(_ROCKE)]) == 1
+    assert read == [f"{arch}_conv_fwd_aot.labels.txt" for arch in tool.ARCHES] + [
+        "gfx950_conv_fwd_aot.labels.txt"
+    ]

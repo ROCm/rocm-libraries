@@ -63,6 +63,8 @@ catalog is a curated list of rocKE sweep kernels
 202 direct instances per dtype, in descriptor shards by dtype, pipeline and K loop. Which instances serve a given
 problem is decided at runtime. A test-only engine over a small seed of them,
 `hipkernel:Gfx950ConvFwdAotSeed`, is what the GPU suite pins instance by instance.
+The same instances built for gfx942 ship as `hipkernel:Gfx942ConvFwdAot`; see
+[its README](../gfx942_conv_fwd/README.md).
 
 [Verification and coverage](coverage.md) records what the shipped catalog is
 verified against.
