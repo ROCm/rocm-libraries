@@ -839,6 +839,54 @@ INSTANTIATE_TEST_SUITE_P(
             "batch_prefill", "qr_tdm", mode_enum::group, false, 100, 500, 1024, "_qr_tdm_v"}));
 #endif
 
+// min_seqlen_q (aiter's mha_varlen_fwd): the "_skip" kernels leave the group-mode sequences
+// of at most min_seqlen_q query rows unwritten; the others must match the reference.
+TEST(TestCkTileFmhaFwd, SkipMinSeqlenQ)
+{
+    std::string selected_kernel;
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                               4,
+                                               2,
+                                               -1,
+                                               {8, 100, 16, 200},
+                                               {64, 300, 64, 200},
+                                               128,
+                                               128,
+                                               0,
+                                               {-1},
+                                               {-1},
+                                               {},
+                                               {},
+                                               0,
+                                               false,
+                                               false,
+                                               0,
+                                               0,
+                                               true,
+                                               true,
+                                               0,
+                                               false,
+                                               "n",
+                                               0.0f,
+                                               0,
+                                               0,
+                                               false,
+                                               "0",
+                                               qscale_str,
+                                               true,
+                                               1,
+                                               COMMON_ARGS,
+                                               std::nullopt,
+                                               &selected_kernel,
+                                               "linear",
+                                               "vllm",
+                                               "fwd",
+                                               "",
+                                               16);
+    CHECK_RESULT(result);
+    EXPECT_NE(selected_kernel.find("_skip_"), std::string::npos) << selected_kernel;
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts

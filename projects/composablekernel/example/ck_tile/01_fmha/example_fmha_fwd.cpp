@@ -122,6 +122,10 @@ auto create_args(int argc, char* argv[])
                 "run only this pipeline of the API, by the tag in the kernel name (e.g. qr, "
                 "qr_async, qr_tdm, qr_tdm_sched, qr_tdm_pingpong), skipping the dispatch "
                 "heuristics that choose between pipelines; empty: let the dispatch choose")
+        .insert("min_seqlen_q",
+                "0",
+                "group mode, fwd/pagedkv: skip the sequences of at most this many query rows "
+                "(their O and LSE are left unwritten); 0: off")
         .insert("cache_batch_idx", "0", "whether to use index map to the kvcache")
         .insert("warmup", "5", "number of iterations before benchmark the kernel")
         .insert("repeat", "20", "number of iterations to benchmark the kernel")
@@ -236,7 +240,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         arg_parser.get_str("kv_layout"),
                                         arg_parser.get_str("kv_lookup"),
                                         arg_parser.get_str("api"),
-                                        arg_parser.get_str("pipeline"));
+                                        arg_parser.get_str("pipeline"),
+                                        arg_parser.get_int("min_seqlen_q"));
 }
 
 int main(int argc, char* argv[])

@@ -94,6 +94,11 @@ auto create_args(int argc, char* argv[])
                 "  sensitive  - rand[-1,1], keeps d_sink dependent on the sink element read\n"
                 "  neutral    - -inf on every other head, pins the sink_ptr[nhead] contract\n"
                 "  saturated  - rand[30,60], exercises P_sink -> 1 and lse saturation")
+        .insert("pipeline",
+                "",
+                "run only this dq/dk/dv pipeline (kr_ktr_vr, trload_kr_ktr_vr, "
+                "trload_qr_qtr_dor, tdm_kr_ktr), skipping the dispatch heuristics that choose "
+                "between pipelines; empty: let the dispatch choose")
         .insert("json", "0", "0: No Json, 1: Dump Results in Json format")
         .insert("jsonfile", "fmha_bwd.json", "json file name to dump results");
 
@@ -182,7 +187,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         do_validation,
                                         stream_config,
                                         json,
-                                        sink_values);
+                                        sink_values,
+                                        arg_parser.get_str("pipeline"));
 }
 
 int main(int argc, char* argv[])

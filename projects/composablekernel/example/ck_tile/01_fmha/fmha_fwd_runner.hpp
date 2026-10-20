@@ -277,7 +277,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         std::string kv_layout_str         = "linear",
                         std::string kv_lookup_str         = "vllm",
                         std::string api                   = "auto",
-                        std::string pipeline              = "")
+                        std::string pipeline              = "",
+                        ck_tile::index_t min_seqlen_q     = 0)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -772,6 +773,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
                   << " does not take these args (fwd: no KV cache; splitkv: num_splits > 1 or a "
                      "KV cache; batch_prefill: group mode and page_block_size > 0; pagedkv: "
                      "page_block_size > 0; both: num_splits = 1)"
+                  << std::endl;
+        return fwd_result::invalid_args;
+    }
+    // -min_seqlen_q: the fwd and pagedkv kernels skip group-mode sequences of at most this
+    // many query rows (aiter's mha_varlen_fwd), leaving their O and LSE unwritten.
+    if(0 < min_seqlen_q && (mode != mode_enum::group || 1 < num_splits ||
+                            (use_kvcache ? api != "pagedkv" : !(api == "auto" || api == "fwd"))))
+    {
+        std::cerr << "min_seqlen_q needs group mode, num_splits = 1, and api fwd (or auto) or, "
+                     "with a KV cache, pagedkv"
                   << std::endl;
         return fwd_result::invalid_args;
     }
@@ -1438,13 +1449,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
             if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
             {
-                traits.has_dropout = (p_drop > 0.0f);
-                traits.qscale_type = qscale.type;
+                traits.has_dropout       = (p_drop > 0.0f);
+                traits.qscale_type       = qscale.type;
+                traits.skip_min_seqlen_q = (0 < min_seqlen_q);
             }
             else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
                                              std::decay_t<decltype(traits)>>)
             {
-                traits.use_pagedkv = (0 < page_block_size);
+                traits.use_pagedkv       = (0 < page_block_size);
+                traits.skip_min_seqlen_q = (0 < min_seqlen_q);
             }
             else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
                                              std::decay_t<decltype(traits)>>)
@@ -1649,6 +1662,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.window_size_right = mask.right;
             args.sink_size         = mask.sink;
             args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
+            if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>> ||
+                         std::is_same_v<fmha_fwd_pagedkv_args, std::decay_t<decltype(args)>>)
+                args.min_seqlen_q = min_seqlen_q;
 
             if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
             {
@@ -2238,6 +2254,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     real_seqlen_k = cukv_cum[wb + 1] - cukv_cum[wb];
                 }
             }
+            // the kernel skipped this sequence and left its O and LSE as they were
+            if(real_seqlen_q <= min_seqlen_q)
+                continue;
 
             // adjust matrix index according to the mode
             const ck_tile::index_t b_idx = (mode == mode_enum::batch ? wb : 0);

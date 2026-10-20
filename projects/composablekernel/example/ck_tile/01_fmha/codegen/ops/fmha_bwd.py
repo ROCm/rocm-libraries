@@ -287,7 +287,7 @@ def FMHA_BWD_API_COND_STATEMENT(F_cond: str, F_body: str, *, if_i=0) -> str:
     return "\n".join(lines) + "\n"
 
 
-FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_dbias == {F_dbias}) && ({F_dropout_check}) &&
+FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.pipeline.empty() || t.pipeline == "{F_pipeline_tag}") && (t.is_group_mode == {F_mode}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_dbias == {F_dbias}) && ({F_dropout_check}) &&
         ({F_scheck}) && ({F_dcheck}) && ({F_dvcheck}) && (t.is_deterministic == {F_deterministic}){F_max_seq_q_cond}{F_cond_extra}) {{
     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dvpad} > 0)>;
     using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_tagq}, {F_bn0}>;
@@ -931,6 +931,16 @@ class FmhaBwdApiTrait:
             return f"t.hdim_v % {self.dvpad} == 0"
 
     @property
+    def pipeline_tag(self) -> str:
+        # The dq/dk/dv pipeline BlockFmhaBwdDQDKDVPipelineSelector picks for this
+        # instance (kr_ktr_vr includes its IGLP form, which it takes without dpad=1).
+        if self.tr_load == "t":
+            if self.tile.max_seq_q != 0:
+                return "trload_qr_qtr_dor"
+            return "trload_kr_ktr_vr"
+        return "tdm_kr_ktr" if self.tile.tdm_kr_ktr else "kr_ktr_vr"
+
+    @property
     def max_seq_q_cond(self) -> str:
         prefix = "max_" if self.mode == "group" else ""
         cond = ""
@@ -939,7 +949,10 @@ class FmhaBwdApiTrait:
         if self.tile.dispatch_max_seq_k != 0:
             cond += f" && (t.{prefix}seqlen_k <= {self.tile.dispatch_max_seq_k})"
         if self.tile.dispatch_min_grid != 0:
-            cond += f" && (t.batch * t.nhead_q >= {self.tile.dispatch_min_grid})"
+            # Only chooses this pipeline over the next one: skipped when the caller
+            # names the pipeline in fmha_bwd_traits::pipeline.
+            grid = f"t.batch * t.nhead_q >= {self.tile.dispatch_min_grid}"
+            cond += f" && (!t.pipeline.empty() || ({grid}))"
         return cond
 
     @property
@@ -1036,6 +1049,7 @@ class FmhaBwdApiPool:
         for i_trait, trait in enumerate(traits):
             inners_common = FMHA_BWD_API_INNER_DISPATCH_COMMON.format(
                 F_if=if_(i_trait),
+                F_pipeline_tag=trait.pipeline_tag,
                 F_mode=MODE_MAP[trait.mode],
                 F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
                 F_mask=get_mask_map(self.mask_impl)[trait.mask],

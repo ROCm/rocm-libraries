@@ -216,22 +216,32 @@ class TestFmhaBwdDecodeDispatchCodegen(unittest.TestCase):
                     "false", "simplified", "t",
                 )
                 prefix = "max_" if mode == "group" else ""
+                # The grid threshold only chooses the decode pipeline, so a named
+                # pipeline skips it; the 32 rows the decode tile holds still apply.
                 expected = (
                     f" && (t.{prefix}seqlen_q <= 32)"
-                    " && (t.batch * t.nhead_q >= 768)"
+                    " && (!t.pipeline.empty() || (t.batch * t.nhead_q >= 768))"
                 )
                 self.assertEqual(trait.max_seq_q_cond, expected)
-                expression = trait.max_seq_q_cond.removeprefix(" && ").replace("&&", "and")
-                for query_length, grid, matches in (
-                    (31, 768, True), (32, 768, True), (33, 768, False),
-                    (32, 767, False), (32, 769, True),
+                self.assertEqual(trait.pipeline_tag, "trload_qr_qtr_dor")
+                expression = (
+                    trait.max_seq_q_cond.removeprefix(" && ")
+                    .replace("!t.pipeline.empty()", "t.pipeline != ''")
+                    .replace("&&", "and")
+                    .replace("||", "or")
+                )
+                for query_length, grid, pipeline, matches in (
+                    (31, 768, "", True), (32, 768, "", True), (33, 768, "", False),
+                    (32, 767, "", False), (32, 769, "", True),
+                    (32, 1, "trload_qr_qtr_dor", True), (33, 1, "trload_qr_qtr_dor", False),
                 ):
                     traits = SimpleNamespace(
                         seqlen_q=query_length if mode == "batch" else query_length * grid,
-                        max_seqlen_q=query_length, batch=grid, nhead_q=1,
+                        max_seqlen_q=query_length, batch=grid, nhead_q=1, pipeline=pipeline,
                     )
                     with self.subTest(head_dim=tile.F_bhdq, mode=mode,
-                                      query_length=query_length, grid=grid):
+                                      query_length=query_length, grid=grid,
+                                      pipeline=pipeline):
                         self.assertEqual(eval(expression, {"__builtins__": {}}, {"t": traits}),
                                          matches)
 

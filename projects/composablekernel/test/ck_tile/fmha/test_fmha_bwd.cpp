@@ -279,9 +279,83 @@ TEST_P(DecodeDropout, DataTypeConfig)
                                                false,
                                                true,
                                                true,
-                                               false});
+                                               false,
+                                               ""});
     ASSERT_EQ(launcher.selected_max_seqlen_q(), 32);
     fmha_bwd_test(GetParam(), true);
+}
+
+// A named dq/dk/dv pipeline (the example's -pipeline) runs whatever the grid threshold that
+// chooses the decode pipeline says -- the TDM decode pipeline on a small grid, tdm_kr_ktr on
+// one that would take decode -- and needs a kernel that applies: none for the decode
+// pipeline past its 32 rows, and none for kr_ktr_vr on gfx1250. d64, s_k 128.
+// pipeline, batch, seqlen_q, name parts ("" for no kernel at all)
+using ForcedPipelineCase = std::tuple<const char*, int, int, const char*, const char*>;
+
+class ForcedPipeline : public TestWithParam<ForcedPipelineCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaBwd,
+    ForcedPipeline,
+    Values(ForcedPipelineCase{"trload_qr_qtr_dor", 2, 32, "_maxq32", "_trload"},
+           ForcedPipelineCase{"tdm_kr_ktr", 192, 32, "_maxq0", "_ntrload"},
+           ForcedPipelineCase{"tdm_kr_ktr", 2, 100, "_maxq0", "_ntrload"},
+           ForcedPipelineCase{"trload_qr_qtr_dor", 2, 64, "", ""},
+           ForcedPipelineCase{"kr_ktr_vr", 2, 32, "", ""}));
+
+TEST_P(ForcedPipeline, DataTypeConfig)
+{
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaBwdFp32>)
+        GTEST_SKIP() << "the gfx1250 pipelines support fp16 and bf16";
+    else
+    {
+        if(ck_tile::get_device_name().compare(0, 6, "gfx125") != 0)
+            GTEST_SKIP() << "these pipelines are the gfx1250 ones";
+        const auto [pipeline, batch, seqlen_q, name_part0, name_part1] = GetParam();
+
+        std::string selected_kernel;
+        auto result = fmha_bwd_run<DataTypeConfig>(
+            mode_enum::batch,
+            batch,
+            4,
+            4,
+            {seqlen_q},
+            {128},
+            {-1},
+            {-1},
+            64,
+            64,
+            true,
+            true,
+            0, // scale
+            "n",
+            false,
+            0.0f,
+            0,
+            0,
+            false,
+            "0",
+            false, // sink_grad
+            false, // deterministic
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1,
+            stream_config,
+            std::nullopt,
+            sink_regime::sensitive,
+            pipeline,
+            &selected_kernel);
+        if(*name_part0 == '\0')
+        {
+            EXPECT_EQ(result, bwd_result::no_instance) << selected_kernel;
+            return;
+        }
+        ASSERT_EQ(result, bwd_result::success);
+        EXPECT_NE(selected_kernel.find(name_part0), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(name_part1), std::string::npos) << selected_kernel;
+    }
 }
 
 class Deterministic : public TestWithParam<FmhaBwdTestParam>
