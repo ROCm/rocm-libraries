@@ -4,16 +4,17 @@ Measured scope: the opt-in `use_cfvst=True`, `lds_num_buffers=2`, `v_reg_prefetc
 gfx942 dense prefill attention kernel, bf16, D128, causal, on gfx942 with 304 CUs.
 Baseline: the `baseline` arm of the ablation harness, compiled in the same process from
 the benchmarked source commit (see
-[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Result: 10.74–15.58% lower
+[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Result: 10.69–15.28% lower
 latency at the 12 measured configurations listed under Results.
 
 ## Introduction
 
-This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels. At the 12 measured configurations it lowers latency by 10.74–15.58%.
+This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels. At the 12 measured configurations it lowers latency by 10.69–15.28%.
 
 ## Problem
 
 Benchmarking, profiling and tracing highlighted bottlenecks in:
+
 1. V read from LDS: V was stored in traditional layout in LDS. Bank conflicts occur during access.
 2. Awkward allocation of LDS per WG (33KB). Max limit per CU is 64KB. This limits WG occupancy in CU to 1 while leaving 31KB of LDS unused.
 3. Stalls at sync point for loading K and V tiles before MFMA.
@@ -69,7 +70,7 @@ Twelve `(B, S, Hkv)` workloads were swept independently. The completed sweep rep
 | `lazy_rescale` | No | — | Inactive in the gfx942 kernel body; only changes the kernel-name token. |
 | `emit_lse` | No | — | Requests an additional LSE output, rather than tuning the same output contract. |
 
-**Count:**: **12 swept**. The grid knobs were **not forced off**; each workload retained its dispatch-resolved settings. CFVST, K LDS double buffering, and V register prefetch were not enabled in the baseline sweep.
+**Count: 12 swept.** The grid knobs were **not forced off**; each workload retained its dispatch-resolved settings. CFVST, K LDS double buffering, and V register prefetch were not enabled in the baseline sweep.
 
 #### Grouping the 12 swept knobs
 
@@ -120,6 +121,7 @@ These are the best **final A/B-tested** configurations, compared with each workl
 The lever sweep did improve performance by around 40% for S=1024 and 17% for S=2048. For B=1 S=4096+ its around 12%. While batch=16 around 9%. The common optimizations are lds_row_pad=4 which directly targets bank conflicts (1st bottleneck) during K LDS loads. For the 2nd bottleneck, conceptualy, the optimizations used dont directly target the bottleneck but do provide gains.
 
 We explore whether introducing optimizations:
+
 1. That directly targets the 3rd bottleneck would give greater performance gains. (such as K Double Buffering + V Register Prefetching)
 2. That targets bank conflicts in V LDS loads (CFVST) (in contrast to K LDS loads) could also improve performance.
 
@@ -128,6 +130,8 @@ We explore whether introducing optimizations:
 V was stored in traditional layout in LDS. This caused bank conflicts during access. The hypothesis was that transposed layout would reduce bank conflicts. This feature was already present (CFVST) but disabled for bf16 due to register spillage concerns. Performance improved substantially with it enabled, so we adopted this optimization.
 
 #### Register usage
+
+Earlier toolchain measurements (prior source revision):
 
 VGPR count, spill count, and scratch bytes per thread, read from the code-object
 notes (`.vgpr_count`, `.vgpr_spill_count`, `.private_segment_fixed_size`) for gfx942,
@@ -150,6 +154,34 @@ contains no scratch instructions: the spill reloads sit outside it, and on the
 persistent grid they run once per work item (16 at `llvm20`, 7 at `llvm23`). The
 `llvm22` flavor was not measured.
 
+#### Current llvm23 static code-object measurements (persistent-304)
+
+BF16 D128 causal, B1 S4096 Hq32 Hkv8, gfx942 (304 CUs), `llvm23`,
+`persistent=True`, `num_persistent=304`, `block_m=256`, `block_n=64`,
+`waves_per_eu=2`, `lds_row_pad=8`, `emit_lse=False`.
+Source HEAD: `bbf25121809cd0d20fd42f703860e0f1bcccd48c` (working tree dirty);
+kernel source SHA-256: `cd46eed01dbdbd709cd6e413bad56d6bb0a35e4d5b20808496ad2ba1bd00d3db`.
+Code-object metadata was checked directly with `llvm-readobj --notes`; the
+combined configuration's counts were reproduced by a separate compilation.
+
+| variant | SGPR | VGPR | SGPR spills | VGPR spills | Scratch (B/thread) | LDS (KiB/WG) |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 41 | 194 | 0 | 0 | 0 | 34 |
+| CFVST | 42 | 225 | 0 | 0 | 0 | 33 |
+| CFVST + KDB | 48 | 254 | 0 | 0 | 0 | 50 |
+| CFVST + VPF | 48 | 256 | 0 | 9 | 40 | 33 |
+| CFVST + KDB + VPF | 48 | 256 | 0 | 5 | 24 | 50 |
+| Full minus baseline | +7 | +62 | 0 | +5 | +24 | +16 |
+
+| variant | Total static ISA | `ds_read` | `ds_write` | `s_waitcnt` | `lgkmcnt(0)` | `s_barrier` | MFMA |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 1979 | 144 | 0 | 86 | 52 | 3 | 64 |
+| CFVST | 1810 | 32 | 8 | 31 | 21 | 3 | 64 |
+| CFVST + KDB | 2576 | 64 | 16 | 56 | 38 | 5 | 128 |
+| CFVST + VPF | 2574 | 64 | 16 | 66 | 38 | 5 | 128 |
+| CFVST + KDB + VPF | 2578 | 64 | 16 | 68 | 38 | 5 | 128 |
+| Full minus baseline | +599 | -80 | +16 | -18 | -14 | +2 | +64 |
+
 ## Optimization 2 and 3: K LDS Double Buffering + V register pre-fetching
 
 Analysis of stalls using threadtrace found a large number of waiting at sync points. One such point was waiting for K and V tiles to be loaded before MFMA. This wait restricted MFMA and memory loading parallelism. The hypothesis was that K LDS Double Buffering + V register pre-fetching would introduce parallelism and latency hiding. Optimizing 1 would leave other the bottleneck. The optimization improved performance substantially hence it was adopted.
@@ -159,39 +191,39 @@ Analysis of stalls using threadtrace found a large number of waiting at sync poi
 **Hardware:** gfx942, 304 CUs
 
 | dtype | B | S | Hq | Hkv | D | baseline vs CFVST+KDB+VPF | latency reduction | min | max |
-|------:|---:|------:|---:|----:|----:|----------------:|------------------:|----:|----:|
-| bf16 | 1 | 1024 | 32 | 8 | 128 | 1.1203x | 10.74% | 10.61% | 10.88% |
-| bf16 | 1 | 1024 | 32 | 16 | 128 | 1.1362x | 11.99% | 11.02% | 12.06% |
-| bf16 | 1 | 2048 | 32 | 8 | 128 | 1.1258x | 11.18% | **-361.37% | 12.38% |
-| bf16 | 1 | 2048 | 32 | 16 | 128 | 1.1227x | 10.93% | 9.75% | 11.26% |
-| bf16 | 1 | 4096 | 32 | 8 | 128 | 1.1692x | 14.47% | 14.15% | 15.12% |
-| bf16 | 1 | 4096 | 32 | 16 | 128 | 1.1796x | 15.23% | 14.47% | 15.69% |
-| bf16 | 1 | 8192 | 32 | 8 | 128 | 1.1845x | 15.58% | 15.14% | 16.05% |
-| bf16 | 1 | 8192 | 32 | 16 | 128 | 1.1836x | 15.51% | 14.86% | 15.82% |
-| bf16 | 1 | 16384 | 32 | 8 | 128 | 1.1834x | 15.50% | 14.61% | 15.59% |
-| bf16 | 16 | 4096 | 32 | 8 | 128 | 1.1591x | 13.72% | 13.32% | 14.08% |
-| bf16 | 16 | 4096 | 32 | 16 | 128 | 1.1279x | 11.34% | 10.87% | 11.66% |
-| bf16 | 16 | 8192 | 32 | 8 | 128 | 1.1598x | 13.78% | 12.75% | 14.02% |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| bf16 | 1 | 1024 | 32 | 8 | 128 | 1.1198x | 10.69% | 9.75% | 12.78% |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | 1.1326x | 11.71% | 10.49% | 12.06% |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | 1.1235x | 11.00% | -373.26% | 11.71% |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | 1.1200x | 10.72% | 10.28% | 11.97% |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | 1.1762x | 14.98% | 14.72% | 15.29% |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | 1.1754x | 14.92% | 14.35% | 15.34% |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | 1.1804x | 15.28% | 15.05% | 16.16% |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | 1.1761x | 14.97% | 14.79% | 15.73% |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | 1.1698x | 14.51% | 13.91% | 14.84% |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | 1.1551x | 13.43% | 13.43% | 13.89% |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | 1.1376x | 12.10% | 11.69% | 12.82% |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | 1.1702x | 14.55% | 13.89% | 14.78% |
 
-** Not a numerical error. A repeated 1st measurement anomaly.
+Min/max are paired within-round baseline-to-full latency reductions. The B=1, S=2048, Hkv=8 minimum includes a first-round 1.188339 ms combined-kernel timing outlier; post-batch correctness passed.
 
 #### Ablation studies of optimizations
 We performed ablation study to isolate the optimizations and understand its individual contributions.
 
-| dtype | B | S | Hq | Hkv | D | CFVST vs base |  CFVST +KDB vs CFVST | CFVST +VPF vs CFVST | CFVST +KDB +VPF vs CFVST | CFVST +KDB +VPF vs base |
-|------:|---:|------:|---:|----:|----:|----------------:|----------------:|----------------:|----------------:|----------------:|
-| bf16 | 1 | 1024 | 32 | 8 | 128 | 3.57% | -0.16% | 2.13% | 7.44% | 10.74% |
-| bf16 | 1 | 1024 | 32 | 16 | 128 | 4.55% | 0.12% | 3.19% | 7.79% | 11.99% |
-| bf16 | 1 | 2048 | 32 | 8 | 128 | 5.02% | 0.06% | 1.90% | 6.48% | 11.18% |
-| bf16 | 1 | 2048 | 32 | 16 | 128 | 4.47% | 0.77% | 2.49% | 6.76% | 10.93% |
-| bf16 | 1 | 4096 | 32 | 8 | 128 | 9.86% | 1.70% | 1.23% | 5.12% | 14.47% |
-| bf16 | 1 | 4096 | 32 | 16 | 128 | 10.02% | 2.06% | 2.04% | 5.79% | 15.23% |
-| bf16 | 1 | 8192 | 32 | 8 | 128 | 10.05% | 2.27% | 1.60% | 6.15% | 15.58% |
-| bf16 | 1 | 8192 | 32 | 16 | 128 | 10.78% | 1.89% | 1.01% | 5.30% | 15.51% |
-| bf16 | 1 | 16384 | 32 | 8 | 128 | 11.16% | 1.47% | 1.37% | 4.89% | 15.50% |
-| bf16 | 16 | 4096 | 32 | 8 | 128 | 10.09% | 0.76% | 0.03% | 4.04% | 13.72% |
-| bf16 | 16 | 4096 | 32 | 16 | 128 | 9.05% | 0.86% | -0.24% | 2.52% | 11.34% |
-| bf16 | 16 | 8192 | 32 | 8 | 128 | 10.18% | 0.53% | 0.00% | 4.01% | 13.78% |
+| dtype | B | S | Hq | Hkv | D | CFVST vs base | CFVST + KDB vs CFVST | CFVST + VPF vs CFVST | Full vs CFVST | Full vs base |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| bf16 | 1 | 1024 | 32 | 8 | 128 | 3.62% | -0.43% | 1.23% | 7.34% | 10.69% |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | 4.66% | -0.08% | 3.01% | 7.40% | 11.71% |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | 4.90% | 0.01% | 1.56% | 6.41% | 11.00% |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | 4.50% | 0.65% | 2.49% | 6.51% | 10.72% |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | 10.25% | 2.08% | 1.55% | 5.28% | 14.98% |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | 10.57% | 1.55% | 0.93% | 4.86% | 14.92% |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | 10.40% | 2.43% | 1.29% | 5.46% | 15.28% |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | 10.35% | 1.78% | 0.62% | 5.16% | 14.97% |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | 10.20% | 1.26% | 0.56% | 4.81% | 14.51% |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | 10.01% | 0.64% | 0.14% | 3.80% | 13.43% |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | 8.84% | 1.81% | 0.48% | 3.57% | 12.10% |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | 10.60% | 0.72% | 0.20% | 4.41% | 14.55% |
 
 ## Results and Ablation Methodology
 The complete experiment can be summarized as follows:
@@ -263,7 +295,7 @@ For each of the 12 BF16 D128 causal attention shapes:
     `Max = max(R_1, R_2, R_3, R_4, R_5)`
 
 26. Report the main full-vs-baseline latency reduction using the ratio of the two median latencies, rather than the median of round-level reductions.
-27. Use the five configurations and pairwise comparisons to quantify the contributions of CFVST, K LDS double buffering (KDB), V register prefetching (VPF), and their combined effect.```
+27. Use the five configurations and pairwise comparisons to quantify the contributions of CFVST, K LDS double buffering (KDB), V register prefetching (VPF), and their combined effect.
 
 #### Benchmark Environment and Provenance
 
@@ -271,8 +303,11 @@ The five-way ablation was measured on gfx942 with 304 CUs, using 12 BF16 D128 ca
 
 | Component | Configuration |
 | :--- | :--- |
-| Hardware target | gfx942, 304 CUs |
-| Benchmarked source commit | `51832d8c8078267a8e5274478c3289f3096106ff` |
+| Hardware target | AMD Instinct MI300X VF, `gfx942:sramecc+:xnack-`, 304 CUs |
+| Benchmarked source HEAD | `bbf25121809cd0d20fd42f703860e0f1bcccd48c` (working tree dirty) |
+| Kernel source SHA-256 | `cd46eed01dbdbd709cd6e413bad56d6bb0a35e4d5b20808496ad2ba1bd00d3db` |
+| Benchmark harness SHA-256 | `c07cb19068c641ed8f258fa9ae7c1e3fd50b36c31573f0c8a75c781f96e2ba1c` |
+| Benchmark timestamp (UTC) | `2026-10-20T01:28:23.777345+00:00` |
 | ROCm stack | 10.0.0 (public release) |
 | HIP | 7.15.26333 |
 | Python | 3.12.3 |
@@ -301,6 +336,7 @@ The five-way ablation was measured on gfx942 with 304 CUs, using 12 BF16 D128 ca
 | bf16 | 16 | 8192 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
 
 **Benchmark harness:** `library/benchmarks/gfx942/attention/prefill/bench_rocke_5way_specs.py`
+
 **Kernel source:** `library/kernels/gfx942/attention_dense.py`
 
 #### Reproducibility

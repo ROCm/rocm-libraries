@@ -254,15 +254,18 @@ def _artifact_digest(hsaco) -> str | None:
     return None
 
 
-def _environment(torch, device, rocke: Path, script_file: Path) -> dict:
-    props = torch.cuda.get_device_properties(device)
-    # gpu.multi_processor_count is the ROCm workgroup processor count exposed by
-    # torch, which should be checked against the part named in the case study.
+def _environment(torch, device_id: int, rocke: Path, script_file: Path) -> dict:
+    # Hardware identity comes from rocKE's HIP runtime, not PyTorch properties.
+    from rocke.runtime.hip_module import (
+        get_device_name,
+        get_device_num_cus,
+        get_device_target_id,
+    )
+
     gpu = {
-        "name": torch.cuda.get_device_name(device),
-        "architecture": getattr(props, "gcnArchName", None),
-        "cu_count_reported_by_torch": getattr(props, "multi_processor_count", None),
-        "total_memory_bytes": getattr(props, "total_memory", None),
+        "name": get_device_name(device_id),
+        "architecture": get_device_target_id(device_id),
+        "cu_count_reported_by_hip": get_device_num_cus(device_id),
     }
     return {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -341,7 +344,7 @@ def _report_text(environment: dict, *, args, shapes, resolved_rows,
         "Performance evidence below is relative-only. Internal CSV files hold absolute",
         "GPU timings and should not be copied into public reports.", "",
         f"Measured scope: {shape_count} BF16 D128 causal GQA shapes, gfx942; "
-        f"device={gpu['name']}, CUs={gpu['cu_count_reported_by_torch']}; "
+        f"device={gpu['name']}, CUs={gpu['cu_count_reported_by_hip']}; "
         "five compile-time variants of the current `attention_dense.py`.",
         f"Source revision: `{git['head_sha'] or 'unknown'}`; "
         f"working tree dirty: `{git['working_tree_dirty']}`. "
@@ -497,11 +500,14 @@ def main() -> int:
     shapes = args.shape if args.shape else list(DEFAULT_SHAPES)
     out_dir = Path(args.out_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    environment = _environment(torch, device, rocke, Path(__file__).resolve())
-    print(f"ROCKE_ROOT={rocke}\nattention_dense={source_file}\nGPU={torch.cuda.get_device_name(device)}")
+    # Resolve the index of the GPU used by PyTorch's benchmark stream so HIP
+    # metadata refers to that same device, even when it is not device 0.
+    device_id = device.index if device.index is not None else torch.cuda.current_device()
+    environment = _environment(torch, device_id, rocke, Path(__file__).resolve())
+    print(f"ROCKE_ROOT={rocke}\nattention_dense={source_file}\nGPU={environment['gpu']['name']}")
     print(f"Git head={environment['git']['head_sha']} dirty={environment['git']['working_tree_dirty']} "
           f"LLVM flavor={environment['compiler_flavor_requested']} "
-          f"CUs={environment['gpu']['cu_count_reported_by_torch']}", flush=True)
+          f"CUs={environment['gpu']['cu_count_reported_by_hip']}", flush=True)
     print(f"current_stream={stream_ptr} | variants={[v.name for v in VARIANTS]}")
 
     raw_rows: list[dict] = []
@@ -649,6 +655,11 @@ def main() -> int:
                 backend="python",
                 capture_ir_text=False,
             )
+            hsaco_dir = out_dir / "hsaco" / shape.label
+            hsaco_dir.mkdir(parents=True, exist_ok=True)
+
+            hsaco_path = hsaco_dir / f"{name}.hsaco"
+            hsaco_path.write_bytes(artifact.hsaco)
             if artifact.kernel_name != names[name]:
                 raise RuntimeError(f"Artifact/kernel name mismatch: {name}")
             compiled_artifacts[name] = {
@@ -819,7 +830,7 @@ def main() -> int:
         f"git_head={git_head(rocke)}",
         f"attention_dense_file={source_file}",
         f"attention_dense_sha256={hashlib.sha256(source_text.encode()).hexdigest()}",
-        f"gpu={torch.cuda.get_device_name(device)}",
+        f"gpu={environment['gpu']['name']}",
         f"torch={torch.__version__}",
         f"hip={getattr(torch.version, 'hip', None)}",
         f"stream_ptr={stream_ptr}",
