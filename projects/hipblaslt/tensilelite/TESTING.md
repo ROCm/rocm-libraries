@@ -665,7 +665,7 @@ it is further along than it is.
 | TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. Enforced in a lane that is not a required check |
 | TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
 | TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on eight files |
-| TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
+| TensileLite C++: `tensilelite-host`, the client and rocisa, `.cpp` files only | `llvm-cov` via `tox -e coverage-cpp` | Math CI | Reported to codecov as `TensileLite-CPP`, not enforced |
 
 The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
 characterization suite and the pure unit suite once each under coverage, keeping the two selections
@@ -717,10 +717,21 @@ they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
 including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
 
-**No C++ coverage target exists** for the reasons given under
+**C++ coverage** (`coverage-cpp`) counts `.cpp` files from three places: `tensilelite-host`
+(`src/`, exported from `libtensilelite-host.so`), the client (`client/src/`, including the CPU
+reference in `Reference.cpp`) and rocisa (`rocisa/rocisa/src/`, exported from `_rocisa.so`). Test
+sources and `.hpp` headers are excluded, so templates and inline functions in headers are not
+counted. The job log also prints a per-directory table with headers included; that table is
+advisory and is not uploaded. The counts come from `tensilelite-tests` (`ctest`) and `rocisa/test`
+(`pytest`). The GPU `-m common` suite is what drives most of the client, and it does not run under
+coverage, which is why most of `client/src/` reads low.
+
+**No enforced C++ coverage floor exists.** `codecov.yml` sets the same 80% target for
+`TensileLite-CPP` as for the other flags (see [Targets](#targets)), but the job that uploads it is
+not a required check. Enforcing it before the host-side code is linkable in isolation would produce a
+number nobody could act on, for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
-structural blockers). Setting one before the host-side code is linkable in isolation would produce a
-number nobody could act on.
+structural blockers).
 
 ## Improvement Roadmap
 
