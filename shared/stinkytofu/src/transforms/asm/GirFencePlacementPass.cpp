@@ -58,25 +58,11 @@ struct Node {
 using Markers = std::set<const StinkyInstruction*>;
 using HazardKinds = std::set<GirHazardKind>;
 
-struct HazardClass {
-    GirHazardKind kind = GirHazardKind::RAW;
-    int storage = -1;
-
-    bool operator<(const HazardClass& other) const {
-        return std::tie(kind, storage) < std::tie(other.kind, other.storage);
-    }
-};
-
-using HazardClasses = std::set<HazardClass>;
+using HazardClasses = GirFrameHazards;
 using MarkerCoverage = std::map<const StinkyInstruction*, HazardClasses>;
 
-struct MarkerOwnership {
-    HazardClasses coverage;
-    HazardKinds kinds;
-    bool allRawAreTensor = true;
-};
-
-using MarkerOwnershipMap = std::map<const StinkyInstruction*, MarkerOwnership>;
+/// What each fence kills, per frame it executes in -- the token the barrier carries.
+using FenceDischarge = std::map<const StinkyInstruction*, std::map<GirFrame, GirFrameHazards>>;
 
 const char* hazardKindName(GirHazardKind kind) {
     switch (kind) {
@@ -90,19 +76,15 @@ const char* hazardKindName(GirHazardKind kind) {
     STINKY_UNREACHABLE("unknown GIR hazard kind");
 }
 
-HazardClass hazardClass(const GirFrameHazard& hazard) {
-    return {hazard.kind, hazard.storage};
-}
-
 HazardKinds hazardKinds(const HazardClasses& coverage) {
     HazardKinds result;
-    for (const HazardClass& hazard : coverage) result.insert(hazard.kind);
+    for (const GirFrameHazard* hazard : coverage) result.insert(hazard->kind);
     return result;
 }
 
 void eraseHazardKind(HazardClasses& coverage, GirHazardKind kind) {
     for (auto it = coverage.begin(); it != coverage.end();)
-        if (it->kind == kind)
+        if ((*it)->kind == kind)
             it = coverage.erase(it);
         else
             ++it;
@@ -124,10 +106,16 @@ bool publishes(const StinkyInstruction& inst, const Markers& markers) {
     return isBarrier(inst) || markers.count(&inst) != 0;
 }
 
+/// \p onPublish sees every (fence, hazard) this walk discharges -- the ownership the plan implies.
+/// \p perFrame narrows the class to the consumer's frame: placement asks whether SOME generation
+/// of a storage is fenced here, ownership asks which one, and a fence that answers for a storage
+/// in one frame does not discharge another frame's reader of the same storage.
+template <class OnPublish>
 void publishOwned(const StinkyInstruction& inst, Live& live,
                   const GirFrameHazardAnalysis::Result& hazards, const Markers& markers,
-                  const MarkerCoverage& markerCoverage) {
+                  const MarkerCoverage& markerCoverage, bool perFrame, OnPublish onPublish) {
     if (isBarrier(inst)) {
+        // Liveness moves on past a barrier; that is not a discharge, so nothing is killed here.
         live.clear();
         return;
     }
@@ -136,28 +124,35 @@ void publishOwned(const StinkyInstruction& inst, Live& live,
     if (owned == markerCoverage.end()) return;
     for (auto it = live.begin(); it != live.end();) {
         const GirFrameHazard& hazard = hazards.hazards[*it];
-        // A hazard kind alone is not ownership: one tensor action can overwrite A/r0 while
-        // unrelated A/r1 and B reads remain in flight on the same DS counter. Publish only the
-        // concrete GIR storage class this marker protects.
-        if (owned->second.contains(hazardClass(hazard)))
+        const auto sameFrameClass = [&](const GirFrameHazard* covered) {
+            return covered->kind == hazard.kind && covered->storage == hazard.storage &&
+                   covered->producer == hazard.producer &&
+                   covered->producerFrame == hazard.producerFrame;
+        };
+        // Kind alone is not ownership: publish only the storage class this marker protects.
+        if (perFrame ? std::any_of(owned->second.begin(), owned->second.end(), sameFrameClass)
+                     : coversHazard(owned->second, hazard)) {
+            onPublish(&inst, *it);
             it = live.erase(it);
-        else
+        } else {
             ++it;
+        }
     }
 }
 
 /// Walk one node, applying gen at producers and the total kill at fences.  `report` sees every
 /// consumer whose producer is still live -- an undischarged hazard.
-template <class Report>
+template <class Report, class OnPublish = decltype([](const StinkyInstruction*, size_t) {})>
 Live transfer(const Node& node, const std::vector<StinkyInstruction*>& body,
               const GirFrameHazardAnalysis::Result& hazards, const Live& in, const Markers& markers,
-              const MarkerCoverage& markerCoverage, Report report) {
+              const MarkerCoverage& markerCoverage, bool perFrame, Report report,
+              OnPublish onPublish = {}) {
     Live live = in;
     for (size_t i = 0; i < body.size(); ++i) {
         StinkyInstruction* inst = body[i];
         // A marker names the instruction the fence is inserted BEFORE, so it kills here, exactly
         // where a materialized barrier at this slot would.
-        publishOwned(*inst, live, hazards, markers, markerCoverage);
+        publishOwned(*inst, live, hazards, markers, markerCoverage, perFrame, onPublish);
         for (size_t h = 0; h < hazards.hazards.size(); ++h) {
             const GirFrameHazard& hazard = hazards.hazards[h];
             if (!hazard.crossAgent) continue;
@@ -222,7 +217,8 @@ FrameCFG buildFrameCFG(Function& function, const GirFrameAnalysis::Result& frame
 /// Least fixpoint of the may-reach set; meet is union, so a producer unfenced on ANY path in is
 /// unfenced here.  Finite frames plus a monotone transfer bound the iteration.
 std::vector<Live> solve(const FrameCFG& cfg, const GirFrameHazardAnalysis::Result& hazards,
-                        const Markers& markers, const MarkerCoverage& markerCoverage) {
+                        const Markers& markers, const MarkerCoverage& markerCoverage,
+                        bool perFrame = false) {
     std::vector<Live> in(cfg.nodes.size());
     std::vector<Live> out(cfg.nodes.size());
     std::deque<size_t> work;
@@ -236,7 +232,7 @@ std::vector<Live> solve(const FrameCFG& cfg, const GirFrameHazardAnalysis::Resul
         if (merged == in[n] && !out[n].empty()) continue;
         in[n] = merged;
         Live next = transfer(cfg.nodes[n], cfg.body[n], hazards, in[n], markers, markerCoverage,
-                             [](size_t, size_t) {});
+                             perFrame, [](size_t, size_t) {});
         if (next == out[n]) continue;
         out[n] = std::move(next);
         for (size_t m = 0; m < cfg.nodes.size(); ++m)
@@ -254,7 +250,7 @@ bool firstViolation(const FrameCFG& cfg, const GirFrameHazardAnalysis::Result& h
     for (size_t n = 0; n < cfg.nodes.size(); ++n) {
         size_t found = cfg.body[n].size();
         std::vector<size_t> here;
-        transfer(cfg.nodes[n], cfg.body[n], hazards, in[n], markers, markerCoverage,
+        transfer(cfg.nodes[n], cfg.body[n], hazards, in[n], markers, markerCoverage, false,
                  [&](size_t i, size_t h) {
                      if (i < found) {
                          found = i;
@@ -291,7 +287,7 @@ bool countsFor(const StinkyInstruction& inst, Counter counter) {
 /// every edge and no issue on the producer's counter lies between them; each edge's FIFO rank is
 /// then unchanged. Different groups that land on the same instruction naturally share one marker.
 GirRawPlacementPlan rawMarkers(const FrameCFG& cfg, const GirFrameHazardAnalysis::Result& hazards,
-                               int wmmaLead) {
+                               int wmmaLead, FenceDischarge* discharge = nullptr) {
     using Group = std::tuple<BasicBlock*, uint64_t, Counter>;
     using ByDeadline = std::map<size_t, std::vector<const GirFrameHazard*>>;
     std::map<Group, ByDeadline> deadlines;
@@ -349,6 +345,11 @@ GirRawPlacementPlan rawMarkers(const FrameCFG& cfg, const GirFrameHazardAnalysis
             const StinkyInstruction* marker = instructions[markerSlot];
             plan.markers.insert(marker);
             if (counter == Counter::Tensor) plan.tensorMarkers.insert(marker);
+            // The cluster this mandatory marker was placed for, filed under the frame its
+            // consumer reads in. No RAW ever reaches the cut loop, so this is the only RAW site.
+            if (discharge)
+                for (const GirFrameHazard* hazard : cluster)
+                    (*discharge)[marker][hazard->consumerFrame].insert(hazard);
         };
         for (++deadline; deadline != byDeadline.rend(); ++deadline) {
             const size_t candidate = deadline->first;
@@ -385,30 +386,6 @@ GirRawPlacementPlan rawMarkers(const FrameCFG& cfg, const GirFrameHazardAnalysis
     return plan;
 }
 
-MarkerOwnershipMap collectMarkerOwnership(const GirFrameAnalysis::Result& frames,
-                                          const GirFrameHazardAnalysis::Result& hazards,
-                                          const Markers& markers,
-                                          const std::function<bool(const BasicBlock&)>& covers) {
-    const auto marked = [&markers](const StinkyInstruction& inst) {
-        return markers.count(&inst) != 0;
-    };
-    MarkerOwnershipMap result;
-    for (const GirFrameHazard& hazard : hazards.hazards) {
-        if (!hazard.crossAgent || !covers(*hazard.consumerBlock)) continue;
-        const GirHazardFenceCover cover = enclosingFences(frames, hazard, marked);
-        for (const GirHazardFenceOwner& owner : cover.owners) {
-            if (!owner.anchor || !markers.count(owner.anchor)) continue;
-            MarkerOwnership& summary = result[owner.anchor];
-            summary.coverage.insert(hazardClass(hazard));
-            summary.kinds.insert(hazard.kind);
-            if (hazard.kind == GirHazardKind::RAW)
-                summary.allRawAreTensor &=
-                    waitcnt::classifyMemOp(*hazard.producer) == waitcnt::CK_Tensor;
-        }
-    }
-    return result;
-}
-
 /// What is unfenced just before each instruction, so a candidate slot knows what it would
 /// discharge -- and therefore which residuals its one wait must be the minimum of.
 std::vector<Live> liveBefore(const Node& node, const std::vector<StinkyInstruction*>& body,
@@ -417,7 +394,8 @@ std::vector<Live> liveBefore(const Node& node, const std::vector<StinkyInstructi
     std::vector<Live> out(body.size() + 1);
     Live live = in;
     for (size_t i = 0; i < body.size(); ++i) {
-        publishOwned(*body[i], live, hazards, markers, markerCoverage);
+        publishOwned(*body[i], live, hazards, markers, markerCoverage, false,
+                     [](const StinkyInstruction*, size_t) {});
         out[i] = live;
         for (size_t h = 0; h < hazards.hazards.size(); ++h) {
             const GirFrameHazard& hazard = hazards.hazards[h];
@@ -595,19 +573,23 @@ class GirFencePlacementPass final : public StinkyInstPass {
         const FrameCFG cfg = buildFrameCFG(function, frames);
         if (cfg.nodes.empty()) return PreservedAnalyses::all();
         const int wmmaLead = std::max(0, passCtx.getPassFeatureConfig().dagFeatures.wmmaQueueDepth);
-        const GirRawPlacementPlan rawPlan = rawMarkers(cfg, hazards, wmmaLead);
+        FenceDischarge finalOwnership;
+        const GirRawPlacementPlan rawPlan = rawMarkers(cfg, hazards, wmmaLead, &finalOwnership);
         const Markers& mandatoryRawMarkers = rawPlan.markers;
         Markers markers = mandatoryRawMarkers;
         MarkerCoverage markerCoverage;
+        auto fenceCoverage = std::make_shared<GirFenceCoverage>();
         const auto marked = [&markers](const StinkyInstruction& inst) {
             return markers.count(&inst) != 0;
         };
-        for (const GirFrameHazard& hazard : hazards.hazards) {
+        const GirPlanFenceCoverage seedPlan = buildGirPlanFenceCoverage(frames, hazards, marked);
+        for (size_t h = 0; h < hazards.hazards.size(); ++h) {
+            const GirFrameHazard& hazard = hazards.hazards[h];
             if (!hazard.crossAgent || hazard.kind != GirHazardKind::RAW) continue;
-            const GirHazardFenceCover cover = enclosingFences(frames, hazard, marked);
+            const GirHazardFenceCover& cover = seedPlan.byHazard[h];
             for (const GirHazardFenceOwner& owner : cover.owners)
                 if (owner.anchor && mandatoryRawMarkers.count(owner.anchor))
-                    markerCoverage[owner.anchor].insert(hazardClass(hazard));
+                    markerCoverage[owner.anchor].insert(&hazard);
         }
         const auto covers = [&passCtx](const BasicBlock& block) {
             return passCtx.shouldProcessBasicBlock(const_cast<BasicBlock&>(block));
@@ -648,9 +630,14 @@ class GirFencePlacementPass final : public StinkyInstPass {
                                   violating, slot, markers);
                 const StinkyInstruction* marker = cfg.body[node][slot];
                 bool extended = markers.insert(marker).second;
-                for (size_t h : violating)
-                    extended |=
-                        markerCoverage[marker].insert(hazardClass(hazards.hazards[h])).second;
+                for (size_t h : violating) {
+                    const GirFrameHazard& hazard = hazards.hazards[h];
+                    // The cut that answers this violation: the WAR site.
+                    finalOwnership[marker][cfg.nodes[node].frame].insert(&hazard);
+                    if (coversHazard(markerCoverage[marker], hazard)) continue;
+                    markerCoverage[marker].insert(&hazard);
+                    extended = true;
+                }
                 // A marker already at the consumer can acquire another storage class. If neither
                 // the marker set nor its coverage changed, the transfer should have discharged
                 // this violation and the fixpoint cannot make progress.
@@ -660,11 +647,13 @@ class GirFencePlacementPass final : public StinkyInstPass {
             // Phase 2: the cut fixpoint answers LIVENESS; the wait pass asks POSITION -- does a
             // barrier stand before this consumer. Cover what the first question does not imply,
             // asking `lastBarrierBefore` about the plan so both phases speak of the same fences.
+            const GirPlanFenceCoverage positionPlan =
+                buildGirPlanFenceCoverage(frames, hazards, marked);
             for (size_t h = 0; h < hazards.hazards.size(); ++h) {
                 const GirFrameHazard& hazard = hazards.hazards[h];
                 if (!hazard.crossAgent) continue;
                 if (!passCtx.shouldProcessBasicBlock(*hazard.consumerBlock)) continue;
-                const GirHazardFenceCover cover = enclosingFences(frames, hazard, marked);
+                const GirHazardFenceCover& cover = positionPlan.byHazard[h];
                 if (!cover.hasHazardPath)
                     STINKY_UNREACHABLE(
                         "GirFencePlacementPass found no exact frame path for a GIR hazard");
@@ -675,7 +664,7 @@ class GirFencePlacementPass final : public StinkyInstPass {
                     if (!inst) continue;
                     if (index++ == hazard.consumerIndex) {
                         markers.insert(inst);
-                        markerCoverage[inst].insert(hazardClass(hazard));
+                        markerCoverage[inst].insert(&hazard);
                         break;
                     }
                 }
@@ -694,6 +683,7 @@ class GirFencePlacementPass final : public StinkyInstPass {
                     if (!firstViolation(cfg, hazards, solve(cfg, hazards, markers, markerCoverage),
                                         markers, markerCoverage, n, sl, v)) {
                         markerCoverage.erase(candidate);
+                        finalOwnership.erase(candidate);
                         shrinking = true;
                         break;
                     }
@@ -739,10 +729,12 @@ class GirFencePlacementPass final : public StinkyInstPass {
             if (candidateCoverage == markerCoverage.end()) return false;
 
             std::vector<size_t> ownedHazards;
+            const GirPlanFenceCoverage shrinkPlan =
+                buildGirPlanFenceCoverage(frames, hazards, marked);
             for (size_t h = 0; h < hazards.hazards.size(); ++h) {
                 const GirFrameHazard& hazard = hazards.hazards[h];
-                if (!candidateCoverage->second.contains(hazardClass(hazard))) continue;
-                const GirHazardFenceCover cover = enclosingFences(frames, hazard, marked);
+                if (!coversHazard(candidateCoverage->second, hazard)) continue;
+                const GirHazardFenceCover& cover = shrinkPlan.byHazard[h];
                 if (std::any_of(cover.owners.begin(), cover.owners.end(),
                                 [&](const GirHazardFenceOwner& owner) {
                                     return owner.anchor == candidate;
@@ -757,11 +749,14 @@ class GirFencePlacementPass final : public StinkyInstPass {
                                                    first)
                                        : waitcnt::WaitCountSpec::kUnused;
             markers.erase(candidate);
+            // The plan just changed under us, so ask what the REMAINING fences cover.
+            const GirPlanFenceCoverage adoptPlan =
+                buildGirPlanFenceCoverage(frames, hazards, marked);
             HazardClasses adopted;
             bool legal = true;
             for (size_t h : ownedHazards) {
                 const GirFrameHazard& hazard = hazards.hazards[h];
-                const GirHazardFenceCover cover = enclosingFences(frames, hazard, marked);
+                const GirHazardFenceCover& cover = adoptPlan.byHazard[h];
                 if (!cover.hasHazardPath || cover.hasUnfencedPath || cover.owners.empty()) {
                     legal = false;
                     break;
@@ -772,7 +767,7 @@ class GirFencePlacementPass final : public StinkyInstPass {
                         break;
                     }
                 if (!legal) break;
-                adopted.insert(hazardClass(hazard));
+                adopted.insert(&hazard);
             }
             if (legal && requireUnchangedDs) {
                 const waitcnt::WaitInsertionPlan trial =
@@ -786,6 +781,12 @@ class GirFencePlacementPass final : public StinkyInstPass {
 
             markerCoverage.erase(candidate);
             markerCoverage[first].insert(adopted.begin(), adopted.end());
+            // The discharge moves with the coverage it answers for.
+            if (auto moved = finalOwnership.find(candidate); moved != finalOwnership.end()) {
+                for (const auto& [frame, covered] : moved->second)
+                    finalOwnership[first][frame].insert(covered.begin(), covered.end());
+                finalOwnership.erase(candidate);
+            }
             return true;
         };
 
@@ -844,33 +845,48 @@ class GirFencePlacementPass final : public StinkyInstPass {
         Markers waitRetiredMarkers;
         waitcnt::WaitInsertionPlan finalVirtualWaits;
         for (size_t round = 0; round <= markerBound; ++round) {
-            MarkerOwnershipMap ownership = collectMarkerOwnership(frames, hazards, markers, covers);
+            // Kinds and the all-RAW-are-tensor test come from the coverage the cut dataflow
+            // built; nothing re-derives ownership with a path query.
+            const auto ownedKinds = [&](const StinkyInstruction* fence) {
+                auto covered = markerCoverage.find(fence);
+                return covered == markerCoverage.end() ? HazardKinds{}
+                                                       : hazardKinds(covered->second);
+            };
+            const auto allRawAreTensor = [&](const StinkyInstruction* fence) {
+                auto covered = markerCoverage.find(fence);
+                if (covered == markerCoverage.end()) return true;
+                for (const GirFrameHazard* hazard : covered->second)
+                    if (hazard->kind == GirHazardKind::RAW &&
+                        waitcnt::classifyMemOp(*hazard->producer) != waitcnt::CK_Tensor)
+                        return false;
+                return true;
+            };
             waitcnt::WaitInsertionPlan virtualWaits =
                 waitcnt::buildGirFrameWaitPlan(function, frames, hazards, covers, marked);
 
             bool removed = false;
             for (const StinkyInstruction* candidate : inProgramOrder(markers)) {
-                auto owned = ownership.find(candidate);
                 auto wait =
                     virtualWaits.anchorWaits.find(const_cast<StinkyInstruction*>(candidate));
                 const bool hasTensorWait =
                     wait != virtualWaits.anchorWaits.end() &&
                     wait->second.tensorCount != waitcnt::WaitCountSpec::kUnused;
 
-                const bool dropsUnwaitedRaw = owned != ownership.end() && !hasTensorWait &&
-                                              owned->second.kinds.contains(GirHazardKind::RAW) &&
-                                              owned->second.allRawAreTensor;
+                const bool dropsUnwaitedRaw = !hasTensorWait &&
+                                              ownedKinds(candidate).contains(GirHazardKind::RAW) &&
+                                              allRawAreTensor(candidate);
                 if (dropsUnwaitedRaw) {
-                    owned->second.kinds.erase(GirHazardKind::RAW);
-                    eraseHazardKind(owned->second.coverage, GirHazardKind::RAW);
+                    auto covered = markerCoverage.find(candidate);
+                    if (covered != markerCoverage.end())
+                        eraseHazardKind(covered->second, GirHazardKind::RAW);
                 }
                 const bool retiresUnwaitedRaw =
                     dropsUnwaitedRaw && !waitRetiredMarkers.count(candidate);
-                if (!retiresUnwaitedRaw && owned != ownership.end() && !owned->second.kinds.empty())
-                    continue;
+                if (!retiresUnwaitedRaw && !ownedKinds(candidate).empty()) continue;
 
                 markers.erase(candidate);
                 markerCoverage.erase(candidate);
+                finalOwnership.erase(candidate);
                 waitRetiredMarkers.insert(candidate);
                 removed = true;
                 break;
@@ -890,9 +906,6 @@ class GirFencePlacementPass final : public StinkyInstPass {
                 continue;
             }
 
-            markerCoverage.clear();
-            for (const auto& [marker, summary] : ownership)
-                markerCoverage[marker] = summary.coverage;
             finalVirtualWaits = std::move(virtualWaits);
             waitAwareShrinkConverged = true;
             break;
@@ -933,6 +946,31 @@ class GirFencePlacementPass final : public StinkyInstPass {
             }
         }
 
+        // A marker is placed at a deadline; what it DISCHARGES is decided only once the fence
+        // set is final. Replay the materialization dataflow over it: a hazard is answered by the
+        // first fence its liveness reaches that was placed for that same written generation.
+        {
+            // Gate the kill on what each marker was PLACED for, not on `markerCoverage`: the
+            // phase-0 path-query seed widens that one, and it would discharge a hazard whose
+            // deadline lies at a later marker merely because the storage matches.
+            MarkerCoverage placedFor;
+            for (const auto& [fence, byFrame] : finalOwnership)
+                for (const auto& [frame, covered] : byFrame)
+                    placedFor[fence].insert(covered.begin(), covered.end());
+            const std::vector<Live> in = solve(cfg, hazards, markers, placedFor, true);
+            finalOwnership.clear();
+            for (size_t n = 0; n < cfg.nodes.size(); ++n)
+                transfer(
+                    cfg.nodes[n], cfg.body[n], hazards, in[n], markers, placedFor, true,
+                    [](size_t, size_t) {},
+                    [&](const StinkyInstruction* fence, size_t h) {
+                        // Filed under the frame the CONSUMER reads in: that is the storage the
+                        // query at the fence's block is asking about.
+                        finalOwnership[fence][hazards.hazards[h].consumerFrame].insert(
+                            &hazards.hazards[h]);
+                    });
+        }
+
         // Phase 4: and only now does the plan become instructions.
         const size_t placed = markers.size();
         const size_t erased = 0;
@@ -947,7 +985,16 @@ class GirFencePlacementPass final : public StinkyInstPass {
             if (covered == markerCoverage.end() || covered->second.empty())
                 STINKY_UNREACHABLE("GirFencePlacementPass: barrier has no hazard-kind stamp");
             wait->addModifier<CommentData>(CommentData{fenceStamp(hazardKinds(covered->second))});
+            // One entry per fence. Both halves answer for the same cut, so a consumer that holds
+            // either one reaches it through the signal/wait pairing it already knows.
+            auto owned = finalOwnership.find(target);
+            if (owned == finalOwnership.end() || owned->second.empty())
+                STINKY_UNREACHABLE("GirFencePlacementPass: barrier covers no hazard");
+            for (const auto& [frame, covered] : owned->second)
+                for (const GirFrameHazard* hazard : covered)
+                    fenceCoverage->add(wait, frame, *hazard);
         }
+        function.setStructMetaData<GirFenceCoverage>(kGirFenceCoverageKey, fenceCoverage);
 
         if (placed == 0 && erased == 0) return PreservedAnalyses::all();
         AM.invalidate(function, preserveCFGAnalyses());

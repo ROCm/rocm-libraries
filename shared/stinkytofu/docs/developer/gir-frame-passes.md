@@ -18,6 +18,8 @@ rotation and control-flow facts while instruction modifiers supply the accesses.
 | `GirFrameHazardAnalysis` | same file, `GirFrameHazardAnalysis::run` |
 | Same-trip scheduling edges | `src/transforms/asm/dag/RegionDAG.cpp`, `addGirFrameHazardEdges` |
 | `GirFencePlacementPass` | `src/transforms/asm/GirFencePlacementPass.cpp` |
+| Fence discharge record (`GirFenceCoverage`) | `include/stinkytofu/analysis/asm/GirFrameAnalysis.hpp` |
+| Barrier memory tokens | `src/transforms/asm/StinkyBuildImplicitDependencyPass.cpp` |
 | Generic register waits | `src/transforms/asm/StinkyWaitCntInsertionPass.cpp` |
 | `GirWaitCntInsertionPass` | `src/transforms/asm/GirWaitCntInsertionPass.cpp` |
 | Counter flow (the wait solver) | `src/transforms/asm/waitcnt/GirFrameCounterFlow.cpp` |
@@ -31,9 +33,11 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createGirWaitCntInsertionPass();
 
 ```mermaid
 flowchart TD
-  imp["GirFrameContractImportPass"] --> region["addGfx1250RegionPasses (DAG scheduling, peepholes, ...)"]
+  imp["GirFrameContractImportPass"] --> region["addGfx1250RegionPasses (peepholes, wait removal, ...)"]
   region --> fence["GirFencePlacementPass"]
-  fence --> swait["StinkyWaitCntInsertionPass (register/token dataflow)"]
+  fence --> dep["StinkyBuildImplicitDependencyPass (barrier memory tokens)"]
+  dep --> sched["StinkyDAGSchedulerPass + StinkyMergeBarrierPass"]
+  sched --> swait["StinkyWaitCntInsertionPass (register/token dataflow)"]
   swait --> gwait["GirWaitCntInsertionPass (storage/frame dataflow)"]
   gwait --> later["cluster barriers and later passes"]
 ```
@@ -99,6 +103,29 @@ that constrained it:
 finite decisions produce `[gir-wait]` records.
 Materialized barrier waits carry comments such as
 `GIR fence (RAW,WAR)` so the owning hazard kinds are visible in assembly.
+
+To see what each barrier discharges and under which frame, enable
+`DEBUG_TYPE "StinkyBuildImplicitDependencyPass"` (in production,
+`StinkyTofuDebugPass: "StinkyBuildImplicitDependencyPass"`). The `[GirCover]`
+dump lists every frame a fence carries entries on, marks the one the scheduler
+selected, and names both endpoints of each discharged hazard:
+
+```text
+[GirCover] s_barrier_wait at label_LoopBeginL #2  (3 frames)
+  -> gen0=0 gen1=0 gen2=0 gen3=0 gen4=2 gen5=0   [scheduled]
+       RAW LDS3  tensor_load_to_lds entry#52 -> ds_load_b128 label_LoopBeginL#9  (5 nodes on)
+     gen0=0 gen1=0 gen2=0 gen3=0 gen4=2 gen5=1
+       RAW LDS3  tensor_load_to_lds label_LoopBeginL_1#335 -> ds_load_b128 label_LoopBeginL#9  (2 nodes on)
+     gen0=1 gen1=1 gen2=1 gen3=1 gen4=2 gen5=1
+       RAW LDS7  tensor_load_to_lds label_LoopBeginL_1#335 -> ds_load_b128 label_LoopBeginL#9  (2 nodes on)
+```
+
+Only the `[scheduled]` frame's slots become memory tokens — here, `LDS3` alone.
+A barrier carrying entries on several frames is normal and is *not* evidence of
+over-tagging: this one discharges a single `ds_load`, reached on the prologue
+path from `entry#52` and on the back edge from `label_LoopBeginL_1#335`, and the
+ring names that slot `LDS3` on two frames and `LDS7` on a third. Over-tagging
+looks different — several *distinct* storages on the one `[scheduled]` line.
 
 `ST_GIR_SPAN_STATS=1` separately reports span walks that ended without either
 reaching the anchor or retiring — see [Unaccounted spans](#unaccounted-spans).
@@ -315,12 +342,16 @@ wait into an unnecessary drain.
 
 Least fixpoint of the may-reach set over producers with no fence crossed since.
 The meet is **union**, so a producer unfenced on any incoming path is unfenced
-here. A fence publishes everything, so its kill is total: tracking discharge
-per-storage instead is what invents redundant fences, because each one then
-looks like it covers only its own hazard.
+here. A materialized barrier publishes everything, so its kill is total, and a
+virtual marker kills by storage class (`coversHazard`) — deliberately coarse,
+because a finer test here invents redundant fences: each one then looks like it
+covers only its own hazard.
 
 While any hazard is violated, mark the slot with the deepest residual and
 re-solve.
+
+This coarseness is why ownership cannot be read off this walk. Phase 3c replays
+the same dataflow with a narrower kill once placement is settled.
 
 ### Phase 2 — cover position
 
@@ -350,6 +381,40 @@ The final plan rejects a RAW-stamped marker without a tensor wait. It also
 checks that two pure WAR barriers with no intervening tensor issue were not left
 mergeable.
 
+### Phase 3c — the discharge
+
+Placement is now final; what each fence *discharges* is read off that final set.
+
+Placement is multi-staged: `rawMarkers` proposes RAW sites, the wait plan
+confirms which are real, and merge, shrink and wait-aware retirement move them.
+A discharge recorded while that was still happening names fences that later
+merged or retired, so the record built along the way is kept only as "what this
+marker was **placed for**" and is then replaced by one replay of the
+materialization dataflow over the surviving markers.
+
+Two things make that replay answer the ownership question rather than the
+placement question:
+
+- **The kill is gated on what each marker was placed for, not on
+  `markerCoverage`.** Phase 0 seeds `markerCoverage` from a path query, which
+  widens it: a fence would otherwise discharge a hazard whose deadline lies at a
+  *later* marker merely because the storage matches.
+- **The kill class is per producer occurrence.** `coversHazard` compares kind
+  and storage only, which is the right question for placement — *is some
+  generation of this slot fenced here* — but too coarse for ownership, because a
+  fence answering for `RAW:7` in one frame would kill another frame's `RAW:7`.
+  The replay passes `perFrame = true`, narrowing the class to
+  `kind && storage && producer && producerFrame`. It is the only caller that
+  does; every placement call site passes `false`, so the fixpoint is untouched.
+
+Each killed hazard is filed under its **consumer's** frame — that is the frame
+the query at the fence's block will ask about.
+
+The result is a `GirFenceCoverage`: `fence -> frame -> hazards`. Hazards are
+held **by value**; placement invalidates the hazard analysis before any consumer
+reads the record. `merge(into, from)` folds one fence's entries into another,
+frame by frame, as a barrier merge does to the fences it collapses.
+
 ### Phase 4 — materialise
 
 Only now does the plan become instructions. Each marker gets a signal/wait pair
@@ -372,6 +437,57 @@ owns, for example:
     s_barrier_wait -1        // GIR fence (WAR)
 ```
 
+Materialization also writes the Phase 3c discharge onto each fence and stores it
+on the function under `kGirFenceCoverageKey` for later passes to query.
+
+---
+
+## The barrier's memory token
+
+`StinkyBuildImplicitDependencyPass` reads `GirFenceCoverage` and gives each
+materialized barrier the LDS slots of the hazards it discharges, on its block's
+**selected scheduling frame**. For a split all-wave barrier both halves get the
+same set, since both answer for the same cut.
+
+**The token is the discharge set, not the live set.** A barrier's `live.clear()`
+in the placement fixpoint is liveness moving on, not a discharge: a hazard an
+earlier fence already answered must not be tagged again on a later one. Tagging
+it anyway makes a barrier look like it publishes slots it does not, which shows
+up as spurious `s_wait_dscnt` on the token chain.
+
+The token does double duty, and both jobs need it to be exactly the discharge
+set:
+
+- it is the **ownership record** — which slots this fence publishes; and
+- it is the scheduler's **anti-hoist constraint** — a read may not float above a
+  fence that carries its slot.
+
+That second role is why narrowing the token without also fixing where the
+discharge is computed is unsafe: a read floats above the fence that was its only
+publication point, and the counter flow then reports
+`Cross-agent GIR hazard has an unfenced exact frame-graph path`.
+
+### Worked example
+
+Three unrolled loop copies over an eight-slot ring, as the assembly comments
+show them (`GIR to sync LDSn`):
+
+```text
+B1 {RAW:3}                B2 {WAR:0,1,2  RAW:4,5}   B3 {WAR:3  RAW:6}
+B4 {RAW:7}                B5 {WAR:4,5,6  RAW:0,1}   B6 {WAR:7  RAW:2}
+B7..B9 repeat B1..B3
+```
+
+To check a barrier's token by hand, read the segment that follows it: the WAR
+slots are the ones its `tensor_load`s overwrite, and the RAW slots are the ones
+its `ds_load`s consume **minus whatever an earlier barrier already discharged**.
+`B1`'s segment reads slots 0, 1, 2 and 3, but 0 and 1 were discharged at `B5`
+and 2 at `B6` of the previous sub-iteration, so `B1` owns slot 3 alone.
+
+`tests/filecheck/gir_fence_token_discharge.stir` pins both directions: a loop
+barrier that must *not* re-tag a slot the prologue already fenced, and one that
+must carry both slots because it is the first to answer for either.
+
 ---
 
 ## GirWaitCntInsertionPass
@@ -392,8 +508,9 @@ producer means waiting until `n - 1` remain.
 ### Anchors
 
 ```cpp
-StinkyInstruction* anchor = hazard.consumer;
-if (hazard.crossAgent) std::tie(anchor, anchorFrame) = enclosingFence(...);
+if (!hazard.crossAgent) { addPotential(hazard.consumer, hazard.consumerFrame, hazard.gap); }
+else for (const GirHazardFenceOwner& owner : plan.byHazard[h].owners)
+    addPotential(owner.anchor, owner.anchorNode.frame, owner.producerToAnchorGap);
 ```
 
 A same-wave hazard anchors on its consumer. A cross-agent hazard anchors on the
@@ -401,6 +518,15 @@ barrier that discharges it, resolved **by position** through `lastBarrierBefore`
 rather than by any fence-to-hazard table, so a barrier StinkyTofu placed itself
 anchors exactly like one it inherited. A cross-agent hazard with no barrier is a
 fatal error.
+
+`buildGirPlanFenceCoverage` runs that position query once for every cross-agent
+hazard and returns a `GirHazardFenceCover` per hazard: the fences covering it on
+each exact dynamic path, the frame each stands on, and whether any path is left
+unfenced. One walk, so every consumer reads the same answer. Note this is a
+*different* question from Phase 3c's discharge record: this one asks **which
+fences stand on the path** (and may name several), while the discharge asks
+**which single fence answered for this hazard**. Both exist; do not substitute
+one for the other.
 
 For a split all-wave barrier, the anchor is its signal. A same-trip cross-agent
 WAR therefore emits its `s_wait_dscnt` before the signal, not between signal and
@@ -520,6 +646,4 @@ additional storage ordering still required. Consequently:
 - [GIR Frame Contract](gir-frame-contract.md) — the input
 - [Insert Cluster Barrier Pass](cluster-barrier.md) — the `-3` barriers, a
   separate mechanism with its own placement rules
-- [Wait-Aware Schedule Repair Pass](wait-aware-schedule-repair-pass.md) — runs
-  after wait insertion and treats emitted waits as fixed
 - [Architecture](architecture.md) — pass pipeline overview

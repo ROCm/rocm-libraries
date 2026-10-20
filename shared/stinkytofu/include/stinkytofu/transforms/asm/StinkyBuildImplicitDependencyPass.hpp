@@ -47,9 +47,10 @@ class Pass;
  *      Barriers                            — token to both src and dest
  *    This creates the dependency chain:  writer → barrier → reader.
  *
- * With the GIR frame pipeline, (2) is derived from GirFrameAnalysis instead of frontend
- * MemTokenData. A materialized split GIR fence receives the same storage tokens on both its
- * signal and wait, producing the scheduler chain writer -> signal -> wait -> reader.
+ * With the GIR frame pipeline, (2) follows one coherent path through the GirFrame graph. Concrete
+ * storage ids along that path are scheduling-only tokens, preserving predecessor-to-successor LDS
+ * rotation; full dynamic frame reasoning remains in the GIR hazard/waitcnt passes. A split fence
+ * receives only selected-path endpoint tokens relevant to its own scheduling block.
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass(
     bool enableMemoryTokenDependencies = true);

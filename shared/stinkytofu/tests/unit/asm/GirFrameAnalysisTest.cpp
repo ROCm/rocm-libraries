@@ -927,6 +927,26 @@ TEST(GirFrameAnalysisTest, HazardBecomesAnOrdinaryDagEdge) {
     EXPECT_EQ(graph.nodes[1].inDegree, 1u);
 }
 
+TEST(GirFrameAnalysisTest, PhysicalSplitFenceSignalAlwaysPrecedesWait) {
+    Function function("physical_split_fence");
+    setFunctionArch(function, GfxArchID::Gfx1250);
+    BasicBlock* block = function.createBasicBlock("entry");
+    AsmIRBuilder builder(*block, GfxArchID::Gfx1250);
+    StinkyInstruction* signal =
+        builder.create(getMCIDByUOp(GFX::s_barrier_signal, GfxArchID::Gfx1250));
+    signal->addSrcReg(StinkyRegister(-1));
+    StinkyInstruction* filler = createVAddInBlock(block, GfxArchID::Gfx1250, 40, 41, 42);
+    StinkyInstruction* wait = builder.create(getMCIDByUOp(GFX::s_barrier_wait, GfxArchID::Gfx1250));
+    wait->addSrcReg(StinkyRegister(-1));
+
+    dag::RegionDAG graph = dag::buildRegisterDependencyDAG({signal, filler, wait});
+    dag::addGirFrameHazardEdges(graph, GirFrameHazardAnalysis::Result{},
+                                GirFrameAnalysis::Result{});
+
+    ASSERT_TRUE(graph.graph[0].contains(2));
+    EXPECT_EQ(graph.nodes[2].inDegree, 1u);
+}
+
 TEST(GirFrameAnalysisTest, FrameSchedulingDoesNotMaterializeLegacyMemoryTokenRegisters) {
     Function function("frame_without_tokens");
     setFunctionArch(function, GfxArchID::Gfx1250);

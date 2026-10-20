@@ -1,7 +1,7 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --print-output
 #
-# Under the GIR frame contract the pass derives one memtoken per concrete LDS slot, so a copy into
-# one buffer shares a pseudo-register with the reads of that buffer and with nothing else.
+# Under the GIR frame contract the pass follows one coherent frame-graph path and uses that path's
+# concrete LDS storage ids as scheduling-only memtokens.
 #
 # CHECK-LABEL: @gir_slot_tokens_separate_buffers
 # CHECK: "st.ds_load_b64"(v10, LDS0)
@@ -14,19 +14,24 @@ gir-frame-contract
 gen 300  ring=2 entry=0
 incoming  dst=301 src=300 gen=300 value=0
 incoming  dst=301 src=301 gen=300 value=1 relative=1
+gen 400  ring=2 entry=0
+incoming  dst=401 src=400 gen=400 value=0
+incoming  dst=402 src=401 gen=400 value=1 relative=1
+incoming  dst=403 src=402 gen=400 value=1 relative=1
+incoming  dst=401 src=403 gen=400 value=1 relative=1
 }
 
 st.func @gir_slot_tokens_separate_buffers() {
 ^entry:
-  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 0, anchor = 0, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 1, anchor = 1, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
-  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 2, kind = read, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_abs = 0 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 0, anchor = 0, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 1, anchor = 1, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 2, kind = ds, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_abs = 0 } }
 }
 
 #
-# A rotating ring: in every trip the copy writes one buffer and the read consumes the OTHER
-# (`gdelta=1`), so they never meet in a frame and must not share a pseudo-register even though
-# both walk the same ring.  The prologue copy is the same buffer as the first trip's copy.
+# In the selected frame the rotating copy writes one buffer and the read consumes the OTHER
+# (`gdelta=1`), so their static schedule uses different pseudo-registers. Other dynamic phases are
+# deliberately left to GIR hazard/waitcnt analysis.
 #
 # CHECK-LABEL: @gir_slot_tokens_rotating_ring
 # CHECK: LDS0 = "st.tensor_load_to_lds"(s[0:3]
@@ -36,12 +41,73 @@ st.func @gir_slot_tokens_separate_buffers() {
 
 st.func @gir_slot_tokens_rotating_ring() {
 ^entry:
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 300, anchor = 300, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 300, anchor = 300, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
   "st.s_branch"("loop")
   Successors: ^loop
 ^loop:
-  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 301, anchor = 301, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 300 } }
-  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 302, anchor = 301, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 300, access0_gdelta = 1 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 301, anchor = 301, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 300 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 302, anchor = 301, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 300, access0_gdelta = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
+
+#
+# Three physical loop-copy blocks must follow one connected frame path. Independent per-block
+# minima would assign phase zero to all three; the graph transitions are 0 -> 1 -> 0.
+#
+# CHECK-LABEL: @gir_slot_tokens_three_copy_rotation
+# CHECK: LDS0 = "st.tensor_load_to_lds"(s[0:3]
+# CHECK: ^copy0:
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"(s[4:7]
+# CHECK: ^copy1:
+# CHECK-NEXT: LDS1 = "st.tensor_load_to_lds"(s[8:11]
+# CHECK: ^copy2:
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"(s[12:15]
+
+st.func @gir_slot_tokens_three_copy_rotation() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[20:27]) { mod.gir_action = { action = 400, anchor = 400, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  "st.s_branch"("copy0")
+  Successors: ^copy0
+^copy0:
+  "st.tensor_load_to_lds"(s[4:7], s[20:27]) { mod.gir_action = { action = 401, anchor = 401, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 400 } }
+  "st.s_branch"("copy1")
+  Successors: ^copy1
+^copy1:
+  "st.tensor_load_to_lds"(s[8:11], s[20:27]) { mod.gir_action = { action = 402, anchor = 402, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 400 } }
+  "st.s_branch"("copy2")
+  Successors: ^copy2
+^copy2:
+  "st.tensor_load_to_lds"(s[12:15], s[20:27]) { mod.gir_action = { action = 403, anchor = 403, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 400 } }
+  "st.s_cbranch_scc1"("copy0", SCC0)
+  Successors: ^copy0, ^exit
+^exit:
+}
+
+#
+# A same-trip selected-frame RAW with a physical split barrier. Copy, barrier halves, and read all
+# use LDS0. Dynamic opposite-buffer/loop-carried hazards are intentionally absent from these
+# scheduling tags and remain the GIR waitcnt pass's responsibility.
+#
+# CHECK-LABEL: @gir_slot_tokens_split_fence_bridge
+# CHECK: LDS0 = "st.tensor_load_to_lds"(s[0:3]
+# CHECK: ^loop:
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"(s[4:7]
+# CHECK-NEXT: LDS0 = "st.s_barrier_signal"
+# CHECK-NEXT: LDS0 = "st.s_barrier_wait"
+# CHECK-NEXT: "st.ds_load_b64"(v10, LDS0)
+
+st.func @gir_slot_tokens_split_fence_bridge() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 300, anchor = 300, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 301, anchor = 301, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 300, access0_cross = 1 } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1 }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 302, anchor = 301, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 300, access0_cross = 1 } }
   "st.s_cbranch_scc1"("loop", SCC0)
   Successors: ^loop, ^exit
 ^exit:

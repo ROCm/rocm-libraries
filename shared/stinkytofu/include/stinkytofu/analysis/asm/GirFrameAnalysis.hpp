@@ -4,14 +4,17 @@
  * ************************************************************************ */
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -219,10 +222,51 @@ struct GirHazardFenceCover {
     bool hasUnfencedPath = false;
 };
 
-/// Last fence on each exact dynamic path of `hazard`.
-STINKYTOFU_EXPORT GirHazardFenceCover
-enclosingFences(const GirFrameAnalysis::Result& frames, const GirFrameHazard& hazard,
-                const std::function<bool(const StinkyInstruction&)>& alsoFences = {});
+inline constexpr const char* kGirFenceCoverageKey = "gir.fence_coverage";
+
+using GirFrameHazards = std::set<const GirFrameHazard*>;
+
+/// A fence distinguishes hazards by kind and slot, so one covered hazard answers for its class.
+inline bool coversHazard(const GirFrameHazards& coverage, const GirFrameHazard& hazard) {
+    return std::any_of(coverage.begin(), coverage.end(), [&](const GirFrameHazard* covered) {
+        return covered->kind == hazard.kind && covered->storage == hazard.storage;
+    });
+}
+
+/// Which hazards each materialized GIR fence covers, and on which frame. Placement is the only
+/// thing that knows which hazards it placed a fence for, so it records them here and consumers
+/// query instead of deriving ownership again -- the kinds give the fence stamp, the storages give
+/// the memory tokens. Merging two fences unions their entries frame by frame.
+struct STINKYTOFU_EXPORT GirFenceCoverage {
+    /// Hazards are held BY VALUE: this outlives the hazard analysis that produced them, which
+    /// placement invalidates before any consumer reads it.
+    using Covered = std::vector<GirFrameHazard>;
+    std::map<const StinkyInstruction*, std::map<GirFrame, Covered>> fences;
+
+    void add(const StinkyInstruction* fence, const GirFrame& frame, const GirFrameHazard& hazard) {
+        Covered& covered = fences[fence][frame];
+        for (const GirFrameHazard& seen : covered)
+            if (seen.kind == hazard.kind && seen.storage == hazard.storage) return;
+        covered.push_back(hazard);
+    }
+
+    /// Hazards \p fence covers on \p frame, or nullptr when it covers none there.
+    const Covered* on(const StinkyInstruction* fence, const GirFrame& frame) const {
+        auto entry = fences.find(fence);
+        if (entry == fences.end()) return nullptr;
+        auto covered = entry->second.find(frame);
+        return covered == entry->second.end() ? nullptr : &covered->second;
+    }
+
+    /// Fold \p from into \p into, as a barrier merge does to the fences it collapses.
+    void merge(const StinkyInstruction* into, const StinkyInstruction* from) {
+        auto source = fences.find(from);
+        if (source == fences.end()) return;
+        for (const auto& [frame, covered] : source->second)
+            for (const GirFrameHazard& hazard : covered) add(into, frame, hazard);
+        fences.erase(from);
+    }
+};
 
 struct STINKYTOFU_EXPORT GirFrameHazardAnalysis {
     STINKYTOFU_ANALYSIS_KEY("GirFrameHazardAnalysis")
@@ -237,5 +281,17 @@ struct STINKYTOFU_EXPORT GirFrameHazardAnalysis {
 
     static Result run(Function& function, AnalysisManager& AM);
 };
+
+/// Fence coverage of every cross-agent hazard under one marker plan: for hazard `h`,
+/// `byHazard[h]` names the fences covering it on each exact dynamic path, the frame each stands
+/// on, and whether any path is left unfenced. Built in one walk so every consumer reads the same
+/// answer instead of deriving ownership for itself.
+struct STINKYTOFU_EXPORT GirPlanFenceCoverage {
+    std::vector<GirHazardFenceCover> byHazard;
+};
+
+STINKYTOFU_EXPORT GirPlanFenceCoverage buildGirPlanFenceCoverage(
+    const GirFrameAnalysis::Result& frames, const GirFrameHazardAnalysis::Result& hazards,
+    const std::function<bool(const StinkyInstruction&)>& alsoFences = {});
 
 }  // namespace stinkytofu

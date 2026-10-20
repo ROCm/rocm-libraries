@@ -141,7 +141,9 @@ PotentialMap buildPotentials(Function& function, const GirFrameAnalysis::Result&
         seen;
     std::set<const BasicBlock*> modeled;
     for (BasicBlock& block : function) modeled.insert(&block);
-    for (const GirFrameHazard& hazard : hazards.hazards) {
+    const GirPlanFenceCoverage plan = buildGirPlanFenceCoverage(frames, hazards, alsoFences);
+    for (size_t h = 0; h < hazards.hazards.size(); ++h) {
+        const GirFrameHazard& hazard = hazards.hazards[h];
         // GIR models exactly the scheduling region, so an endpoint outside this function is not a
         // hazard of it -- it is a tag riding on a fork that the region never modeled.
         if (!modeled.count(hazard.producerBlock) || !modeled.count(hazard.consumerBlock)) continue;
@@ -174,7 +176,7 @@ PotentialMap buildPotentials(Function& function, const GirFrameAnalysis::Result&
             continue;
         }
 
-        const GirHazardFenceCover cover = enclosingFences(frames, hazard, alsoFences);
+        const GirHazardFenceCover& cover = plan.byHazard[h];
         if (!cover.hasHazardPath)
             STINKY_UNREACHABLE("Cross-agent GIR hazard has no exact frame-graph path");
         if (cover.hasUnfencedPath)
