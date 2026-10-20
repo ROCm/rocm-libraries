@@ -406,6 +406,7 @@ TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBu
                      << ", cluster=" << cluster.x << 'x' << cluster.y);
         ContractionSolution solution;
         configurePersistentSolution(solution, 3, layout);
+        solution.sizeMapping.workGroupSize = TensileLite::dim3(32, 8, 1);
         if(layout == 2)
         {
             solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;

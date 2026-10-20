@@ -5252,6 +5252,11 @@ namespace TensileLite
                         || arg.semantic == CustomArgSemantic::GSUSync)
                     throw std::runtime_error("StreamK version-2 descriptor contains incompatible scheduling arguments");
             }
+            // SizeMapping retains logical WorkGroup dimensions. Custom metadata
+            // describes the flattened physical launch used by calculateGrid.
+            const size_t threads = checkedMultiply(
+                checkedMultiply(sizeMapping.workGroupSize.x, sizeMapping.workGroupSize.y),
+                sizeMapping.workGroupSize.z);
             if(count != semantics.size() || workspace != 1 || flags != 1
                || customKernel.workspaceType != CustomWorkspaceType::StreamKWithReduction
                || customKernel.workspaceSizePerElemC == 0
@@ -5259,9 +5264,8 @@ namespace TensileLite
                || customKernel.macrotile.x != sizeMapping.macroTile.x
                || customKernel.macrotile.y != sizeMapping.macroTile.y
                || customKernel.macrotile.z != sizeMapping.depthU
-               || customKernel.threads.x != sizeMapping.workGroupSize.x
-               || customKernel.threads.y != sizeMapping.workGroupSize.y
-               || customKernel.threads.z != sizeMapping.workGroupSize.z)
+               || threads == 0 || customKernel.threads.x != threads
+               || customKernel.threads.y != 1 || customKernel.threads.z != 1)
                 throw std::runtime_error("StreamK version-2 descriptor must match the compiled geometry and partial workspace");
             return;
         }
