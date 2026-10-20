@@ -51,7 +51,6 @@ from the standard library plus the packages above.
 │   ├── pr_merge_sync_patches.py        ← generate patch + push to sub-repo
 │   │
 │   ├── # TheRock / multi-arch CI
-│   ├── resolve_therock_ref.py          ← pin TheRock commit for a PR/push event
 │   ├── component_ci.py                 ← per-component CI trigger flags
 │   ├── check_wheel_freshness.py        ← fail CI if nightly wheels are stale
 │   │
@@ -69,7 +68,6 @@ from the standard library plus the packages above.
 │   │
 │   └── tests/
 │       ├── fixtures/                   ← .patch files for commit-message tests
-│       ├── resolve_therock_ref_test.py
 │       ├── test_pr_detect_changed_subtrees.py
 │       └── test_pr_merge_sync_patches.py
 │
@@ -252,28 +250,6 @@ git -C /tmp/test-apply apply /tmp/mylib.patch
 - [ ] `pytest .github/scripts/tests/ -v` passes locally
 - [ ] `--dry-run --debug` smoke test passes against a real merged PR number
 - [ ] PR references the issue being fixed (link or description in PR body)
-
----
-
-### TheRock CI — `resolve_therock_ref.py`
-
-`resolve_therock_ref.py` pins the TheRock commit that a CI run builds against.
-The resolution policy (merge-base for PRs, live tip for pushes) is documented
-in the module docstring.
-
-> **Note:** no workflow currently invokes this script. `therock-multi-arch-ci.yml`
-> pins its TheRock ref inline and through the `ci-env` action, and resolves
-> changed projects with TheRock's own `configure_external_repo_ci.py`. The
-> script and its tests are kept for now; remove them if nothing adopts it.
-
-It has test coverage in `tests/`:
-
-```bash
-pytest tests/resolve_therock_ref_test.py -v
-```
-
-These tests use an in-process `FakeClient` that stubs out all HTTP calls —
-follow the same pattern for any new tests.
 
 ---
 
