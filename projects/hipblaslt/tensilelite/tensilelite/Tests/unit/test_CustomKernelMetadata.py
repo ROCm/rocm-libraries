@@ -959,6 +959,18 @@ def test_build_from_metadata_numworkgroups_grid():
     assert ck["grid"][0] == "TilesXYBatchGSU"
 
 
+@pytest.mark.parametrize("segment, padding", [(16, 4), (12, None)])
+def test_build_from_metadata_pads_trailing_group_size(segment, padding):
+    """The kernarg segment can end past the trailing groupSize; the gap is padding."""
+    full = _kernel_yaml([dict(_D_ARG, **{".offset": 0}),
+                         {".name": "groupSize", ".size": 4, ".offset": 8,
+                          ".value_kind": "by_value"}])
+    full["amdhsa.kernels"][0][".kernarg_segment_size"] = segment
+    ck = _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
+    assert ck["args"][-1]["semantic"] == "ScaleBlockSizeA"
+    assert ck["args"][-1].get("padding") == padding
+
+
 def test_build_from_metadata_default_multidim_grid():
     # Version 0 split-K kernels need one work group per GSU slice along Y.
     ck = _buildCustomKernelFromMetadata(

@@ -615,79 +615,6 @@ constexpr auto select_flag_config_picker() ->
     return partition_config_params_base<data_type>();
 }
 
-// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
-template<class Target, class data_type>
-constexpr auto select_flag_config_picker() -> 
-    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, partition_config_params>
-{
-    // CONFIG: {'data_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 4}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 16)
-    && (sizeof(data_type) > 8)))
-    {
-        return partition_config_params{ { 512, 4 } };
-    }
-    // CONFIG: {'data_type': 'int64_t', 'block_size_x': 512, 'ipt': 8}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 8)
-    && (sizeof(data_type) > 4)))
-    {
-        return partition_config_params{ { 512, 8 } };
-    }
-    // CONFIG: {'data_type': 'int', 'block_size_x': 512, 'ipt': 15}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 4)
-    && (sizeof(data_type) > 2)))
-    {
-        return partition_config_params{ { 512, 15 } };
-    }
-    // CONFIG: {'data_type': 'short', 'block_size_x': 512, 'ipt': 17}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 2)
-    && (sizeof(data_type) > 1)))
-    {
-        return partition_config_params{ { 512, 17 } };
-    }
-    // CONFIG: {'data_type': 'int8_t', 'block_size_x': 192, 'ipt': 31}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 1)
-    ))
-    {
-        return partition_config_params{ { 192, 31 } };
-    }
-    // CONFIG: {'data_type': 'double', 'block_size_x': 512, 'ipt': 8}
-    if constexpr(
-    (bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 8)
-    && (sizeof(data_type) > 4)))
-    {
-        return partition_config_params{ { 512, 8 } };
-    }
-    // CONFIG: {'data_type': 'float', 'block_size_x': 512, 'ipt': 16}
-    if constexpr(
-    (bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 4)
-    && (sizeof(data_type) > 2)))
-    {
-        return partition_config_params{ { 512, 16 } };
-    }
-    // CONFIG: {'data_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 27}
-    if constexpr(
-    (bool(rocprim::is_floating_point<data_type>::value)
-    && (sizeof(data_type) <= 2)
-    ))
-    {
-        return partition_config_params{ { 512, 27 } };
-    }
-    // Default case if none of the conditions match
-    return partition_config_params_base<data_type>();
-}
-
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class data_type>
 constexpr auto select_flag_config_picker() -> 
@@ -704,7 +631,6 @@ using select_flag_targets = comp_targets<
     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
-    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

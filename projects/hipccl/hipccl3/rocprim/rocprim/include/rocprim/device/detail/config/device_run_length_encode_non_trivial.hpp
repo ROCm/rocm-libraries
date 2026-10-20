@@ -919,105 +919,6 @@ constexpr auto run_length_encode_non_trivial_config_picker() ->
     return non_trivial_runs_config_params_base<key_type>();
 }
 
-// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
-template<class Target, 
-    class key_type
->
-constexpr auto run_length_encode_non_trivial_config_picker() -> 
-    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, non_trivial_runs_config_params>
-{
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 32, 'block_load_func': '::rocprim::block_load_method::block_load_warp_transpose'}
-    if constexpr(
-    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8) && (sizeof(key_type) <= 16)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 64, 32 },
-        ::rocprim::block_load_method::block_load_warp_transpose,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'int64_t', 'block_size_x': 64, 'ipt': 64, 'block_load_func': '::rocprim::block_load_method::block_load_vectorize'}
-    if constexpr(
-    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 64, 64 },
-        ::rocprim::block_load_method::block_load_vectorize,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'int', 'block_size_x': 256, 'ipt': 16, 'block_load_func': '::rocprim::block_load_method::block_load_vectorize'}
-    if constexpr(
-    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 256, 16 },
-        ::rocprim::block_load_method::block_load_vectorize,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'short', 'block_size_x': 64, 'ipt': 64, 'block_load_func': '::rocprim::block_load_method::block_load_vectorize'}
-    if constexpr(
-    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1) && (sizeof(key_type) <= 2)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 64, 64 },
-        ::rocprim::block_load_method::block_load_vectorize,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'int8_t', 'block_size_x': 128, 'ipt': 32, 'block_load_func': '::rocprim::block_load_method::block_load_vectorize'}
-    if constexpr(
-    (!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 128, 32 },
-        ::rocprim::block_load_method::block_load_vectorize,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'double', 'block_size_x': 64, 'ipt': 64, 'block_load_func': '::rocprim::block_load_method::block_load_warp_transpose'}
-    if constexpr(
-    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4) && (sizeof(key_type) <= 8)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 64, 64 },
-        ::rocprim::block_load_method::block_load_warp_transpose,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'float', 'block_size_x': 128, 'ipt': 32, 'block_load_func': '::rocprim::block_load_method::block_load_vectorize'}
-    if constexpr(
-    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2) && (sizeof(key_type) <= 4)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 128, 32 },
-        ::rocprim::block_load_method::block_load_vectorize,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 512, 'ipt': 8, 'block_load_func': '::rocprim::block_load_method::block_load_vectorize'}
-    if constexpr(
-    (rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-)
-    {
-        return non_trivial_runs_config_params{ 
-        { 512, 8 },
-        ::rocprim::block_load_method::block_load_vectorize,
-        block_scan_algorithm::using_warp_scan
-    };
-    }
-    // Default case if none of the conditions match
-    return non_trivial_runs_config_params_base<key_type>();
-}
-
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, 
     class key_type
@@ -1037,7 +938,6 @@ using run_length_encode_non_trivial_targets = comp_targets<
     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
-    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

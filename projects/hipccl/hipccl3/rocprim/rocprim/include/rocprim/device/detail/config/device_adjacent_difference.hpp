@@ -447,57 +447,6 @@ constexpr auto adjacent_difference_config_picker() ->
     return adjacent_difference_config_params_base<value_type>();
 }
 
-// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
-template<class Target, 
-    class value_type
->
-constexpr auto adjacent_difference_config_picker() -> 
-    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, adjacent_difference_config_params>
-{
-    // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 1}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8) && (sizeof(value_type) <= 16))
-    {
-        return adjacent_difference_config_params{ { 512, 1 } };
-    }
-    // CONFIG: {'value_type': 'int64_t', 'block_size_x': 64, 'ipt': 7}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
-    {
-        return adjacent_difference_config_params{ { 64, 7 } };
-    }
-    // CONFIG: {'value_type': 'int', 'block_size_x': 128, 'ipt': 2}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
-    {
-        return adjacent_difference_config_params{ { 128, 2 } };
-    }
-    // CONFIG: {'value_type': 'short', 'block_size_x': 512, 'ipt': 29}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1) && (sizeof(value_type) <= 2))
-    {
-        return adjacent_difference_config_params{ { 512, 29 } };
-    }
-    // CONFIG: {'value_type': 'int8_t', 'block_size_x': 512, 'ipt': 7}
-    if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
-    {
-        return adjacent_difference_config_params{ { 512, 7 } };
-    }
-    // CONFIG: {'value_type': 'double', 'block_size_x': 64, 'ipt': 31}
-    if constexpr((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4) && (sizeof(value_type) <= 8))
-    {
-        return adjacent_difference_config_params{ { 64, 31 } };
-    }
-    // CONFIG: {'value_type': 'float', 'block_size_x': 512, 'ipt': 17}
-    if constexpr((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2) && (sizeof(value_type) <= 4))
-    {
-        return adjacent_difference_config_params{ { 512, 17 } };
-    }
-    // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 128, 'ipt': 11}
-    if constexpr((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2))
-    {
-        return adjacent_difference_config_params{ { 128, 11 } };
-    }
-    // Default case if none of the conditions match
-    return adjacent_difference_config_params_base<value_type>();
-}
-
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, 
     class value_type
@@ -516,7 +465,6 @@ using adjacent_difference_targets = comp_targets<
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
-    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail

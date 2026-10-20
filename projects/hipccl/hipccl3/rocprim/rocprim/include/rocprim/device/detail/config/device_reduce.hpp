@@ -688,79 +688,6 @@ constexpr auto reduce_config_picker() ->
     return reduce_config_params_base<key_type>();
 }
 
-// TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
-template<class Target, class key_type>
-constexpr auto reduce_config_picker() -> 
-    std::enable_if_t<std::is_same_v<Target, comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>, reduce_config_params>
-{
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 16)
-    && (sizeof(key_type) > 8)))
-    {
-        return reduce_config_params{ { 256, 1 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'int64_t', 'block_size_x': 64, 'ipt': 2}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 8)
-    && (sizeof(key_type) > 4)))
-    {
-        return reduce_config_params{ { 64, 2 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'int', 'block_size_x': 64, 'ipt': 4}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 4)
-    && (sizeof(key_type) > 2)))
-    {
-        return reduce_config_params{ { 64, 4 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'short', 'block_size_x': 64, 'ipt': 8}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 2)
-    && (sizeof(key_type) > 1)))
-    {
-        return reduce_config_params{ { 64, 8 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'int8_t', 'block_size_x': 256, 'ipt': 16}
-    if constexpr(
-    (!bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 1)
-    ))
-    {
-        return reduce_config_params{ { 256, 16 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'double', 'block_size_x': 128, 'ipt': 2}
-    if constexpr(
-    (bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 8)
-    && (sizeof(key_type) > 4)))
-    {
-        return reduce_config_params{ { 128, 2 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'float', 'block_size_x': 64, 'ipt': 4}
-    if constexpr(
-    (bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 4)
-    && (sizeof(key_type) > 2)))
-    {
-        return reduce_config_params{ { 64, 4 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // CONFIG: {'key_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 8}
-    if constexpr(
-    (bool(rocprim::is_floating_point<key_type>::value)
-    && (sizeof(key_type) <= 2)
-    ))
-    {
-        return reduce_config_params{ { 64, 8 }, ::rocprim::block_reduce_algorithm::using_warp_reduce };
-    }
-    // Default case if none of the conditions match
-    return reduce_config_params_base<key_type>();
-}
-
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class key_type>
 constexpr auto reduce_config_picker() -> 
@@ -778,7 +705,6 @@ using reduce_targets = comp_targets<
     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
     comp_target<gen::cdna4, target_arch::gfx950, gpu::mi350x, rep::amdgcn>,
-    comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>,
     comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
