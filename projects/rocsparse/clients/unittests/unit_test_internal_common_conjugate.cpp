@@ -194,9 +194,13 @@ TEST_F(ConjugateReal, is_noop_without_kernel_launch)
     check_conjugate_real_is_noop<double>(handle);
 }
 
-TEST_F(ConjugateReal, unsupported_datatype_is_invalid_value)
+TEST_F(ConjugateReal, non_complex_datatype_is_noop)
 {
-    int32_t dummy = 0;
+    int32_t dummy = 7;
     EXPECT_EQ(rocsparse::conjugate(handle, 1, rocsparse_datatype_i32_r, &dummy),
-              rocsparse_status_invalid_value);
+              rocsparse_status_success);
+    EXPECT_EQ(rocsparse::conjugate_strided_batched(
+                  handle, 2, 1, rocsparse_datatype_i32_r, &dummy, static_cast<int64_t>(1)),
+              rocsparse_status_success);
+    EXPECT_EQ(dummy, 7);
 }
