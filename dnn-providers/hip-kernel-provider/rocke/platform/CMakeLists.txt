@@ -535,6 +535,22 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 300)\n")
 
+    # Library SDPA CPU tests (no GPU): the hipDNN SDPA request contract and
+    # from_hipdnn, the request-driven and array oracles, and the forward/backward
+    # case tables. Pointed at the DIRECTORY so a new file there runs automatically;
+    # a GPU test added there must be --ignore'd here and enrolled in the GPU lane.
+    # Distinct from rocke_sdpa_reference_unit_pytest below, which runs only
+    # tests/test_sdpa_reference_contract.py.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_sdpa_pytest python -m pytest"
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
+           " -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+
     foreach(_operation sdpa conv)
       string(TOUPPER "${_operation}" _operation_upper)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
