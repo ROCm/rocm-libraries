@@ -218,6 +218,11 @@ typedef struct rocke_memory_caps
     bool has_global_prefetch;
     bool has_cluster_launch;
     bool has_multicast_load;
+    /* Float add global atomics: scalar f32 global_atomic_add and the packed
+     * <2 x bf16> / <2 x f16> global_atomic_pk_add. Gates the WMMA split-K wgrad
+     * epilogue; MFMA targets do not consult it. Mirrors
+     * MemoryCapabilities.has_global_float_atomic_add. */
+    bool has_global_float_atomic_add;
 } rocke_memory_caps_t;
 
 typedef struct rocke_resource_limits

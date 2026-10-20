@@ -28,6 +28,11 @@
 static_assert(sizeof(rocke_mma_op_t) == 160 && ROCKE_ABI_VERSION >= 3,
               "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
+/* Same canary for rocke_memory_caps_t, which sits inside rocke_arch_target_t
+ * ahead of its limits. */
+static_assert(sizeof(rocke_memory_caps_t) == 20 && ROCKE_ABI_VERSION >= 4,
+              "rocke_memory_caps_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
 #endif
 
 static const char* short_dtype(const char* dtype)

@@ -175,7 +175,10 @@ def wgrad_atomic_store_vec(
 
 
 def wgrad_atomic_epilogue_available(
-    p: ConvProblem, dtype_d: str, vector_size_c: Optional[int] = None
+    p: ConvProblem,
+    dtype_d: str,
+    vector_size_c: Optional[int] = None,
+    wave_size: int = 64,
 ) -> Tuple[bool, str]:
     """Can split-K reach this problem through the *packed atomic* epilogue?
 
@@ -192,7 +195,9 @@ def wgrad_atomic_epilogue_available(
       not dword-aligned; and
     * an even store-vector width -- the epilogue emits ``sv/2`` pairs per
       thread, so ``sv == 1`` (which is what a depthwise ``cpg == 1`` yields)
-      produces no pair at all.
+      produces no pair at all. MFMA (wave64) only: the WMMA epilogue
+      (``wave_size == 32``) issues one pair per accumulator element, value in
+      its half and zero in the partner, and never reads the store width.
 
     gfx9 has no scalar 16-bit atomic add to fall back on, so when this returns
     False the only ways to keep ``split_k > 1`` are the two-stage f32-workspace
@@ -202,7 +207,7 @@ def wgrad_atomic_epilogue_available(
     if dtype_d not in ("bf16", "fp16"):
         return True, "ok"
     wgN = _wg_N(p)
-    sv = wgrad_atomic_store_vec(p, dtype_d, vector_size_c)
+    sv = wgrad_atomic_store_vec(p, dtype_d, vector_size_c) if wave_size != 32 else 2
     if wgN % 2 != 0 or sv % 2 != 0:
         return False, (
             f"split_k atomic with dtype_d={dtype_d!r} requires an even dW row "
@@ -830,7 +835,7 @@ class WgradConvSpec:
             # cpg=3, X=2) is perfectly safe, and rejecting it needlessly pushed
             # depthwise-adjacent shapes off split-K entirely.
             _ok, _why = wgrad_atomic_epilogue_available(
-                self.problem, self.data.dtype_d, self.vector_size_c
+                self.problem, self.data.dtype_d, self.vector_size_c, self.wave_size
             )
             if not _ok:
                 raise ValueError(_why)
@@ -845,7 +850,7 @@ class WgradConvSpec:
         # rule protects. It routes to _emit_wgrad_split_k_epilogue_wmma, which
         # forms each pair itself (value in its half, zero in the partner) from
         # the WMMA C-fragment layout. Which wave32 arches may use it is an arch
-        # question, so is_valid_wgrad_spec (_WMMA_SPLIT_K_ATOMIC_ARCHES) owns it.
+        # question, so is_valid_wgrad_spec (wgrad_wmma_split_k_available) owns it.
         if (
             _needs_atomic
             and self.data.dtype_d in ("bf16", "fp16")
@@ -1325,22 +1330,30 @@ def _gm_dw_addr_fn(
 # are validated on these targets.
 _STREAMK_ARCHES = ("gfx942", "gfx950")
 
-# Wave32 arches whose 16-bit split-K reaches dW through
-# _emit_wgrad_split_k_epilogue_wmma: one packed <2 x dtype> atomic per
-# accumulator element, value in its half and zero in the partner. The WMMA
-# epilogue builds the pair itself, so it does not need cshuffle the way the
-# MFMA path does. Listed per arch because it is only validated where the
-# packed bf16/fp16 global atomics were run on hardware.
-_WMMA_SPLIT_K_ATOMIC_ARCHES = ("gfx1250",)
+
+def wgrad_wmma_split_k_available(arch: str) -> bool:
+    """Whether wave32 ``arch`` admits split-K through the WMMA atomic epilogue.
+
+    _emit_wgrad_split_k_epilogue_wmma issues one atomic per accumulator element:
+    a scalar f32 add, or a packed ``<2 x dtype>`` add with the value in its half
+    and zero in the partner. It builds the pair itself, so it does not need
+    cshuffle the way the MFMA path does. It is admitted only where the arch
+    catalog marks those float global atomics as run on a device
+    (``MemoryCapabilities.has_global_float_atomic_add``); the C++ validator reads
+    the same flag.
+    """
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add
 
 
 def wgrad_two_stage_available(arch: str) -> bool:
     """Whether ``arch`` has the two-stage (f32 scratch) split-K wgrad path.
 
     The scratch-store epilogue decodes the C fragment through the MFMA atom, so
-    wave32 (WMMA) targets have none. The validator and the dispatcher both ask
-    here, so a split degree the dispatcher would route through two-stage can
-    never reach a builder that rejects it.
+    wave32 (WMMA) targets have none. is_valid_wgrad_spec rejects a two-stage
+    spec wherever this is False, so a caller choosing between the split paths
+    can ask the same question before it builds.
     """
     return _wgrad_mma_family(arch) != "wmma"
 
@@ -1828,12 +1841,12 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"two-stage wgrad is CDNA-only (got family 'wmma' on "
             f"{arch}); the scratch-atomic epilogue has no WMMA variant"
         )
-    # WMMA split-K is enabled per arch, for every dW dtype: the WMMA atomic
-    # epilogue is validated only where it was run on hardware.
-    if _is_atomic and family == "wmma" and arch not in _WMMA_SPLIT_K_ATOMIC_ARCHES:
+    # WMMA split-K is enabled for every dW dtype where the arch catalog marks
+    # the float global atomics as run on a device.
+    if _is_atomic and family == "wmma" and not wgrad_wmma_split_k_available(arch):
         return False, (
-            f"WMMA split_k atomic is enabled only on "
-            f"{', '.join(_WMMA_SPLIT_K_ATOMIC_ARCHES)} (got {arch})"
+            f"WMMA split_k atomic is enabled only on arches with validated float "
+            f"global atomics (has_global_float_atomic_add; got {arch})"
         )
     _needs_atomic = _is_atomic and not _effective_two_stage
     if _needs_atomic and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
@@ -1846,7 +1859,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # cpg, and it does not apply when the epilogue is the f32 scratch atomic.
     if _needs_atomic:
         _ok, _why = wgrad_atomic_epilogue_available(
-            spec.problem, spec.data.dtype_d, spec.vector_size_c
+            spec.problem, spec.data.dtype_d, spec.vector_size_c, spec.wave_size
         )
         if not _ok:
             return False, _why
@@ -1856,7 +1869,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # store, and under two_stage it is an f32 scratch atomic; neither emits
     # packed atomics, so 'default' is fine. WMMA rejects cshuffle outright, so
     # 'default' is its only epilogue; its split-K (admitted above only on
-    # _WMMA_SPLIT_K_ATOMIC_ARCHES) goes through the WMMA epilogue, which forms
+    # wgrad_wmma_split_k_available arches) goes through the WMMA epilogue, which forms
     # each packed pair itself.
     # (_effective_two_stage is computed above, with the split-K validity gates.)
     if (

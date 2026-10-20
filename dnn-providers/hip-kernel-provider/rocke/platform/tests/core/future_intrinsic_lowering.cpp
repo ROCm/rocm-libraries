@@ -2846,13 +2846,13 @@ void case_memory_caps()
         rocke_memory_caps_t caps;
     };
     static const expected_caps table[] = {
-        {"gfx11-generic", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1151", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1201", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx1250", {false, true, false, true, 4, 0, true, true, true, true}},
-        {"gfx90a", {false, false, false, false, 4, 0, false, false, false, false}},
-        {"gfx942", {true, true, false, false, 4, 1, false, false, false, false}},
-        {"gfx950", {true, true, true, false, 4, 4, false, false, false, false}},
+        {"gfx11-generic", {false, false, false, false, 4, 0, false, false, false, false, false}},
+        {"gfx1151", {false, false, false, false, 4, 0, false, false, false, false, false}},
+        {"gfx1201", {false, false, false, false, 4, 0, false, false, false, false, false}},
+        {"gfx1250", {false, true, false, true, 4, 0, true, true, true, true, true}},
+        {"gfx90a", {false, false, false, false, 4, 0, false, false, false, false, false}},
+        {"gfx942", {true, true, false, false, 4, 1, false, false, false, false, false}},
+        {"gfx950", {true, true, true, false, 4, 4, false, false, false, false, false}},
     };
     for(const expected_caps& row : table)
     {
@@ -2872,7 +2872,8 @@ void case_memory_caps()
            || got.has_scalar_data_prefetch != want.has_scalar_data_prefetch
            || got.has_global_prefetch != want.has_global_prefetch
            || got.has_cluster_launch != want.has_cluster_launch
-           || got.has_multicast_load != want.has_multicast_load)
+           || got.has_multicast_load != want.has_multicast_load
+           || got.has_global_float_atomic_add != want.has_global_float_atomic_add)
             fail(row.gfx, __LINE__);
     }
 }

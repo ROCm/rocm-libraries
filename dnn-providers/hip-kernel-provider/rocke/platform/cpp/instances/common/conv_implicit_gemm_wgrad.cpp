@@ -600,17 +600,6 @@ static bool wgrad_group_merge_available(const rocke_implicit_gemm_conv_wgrad_spe
 #undef GM_REJECT
 }
 
-/* Wave32 arches whose 16-bit split-K goes through the WMMA atomic epilogue.
- * Mirrors Python _WMMA_SPLIT_K_ATOMIC_ARCHES; keep the two lists identical. */
-static bool wgrad_wmma_split_k_atomic_arch(const char* arch)
-{
-    static const char* const arches[] = {"gfx1250"};
-    for(const char* a : arches)
-        if(strcmp(arch, a) == 0)
-            return true;
-    return false;
-}
-
 bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                                   const char* arch,
                                                   char* reason,
@@ -801,14 +790,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          arch);
             return false;
         }
-        /* WMMA split-K is enabled per arch, for every dW dtype: the WMMA atomic
-         * epilogue is validated only where it was run on hardware. */
-        if(is_wmma_family && !wgrad_wmma_split_k_atomic_arch(arch))
+        /* WMMA split-K is enabled for every dW dtype where the arch catalog marks
+         * the float global atomics as run on a device. Mirrors Python
+         * wgrad_wmma_split_k_available. */
+        if(is_wmma_family && !target->memory.has_global_float_atomic_add)
         {
             if(reason && reason_cap)
                 snprintf(reason,
                          reason_cap,
-                         "WMMA split_k atomic is enabled only on gfx1250 (got %s)",
+                         "WMMA split_k atomic is enabled only on arches with validated float "
+                         "global atomics (has_global_float_atomic_add; got %s)",
                          arch);
             return false;
         }
@@ -848,9 +839,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
              * Checking only wg_N admits a spec that CShuffleEpilogue::atomic_store
              * then rejects -- the same admits/build split this gate exists to
              * close. store_vec mirrors default_vector_sizes(..., split_k=1):
-             * widest of 8/4/2/1 dividing the channel run (per-group when grouped). */
+             * widest of 8/4/2/1 dividing the channel run (per-group when grouped).
+             * MFMA only: the WMMA epilogue (wave32) issues one pair per
+             * accumulator element with a zero partner and never reads the store
+             * width, so only the row parity applies there. */
             int store_vec;
-            if(s->has_vector_size_c)
+            if(is_wmma_family)
+            {
+                store_vec = 2;
+            }
+            else if(s->has_vector_size_c)
             {
                 store_vec = s->vector_size_c;
             }
@@ -893,8 +891,8 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * workspace store.  Neither emits packed atomics, so the default epilogue
      * is fine for both.  Guarding on sk rather than on dtype alone keeps the
      * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
-     * can use, since WMMA rejects cshuffle.  On the WMMA split-K atomic arches
-     * (Python _WMMA_SPLIT_K_ATOMIC_ARCHES) the WMMA epilogue forms each packed
+     * can use, since WMMA rejects cshuffle.  Where WMMA split-K is admitted
+     * (memory.has_global_float_atomic_add) the WMMA epilogue forms each packed
      * pair itself, so 'default' is admitted there.
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1)

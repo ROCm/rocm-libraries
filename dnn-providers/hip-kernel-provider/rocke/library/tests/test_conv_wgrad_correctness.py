@@ -635,16 +635,16 @@ class TestConvWgradCorrectness(unittest.TestCase):
         """K-outer under split-K atomics (the shipping configuration).
 
         Runs on MFMA and on the wave32 arches whose 16-bit split-K goes through
-        the WMMA atomic epilogue (``_WMMA_SPLIT_K_ATOMIC_ARCHES``). There
+        the WMMA atomic epilogue (``wgrad_wmma_split_k_available``). There
         ``_KOUTER_EPILOGUE`` is ``default`` -- the only epilogue WMMA has -- and
         the validator admits it with split_k > 1. ``_assert_ran`` keeps an
         all-skipped run from reporting a false green.
         """
         from kernels.common.conv_implicit_gemm_wgrad import (
-            _WMMA_SPLIT_K_ATOMIC_ARCHES,
+            wgrad_wmma_split_k_available,
         )
 
-        if not _IS_MFMA and GPU_ARCH not in _WMMA_SPLIT_K_ATOMIC_ARCHES:
+        if not _IS_MFMA and not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"no 16-bit wgrad split-K atomic path on {GPU_ARCH}")
         ran = 0
         for shape in _SHAPES:
@@ -741,10 +741,10 @@ class TestConvWgradCorrectness(unittest.TestCase):
         the same dword -- every degree must still reproduce the reference.
         """
         from kernels.common.conv_implicit_gemm_wgrad import (
-            _WMMA_SPLIT_K_ATOMIC_ARCHES,
+            wgrad_wmma_split_k_available,
         )
 
-        if GPU_ARCH not in _WMMA_SPLIT_K_ATOMIC_ARCHES:
+        if not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}")
         ran = 0
         for dtype in _DTYPES:
@@ -820,33 +820,40 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     self._check(shape, dtype, "mem", "default")
 
     def test_wide_tile_spec_at_degree_cap_gfx1250(self):
-        """Run the 2x2-warp gfx1250 split-K specs at a high resolved degree.
+        """Run gfx1250 split-K wgrad the way the AOT cache serves it.
 
-        The sweeps above build their own 1x1-warp tiles; these are the wider
-        2x2-warp tiles, with the degree resolved by the gfx1250 split policy
-        exactly as the builder resolves ``split_k=-1``. The problems are sized
-        so the bf16 degree lands on the slice-depth bound and fp16 on its cap.
-        The inputs are all-positive -- same-sign partials do not cancel their
-        16-bit rounding -- so this also bounds the accuracy at that degree.
+        wgrad has no dispatcher instance list; as on gfx950 it is served from
+        the AOT cache. So the kernel here is taken from the cache grid
+        (:mod:`kernels.conv.aot_jobs`, the one split-K binary per geometry,
+        filtered by the same validity and problem-support checks the cache
+        build and lookup apply), and its degree from the launch-time resolver
+        (``_runtime_split_ks`` with ``--split-k -1``). The binary is built here
+        at that degree rather than at the cache's ``split_k=2`` marker; the
+        degree is a kernarg, so the IR is the same.
+
+        These are the 2x2-warp tiles, and the problems are sized so the bf16
+        degree lands on the slice-depth bound and fp16 on its cap. The inputs
+        are all-positive -- same-sign partials do not cancel their 16-bit
+        rounding -- so this also bounds the accuracy at that degree.
         """
-        from dataclasses import replace
-
         from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
         from kernels.common.conv_implicit_gemm_wgrad import (
-            _WMMA_SPLIT_K_ATOMIC_ARCHES,
             WgradConvSpec,
-            _wg_K,
-            _wg_M,
-            _wg_N,
+            wgrad_wmma_split_k_available,
         )
-        from rocke.helpers.split_k import select_split_k_wgrad
+        from kernels.conv import aot_jobs
+        from kernels.conv.kernel_identity import identity_supports_problem
+        from rocke.core.arch import ArchTarget
 
-        if GPU_ARCH not in _WMMA_SPLIT_K_ATOMIC_ARCHES:
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
+
+        target = ArchTarget.from_gfx(GPU_ARCH)
+        if target.wave_size != 32 or not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"WMMA split-K not enabled on {GPU_ARCH}")
-        # (C, K, G, dtype, tile_m x tile_n x tile_k, expected degree)
+        # (C, K, G, dtype, (tile_m, tile_n, tile_k), expected degree)
         cases = [
             (64, 96, 1, "bf16", (32, 64, 64), 16),
             (64, 128, 1, "fp16", (64, 64, 64), 8),
@@ -854,42 +861,46 @@ class TestConvWgradCorrectness(unittest.TestCase):
             (64, 64, 4, "fp16", (32, 32, 32), 8),
         ]
         ran = 0
-        for C, K, G, dtype, (tm, tn, tk), degree in cases:
+        for C, K, G, dtype, tile, degree in cases:
             with self.subTest(C=C, K=K, G=G, dtype=dtype):
                 problem = ConvProblem(
                     N=32, Hi=32, Wi=32, C=C, K=K, Y=3, X=3, pH=1, pW=1, groups=G
                 )
+                geometries = [
+                    g
+                    for g in aot_jobs._geometry_list(target, dtype, "wgrad")
+                    if tuple(g[:5]) == (*tile, 2, 2)
+                    and g[5] == 16
+                    and g[6:8] == ("mem", "default")
+                ]
+                # The cache's split-K binaries for this geometry that would be
+                # built (spec validity) and offered for this problem (lookup).
+                jobs = [
+                    j
+                    for j in aot_jobs._direction_jobs(
+                        "wgrad", GPU_ARCH, dtype, target, (2,), 1, geometries=geometries
+                    )
+                    if aot_jobs._spec_is_valid(j, GPU_ARCH, dtype)
+                    and identity_supports_problem(j.identity, problem)[0]
+                ]
+                self.assertTrue(jobs, f"no cached split-K kernel serves {problem}")
+                job = max(
+                    jobs,
+                    key=lambda j: (
+                        j.identity.vector_size_a,
+                        j.identity.vector_size_b,
+                    ),
+                )
+                self.assertFalse(job.identity.two_stage)
+                (resolved,) = _runtime_split_ks(
+                    problem, job.identity, -1, dtype_d=dtype
+                )
+                self.assertEqual(resolved, degree)
                 spec = WgradConvSpec(
                     problem=problem,
                     data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-                    tile_m=tm,
-                    tile_n=tn,
-                    tile_k=tk,
-                    warp_m=2,
-                    warp_n=2,
-                    warp_tile_m=16,
-                    warp_tile_n=16,
-                    warp_tile_k=32,
-                    wave_size=32,
-                    pipeline="mem",
-                    epilogue="default",
-                    lds_k_outer=True,
-                    split_k=-1,
+                    **dict(job.spec_kwargs, split_k=resolved),
                 )
-                decision = select_split_k_wgrad(
-                    wg_M=_wg_M(problem),
-                    wg_N=_wg_N(problem),
-                    wg_K=_wg_K(problem),
-                    tile_m=tm,
-                    tile_n=tn,
-                    tile_k=tk,
-                    arch=GPU_ARCH,
-                    groups=spec.grid_groups,
-                    block_size=spec.block_size,
-                    dtype_d=dtype,
-                )
-                self.assertEqual(decision.split_k, degree)
-                spec = replace(spec, split_k=decision.split_k)
                 shape = _Shape(
                     f"wide_N32H32W32C{C}K{K}G{G}",
                     N=32,
@@ -930,10 +941,10 @@ class TestConvWgradCorrectness(unittest.TestCase):
         a run that leaves any group's output-channel rows at zero.
         """
         from kernels.common.conv_implicit_gemm_wgrad import (
-            _WMMA_SPLIT_K_ATOMIC_ARCHES,
+            wgrad_wmma_split_k_available,
         )
 
-        if GPU_ARCH not in _WMMA_SPLIT_K_ATOMIC_ARCHES:
+        if not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}")
         grouped = [
             _Shape(
@@ -2263,16 +2274,21 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
             self.assertFalse(wgrad_two_stage_available(arch), arch)
 
     def test_16bit_split_k_atomic_arch_scope(self):
-        # The 16-bit WMMA split-K atomic is admitted only on the arches it was
-        # run on (_WMMA_SPLIT_K_ATOMIC_ARCHES); other wave32 arches keep the
-        # cshuffle requirement, which WMMA cannot meet, so they stay rejected.
+        # WMMA split-K is admitted only where the arch catalog marks the float
+        # global atomics as run on a device; other wave32 arches stay rejected.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
         from kernels.common.conv_implicit_gemm_wgrad import (
-            _WMMA_SPLIT_K_ATOMIC_ARCHES,
             is_valid_wgrad_spec,
+            wgrad_wmma_split_k_available,
         )
+        from rocke.core.arch import ArchTarget
 
-        self.assertEqual(_WMMA_SPLIT_K_ATOMIC_ARCHES, ("gfx1250",))
+        self.assertTrue(wgrad_wmma_split_k_available("gfx1250"))
+        for arch in ("gfx1151", "gfx1201"):
+            self.assertFalse(wgrad_wmma_split_k_available(arch), arch)
+            self.assertFalse(
+                ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add, arch
+            )
         for dtype in ("bf16", "fp16", "fp32"):
             data = ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype)
             spec = self._gfx1250_spec(data=data, split_k=4)
@@ -2292,6 +2308,37 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
             )
             self.assertFalse(
                 ok, f"{dtype} cshuffle split-K on gfx1250 must be rejected"
+            )
+
+    def test_wmma_split_k_ignores_store_vec(self):
+        # The AOT cache grid pins vector_size_c=1 for the default epilogue. The
+        # MFMA packed atomic needs an even store width (it emits sv/2 pairs per
+        # thread), but the WMMA epilogue forms one pair per accumulator element
+        # and never reads it, so only the dW row parity applies on wave32.
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+            wgrad_atomic_epilogue_available,
+        )
+
+        for dtype in ("bf16", "fp16"):
+            data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+            spec = self._gfx1250_spec(data=data, split_k=4, vector_size_c=1)
+            spec.validate()
+            ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+            self.assertTrue(ok, f"{dtype} WMMA split-K at vector_size_c=1: {why}")
+            even = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+            self.assertFalse(wgrad_atomic_epilogue_available(even, dtype, 1)[0])
+            self.assertTrue(
+                wgrad_atomic_epilogue_available(even, dtype, 1, wave_size=32)[0]
+            )
+            # The row parity still applies on WMMA: wg_N = 3*3*3 = 27 is odd.
+            odd = ConvProblem(N=8, Hi=56, Wi=56, C=3, K=64, Y=3, X=3, pH=1, pW=1)
+            self.assertFalse(
+                wgrad_atomic_epilogue_available(odd, dtype, None, wave_size=32)[0]
             )
 
 

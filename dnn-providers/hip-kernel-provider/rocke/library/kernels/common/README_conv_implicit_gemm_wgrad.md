@@ -39,15 +39,15 @@ Four epilogue paths are supported, selected automatically based on `spec.epilogu
 | CShuffleEpilogue | `epilogue="cshuffle"`, `split_k=1` | LDS-staged vectorised store |
 | Split-K direct atomic | `epilogue="default"`, `split_k > 1`, `dtype_d="fp32"` | `global_atomic_add` per MFMA-lane directly from accumulators |
 | Split-K cshuffle atomic | `epilogue="cshuffle"`, `split_k > 1` | LDS scatter + `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` from LDS |
-| Split-K WMMA atomic | wave32 on gfx1250, `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
+| Split-K WMMA atomic | wave32 with `memory.has_global_float_atomic_add` (gfx1250), `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
 
 On MFMA targets, `epilogue="cshuffle"` is **required** for bf16/fp16 output when
 `split_k > 1`. The direct-atomic path emits zero-filled packed atomics at the
 scattered MFMA layout; the cshuffle path produces genuinely contiguous adjacent
 pairs after the LDS shuffle, which is necessary for correct `<2 x dtype>` packed
-atomics. WMMA has no cshuffle epilogue; on the arches in
-`_WMMA_SPLIT_K_ATOMIC_ARCHES` (gfx1250) its split-K epilogue places each value
-in its half of the pair itself, so `default` is the split-K epilogue there.
+atomics. WMMA has no cshuffle epilogue; on arches whose `ArchTarget` sets
+`memory.has_global_float_atomic_add` (gfx1250) its split-K epilogue places each
+value in its half of the pair itself, so `default` is the split-K epilogue there.
 Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
 
 ---
@@ -58,8 +58,8 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
 
 - 16-bit and fp32 split-K are enabled on gfx1250 through the WMMA atomic
   epilogue (`_emit_wgrad_split_k_epilogue_wmma`, mirrored in the C++ engine).
-  Both engines admit WMMA split-K only on `_WMMA_SPLIT_K_ATOMIC_ARCHES`, and only
-  inside the WMMA wgrad subset (`mem` pipeline, `default` epilogue, 16x16x16 or
+  Both engines admit WMMA split-K only where the arch catalog sets
+  `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset (`mem` pipeline, `default` epilogue, 16x16x16 or
   16x16x32 atom).
 - Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a general cap. As with the CK
@@ -67,11 +67,13 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   rounds its partial into a 16-bit dW, so accuracy decreases as the degree grows,
   most when partials share a sign. fp16 has a lower cap because its packed atomic
   loses throughput under contention.
-- Dispatch (gfx1250 candidate): problems the packed atomic can represent
-  auto-resolve the degree, grouped ones included (grid-per-group, Python engine
-  only). Ungrouped problems that split take a wider tile. An odd dW row length
-  would need the two-stage path, which WMMA does not have, so it stays at
-  `split_k=1`.
+- Reachability: as on gfx950, wgrad has no dispatcher instance list; it is
+  served from the AOT cache. The cache grid (`kernels/conv/aot_jobs.py`) builds
+  one split-K binary per geometry, and the degree is resolved at launch by
+  `select_split_k_wgrad` with the dW dtype (`benchmark_implicit_gemm_conv.py
+  --run-from-cache --split-k -1`). A 16-bit dW whose row length (`Z*Y*X*cpg`) is
+  odd cannot use the packed atomic, and WMMA has no two-stage path to fall back
+  on, so such problems run at `split_k=1`.
 - Results are not bit-reproducible across runs once `split_k > 1` (atomic
   ordering), and the caller must zero `dW` before launch.
 
