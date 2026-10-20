@@ -225,13 +225,12 @@ TIMING_HIERARCHY = {
 # Under python_client_execution, children are grouped into these display
 # categories instead of being shown individually.
 CPP_PHASE_GROUPS = {
-    "Process Startup/Exit (outside client main())": [
+    # Everything paid once per client launch, independent of how many problems/solutions run:
+    # process startup, in-process setup, and teardown/exit. process_startup, main_teardown_locals
+    # and process_exit come from wall-clock stamps (they fall outside the client's own timers).
+    "C++ Client Setup & Teardown": [
         "python_client_write_run_script",
         "process_startup",
-        "main_teardown_locals",
-        "process_exit",
-    ],
-    "C++ Client Setup": [
         "main_parse_args",
         "main_timing_calibration",
         "main_problem_factory",
@@ -243,6 +242,8 @@ CPP_PHASE_GROUPS = {
         "solution_iterator_setup",
         "listener_setup",
         "reporter_setup",
+        "main_teardown_locals",
+        "process_exit",
     ],
     "Data Preparation": [
         "pre_problem",
@@ -833,7 +834,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     )
     client_setup_time = sum(
         total_time_by_category.get(c, 0)
-        for c in CPP_PHASE_GROUPS.get("C++ Client Setup", [])
+        for c in CPP_PHASE_GROUPS.get("C++ Client Setup & Teardown", [])
     )
     data_prep_time = sum(
         total_time_by_category.get(c, 0)
@@ -850,12 +851,12 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     print("KEY INSIGHTS (% of wall clock)")
     print("-" * TABLE_WIDTH)
-    print(f"  Python phases (code gen, compilation):  {python_codegen_time / 1000:.2f}s ({as_percentage(python_codegen_time, wall_clock_ms):.1f}%)")
-    print(f"  Python I/O overhead (cache, YAML):      {python_io_time / 1000:.2f}s ({as_percentage(python_io_time, wall_clock_ms):.1f}%)")
-    print(f"  C++ client setup (library loading):     {client_setup_time / 1000:.2f}s ({as_percentage(client_setup_time, wall_clock_ms):.1f}%)")
-    print(f"  Data preparation (CPU init, GPU prep):  {data_prep_time / 1000:.2f}s ({as_percentage(data_prep_time, wall_clock_ms):.1f}%)")
-    print(f"  Reference computation (CPU GEMM):       {ref_time / 1000:.2f}s ({as_percentage(ref_time, wall_clock_ms):.1f}%)")
-    print(f"  Kernel execution (warmup, benchmark):   {kernel_time / 1000:.2f}s ({as_percentage(kernel_time, wall_clock_ms):.1f}%)")
+    print(f"  {'Python phases (code gen, compilation):':<43} {python_codegen_time / 1000:.2f}s ({as_percentage(python_codegen_time, wall_clock_ms):.1f}%)")
+    print(f"  {'Python I/O overhead (cache, YAML):':<43} {python_io_time / 1000:.2f}s ({as_percentage(python_io_time, wall_clock_ms):.1f}%)")
+    print(f"  {'C++ client setup & teardown (per launch):':<43} {client_setup_time / 1000:.2f}s ({as_percentage(client_setup_time, wall_clock_ms):.1f}%)")
+    print(f"  {'Data preparation (CPU init, GPU prep):':<43} {data_prep_time / 1000:.2f}s ({as_percentage(data_prep_time, wall_clock_ms):.1f}%)")
+    print(f"  {'Reference computation (CPU GEMM):':<43} {ref_time / 1000:.2f}s ({as_percentage(ref_time, wall_clock_ms):.1f}%)")
+    print(f"  {'Kernel execution (warmup, benchmark):':<43} {kernel_time / 1000:.2f}s ({as_percentage(kernel_time, wall_clock_ms):.1f}%)")
     print()
 
     cpu_ref_time = total_time_by_category.get('cpu_reference_gemm', 0)
