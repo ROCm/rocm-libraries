@@ -2459,6 +2459,21 @@ def _build_tilde_dgrad(
     return b.kernel
 
 
+def _dgrad_tilde_decomp(
+    b, m_rem, w_tilde_slice, c_m, c_n, gemm_m, gemm_n, d_h_stride, d_h_offset,
+    d_w_stride, d_w_offset, c0, c_Hi, c_Wi,
+):
+    """Compute hi/wi/ok for a dgrad tilde sub-GEMM."""
+    htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
+    hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
+    wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
+    m_ok = b.cmp_lt(c_m, gemm_m)
+    n_ok = b.cmp_lt(c_n, gemm_n)
+    hi_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, c_Hi))
+    wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_Wi))
+    return b.land(b.land(m_ok, n_ok), b.land(hi_ok, wi_ok))
+
+
 def _emit_dgrad_tilde_atomic_epilogue(
     b: IRBuilder,
     spec: DgradConvSpec,
