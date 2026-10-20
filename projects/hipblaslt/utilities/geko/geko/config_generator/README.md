@@ -139,8 +139,10 @@ tuning run then spends its budget on kernels that fail code generation. For GEMM
 TensileLite code generation builds at least one kernel with every other parameter inside the generic (GA)
 search space's fork ranges. One list serves the generic and heuristic search spaces (heuristic's ranges
 are narrower, so it can build no MI generic cannot); subtile kernels (the subtile search space and
-gfx950 MX) are not covered and keep every candidate. Without a list MI Designer enumerates every MI and
-logs a warning.
+gfx950 MX) are not covered and keep every candidate. Lists are generated with StreamK off: the persistent
+StreamK kernels need slightly more VGPRs, so the StreamK-off list holds every MI the StreamK-on one does
+plus a few tiles at the register limit, and one list serves runs with either setting. Without a list MI
+Designer enumerates every MI and logs a warning.
 
 The lists are produced, CPU only, by [`scripts/generate_buildable_mis.py`](../../scripts/generate_buildable_mis.py)
 (search described in [`buildability.py`](buildability.py)). Code generation and fork ranges change, so
