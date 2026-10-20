@@ -188,3 +188,58 @@ def test_each_fact_is_recorded_by_some_target_and_missing_on_another(fact):
     """Guard against a vacuous sweep: every fact must both admit and refuse."""
     holds = [_FACTS[fact](ArchTarget.from_gfx(arch)) for arch in known_arches()]
     assert any(holds) and not all(holds)
+
+
+# ---- scaled WMMA: admitted by the target's MMA catalog ----
+
+
+def _scaled_atom(scale16: bool):
+    """A real scaled-WMMA atom, taken from the catalog that lists it."""
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="fp8",
+        c_dtype="fp32",
+        scales=("e8m0", "e8m0", 16 if scale16 else 32),
+        m=16,
+        n=16,
+        k=128,
+    )
+    assert atom is not None
+    return atom
+
+
+def _scaled_kernel(atom, scale16: bool):
+    b = IRBuilder("scaled_wmma")
+    matrix = b.param("matrix", PtrType(I32, "global"), readonly=True)
+    accum = b.param("accum", PtrType(F32, "global"))
+    scale_ty = I64 if scale16 else I32
+    scales = b.param("scales", PtrType(scale_ty, "global"), readonly=True)
+    lane = b.thread_id_x()
+    lo = b.global_load_vN(matrix, lane, I32, 8)
+    hi = b.global_load_vN(matrix, b.add(lane, b.const_i32(8)), I32, 8)
+    fragment = b.vec_concat(lo, hi)
+    c = b.global_load_vN(accum, lane, F32, 8)
+    scale = b.global_load(scales, lane, scale_ty)
+    d = b.mma(atom, fragment, fragment, c, scale, scale)
+    b.global_store(accum, lane, b.vec_extract(d, 0))
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("arch", known_arches())
+@pytest.mark.parametrize("scale16", [False, True])
+def test_scaled_wmma_follows_the_target_catalog(scale16, arch):
+    atom = _scaled_atom(scale16)
+    kernel = _scaled_kernel(atom, scale16)
+    if ArchTarget.from_gfx(arch).mma.by_op_id(atom.op_id) is not None:
+        lower_with_both_engines(kernel, arch, "llvm23")
+    else:
+        assert_both_engines_reject(
+            kernel,
+            arch,
+            NotImplementedError,
+            f"tile.{atom.op_id} is not available on {arch}: "
+            "its MMA catalog does not list it",
+            "llvm23",
+        )
