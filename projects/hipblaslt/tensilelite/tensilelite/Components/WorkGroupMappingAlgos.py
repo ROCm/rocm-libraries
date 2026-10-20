@@ -1240,7 +1240,7 @@ def FusedA2AWgRemap(writer, kernel):
     FusedTotalWGs untouched.  Correctness therefore does not depend on the
     hardware dispatching in t order -- only the benefit does.
 
-    Precondition: A <= N0, enforced by the AM <= M check in the FusedA2AShape
+    Precondition: A <= N0, enforced by the AM <= M check in the GemmA2AShape
     predicate (with AM % MT0 == 0 and M % MT0 == 0 making
     both quotients exact).
 

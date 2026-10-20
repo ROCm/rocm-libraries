@@ -2363,7 +2363,7 @@ namespace
         if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
            && fusedInfo.hasA2APrefix)
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -2667,7 +2667,7 @@ namespace
         if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
            && fusedInfo.hasA2APrefix)
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }

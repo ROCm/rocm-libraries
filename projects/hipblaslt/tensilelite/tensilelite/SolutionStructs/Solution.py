@@ -2420,30 +2420,52 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GlobalSplitU or a persistent TileProcessingStrategy must be enabled")
       return
 
-    if state["ProblemType"]["FusedGemmA2A"]:
+    fusedA2A = state["ProblemType"]["FusedA2A"]
+    if fusedA2A != "Disabled":
       if isa[:2] not in ((9, 4), (9, 5)):
         reject(state, printRejectionReason,
-               "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
-               "packet layout is gfx9 only)")
-        return
-      if not state["ProblemType"]["DestDataType"].isBFloat16():
-        reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
+               "FusedA2A=%s requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
+               "packet layout is gfx9 only)" % fusedA2A)
         return
       if isPersistent(state):
-        reject(state, printRejectionReason, "FusedGemmA2A requires TileProcessingStrategy=None")
-        return
-      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
-      if mt0 not in (128, 256) or mt1 not in (128, 256):
-        reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires TileProcessingStrategy=None" % fusedA2A)
         return
       if state["GlobalSplitU"] != 1:
         reject(state, printRejectionReason,
-               "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
+               "FusedA2A=%s requires GlobalSplitU=1 (the last work-group is elected "
                "against NumWorkGroups0*NumWorkGroups1; any other GSU can multiply "
                "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
-               "the election may fire early)")
+               "the election may fire early)" % fusedA2A)
         return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
+
+    if fusedA2A == "GemmA2A":
+      if not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "FusedA2A=GemmA2A only supports a bf16 D")
+        return
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason, "FusedA2A=GemmA2A supports MacroTile0/1 in {128, 256}")
+        return
+
+    if state["A2ASubRounds"] != 1 and fusedA2A != "A2AGemm":
+      reject(state, printRejectionReason, "A2ASubRounds > 1 requires FusedA2A=A2AGemm")
+      return
+
+    if fusedA2A == "A2AGemm":
+      _disableRuntimeStaggerU(state)
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires UseSubtileImpl=0")
+        return
+      if state["DirectToVgprA"] or state["DirectToVgprB"]:
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires DirectToVgprA=DirectToVgprB=0")
+        return
+      if not state["BufferLoad"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires BufferLoad=1")
+        return
+      state["OptNoLoadLoop"] = 0
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")

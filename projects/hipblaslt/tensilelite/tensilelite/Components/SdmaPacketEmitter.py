@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 # SDMA packet-construction emitter: builds the 13-dword COPY_SUBWIN and
-# 8-dword ATOMIC ADD_RTN_32 dword arrays in SGPRs out of runtime field values.
-# SdmaRingEmitter -- the packet-INDEPENDENT ring plumbing -- then writes them
-# into the ring with s_store.  The dwords live in SGPRs because every input is
-# wave-uniform, which is what lets the whole submit path avoid v_readfirstlane
-# and VCC.
+# 8-dword ATOMIC ADD_RTN_32 dword arrays out of runtime field values, either in
+# SGPRs or one packet per lane in VGPRs. SdmaRingEmitter -- the
+# packet-INDEPENDENT ring plumbing -- then writes them into the ring with
+# s_store or global_store respectively.
 #
 # THIS FILE KNOWS THE PACKET FORMAT AND NOTHING ABOUT WHAT IS BEING COPIED, so
 # a second caller with a different data layout reuses it as-is.  The geometry
@@ -24,21 +23,27 @@
 # emitted as a literal 0.  The reserved gaps and the <<13 pitch placement look
 # arbitrary because they are hardware-mandated.  Every field is packed
 # UNMASKED, so an over-range value ORs into its neighbour; keeping the geometry
-# in range is the caller's job (for the A2A path, the FusedA2AShape predicate).
+# in range is the caller's job (for the A2A paths, the GemmA2AShape and
+# A2AGemmShape predicates).
 #
 # This encoding is gfx9xx / gfx95x ONLY -- GFX12+ uses a different layout of
 # the same size.
 ################################################################################
 
-from rocisa.container import sgpr
+from rocisa.container import sgpr, vgpr
 from rocisa.instruction import (
     SMovB32, SMovB64, SSubU32, SOrB32, SLShiftLeftB32,
+    VMovB32, VAddU32, VLShiftLeftB32, VLShiftLeftOrB32, VWritelaneB32,
 )
 
 
 SDMA_OP_COPY_SUBWIN         = 1
 SDMA_SUBOP_COPY_LINEAR_RECT = 4
 COPY_PACKET_DWORDS          = 13
+COPY_DW_SRC                 = 1
+COPY_DW_DST                 = 6
+COPY_DW_RECT                = 11
+SIGNAL_DW_ADDR              = 1
 
 # operation is a 7-bit index into the TC atomic op table (ADD_RTN_32 = 15,
 # ADD_RTN_64 = 47); RTN means the op returns the pre-op value, which SDMA drops.
@@ -58,7 +63,7 @@ ATOMIC_HEADER_DW0 = ((SDMA_OP_ATOMIC & 0xFF) | ((SDMA_ATOMIC_ADD_RTN_32 & 0x7F) 
 
 
 class SdmaPacketEmitter:
-    """Builds the COPY_SUBWIN + ATOMIC packet dword arrays in SGPRs, in the
+    """Builds the COPY_SUBWIN + ATOMIC packet dword arrays in SGPRs or VGPRs, in the
     layout documented at the top of this file.
 
     Allocation-free: every method takes the registers it uses, and unlike
@@ -180,3 +185,48 @@ class SdmaPacketEmitter:
                            comment="ATOMIC DW4: src_data hi (unused by ADD_RTN_32), DW5: cmp_data lo (unused)"))
         module.add(SMovB64(dst=sgpr(pktS + 6, 2), src=0,
                            comment="ATOMIC DW6: cmp_data hi (unused), DW7: loop_interval=0"))
+
+    # ---- VGPR builders ------------------------------------------------------
+    # One packet per lane, COPY and signal lanes sharing one block. The
+    # lane-invariant dwords are written once, under the caller's EXEC; the
+    # caller writes the bases into COPY_DW_SRC / COPY_DW_DST and the target
+    # into SIGNAL_DW_ADDR per placement.
+
+    def emitBuildCopyPacketUniformV(self, module, pktV, pitchV, sliceV):
+        """COPY_SUBWIN's lane-invariant dwords into pktV, one pitch and one slice
+        pitch for both sides."""
+        module.add(VMovB32(dst=vgpr(pktV + 0), src=hex(self.copyHeaderDw0),
+                           comment="SUBWIN DW0: op=COPY sub_op=RECT elementsize=log2(%dB)"
+                                   % (1 << self.packetElementLog2)))
+        for dw in (3, 8, 12):
+            module.add(VMovB32(dst=vgpr(pktV + dw), src=0, comment="SUBWIN DW%d: 0" % dw))
+        module.add(VAddU32(dst=vgpr(pktV + 4), src0=-1, src1=vgpr(pitchV),
+                           comment="SUBWIN DW4: pitch - 1"))
+        module.add(VLShiftLeftB32(dst=vgpr(pktV + 4), shiftHex=13, src=vgpr(pktV + 4),
+                                  comment="SUBWIN DW4: src_pitch-1 (<< 13)"))
+        module.add(VMovB32(dst=vgpr(pktV + 9), src=vgpr(pktV + 4), comment="SUBWIN DW9: dst_pitch-1"))
+        module.add(VAddU32(dst=vgpr(pktV + 5), src0=-1, src1=vgpr(sliceV),
+                           comment="SUBWIN DW5: src_slice-1"))
+        module.add(VMovB32(dst=vgpr(pktV + 10), src=vgpr(pktV + 5), comment="SUBWIN DW10: dst_slice-1"))
+
+    def emitBuildCopyRectV(self, module, pktV, rectXV, rectYV):
+        """DW11 from per-lane rect_x / rect_y VGPRs."""
+        module.add(VLShiftLeftOrB32(dst=vgpr(pktV + COPY_DW_RECT), shiftHex=16, src0=vgpr(rectYV),
+                                    src1=vgpr(rectXV), comment="SUBWIN DW11: rect_y << 16 | rect_x"))
+        module.add(VAddU32(dst=vgpr(pktV + COPY_DW_RECT), src0=hex(0xFFFEFFFF),
+                           src1=vgpr(pktV + COPY_DW_RECT),
+                           comment="SUBWIN DW11: rect_x-1|rect_y-1"))
+
+    def emitBuildAtomicPacketUniformV(self, module, pktV):
+        module.add(VMovB32(dst=vgpr(pktV + 0), src=hex(ATOMIC_HEADER_DW0),
+                           comment="ATOMIC DW0: op=ATOMIC operation=ADD_RTN_32"))
+        module.add(VMovB32(dst=vgpr(pktV + 3), src=1, comment="ATOMIC DW3: src_data lo (addend)"))
+        for dw in range(4, ATOMIC_PACKET_DWORDS):
+            module.add(VMovB32(dst=vgpr(pktV + dw), src=0, comment="ATOMIC DW%d: 0" % dw))
+
+    def emitSignalAddressV(self, module, pktV, dstAddrS, lane):
+        """ATOMIC DW1-DW2 of `lane` = the 2-SGPR target address."""
+        module.add(VWritelaneB32(dst=vgpr(pktV + SIGNAL_DW_ADDR), src0=sgpr(dstAddrS + 0),
+                                 src1=lane, comment="signal DW1: addr lo"))
+        module.add(VWritelaneB32(dst=vgpr(pktV + SIGNAL_DW_ADDR + 1), src0=sgpr(dstAddrS + 1),
+                                 src1=lane, comment="signal DW2: addr hi"))

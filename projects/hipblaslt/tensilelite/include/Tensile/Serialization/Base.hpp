@@ -36,6 +36,7 @@
 #include <Tensile/Activation.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/ScalarValueTypes.hpp>
 #include <Tensile/geom.hpp>
@@ -450,6 +451,21 @@ namespace TensileLite
                 for(int i = 0; i < static_cast<int>(ActivationType::Count); i++)
                 {
                     auto const& info = static_cast<ActivationType>(i);
+                    iot::enumCase(io, value, TensileLite::ToString(info).c_str(), info);
+                }
+            }
+        };
+
+        template <typename IO>
+        struct EnumTraits<FusedA2A, IO>
+        {
+            using iot = IOTraits<IO>;
+
+            static void enumeration(IO& io, FusedA2A& value)
+            {
+                for(int i = 0; i < static_cast<int>(FusedA2A::Count); i++)
+                {
+                    auto const& info = static_cast<FusedA2A>(i);
                     iot::enumCase(io, value, TensileLite::ToString(info).c_str(), info);
                 }
             }
