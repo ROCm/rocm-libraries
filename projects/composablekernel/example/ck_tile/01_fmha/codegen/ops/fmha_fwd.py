@@ -2310,11 +2310,13 @@ def with_max_logits_variants(
         if p.tag in MAX_LOGITS_PIPELINES
         # the hdim 256 body of qr_async_trload does not store the max logits
         and not (p.tag == "qr_async_trload" and hdim == 256)
+        # required for correct max logits; the pipelines static_assert these
         and p.F_lse == "t"
         and p.F_bias == "no"
-        and p.F_dropout == "f"
         and p.F_qscale == "no"
         and p.F_logits == "f"
+        # these don't change the scores; left out only to limit the instance count
+        and p.F_dropout == "f"
         and p.F_skip == "f"
         # the default receipt leaves out the sink twins
         and (p.F_sink == "f" or receipt != 0)

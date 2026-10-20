@@ -916,8 +916,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
 {
     if(args.max_logits_ptr != nullptr)
     {
-        throw std::runtime_error(
-            "fmha_fwd: max_logits_ptr is not supported by this kernel instance");
+        throw std::runtime_error("fmha_fwd: the v3 pipeline does not support max logits");
     }
     /// NOTICE: This was borrowed from Aiter. Make sure the selected remap_opt setting truly
     /// maximizes the kernel's performance.
