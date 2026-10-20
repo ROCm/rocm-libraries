@@ -31,6 +31,7 @@
 #include "hipblaslt_scaling_format.hpp"
 #include <cassert>
 #include <hipblaslt/hipblaslt.h>
+#include <optional>
 #include <string>
 
 enum class hipblaslt_initialization
