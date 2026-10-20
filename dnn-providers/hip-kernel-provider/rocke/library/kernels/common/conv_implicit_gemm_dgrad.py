@@ -86,7 +86,6 @@ from rocke.helpers.transforms import (
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
     _c_lane_rows_cols,
-    _implicit_gemm_c_ctx,
     _implicit_gemm_output_config,
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -2490,30 +2489,21 @@ def _emit_dgrad_tilde_atomic_epilogue(
     Computes the dX NHWC offset at runtime using the sub-GEMM record's
     d_h/d_w stride/offset fields, then issues atomic-add.
     """
-    (
-        dtype_d,
-        p,
-        mfmas_m,
-        mfmas_n,
-        warp_m_off,
-        warp_n_off,
-        block_warp_m_off,
-        block_warp_n_off,
-        _,
-        _,
-        rows,
-        cols,
-    ) = _implicit_gemm_c_ctx(
-        b,
-        atom,
-        lane,
-        c_per_lane,
-        spec,
-        warp_m_idx,
-        warp_n_idx,
-        block_m_off,
-        block_n_off,
-    )
+    from rocke.helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
+    from rocke.helpers.distribution import make_static_tile_distribution
+
+    dtype_d = spec.data.dtype_d
+    p = spec.problem
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+    block_warp_m_off = b.add(block_m_off, warp_m_off)
+    block_warp_n_off = b.add(block_n_off, warp_n_off)
+
+    _, __, kc_m1, kc_nlane = c_warp_params(atom)
+    rows, cols = _c_lane_rows_cols(b, atom, lane, kc_m1, kc_nlane, c_per_lane)
 
     c0 = b.const_i32(0)
 

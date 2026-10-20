@@ -60,29 +60,6 @@ from rocke.helpers.transforms import (
 _DTYPE_TO_IR: dict = {"f16": F16, "fp16": F16, "bf16": BF16, "fp32": F32}
 
 
-def _implicit_gemm_c_ctx(b, atom, lane, c_per_lane, spec, warp_m_idx, warp_n_idx, block_m_off, block_n_off):
-    """Shared dgrad/wgrad C-tile context: imports, offsets, lane decode."""
-    from rocke.helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
-    from rocke.helpers.distribution import make_static_tile_distribution
-
-    dtype_d = spec.data.dtype_d
-    p = spec.problem
-    mfmas_m = spec.mfmas_per_warp_m
-    mfmas_n = spec.mfmas_per_warp_n
-
-    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
-    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
-    block_warp_m_off = b.add(block_m_off, warp_m_off)
-    block_warp_n_off = b.add(block_n_off, warp_n_off)
-
-    _, __, kc_m1, kc_nlane = c_warp_params(atom)
-    rows, cols = _c_lane_rows_cols(b, atom, lane, kc_m1, kc_nlane, c_per_lane)
-    return (
-        dtype_d, p, mfmas_m, mfmas_n, warp_m_off, warp_n_off,
-        block_warp_m_off, block_warp_n_off, kc_m1, kc_nlane, rows, cols,
-    )
-
-
 def _ir_dtype(dtype: str) -> Type:
     """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
     t = _DTYPE_TO_IR.get(dtype)
