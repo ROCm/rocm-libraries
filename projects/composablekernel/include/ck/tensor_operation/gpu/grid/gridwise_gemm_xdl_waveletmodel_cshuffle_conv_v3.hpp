@@ -697,7 +697,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         {
             // M contiguous
             constexpr index_t cluster_length_k1 =
-                64 / ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<1>{});
+                math::min(ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<2>{}),
+                          64 / ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<1>{}));
             constexpr index_t cluster_length_k0 =
                 ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<0>{}) *
                 (ABlockTransferThreadClusterLengths_AK0_M_AK1::At(Number<2>{}) / cluster_length_k1);
@@ -719,7 +720,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         {
             // N contiguous
             constexpr index_t cluster_length_k1 =
-                64 / BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<1>{});
+                math::min(BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<2>{}),
+                          64 / BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<1>{}));
             constexpr index_t cluster_length_k0 =
                 BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<0>{}) *
                 (BBlockTransferThreadClusterLengths_BK0_N_BK1::At(Number<2>{}) / cluster_length_k1);
