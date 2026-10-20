@@ -211,9 +211,9 @@ class TestMaskNumeric:
         wrong_qq[:, shift:] = data["qq_bias"][:, : wrong_qq.shape[1] - shift]
         wrong = P.run_reference(s, dict(data, qq_bias=wrong_qq))
         assert _max_abs(ref, wrong) > 10 * _tol(s.dtype), "discriminator too weak"
-        assert _max_abs(out, wrong) > 10 * _tol(s.dtype), (
-            "kernel applies the QQ-bias at the bottom-right offset"
-        )
+        assert _max_abs(out, wrong) > 10 * _tol(
+            s.dtype
+        ), "kernel applies the QQ-bias at the bottom-right offset"
 
 
 class TestTopLeftDecode:
@@ -295,9 +295,9 @@ class TestEmptyRows:
             dtype="bf16",
         )
         data = P.make_inputs(s)
-        assert au._d256_gfx942_fast(P.problem_of(s, data), _ARCH), (
-            "left the D256 lean cohort"
-        )
+        assert au._d256_gfx942_fast(
+            P.problem_of(s, data), _ARCH
+        ), "left the D256 lean cohort"
         ref = P.run_reference(s, data)
         out = _run(s, data, "2d")
         assert not torch.isnan(out).any(), "NaN in kernel output"
@@ -331,6 +331,150 @@ class TestNoMaskVisibility:
         vc[blk, last % s.block_size] += 5.0
         out2 = _run(s, dict(data, value_cache=vc), path)
         assert _max_abs(out2[0:4], out[0:4]) > 1e-3
+
+
+# (q_len, kv_len, left, right, top_left). ``left`` = 0 means unbounded.
+_ONE_HOT_BANDS = {
+    "causal_br": (40, 100, 0, 0, False),
+    "causal_tl": (40, 100, 0, 0, True),
+    "causal_w16_br": (40, 100, 16, 0, False),
+    "causal_w16_tl": (40, 100, 16, 0, True),
+    "left_only_w16_tl": (40, 100, 16, -1, True),
+    "left_only_w16_br": (40, 100, 16, -1, False),
+    "two_sided_w8_r4_tl": (40, 100, 8, 4, True),
+    "two_sided_w8_r4_br": (40, 100, 8, 4, False),
+    "lookahead_r4_tl": (40, 100, 0, 4, True),
+    "lookahead_r4_br": (40, 100, 0, 4, False),
+    "full": (40, 100, 0, -1, False),
+    # Rows with no visible key: top-left rows past ``kv_len + left - 1``, and
+    # bottom-right rows above the diagonal when ``q > kv``.
+    "tl_empty_rows_w16": (140, 100, 16, 0, True),
+    "br_empty_rows_q_gt_kv": (110, 100, 0, 0, False),
+}
+
+
+class TestBandIndexTruthTable:
+    """Index-level check of the band inequalities on the real kernels.
+
+    With ``q = 0`` every visible score is 0, so the softmax is uniform over the
+    visible keys; with ``V[k] = e_k`` (one-hot) the output row is ``1/n`` exactly at
+    the visible key indices. The expected set is the literal definition
+    ``d - k < left`` and ``k <= d + right`` (``d = p`` top-left, ``p + kv - q``
+    bottom-right), so ``left = W`` sees W keys counting the diagonal and any
+    off-by-one in a kernel shows up as a wrong index, not a tolerance miss. A row
+    with no visible key must be exactly 0.
+    """
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("path", ["2d", "3d"])
+    @pytest.mark.parametrize("name", list(_ONE_HOT_BANDS))
+    def test_visible_key_set_is_exact(self, name, path):
+        P = _harness()
+        q_len, kv_len, left, right, top_left = _ONE_HOT_BANDS[name]
+        head = 128
+        s = P._mask_shape(
+            name,
+            [(q_len, kv_len)],
+            group="truth_table",
+            heads=2,
+            kv_heads=1,
+            head_size=head,
+            dtype="fp16",
+            sliding_window=left,
+            causal_top_left=top_left,
+            right_bound=right,
+        )
+        data = P.make_inputs(s)
+        _skip_if_path_unsupported_for_default_mask(s, data, path)
+        data["query"].zero_()
+        vc = torch.zeros_like(data["value_cache"])
+        for k in range(kv_len):
+            blk = int(data["block_tables"][0, k // s.block_size])
+            vc[blk, k % s.block_size, 0, k] = 1.0
+        data["value_cache"] = vc
+        out = _run(s, data, path)
+        expected = torch.zeros(q_len, 2, head, dtype=torch.float32)
+        empty = 0
+        for p in range(q_len):
+            d = p if top_left else p + kv_len - q_len
+            visible = [
+                k
+                for k in range(kv_len)
+                if (left == 0 or d - k < left) and (right < 0 or k <= d + right)
+            ]
+            if visible:
+                expected[p, :, visible] = 1.0 / len(visible)
+            else:
+                empty += 1
+        if "empty_rows" in name:
+            assert empty > 0, "case has no empty rows; it checks nothing"
+        assert not torch.isnan(out).any(), "NaN in kernel output"
+        err = (out.float().cpu() - expected).abs().max().item()
+        assert err < 2e-3, f"{name}/{path}: max_abs={err:.3e}"
+
+
+_OVERREAD_CHILD = """
+import sys, torch
+import builders.gfx942.attention.prefill.parity_unified_attention as P
+import kernels.common.attention_unified as au
+pred, heads, dtype, head, window = sys.argv[1:6]
+s = P._mask_shape("overread", [(40, 100)], group="x", heads=int(heads), kv_heads=1,
+                  dtype=dtype, head_size=int(head), sliding_window=int(window))
+data = P.make_inputs(s)
+assert getattr(au, pred)(P.problem_of(s, data), "gfx942")
+bt = data["block_tables"]
+n = bt.numel()
+# Poison the int32s right after the table: a read of entry n is then a wild block.
+buf = torch.full((n + 64,), 100_000_000, dtype=torch.int32, device="cuda")
+buf[:n] = bt.flatten()
+data["block_tables"] = buf[:n].view(bt.shape)
+out, _ = P.run_dispatch(s, data, backend="2d")
+err = (out.float() - P.run_reference(s, data)).abs().max().item()
+sys.exit(0 if err < 2e-2 else 3)
+"""
+
+
+class TestBlockTableOverread:
+    """kv_len = 100 is not a multiple of either 4-warp body's key tile (32 for the
+    D128 SWA body, 64 for D256 lean), so the last tile's tail keys map to block
+    table entry 7 of a 7-entry row unless the kernel clamps the page index."""
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "pred, heads, dtype, head, window",
+        [
+            ("_d128_gfx942_swa_fast", 2, "fp16", 128, 16),
+            ("_d128_gfx942_swa_fast", 4, "bf16", 128, 16),  # GQA head-fold
+            ("_d256_gfx942_fast", 2, "bf16", 256, 0),
+        ],
+        ids=["d128_swa", "d128_swa_fold", "d256_lean"],
+    )
+    def test_body_reads_only_the_sequence_blocks(
+        self, pred, heads, dtype, head, window
+    ):
+        """The kernel must not read past a sequence's ``ceil(kv_len / bs)`` block
+        table entries. Runs in a child process: a fault poisons the device."""
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _OVERREAD_CHILD,
+                pred,
+                str(heads),
+                dtype,
+                str(head),
+                str(window),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        assert proc.returncode == 0, proc.stderr[-2000:]
 
 
 # ---------------------------------------------------------------------------
@@ -492,9 +636,9 @@ class TestMaskBodies:
         if pred is not None:
             problem = P.problem_of(s, data)
             if pred in _CAUSAL_ONLY_BODIES and rb != 0:
-                assert not _pred(pred, problem), (
-                    f"right_bound={rb} routed onto the causal-only {pred} body"
-                )
+                assert not _pred(
+                    pred, problem
+                ), f"right_bound={rb} routed onto the causal-only {pred} body"
                 # Off the 4-warp body, whatever production picks must be right
                 # (a forced 2D can exceed the gfx942 LDS budget at D256 bs32).
                 backend = "auto"
@@ -511,9 +655,9 @@ class TestMaskBodies:
             dataclasses.replace(s, causal_top_left=False, right_bound=0), data
         )
         if _max_abs(ref, ref_br) > 10 * _tol(s.dtype):
-            assert _max_abs(out, ref_br) > 10 * _tol(s.dtype), (
-                "kernel matches the default bottom-right reference"
-            )
+            assert _max_abs(out, ref_br) > 10 * _tol(
+                s.dtype
+            ), "kernel matches the default bottom-right reference"
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +802,118 @@ class TestDispatchEndToEnd:
         assert err < _tol(s.dtype), f"dispatch {res.candidate.name}/{path}: {err:.3e}"
 
 
+class TestDispatchedMixedCohort:
+    """request -> dispatch -> launch on a cohort whose batch maxima are EQUAL.
+
+    ``seqlen_q`` / ``seqlen_k`` of the request are the batch maxima for the paged
+    unified kernels, which take ``context_len`` per sequence from ``cu_seqlens_q`` /
+    ``seq_lens`` at runtime. The cohort below has maxima 700 / 700 yet holds
+    (700, 200) and (200, 700) sequences, so folding top-left into bottom-right because
+    the maxima match silently gives those sequences the wrong diagonal.
+    ``TestDispatchEndToEnd`` uses uniform lengths, where that fold is harmless.
+    """
+
+    _MIXED = [(512, 512), (700, 200), (200, 700), (64, 64)]
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("path", ["tiled", "auto"])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize(
+        "name,request_kw,band",
+        [
+            (
+                "top_left",
+                dict(mask_type="TOP_LEFT_CAUSAL"),
+                dict(causal_top_left=True, right_bound=0, sliding_window=0),
+            ),
+            (
+                "top_left_window",
+                dict(mask_type="TOP_LEFT_CAUSAL", sliding_window=64),
+                dict(causal_top_left=True, right_bound=0, sliding_window=64),
+            ),
+            (
+                "left_only_window_trio",
+                dict(mask_type="NO_MASK", sliding_window=64),
+                dict(causal_top_left=True, right_bound=-1, sliding_window=64),
+            ),
+            (
+                "two_sided_window_trio",
+                dict(mask_type="NO_MASK", sliding_window=96, right_bound=32),
+                dict(causal_top_left=True, right_bound=32, sliding_window=96),
+            ),
+        ],
+    )
+    def test_request_with_equal_batch_maxima_keeps_top_left(
+        self, name, request_kw, band, dtype, path
+    ):
+        from dispatch.attention import (
+            AttentionMaskType,
+            AttentionRequest,
+            _problem,
+            dispatch_attention,
+        )
+        from kernels import run_unified_attention_torch
+
+        P = _harness()
+        s = P._mask_shape(
+            f"mixed_{name}", self._MIXED, group="dispatch", dtype=dtype, **band
+        )
+        data = P.make_inputs(s)
+        kw = dict(request_kw)
+        kw["mask_type"] = getattr(AttentionMaskType, kw["mask_type"])
+        req = AttentionRequest(
+            batch=len(self._MIXED),
+            nhead_q=s.heads,
+            nhead_k=s.kv_heads,
+            seqlen_q=data["max_query_len"],
+            seqlen_k=data["max_kv_len"],
+            hdim_q=s.head_size,
+            hdim_v=s.head_size,
+            arch="gfx942",
+            dtype=dtype,
+            kv_block_size=s.block_size,
+            **kw,
+        )
+        assert req.seqlen_q == req.seqlen_k == 700, "the maxima must be equal"
+        res = dispatch_attention(req)
+        assert res.spec.causal_top_left, f"{res.candidate.name} dropped top-left"
+        problem = _problem(req)
+        for field, want in band.items():
+            assert getattr(problem, field) == want, (field, getattr(problem, field))
+        # The request carries ``batch * seqlen_q`` rows; the launch has the real count.
+        problem = dataclasses.replace(problem, total_q=data["query"].shape[0])
+
+        def launch(prob):
+            out = torch.empty_like(data["query"])
+            run_unified_attention_torch(
+                problem=prob,
+                q=data["query"],
+                k=data["key_cache"],
+                v=data["value_cache"],
+                out=out,
+                cu_seqlens_q=data["cu_q"],
+                seqused_k=data["kv_lens"],
+                softmax_scale=data["scale"],
+                block_table=data["block_tables"],
+                softcap=0.0,
+                backend=path,
+            )
+            torch.cuda.synchronize()
+            return out
+
+        ref = P.run_reference(s, data)
+        out = launch(problem)
+        assert not torch.isnan(out).any(), "NaN in kernel output"
+        err = _max_abs(out, ref)
+        assert err < _tol(dtype), f"{name}/{dtype}/{path}: max_abs={err:.3e}"
+        # Negative control: the bottom-right body (what the equal-maxima shortcut
+        # selected) must NOT match, or this test could not have caught the bug.
+        wrong = launch(dataclasses.replace(problem, causal_top_left=False))
+        wrong = torch.nan_to_num(wrong.float(), nan=float("inf"))
+        assert _max_abs(wrong, ref) > 1e-2, "bottom-right body unexpectedly matches"
+
+
 # Levers that derive a bound from ``context_len`` on the gfx942 fp16 flash body.
 # Combinations the spec validator rejects are skipped; the base must run.
 _LEVER_VARIANTS = {
@@ -695,9 +951,9 @@ class TestMask2DLevers:
         )
         data = P.make_inputs(s)
         problem = P.problem_of(s, data)
-        assert au._enable_gfx942_fp16_flash(problem, _ARCH), (
-            "left the fp16 flash cohort"
-        )
+        assert au._enable_gfx942_fp16_flash(
+            problem, _ARCH
+        ), "left the fp16 flash cohort"
         orig = au._tiled_spec_from_problem
         over = _LEVER_VARIANTS[variant]
         try:
