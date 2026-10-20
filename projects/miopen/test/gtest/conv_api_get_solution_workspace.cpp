@@ -9,13 +9,11 @@
 // workspace for the configuration Immediate will run, retains a larger stored value, and executes
 // correctly with the size it reports.
 
-#include <miopen/any_solver.hpp>
-#include <miopen/conv/db_getter.hpp>
-#include <miopen/execution_context.hpp>
-#include <miopen/invoke_params.hpp>
 #include <miopen/miopen.h>
 #include <miopen/conv/problem_description.hpp>
+#include <miopen/conv_solution.hpp>
 #include <miopen/convolution.hpp>
+#include <miopen/execution_context.hpp>
 #include <miopen/db_record.hpp>
 #include <miopen/find_db.hpp>
 #include <miopen/readonlyramdb.hpp>
@@ -31,6 +29,15 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+namespace miopen {
+// Immediate resolves the configuration it runs through this entry point
+// (src/hip/convolutionocl.cpp), the same path PrepareInvoker uses.
+std::vector<solver::ConvSolution>
+GetConvSolutions(const ExecutionContext& ctx,
+                 const conv::ProblemDescription& problem,
+                 const std::vector<miopenConvSolution_t> solutions);
+} // namespace miopen
 
 namespace {
 
@@ -160,7 +167,16 @@ protected:
         ASSERT_EQ(solutions.size(), 1) << "expected only the record from the temporary find-db";
         ASSERT_EQ(solutions[0].solution_id, solver_id);
         if(verify_grouped_forward)
-            ASSERT_GE(solutions[0].workspace_size, expected_reported);
+        {
+            // Fatal before any allocation or launch: the reported size must cover the
+            // configuration Immediate resolves for this solution.
+            const auto selected = SelectedWorkspace(solutions[0]);
+            ASSERT_TRUE(selected.has_value()) << "could not resolve the Immediate configuration";
+            ASSERT_GT(*selected, db_workspace) << "test shape no longer exercises an undersized "
+                                                  "stored workspace";
+            ASSERT_GE(solutions[0].workspace_size, *selected)
+                << "reported workspace is smaller than the selected configuration needs";
+        }
         else
             ASSERT_EQ(solutions[0].workspace_size, expected_reported);
 
@@ -212,11 +228,11 @@ protected:
         return miopenConvolutionForwardGetSolutionWorkspaceSize(
                    handle, wDesc, xDesc, convDesc, yDesc, solver_id, &live) == miopenStatusSuccess;
     }
-    std::optional<std::size_t> SelectedWorkspace(const char* selected_solver) const
+    // Workspace of the configuration Immediate will resolve for this solver.
+    std::optional<std::size_t> SelectedWorkspace(const miopenConvSolution_t& reported) const
     {
-        auto& handle_ref = miopen::deref(handle);
-        auto ctx         = miopen::ExecutionContext{&handle_ref};
-        auto problem     = miopen::conv::ProblemDescription{miopen::deref(xDesc),
+        auto ctx     = miopen::ExecutionContext{&miopen::deref(handle)};
+        auto problem = miopen::conv::ProblemDescription{miopen::deref(xDesc),
                                                         miopen::deref(wDesc),
                                                         miopen::deref(yDesc),
                                                         miopen::deref(convDesc),
@@ -226,12 +242,10 @@ protected:
         ctx.do_search              = false;
         ctx.disable_search_enforce = true;
 
-        const auto solver   = miopen::solver::Id{selected_solver}.GetSolver();
-        auto db             = miopen::MakeConvDbGetter(ctx);
-        const auto solution = solver.FindSolution(ctx, problem, db, {});
-        if(!solution.Succeeded())
+        const auto conv_solutions = miopen::GetConvSolutions(ctx, problem, {reported});
+        if(conv_solutions.size() != 1 || !conv_solutions[0].Succeeded())
             return std::nullopt;
-        return solution.workspace_sz;
+        return conv_solutions[0].workspace_sz;
     }
 
     void SetGroupFwdShape()
@@ -286,8 +300,5 @@ TEST_F(GPU_ConvApiGetSolutionWorkspace_FP16, GroupFwdNonzeroUndersizedWorkspaceE
     if(!LiveWorkspace(live, group_fwd_solver_name))
         GTEST_SKIP() << group_fwd_solver_name << " is not applicable on this device or build";
     ASSERT_GT(live, 1);
-    const auto selected_workspace = SelectedWorkspace(group_fwd_solver_name);
-    ASSERT_TRUE(selected_workspace);
-    ASSERT_GT(*selected_workspace, 1);
-    Check(group_fwd_solver_name, implicit_gemm_algo, 1, *selected_workspace, true);
+    Check(group_fwd_solver_name, implicit_gemm_algo, 1, live, true);
 }
