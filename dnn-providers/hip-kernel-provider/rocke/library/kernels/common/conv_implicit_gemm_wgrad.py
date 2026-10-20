@@ -1950,10 +1950,10 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # pairs at the scattered MFMA layout, so it needs cshuffle's contiguous
     # pairs. Two cases are not on it. At split_k == 1 the epilogue is a direct
     # store, and under two_stage it is an f32 scratch atomic; neither emits
-    # packed atomics, so 'default' is fine. WMMA rejects cshuffle outright, so
-    # 'default' is its only epilogue; its split-K (admitted above only on
-    # wgrad_wmma_split_k_available arches) goes through the WMMA epilogue, which forms
-    # each packed pair itself.
+    # packed atomics, so 'default' is fine. WMMA is exempt too: its 'default'
+    # split-K (admitted above only on wgrad_wmma_split_k_available arches) goes
+    # through the WMMA epilogue, which forms each packed pair itself with a zero
+    # partner, and its 'cshuffle' split-K pairs through LDS exactly as on MFMA.
     # (_effective_two_stage is computed above, with the split-K validity gates.)
     if (
         _is_atomic
@@ -2145,9 +2145,11 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
                 f"WMMA wgrad supports only the {_WMMA_WGRAD_PIPELINES} pipelines "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        if spec.epilogue != "default":
+        # cshuffle reads the accumulators through op.c_layout(), the same WMMA
+        # path the forward and dgrad cshuffle epilogues use.
+        if spec.epilogue not in ("default", "cshuffle"):
             return False, (
-                f"WMMA wgrad supports only the 'default' epilogue "
+                f"WMMA wgrad supports only the 'default' and 'cshuffle' epilogues "
                 f"(got {spec.epilogue!r}) on {arch}"
             )
         # unroll_k and prefetch_addr are family-agnostic K-loop bodies: they
@@ -3555,7 +3557,7 @@ def build_implicit_gemm_conv_wgrad(
             params,
             gm_group=group_v,
         )
-    elif _is_split_k and op.family == "wmma":
+    elif _is_split_k and op.family == "wmma" and spec.epilogue != "cshuffle":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
         _emit_wgrad_split_k_epilogue_wmma(
             b,
@@ -3572,12 +3574,14 @@ def build_implicit_gemm_conv_wgrad(
             group=group_v,
         )
     elif _is_split_k and spec.epilogue == "cshuffle":
-        # MFMA split-K + cshuffle: scatter to LDS then paired pk_atomic from smem.
-        # Avoids the zero-fill workaround of the direct split-K path for bf16/fp16.
+        # Split-K + cshuffle (MFMA or WMMA): scatter to LDS then paired
+        # pk_atomic from smem. Avoids the zero-fill workaround of the direct
+        # split-K path for bf16/fp16.
         _emit_wgrad_split_k_cshuffle_epilogue(
             b,
             spec,
             atom,
+            op,
             final_accs,
             grid,
             dW,
@@ -3603,7 +3607,7 @@ def build_implicit_gemm_conv_wgrad(
         )
     elif spec.epilogue == "cshuffle":
         _emit_wgrad_cshuffle_epilogue(
-            b, spec, final_accs, grid, dw_rsrc, params, group=group_v
+            b, spec, op, final_accs, grid, dw_rsrc, params, group=group_v
         )
     elif op.family == "wmma":
         _emit_wgrad_direct_epilogue_wmma(
@@ -3916,10 +3920,22 @@ def _emit_wgrad_split_k_epilogue_wmma(
                     _emit_single_packed_atomic(c_m, c_n, b.vec_extract(acc, i))
 
 
+def _cshuffle_epilogue(op, atom, grid, kwargs: dict) -> CShuffleEpilogue:
+    """The cshuffle epilogue for this accumulator layout.
+
+    WMMA reads the fragment through ``op.c_layout()`` (``from_grid_op``, as the
+    forward and dgrad WMMA cshuffle epilogues do); MFMA through the atom.
+    """
+    if op.family == "wmma":
+        return CShuffleEpilogue.from_grid_op(op=op, grid=grid, **kwargs)
+    return CShuffleEpilogue.from_grid(atom=atom, grid=grid, **kwargs)
+
+
 def _emit_wgrad_split_k_cshuffle_epilogue(
     b: IRBuilder,
     spec: WgradConvSpec,
-    atom: MfmaAtom,
+    atom: Optional[MfmaAtom],
+    op,
     accs: Sequence[Value],
     grid,
     dW: Value,
@@ -3990,9 +4006,7 @@ def _emit_wgrad_split_k_cshuffle_epilogue(
         eff_grid = grid
         wg_M_v = params["p_wg_M"]
 
-    CShuffleEpilogue.from_grid(
-        atom=atom, grid=eff_grid, **_cshuffle_kwargs
-    ).atomic_store(
+    _cshuffle_epilogue(op, atom, eff_grid, _cshuffle_kwargs).atomic_store(
         b,
         accs=accs,
         dw_ptr=dW,
@@ -4143,6 +4157,7 @@ def _emit_wgrad_direct_epilogue_wmma(
 def _emit_wgrad_cshuffle_epilogue(
     b: IRBuilder,
     spec: WgradConvSpec,
+    op,
     accs: Sequence[Value],
     grid: WarpGrid,
     dw_rsrc: Value,
@@ -4201,7 +4216,7 @@ def _emit_wgrad_cshuffle_epilogue(
             _vc_C, _vc_K, spec.data.dtype_d, split_k=spec.split_k
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
-    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
+    _cshuffle_epilogue(op, spec.atom, grid, _cshuffle_kwargs).store(
         b,
         accs=accs,
         addr_fn=dw_addr,

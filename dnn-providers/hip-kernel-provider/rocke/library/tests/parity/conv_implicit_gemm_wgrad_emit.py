@@ -67,6 +67,11 @@
 #   59 -- gfx1250 async_dma + "wmma_v1", K-outer, 64x64x64 2x2 warps
 #   60-61 -- both engines must reject: "wmma_v1" on gfx950 (MFMA), and gfx1250
 #         async_dma with C=3 (a one-element chunk is narrower than the copy)
+#   62-64 -- gfx1250 cshuffle (WMMA fragment through LDS): direct fp16 dW,
+#         split-K bf16 dW (genuine paired atomics), and with async_dma under
+#         split-K at C=24 (partial N tiles)
+#   65 -- both engines must reject: cshuffle split-K on gfx1201 (WMMA split-K
+#         is enabled only on gfx1250)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -747,6 +752,39 @@ def _spec(idx: int):
             epilogue="default",
             split_k=split_k,
             lds_k_outer=wave32,
+        )
+        kw.update(extra)
+        return WgradConvSpec(**kw), arch
+
+    if 62 <= idx <= 65:
+        # WMMA cshuffle epilogue.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p64 = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        p24 = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+        problem, dtype_d, split_k, extra, arch = {
+            62: (p64, "fp16", 1, {}, "gfx1250"),
+            63: (p64, "bf16", 4, {}, "gfx1250"),
+            64: (p24, "fp16", 2, {"async_dma": True}, "gfx1250"),
+            65: (p64, "fp16", 4, {}, "gfx1201"),
+        }[idx]
+        gfx1250 = arch == "gfx1250"
+        kw = dict(
+            problem=problem,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32 if gfx1250 else 16,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="cshuffle",
+            split_k=split_k,
+            lds_k_outer=gfx1250,
         )
         kw.update(extra)
         return WgradConvSpec(**kw), arch

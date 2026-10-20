@@ -1285,13 +1285,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          arch);
             return false;
         }
+        /* cshuffle reads the accumulators through op.c_layout(), the WMMA path
+         * the forward and dgrad cshuffle epilogues use. */
         const char* epilogue = s->epilogue ? s->epilogue : "default";
-        if(strcmp(epilogue, "default") != 0)
+        if(strcmp(epilogue, "default") != 0 && strcmp(epilogue, "cshuffle") != 0)
         {
             if(reason && reason_cap)
                 snprintf(reason,
                          reason_cap,
-                         "WMMA wgrad supports only the 'default' epilogue (got '%s') on %s",
+                         "WMMA wgrad supports only the 'default' and 'cshuffle' epilogues "
+                         "(got '%s') on %s",
                          epilogue,
                          arch);
             return false;
@@ -2321,8 +2324,10 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
             vec_c = 1;
     }
 
+    /* WMMA reads the fragment through op.c_layout() (Python _cshuffle_epilogue). */
     rocke_cshuffle_epilogue_t cepi
-        = rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);
+        = ctx->is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx->op, &ctx->grid, vec_c)
+                       : rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);
     cepi.out_dtype = dtype_d;
 
     rocke_cshuffle_epilogue_atomic_store(b,
@@ -4170,11 +4175,13 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         for(int i = 0; i < ctx.num_final_accs; ++i)
             ctx.final_accs[i] = post_accs[i];
 
-        /* Same order as Python: the WMMA epilogue is chosen before the
-         * epilogue knob, since WMMA has no cshuffle. */
-        if(ctx.is_wmma)
+        /* Same order as Python: WMMA takes its own atomic epilogue unless the
+         * cshuffle epilogue was asked for, which pairs through LDS on both
+         * families. */
+        const bool cshuffle_epi = spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0;
+        if(ctx.is_wmma && !cshuffle_epi)
             wgrad_emit_split_k_epilogue_wmma(b, &ctx, spec, dW);
-        else if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
+        else if(cshuffle_epi)
             wgrad_emit_split_k_cshuffle_epilogue(b, &ctx, spec, dW, wg_M, wg_N);
         else
             wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);
@@ -4230,7 +4237,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
                     vec_c = 1;
             }
             rocke_cshuffle_epilogue_t cepi
-                = rocke_cshuffle_epilogue_from_grid(ctx.atom, &ctx.grid, vec_c);
+                = ctx.is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx.op, &ctx.grid, vec_c)
+                              : rocke_cshuffle_epilogue_from_grid(ctx.atom, &ctx.grid, vec_c);
             cepi.out_dtype = dtype_d;
             if(ctx.is_pointwise)
             {

@@ -454,6 +454,39 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         *arch = wave32 ? "gfx1250" : "gfx950";
         return 0;
     }
+    case 62:
+    case 63:
+    case 64:
+    case 65:
+    {
+        /* WMMA cshuffle epilogue. Must match the Python emitter's 62-65. */
+        const bool gfx1250 = idx != 65;
+        if(idx == 64)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 63 ? "bf16" : "fp16";
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 64;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = gfx1250 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "cshuffle";
+        spec->split_k = idx == 62 ? 1 : (idx == 64 ? 2 : 4);
+        spec->lds_k_outer = gfx1250;
+        spec->async_dma = idx == 64;
+        *arch = gfx1250 ? "gfx1250" : "gfx1201";
+        return 0;
+    }
     default:
         return -1;
     }

@@ -79,13 +79,27 @@ barrier. Three variants now cover it, each mirrored in the C++ engine:
   - It needs a 4-, 8- or 16-byte chunk on both operands, so an odd channel run
     is rejected.
 
+### cshuffle epilogue on WMMA (gfx1250)
+
+The WMMA C fragment gives each lane one dW column of 8 rows. The default
+epilogue therefore writes a 16-bit split-K partial as one zero-partner packed
+atomic per element, so every dword takes two atomics. `epilogue="cshuffle"` now
+admits WMMA. It stages the tile through LDS with `CShuffleEpilogue.from_grid_op`,
+the WMMA path the forward and dgrad epilogues already use, and then issues
+genuine `<2 x dtype>` pairs from contiguous runs: half the atomics, still
+coalesced across lanes.
+
+Swapping the WMMA operands instead was tried and dropped. That swap gives each
+lane a contiguous run, but it spreads the 32 lanes of one instruction over 32
+dW rows, and the extra memory transactions outweigh the halved atomic count.
+
 ### Split-K on gfx1250 (WMMA)
 
 - 16-bit and fp32 split-K are enabled on gfx1250 through the WMMA atomic
   epilogue (`_emit_wgrad_split_k_epilogue_wmma`, mirrored in the C++ engine).
   Both engines admit WMMA split-K only where the arch catalog sets
   `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset
-  (`default` epilogue, 16x16x16 or 16x16x32 atom).
+  (`default` or `cshuffle` epilogue, 16x16x16 or 16x16x32 atom).
 - Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
   16-bit atomic rounds the running sum in dW, so with same-sign partials the
