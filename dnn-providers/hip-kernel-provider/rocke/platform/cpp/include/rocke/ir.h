@@ -693,14 +693,20 @@ bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
  * signedness asks it which form to emit. NULL-safe. */
 bool rocke_type_is_unsigned(const rocke_type_t* t);
 
-/* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
+/* AMDGPU buffer-load cache-policy bits (the AUX operand; Python module
+ * constants). Bit 0 (1) is GLC on gfx90a and SC0 on gfx942/gfx950; bit 1 (2) is
+ * SLC on gfx90a and NT (streaming) on gfx942/gfx950. */
 typedef enum rocke_cache_policy
 {
-    ROCKE_CACHE_ALL = 0,
-    ROCKE_CACHE_GLOBAL = 1,
-    ROCKE_CACHE_STREAM = 2,
-    ROCKE_NON_TEMPORAL = 3
+    ROCKE_CACHE_ALL = 0, /* no bits: the default caching */
+    ROCKE_CACHE_GLOBAL = 1, /* GLC / SC0 */
+    ROCKE_CACHE_STREAM = 2, /* SLC / NT */
+    ROCKE_NON_TEMPORAL = 3 /* GLC + SLC / SC0 + NT */
 } rocke_cache_policy_t;
+
+/* The bits of a cache-policy name ("all", "global", "stream", "nt"; Python
+ * cache_policy_from_name). Returns false for any other name. */
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out);
 
 /* ============================== ATTR MAP ================================ */
 
@@ -1577,6 +1583,13 @@ void rocke_b_sync(rocke_ir_builder_t* b);
 void rocke_b_s_barrier_bare(rocke_ir_builder_t* b);
 void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector);
 void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
+/* Python sync / sync_lds_only / s_barrier_bare(fence=mode): mode "compiler"
+ * follows the barrier with a compiler memory barrier, "workgroup" also
+ * brackets it with workgroup-scope release / acquire fences; NULL or "none" is
+ * the plain op. Any other mode records ROCKE_ERR_VALUE. */
+void rocke_b_sync_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_sync_lds_only_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_s_barrier_bare_fence(rocke_ir_builder_t* b, const char* mode);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);

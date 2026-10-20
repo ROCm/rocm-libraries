@@ -1762,6 +1762,16 @@ class _Lowerer:
         self._smem_offsets: Dict[str, int] = {}
         self._smem_pool_size: int = 0
         self._smem_pool_name: Optional[str] = None
+        # LDS alias scopes (kernel attr ``lds_alias_scopes``): one scope per
+        # smem allocation, noalias against allocations whose pooled byte
+        # ranges are disjoint. Without them SIInsertWaitcnts must assume any
+        # LDS read can alias an in-flight LDS DMA (buffer_load ... lds) and
+        # waits vmcnt(0) first; with them it waits only for DMA into the
+        # read's own allocation.
+        self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
+        self._smem_sizes: Dict[str, int] = {}
+        self._lds_prov: Dict[str, str] = {}
+        self._lds_aa_used = False
         # Cache of per-allocation base pointers already emitted, keyed by
         # (block label, global name). Lets a non-zero-offset allocation that is
         # accessed several times in the same block reuse a single byte-level
@@ -2237,6 +2247,7 @@ class _Lowerer:
 
         for gname, stype in sorted_allocs:
             seg = _seg_size(stype)
+            self._smem_sizes[gname] = seg
             aln = _align(stype)
             first_seq, last_seq = live.get(gname, (0, 0))
             # Exclusive (cshuffle no-alias) allocations must not reuse another
@@ -2311,6 +2322,45 @@ class _Lowerer:
 
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
         self._smem_pool_size = (pool_size + 15) & ~15
+
+    _LDS_AA_BASE = 900000
+
+    def _lds_aa_names(self) -> List[str]:
+        return sorted(self._smem_sizes)
+
+    def _lds_aa_suffix(self, gname: Optional[str]) -> str:
+        """``, !alias.scope !A, !noalias !N`` for an access to ``gname``."""
+        if not self._lds_aa or gname is None or gname not in self._smem_sizes:
+            return ""
+        self._lds_aa_used = True
+        names = self._lds_aa_names()
+        n = len(names)
+        i = names.index(gname)
+        b = self._LDS_AA_BASE
+        return f", !alias.scope !{b + 1 + n + i}, !noalias !{b + 1 + 2 * n + i}"
+
+    def _lds_aa_render(self) -> List[str]:
+        names = self._lds_aa_names()
+        n = len(names)
+        b = self._LDS_AA_BASE
+        out = [f'!{b} = distinct !{{!{b}, !"rocke.lds"}}']
+        for i, g in enumerate(names):
+            out.append(f'!{b + 1 + i} = distinct !{{!{b + 1 + i}, !{b}, !"{g}"}}')
+        for i, g in enumerate(names):
+            out.append(f"!{b + 1 + n + i} = !{{!{b + 1 + i}}}")
+        for i, g in enumerate(names):
+            lo, hi = self._smem_offsets[g], self._smem_offsets[g] + self._smem_sizes[g]
+            dis = [
+                f"!{b + 1 + j}"
+                for j, h in enumerate(names)
+                if h != g
+                and (
+                    self._smem_offsets[h] >= hi
+                    or self._smem_offsets[h] + self._smem_sizes[h] <= lo
+                )
+            ]
+            out.append(f"!{b + 1 + 2 * n + i} = !{{{', '.join(dis)}}}")
+        return out
 
     def _emit_smem_base_ptr(self, gname: str, stype: SmemType) -> str:
         """Return an addrspace(3) pointer to the start of the smem segment.
@@ -3040,8 +3090,8 @@ class _Lowerer:
         %r_i8 = trunc i32 %clamped to i8
 
         The clamp uses ``llvm.smin`` / ``llvm.smax`` so the backend can
-        fold the whole sequence into a ``v_med3_i32`` followed by a
-        single ``v_cvt_pk_i16_i32`` byte select.
+        fold it into a single ``v_med3_i32``; the low byte of the result
+        is the i8.
         """
         (v,) = op.operands
         self._need("rint.f32")
@@ -3180,8 +3230,12 @@ class _Lowerer:
         # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
         # Coefficients are in Horner power-basis order, not Taylor coefficients.
         # Source: amd/device-libs/ocml/src/tanhF.cl.
-        f32 = lambda value: self._composed_constant(value, F32, "f32")
-        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        def f32(value):
+            return self._composed_constant(value, F32, "f32")
+
+        def i32(value):
+            return self._composed_constant(value, I32, "i32")
+
         lower = self._lower_composed_op
 
         one = f32(1.0)
@@ -3641,7 +3695,7 @@ class _Lowerer:
         align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
-            f"align {align}"
+            f"align {align}{self._lds_aa_suffix(gname)}"
         )
 
     def _op_tile_smem_load_v4(self, op: Op) -> None:
@@ -3743,6 +3797,7 @@ class _Lowerer:
             scalar = self._fresh("smem.s")
             self._current().emit(
                 f"  {scalar} = load {volatile}{elem_ty}, ptr addrspace(3) {base}, align {align}"
+                f"{self._lds_aa_suffix(gname)}"
             )
             self._current().emit(
                 f"  {op.result.name} = insertelement <1 x {elem_ty}> undef, {elem_ty} {scalar}, i32 0"
@@ -3750,7 +3805,7 @@ class _Lowerer:
         else:
             self._current().emit(
                 f"  {op.result.name} = load {volatile}<{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
-                f"align {align}"
+                f"align {align}{self._lds_aa_suffix(gname)}"
             )
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
@@ -5221,6 +5276,7 @@ class _Lowerer:
         gname = self._smem_storage_name[smem.name]
         stype = smem.type
         base_ptr = self._emit_smem_base_ptr(gname, stype)
+        self._lds_prov[op.result.name] = gname
         # The global is ptr addrspace(3); cast to i64 for arithmetic.
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
@@ -5228,6 +5284,8 @@ class _Lowerer:
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
+        if base.name in self._lds_prov:
+            self._lds_prov[op.result.name] = self._lds_prov[base.name]
         self._current().emit(
             f"  {op.result.name} = add i64 {self._operand(base)}, {self._operand(off)}"
         )
@@ -5280,6 +5338,7 @@ class _Lowerer:
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
             f"i32 0, i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 
     def _op_tile_s_wait_asynccnt(self, op: Op) -> None:
@@ -5596,8 +5655,28 @@ class _Lowerer:
         # the raw s_barrier does NOT auto-drain LDS, so an explicit wait is
         # required or the same-wave LDS write->read races -> stale LDS / NaN).
         self._backend.emit_lds_barrier_drain(self, drain_vmem=True)
+        self._emit_s_barrier(op)
+
+    def _emit_s_barrier(self, op: Op) -> None:
+        # ``fence`` attr (IRBuilder.sync): the barrier orders memory accesses
+        # across waves. The barrier intrinsic itself does not access memory,
+        # so LLVM may move an LDS load or store across it; machine-level
+        # sinking moves a load above the barrier into a successor block. A
+        # compiler memory barrier after it (inline asm with a memory clobber,
+        # CK Tile's ``block_sync_lds``) prevents that and emits nothing.
+        # "workgroup" adds the ``__syncthreads`` release / acquire fences
+        # (which on their own do not stop the sinking).
+        fence = op.attrs.get("fence")
+        if fence not in (None, "compiler", "workgroup"):
+            raise ValueError(f"{op.name}: unknown fence {fence!r}")
+        if fence == "workgroup":
+            self._current().emit('  fence syncscope("workgroup") release')
         self._need("s.barrier")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        if fence == "workgroup":
+            self._current().emit('  fence syncscope("workgroup") acquire')
+        if fence is not None:
+            self._current().emit('  call void asm sideeffect "", "~{memory}"()')
 
     def _op_tile_s_barrier_bare(self, op: Op) -> None:
         # Bare full-CTA barrier: emit ONLY s_barrier, no implicit s_waitcnt.
@@ -5605,8 +5684,7 @@ class _Lowerer:
         # producer/consumer loop issues s_waitcnt(vmcnt=0) explicitly so
         # the producers' async LDS writes are drained but NOT serialized
         # against the next iteration's in-flight loads).
-        self._need("s.barrier")
-        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        self._emit_s_barrier(op)
 
     # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
 
@@ -5682,8 +5760,7 @@ class _Lowerer:
         # overlap. Matches CK Tile's ``block_sync_lds``.
         # LDS-only drain (keep VMEM in flight for the async-DMA ping-pong).
         self._backend.emit_lds_barrier_drain(self, drain_vmem=False)
-        self._need("s.barrier")
-        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        self._emit_s_barrier(op)
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
@@ -7110,6 +7187,9 @@ class _Lowerer:
             out.append("")
         if self._needs_nontemporal_md:
             out.append("!5 = !{i32 1}")
+            out.append("")
+        if self._lds_aa_used:
+            out.extend(self._lds_aa_render())
             out.append("")
         if self._debug is not None:
             out.extend(self._debug.render())

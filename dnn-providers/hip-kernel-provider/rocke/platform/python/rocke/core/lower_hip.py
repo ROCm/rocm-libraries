@@ -1307,8 +1307,22 @@ class _Lowerer:
             f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, 0);"
         )
 
+    @staticmethod
+    def _barrier_fence(op: Op):
+        fence = op.attrs.get("fence")
+        if fence not in (None, "compiler", "workgroup"):
+            raise ValueError(f"{op.name}: unknown fence {fence!r}")
+        return fence
+
+    def _emit_barrier_clobber(self, op: Op) -> None:
+        # ``fence`` attr: compiler memory barrier after the barrier, as in the
+        # LLVM path (``__syncthreads`` carries the workgroup fences already).
+        if self._barrier_fence(op) is not None:
+            self._emit('__asm__ volatile("" ::: "memory");')
+
     def _op_tile_sync(self, op: Op) -> None:
         self._emit("__syncthreads();")
+        self._emit_barrier_clobber(op)
 
     def _op_tile_sync_half_block(self, op: Op) -> None:
         # `if (selector) __builtin_amdgcn_s_barrier();` -- the
@@ -1326,12 +1340,21 @@ class _Lowerer:
         mask = self._encode_waitcnt(vmcnt=-1, expcnt=-1, lgkmcnt=0)
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
         self._emit("__syncthreads();")
+        self._emit_barrier_clobber(op)
 
     def _op_tile_s_barrier_bare(self, op: Op) -> None:
         # Bare workgroup rendezvous, NO implicit waitcnt -- the caller
         # issues the explicit s_waitcnt counters. Mirrors the LLVM-direct
         # ``call void @llvm.amdgcn.s.barrier()`` (no preceding waitcnt).
+        # ``fence="workgroup"``: the release / acquire fences of the LLVM path
+        # (``__syncthreads`` above already carries them).
+        workgroup = self._barrier_fence(op) == "workgroup"
+        if workgroup:
+            self._emit('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");')
         self._emit("__builtin_amdgcn_s_barrier();")
+        if workgroup:
+            self._emit('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");')
+        self._emit_barrier_clobber(op)
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
@@ -1833,8 +1856,8 @@ class _Lowerer:
         # Saturating f32 -> i8 round-to-nearest-even. ``rintf`` honours
         # the current rounding mode (RNE by default), the explicit
         # clamp into [-128, 127] makes the trunc-to-i8 fully defined,
-        # and the resulting sequence folds into a ``v_med3_i32`` plus a
-        # ``v_cvt_pk_i16_i32`` byte select on the AMDGPU backend.
+        # and the clamp folds into a single ``v_med3_i32`` on the
+        # AMDGPU backend.
         (v,) = op.operands
         rounded = f"{_name(op.result)}_r"
         as_i32 = f"{_name(op.result)}_i"
