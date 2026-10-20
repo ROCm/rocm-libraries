@@ -211,16 +211,22 @@ worked example is SDPA forward:
       `normalized()` is a stable cache key and round-trips back to the request.
 - [ ] **Translator from the graph.** A `from_hipdnn()` builds the request from
       the node's flatbuffer JSON, applying hipDNN's own precedence and validation
-      rules. A test runs it over the checked-in golden-bundle graphs for the
-      operator when they exist.
-- [ ] **Reference oracle with hipDNN semantics.** A numpy reference in
-      [numeric/references.py](platform/python/rocke/numeric/references.py) that
+      rules. A key hipDNN does not write raises instead of being dropped. A test
+      runs it over the checked-in golden-bundle graphs for the operator when
+      they exist.
+- [ ] **Reference oracle with hipDNN semantics.** A numpy reference that
       matches hipDNN's CPU reference and golden generator, including edge cases
-      (fully masked rows, padding). Features it does not implement raise
-      `NotImplementedError` by name.
+      (fully masked rows, padding), reusing the operator's existing array oracle
+      rather than a second copy of the math. For SDPA,
+      [numeric/sdpa_request_reference.py](platform/python/rocke/numeric/sdpa_request_reference.py)
+      decodes the request and delegates to
+      [numeric/sdpa_reference.py](platform/python/rocke/numeric/sdpa_reference.py).
+      Features it does not implement raise `NotImplementedError` by name.
 - [ ] **Case table.** One shared list of requests that together report every
       feature at least once, including the decline-only ones, so each
-      candidate's verdict on each feature is recorded.
+      candidate's verdict on each feature is recorded. For SDPA this is
+      [tests/sdpa/request_cases.py](library/tests/sdpa/request_cases.py); the
+      kernel coverage table is [tests/sdpa/cases.py](library/tests/sdpa/cases.py).
 - [ ] **Coverage test.** For every hipDNN field, a test shows the field changes
       `features()` or `normalized()`.
 
@@ -243,10 +249,14 @@ handling of it must stay in step.
       signature when the flag is off, so existing kernel ABIs do not change. The
       gate stays GREEN with no re-bless.
 - [ ] **Shared emission, not per-family copies.** Use the shared hooks on the
-      common inner bodies (for attention, the score hook's query and key
-      positions for bias, and `epilogue_fn` for LSE in
-      [mfma_attention.py](platform/python/rocke/helpers/mfma_attention.py))
-      or a shared helper, rather than re-implementing the operand in each family.
+      common inner bodies or a shared helper, rather than re-implementing the
+      operand in each family. For attention: the score hook's query and key
+      positions in
+      [mfma_attention.py](platform/python/rocke/helpers/mfma_attention.py) for
+      bias, and `AttnFwdExt.epilogue_hook`
+      ([attention_fwd_ext.py](platform/python/rocke/helpers/attention_fwd_ext.py))
+      with the `_lse_store` factories
+      ([_lse_store.py](library/kernels/common/_lse_store.py)) for LSE.
 - [ ] **Numeric test against the reference.** For each family that admits the
       feature, an on-GPU test compares the kernel to the reference oracle on the
       case-table entries that use it, including broadcast and edge cases.
