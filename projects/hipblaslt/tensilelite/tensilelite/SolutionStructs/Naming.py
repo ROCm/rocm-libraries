@@ -256,6 +256,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
+    # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
+    if state.get("ClusterAIDMapping", -1) != -1:
+      requiredParametersTemp.add("ClusterAIDMapping")
+    else:
+      requiredParametersTemp.discard("ClusterAIDMapping")
+
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":
         continue

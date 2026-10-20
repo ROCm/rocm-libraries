@@ -6,11 +6,14 @@ A benchmark table has to name each kernel it ran, and that name is only
 useful if it pins the kernel down: two binaries that differ in an LDS layout
 or an operand dtype must not print alike, or a result cannot be traced back
 to the kernel that produced it. :func:`encode` therefore turns a
-:class:`~benchmarks.common.kernel_cache.KernelIdentity` into a string that
+:class:`~kernels.conv.kernel_identity.KernelIdentity` into a string that
 carries *every* identity field, and :func:`decode` turns the string back into
 an equal identity -- ``decode(encode(i)) == i`` for every identity. That
 round trip is what ``reproduce_kernel.py`` builds on: a name copied out of a
-log is enough to rebuild the kernel.
+log is enough to rebuild the kernel. The grouped-convolution dispatcher
+names its instances by it too (their list,
+``dispatch/grouped_convolution_instances/``, spells the same fields
+against the same baseline).
 
 Format
 ------
@@ -50,7 +53,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote, unquote
 
-__all__ = ["decode", "encode", "strip_launch_suffix"]
+__all__ = ["decode", "encode", "field_baseline", "strip_launch_suffix"]
 
 _SEP = "-"
 
@@ -284,6 +287,15 @@ def _is_direct(algorithm: Any) -> bool:
     return isinstance(algorithm, str) and algorithm.startswith("direct")
 
 
+def field_baseline(algorithm: str) -> Dict[str, Any]:
+    """What each field of an ``algorithm`` identity reads as when a name omits it.
+
+    A copy of the frozen baseline (direct conv's when ``algorithm`` is a direct
+    variant); fields with no baseline are always spelled.
+    """
+    return dict(_DIRECT_BASELINE if _is_direct(algorithm) else _BASELINE)
+
+
 # ---------------------------------------------------------------------------
 # encode
 # ---------------------------------------------------------------------------
@@ -425,11 +437,11 @@ def _match_head(tag: _Tag, token: str, name: str) -> Dict[str, Any]:
 def decode(name: str, cls: Optional[Callable[..., Any]] = None):
     """The identity named ``name`` (as produced by :func:`encode`).
 
-    ``cls`` defaults to :class:`~benchmarks.common.kernel_cache.KernelIdentity`.
+    ``cls`` defaults to :class:`~kernels.conv.kernel_identity.KernelIdentity`.
     Raises ``ValueError`` on a malformed name.
     """
     if cls is None:
-        from benchmarks.common.kernel_cache import KernelIdentity as cls
+        from kernels.conv.kernel_identity import KernelIdentity as cls
 
     name = strip_launch_suffix(name)
     tokens = name.split(_SEP)
