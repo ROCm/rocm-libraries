@@ -6,6 +6,13 @@ add_executable(hipdnn_list_engines ListEngines.cpp)
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
 target_link_libraries(hipdnn_list_engines PRIVATE hipdnn_backend hipdnn_data_sdk)
 target_compile_definitions(hipdnn_list_engines PRIVATE HIPDNN_BACKEND_COMPILATION)
+# CMAKE_INSTALL_RPATH_USE_LINK_PATH adds only link directories outside the build tree, so it
+# never adds the directory of the in-tree hipdnn_backend; without this the installed tool
+# needs LD_LIBRARY_PATH to start. Same layout as hipdnn_sample_dynamic_backend_loading
+# (samples/CMakeLists.txt): bin/ -> lib/.
+set_target_properties(
+    hipdnn_list_engines PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+)
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
@@ -334,6 +341,22 @@ endif()
                 _hipdnn_ingestor_pytest_env
                 "HIPDNN_INGESTOR_STUB_INCLUDE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
             )
+
+            # test_packs_formatting.py takes the formatter from HIPDNN_CLANG_FORMAT, else PATH.
+            # The lanes install clang-format into the interpreter's own environment, whose
+            # scripts directory is not on PATH, so name it here.
+            get_filename_component(_hipdnn_py_dir "${Python3_EXECUTABLE}" DIRECTORY)
+            find_program(
+                HIPDNN_INGESTOR_CLANG_FORMAT
+                NAMES clang-format
+                HINTS "${_hipdnn_py_dir}"
+                NO_DEFAULT_PATH
+            )
+            if(HIPDNN_INGESTOR_CLANG_FORMAT)
+                list(APPEND _hipdnn_ingestor_pytest_env
+                     "HIPDNN_CLANG_FORMAT=${HIPDNN_INGESTOR_CLANG_FORMAT}"
+                )
+            endif()
 
             if(DEFINED TEST_ENVIRONMENT)
                 list(APPEND _hipdnn_ingestor_pytest_env ${TEST_ENVIRONMENT})

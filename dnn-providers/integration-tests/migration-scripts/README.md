@@ -137,13 +137,15 @@ plus per-case byte-exact comparison of graph AND metadata (seed, inputs).
 
 ```bash
 python3 migration-scripts/import_graph.py \
-    --graph path/to/graph.json \
-    --bundle-dir integration-test-bundles/ \
-    --meta reference_source="c++ integration suite: Suite.Case"
+    --graph captured_bundles/Suite/Case/Case.json \
+    --bundle-dir integration-test-bundles/
 ```
 
-Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
-non-zero on dup (CI mode). `--force` appends regardless. For behavior and
+Dedup-aware placement. Default: skip exact duplicates. Metadata and the tier
+come from the graph's `.meta.json` sidecar; an unusable sidecar fails the
+import. `--strict` (CI mode) also exits non-zero on a duplicate or on a
+`--seed`/`--meta`/`--tier` value that contradicts the sidecar. `--force`
+appends regardless. For behavior and
 output, see
 [Adding Tests — From a graph you already have](../docs/adding-tests.md#from-a-graph-you-already-have).
 

@@ -105,6 +105,7 @@ Infer options from the user request:
      meaningless. That skill applies the suite's own documentation to the
      output. This includes the signals that the suite prints but that never
      fail a run.
+   - An ingestor engine's explicit-selection C++ cases run inside the shared `hip_kernel_provider_integration_tests` binary (CTest entry `hip_kernel_provider_integration_tests_quick_suite`, which runs every engine's cases); the ingestor RUNBOOK stage 5 gives the filtered command.
 
 9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY". Never report only the exit code. A run that skips 100% of tests is green, but it does not show that the engine still works.
 

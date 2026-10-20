@@ -532,6 +532,13 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v);
 /* "<type> <operand>" (Python _operand_with_type). */
 const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v);
 
+/* Emit one `bitcast` of `v` to `register_type` and return the new name
+ * (Python _Lowerer._reinterpret). Only renders: the caller has established
+ * that the bit widths match (rocke_mma_operand_needs_reinterpret). */
+const char* rocke_ll_reinterpret(rocke_lower_t* L,
+                                 const rocke_value_t* v,
+                                 const rocke_type_t* register_type);
+
 /* Map an IR Type to its LLVM textual form (Python _llvm_type). Sets NOTIMPL on
  * an unmapped type and returns "" . */
 const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t);
@@ -659,6 +666,15 @@ void rocke_ll_binop(rocke_lower_t* L, const rocke_op_t* op, const char* llvm_op)
 
 /* Vector same-type binary op (Python _vector_binop). */
 void rocke_ll_vector_binop(rocke_lower_t* L, const rocke_op_t* op, const char* llvm_op);
+
+/* The icmp predicate for an arith.cmp / vector.cmp predicate ("lt", ...) on
+ * operands of type `t`: ordered compares of unsigned integers are unsigned
+ * (Python _icmp_predicate). An unknown predicate fails "<op_name>: unknown pred
+ * <pred>". */
+const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
+                                    const char* op_name,
+                                    const char* pred,
+                                    const rocke_type_t* t);
 
 /* Shared FP8/BF8 MFMA lowering body (Python _lower_mfma_fp8_bf8): bitcasts the
  * <8 x i8> A/B to the flavor-correct packed type (i64 on LLVM22, <2 x i32> on
