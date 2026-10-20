@@ -7136,7 +7136,7 @@ static bool matchesRocRollerSelectedKernel(const std::string&                 ke
                              const RocblasltContractionProblem& prob,
                              const RocRollerSelectedTile&                     tile)
 {
-    if(tile.streamK || tile.nonTemporalA || tile.nonTemporalB)
+    if(tile.nonTemporalA || tile.nonTemporalB)
         return false;
     if(rocRollerTypeToken(prob.a_type)[0] == '\0' || rocRollerTypeToken(prob.c_type)[0] == '\0')
         return false;
@@ -7147,16 +7147,11 @@ static bool matchesRocRollerSelectedKernel(const std::string&                 ke
                                + rocRollerTypeToken(prob.a_type) + "_" + rocRollerTypeToken(prob.b_type) + "_"
                                + rocRollerTypeToken(prob.c_type) + "_" + rocRollerTypeToken(prob.d_type)
                                + "_Float_";
-    if(kernel.find(prefix) == std::string::npos)
-        return false;
 
-    const std::string wgt = "WGT_" + std::to_string(tile.m) + "x" + std::to_string(tile.n) + "x"
-                            + std::to_string(tile.k) + "_UR_";
-    if(kernel.find(wgt) == std::string::npos)
-        return false;
-
-    const bool hasWgm = kernel.find("_WGM_") != std::string::npos;
-    return hasWgm == tile.workgroupMapping;
+    // Everything past the prefix is rocRollerKernelNameMatchesTile
+    // (rocroller_kernel_match.hpp), where clients/tests/unit covers it without a
+    // problem descriptor or a GPU.
+    return rocRollerKernelNameMatchesTile(kernel, prefix, tile);
 }
 
 // rocRoller-off substitute for getRocRollerBestSolutions. Rank order comes from
@@ -7186,6 +7181,8 @@ static rocblaslt_status
 
     library->materializeAllSolutions();
 
+    auto tensileProblem = ConstructTensileProblem(prob);
+
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
     const int cap = requestedAlgoCount < 0 ? static_cast<int>(ranked.size()) : requestedAlgoCount;
     for(const RocRollerSelectedTile& tile : ranked)
@@ -7212,11 +7209,19 @@ static rocblaslt_status
                 }
             }
         }
+        // The rocRoller-on path rejects a ranked tile whose kernel needs more
+        // workspace than the caller offers (gemm.cpp:703-706, isSupportedProblem)
+        // and walks on to the next tile (rocroller_host.cpp:426-429). Without the
+        // same reject here an off build hands back a StreamK kernel that an on
+        // build would have skipped. _convertToHeuristicResultArray only reports
+        // requiredWorkspaceSize; it never filters on it.
+        if(found && found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
+            continue;
+
         if(found)
             chosen.push_back(found);
     }
 
-    auto tensileProblem = ConstructTensileProblem(prob);
     const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
                                                     : requestedAlgoCount;
     _convertToHeuristicResultArray(

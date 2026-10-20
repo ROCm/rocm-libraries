@@ -5,21 +5,11 @@
 
 #include "rocblaslt.h"
 
-#include <vector>
+// RocRollerSelectedTile and the kernel-name match, in a header that depends on
+// nothing but <string> so they can be unit-tested GPU-free.
+#include "rocroller_kernel_match.hpp"
 
-// One entry from chooseSolutionIndexParameters, in that function's order.
-// streamK and the non-temporal bits are kept so a checked-in kernel is not
-// substituted for a rocRoller kernel that was not captured.
-struct RocRollerSelectedTile
-{
-    int  m = 0;
-    int  n = 0;
-    int  k = 0;
-    bool workgroupMapping = false;
-    bool streamK          = false;
-    bool nonTemporalA     = false;
-    bool nonTemporalB     = false;
-};
+#include <vector>
 
 // Same rejects and the same rank order as getRocRollerBestSolutions.
 // Implemented by calling chooseSolutionIndexParameters.
