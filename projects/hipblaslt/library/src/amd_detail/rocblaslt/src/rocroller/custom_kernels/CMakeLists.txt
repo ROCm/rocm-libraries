@@ -1,7 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# CUSTOM_KERNEL_ARCH is the *name*: the output directory and the .co filename.
+# CUSTOM_KERNEL_TARGET_ID is the compiler target these kernels are built to,
+# ISA features included (gfx950:sramecc+). Keeping them apart is what lets the
+# code objects be SRAMECC_ON without a colon ever reaching a path.
 set(CUSTOM_KERNEL_ARCH "gfx950")
+tensilelite_offload_target(CUSTOM_KERNEL_TARGET_ID "${CUSTOM_KERNEL_ARCH}")
 set(CUSTOM_KERNEL_CO_NAME "rr_custom_kernels_${CUSTOM_KERNEL_ARCH}.co")
 
 if(NOT "${HIPBLASLT_TENSILE_LIBPATH}")
@@ -131,7 +136,7 @@ if(ROCM_LLD)
     message(STATUS "Building custom kernels from assembly sources")
     message(STATUS "  ROCm clang: ${ROCM_CLANG}")
     message(STATUS "  ROCm ld.lld: ${ROCM_LLD}")
-    message(STATUS "  GPU arch: ${CUSTOM_KERNEL_GPU_ARCH}")
+    message(STATUS "  GPU target id: ${CUSTOM_KERNEL_TARGET_ID}")
 
     set(BUILT_OBJ_FILES)
     foreach(ASM_FILE ${CUSTOM_KERNEL_ASM_SOURCES})
@@ -143,7 +148,7 @@ if(ROCM_LLD)
             COMMAND ${CMAKE_CXX_COMPILER}
                 -x assembler
                 -target amdgcn-amd-amdhsa
-                "-mcpu=${CUSTOM_KERNEL_ARCH}"
+                "-mcpu=${CUSTOM_KERNEL_TARGET_ID}"
                 -c
                 "${ASM_FILE}"
                 -o "${OBJ_OUTPUT}"

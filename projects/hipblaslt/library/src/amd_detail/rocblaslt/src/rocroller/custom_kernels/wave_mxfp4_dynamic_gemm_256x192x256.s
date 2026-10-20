@@ -1,4 +1,4 @@
-.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"
 
 .text
 

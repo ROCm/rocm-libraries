@@ -148,6 +148,23 @@ endif()
 tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
+# hip-config.cmake turns GPU_BUILD_TARGETS into the `--offload-arch=` flags on
+# hip::device, defaulting it from GPU_TARGETS only when it is not already in the
+# cache. Setting it here is what makes hipBLASLt's own HIP device code carry the
+# architecture's ISA features (gfx950 -> gfx950:sramecc+) without a feature tail
+# reaching GPU_TARGETS, which is a user-facing allow-list value and is forwarded
+# verbatim to TensileLite as --architecture=.
+# Must precede the find_package(hip) below: hip::device's compile options are
+# fixed by the first find_package in a directory scope and not revised after.
+# Superbuild siblings that find hip earlier do not interfere. hip::device is a
+# non-GLOBAL IMPORTED target, so this directory gets its own copy built from the
+# value set here; and none of those siblings compile device code in any case --
+# rocRoller assembles its kernels at runtime through amd_comgr, for the target
+# id the HIP device reports, so GPU_BUILD_TARGETS never reaches them.
+tensilelite_offload_targets(_hipblaslt_offload_targets ${GPU_TARGETS})
+set(GPU_BUILD_TARGETS "${_hipblaslt_offload_targets}" CACHE STRING "GPU target ids to compile device code for" FORCE)
+message(STATUS "Building device code for GPU target ids: ${GPU_BUILD_TARGETS}")
+
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
