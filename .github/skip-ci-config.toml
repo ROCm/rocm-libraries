@@ -32,7 +32,6 @@ common = [
     "*/.spellcheck.local.yaml",
     "*/.wordlist.txt",
     ".github/label*.yml",
-    ".github/workflows/*",
     ".gitignore",
     "dnn-providers/*/.gitignore",
     "dnn-providers/*/docs/*",
