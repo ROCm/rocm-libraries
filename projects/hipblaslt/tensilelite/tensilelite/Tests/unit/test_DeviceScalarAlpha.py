@@ -15,13 +15,18 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
-@pytest.mark.parametrize("problem_name", [
-    "HSS_BH_Bias_HA_S_SAV_UserArgs",
-    "HSS_BH_Bias_GG_HA_S_SAV_UserArgs",
-    "F4SS_MXAF8B16_MXBF8B16_BH_Bias_HA_S_SAV_UserArgs",
-    "F4BS_MXAF8B16_MXBF8B16_BH_Bias_HA_S_SAV_UserArgs",
+@pytest.mark.parametrize("problem_name, cu_suffix, library_type", [
+    ("HSS_BH_Bias_HA_S_SAV_UserArgs", "", "GridBased"),
+    ("HSS_BH_Bias_GG_HA_S_SAV_UserArgs", "", "GridBased"),
+    ("F4SS_MXAF8B16_MXBF8B16_BH_Bias_HA_S_SAV_UserArgs", "", "GridBased"),
+    ("F4BS_MXAF8B16_MXBF8B16_BH_Bias_HA_S_SAV_UserArgs", "", "GridBased"),
+    ("F4BS_MXAF8B16_MXBF8B16_BH_SAV_UserArgs", "", "Equality"),
+    ("F4BS_MXAF8B16_MXBF8B16_BH_SAV_UserArgs", "_96cu", "Equality"),
+    ("F4BS_MXAF8B16_MXBF8B16_BH_SAV_UserArgs", "_192cu", "Equality"),
 ])
-def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(problem_name, arch):
+def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(
+    problem_name, arch, cu_suffix, library_type
+):
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.Common.Capabilities import makeIsaInfoMap
     from Tensile.Contractions import InternalArgsSupport
@@ -32,7 +37,7 @@ def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(problem_n
     product = Path(__file__).resolve().parents[4] / "library/src/amd_detail/rocblaslt"
     if not product.is_dir():
         pytest.skip("Shipped hipBLASLt logic is not included in standalone TensileLite test artifacts")
-    logic = (product / f"src/Tensile/Logic/asm_full/{arch}/{arch}/GridBased"
+    logic = (product / f"src/Tensile/Logic/asm_full/{arch}/{arch}{cu_suffix}/{library_type}"
              / f"{arch}_Cijk_Alik_Bljk_{problem_name}.yaml")
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -40,6 +45,7 @@ def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(problem_n
     isa_info = makeIsaInfoMap([gfxToIsa("gfx1250")], cxx)
     solutions = parseLibraryLogicFile(str(logic), assembler, False, False, False, isa_info, False).solutions
     assert solutions
+    assert all(solution["ProblemType"]["UseScaleAlphaVec"] == 1 for solution in solutions)
     assert all(InternalArgsSupport.FromOriginalState(solution._state).deviceScalarAlpha
                for solution in solutions)
 

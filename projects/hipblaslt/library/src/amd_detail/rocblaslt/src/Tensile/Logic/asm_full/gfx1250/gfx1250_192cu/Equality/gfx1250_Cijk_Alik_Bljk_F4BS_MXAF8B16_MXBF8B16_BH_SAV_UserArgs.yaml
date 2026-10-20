@@ -99,7 +99,7 @@ ProblemType:
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 0
+  UseScaleAlphaVec: 1
   UseScaleCD: false
   isMixMode: false
 DefaultSolution:
@@ -402,6 +402,7 @@ Solutions:
   HalfPLRB: false
   ISA: [12, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
+    SupportDeviceScalarAlpha: true,
     SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
@@ -716,6 +717,7 @@ Solutions:
   HalfPLRB: false
   ISA: [12, 5, 0]
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
+    SupportDeviceScalarAlpha: true,
     SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
     UseSFC: false, UseUniversalArgs: true}
   Kernel: true
