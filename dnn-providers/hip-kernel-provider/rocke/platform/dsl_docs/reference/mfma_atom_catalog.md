@@ -162,3 +162,10 @@ stored as two I32 words; accumulator sizes are four and sixteen FP32 values.
 The [numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 demonstrates raw input transport and explicit RNE preparation. These atoms do
 not alter ordinary FP32 selection or enable TF32 production GEMM dispatch.
+
+On gfx950, which has no native XF32 instruction, logical `tf32` selects two emulated
+atoms, `mfma_f32_16x16x32_xf32` and `mfma_f32_32x32x16_xf32`. They take the same TF32
+operands (`vec<tf32x8>`, one I32 word per element) and FP32 accumulators (four and
+sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
+`mfma_f32_32x32x16_bf16`; see the
+[emulation description](../architecture/xf32_bf16x3_emulation.md).

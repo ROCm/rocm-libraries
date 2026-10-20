@@ -23,6 +23,8 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    F32,
+    I32,
     KernelDef,
     Op,
     PtrType,
@@ -31,16 +33,26 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _refuse_unsigned_operands,
     _sync_attr,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     require_streaming_arch,
 )
+from .mma_operand import (
+    MmaOperandRole,
+    mma_operand_needs_reinterpret,
+    mma_operand_value,
+)
+from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
 
 
+# No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+# keeps its values out of the IR.
 _HIP_TYPE = {
     "i1": "bool",
     "i8": "int8_t",
+    "u8": "uint8_t",
     "i16": "int16_t",
     "i32": "int",
     "tf32": "int",
@@ -53,9 +65,28 @@ _HIP_TYPE = {
     "bf8e5m2": "bf8e5m2",
 }
 
+
+def _hip_scalar_type(type_name: str) -> str:
+    """Return the HIP scalar spelling of the IR type named ``type_name``, or refuse it.
+
+    Every handler that needs a scalar spelling asks here, and
+    :func:`_type_to_hip` sends here every type it does not compose itself, so
+    one message refuses them all (only the ``scf.for`` iter-arg declarations
+    fall back to ``auto``). A type with no HIP spelling -- a logical sub-byte
+    type such as ``i4`` whose values travel packed, or a vector of an unmapped
+    element -- is refused with the HIP twin of the LLVM lowering's ``no LLVM
+    mapping for type <name>``.
+    """
+    try:
+        return _HIP_TYPE[type_name]
+    except KeyError:
+        raise NotImplementedError(f"no HIP mapping for type {type_name}") from None
+
+
 _HIP_UNSIGNED_INT_TYPE = {
     "i1": "bool",
     "i8": "uint8_t",
+    "u8": "uint8_t",
     "i16": "uint16_t",
     "i32": "uint32_t",
     "i64": "uint64_t",
@@ -69,6 +100,8 @@ def _type_to_hip(t) -> str:
     if isinstance(t, VectorType):
         # Naming convention matches the prologue's typedefs:
         # ``f16xN``, ``bf16xN``, ``f32xN``, ``i32xN``, ``i8xN`` for N>=1.
+        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+        # keeps its values out of the IR.
         elem = t.elem.name
         if elem == "f16":
             return f"f16x{t.count}"
@@ -98,7 +131,7 @@ def _type_to_hip(t) -> str:
         # smem allocations expand into __shared__ arrays at the top of
         # the kernel; the value at the use site is a typed pointer-ish.
         return f"{_type_to_hip(t.elem)}*"
-    return _HIP_TYPE[t.name]
+    return _hip_scalar_type(t.name)
 
 
 # Compilable-HIP prologue. Pasted at the top of every lowered source so
@@ -371,8 +404,6 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
-        from .tf32 import tf32_op_error
-
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
@@ -394,7 +425,7 @@ class _Lowerer:
         res = op.result
         ity = op.attrs.get("ity", "i32")
         val = op.attrs["value"]
-        cpp_t = _HIP_TYPE[ity]
+        cpp_t = _hip_scalar_type(ity)
         if ity in ("f16", "f32"):
             literal = _f32_literal(float(val))
             if ity == "f16":
@@ -468,19 +499,31 @@ class _Lowerer:
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = {_name(a)} | {_name(b)};"
         )
 
-    def _op_arith_smax(self, op: Op) -> None:
+    def _select_by_compare(self, op: Op, compare: str) -> None:
+        """The maximum (``>``) or minimum (``<``) of the two operands, as a C
+        ternary."""
         a, b = op.operands
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
-            f"({_name(a)} > {_name(b)} ? {_name(a)} : {_name(b)});"
+            f"({_name(a)} {compare} {_name(b)} ? {_name(a)} : {_name(b)});"
         )
 
+    # smax / smin are signed, so they refuse a u8 operand; umax / umin take u8.
+    # uint8_t operands promote to int, so C's own comparison and the ternary
+    # are the unsigned maximum / minimum.
+    def _op_arith_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umax")
+        self._select_by_compare(op, ">")
+
     def _op_arith_smin(self, op: Op) -> None:
-        a, b = op.operands
-        self._emit(
-            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
-            f"({_name(a)} < {_name(b)} ? {_name(a)} : {_name(b)});"
-        )
+        _refuse_unsigned_operands(op, "arith.umin")
+        self._select_by_compare(op, "<")
+
+    def _op_arith_umax(self, op: Op) -> None:
+        self._select_by_compare(op, ">")
+
+    def _op_arith_umin(self, op: Op) -> None:
+        self._select_by_compare(op, "<")
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
@@ -496,6 +539,7 @@ class _Lowerer:
         )
 
     def _op_arith_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.zext")
         (v,) = op.operands
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = ({_type_to_hip(op.result.type)}){_name(v)};"
@@ -531,7 +575,7 @@ class _Lowerer:
         st = op.result.type
         assert isinstance(st, SmemType)
         dims = "][".join(str(d) for d in st.shape)
-        elem = _HIP_TYPE[st.elem.name]
+        elem = _hip_scalar_type(st.elem.name)
         nice = _name(op.result)
         decl = f"    __shared__ {elem} {nice}_storage[{dims}];"
         self.smem_decls.append(decl)
@@ -630,8 +674,6 @@ class _Lowerer:
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
-        from .tf32 import TF32_MMA
-
         op_id = op.attrs["op_id"]
         from .arch.mfma_scale import (
             gfx950_scaled_mfma,
@@ -654,8 +696,9 @@ class _Lowerer:
             )
             return
         if op_id in TF32_MMA:
-            if self.arch.gfx != "gfx942":
-                raise ValueError("XF32 MMA requires gfx942")
+            error = tf32_mma_target_error(op_id, self.arch)
+            if error:
+                raise ValueError(error)
             a, b, c = op.operands
             self._emit(
                 f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("
@@ -663,7 +706,16 @@ class _Lowerer:
                 f"__builtin_bit_cast(f32x2, {_name(b)}), {_name(c)}, 0, 0, 0);"
             )
             return
-        op_id = op.attrs["op_id"]
+        atom = self.arch.mma.by_op_id(op_id)
+        if atom is not None and not atom.is_native:
+            # The expansion exists only in the LLVM lowerer. Without this the op
+            # would reach the generic dispatcher below as ``tile.<op_id>`` and fail
+            # as though the HIP backend had merely forgotten a hardware atom.
+            raise NotImplementedError(
+                f"tile.mma {op_id}: an emulated atom ({atom.emulation.recipe} over "
+                f"{atom.emulation.physical_op_id}) has no HIP lowering; lower it "
+                f"through the LLVM path"
+            )
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -673,18 +725,40 @@ class _Lowerer:
         )
         self.lower_op(legacy)
 
+    def _mma_operand(
+        self, op: Op, op_id: str, role: MmaOperandRole, register_type: Type
+    ) -> str:
+        """Return MMA operand ``role`` of ``op`` as the instruction's register type.
+
+        The operand passes through unchanged, or is reinterpreted with one
+        ``__builtin_bit_cast``, as
+        :func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret` decides;
+        that rule also raises for an operand it refuses. The LLVM lowering
+        renders the same decision as a ``bitcast``.
+        """
+        value = mma_operand_value(op, role)
+        if mma_operand_needs_reinterpret(
+            op_id, role, value.type, register_type, self.arch
+        ):
+            return f"__builtin_bit_cast({_type_to_hip(register_type)}, {_name(value)})"
+        return _name(value)
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        op_id = "mfma_f32_16x16x4_f32"
+        a = self._mma_operand(op, op_id, "a", F32)
+        b = self._mma_operand(op, op_id, "b", F32)
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x4f32("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        op_id = "mfma_f32_32x32x2_f32"
+        a = self._mma_operand(op, op_id, "a", F32)
+        b = self._mma_operand(op, op_id, "b", F32)
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x2f32("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
@@ -786,14 +860,16 @@ class _Lowerer:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
-        # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
+        # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
-        self._require_wmma_arch(f"wmma_gfx1250_f32_16x16x64_{ab}")
-        a, b, c = op.operands
+        op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
+        self._require_wmma_arch(op_id)
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
         self._emit(
             f"f32x8 {_name(op.result)} = "
             f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
-            f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
+            f"{a}, {b}, (int16_t)0, {_name(op.operands[2])}, false, false);"
         )
 
     def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
@@ -831,19 +907,23 @@ class _Lowerer:
     #
     # The integer twin of the f16 WMMA handler. Per-lane A/B operands are
     # ``i32x4`` (16 int8 packed 4-per-i32) and the accumulator / result are
-    # ``i32x8``. The builtin's two leading bool flags select each operand's
-    # *signedness* (``true`` => signed; verified on gfx11 — passing ``false``
-    # makes the unit compute the *unsigned* dot product), and the trailing bool
+    # ``i32x8``; packed bytes of the same width (``i8x16``) are passed through
+    # one ``__builtin_bit_cast`` (``_mma_operand``). The builtin's two leading
+    # bool flags select each operand's *signedness* (``true`` => signed;
+    # verified on gfx11 -- passing ``false`` makes the unit compute the
+    # *unsigned* dot product), and the trailing bool
     # is the clamp flag (``false`` => exact i32 wrap). This mirrors the verified
     # LLVM-IR emission in ``core/isa/backend.py`` (``_emit_wmma_int``):
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu8(i1 1, A, i1 1, B, C, i1 0)``.
 
     def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
-        self._require_wmma_arch("wmma_i32_16x16x16_iu8")
-        a, b, c = op.operands
+        op_id = "wmma_i32_16x16x16_iu8"
+        self._require_wmma_arch(op_id)
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, 4))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, 4))
         self._emit(
             f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32("
-            f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
+            f"true, {a}, true, {b}, {_name(op.operands[2])}, false);"
         )
 
     # ---- WMMA iu4 (RDNA3/3.5, gfx11, wave32) — int4 matrix engine ----
@@ -854,11 +934,13 @@ class _Lowerer:
     # trailing bool is the (off) clamp. Mirrors the LLVM emission
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu4(i1 1, A, i1 1, B, C, i1 0)``.
     def _op_tile_wmma_i32_16x16x16_iu4(self, op: Op) -> None:
-        self._require_wmma_arch("wmma_i32_16x16x16_iu4")
-        a, b, c = op.operands
+        op_id = "wmma_i32_16x16x16_iu4"
+        self._require_wmma_arch(op_id)
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, 2))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, 2))
         self._emit(
             f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32("
-            f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
+            f"true, {a}, true, {b}, {_name(op.operands[2])}, false);"
         )
 
     def _require_wmma_arch(self, op_id: str) -> None:
@@ -1064,7 +1146,7 @@ class _Lowerer:
         # 4-byte types (f32, i32) → __builtin_amdgcn_raw_buffer_load_b32.
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
-        hip_t = _HIP_TYPE[elem_type]
+        hip_t = _hip_scalar_type(elem_type)
         tmp = f"_bl_{_name(op.result).lstrip('%')}"
         if elem_type in ("f16", "bf16"):
             self._emit(
@@ -1225,8 +1307,22 @@ class _Lowerer:
             f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, 0);"
         )
 
+    @staticmethod
+    def _barrier_fence(op: Op):
+        fence = op.attrs.get("fence")
+        if fence not in (None, "compiler", "workgroup"):
+            raise ValueError(f"{op.name}: unknown fence {fence!r}")
+        return fence
+
+    def _emit_barrier_clobber(self, op: Op) -> None:
+        # ``fence`` attr: compiler memory barrier after the barrier, as in the
+        # LLVM path (``__syncthreads`` carries the workgroup fences already).
+        if self._barrier_fence(op) is not None:
+            self._emit('__asm__ volatile("" ::: "memory");')
+
     def _op_tile_sync(self, op: Op) -> None:
         self._emit("__syncthreads();")
+        self._emit_barrier_clobber(op)
 
     def _op_tile_sync_half_block(self, op: Op) -> None:
         # `if (selector) __builtin_amdgcn_s_barrier();` -- the
@@ -1244,12 +1340,21 @@ class _Lowerer:
         mask = self._encode_waitcnt(vmcnt=-1, expcnt=-1, lgkmcnt=0)
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
         self._emit("__syncthreads();")
+        self._emit_barrier_clobber(op)
 
     def _op_tile_s_barrier_bare(self, op: Op) -> None:
         # Bare workgroup rendezvous, NO implicit waitcnt -- the caller
         # issues the explicit s_waitcnt counters. Mirrors the LLVM-direct
         # ``call void @llvm.amdgcn.s.barrier()`` (no preceding waitcnt).
+        # ``fence="workgroup"``: the release / acquire fences of the LLVM path
+        # (``__syncthreads`` above already carries them).
+        workgroup = self._barrier_fence(op) == "workgroup"
+        if workgroup:
+            self._emit('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");')
         self._emit("__builtin_amdgcn_s_barrier();")
+        if workgroup:
+            self._emit('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");')
+        self._emit_barrier_clobber(op)
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
@@ -1318,7 +1423,9 @@ class _Lowerer:
         (v,) = op.operands
         i = op.attrs["index"]
         elem_t = v.type.elem if isinstance(v.type, VectorType) else v.type
-        self._emit(f"{_HIP_TYPE[elem_t.name]} {_name(op.result)} = {_name(v)}[{i}];")
+        self._emit(
+            f"{_hip_scalar_type(elem_t.name)} {_name(op.result)} = {_name(v)}[{i}];"
+        )
 
     def _op_vector_trunc_f32_to_f16(self, op: Op) -> None:
         # Legacy op name; the post-merge IR emits ``vector.trunc_f32_to``
@@ -1566,8 +1673,23 @@ class _Lowerer:
         cpp_t = _type_to_hip(op.result.type)
         self._emit(f"{cpp_t} {_name(op.result)} = ({cpp_t}){_name(v)};")
 
+    def _op_arith_cvt_f32_to_f64(self, op: Op) -> None:
+        # f32 -> f64 is exact; the C conversion is the same fpext.
+        (v,) = op.operands
+        self._emit(f"double {_name(op.result)} = (double){_name(v)};")
+
+    def _op_arith_cvt_f64_to_f32(self, op: Op) -> None:
+        # f64 -> f32 rounds to nearest even, as the C conversion does.
+        (v,) = op.operands
+        self._emit(f"float {_name(op.result)} = (float){_name(v)};")
+
     def _op_arith_sitofp_f32(self, op: Op) -> None:
         # i32 -> f32. C-style cast is sufficient.
+        (v,) = op.operands
+        self._emit(f"float {_name(op.result)} = (float){_name(v)};")
+
+    def _op_arith_uitofp_f32(self, op: Op) -> None:
+        # u8 -> f32: a uint8_t converts exactly.
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
@@ -1744,6 +1866,18 @@ class _Lowerer:
         self._emit(
             f"int8_t {_name(op.result)} = (int8_t)({as_i32} < -128 ? -128 : "
             f"({as_i32} > 127 ? 127 : {as_i32}));"
+        )
+
+    def _op_arith_cvt_f32_to_u8_sat(self, op: Op) -> None:
+        # Saturating f32 -> u8, round-to-nearest-even. The clamp into
+        # [0, 255] happens in f32 so the conversion is always in range, and
+        # fmaxf turns a NaN into 0, as the LLVM lowering's maxnum does.
+        (v,) = op.operands
+        rounded = f"{_name(op.result)}_r"
+        self._emit(f"float {rounded} = rintf({_name(v)});")
+        self._emit(
+            f"uint8_t {_name(op.result)} = "
+            f"(uint8_t)fminf(fmaxf({rounded}, 0.0f), 255.0f);"
         )
 
     def _op_arith_rint_f32(self, op: Op) -> None:
@@ -2383,7 +2517,7 @@ class _Lowerer:
         (v,) = op.operands
         n = v.type.count if isinstance(v.type, VectorType) else 1
         elem_t = v.type.elem.name if isinstance(v.type, VectorType) else v.type.name
-        cpp_t = _HIP_TYPE[elem_t]
+        cpp_t = _hip_scalar_type(elem_t)
         nice = _name(op.result)
         self._emit(f"{cpp_t} {nice} = {_name(v)}[0];")
         for i in range(1, n):
@@ -2526,7 +2660,7 @@ class _Lowerer:
         (v,) = op.operands
         n = v.type.count if isinstance(v.type, VectorType) else 1
         elem_t = v.type.elem.name if isinstance(v.type, VectorType) else v.type.name
-        cpp_t = _HIP_TYPE[elem_t]
+        cpp_t = _hip_scalar_type(elem_t)
         nice = _name(op.result)
         self._emit(f"{cpp_t} {nice} = {_name(v)}[0];")
         for i in range(1, n):
@@ -2541,7 +2675,7 @@ class _Lowerer:
         (v,) = op.operands
         n = v.type.count if isinstance(v.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
-        elem_cpp = _HIP_TYPE[op.attrs.get("target", "f16")]
+        elem_cpp = _hip_scalar_type(op.attrs.get("target", "f16"))
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):
@@ -2562,7 +2696,7 @@ class _Lowerer:
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iv_name = op.attrs["iv"][1:]
-        iv_ty = _HIP_TYPE[op.attrs["iv_type"]]
+        iv_ty = _hip_scalar_type(op.attrs["iv_type"])
 
         def cpp_type_for(type_name: str) -> str:
             if type_name.startswith("vec<f32x"):
@@ -2656,7 +2790,7 @@ def _extra_vector_declarations(kernel: KernelDef) -> list[str]:
                 if t.elem.name == "i1"
                 else _vec_prefix(t.elem.name, "vector type")
             )
-            scalar = "int8_t" if prefix == "i8x" else _HIP_TYPE[t.elem.name]
+            scalar = "int8_t" if prefix == "i8x" else _hip_scalar_type(t.elem.name)
             if f"_ROCKE_VEC({scalar}, {prefix}, {t.count})" not in HIP_PROLOGUE:
                 declarations[name] = (
                     f"using {name} = {scalar} __attribute__((ext_vector_type({t.count})));"

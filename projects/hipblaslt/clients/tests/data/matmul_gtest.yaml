@@ -4333,10 +4333,9 @@ Tests:
   unit_check: 0
   fast_check: 1
 
-# ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
-# kernel arguments, so batch 1 reads or writes the wrong place and the GEMM
-# returns success with a wrong D. Each operand's stride in turn starts batch 1
-# just past 2^32. Quarantined in known_bugs.yaml.
+# Batch strides of 2^32 elements or more, one operand at a time, so batch 1 starts
+# just past 2^32. Kernels take batch strides as 32-bit values, so the library must
+# refuse these (allow_no_solution) rather than return a wrong D (ROCM-32140).
 - name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140
   category: stress
   function:
