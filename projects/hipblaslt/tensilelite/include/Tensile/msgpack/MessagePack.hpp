@@ -437,6 +437,11 @@ namespace TensileLite
             // appendMap only needs how many entries this map holds, and path()
             // only needs the key being written right now, so neither key is
             // copied into a container.
+            //
+            // lastKey is borrowed, never owned. A key may be a temporary -- see
+            // DefaultCustomMappingTraits in Serialization/Containers.hpp -- so
+            // it is only set for the duration of the mapRequired call that
+            // supplied it, which is the only window in which path() reads it.
             size_t      keyCount = 0;
             const char* lastKey  = nullptr;
 
@@ -499,6 +504,8 @@ namespace TensileLite
                 return false;
             }
 
+            /// Packs a key and counts it. The key is only read here: the bytes
+            /// are copied into the buffer and the pointer is not retained.
             void packKey(const char* key)
             {
                 auto   pk  = packer();
@@ -506,7 +513,6 @@ namespace TensileLite
                 pk.pack_str(length(len));
                 pk.pack_str_body(key, static_cast<uint32_t>(len));
                 keyCount++;
-                lastKey = key;
             }
 
             template <typename T>
@@ -514,9 +520,13 @@ namespace TensileLite
             {
                 packKey(key);
 
+                // The caller owns key and must keep it alive across this call;
+                // nothing borrows it past the clear below.
+                lastKey = key;
                 inValue = true;
                 output(obj);
                 inValue = false;
+                lastKey = nullptr;
             }
 
             template <typename T>
