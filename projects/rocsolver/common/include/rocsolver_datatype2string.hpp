@@ -275,6 +275,49 @@ constexpr auto rocsolver2char_cholqr_shift(rocsolver_cholqr_shift value)
     }
     return '\0';
 }
+
+constexpr auto rocsolver2char_schur_job(rocsolver_schur_job value)
+{
+    switch(value)
+    {
+    case rocsolver_schur_eigenvalues: return 'E';
+    case rocsolver_schur_form: return 'S';
+    }
+    return '\0';
+}
+
+constexpr auto rocsolver2char_schur_vectors(rocsolver_schur_vectors value)
+{
+    switch(value)
+    {
+    case rocsolver_schur_vectors_none: return 'N';
+    case rocsolver_schur_vectors_initialize: return 'I';
+    case rocsolver_schur_vectors_update: return 'V';
+    }
+    return '\0';
+}
+
+constexpr auto rocsolver2char_eigenvectors(rocsolver_eigenvectors value)
+{
+    switch(value)
+    {
+    case rocsolver_eigenvectors_all: return 'A';
+    case rocsolver_eigenvectors_backtransform: return 'B';
+    }
+    return '\0';
+}
+
+constexpr auto rocsolver2char_balance(rocsolver_balance value)
+{
+    switch(value)
+    {
+    case rocsolver_balance_none: return 'N';
+    case rocsolver_balance_permute: return 'P';
+    case rocsolver_balance_scale: return 'S';
+    case rocsolver_balance_both: return 'B';
+    }
+    return '\0';
+}
 /* ============================================================================================
  */
 /*  Convert lapack char constants to rocblas type. */
@@ -327,6 +370,8 @@ constexpr rocblas_side char2rocblas_side(char value)
     case 'l': return rocblas_side_left;
     case 'R':
     case 'r': return rocblas_side_right;
+    case 'B':
+    case 'b': return rocblas_side_both;
     default: return static_cast<rocblas_side>(0);
     }
 }
@@ -508,6 +553,49 @@ constexpr rocsolver_cholqr_shift char2rocsolver_cholqr_shift(char value)
     case 'C': return rocsolver_cholqr_shift_computed;
     case 'P': return rocsolver_cholqr_shift_provided;
     default: return static_cast<rocsolver_cholqr_shift>(0);
+    }
+}
+
+constexpr rocsolver_schur_job char2rocsolver_schur_job(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'E': return rocsolver_schur_eigenvalues;
+    case 'S': return rocsolver_schur_form;
+    default: return static_cast<rocsolver_schur_job>(0);
+    }
+}
+
+constexpr rocsolver_schur_vectors char2rocsolver_schur_vectors(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'N': return rocsolver_schur_vectors_none;
+    case 'I': return rocsolver_schur_vectors_initialize;
+    case 'V': return rocsolver_schur_vectors_update;
+    default: return static_cast<rocsolver_schur_vectors>(0);
+    }
+}
+
+constexpr rocsolver_eigenvectors char2rocsolver_eigenvectors(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'A': return rocsolver_eigenvectors_all;
+    case 'B': return rocsolver_eigenvectors_backtransform;
+    default: return static_cast<rocsolver_eigenvectors>(0);
+    }
+}
+
+constexpr rocsolver_balance char2rocsolver_balance(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'N': return rocsolver_balance_none;
+    case 'P': return rocsolver_balance_permute;
+    case 'S': return rocsolver_balance_scale;
+    case 'B': return rocsolver_balance_both;
+    default: return static_cast<rocsolver_balance>(0);
     }
 }
 #undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
