@@ -83,6 +83,7 @@ namespace TensileLite
             {"Float4", "F4", false},
             {"E8", "E8", false},
             {"E5M3", "E5M3", false},
+            {"Int4", "I4", false},
         };
         static_assert(std::size(DataTypes) == static_cast<size_t>(rocisa::DataType::Count));
 

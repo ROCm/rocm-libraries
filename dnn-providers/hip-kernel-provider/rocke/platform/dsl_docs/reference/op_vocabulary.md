@@ -35,6 +35,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.cast_f32_to`    | `cast_f32_to`                     | `fptrunc` to f16/bf16                  |
 | `arith.trunc_f32_to_f16` | `trunc_f32_to_f16`              | `fptrunc` (vec-packed in some emissions) |
 | `arith.sitofp_f32`     | `sitofp_f32`                      | `sitofp i32 to float`                  |
+| `arith.cvt_f32_to_f64` | `cvt_f32_to_f64`                  | `fpext float to double` (exact)        |
+| `arith.cvt_f64_to_f32` | `cvt_f64_to_f32`                  | `fptrunc double to float` (round to nearest even) |
 | `arith.cvt_fp8_to_f32` | `cvt_fp8_to_f32`                  | `llvm.amdgcn.cvt.f32.fp8`              |
 | `arith.cvt_bf8_to_f32` | `cvt_bf8_to_f32`                  | `llvm.amdgcn.cvt.f32.bf8`              |
 | `arith.cvt_f32_to_fp8` | `cvt_f32_to_fp8`                  | `llvm.amdgcn.cvt.pk.fp8.f32` (low byte) |
