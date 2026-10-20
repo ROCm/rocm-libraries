@@ -78,6 +78,13 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
                                                                                solve,
                                                                                p_csrsm_info,
                                                                                temp_buffer)));
+
+        if(analysis == rocsparse_analysis_policy_reuse
+           && info->get_csrsm_info(trans_A, descr->fill_mode) == nullptr)
+        {
+            info->set_csrsm_info(
+                trans_A, descr->fill_mode, info->get_csrsv_info(trans_A, descr->fill_mode));
+        }
         return rocsparse_status_success;
     }
 
