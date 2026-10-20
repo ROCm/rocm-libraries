@@ -48,6 +48,7 @@
 //
 // TARGET: rocsparse-unit-test-device.
 //
+#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 // ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit
@@ -395,7 +396,7 @@ namespace
         }
         if(buffer != nullptr)
         {
-            (void)hipFree(buffer);
+            rocsparse_clients_log_hip_error("hipFree", hipFree(buffer));
         }
         EXPECT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
                   rocsparse_status_success);

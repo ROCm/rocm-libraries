@@ -32,6 +32,7 @@
 //
 #pragma once
 
+#include "../include/rocsparse_clients_log.hpp"
 #include "rocsparse.h"
 
 #include <cstdint>
@@ -115,25 +116,27 @@ namespace rocsparse_ut
         explicit device_vector(const std::vector<T>& host)
         {
             n = host.size();
-            if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
+            rocsparse_clients_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
+            const hipError_t copy_status
+                = hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
+            if(copy_status != hipSuccess)
             {
+                rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
                 ptr = nullptr;
-                return;
+                rocsparse_clients_throw_hip_error("hipMemcpy", copy_status);
             }
-            (void)hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
         }
         explicit device_vector(size_t count)
             : n(count)
         {
-            if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
-                ptr = nullptr;
+            rocsparse_clients_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
         }
-        device_vector(const device_vector&) = delete;
+        device_vector(const device_vector&)            = delete;
         device_vector& operator=(const device_vector&) = delete;
         ~device_vector()
         {
             if(ptr)
-                (void)hipFree(ptr);
+                rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
         }
         operator T*() const
         {
@@ -150,7 +153,9 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            (void)hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            rocsparse_clients_throw_hip_error(
+                "hipMemcpy",
+                hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost));
         }
         return host;
     }

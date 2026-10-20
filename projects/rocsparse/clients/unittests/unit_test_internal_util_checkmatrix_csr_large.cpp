@@ -403,7 +403,7 @@ namespace
         // deterministic rather than whatever the allocation held.
         device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
         EXPECT_TRUE(tmp.ptr);
-        EXPECT_EQ(hipMemset(tmp.ptr, 0, buffer_size), hipSuccess);
+        rocsparse_clients_throw_hip_error("hipMemset", hipMemset(tmp.ptr, 0, buffer_size));
 
         (void)hipGetLastError();
 
@@ -422,7 +422,7 @@ namespace
                                               &status,
                                               tmp.ptr),
                   rocsparse_status_success);
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        rocsparse_clients_throw_hip_error("hipGetLastError", hipGetLastError());
         return status;
     }
 }

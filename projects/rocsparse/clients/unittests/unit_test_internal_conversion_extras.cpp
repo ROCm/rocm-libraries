@@ -33,6 +33,7 @@
 // buffer-size / nnz / compute pipeline on a tiny matrix plus a few bad-argument
 // branches.
 //
+#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
@@ -49,12 +50,16 @@ namespace
         rocsparse_mat_descr d = nullptr;
         MatDescr()
         {
-            (void)rocsparse_create_mat_descr(&d);
+            if(rocsparse_create_mat_descr(&d) != rocsparse_status_success)
+            {
+                ADD_FAILURE() << "rocsparse_create_mat_descr failed";
+            }
         }
         ~MatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_mat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                      rocsparse_destroy_mat_descr(d));
         }
     };
     struct MatInfo
@@ -62,12 +67,16 @@ namespace
         rocsparse_mat_info i = nullptr;
         MatInfo()
         {
-            (void)rocsparse_create_mat_info(&i);
+            if(rocsparse_create_mat_info(&i) != rocsparse_status_success)
+            {
+                ADD_FAILURE() << "rocsparse_create_mat_info failed";
+            }
         }
         ~MatInfo()
         {
             if(i)
-                (void)rocsparse_destroy_mat_info(i);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_info",
+                                                      rocsparse_destroy_mat_info(i));
         }
     };
 }

@@ -33,6 +33,7 @@
 // applicable) on a tiny problem, so the host dispatch/validation/orchestration
 // in library/src/level2 is counted.
 //
+#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
@@ -50,12 +51,16 @@ namespace
         rocsparse_mat_descr d = nullptr;
         MatDescr()
         {
-            (void)rocsparse_create_mat_descr(&d);
+            if(rocsparse_create_mat_descr(&d) != rocsparse_status_success)
+            {
+                ADD_FAILURE() << "rocsparse_create_mat_descr failed";
+            }
         }
         ~MatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_mat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                      rocsparse_destroy_mat_descr(d));
         }
     };
 

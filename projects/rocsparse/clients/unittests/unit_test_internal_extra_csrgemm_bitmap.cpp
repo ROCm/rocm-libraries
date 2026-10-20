@@ -172,9 +172,8 @@ namespace
     template <typename T>
     T value(int re, int im)
     {
-        if constexpr(std::is_same_v<
-                         T,
-                         rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>)
+        if constexpr(std::is_same_v<T, rocsparse_float_complex>
+                     || std::is_same_v<T, rocsparse_double_complex>)
         {
             return T(re, im);
         }
@@ -880,7 +879,7 @@ namespace
                             device_vector<J>    d_perm(p.perm), d_offset(std::vector<J>{p.offset});
                             device_vector<I>    d_ptr_C(initial.ptr);
                             device_vector<J>    d_ind_C(stage == value_stage::numeric ? want.ind
-                                                                                      : initial.ind);
+                                                                                   : initial.ind);
                             device_vector<T>    d_val_C(initial.val);
                             auto                workspace = make_workspace<I, J>(handle, s, p.n);
                             ASSERT_TRUE(d_ptr_C.ptr && d_ind_C.ptr && d_val_C.ptr);
@@ -1304,7 +1303,7 @@ TEST_F(internal_extra_csrgemm_bitmap, tile_limits_i32_i32)
             EXPECT_EQ(workspace.rank, nullptr);
             EXPECT_EQ(workspace.rank_scan, nullptr);
             EXPECT_EQ(workspace.rank_scan_size, 0u);
-            EXPECT_EQ(hipGetLastError(), hipSuccess);
+            ASSERT_EQ(hipGetLastError(), hipSuccess);
         }
     }
 }

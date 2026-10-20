@@ -58,6 +58,7 @@
 // equal B + fill and the check can be an exact comparison. beta = 1 makes every
 // update accumulate, so a column visited twice differs from a column visited once.
 //
+#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
@@ -164,7 +165,8 @@ namespace
         ~SpMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_spmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(d));
         }
     };
 
@@ -174,7 +176,8 @@ namespace
         ~DnMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_dnmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(d));
         }
     };
 }

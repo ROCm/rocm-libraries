@@ -92,6 +92,7 @@
 // entry point and need a real device and the complete handle type. The largest
 // allocation is a few kilobytes, so there is no device-memory guard.
 //
+#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 // Internal handle definition: the complete _rocsparse_handle type is required to
@@ -307,7 +308,8 @@ namespace
         ~SpMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_spmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(d));
         }
     };
 
@@ -317,7 +319,8 @@ namespace
         ~DnMatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_dnmat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(d));
         }
     };
 

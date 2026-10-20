@@ -37,6 +37,7 @@
 // The generic level-1 vector ops (rot/gather/scatter/axpby) are already covered
 // by unit_test_host_level1_generic.cpp and are intentionally NOT duplicated here.
 //
+#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 using namespace rocsparse_ut;
@@ -66,7 +67,8 @@ namespace
         ~IdentityCsr()
         {
             if(A)
-                (void)rocsparse_destroy_spmat_descr(A);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(A));
         }
     };
 
@@ -88,7 +90,8 @@ namespace
         ~IdentityCoo()
         {
             if(A)
-                (void)rocsparse_destroy_spmat_descr(A);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(A));
         }
     };
 } // namespace
@@ -646,7 +649,8 @@ namespace
         ~DiagCsr()
         {
             if(A)
-                (void)rocsparse_destroy_spmat_descr(A);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(A));
         }
     };
 } // namespace
