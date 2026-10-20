@@ -5,8 +5,8 @@ API, you do not need this -- start with `tiling_api_surface.md` (its sec 2 is a 
 
 **Status:** Steps 1-4 have LANDED -- the primitives named below are shipped and re-exported at the package
 root: `TileMmaPlan`/`TileMmaDriver`, the `LayoutStyle` seam (`canonical`/`interleaved`),
-`cooperative_load_desc`, `TileDesc.swap_dims`/`.reorder_registers`, the N-D `at_index`/`squeeze`, and the
-transform observers. Only `TilePipeline` (Step 7) is still `(planned)`. This doc is where each BELONGS,
+`cooperative_load_desc`, `TileDesc.swap_dims`/`.reorder_registers`, `lds_tile_desc`, `check_gemm_shapes`, and
+the transform observers. Only `TilePipeline` (Step 7) is still `(planned)`. This doc is where each BELONGS,
 and the gate every new one passes.
 
 **This is the WHY.** The how-to-use catalog is `tiling_api_surface.md`; domain theory lives in
@@ -45,12 +45,12 @@ The `__init__.__all__` is grouped by these tiers, front door first. Do not re-in
 catalog-based groupings; a newcomer meets one map.
 
 - **FRONT DOOR** -- what you reach for by default: `TileMma`, `TilePipeline` (planned), the everyday
-  factories (`make_tensor_desc`/`make_window`/`make_tile_desc`/`make_fragment`), and the IR verbs
-  (`load_fragment`/`store_fragment`/`fill_fragment`/`transform_fragment`).
+  factories (`make_tensor_desc`/`make_window`/`make_tile_desc`/`make_fragment`), the IR verbs
+  (`load_fragment`/`store_fragment`/`fill_fragment`/`transform_fragment`), and `check_gemm_shapes`.
 - **TOOLBOX** -- the finer primitives the front door is *built from*, callable directly when you need
   control: `Tiling` (the `TileMma` atom/order knobs), `TileMmaPlan`/`TileMmaDriver`, the `LayoutStyle`
   seam (`canonical`/`interleaved`), `TileDesc.swap_dims`/`.reorder_registers`, `cooperative_load_desc`,
-  `at_index`/`squeeze`, and the transform *observers* (surfaced at the root in the transforms split:
+  the LDS bridge (`lds_tile_desc`/`lds_store`/`lds_read`), and the transform *observers* (surfaced at the root in the transforms split:
   `classify_transform`, `describe_edge`, `mma_pair_k_aligned`, `mma_operand_layout_sound`,
   `mma_accumulator_flow_consistent`, `mma_pair_compatible`, `reorder_between`, `derive_c_distribution`).
 - **MACHINERY** -- internal, NOT authoring API, NOT re-exported: the recorder, the transform *solver*
@@ -168,18 +168,22 @@ Clipping is BUILT and bit-exact on the masked path (`tiling_api_surface.md` 5b).
 
 ---
 
-## 6. N-D tensors -- rank-generic descriptors, a rank-2 MMA view, a typed slice
+## 6. N-D tensors -- rank-generic descriptors, one axis convention, no axis labels
 
-- Tensor/tile/window/cooperative-load/store descriptors are **rank-generic**; the MMA consumes a rank-2
-  `(free, K)` view. Nothing hardcodes rank 2.
-- The N-D descriptor carries an **author-declared axis role** (contraction/free) -- a bare `rank==2` cannot
-  tell `(free, K)` from `(K, free)`.
-- The rank-reducing slice `at_index(axis, i)` / `squeeze(axis)` yields the rank-2 view with strides
-  preserved, **typed against the declared contraction role**: it fails-fast if asked to reduce the K axis.
-  Rank-2-ness is enforced when an operand is loaded (`load_fragment`) and in `cooperative_load_desc`
-  (which also runs the extent-vs-allocation guard). The LDS memref stays 2D per iteration (a rank-3
-  LDS tile only on a *measured* occupancy need, its served-group property re-derived by dumping the
-  address map, NOT inherited from the 2D case -- deferred; `lds_banks.md`).
+- Tensor/tile/window/cooperative-load/store descriptors are **rank-generic**; nothing hardcodes rank 2.
+- **One axis convention, no labels.** Batch axes first, the reduction axis last, the memory layout only in
+  the strides; nothing reads what an axis means. A rank-`r` tile covers the tensor's last `r` axes and
+  each leading axis is positioned by the window origin; other orders go through `permute`, anything more
+  general through a transform graph. The rule and its GEMM reading (A `(M, K)`, B `(N, K)`, C `(M, N)`)
+  live in `tiling_api_surface.md` sec 3, "One axis convention".
+- **Why no labels.** A label on a general unit (a descriptor, a window, a verb) is a workload assumption
+  -- "contraction" and "free" are GEMM words that a copy, a reduction or a convolution does not have. The
+  one GEMM-specific check is named for GEMM and called on purpose: `check_gemm_shapes` reads A, B and C
+  positionally, so its domain is stated in its docstring rather than inferred from labels.
+- **LDS is a flat buffer; the descriptor is its layout.** The verbs address LDS through the descriptor's
+  strides exactly as global memory, so a staged buffer with several stages is a rank-3 descriptor whose
+  leading stage axis is positioned by the origin. The served-group property of any new LDS descriptor is
+  re-derived by dumping the address map, NOT inherited from another layout (`lds_banks.md`).
 - **Batch loop owner, by shape:** independent batch -> the author's outer loop (later a typed pipeline
   stage that emits nothing); batch *inside the contraction* -> the `TileMmaDriver`'s carried accumulator
   (a naive outer loop is silently wrong -- each per-batch MMA is individually sound so no gate fires);

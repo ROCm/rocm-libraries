@@ -22,6 +22,7 @@
  * rocke_ll_need, rocke_ll_fresh, rocke_ll_vector_binop, rocke_ll_fail, ...) lives in
  * BUCKET 0; this file only calls them through the internal header.
  */
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <stdio.h>
@@ -340,37 +341,9 @@ static void _op_vector_cmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         pred = "lt";
     }
-    const char* llvm_pred;
-    if(strcmp(pred, "lt") == 0)
-    {
-        llvm_pred = "slt";
-    }
-    else if(strcmp(pred, "le") == 0)
-    {
-        llvm_pred = "sle";
-    }
-    else if(strcmp(pred, "gt") == 0)
-    {
-        llvm_pred = "sgt";
-    }
-    else if(strcmp(pred, "ge") == 0)
-    {
-        llvm_pred = "sge";
-    }
-    else if(strcmp(pred, "eq") == 0)
-    {
-        llvm_pred = "eq";
-    }
-    else if(strcmp(pred, "ne") == 0)
-    {
-        llvm_pred = "ne";
-    }
-    else
-    {
-        rocke_ll_fail(L, ROCKE_ERR_KEY, "vector.cmp: unknown pred %s", pred);
-    }
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
+    const char* llvm_pred = rocke_ll_icmp_predicate(L, "vector.cmp", pred, a->type);
     rocke_ll_emitf(L,
                    "  %s = icmp %s %s %s, %s",
                    res->name,
@@ -388,6 +361,7 @@ static void _op_vector_smax(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, NULL);
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_type_t* vec_ty = a->type;
@@ -423,6 +397,7 @@ static void _op_vector_smin(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, NULL);
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     int count = (res->type && res->type->kind == ROCKE_TYPE_VECTOR) ? res->type->count : 0;
@@ -469,6 +444,7 @@ static void _op_vector_sext(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, NULL);
     const rocke_value_t* v = op->operands[0];
     rocke_ll_emitf(L,
                    "  %s = sext %s %s to %s",
@@ -930,6 +906,38 @@ static void _op_vector_trunc_f32_to(rocke_lower_t* L, const rocke_op_t* op)
 /* tile.* barriers / sync / scheduling                                      */
 /* ======================================================================== */
 
+/* Python _emit_s_barrier: the s_barrier call and its fence attr. The barrier
+ * intrinsic does not access memory, and machine-level sinking moves a load
+ * above it into a successor block; "compiler" follows the barrier with a
+ * compiler memory barrier (inline asm with a memory clobber, emits nothing),
+ * "workgroup" also brackets it with the __syncthreads release / acquire fences
+ * (which on their own do not stop the sinking). */
+static void ll_emit_s_barrier(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* fence = rocke_attr_get_str(&op->attrs, "fence");
+    bool workgroup = fence && strcmp(fence, "workgroup") == 0;
+    if(fence && !workgroup && strcmp(fence, "compiler") != 0)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s: unknown fence '%s'", op->name ? op->name : "tile.sync", fence);
+        return;
+    }
+    if(workgroup)
+    {
+        rocke_ll_emit(L, "  fence syncscope(\"workgroup\") release");
+    }
+    rocke_ll_need(L, "s.barrier");
+    rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
+    if(workgroup)
+    {
+        rocke_ll_emit(L, "  fence syncscope(\"workgroup\") acquire");
+    }
+    if(fence)
+    {
+        rocke_ll_emit(L, "  call void asm sideeffect \"\", \"~{memory}\"()");
+    }
+}
+
 /* Python _op_tile_sync: s_waitcnt(vmcnt0,lgkmcnt0) + s_barrier, with the
  * unroll trailing-sync elision check. */
 static void _op_tile_sync(rocke_lower_t* L, const rocke_op_t* op)
@@ -946,20 +954,17 @@ static void _op_tile_sync(rocke_lower_t* L, const rocke_op_t* op)
      * backend picks the wait: gfx9/10/11 the monolithic s_waitcnt, gfx1250 the
      * split s_wait_loadcnt/dscnt pair. */
     ll_backend_lds_barrier_drain(L, /*drain_vmem=*/true);
-    rocke_ll_need(L, "s.barrier");
-    rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
+    ll_emit_s_barrier(L, op);
 }
 
 /* Python _op_tile_s_barrier_bare: bare s_barrier, no implicit waitcnt. */
 static void _op_tile_s_barrier_bare(rocke_lower_t* L, const rocke_op_t* op)
 {
-    (void)op;
     if(!rocke_ll_live(L))
     {
         return;
     }
-    rocke_ll_need(L, "s.barrier");
-    rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
+    ll_emit_s_barrier(L, op);
 }
 
 /* Python _op_tile_sync_half_block: cond-branch so only the then-branch hits
@@ -999,15 +1004,13 @@ static void _op_tile_sync_half_block(rocke_lower_t* L, const rocke_op_t* op)
 /* Python _op_tile_sync_lds_only: drain LDS (lgkmcnt0) but not VMEM. */
 static void _op_tile_sync_lds_only(rocke_lower_t* L, const rocke_op_t* op)
 {
-    (void)op;
     if(!rocke_ll_live(L))
     {
         return;
     }
     /* LDS-only drain (keep VMEM in flight for the async-DMA ping-pong). */
     ll_backend_lds_barrier_drain(L, /*drain_vmem=*/false);
-    rocke_ll_need(L, "s.barrier");
-    rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
+    ll_emit_s_barrier(L, op);
 }
 
 /* Python _op_tile_s_waitcnt: explicit s_waitcnt from attrs.
