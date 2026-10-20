@@ -357,6 +357,8 @@ class DirectNongroupedConvSpec:
                 f"DirectNongroupedConvSpec is the groups==1 family (got groups={p.groups}); "
                 f"use conv_direct_grouped for grouped shapes"
             )
+        if self.grouped and p.groups < 1:
+            raise ValueError(f"grouped=True needs groups >= 1 (got groups={p.groups})")
         if self.grouped and (self.group_merge < 1 or p.groups % self.group_merge != 0):
             raise ValueError(
                 f"group_merge {self.group_merge} must be positive and divide "

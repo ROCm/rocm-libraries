@@ -458,7 +458,7 @@ def _nongrouped_grouped_spec(idx: int):
     ``_NONGROUPED_GROUPED_CFG_BASE + idx``), or None past the last one. They pin
     the runtime cpg / kpg, the merged-group cell axis, the A channel base, both
     weight paths (group_merge 1, and the per-4-channel pieces masked per chunk
-    for group_merge > 1) and the epilogue channel offset; 7..9 are specs both
+    for group_merge > 1) and the epilogue channel offset; 7..10 are specs both
     engines must reject."""
     if idx == 0:
         # group_merge 1, fp16, cpg 32: plain weight path; tile_k above the
@@ -597,6 +597,18 @@ def _nongrouped_grouped_spec(idx: int):
         return (
             "nongrouped",
             _nongrouped_s(_nongrouped_p(1, 16, 16, 64, 64), group_merge=2),
+            "gfx950",
+        )
+    if idx == 10:
+        # Must reject: grouped=True with no groups (0 % group_merge is 0).
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 0, 8, 8),
+                tile_k=32,
+                grouped=True,
+                group_merge=1,
+            ),
             "gfx950",
         )
     return None

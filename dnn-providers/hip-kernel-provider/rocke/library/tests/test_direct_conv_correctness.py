@@ -2317,6 +2317,19 @@ class TestDirectConvNongroupedValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             DirectNongroupedConvSpec(problem=p).validate()
 
+    def test_grouped_without_groups_rejected(self):
+        """grouped=True needs a positive group count: 0 and negative multiples
+        of group_merge pass the divisibility check alone."""
+        from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
+
+        for groups, group_merge in ((0, 1), (0, 2), (-4, 2)):
+            p = self._problem(groups=groups, cpg=8, kpg=8)
+            with self.subTest(groups=groups, group_merge=group_merge):
+                with self.assertRaisesRegex(ValueError, "groups >= 1"):
+                    DirectNongroupedConvSpec(
+                        problem=p, grouped=True, group_merge=group_merge
+                    ).validate()
+
     def test_oversized_accumulator_rejected(self):
         """A tile needing more than 256 accumulator registers must not build.
 

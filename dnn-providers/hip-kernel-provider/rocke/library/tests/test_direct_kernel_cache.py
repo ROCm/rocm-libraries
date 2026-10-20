@@ -414,7 +414,7 @@ def _code_object(text: bytes, scratch: int = 0, entry: int = 0) -> bytes:
 def test_code_facts_read_text_descriptor_and_scratch():
     code, scratch = dks._elf_code_facts(_code_object(b"\x01\x02", scratch=12))
     assert scratch == 12
-    assert code.startswith(b"\x01\x02")
+    assert len(code) == 32  # a SHA-256 digest, not the code itself
     # The entry-point offset is file layout, not code.
     assert dks._elf_code_facts(_code_object(b"\x01\x02", entry=256))[0] == (
         dks._elf_code_facts(_code_object(b"\x01\x02"))[0]

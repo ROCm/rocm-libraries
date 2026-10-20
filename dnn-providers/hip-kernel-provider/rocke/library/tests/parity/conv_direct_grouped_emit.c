@@ -548,7 +548,7 @@ static rocke_direct_conv_problem_t mk_grouped_problem(
 }
 
 /* Grouped configs, emitted as NONGROUPED_GROUPED_CFG_BASE + idx (mirrors Python
- * _nongrouped_grouped_spec); 7..9 are must-reject. Returns 0 on success, -1 past
+ * _nongrouped_grouped_spec); 7..10 are must-reject. Returns 0 on success, -1 past
  * the last one. */
 static int
     make_nongrouped_grouped_cfg(int idx, rocke_direct_conv_nongrouped_spec_t* s, const char** arch)
@@ -640,6 +640,13 @@ static int
         /* Must reject: group_merge without grouped. */
         *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 16, 16, 64, 64, 3, 3, 1, 1, "bf16"));
         s->group_merge = 2;
+        return 0;
+    case 10:
+        /* Must reject: grouped with no groups (0 % group_merge is 0). */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 16, 16, 0, 8, 8, 1, "bf16"));
+        s->tile_k = 32;
+        s->grouped = true;
+        s->group_merge = 1;
         return 0;
     default:
         return -1;

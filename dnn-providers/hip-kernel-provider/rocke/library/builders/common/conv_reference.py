@@ -134,7 +134,13 @@ def conv_reference(
         # The padded input extent bounds the output's (stride >= 1).
         out_bound = (h_img + 2 * p.pH) * (w_img + 2 * p.pW) * B.shape[0]
         img_bytes = 4 * max(h_img * w_img * c_img, out_bound)
-        per_chunk = max(1, ((1 << 31) - 1) // img_bytes)
+        per_chunk = ((1 << 31) - 1) // img_bytes
+        if per_chunk < 1:
+            raise ValueError(
+                f"conv_reference: one {h_img}x{w_img}x{c_img} image needs "
+                f"{img_bytes} fp32 bytes, past the backend's 2**31 limit; "
+                "the batch split cannot make it fit"
+            )
         parts = []
         for n0 in range(0, n_img, per_chunk):
             A_t = A[n0 : n0 + per_chunk].float().cuda().permute(0, 3, 1, 2)

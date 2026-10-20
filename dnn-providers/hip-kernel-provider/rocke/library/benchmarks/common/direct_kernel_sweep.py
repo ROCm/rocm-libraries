@@ -35,6 +35,7 @@ launches the plan.
 from __future__ import annotations
 
 import collections
+import hashlib
 import itertools
 import json
 import struct
@@ -1369,11 +1370,13 @@ def compile_all_direct(
 
 
 def _elf_code_facts(hsaco: bytes) -> Optional[Tuple[bytes, int]]:
-    """``(code, scratch bytes)`` of an ELF64 code object, or None for anything else.
+    """``(code digest, scratch bytes)`` of an ELF64 code object, or None for
+    anything else.
 
-    ``code`` is the ``.text`` section followed by every kernel descriptor
+    The code is the ``.text`` section followed by every kernel descriptor
     (``<kernel>.kd``): what the GPU executes and how it is launched, so two
-    binaries with equal ``code`` run identically whatever their symbol names.
+    binaries with equal digests run identically whatever their symbol names.
+    Only its SHA-256 is kept, so a sweep's worth of facts stays small.
     ``scratch`` is the largest descriptor's private segment size -- non-zero
     when the kernel spills.
     """
@@ -1414,7 +1417,7 @@ def _elf_code_facts(hsaco: bytes) -> Optional[Tuple[bytes, int]]:
     if not kds:
         return None
     scratch = max(struct.unpack_from("<I", kd, 4)[0] for kd in kds)
-    return text + b"".join(sorted(kds)), scratch
+    return hashlib.sha256(text + b"".join(sorted(kds))).digest(), scratch
 
 
 def prune_halo_entries(cache: KernelCache, jobs: Sequence[BuildJob], log=print) -> int:

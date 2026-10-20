@@ -379,6 +379,10 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
                           "use conv_direct_grouped for grouped shapes",
                           p->groups);
     }
+    if(spec->grouped && p->groups < 1)
+    {
+        NONGROUPED_REJECT("grouped=True needs groups >= 1 (got groups=%d)", p->groups);
+    }
     /* Python's `%` floors; a nonzero remainder is nonzero in either convention. */
     if(spec->grouped && (spec->group_merge < 1 || p->groups % spec->group_merge != 0))
     {
