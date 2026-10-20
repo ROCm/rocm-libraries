@@ -28,8 +28,8 @@ test_categories:
       - "hipdnn_support_claim_verifier_python_tests"
       - "hipdnn_support_claim_harvest_python_tests"
       - "hipdnn_support_sidecar_python_tests"
-      - "hipdnn_golden_generator_python_tests"
-      - "hipdnn_golden_bwd_generator_python_tests"
+      - "hipdnn_golden_sdpa_fwd_generator_python_tests"
+      - "hipdnn_golden_sdpa_bwd_generator_python_tests"
     labels:
       - "quick"
       - "pre-commit"
@@ -42,7 +42,7 @@ test_categories:
       - "hipdnn_support_claim_verifier_python_tests"
       - "hipdnn_support_claim_harvest_python_tests"
       - "hipdnn_support_sidecar_python_tests"
-      - "hipdnn_golden_generator_python_tests"
-      - "hipdnn_golden_bwd_generator_python_tests"
+      - "hipdnn_golden_sdpa_fwd_generator_python_tests"
+      - "hipdnn_golden_sdpa_bwd_generator_python_tests"
     labels:
       - "ffm-full"

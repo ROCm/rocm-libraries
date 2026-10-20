@@ -191,7 +191,7 @@ python dnn-providers/integration-tests/reference-data-scripts/tests/test_generat
 ```
 
 ```bash
-ctest -R hipdnn_golden_bwd_generator_python_tests --output-on-failure
+ctest -R hipdnn_golden_sdpa_bwd_generator_python_tests --output-on-failure
 ```
 
 The tests skip themselves when PyTorch is not installed. They cover that one run
