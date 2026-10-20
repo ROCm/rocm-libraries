@@ -4,11 +4,12 @@
 
 The gate in ``library/tests/test_attention_builds.py`` asserts a min-occupancy
 floor computed by ``rocke.benchmark.perf.occupancy.estimate_occupancy_detail`` --
-a static, no-GPU model whose per-arch caps are PROVISIONAL (gfx942 in particular
-models a conservative 8 waves/SIMD, granularity 16, where CDNA3 is really 10 / 8).
-This tool closes the loop: it predicts occupancy for a spread of reference kernels
-and compares against rocprofv3's measured ``MeanOccupancyPerCU`` so the caps can be
-corrected, then promoted into ``core/arch/data/arch_specs.json``.
+a static, no-GPU model. Its VGPR file (512 per SIMD, allocated in steps of 8, at
+most 8 waves) matches the compiler's occupancy report; its AGPR, LDS and workgroup
+limiters are PROVISIONAL. This tool closes the loop: it predicts occupancy for a
+spread of reference kernels and compares against rocprofv3's measured
+``MeanOccupancyPerCU`` so the caps can be corrected, then promoted into
+``core/arch/data/arch_specs.json``.
 
 Two halves, split by what needs a GPU:
 
@@ -184,7 +185,7 @@ def _tiled_small_2d(arch: str):
 # (label, arch, build_fn). Chosen to span the occupancy curve and every limiter,
 # not just the high-VGPR regime the shipped kernels live in: the shipped budgeted
 # kernels (what the gate floors), a low-VGPR high-occupancy point (validates the
-# max waves/SIMD cap -- the gfx942 8-vs-10 question), mid-VGPR points (granularity),
+# max waves/SIMD cap), mid-VGPR points (granularity),
 # and LDS-limited kernels with AGPRs allocated (the LDS/AGPR branches). Build
 # failures on an unsupported arch are skipped by ``predict`` -- extend freely.
 # NB: build_attention_dense is gfx950-only; tiled-2d/3d and scalar run on both.
@@ -361,8 +362,8 @@ def compare(
     """Join predictions with measured occupancy; flag the direction of any gap.
 
     ``MODEL_LOW`` (measured > predicted) means the caps under-count residency --
-    e.g. gfx942 modeled at 8 waves/SIMD when hardware allows 10, or granularity too
-    coarse. ``MODEL_HIGH`` means the model is optimistic (a real limiter the caps
+    e.g. an AGPR pool counted more tightly than the hardware allows, or granularity
+    too coarse. ``MODEL_HIGH`` means the model is optimistic (a real limiter the caps
     miss). Either way the fix is a caps edit, re-run, converge."""
     out: list[Comparison] = []
     for p in predictions:

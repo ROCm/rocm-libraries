@@ -20,9 +20,13 @@ Programmatic use (for attention specs, use the library-side driver
     probe_occupancy([(label, kernel_def, waves_per_wg) for ...])
 
 Notes:
-- Occupancy math is intentionally conservative: gfx950 VGPR allocation
-  granularity is 16 VGPRs and waves-per-EU is a soft hint, not a hard
-  cap. Use this for relative ranking, not for absolute predictions.
+- Occupancy math is intentionally conservative. VGPRs are allocated in
+  steps of 8 on gfx90a, gfx942 and gfx950, as in the compiler's own
+  occupancy report, but this script gives the AGPRs a separate pool,
+  while the compiler counts them in the same 512-entry file (and the
+  notes' ``.vgpr_count`` already includes them). Waves-per-EU is a soft
+  hint, not a hard cap. Use this for relative ranking, not for absolute
+  predictions.
 - For absolute numbers, prefer rocprof's ``OccupancyPct`` column or the
   ``ROCm Compute Profiler`` reports — but those need a live kernel
   launch; this script is static, runs in <1 s per spec, and works in
@@ -95,7 +99,7 @@ ARCH_GFX950 = ArchCaps(
     max_waves_per_cu=32,
     vgpr_per_cu=512 * 4,  # 512 VGPRs/SIMD × 4 SIMDs (per CU sum)
     agpr_per_cu=256 * 4,
-    vgpr_alloc_granularity=16,
+    vgpr_alloc_granularity=8,
     waves_per_simd=8,
     simds_per_cu=4,
 )
@@ -105,7 +109,7 @@ ARCH_GFX942 = ArchCaps(  # MI300X
     max_waves_per_cu=32,
     vgpr_per_cu=512 * 4,
     agpr_per_cu=256 * 4,
-    vgpr_alloc_granularity=16,
+    vgpr_alloc_granularity=8,
     waves_per_simd=8,
     simds_per_cu=4,
 )
