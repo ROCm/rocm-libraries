@@ -134,6 +134,9 @@ namespace TensileLite
                     for(auto const& reference : m_referenceInputs)
                         SolveCPU(problem, reference.get(), m_elementsToValidate);
                 }
+                m_referenceInputGeneration.clear();
+                for(auto const& ctx : m_devices)
+                    m_referenceInputGeneration.push_back(ctx->dataInit->mxInputGeneration());
             }
         }
 
@@ -160,14 +163,34 @@ namespace TensileLite
                 // instead of paying a full dense reference GEMM per solution.
                 for(size_t d = 0; d < m_devices.size(); d++)
                 {
-                    if(!m_devices[d]->dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    auto& dataInit = *m_devices[d]->dataInit;
+                    if(!dataInit.referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    {
+                        // Gate said "inputs are unchanged": reference reused. Count-only marker.
+                        ScopedTimer timer("pre_solution_ref_skipped");
                         continue;
-                    ScopedTimer timer("cpu_reference_gemm_per_solution");
+                    }
+
+                    // This check only says the inputs *could* change for this solution. Compare
+                    // the generation counter to see whether DataInitialization actually
+                    // regenerated them since the reference was last computed. The recompute below
+                    // happens either way; the category tells necessary and redundant ones apart.
+                    size_t const generation    = dataInit.mxInputGeneration();
+                    bool const   inputsChanged = generation != m_referenceInputGeneration[d];
+                    m_referenceInputGeneration[d] = generation;
+
+                    ScopedTimer timer(inputsChanged
+                                          ? "cpu_reference_gemm_per_solution_inputs_changed"
+                                          : "cpu_reference_gemm_per_solution_inputs_unchanged");
                     struct PerSolutionScope
                     {
-                        PerSolutionScope() { g_inPerSolutionReference = true; }
-                        ~PerSolutionScope() { g_inPerSolutionReference = false; }
-                    } perSolutionScope;
+                        PerSolutionScope(bool changed)
+                        {
+                            g_perSolutionRefKind = changed ? PerSolutionRefKind::InputsChanged
+                                                           : PerSolutionRefKind::InputsUnchanged;
+                        }
+                        ~PerSolutionScope() { g_perSolutionRefKind = PerSolutionRefKind::None; }
+                    } perSolutionScope(inputsChanged);
                     SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
                 }
             }

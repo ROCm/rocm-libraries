@@ -140,6 +140,10 @@ namespace TensileLite
             std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
 
+            // DataInitialization::mxInputGeneration() at the time the reference was last
+            // computed; used to report whether a per-solution recompute had new inputs.
+            std::vector<size_t> m_referenceInputGeneration;
+
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
