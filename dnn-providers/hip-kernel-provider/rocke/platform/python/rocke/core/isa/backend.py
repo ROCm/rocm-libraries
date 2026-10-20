@@ -15,9 +15,8 @@ backend therefore selects the same shared constants for both, while exposing
 distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``). The
 ``arch.vmcnt_bits`` fact is load-bearing: :meth:`ISABackend.encode_waitcnt`
 asserts it against the encoder's representable field width
-(:data:`ISABackend._VMCNT_ENCODER_BITS`), so genuinely divergent codegen (e.g.
-gfx908, or a future target whose VMCNT field is wider than the current 6-bit
-encoders emit) fails loudly here instead of silently truncating a partial wait
+(:data:`ISABackend._VMCNT_ENCODER_BITS`), so a future target whose VMCNT
+field is wider than the current 6-bit encoders emit fails loudly here instead of silently truncating a partial wait
 into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
@@ -89,9 +88,8 @@ class ISABackend:
     # Widest VMCNT field this backend's encoder can physically represent. The
     # gfx9/10 split layout (VMCNT across ``[3:0]`` and ``[15:14]``) emits a
     # 6-bit value; the RDNA contiguous layout (``[15:10]``) is also 6-bit. This
-    # is the *encoder capability*, distinct from any one arch's declared
-    # ``vmcnt_bits`` -- e.g. gfx942 declares a 4-bit field but is lowered
-    # through this 6-bit-capable encoder (HW-verified on MI300X). The guard in
+    # is the *encoder capability*, distinct from any one arch's ``vmcnt_bits``
+    # (the hardware field width; 6 on every target wired today). The guard in
     # :meth:`encode_waitcnt` consults ``arch.vmcnt_bits`` so a future target
     # whose field is *wider* than the encoder can emit fails loudly instead of
     # silently truncating a wait into a full VMEM drain.
