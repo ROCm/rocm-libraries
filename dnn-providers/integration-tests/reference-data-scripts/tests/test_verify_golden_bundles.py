@@ -496,6 +496,185 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn("Small.meta.json", completed.stderr)
             self.assertIn("reference_source", completed.stderr)
 
+    # RFC 0011 4.1 and 4.2: a backward bundle must carry a .meta.json naming the
+    # reference strategy and the forward pass whose O and LSE its gradients were
+    # computed from. Only backward bundles are held to this; forward bundles
+    # migrated from the old test system may have no metadata at all.
+
+    BACKWARD_METADATA = {
+        "generator": "generate_sdpa_bwd_golden.py",
+        "reference_source": "PyTorch 2.14.1",
+        "reference_strategy": "matched_precision",
+        "direction": "backward",
+        "forward_source": {
+            "method": "pytorch_math_backend",
+            "version": "2.14.1",
+            "generated_at": "2026-10-20T00:00:00Z",
+        },
+    }
+
+    def write_backward_bundle(self, root: Path, **overrides: object) -> Path:
+        metadata = {**self.BACKWARD_METADATA, **overrides}
+        metadata = {key: value for key, value in metadata.items() if value is not None}
+        return self.write_bundle(
+            root,
+            Path("quick/SdpaBackward/bhsd/bf16/Small"),
+            metadata=metadata,
+        )
+
+    def test_well_formed_backward_metadata_passes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_backward_metadata_without_forward_source_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, forward_source=None)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "forward_source is required on backward bundles", completed.stderr
+            )
+
+    def test_backward_metadata_without_reference_strategy_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, reference_strategy=None)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "reference_strategy is required on backward bundles", completed.stderr
+            )
+
+    def test_forward_source_must_name_method_version_and_timestamp(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(
+                root, forward_source={"method": "pytorch_math_backend"}
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("forward_source.version is required", completed.stderr)
+            self.assertIn("forward_source.generated_at is required", completed.stderr)
+
+    def test_forward_source_must_be_an_object(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, forward_source="pytorch")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("forward_source must be an object", completed.stderr)
+
+    def test_forward_metadata_does_not_require_forward_source(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bhsd/bf16/Small"),
+                metadata={
+                    "generator": "generate_sdpa_fwd_golden.py",
+                    "reference_source": "PyTorch 2.14.1",
+                    "direction": "forward",
+                },
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_unknown_direction_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(root, direction="sideways")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("direction must be 'forward' or 'backward'", completed.stderr)
+
+    def _write_pair(self, root: Path, **forward_source_overrides: object):
+        """A backward bundle alongside the forward bundle its metadata names."""
+        self.write_bundle(
+            root,
+            Path("quick/SdpaBackward/bhsd/bf16/Small_fwd_pair"),
+            metadata={
+                "generator": "generate_sdpa_bwd_golden.py",
+                "reference_source": "PyTorch 2.14.1",
+                "reference_strategy": "matched_precision",
+                "direction": "forward",
+                "reference_backend": "pytorch_math_backend",
+                "generated_at": "2026-10-20T00:00:00Z",
+            },
+        )
+        forward_source = {
+            **self.BACKWARD_METADATA["forward_source"],
+            "bundle": "../Small_fwd_pair/Small_fwd_pair.json",
+            **forward_source_overrides,
+        }
+        self.write_backward_bundle(root, forward_source=forward_source)
+
+    def test_matching_forward_source_pairing_passes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_pair(root)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_stale_forward_source_timestamp_fails(self) -> None:
+        """The failure a forward bundle regenerated on its own would produce."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_pair(root, generated_at="2026-01-01T00:00:00Z")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "the forward bundle was regenerated without its backward partner",
+                completed.stderr,
+            )
+
+    def test_mismatched_forward_source_method_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_pair(root, method="cudnn")
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("forward_source.method is 'cudnn'", completed.stderr)
+
+    def test_forward_source_naming_an_absent_bundle_is_not_an_error(self) -> None:
+        """Verifying a subtree without the forward partner pulled must still pass."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_backward_bundle(
+                root,
+                forward_source={
+                    **self.BACKWARD_METADATA["forward_source"],
+                    "bundle": "../NotPulled/NotPulled.json",
+                },
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_non_graph_json_warns_and_is_ignored(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
