@@ -203,7 +203,7 @@ int main(int argc, char** argv) noexcept
             .help("Timed executions per test (default 20). Requires --benchmark.");
         parser.add_argument("--benchmark-warmup")
             .scan<'i', int>()
-            .help("Untimed executions before timing (default 3). Requires --benchmark.");
+            .help("Untimed executions before timing (default 30). Requires --benchmark.");
 
         std::vector<std::string> remainingArgs;
         try

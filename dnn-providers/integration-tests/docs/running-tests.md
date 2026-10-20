@@ -155,10 +155,15 @@ Each timed test prints one line:
 [ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE timing=DEVICE_ONLY samples=20 min=0.0182 ms robust=0.0184 ms mean=0.0185 ms stddev=0.0003 ms
 ```
 
-- Autotune runs `--benchmark-warmup` untimed executions (default 3). Then it
+- Autotune runs `--benchmark-warmup` untimed executions (default 30). Then it
   runs `--benchmark-iterations` timed executions (default 20), with the
   `FIXED_AVERAGE` strategy and the same stall gate, retry and statistics
   rules as any other autotune call.
+- The GPU idles between tests, so each test starts cold. Too few warmup
+  executions make the times read high: on MI210 the quick-tier bundles read
+  4-60% slow with 1-10 warmups and settle after about 30. More timed
+  iterations do not fix this; more warmup does. Raise `--benchmark-warmup`
+  if `stddev` stays large compared with `mean`.
 - `robust` is the mean after autotune drops the slow tail: what the engine
   usually costs. `min`, `mean` and `stddev` are over all timed samples.
 - `timing=DEVICE_ONLY` means that the stream was stalled, so the times exclude
@@ -216,7 +221,7 @@ Otherwise, you test the old tree.
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
 | `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
 | `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
-| `--benchmark-warmup` | | 3 | Untimed executions before timing. Requires `--benchmark`. |
+| `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
 | `--gtest_*` | | | Passed through to GTest. |
 
 The binary refuses these flag combinations (exit 1):

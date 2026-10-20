@@ -21,7 +21,10 @@ namespace hipdnn_integration_tests
 struct BenchmarkSettings
 {
     static constexpr int DEFAULT_TIMED_ITERATIONS = 20;
-    static constexpr int DEFAULT_WARMUP_ITERATIONS = 3;
+    // The GPU idles between tests (input fill, reference, comparison), so each test
+    // starts cold. On MI210, quick-tier bundles read 4-60% slow with 1-10 warmup
+    // executions and settle after about 30. More timed iterations do not fix this.
+    static constexpr int DEFAULT_WARMUP_ITERATIONS = 30;
 
     int timedIterations = DEFAULT_TIMED_ITERATIONS;
     int warmupIterations = DEFAULT_WARMUP_ITERATIONS;

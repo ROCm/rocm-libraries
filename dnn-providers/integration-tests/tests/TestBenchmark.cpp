@@ -80,7 +80,7 @@ TEST(TestResolveBenchmark, EnabledAloneUsesTheDefaults)
 
     ASSERT_TRUE(resolution.settings.has_value()) << resolution.error.value_or("");
     EXPECT_EQ(resolution.settings->timedIterations, 20);
-    EXPECT_EQ(resolution.settings->warmupIterations, 3);
+    EXPECT_EQ(resolution.settings->warmupIterations, 30);
 }
 
 TEST(TestResolveBenchmark, ExplicitCountsOverrideTheDefaults)
