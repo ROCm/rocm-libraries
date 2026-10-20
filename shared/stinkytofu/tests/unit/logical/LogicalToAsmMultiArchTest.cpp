@@ -660,6 +660,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SSetRegB32(sgpr(0), sgpr(1));
         case logical::SSetRegIMM32B32:
             return SSetRegIMM32B32(sgpr(0), sgpr(1));
+        case logical::SSendMsgRtnB32:
+            return SSendMsgRtnB32(sgpr(0), literal(135));
         case logical::VAddPKF32:
             return VAddPKF32(vgpr(0), vgpr(1), vgpr(2));
         case logical::VMulPKF32:
@@ -853,6 +855,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::SGetRegB32, "s_getreg_b32"},
     {logical::SSetRegB32, "s_setreg_b32"},
     {logical::SSetRegIMM32B32, "s_setreg_IMM32_b32"},
+    {logical::SSendMsgRtnB32, "s_sendmsg_rtn_b32"},
     // Vector Arithmetic
     {logical::VAddU32, "v_add_nc_u32"},
     {logical::VAddF32, "v_add_f32"},
