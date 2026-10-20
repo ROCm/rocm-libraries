@@ -382,6 +382,44 @@ block()
         install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
             DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+
+        # Ship the standalone stinkytofu backend as siblings of rocisa/ in the
+        # installed Python root (lib/hipblaslt). The block above only stages it
+        # into the *build tree*; downstream projects that codegen against the
+        # *installed* tensilelite -- e.g. hipSPARSELt's THEROCK build, which
+        # pulls hipBLASLt via find_package rather than add_subdirectory -- import
+        # from this install layout. Without these rules import stinkytofu fails
+        # there, rocisa/__init__.py silently falls back to native, and the
+        # per-ISA guard in TensileCreateLibrary/Run.py refuses to emit gfx1250
+        # kernels. The stinkytofu_python target (hence this block) exists only
+        # for gfx1250 builds (STINKYTOFU_BUILD_PYTHON), which is exactly when the
+        # stinkytofu backend is needed.
+        if(TARGET stinkytofu_python)
+            set(_stinkytofu_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/stinkytofu")
+            set(_adaptor_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa_stinkytofu_adaptor")
+            # _stinkytofu.so statically embeds libstinkytofu in the integrated
+            # build (stinkytofu is configured with BUILD_SHARED_LIBS OFF), so its
+            # INSTALL_RPATH of $ORIGIN is self-sufficient; mirror _rocisa's
+            # TheRock RPATH origin so packaging rewrites it consistently.
+            set_property(TARGET stinkytofu_python PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+                "${_stinkytofu_install_dir}")
+            install(TARGETS stinkytofu_python
+                LIBRARY DESTINATION "${_stinkytofu_install_dir}"
+                COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            install(FILES "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
+                DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            # intrinsics.st.bc is loaded at runtime from next to _stinkytofu.so.
+            if(TARGET intrinsics_compiled)
+                install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+                    DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            endif()
+            # The adaptor is a pure-Python package; install the inner package
+            # directory so `import rocisa_stinkytofu_adaptor` resolves.
+            install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
+                DESTINATION "${_adaptor_install_dir}"
+                COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+                FILES_MATCHING PATTERN "*.py")
+        endif()
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with
