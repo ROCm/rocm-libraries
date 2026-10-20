@@ -450,6 +450,20 @@ def _lds_bitmap_predicate(
 # ---------------------------------------------------------------------
 
 
+def _sparse_q_setup(kb, b, spec):
+    """Shared sparse-attention Q setup: scalars, indices, and the sparsity magic div."""
+    scale_log2 = kb.scalar("scale_log2")
+    seqlen_k_arg = kb.scalar("seqlen_k")
+    q_tile_idx = kb.q_token
+    head_idx = kb.head_idx
+    kv_head_idx = kb.kv_head_idx
+    q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
+    q_block_idx = _magic_div(b, q_tile_base, spec.block_q)
+    return (
+        scale_log2, seqlen_k_arg, q_tile_idx, head_idx, kv_head_idx, q_tile_base, q_block_idx
+    )
+
+
 def build_jenga_sparse_attention(
     spec: JengaSparseSpec, arch: str = "gfx950"
 ) -> KernelDef:
@@ -478,14 +492,10 @@ def build_jenga_sparse_attention(
     _declare_jenga_params(kb)
     b, Q, K, V, O = _sparse_builder_setup(kb)
     mask = kb.ptr("mask")
-    scale_log2 = kb.scalar("scale_log2")
-    seqlen_k_arg = kb.scalar("seqlen_k")
-    q_tile_idx = kb.q_token
-    head_idx = kb.head_idx
-    kv_head_idx = kb.kv_head_idx
-    q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
     # The Q tile's first row determines its sparsity-q-block.
-    q_block_idx = _magic_div(b, q_tile_base, spec.block_q)
+    scale_log2, seqlen_k_arg, q_tile_idx, head_idx, kv_head_idx, q_tile_base, q_block_idx = _sparse_q_setup(
+        kb, b, spec
+    )
     mask_row_base = b.mul(q_block_idx, b.const_i32(spec.num_k_blocks))
 
     # Stage the per-Q-block mask row into LDS once. The K-tile predicate
@@ -570,13 +580,10 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec, arch: str = "gfx950") -> Ker
     b, Q, K, V, O = _sparse_builder_setup(kb)
     block_lut = kb.ptr("block_lut")
     block_count = kb.ptr("block_count")
-    scale_log2 = kb.scalar("scale_log2")
-    seqlen_k_arg = kb.scalar("seqlen_k")
-    q_tile_idx = kb.q_token
-    head_idx = kb.head_idx
-    kv_head_idx = kb.kv_head_idx
-    q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
-    q_block_idx = _magic_div(b, q_tile_base, spec.block_q)
+    # The Q tile's first row determines its sparsity-q-block.
+    scale_log2, seqlen_k_arg, q_tile_idx, head_idx, kv_head_idx, q_tile_base, q_block_idx = _sparse_q_setup(
+        kb, b, spec
+    )
     lut_row_base = b.mul(q_block_idx, b.const_i32(spec.max_blocks_per_q))
 
     tid = b.thread_id_x()
