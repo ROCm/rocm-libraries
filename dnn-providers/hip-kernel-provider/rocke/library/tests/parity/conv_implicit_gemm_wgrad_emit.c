@@ -412,6 +412,48 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->split_k = 4;
         *arch = idx == 52 ? "gfx1201" : idx == 53 ? "gfx1250" : "gfx1151";
         return 0;
+    case 55:
+    case 56:
+    case 57:
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    {
+        /* gfx1250 WMMA K-loop variants. Must match the Python emitter's 55-61. */
+        const bool small = idx == 56 || idx == 58;
+        const bool big = idx == 55 || idx == 59;
+        const bool wave32 = idx != 60;
+        if(idx == 61)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
+        else if(small)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 57 ? "fp16" : "fp32";
+        spec->tile_m = big ? 64 : 32;
+        spec->tile_n = big ? 64 : 32;
+        spec->tile_k = big ? 64 : 32;
+        spec->warp_m = big ? 2 : 1;
+        spec->warp_n = big ? 2 : 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = wave32 ? 32 : 16;
+        spec->wave_size = wave32 ? 32 : 64;
+        spec->pipeline = (idx == 55 || idx == 59 || idx == 60) ? "wmma_v1" : "mem";
+        spec->epilogue = "default";
+        spec->split_k = idx == 60 ? 1 : (idx == 57 || idx == 58 || idx == 61) ? 2 : 4;
+        spec->lds_k_outer = wave32;
+        spec->unroll_k = idx == 56;
+        spec->prefetch_addr = idx == 57;
+        spec->async_dma = idx == 58 || idx == 59 || idx == 61;
+        *arch = wave32 ? "gfx1250" : "gfx950";
+        return 0;
+    }
     default:
         return -1;
     }

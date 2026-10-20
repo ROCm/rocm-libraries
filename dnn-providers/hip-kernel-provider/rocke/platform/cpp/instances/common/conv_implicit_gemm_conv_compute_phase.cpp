@@ -303,6 +303,11 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
             }
         }
     }
+    /* wgrad "wmma_v1": schedule.emit_wmma_compute_schedule(b, _wmma_hotloop),
+     * a no-op unless the policy emits hints. Forward/dgrad never set the
+     * tallies, so their WMMA phase is unchanged. */
+    if(ctx->has_wmma_hotloop)
+        rocke_schedule_policy_emit_wmma_compute_schedule(&ctx->schedule, b, &ctx->wmma_hotloop, false);
 }
 
 /* ====================================================================== *

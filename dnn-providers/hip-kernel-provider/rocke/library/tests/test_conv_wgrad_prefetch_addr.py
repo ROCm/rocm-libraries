@@ -119,7 +119,7 @@ class TestWgradPrefetchAddrGate(unittest.TestCase):
                 )
                 self.assertTrue(ok, why)
 
-    def test_rejected_on_wmma(self):
+    def test_admitted_on_wmma(self):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 
         spec = _spec(
@@ -138,9 +138,10 @@ class TestWgradPrefetchAddrGate(unittest.TestCase):
         )
         ok, why = is_valid_wgrad_spec(spec, "gfx1151")
         self.assertTrue(ok, why)
+        # The carried-offset loop only regroups the synchronous loads, and the
+        # MMA phase it calls routes to WMMA, so the flag is family-agnostic.
         ok, why = is_valid_wgrad_spec(replace(spec, prefetch_addr=True), "gfx1151")
-        self.assertFalse(ok)
-        self.assertIn("prefetch_addr", why)
+        self.assertTrue(ok, why)
 
 
 class TestDefaultPrefetchAddr(unittest.TestCase):

@@ -46,8 +46,9 @@
 #   31-48 -- prefetch_addr=True on a base config (see _PFA_BASES): the
 #         carried-offset K loop across mem/compv3/compv4/basic, M-outer and
 #         K-outer, split-K atomic, two-stage, scalar loads, pointwise, 3-D,
-#         gfx942 and chiplet swizzle; 45-47 pair it with async_dma, unroll_k
-#         and WMMA, which both engines must reject; 48 is a scalar-load
+#         gfx942 and chiplet swizzle; 45-46 pair it with async_dma and
+#         unroll_k, which both engines must reject; 47 is WMMA gfx1151 (the
+#         carried-offset loop is family-agnostic); 48 is a scalar-load
 #         128x128 tile (more carried offsets than accumulators)
 #   49 -- gfx1250 WMMA split-K=4, bf16 dW (zero-fill packed bf16 atomic), M-outer
 #   50 -- gfx1250 WMMA split-K=4, fp32 dW (scalar atomic), K-outer
@@ -55,6 +56,17 @@
 #   52-54 -- WMMA split-K both engines must reject: gfx1201 bf16 dW (arch not
 #         enabled), gfx1250 bf16 dW with the cshuffle epilogue (outside the
 #         WMMA wgrad subset), gfx1151 fp32 dW (arch not enabled, any dtype)
+#   55 -- gfx1250 pipeline="wmma_v1" (WMMA ds_read/wmma interleave hints), K-outer,
+#         64x64x64 2x2 warps, split-K=4 fp32 dW
+#   56 -- gfx1250 unroll_k ping-pong, K-outer, split-K=4 fp32 dW (odd slices:
+#         the phase-B prefetch takes the zero-fill redirect)
+#   57 -- gfx1250 prefetch_addr carried-offset loop, K-outer, split-K=2 fp16 dW
+#   58 -- gfx1250 async_dma (global_load_async_to_lds ping-pong), K-outer,
+#         split-K=2 fp32 dW, C=24 (partial N tiles: zero-filled chunks) and odd
+#         slices (zero-fill redirect)
+#   59 -- gfx1250 async_dma + "wmma_v1", K-outer, 64x64x64 2x2 warps
+#   60-61 -- both engines must reject: "wmma_v1" on gfx950 (MFMA), and gfx1250
+#         async_dma with C=3 (a one-element chunk is narrower than the copy)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -693,6 +705,51 @@ def _spec(idx: int):
             ),
             arch,
         )
+
+    if 55 <= idx <= 61:
+        # gfx1250 WMMA K-loop variants: the hint schedule, the unroll_k and
+        # prefetch_addr loops, and the global_load_async_to_lds ping-pong.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        p_small = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+        p_c3 = ConvProblem(N=4, Hi=12, Wi=12, C=3, K=32, Y=3, X=3, pH=1, pW=1)
+        problem, dtype_d, split_k, big, extra, arch = {
+            55: (p, "fp32", 4, True, {"pipeline": "wmma_v1"}, "gfx1250"),
+            56: (p_small, "fp32", 4, False, {"unroll_k": True}, "gfx1250"),
+            57: (p, "fp16", 2, False, {"prefetch_addr": True}, "gfx1250"),
+            58: (p_small, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+            59: (
+                p,
+                "fp32",
+                4,
+                True,
+                {"async_dma": True, "pipeline": "wmma_v1"},
+                "gfx1250",
+            ),
+            60: (p, "fp32", 1, False, {"pipeline": "wmma_v1"}, "gfx950"),
+            61: (p_c3, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+        }[idx]
+        wave32 = arch == "gfx1250"
+        kw = dict(
+            problem=problem,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=64 if big else 32,
+            tile_n=64 if big else 32,
+            tile_k=64 if big else 32,
+            warp_m=2 if big else 1,
+            warp_n=2 if big else 1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32 if wave32 else 16,
+            wave_size=32 if wave32 else 64,
+            pipeline="mem",
+            epilogue="default",
+            split_k=split_k,
+            lds_k_outer=wave32,
+        )
+        kw.update(extra)
+        return WgradConvSpec(**kw), arch
 
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.

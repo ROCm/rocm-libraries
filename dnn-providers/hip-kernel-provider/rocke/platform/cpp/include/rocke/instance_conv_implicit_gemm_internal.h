@@ -454,6 +454,18 @@ typedef struct rocke_conv_build_ctx
      * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
      *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* gfx1250 async K loop (wgrad only): the sync loaders' slot partition with
+     * each chunk moved by global_load_async_to_lds from a_ptr / b_ptr instead of
+     * a buffer load. Zeroed by the ctx memset, so fwd/dgrad are unaffected. */
+    bool async_global_lds;
+    rocke_value_t* a_ptr;
+    rocke_value_t* b_ptr;
+    /* WMMA hint schedule tallies (wgrad only): when has_wmma_hotloop is set,
+     * rocke_conv_emit_wmma_phase closes each K-tile with
+     * SchedulePolicy.emit_wmma_compute_schedule (a no-op unless the policy
+     * emits hints). Zeroed by the ctx memset for fwd/dgrad. */
+    bool has_wmma_hotloop;
+    rocke_wmma_hotloop_inst_list_t wmma_hotloop;
     /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
      * and dgrad drivers keep their exact previous behaviour. */
     bool lds_k_outer;
@@ -745,6 +757,10 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
+
+/* gfx1250 async branch (wgrad only, ctx->async_global_lds): one-barrier
+ * ping-pong over global_load_async_to_lds copies drained by s_wait_asynccnt. */
+void rocke_conv_emit_kloop_async_global_lds(rocke_conv_build_ctx_t* ctx);
 
 /* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
  * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields

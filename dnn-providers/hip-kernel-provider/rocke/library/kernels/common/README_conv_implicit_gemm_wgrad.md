@@ -54,13 +54,38 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
 
 ## Changelog
 
+### WMMA K-loop variants (gfx1250)
+
+The WMMA K loop was single-buffered with no overlap: load, barrier, WMMA,
+barrier. Three variants now cover it, each mirrored in the C++ engine:
+
+- `pipeline="wmma_v1"`: the WMMA intrawave hint schedule
+  (`SchedulePolicy.emit_wmma_compute_schedule`), which interleaves the operand
+  `ds_read`s with the WMMAs of each K tile. It is the same schedule the universal
+  GEMM's WMMA path uses under that name. MFMA rejects it, because there it would
+  build the `mem` kernel under another name.
+- `unroll_k` and `prefetch_addr` on WMMA. Both loop bodies only regroup the
+  synchronous loads and call the MMA phase, which routes to WMMA.
+- `async_dma` on gfx1250 is a ping-pong over `global_load_async_to_lds`, because
+  gfx1250 has no gfx9 `buffer_load_lds`.
+  - It reuses the synchronous K-outer loaders for the slot partition, and keeps
+    the bank-friendly row pad of 8, since the copy writes a per-lane LDS
+    address.
+  - Each phase waits `s_wait_asynccnt 0` and takes one LDS barrier, then issues
+    the next tile while the current tile's WMMAs run.
+  - The copy has no buffer-resource range check. The loader therefore ANDs that
+    check (byte offset below the tensor size) into the descriptor's `valid`,
+    and zero-fills failing chunks with an LDS store.
+  - It needs a 4-, 8- or 16-byte chunk on both operands, so an odd channel run
+    is rejected.
+
 ### Split-K on gfx1250 (WMMA)
 
 - 16-bit and fp32 split-K are enabled on gfx1250 through the WMMA atomic
   epilogue (`_emit_wgrad_split_k_epilogue_wmma`, mirrored in the C++ engine).
   Both engines admit WMMA split-K only where the arch catalog sets
-  `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset (`mem` pipeline, `default` epilogue, 16x16x16 or
-  16x16x32 atom).
+  `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset
+  (`default` epilogue, 16x16x16 or 16x16x32 atom).
 - Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
   16-bit atomic rounds the running sum in dW, so with same-sign partials the

@@ -600,6 +600,76 @@ static bool wgrad_group_merge_available(const rocke_implicit_gemm_conv_wgrad_spe
 #undef GM_REJECT
 }
 
+/* Python _wgrad_free_axis_vec(chan, dtype) with no override. */
+static int wgrad_free_axis_vec(int chan, const char* dtype)
+{
+    const bool f32 = dtype != NULL && strcmp(dtype, "fp32") == 0;
+    for(int v = f32 ? 4 : 8; v > 1; v /= 2)
+        if(chan % v == 0)
+            return v;
+    return 1;
+}
+
+/* Mirrors Python _wmma_async_available: whether a wave32 spec can take the
+ * gfx1250 async global->LDS K loop. global_load_async_to_lds moves 4, 8 or 16
+ * bytes per lane, so a 16-bit chunk needs at least two elements on both
+ * operands. */
+static bool wgrad_wmma_async_available(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                       const char* arch,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    const rocke_archtarget_t* t = rocke_archtarget_from_gfx(arch);
+    if(t == NULL || !t->memory.has_async_global_lds)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "WMMA wgrad async_dma needs global_load_async_to_lds (not on %s)",
+                     arch);
+        return false;
+    }
+    if(!s->lds_k_outer)
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "WMMA wgrad async_dma requires lds_k_outer=True");
+        return false;
+    }
+    const int threads = s->warp_m * s->warp_n * s->wave_size;
+    const int cap_a = wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem), s->dtype_a);
+    const int cap_b = wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem), s->dtype_b);
+    int va = 1;
+    int vb = 1;
+    if(rocke_coalesced_tile_loader_choose_vec_axis(s->tile_k, s->tile_m, threads, cap_a, false, &va)
+           != ROCKE_OK
+       || rocke_coalesced_tile_loader_choose_vec_axis(
+              s->tile_k, s->tile_n, threads, cap_b, false, &vb)
+              != ROCKE_OK)
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "no usable load_vec for the K-outer tile geometry");
+        return false;
+    }
+    const int eb = (s->dtype_a != NULL && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+    const int widths[2] = {va * eb, vb * eb};
+    for(int i = 0; i < 2; ++i)
+    {
+        if(widths[i] != 4 && widths[i] != 8 && widths[i] != 16)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "WMMA wgrad async_dma needs a 4/8/16-byte %s chunk "
+                         "(global_load_async_to_lds width); got %d x %d B",
+                         i == 0 ? "A" : "B",
+                         i == 0 ? va : vb,
+                         eb);
+            return false;
+        }
+    }
+    return true;
+}
+
 bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                                   const char* arch,
                                                   char* reason,
@@ -1117,9 +1187,70 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     fwd.dtype_d = s->dtype_d;
     /* Use a dummy problem that keeps K_gemm/M positive for the LDS calc. */
     fwd.problem = rocke_conv_problem_default(1, 8, 8, 16, 16, 1, 1);
+    /* The forward WMMA subset has neither the "wmma_v1" hints nor the
+     * unroll_k / async K loops that wgrad's WMMA path has, so hand it the "mem"
+     * single-buffer equivalent and charge the double-buffered LDS below, the
+     * way Python is_valid_wgrad_spec does. On MFMA "wmma_v1" never emits its
+     * hints and would build the "mem" kernel under another name. */
+    const bool is_wave32 = s->wave_size == 32;
+    if(s->pipeline && strcmp(s->pipeline, "wmma_v1") == 0)
+    {
+        if(!is_wave32)
+        {
+            if(reason && reason_cap)
+                snprintf(reason, reason_cap, "pipeline='wmma_v1' is WMMA-only (got %s)", arch);
+            return false;
+        }
+        fwd.pipeline = "mem";
+    }
+    if(is_wave32)
+    {
+        fwd.async_dma = false;
+        fwd.unroll_k = false;
+    }
 
     if(!rocke_implicit_gemm_conv_is_valid_spec(&fwd, arch, reason, reason_cap))
         return false;
+
+    if(is_wave32 && (s->unroll_k || s->async_dma))
+    {
+        /* Python: the A/B tile charged twice for the buffer-alternating loops,
+         * K-outer (tile_k, tile_mn + _kouter_pad) or the M-outer layout rows. */
+        const char* da = s->dtype_a ? s->dtype_a : "fp16";
+        const long eb = strcmp(da, "fp32") == 0 ? 4 : 2;
+        long ab;
+        if(s->lds_k_outer)
+        {
+            const long pad = ROCKE_WGRAD_KOUTER_PAD; /* wave32: never the gfx9 pad 0 */
+            ab = ((long)s->tile_k * (s->tile_m + pad) + (long)s->tile_k * (s->tile_n + pad)) * eb;
+        }
+        else
+        {
+            rocke_conv_lds_layout_t lay;
+            char lay_reason[256];
+            if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
+                   &fwd, &lay, lay_reason, sizeof(lay_reason)))
+            {
+                if(reason && reason_cap)
+                    snprintf(reason, reason_cap, "%s", lay_reason);
+                return false;
+            }
+            ab = ((long)s->tile_m * lay.row_stride + (long)s->tile_n * lay.row_stride) * eb;
+        }
+        const rocke_archtarget_t* t32 = rocke_archtarget_from_gfx(arch);
+        if(!rocke_archtarget_fits_lds(t32, 2 * ab))
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "LDS budget %ld bytes (A/B=x2 %ld, C=0, aliased) > %d cap on %s",
+                         2 * ab,
+                         ab,
+                         t32->lds_capacity_bytes,
+                         arch);
+            return false;
+        }
+    }
 
     /* The forward validator has pinned wave_size to the arch, so wave32 is the
      * WMMA family here. Its WMMA subset is the forward conv's, which is wider
@@ -1143,12 +1274,13 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             return false;
         }
         const char* pipeline = s->pipeline ? s->pipeline : "mem";
-        if(strcmp(pipeline, "mem") != 0)
+        if(strcmp(pipeline, "mem") != 0 && strcmp(pipeline, "wmma_v1") != 0)
         {
             if(reason && reason_cap)
                 snprintf(reason,
                          reason_cap,
-                         "WMMA wgrad supports only the 'mem' pipeline (got '%s') on %s",
+                         "WMMA wgrad supports only the ('mem', 'wmma_v1') pipelines (got '%s') "
+                         "on %s",
                          pipeline,
                          arch);
             return false;
@@ -1171,14 +1303,8 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                     reason, reason_cap, "WMMA wgrad does not support chiplet_swizzle on %s", arch);
             return false;
         }
-    }
-
-    /* Mirrors the Python WMMA flag gate. */
-    if(s->prefetch_addr && s->wave_size == 32)
-    {
-        if(reason && reason_cap)
-            snprintf(reason, reason_cap, "WMMA wgrad does not support prefetch_addr on %s", arch);
-        return false;
+        if(s->async_dma && !wgrad_wmma_async_available(s, arch, reason, reason_cap))
+            return false;
     }
 
     return true;
@@ -2781,9 +2907,12 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         if(spec->lds_k_outer)
         {
             a_sh[0] = ctx->block_k;
-            /* Direct load writes packed lane-contiguous bytes and cannot skip a
-             * row pad, so the async path uses a pad of 0. */
-            const int kpad = spec->async_dma ? 0 : ROCKE_WGRAD_KOUTER_PAD;
+            /* The gfx9 direct load writes packed lane-contiguous bytes and
+             * cannot skip a row pad, so its async path uses a pad of 0; the
+             * gfx1250 async copy writes a per-lane address and keeps the pad.
+             * Mirrors Python _kouter_pad. */
+            const int kpad
+                = (spec->async_dma && spec->wave_size == 64) ? 0 : ROCKE_WGRAD_KOUTER_PAD;
             a_sh[1] = ctx->block_m + kpad;
             b_sh[0] = ctx->block_k;
             b_sh[1] = ctx->block_n + kpad;
@@ -2819,6 +2948,33 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->mfmas_m = spec->tile_m / (spec->warp_m * spec->warp_tile_m);
     ctx->mfmas_n = spec->tile_n / (spec->warp_n * spec->warp_tile_n);
     ctx->k_atoms = spec->tile_k / spec->warp_tile_k;
+
+    /* Python _wmma_hotloop: the WMMA hint-schedule tallies (pure arithmetic,
+     * no IR), consumed at the tail of every WMMA phase. */
+    if(ctx->is_wmma)
+    {
+        const bool a32 = spec->dtype_a != NULL && strcmp(spec->dtype_a, "fp32") == 0;
+        const bool b32 = spec->dtype_b != NULL && strcmp(spec->dtype_b, "fp32") == 0;
+        ctx->wmma_hotloop = rocke_wmma_hotloop_inst_list_from_geometry(spec->warp_m * spec->warp_n * spec->wave_size,
+                                                                       ctx->block_m,
+                                                                       ctx->block_n,
+                                                                       ctx->block_k,
+                                                                       ctx->mfmas_m,
+                                                                       ctx->mfmas_n,
+                                                                       spec->warp_tile_m,
+                                                                       spec->warp_tile_n,
+                                                                       spec->warp_tile_k,
+                                                                       ctx->a_per_lane,
+                                                                       ctx->b_per_lane,
+                                                                       1,
+                                                                       0,
+                                                                       0,
+                                                                       a32 ? 4 : 2,
+                                                                       b32 ? 4 : 2,
+                                                                       16,
+                                                                       false);
+        ctx->has_wmma_hotloop = true;
+    }
 
     /* Accumulators */
     ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
@@ -2859,7 +3015,10 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      * (swapped coordinates on the K-outer tile) so it does not fall back to the
      * forward descriptor. */
     ctx->a_descriptor_fn = spec->lds_k_outer ? wgrad_dy_descriptor_kouter : wgrad_dy_descriptor;
-    if(ctx->async_dma)
+    /* gfx1250 async (Python _wmma_async): reuses the synchronous K-outer
+     * loaders for the slot partition and swaps only the copy. */
+    ctx->async_global_lds = spec->async_dma && ctx->is_wmma;
+    if(ctx->async_dma && !ctx->async_global_lds)
     {
         /* K-outer: rows are K_wg, columns are the free axis, so a chunk is a run
          * along the free axis at one k_wg -- contiguous in global for both
@@ -2992,8 +3151,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* Schedule -- only compute the policy here; the caller emits the prologue
      * AFTER the buffer resources so the SSA order matches Python:
      *   buffer_rsrc(dY/X/dW) -> schedule.emit_prologue(b) -> k-loop. */
-    ctx->schedule
-        = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
+    ctx->schedule = rocke_schedule_policy_for_pipeline(
+        b, (ctx->async_dma && !ctx->async_global_lds) ? "async_dma" : spec->pipeline);
 
     return rocke_ir_builder_ok(b);
 }
@@ -3923,6 +4082,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     ctx.a_rsrc = a_rsrc.rsrc;
     ctx.b_rsrc = b_rsrc.rsrc;
     ctx.d_rsrc = d_rsrc.rsrc;
+    /* Plain global pointers for the gfx1250 async copy (no IR emitted). */
+    ctx.a_ptr = dY;
+    ctx.b_ptr = X;
 
     /* Emit schedule prologue AFTER buffer resources -- mirrors Python ordering:
      *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
@@ -3974,6 +4136,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         rocke_conv_emit_kloop_unroll(&ctx);
     else if(spec->prefetch_addr)
         wgrad_emit_kloop_prefetch_addr(&ctx);
+    else if(ctx.async_global_lds)
+        rocke_conv_emit_kloop_async_global_lds(&ctx);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else

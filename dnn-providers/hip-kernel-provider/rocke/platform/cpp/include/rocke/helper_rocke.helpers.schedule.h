@@ -230,6 +230,48 @@ void rocke_schedule_policy_emit_compv4_hotloop(const rocke_schedule_policy_t* p,
                                                const rocke_hotloop_inst_list_t* inst_list,
                                                bool force);
 
+/* ------------------------------------------------------------------------- *
+ * WmmaHotLoopInstList -- per-K-tile WMMA hot-loop tallies (wave32).
+ * Mirrors Python helpers.schedule.WmmaHotLoopInstList.
+ * ------------------------------------------------------------------------- */
+
+typedef struct rocke_wmma_hotloop_inst_list
+{
+    int n_wmma; /* WMMA ops per K-tile                         */
+    int n_ds_read; /* operand fragment ds_read insts             */
+    int n_ds_write; /* operand LDS stores (0 if separate region)  */
+    int n_vmem_read; /* global/buffer loads (0 if separate region) */
+} rocke_wmma_hotloop_inst_list_t;
+
+/* WmmaHotLoopInstList.from_geometry. Python defaults: num_b_operands=1,
+ * a/b_buffer_load_width=0, a/b_dtype_bytes=2, lds_read_bytes=16,
+ * include_loads=false. */
+rocke_wmma_hotloop_inst_list_t rocke_wmma_hotloop_inst_list_from_geometry(int block_size,
+                                                                          int m_per_block,
+                                                                          int n_per_block,
+                                                                          int k_per_block,
+                                                                          int m_repeat,
+                                                                          int n_repeat,
+                                                                          int m_per_wmma,
+                                                                          int n_per_wmma,
+                                                                          int k_per_wmma,
+                                                                          int a_frag_len,
+                                                                          int b_frag_len,
+                                                                          int num_b_operands,
+                                                                          int a_buffer_load_width,
+                                                                          int b_buffer_load_width,
+                                                                          int a_dtype_bytes,
+                                                                          int b_dtype_bytes,
+                                                                          int lds_read_bytes,
+                                                                          bool include_loads);
+
+/* SchedulePolicy.emit_wmma_compute_schedule. force overrides emit_hints. */
+void rocke_schedule_policy_emit_wmma_compute_schedule(
+    const rocke_schedule_policy_t* p,
+    rocke_ir_builder_t* b,
+    const rocke_wmma_hotloop_inst_list_t* inst_list,
+    bool force);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

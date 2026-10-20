@@ -284,6 +284,15 @@ rocke_schedule_policy_t rocke_schedule_policy_for_pipeline(rocke_ir_builder_t* b
         p.mode = "intrawave";
         return p;
     }
+    else if(strcmp(pipeline, "wmma_v1") == 0 || strcmp(pipeline, "wmma") == 0)
+    {
+        /* WMMA intrawave schedule: ds_read/wmma interleave in the compute
+         * region (no MFMA-cycle model; see WmmaHotLoopInstList). */
+        p.name = "wmma_v1";
+        p.emit_hints = true;
+        p.mode = "intrawave";
+        return p;
+    }
     else if(strcmp(pipeline, "basic") == 0)
     {
         /* CK pipeline_basic: naive single-buffer pipeline with global-read/
@@ -526,3 +535,86 @@ void rocke_schedule_policy_emit_compv4_hotloop(const rocke_schedule_policy_t* p,
  *   bool rocke_schedule_policy_assert_expected_ir(const rocke_schedule_policy_t* p,
  *                                               const rocke_llvm_ir_stats_t* stats);
  */
+
+/* ------------------------------------------------------------------------- *
+ * WMMA-class schedules (wave32)
+ * ------------------------------------------------------------------------- */
+
+static int rocke_ceil_div_pos(int a, int b) { return (a + b - 1) / b; }
+
+rocke_wmma_hotloop_inst_list_t rocke_wmma_hotloop_inst_list_from_geometry(int block_size,
+                                                                          int m_per_block,
+                                                                          int n_per_block,
+                                                                          int k_per_block,
+                                                                          int m_repeat,
+                                                                          int n_repeat,
+                                                                          int m_per_wmma,
+                                                                          int n_per_wmma,
+                                                                          int k_per_wmma,
+                                                                          int a_frag_len,
+                                                                          int b_frag_len,
+                                                                          int num_b_operands,
+                                                                          int a_buffer_load_width,
+                                                                          int b_buffer_load_width,
+                                                                          int a_dtype_bytes,
+                                                                          int b_dtype_bytes,
+                                                                          int lds_read_bytes,
+                                                                          bool include_loads)
+{
+    rocke_wmma_hotloop_inst_list_t il;
+    const int k_atoms = k_per_block / k_per_wmma;
+    int a_reads_per_frag = rocke_ceil_div_pos(a_frag_len * a_dtype_bytes, lds_read_bytes);
+    int b_reads_per_frag = rocke_ceil_div_pos(b_frag_len * b_dtype_bytes, lds_read_bytes);
+    (void)m_per_wmma;
+    (void)n_per_wmma;
+    if(a_reads_per_frag < 1)
+        a_reads_per_frag = 1;
+    if(b_reads_per_frag < 1)
+        b_reads_per_frag = 1;
+    il.n_wmma = m_repeat * n_repeat * num_b_operands * k_atoms;
+    /* A fragment is loaded once per (m-atom, k-atom) and shared across the B
+     * operands; each B operand loads its own (n-atom, k-atom) fragments. */
+    il.n_ds_read = m_repeat * k_atoms * a_reads_per_frag
+                   + num_b_operands * n_repeat * k_atoms * b_reads_per_frag;
+    il.n_ds_write = 0;
+    il.n_vmem_read = 0;
+    if(include_loads && a_buffer_load_width && b_buffer_load_width)
+    {
+        const int a_vecs = m_per_block * k_per_block / (block_size * a_buffer_load_width);
+        const int b_vecs = n_per_block * k_per_block / (block_size * b_buffer_load_width);
+        il.n_vmem_read = a_vecs + num_b_operands * b_vecs;
+        il.n_ds_write = il.n_vmem_read;
+    }
+    return il;
+}
+
+void rocke_schedule_policy_emit_wmma_compute_schedule(
+    const rocke_schedule_policy_t* p,
+    rocke_ir_builder_t* b,
+    const rocke_wmma_hotloop_inst_list_t* inst_list,
+    bool force)
+{
+    int n_read, n_wmma, per, remaining, i;
+    if(!(p->emit_hints || force))
+        return;
+    n_read = inst_list->n_ds_read;
+    n_wmma = inst_list->n_wmma;
+    if(n_read <= 0 || n_wmma <= 0)
+        return;
+    per = rocke_ceil_div_pos(n_read, n_wmma); /* reads spread over wmma groups */
+    remaining = n_read;
+    for(i = 0; i < n_wmma; ++i)
+    {
+        if(remaining > 0)
+        {
+            const int r = per < remaining ? per : remaining;
+            rocke_b_sched_group_barrier(b, ROCKE_SCHED_DS_READ, r, 0);
+            remaining -= r;
+        }
+        /* WMMA shares the MFMA sched-group mask (Python WMMA = MFMA). */
+        rocke_b_sched_group_barrier(b, ROCKE_SCHED_MFMA, 1, 0);
+    }
+    if(remaining > 0)
+        rocke_b_sched_group_barrier(b, ROCKE_SCHED_DS_READ, remaining, 0);
+    rocke_b_sched_barrier(b, 0);
+}

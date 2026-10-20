@@ -506,6 +506,67 @@ class CoalescedTileLoader:
                     v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
                     self._store_tile(b, smem_dst, row, col, v)
 
+    def load_async_to_lds(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        smem_dst: Value,
+        descriptor: DescriptorFn,
+        ptr: Value,
+        num_bytes: Value,
+        coherency: int = 0,
+    ) -> None:
+        """gfx1250 async variant of :meth:`load` (``global_load_async_to_lds``).
+
+        Same slot partition and descriptor contract as :meth:`load` in
+        ``vector_axis="col"`` mode, but each in-range chunk is one per-lane
+        async global->LDS copy of ``load_vec`` elements to ``smem_dst[row, col]``
+        instead of a register round trip. The copy reads through a plain global
+        pointer with no buffer-resource range check, so the check the resource
+        would make -- byte offset below ``num_bytes`` -- is ANDed into the
+        descriptor's ``valid``. Descriptors lean on that check: a reduction
+        tail past the tensor, or a free-axis overhang at its last element, is
+        reported valid and only the resource turns it into zero. A chunk that
+        fails either test is zero-filled with an ordinary LDS store. The caller
+        drains the copies with ``s_wait_asynccnt`` (and the zero stores with an
+        LDS barrier) before reading the tile.
+        """
+        if self.vector_axis != "col":
+            raise ValueError(
+                "CoalescedTileLoader.load_async_to_lds supports only vector_axis='col' "
+                "(the copy cannot transpose on store)"
+            )
+        elem_bytes = _ELEM_BYTES.get(self.elem_dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {self.elem_dtype.name!r}"
+            )
+        width = self.load_vec * elem_bytes
+        if width not in (4, 8, 16):
+            raise ValueError(
+                f"global_load_async_to_lds moves 4, 8 or 16 bytes per lane; a "
+                f"{self.load_vec} x {elem_bytes} B chunk is {width} B"
+            )
+        zero = b.zero_vec(self.elem_dtype, self.load_vec)
+        c_elem_bytes = b.const_i32(elem_bytes)
+        for row, col in self.plan_slots(b, tid=tid):
+            off_elems, valid = descriptor(b, row, col)
+            in_bounds = b.cmp_lt(b.mul(off_elems, c_elem_bytes), num_bytes)
+            valid = in_bounds if valid is None else b.land(valid, in_bounds)
+            with b.scf_if_else(valid) as (in_range, out_of_range):
+                with in_range:
+                    b.global_load_async_to_lds(
+                        ptr,
+                        off_elems,
+                        smem_dst,
+                        [row, col],
+                        width_bytes=width,
+                        coherency=coherency,
+                    )
+                with out_of_range:
+                    b.smem_store_vN(smem_dst, [row, col], zero, self.load_vec)
+
     def fetch(
         self,
         b: IRBuilder,

@@ -2457,12 +2457,12 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
         ),
     )
 
-    def _sweep(self, **knobs) -> None:
-        # Both loops are MFMA-only (WMMA wgrad rejects async_dma and
-        # unroll_k). On MFMA every case must build and run: a skip (an
-        # invalid spec) is a failure, not a quiet pass.
-        if not _IS_MFMA:
-            self.skipTest(f"{knobs} wgrad is MFMA-only; running on {GPU_ARCH}")
+    def _sweep(self, pipeline: str = "mem", **knobs) -> None:
+        # Both loops exist on MFMA and on gfx1250 (whose async_dma is the
+        # global_load_async_to_lds ping-pong). Every case must build and run:
+        # a skip (an invalid spec) is a failure, not a quiet pass.
+        if not (_IS_MFMA or GPU_ARCH == "gfx1250"):
+            self.skipTest(f"{knobs} wgrad needs MFMA or gfx1250; running on {GPU_ARCH}")
         for shape in self._CASES:
             for dtype in _DTYPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -2470,7 +2470,7 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
                         GPU_ARCH,
                         shape,
                         dtype,
-                        "mem",
+                        pipeline,
                         _KOUTER_EPILOGUE,
                         split_k=2,
                         **knobs,
@@ -2482,6 +2482,24 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
 
     def test_unroll_k_odd_slice(self):
         self._sweep(unroll_k=True)
+
+    def test_wmma_v1_async_dma_odd_slice(self):
+        # The WMMA hint schedule only reorders; it must not change dW.
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"pipeline='wmma_v1' is WMMA-only; running on {GPU_ARCH}")
+        self._sweep(pipeline="wmma_v1", async_dma=True, lds_k_outer=True)
+
+    def test_wmma_v1_unroll_k_odd_slice(self):
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"pipeline='wmma_v1' is WMMA-only; running on {GPU_ARCH}")
+        self._sweep(pipeline="wmma_v1", unroll_k=True, lds_k_outer=True)
+
+    def test_prefetch_addr_kouter_split(self):
+        # Not double-buffered, but the carried offsets cross the same slice
+        # boundaries; on gfx1250 this is the WMMA carried-offset loop.
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"covered by test_conv_wgrad_prefetch_addr on {GPU_ARCH}")
+        self._sweep(prefetch_addr=True, lds_k_outer=True)
 
 
 def _assert_case_ran(test, ok: bool, why: str) -> None:
