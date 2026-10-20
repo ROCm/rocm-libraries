@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -526,7 +526,14 @@ void testing_bsrsm(const Arguments& arg)
                                                spol,
                                                dbuffer);
 
-        rocsparse_bsrsm_zero_pivot(handle, info, analysis_pivot_gold);
+        {
+            const rocsparse_status status
+                = rocsparse_bsrsm_zero_pivot(handle, info, analysis_pivot_gold);
+            if(status != rocsparse_status_zero_pivot)
+            {
+                CHECK_ROCSPARSE_ERROR(status);
+            }
+        }
 
         const double gpu_solve_time_used
             = rocsparse_clients::run_benchmark(arg,
@@ -552,7 +559,14 @@ void testing_bsrsm(const Arguments& arg)
                                                spol,
                                                dbuffer);
 
-        rocsparse_bsrsm_zero_pivot(handle, info, solve_pivot_gold);
+        {
+            const rocsparse_status status
+                = rocsparse_bsrsm_zero_pivot(handle, info, solve_pivot_gold);
+            if(status != rocsparse_status_zero_pivot)
+            {
+                CHECK_ROCSPARSE_ERROR(status);
+            }
+        }
 
         double gflop_count
             = csrsv_gflop_count(m, size_t(dA.nnzb) * block_dim * block_dim, diag) * nrhs;

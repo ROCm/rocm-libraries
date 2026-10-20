@@ -22,6 +22,7 @@
 * ************************************************************************ */
 
 #include "rocsparse_clients_dnmat_descr.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "testing.hpp"
@@ -369,13 +370,18 @@ namespace rocsparse_clients
 #endif
                      )
 
-            : config({
-                operation_A, operation_X, alg, scalar_datatype, compute_datatype, apol
+            : config({operation_A,
+                      operation_X,
+                      alg,
+                      scalar_datatype,
+                      compute_datatype,
+                      apol
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-                    ,
-                    solve_mode, diagonal_modifier
+                      ,
+                      solve_mode,
+                      diagonal_modifier
 #endif
-            })
+              })
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_status status = rocsparse_create_sptrsm_descr(&this->m_descr);
@@ -386,6 +392,9 @@ namespace rocsparse_clients
             status = this->set(handle);
             if(status != rocsparse_status_success)
             {
+                rocsparse_clients_log_rocsparse_error(
+                    "rocsparse_destroy_sptrsm_descr",
+                    rocsparse_destroy_sptrsm_descr(this->m_descr));
                 throw(status);
             }
         }
@@ -393,7 +402,8 @@ namespace rocsparse_clients
         ~sptrsm_descr()
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-            std::ignore = rocsparse_destroy_sptrsm_descr(this->m_descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_sptrsm_descr",
+                                                  rocsparse_destroy_sptrsm_descr(this->m_descr));
         }
 
         inline operator rocsparse_sptrsm_descr&()
