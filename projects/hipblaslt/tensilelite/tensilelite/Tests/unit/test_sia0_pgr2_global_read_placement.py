@@ -66,6 +66,7 @@ def _make_kernel(schedule_iter_alg):
         "NoLdsWriteCode": False,
         "enableTDMA": False,
         "enableTDMB": False,
+        "TDMPlusLdsBuf": 0,
         "ProblemType": {
             "Sparse": False,
         },
