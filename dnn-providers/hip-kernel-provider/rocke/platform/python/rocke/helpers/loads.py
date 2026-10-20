@@ -70,6 +70,14 @@ _ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 _VALID_VECTOR_AXES = ("col", "row")
 
 
+def _decode_staged_slot(self, b, e, c_threads, tid, c_span, c_load_vec, descriptor):
+    """Decode one per-thread slot: vector index, tile coordinates, descriptor offsets."""
+    vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+    row, col = self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+    off_elems, valid = descriptor(b, row, col)
+    return row, col, off_elems, valid
+
+
 @dataclass(frozen=True)
 class CoalescedTileLoader:
     """Sync coalesced global -> LDS load plan for a 2D tile.
@@ -305,12 +313,9 @@ class CoalescedTileLoader:
 
         staged = []
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            row, col, off_elems, valid = _decode_staged_slot(
+                self, b, e, c_threads, tid, c_span, c_load_vec, descriptor
             )
-
-            off_elems, valid = descriptor(b, row, col)
 
             if self.use_buffer_rsrc:
                 off_bytes = b.mul(off_elems, c_elem_bytes)
@@ -479,12 +484,9 @@ class CoalescedTileLoader:
         c_oob = b.const_i32(self.oob_sentinel)
 
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            row, col, off_elems, valid = _decode_staged_slot(
+                self, b, e, c_threads, tid, c_span, c_load_vec, descriptor
             )
-
-            off_elems, valid = descriptor(b, row, col)
 
             if self.use_buffer_rsrc:
                 off_bytes = b.mul(off_elems, c_elem_bytes)
@@ -548,12 +550,9 @@ class CoalescedTileLoader:
         # the LDS address without re-running the descriptor.
         fetched = []
         for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            row, col, off_elems, valid = _decode_staged_slot(
+                self, b, e, c_threads, tid, c_span, c_load_vec, descriptor
             )
-
-            off_elems, valid = descriptor(b, row, col)
             off_bytes = b.mul(off_elems, c_elem_bytes)
             safe = b.select(valid, off_bytes, c_oob) if valid is not None else off_bytes
 
