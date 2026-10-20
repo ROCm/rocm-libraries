@@ -215,6 +215,7 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
             }                                                                                     \
             catch(std::exception & error)                                                         \
             {                                                                                     \
+                std::cerr << error.what() << std::endl;                                           \
                 CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                         \
             }                                                                                     \
         }                                                                                         \
@@ -244,6 +245,7 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
                 }                                                                                 \
                 catch(std::exception & error)                                                     \
                 {                                                                                 \
+                    std::cerr << error.what() << std::endl;                                       \
                     CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                     \
                 }                                                                                 \
             }                                                                                     \
@@ -286,6 +288,7 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
             }                                                                                     \
             catch(std::exception & error)                                                         \
             {                                                                                     \
+                std::cerr << error.what() << std::endl;                                           \
                 CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                         \
             }                                                                                     \
         }                                                                                         \
@@ -315,6 +318,7 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
                 }                                                                                 \
                 catch(std::exception & error)                                                     \
                 {                                                                                 \
+                    std::cerr << error.what() << std::endl;                                       \
                     CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                     \
                 }                                                                                 \
             }                                                                                     \

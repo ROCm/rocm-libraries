@@ -125,14 +125,32 @@ namespace
                 static bool query_device = true;
                 if(query_device)
                 {
-                    if(hipGetDevice(&dev) != hipSuccess)
+                    // This filter runs while the test suites are being instantiated, outside
+                    // of the harness that catches hipError_t. Returning false on a failed
+                    // query would make every test look like it targets another architecture,
+                    // so the binary would report a pass having run nothing at all.
+                    const hipError_t get_status = hipGetDevice(&dev);
+                    if(get_status != hipSuccess)
                     {
-                        return false;
+                        fprintf(stderr,
+                                "rocsparse-test error: hipGetDevice failed: %s (%d)\n",
+                                hipGetErrorString(get_status),
+                                get_status);
+                        exit(EXIT_FAILURE);
                     }
-                    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+
+                    const hipError_t prop_status = hipGetDeviceProperties(&prop, dev);
+                    if(prop_status != hipSuccess)
                     {
-                        return false;
+                        fprintf(
+                            stderr,
+                            "rocsparse-test error: hipGetDeviceProperties(%d) failed: %s (%d)\n",
+                            dev,
+                            hipGetErrorString(prop_status),
+                            prop_status);
+                        exit(EXIT_FAILURE);
                     }
+
                     query_device = false;
                 }
 
