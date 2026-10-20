@@ -352,8 +352,12 @@ rocsparse_clients::dnmat_descr<T>::~dnmat_descr()
 
     if(this->m_device_memory)
     {
-        rocsparse_clients_log_hip_error("hipFree", hipFree(this->m_device_memory));
-        this->m_device_memory = nullptr;
+        const hipError_t status = hipFree(this->m_device_memory);
+        rocsparse_clients_log_hip_error("hipFree", status);
+        if(status == hipSuccess)
+        {
+            this->m_device_memory = nullptr;
+        }
     }
 
     if(this->m_descr)
