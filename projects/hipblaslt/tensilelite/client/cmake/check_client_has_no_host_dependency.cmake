@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 if(NOT CLIENT OR NOT READELF)
     message(FATAL_ERROR "CLIENT and READELF are required")
 endif()
