@@ -346,20 +346,11 @@ Tests:
   gpu_arch: '9??'
 
 - name: gemv_grid_x_workitem_limit
-  category: nightly
+  category: pre_checkin
   function: gemv
   precision: *single_double_precisions_complex_real
   transA: [ T, C ]
   matrix_size: *gemvt_grid_x_workitem_limit_range
-  incx_incy: *incx_incy_unity
-  alpha_beta: *alpha_beta_range_small
-
-- name: gemv_grid_x_workitem_limit_nb1024
-  category: nightly
-  function: gemv
-  precision: *double_precision
-  transA: [ T, C ]
-  matrix_size: *gemvt_grid_x_workitem_limit_nb1024_range
   incx_incy: *incx_incy_unity
   alpha_beta: *alpha_beta_range_small
 
