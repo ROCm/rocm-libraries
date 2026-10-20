@@ -132,8 +132,8 @@ ROCSOLVER_BEGIN_NAMESPACE
             _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
         }                                                                                           \
         auto const max_x_grid = 2147483647;                                                         \
-        auto const max_y_grid = 64 * 1024;                                                          \
-        auto const max_z_grid = 64 * 1024;                                                          \
+        auto const max_y_grid = 64 * 1024 - 1;                                                      \
+        auto const max_z_grid = 64 * 1024 - 1;                                                      \
         bool const isvalid_grid = (1 <= grid_.x) && (grid_.x <= max_x_grid) && (1 <= grid_.y)       \
             && (grid_.y <= max_y_grid) && (1 <= grid_.z) && (grid_.z <= max_z_grid);                \
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
