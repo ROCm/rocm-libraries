@@ -3,16 +3,15 @@
 
 #pragma once
 
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_frontend/EngineQueryTypes.hpp>
+#include <hipdnn_tools/GraphContentKey.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -22,25 +21,7 @@
 namespace hipdnn_bench
 {
 
-/// @brief The content key of a serialized graph (or of the graph inside a graph-and-plan
-/// container): `GraphContentKey::hash()` in decimal, reported as `graph_key`.
-///
-/// The key ignores the graph's name and id and numbers tensors by position, so two graphs
-/// that compute the same thing share it. It is what a measurement is stored, deduplicated
-/// and held out under. hipdnn_corpus_gen's `graphContentKey` computes the same value, so a
-/// corpus manifest's `benchmark` is the key the bench reports for that file.
-inline std::string graphContentKey(const uint8_t* data, size_t size)
-{
-    const auto graph
-        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(data,
-                                                                                         size);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey key{graph};
-    if(!key.isUsable())
-    {
-        throw std::runtime_error("graph has no verifiable serialized content to key");
-    }
-    return std::to_string(key.hash());
-}
+using hipdnn_tools::graphContentKey;
 
 /// A knob tuple as a JSON object of knob name to value.
 inline nlohmann::json
@@ -82,6 +63,36 @@ inline nlohmann::json pageJson(const hipdnn_frontend::EngineCandidatePage& page,
             {"offset", page.offset},
             {"next_offset",
              page.nextOffset ? nlohmann::json(*page.nextOffset) : nlohmann::json(nullptr)}};
+}
+
+/// One `results[]` entry of a `--sweep --json` response: the candidate, its knobs and kernel
+/// features, then its outcome. `is_valid` means measured, never numerically correct; an
+/// untimed candidate has null timings, since a zero would read as a measurement.
+inline nlohmann::json sweepResultJson(const std::string& candidateId,
+                                      const nlohmann::json& knobs,
+                                      const nlohmann::json& kernelFeatures,
+                                      const CandidateOutcome& outcome)
+{
+    const bool timed = outcome.succeeded && outcome.iterationsRun > 0;
+    const auto timing = [timed](float milliseconds) {
+        return timed ? nlohmann::json(milliseconds) : nlohmann::json(nullptr);
+    };
+    return {{"candidate_id", candidateId},
+            {"knob_settings", knobs},
+            {"kernel_features", kernelFeatures},
+            {"rank", outcome.rank},
+            {"succeeded", outcome.succeeded},
+            {"is_valid", timed},
+            {"numerically_valid", outcome.numericallyValid},
+            {"validation", outcome.validation},
+            {"skip_reason", skipReason(outcome.succeeded, outcome.iterationsRun)},
+            {"min_time_ms", timing(outcome.minTimeMs)},
+            {"avg_time_ms", timing(outcome.avgTimeMs)},
+            {"robust_time_ms", timing(outcome.robustTimeMs)},
+            {"stddev_ms", timing(outcome.stddevMs)},
+            {"iterations", outcome.iterationsRun},
+            {"converged", outcome.converged},
+            {"workspace_bytes", outcome.workspaceBytes}};
 }
 
 } // namespace hipdnn_bench

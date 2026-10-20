@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -140,6 +141,95 @@ TEST(TestCsvOutput, AnUntimedCandidateHasEmptyTimings)
     EXPECT_EQ(csvTiming(true, 0.5F), "0.5");
     EXPECT_EQ(csvTiming(false, 0.0F), "");
     EXPECT_EQ(csvTiming(false, 0.5F), "");
+}
+
+namespace
+{
+
+std::vector<std::string> splitRow(const std::string& line)
+{
+    std::vector<std::string> fields;
+    std::string field;
+    for(const char c : line)
+    {
+        if(c == ',')
+        {
+            fields.push_back(field);
+            field.clear();
+            continue;
+        }
+        field += c;
+    }
+    fields.push_back(field);
+    return fields;
+}
+
+} // namespace
+
+TEST(TestCsvOutput, EveryValueOfARowLandsUnderItsOwnHeaderColumn)
+{
+    // Distinct values throughout, so a swapped column (minTimeMs written as avgTimeMs, the
+    // training label) shows.
+    CandidateOutcome outcome;
+    outcome.engine = "E";
+    outcome.rank = 3;
+    outcome.succeeded = true;
+    outcome.iterationsRun = 30;
+    outcome.verdict = "True";
+    outcome.validation = "agreed";
+    outcome.minTimeMs = 1.25F;
+    outcome.avgTimeMs = 2.5F;
+    outcome.robustTimeMs = 2.25F;
+    outcome.stddevMs = 0.125F;
+    outcome.converged = true;
+    outcome.workspaceBytes = 4096;
+
+    const auto header = splitRow(csvHeader({"device.cu_count"}, {"M"}, {"tile_m"}));
+    const auto row = splitRow(csvRow("p", "1234", {"304"}, {"1024"}, {"128"}, outcome));
+    ASSERT_EQ(row.size(), header.size());
+    std::map<std::string, std::string> cell;
+    for(size_t i = 0; i < header.size(); ++i)
+    {
+        cell[header[i]] = row[i];
+    }
+    const std::map<std::string, std::string> expected{{"problem", "p"},
+                                                      {"benchmark", "1234"},
+                                                      {"device.cu_count", "304"},
+                                                      {"q.M", "1024"},
+                                                      {"kernel.tile_m", "128"},
+                                                      {"engine", "E"},
+                                                      {"rank", "3"},
+                                                      {"succeeded", "1"},
+                                                      {"is_valid", "True"},
+                                                      {"numerically_valid", "True"},
+                                                      {"validation", "agreed"},
+                                                      {"skip_reason", ""},
+                                                      {"minTimeMs", "1.25"},
+                                                      {"avgTimeMs", "2.5"},
+                                                      {"robustMeanMs", "2.25"},
+                                                      {"stddevMs", "0.125"},
+                                                      {"iters", "30"},
+                                                      {"converged", "1"},
+                                                      {"workspace_bytes", "4096"}};
+    EXPECT_EQ(cell, expected);
+}
+
+TEST(TestCsvOutput, AnUntimedRowIsInvalidWithItsReasonAndNoTimings)
+{
+    CandidateOutcome outcome;
+    outcome.succeeded = true; // success without an iteration is not a measurement
+    outcome.avgTimeMs = 2.5F;
+    const auto header = splitRow(csvHeader({}, {}, {}));
+    const auto row = splitRow(csvRow("p", "1", {}, {}, {}, outcome));
+    ASSERT_EQ(row.size(), header.size());
+    std::map<std::string, std::string> cell;
+    for(size_t i = 0; i < header.size(); ++i)
+    {
+        cell[header[i]] = row[i];
+    }
+    EXPECT_EQ(cell["is_valid"], "False");
+    EXPECT_EQ(cell["avgTimeMs"], "");
+    EXPECT_EQ(cell["skip_reason"].rfind("not_timed", 0), 0U) << cell["skip_reason"];
 }
 
 } // namespace hipdnn_bench

@@ -11,26 +11,19 @@ add_executable(hipdnn_bench_tests
     TestNumericalValidation.cpp)
 
 target_compile_options(hipdnn_bench_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-# uhd_gen's dataset tests read this sample of the CSV; TestCsvOutput pins its header to it.
+# Samples of what hipdnn_bench writes, which uhd_gen's tests read: the CSV (TestCsvOutput pins
+# its header) and one `--sweep --json` result entry (TestCandidatePageJson pins it whole).
 # Staged and installed with the test data and found from the test binary, so an installed
 # run reads its own copy rather than the source tree.
-set(_csv_sample_source "${CMAKE_CURRENT_SOURCE_DIR}/../../uhd_gen/dataset/tests/fixtures/hipdnn_bench.csv")
 set(_csv_sample_subdir "hipdnn_bench")
-set(_csv_sample_staged "${HIPDNN_TEST_DATA_DIR}/${_csv_sample_subdir}/hipdnn_bench.csv")
-add_custom_command(
-    OUTPUT "${_csv_sample_staged}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPDNN_TEST_DATA_DIR}/${_csv_sample_subdir}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_csv_sample_source}" "${_csv_sample_staged}"
-    DEPENDS "${_csv_sample_source}"
-    COMMENT "Staging hipdnn_bench's CSV sample beside the test data"
-    VERBATIM
-)
-add_custom_target(hipdnn_bench_test_data
-    DEPENDS "${_csv_sample_staged}"
-    COMMENT "Staging hipdnn_bench test data")
+set(_samples_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../uhd_gen/dataset/tests/fixtures")
+set(_samples "${_samples_dir}/hipdnn_bench.csv" "${_samples_dir}/hipdnn_bench_sweep_result.json")
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/StageFiles.cmake)
+hipdnn_tools_stage_files(hipdnn_bench_test_data
+    "${HIPDNN_TEST_DATA_DIR}/${_csv_sample_subdir}"
+    FILES ${_samples}
+    INSTALL_DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_csv_sample_subdir}")
 add_dependencies(hipdnn_bench_tests hipdnn_bench_test_data)
-install(FILES "${_csv_sample_source}"
-        DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_csv_sample_subdir}")
 target_compile_definitions(hipdnn_bench_tests PRIVATE
     HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
     HIPDNN_BENCH_CSV_SAMPLE_SUBDIR="${_csv_sample_subdir}")

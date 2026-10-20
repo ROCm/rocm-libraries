@@ -19,6 +19,7 @@
 #include <hipdnn_bench/InputDomain.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
+#include <hipdnn_tools/CliArguments.hpp>
 #include <hipdnn_tools/CliNumbers.hpp>
 
 #include <hipdnn_backend.h>
@@ -161,43 +162,10 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
     {
         const std::string& arg = args[i];
         // A following flag is not a value: `--problem-id --no-header` must not swallow the flag.
-        bool missingValue = false;
-        const auto next = [&]() {
-            if(i + 1 >= args.size() || args[i + 1].rfind("--", 0) == 0)
-            {
-                missingValue = true;
-                return std::string();
-            }
-            return args[++i];
-        };
-        // The whole value is the number, or the argument is refused; an empty value is not a
-        // number. So is one outside what the option can hold: `--warmup -1` or a count that
+        // A number outside what the option can hold is refused: `--warmup -1`, or a count that
         // does not fit an int.
-        std::optional<std::string> badNumber;
-        std::string range;
-        const auto integer = [&](auto& target, int64_t atLeast) {
-            using Target = std::remove_reference_t<decltype(target)>;
-            const auto text = next();
-            if(missingValue)
-            {
-                return;
-            }
-            const auto value = hipdnn_tools::parseInteger(text);
-            const auto most = static_cast<int64_t>(std::numeric_limits<Target>::max());
-            if(!value)
-            {
-                badNumber = text;
-            }
-            else if(*value < atLeast || *value > most)
-            {
-                badNumber = text;
-                range = " in [" + std::to_string(atLeast) + ", " + std::to_string(most) + "]";
-            }
-            else
-            {
-                target = static_cast<Target>(*value);
-            }
-        };
+        hipdnn_tools::OptionReader reader(args, i);
+        const auto next = [&reader]() { return reader.next(); };
 
         if(arg == "--help" || arg == "-h")
         {
@@ -222,16 +190,9 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--engine-id")
         {
-            const auto text = next();
-            if(const auto id = hipdnn_tools::parseEngineId(text))
-            {
-                options.engineId = *id;
-                options.haveEngineId = true;
-            }
-            else if(!missingValue)
-            {
-                badNumber = text;
-            }
+            reader.number(
+                options.engineId, hipdnn_tools::parseEngineId, std::numeric_limits<int64_t>::min());
+            options.haveEngineId = true;
         }
         else if(arg == "--plugin-dir")
         {
@@ -276,7 +237,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--offset" || arg == "--limit")
         {
             options.havePageOptions = true;
-            integer(arg == "--offset" ? options.offset : options.limit, 0);
+            reader.integer(arg == "--offset" ? options.offset : options.limit, 0);
         }
         else if(arg == "--sweep")
         {
@@ -310,24 +271,15 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--max-iterations")
         {
-            integer(options.maxIterations, 1);
+            reader.integer(options.maxIterations, 1);
         }
         else if(arg == "--warmup")
         {
-            integer(options.warmup, 0);
+            reader.integer(options.warmup, 0);
         }
         else if(arg == "--stability")
         {
-            const auto text = next();
-            if(const auto value = hipdnn_tools::parseReal(text); value && *value >= 0.0)
-            {
-                options.stability = static_cast<float>(*value);
-            }
-            else if(!missingValue)
-            {
-                badNumber = text;
-                range = value ? " of at least 0" : "";
-            }
+            reader.real(options.stability, 0.0);
         }
         else if(arg == "--query")
         {
@@ -358,14 +310,8 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             printHelp(args[0].c_str());
             return ParseOutcome::INVALID;
         }
-        if(missingValue)
+        if(reader.refused(arg, std::cerr))
         {
-            std::cerr << arg << " needs a value\n";
-            return ParseOutcome::INVALID;
-        }
-        if(badNumber)
-        {
-            std::cerr << arg << " needs a number" << range << ", not '" << *badNumber << "'\n";
             return ParseOutcome::INVALID;
         }
     }
@@ -631,13 +577,34 @@ nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
     }
 }
 
+/// What one autotune result reports, with its cross-check verdict; @p engineName overrides
+/// the engine the result names.
+hipdnn_bench::CandidateOutcome outcomeOf(const AutotuneResult& result,
+                                         const hipdnn_bench::ValidationOutcome& verdict,
+                                         const std::string& engineName)
+{
+    hipdnn_bench::CandidateOutcome outcome;
+    outcome.engine = engineName.empty() ? result.engineName : engineName;
+    outcome.rank = result.rank;
+    outcome.succeeded = result.succeeded;
+    outcome.iterationsRun = result.iterationsRun;
+    outcome.verdict = hipdnn_bench::verdictText(verdict.verdict);
+    outcome.numericallyValid = numericallyValid(verdict.verdict);
+    outcome.validation = verdict.reason;
+    outcome.minTimeMs = result.minTimeMs;
+    outcome.avgTimeMs = result.avgTimeMs;
+    outcome.robustTimeMs = result.robustTimeMs;
+    outcome.stddevMs = result.stddevMs;
+    outcome.converged = result.converged;
+    outcome.workspaceBytes = static_cast<int64_t>(result.workspaceSize);
+    return outcome;
+}
+
 /// @brief Writes the validation fill into every input buffer of @p variantPack.
 ///
 /// Results keep their zero fill so a kernel that writes nothing is detectable. Types this
 /// build cannot encode exactly also keep zeros rather than risk filling NaNs. The inputs in
 /// @p positive -- read by an operation undefined on negative values -- are filled positive.
-/// @p allPositiveFilled is false when one of them is not an input this writes (a tensor the
-/// graph computes), so a NaN there may be correct.
 ///
 /// @p fills keeps each input's image (a function of seed, uid and size) across one problem's
 /// candidates, uploaded afresh into each candidate's buffers, so a kernel that scribbles on an
@@ -646,10 +613,8 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
                                        const std::unordered_map<int64_t, void*>& variantPack,
                                        uint64_t seed,
                                        const std::set<int64_t>& positive,
-                                       std::map<int64_t, std::vector<uint8_t>>& fills,
-                                       bool& allPositiveFilled)
+                                       std::map<int64_t, std::vector<uint8_t>>& fills)
 {
-    std::set<int64_t> filled;
     for(const auto& tensor : plan.tensors)
     {
         const auto buffer = variantPack.find(tensor.uid);
@@ -678,7 +643,6 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
         {
             continue;
         }
-        filled.insert(tensor.uid);
         if(tensor.storage == hipdnn_bench::TensorStorage::HOST)
         {
             std::memcpy(buffer->second, image.data(), image.size());
@@ -688,9 +652,6 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
             hipError(hipMemcpy(buffer->second, image.data(), image.size(), hipMemcpyHostToDevice),
                      "Could not fill a candidate's input"));
     }
-    allPositiveFilled = std::all_of(positive.begin(), positive.end(), [&filled](int64_t uid) {
-        return filled.count(uid) != 0;
-    });
     return {};
 }
 
@@ -709,8 +670,7 @@ hipdnn_frontend::Error
                            std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
                            std::map<int64_t, std::vector<uint8_t>>& images,
                            const std::set<int64_t>& positive,
-                           std::map<int64_t, std::vector<uint8_t>>& fills,
-                           bool& allPositiveFilled)
+                           std::map<int64_t, std::vector<uint8_t>>& fills)
 {
     BenchGraph graph;
     HIPDNN_CHECK_ERROR(
@@ -723,12 +683,8 @@ hipdnn_frontend::Error
     PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
     HIPDNN_CHECK_ERROR(allocateVariantPack(plan, buffers, variantPack));
-    HIPDNN_CHECK_ERROR(fillGraphInputs(plan,
-                                       variantPack,
-                                       hipdnn_bench::detail::graphFillSeed(graphBytes),
-                                       positive,
-                                       fills,
-                                       allPositiveFilled));
+    HIPDNN_CHECK_ERROR(fillGraphInputs(
+        plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes), positive, fills));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     void* workspace = workspaceSize > 0 ? buffers.addDevice(workspaceSize) : nullptr;
@@ -1263,8 +1219,6 @@ int runBench(const std::vector<std::string>& args)
     std::map<int64_t, hipdnn_bench::TensorDescription> tensors;
     hipdnn_bench::CatalogCrossCheck crossCheck(tensors);
     std::map<int64_t, std::vector<uint8_t>> fills; // One input image per uid, every candidate.
-    // Every candidate reads the same inputs, so whichever ran last says it for the problem.
-    bool allPositiveFilled = true;
     for(const auto& result : results)
     {
         hipdnn_bench::CandidateOutput captured;
@@ -1282,8 +1236,7 @@ int runBench(const std::vector<std::string>& args)
                                                     tensors,
                                                     captured.images,
                                                     positiveReads,
-                                                    fills,
-                                                    allPositiveFilled);
+                                                    fills);
             captured.executed = ran.is_good();
             if(!ran.is_good())
             {
@@ -1294,7 +1247,6 @@ int runBench(const std::vector<std::string>& args)
         }
         crossCheck.add(std::move(captured));
     }
-    crossCheck.setNonFiniteMayBeCorrect(!allPositiveFilled);
     const auto verdicts = crossCheck.verdicts();
 
     if(options.json)
@@ -1321,40 +1273,11 @@ int runBench(const std::vector<std::string>& args)
                 std::cerr << "Measured configuration was not an enrolled catalog candidate\n";
                 return 1;
             }
-            // is_valid means measured, not numerically correct.
-            const bool timed = result.succeeded && result.iterationsRun > 0;
-            // An untimed candidate has no timings: a zero would read as a measurement.
-            const auto timing = [timed](float milliseconds) {
-                return timed ? nlohmann::json(milliseconds) : nlohmann::json(nullptr);
-            };
-            std::string reason;
-            if(!result.succeeded)
-            {
-                reason = "config_not_applicable: engine declined or failed to run this "
-                         "configuration";
-            }
-            else if(result.iterationsRun == 0)
-            {
-                reason = "not_timed: autotune reported success without running an iteration";
-            }
-            // Separate from `is_valid` so an unmeasured row and an incorrect row stay distinct.
-            const auto& verdict = verdicts[index];
-            output["results"].push_back({{"candidate_id", candidate->id},
-                                         {"knob_settings", hipdnn_bench::knobJson(tuple)},
-                                         {"kernel_features", candidate->kernelFeatures},
-                                         {"rank", result.rank},
-                                         {"succeeded", result.succeeded},
-                                         {"is_valid", timed},
-                                         {"numerically_valid", numericallyValid(verdict.verdict)},
-                                         {"validation", verdict.reason},
-                                         {"skip_reason", reason},
-                                         {"min_time_ms", timing(result.minTimeMs)},
-                                         {"avg_time_ms", timing(result.avgTimeMs)},
-                                         {"robust_time_ms", timing(result.robustTimeMs)},
-                                         {"stddev_ms", timing(result.stddevMs)},
-                                         {"iterations", result.iterationsRun},
-                                         {"converged", result.converged},
-                                         {"workspace_bytes", result.workspaceSize}});
+            output["results"].push_back(
+                hipdnn_bench::sweepResultJson(candidate->id,
+                                              hipdnn_bench::knobJson(tuple),
+                                              candidate->kernelFeatures,
+                                              outcomeOf(result, verdicts[index], "")));
         }
         std::cout << output.dump() << "\n";
         return results.empty() ? 2 : 0;
@@ -1400,52 +1323,30 @@ int runBench(const std::vector<std::string>& args)
 
     // Emit every variant, including losers and failures: ranking needs the comparison.
     // Treat `rank` as advisory; near-ties flip between runs, so train on times (§5.6).
+    std::vector<std::string> features;
+    features.reserve(featureColumns.size());
+    for(const auto& column : featureColumns)
+    {
+        features.push_back(column.second);
+    }
+    std::vector<std::string> queries;
+    queries.reserve(options.query.size());
+    for(const auto& entry : options.query)
+    {
+        queries.push_back(entry.second);
+    }
     for(size_t index = 0; index < results.size(); ++index)
     {
         const auto& result = results[index];
-        // Every text field goes through csvField: the problem id defaults to the graph's path,
-        // and knob values and engine names are free text.
-        std::cout << hipdnn_bench::csvField(problemId) << "," << hipdnn_bench::csvField(graphKey);
-        for(const auto& column : featureColumns)
-        {
-            std::cout << "," << hipdnn_bench::csvField(column.second);
-        }
-        for(const auto& entry : options.query)
-        {
-            std::cout << "," << hipdnn_bench::csvField(entry.second);
-        }
+        std::vector<std::string> knobs;
+        knobs.reserve(kernelNames.size());
         for(const auto& knob : kernelNames)
         {
-            std::cout << "," << hipdnn_bench::csvField(knobFor(result, knob));
+            knobs.push_back(knobFor(result, knob));
         }
-        // RFC 0019.13 §7.4/§8: untimed pairs are kept with is_valid=False and a skip_reason
-        // for coverage auditing; training filters on is_valid.
-        const bool timed = result.succeeded && result.iterationsRun > 0;
-        std::string skipReason;
-        if(!result.succeeded)
-        {
-            skipReason = "config_not_applicable: engine declined or failed to run this "
-                         "configuration";
-        }
-        else if(result.iterationsRun == 0)
-        {
-            // Emitting this as valid would put a zero time in the training set.
-            skipReason = "not_timed: autotune reported success without running an iteration";
-        }
-
-        std::cout << ","
-                  << hipdnn_bench::csvField(options.engineName.empty() ? result.engineName
-                                                                       : options.engineName)
-                  << "," << result.rank << "," << (result.succeeded ? 1 : 0) << ","
-                  << (timed ? "True" : "False") << ","
-                  << hipdnn_bench::verdictText(verdicts[index].verdict) << ","
-                  << hipdnn_bench::csvField(verdicts[index].reason) << ","
-                  << hipdnn_bench::csvField(skipReason) << ","
-                  << hipdnn_bench::csvTiming(timed, result.minTimeMs) << ","
-                  << hipdnn_bench::csvTiming(timed, result.avgTimeMs) << ","
-                  << hipdnn_bench::csvTiming(timed, result.robustTimeMs) << ","
-                  << hipdnn_bench::csvTiming(timed, result.stddevMs) << "," << result.iterationsRun
-                  << "," << (result.converged ? 1 : 0) << "," << result.workspaceSize << "\n";
+        const auto outcome = outcomeOf(result, verdicts[index], options.engineName);
+        std::cout << hipdnn_bench::csvRow(problemId, graphKey, features, queries, knobs, outcome)
+                  << "\n";
     }
 
     return results.empty() ? 2 : 0;

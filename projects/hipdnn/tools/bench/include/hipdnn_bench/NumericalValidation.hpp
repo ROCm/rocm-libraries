@@ -229,8 +229,9 @@ inline double decodeElement(const std::vector<uint8_t>& image,
 ///
 /// 1 and 2 are exact in every type encodeFillElement() writes, so encoding never rounds.
 /// Signed so large reductions do not overflow fp16; positive where an operation is undefined
-/// on negative values (`inputFillImage`'s @p positive). On these inputs no correct kernel
-/// produces a NaN or an infinity, so the cross-check takes one as wrong.
+/// on negative values (`inputFillImage`'s @p positive). An exact result can still overflow its
+/// output type (a product of 64 values of magnitude 2 in fp16), so the cross-check does not
+/// take a NaN or an infinity as wrong by itself.
 struct FillValue
 {
     bool negative = false;
@@ -627,10 +628,9 @@ inline size_t comparableTensors(const CandidateOutput& candidate,
 ///        per distinct answer rather than one per candidate.
 ///
 /// A candidate whose output holds a NaN or an infinity takes no part in the vote. It is
-/// DISAGREED: the validation fill gives every correct kernel finite results. Only when an
-/// operation undefined on negative values reads a tensor the fill does not reach
-/// (setNonFiniteMayBeCorrect) can a non-finite output be correct; it is then DISAGREED when
-/// the finite candidates reach a majority, and UNKNOWN otherwise. The rest are grouped into
+/// DISAGREED when the finite candidates reach a majority, and UNKNOWN otherwise: an exact
+/// result can overflow the output type, so a non-finite output every candidate shares may be
+/// correct. The rest are grouped into
 /// cohorts with identical output. A strict-majority cohort is
 /// AGREED and everything else DISAGREED; without a strict majority every cross-checked
 /// candidate is DISAGREED, since some candidate is wrong and first-one-wins could invert the
@@ -692,13 +692,6 @@ public:
         _cohorts.push_back(std::move(founded));
     }
 
-    /// @brief Whether a NaN or an infinity can be a correct output of this problem: true when an
-    ///        operation undefined on negative values reads a tensor the fill does not reach.
-    void setNonFiniteMayBeCorrect(bool mayBeCorrect)
-    {
-        _nonFiniteMayBeCorrect = mayBeCorrect;
-    }
-
     /// Host image sets held right now: one per distinct answer seen, never one per candidate.
     size_t retainedImages() const
     {
@@ -713,25 +706,20 @@ public:
     {
         auto outcomes = _outcomes;
         const bool decided = decide(outcomes);
+        // A NaN or an infinity is wrong only beside an agreed finite output: the exact result
+        // can overflow the output type, or an operation undefined on negative values can read
+        // a computed tensor, and then every correct kernel writes it.
         for(const auto& [index, detailText] : _nonFinite)
         {
-            if(!_nonFiniteMayBeCorrect)
-            {
-                outcomes[index] = {NumericalVerdict::DISAGREED,
-                                   "non_finite_output: " + detailText
-                                       + ", which no correct kernel produces from the "
-                                         "validation fill"};
-                continue;
-            }
             outcomes[index] = decided
                                   ? ValidationOutcome{NumericalVerdict::DISAGREED,
                                                       "output_mismatch: " + detailText
                                                           + ", where the agreed output is finite"}
                                   : ValidationOutcome{NumericalVerdict::UNKNOWN,
                                                       "non_finite_output: " + detailText
-                                                          + "; an operation undefined on "
-                                                            "negative values reads a computed "
-                                                            "tensor, so it may be correct"};
+                                                          + "; no candidate wrote a finite "
+                                                            "output to compare, so it may be "
+                                                            "correct"};
         }
         return outcomes;
     }
@@ -842,8 +830,6 @@ private:
 
     /// Add-order index and first non-finite element of each candidate kept out of the vote.
     std::vector<std::pair<size_t, std::string>> _nonFinite;
-
-    bool _nonFiniteMayBeCorrect = false;
 
     /// Where @p candidate first parts company with @p reference, named for the row.
     std::string mismatchDetail(const CandidateOutput& candidate,
