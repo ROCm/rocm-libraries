@@ -87,7 +87,7 @@ and must destroy it with ``hipblasLtEmulationDescDestroy`` when done.
        ``HIPBLASLT_EMULATION_STRATEGY_EAGER`` (2) = always emulate.
    * - ``HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT``
      - ``int32_t``
-     - ADP precision target in mantissa bits: ``1``..``52`` for FP64 (``1``..``23`` for FP32).
+     - ADP precision target in mantissa bits: ``1..52`` for FP64 (``1..23`` for FP32).
        ``0`` = inherit from env var (default = full precision).
    * - ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
      - ``int32_t``
@@ -98,7 +98,7 @@ and must destroy it with ``hipblasLtEmulationDescDestroy`` when done.
        ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN`` (3) = NaN only.
 
 **Attaching to a matmul descriptor** — use the single matmul attribute
-``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR`` (value = 107):
+``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``:
 
 .. code-block:: c
 
