@@ -1845,48 +1845,6 @@
         "verified_on": "llvm23"
       }
     },
-    "ds.read.tr16.b128": {
-      "gfx11-generic": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx1151": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx12-generic": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx1201": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx1250": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx90a": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx942": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      },
-      "gfx950": {
-        "evidence": "not an intrinsic in llvm23",
-        "status": "name_absent",
-        "verified_on": "llvm23"
-      }
-    },
     "ds.read.tr16.b64": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.read.tr16.b64",

@@ -196,10 +196,6 @@ typedef short i16x4_raw __attribute__((ext_vector_type(4)));
 __device__ extern "C" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(
  const __attribute__((address_space(3))) void*)
  __asm("llvm.amdgcn.ds.read.tr16.b64");
-typedef short i16x8_raw __attribute__((ext_vector_type(8)));
-__device__ extern "C" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(
- const __attribute__((address_space(3))) void*)
- __asm("llvm.amdgcn.ds.read.tr16.b128");
 // ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to
 // {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},
 // which is what async-DMA pipelines (compv4 / split-KV attention) need.
@@ -2418,26 +2414,6 @@ class _Lowerer:
             f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
         )
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
-
-    def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        # ``ds_read_b128_tr_b16`` -- wide gfx950 transpose-read.
-        # Same shape as the b64 variant, ``<8 x i16>`` per lane.
-        self._require_ds_read_tr("ds_read_tr16_b128")
-        smem = op.operands[0]
-        indices = op.operands[1:]
-        storage = smem.op.attrs.get("_storage")
-        if storage is None:
-            raise RuntimeError("ds_read_tr16_b128 before smem_alloc was lowered")
-        idx_str = "][".join(_name(i) for i in indices)
-        elem = op.attrs.get("elem_type", "f16")
-        vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")
-        nice = _name(op.result)
-        raw_tmp = f"_trraw_{nice.lstrip('%')}"
-        self._emit(
-            f"i16x8_raw {raw_tmp} = _llvm_amdgcn_ds_read_tr16_b128("
-            f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
-        )
-        self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands

@@ -237,10 +237,9 @@ int rocke_ll_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem);
 void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem);
 
-/* The two ds_read_tr16_b128 opcode selections (Python
- * ISABackend.ds_tr16_b128_spec and the Gfx1250Backend override). Defined in
- * the crosslane bucket alongside the handler. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out);
+/* The gfx1250 ds_read_tr16_b128 opcode selection (Python
+ * Gfx1250Backend.ds_tr16_b128_spec). Defined in the crosslane bucket alongside
+ * the handler. Other backends leave the pointer NULL. */
 bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out);
 
 /* ====================================================================== */

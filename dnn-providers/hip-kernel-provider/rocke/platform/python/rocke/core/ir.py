@@ -4141,17 +4141,14 @@ class IRBuilder:
     def ds_read_tr16_b128(
         self, smem: Value, *indices: Value, dtype: Type = F16
     ) -> Value:
-        """``ds_read_b128_tr_b16`` — gfx950 wide transpose-read.
+        """``ds_load_tr16_b128`` — gfx1250 wide transpose-read.
 
         Same shape as :meth:`ds_read_tr16_b64` but reads 16 bytes per
-        lane instead of 8. Per-lane result is ``<8 x f16>`` (or bf16),
-        delivering the MFMA B-operand layout for the K-packed atoms
-        (``f16_16x16x32`` / ``bf16_16x16x32``) in a single LDS op
-        instead of two paired ``b64`` reads.
-
-        Used by transpose phase-2 and the PV-V LDS read in
-        ``attention_tiled_2d`` 32x32 path: 8 scalar ``ds_read_u16``
-        per lane → 1 transposed read.
+        lane instead of 8. Per-lane result is ``<8 x f16>`` (or bf16).
+        Only gfx1250 lowers this op. gfx950 has no such instruction and
+        LLVM has no ``ds.read.tr16.b128``, so lowering for any other
+        target raises ``NotImplementedError``. Use two
+        :meth:`ds_read_tr16_b64` reads there.
         """
         if not indices:
             raise ValueError("ds_read_tr16_b128 needs at least one index")
