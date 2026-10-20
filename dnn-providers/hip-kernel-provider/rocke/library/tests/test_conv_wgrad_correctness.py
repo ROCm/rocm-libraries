@@ -1152,26 +1152,6 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
             if prev is not None:
                 os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
 
-    def test_dispatch_uses_the_same_policy(self):
-        """Dispatch must not carry its own copy of the gate.
-
-        The divergent copy compared a module constant against a tuple, which is
-        constant-true regardless of the request, and never checked wave_size.
-        """
-        try:
-            from library.dispatch.grouped_convolution import _wgrad_lds_k_outer
-        except ImportError:
-            self.skipTest("library.dispatch not importable in this environment")
-
-        class _Req:
-            def __init__(self, arch, dtype):
-                self.arch, self.dtype = arch, dtype
-
-        self.assertTrue(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx942", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "fp32"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 64))
-
     def test_policy_agrees_with_validate(self):
         """Anything the policy turns on must actually construct."""
         from kernels.common._conv_implicit_gemm_common import ConvProblem

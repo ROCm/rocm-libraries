@@ -26,6 +26,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/RocRollerWgmKernargs.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -38,6 +39,7 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
+#include <optional>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/PreSwizzle.hpp>
 #endif
@@ -50,6 +52,7 @@
 #include <cstring>
 #include <iomanip>
 #include <mutex>
+#include <numeric>
 #include <random>
 #include <unordered_map>
 
@@ -367,6 +370,22 @@ namespace TensileLite
                           << ", so those solutions are excluded from selection and a "
                              "non-work-stealing solution will be used instead.\n";
             });
+        }
+
+        // Workspace queries and launch preparation can resolve the same grid
+        // repeatedly. Keep only the last notice per thread so distinct adjustments
+        // remain visible without retaining an unbounded set of kernel names.
+        void warnStreamKClusterGridAdjustment(std::string const& kernelName,
+                                              size_t requested, size_t aligned, size_t clusterWidth)
+        {
+            static thread_local std::tuple<std::string, size_t, size_t, size_t> lastNotice;
+            auto notice = std::tie(kernelName, requested, aligned, clusterWidth);
+            if(lastNotice == notice)
+                return;
+            lastNotice = notice;
+            std::cerr << "hipBLASLt Warning: rounding StreamK worker budget down from " << requested
+                      << " to " << aligned << " for ClusterDim=[" << clusterWidth
+                      << ",1] (kernel '" << kernelName << "').\n";
         }
 
         // One-shot notice when uniform-summation-order grid steering displaces a developer
@@ -2657,6 +2676,14 @@ namespace TensileLite
                 rv.numWorkGroups.x = launch.grid;
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
+                // A whole-tile StreamK fallback keeps grid == totalTiles so it
+                // needs no partial workspace. Extra physical workgroups hit the
+                // static kernel's no-work exit; do not change its logical grid.
+                if(sizeMapping.isStreamK() && sizeMapping.hasStaticAssignment()
+                   && sizeMapping.clusterDim.x > 1 && sizeMapping.clusterDim.y == 1
+                   && launch.grid == launch.totalTiles)
+                    rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x,
+                                                           sizeMapping.clusterDim.x);
             }
         }
 
@@ -2678,8 +2705,8 @@ namespace TensileLite
         // Its padded work-groups early-exit before the cluster barrier and the
         // surviving peers' broadcast masks are trimmed to the present lanes
         // (computeMulticastMaskReduction). The DataParallel cluster grid above is
-        // already a whole number of clusters. A StreamK cluster keeps the existing
-        // launch -- its 1-D launch.grid is not a tile space and it has no pad-exit.
+        // already a whole number of clusters. StreamK selects aligned workers;
+        // only its whole-tile fallback can pad the physical launch above.
         if(enableCluster && !sizeMapping.isPersistent())
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
@@ -3048,8 +3075,13 @@ namespace TensileLite
         const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
         const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
         const size_t descriptorStrideCD = usesDataParallelArgsV1 ? startStrideCD : 1;
-        auto const& descriptorA = usesDataParallelArgsV1 && problemType.sparse == 1 ? problem.compressed() : problem.a();
-        auto const& descriptorB = usesDataParallelArgsV1 && problemType.sparse == 2 ? problem.compressed() : problem.b();
+        bool         sparseA = problemType.sparse == 1;
+        bool         sparseB = problemType.sparse == 2;
+        auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
+        auto const&  descriptorB = sparseB ? problem.compressed() : problem.b();
+        void const*  aAddress = sparseA ? inputs.compressed : inputs.a;
+        void const*  bAddress = sparseB ? inputs.compressed : inputs.b;
+
         const bool pointerArrayBatch
             = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
@@ -3064,6 +3096,26 @@ namespace TensileLite
 
         if(T_Debug)
             std::cout << "Custom call arguments:" << std::endl;
+
+        // rocRoller workgroup-mapping kernels read M, N, the macrotile, and
+        // WGM. hipBLASLt supplies DEFAULT_WGM (2). Computed only if a custom
+        // kernel argument asks for one of those semantics.
+        std::optional<RocRollerWgmKernargs> wgmKernargs;
+        auto wgmKernarg = [&]() -> RocRollerWgmKernargs const& {
+            if(!wgmKernargs)
+            {
+                if(problem.problemSizes().size() < 2)
+                    throw std::runtime_error(
+                        "rocRoller WGM kernargs need M and N problem sizes");
+                wgmKernargs = evaluateRocRollerWgmKernargs(
+                    static_cast<int64_t>(problem.problemSizes()[0]),
+                    static_cast<int64_t>(problem.problemSizes()[1]),
+                    customKernel.macrotile.x,
+                    customKernel.macrotile.y,
+                    RocRollerDefaultWgm);
+            }
+            return *wgmKernargs;
+        };
 
         for(auto arg : customKernel.args)
         {
@@ -3201,11 +3253,11 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
-                        problem.a().strides()[1] * problem.a().elementBytes(), arg.type);
+                        descriptorA.strides()[1] * descriptorA.elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideB0Bytes:
                     rv.args.appendCustomType("StrideB0Bytes",
-                        problem.b().strides()[1] * problem.b().elementBytes(), arg.type);
+                        descriptorB.strides()[1] * descriptorB.elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideC0Bytes:
                     rv.args.appendCustomType("StrideC0Bytes",
@@ -3292,8 +3344,8 @@ namespace TensileLite
                         usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchA)
                                    ? static_cast<void const*>(inputs.batchA)
-                                   : problemType.sparse == 1 ? inputs.compressed : inputs.a)
-                            : inputs.a);
+                                   : aAddress)
+                            : aAddress);
                     break;
                 case CustomArgSemantic::AddressB:
                     rv.args.template append<void const*>(
@@ -3301,8 +3353,8 @@ namespace TensileLite
                         usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchB)
                                    ? static_cast<void const*>(inputs.batchB)
-                                   : problemType.sparse == 2 ? inputs.compressed : inputs.b)
-                            : inputs.b);
+                                   : bAddress)
+                            : bAddress);
                     break;
                 case CustomArgSemantic::AddressC:
                 {
@@ -3372,6 +3424,12 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::AddressTD:
                     rv.args.template append<void const*>("AddressTD", inputs.d);
+                    break;
+                case CustomArgSemantic::AddressScaleZeroA:
+                    rv.args.template append<void const*>("AddressScaleZeroA", inputs.scaleZeroA);
+                    break;
+                case CustomArgSemantic::ScaleBlockSizeA:
+                    rv.args.appendCustomType("groupSize", problem.scaleBlockSizeA(), arg.type);
                     break;
                 case CustomArgSemantic::AddressScaleA:
                     rv.args.template append<void const*>("AddressScaleA", inputs.scaleA);
@@ -3602,6 +3660,43 @@ namespace TensileLite
                     rv.args.template append<uint32_t>("RNDSeed", distribution(gen));
                     break;
                 }
+
+                // rocRoller workgroup mapping. libdivide branchfree magics of
+                // the WGM integer, numTilesN, the tail, and the main block,
+                // plus the two signed quotients. Not Tensile magicNumber().
+                case CustomArgSemantic::RR_WorkgroupMapping:
+                    rv.args.appendCustomType("RR_WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleWgm:
+                    rv.args.appendCustomType("RR_MagicMultipleWgm", wgmKernarg().magicMultipleWgm, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignWgm:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgm", wgmKernarg().magicShiftAndSignWgm, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleNumTilesN:
+                    rv.args.appendCustomType("RR_MagicMultipleNumTilesN", wgmKernarg().magicMultipleNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignNumTilesN:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignNumTilesN", wgmKernarg().magicShiftAndSignNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_QuotientTilesMByWgm:
+                    rv.args.appendCustomType("RR_QuotientTilesMByWgm", wgmKernarg().quotientTilesMByWgm, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleWgmTail:
+                    rv.args.appendCustomType("RR_MagicMultipleWgmTail", wgmKernarg().magicMultipleWgmTail, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignWgmTail:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgmTail", wgmKernarg().magicShiftAndSignWgmTail, arg.type);
+                    break;
+                case CustomArgSemantic::RR_QuotientTilesByBlock:
+                    rv.args.appendCustomType("RR_QuotientTilesByBlock", wgmKernarg().quotientTilesByBlock, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleWgmMainBlock:
+                    rv.args.appendCustomType("RR_MagicMultipleWgmMainBlock", wgmKernarg().magicMultipleWgmMainBlock, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
+                    break;
 
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));
@@ -7022,6 +7117,39 @@ namespace TensileLite
                 return grid;
             }
 
+            // Generated static StreamK uses a 1-D worker grid. Choose complete
+            // clusters before partitioning K or sizing workspace. Other cluster
+            // layouts and handwritten kernels retain their own launch contracts.
+            const size_t clusterWidth
+                = self.sizeMapping.isStreamK() && self.sizeMapping.hasStaticAssignment()
+                          && self.sizeMapping.clusterDim.y == 1
+                          && self.sizeMapping.clusterDim.x > 1
+                          && (self.customKernel.name.empty() || self.customKernel.generated)
+                      ? self.sizeMapping.clusterDim.x : 1;
+            auto alignWorkerGrid = [clusterWidth, &self](size_t workers) {
+                if(clusterWidth > 1 && workers < clusterWidth)
+                    throw std::invalid_argument(concatenate(
+                        "StreamK worker budget ", workers, " is smaller than ClusterDim=[",
+                        clusterWidth, ",1]; at least ", clusterWidth,
+                        " workers are required (kernel '", self.kernelName, "')."));
+                return clusterWidth > 1 ? (workers / clusterWidth) * clusterWidth : workers;
+            };
+            const size_t requestedGrid = grid;
+            // Reject an undersized budget before either reduction path can
+            // replace it with a whole-tile fallback or size partial workspace.
+            grid = alignWorkerGrid(grid);
+            if(clusterWidth > 1 && tiles > 0 && reductionStrat == origami::reduction_t::parallel)
+            {
+                // Parallel reduction also needs an integral number of workers
+                // per tile. If no split fits, grid == tiles reconciles to tree
+                // reduction and the whole-tile launch is padded above.
+                const size_t splitMultiple = clusterWidth / std::gcd(tiles, clusterWidth);
+                const size_t splits = (grid / tiles / splitMultiple) * splitMultiple;
+                grid = tiles * std::max(splits, size_t{1});
+            }
+            if(clusterWidth > 1 && grid < requestedGrid && grid % clusterWidth == 0)
+                warnStreamKClusterGridAdjustment(self.kernelName, requestedGrid, grid, clusterWidth);
+
             // Under uniform-summation-order + static two-tile packing, snap the chain output
             // g0 onto an admissible uniform grid. F-star is never-upward
             // (g0 > tiles). When g0 < tiles, snap up to tiles (all-full): mixed
@@ -7088,6 +7216,8 @@ namespace TensileLite
                         size_t       FStar = 1; // always admissible (all-full)
                         for(size_t F = F0; F >= 2; --F)
                         {
+                            if((tiles * F) % clusterWidth != 0)
+                                continue;
                             // Tree all-partial without per-tile extras needs
                             // F | I. Parallel extras are per PartialIdx and
                             // tile-symmetric without that capability bit, so
@@ -7159,7 +7289,7 @@ namespace TensileLite
                 {
                     const size_t occupancy
                     = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
-                    grid = (tiles >= maxTiles) ? cuCount * occupancy : tiles;
+                    grid = (tiles >= maxTiles) ? alignWorkerGrid(cuCount * occupancy) : tiles;
                     if(outTreeBoundsFallback)
                         *outTreeBoundsFallback = true;
                 }
@@ -7233,7 +7363,7 @@ namespace TensileLite
                               << "-entry flag region (tiles=" << tiles
                               << "); clamping the grid to " << flagEntries << ".\n";
                 }
-                grid = flagEntries;
+                grid = alignWorkerGrid(flagEntries);
             }
 
             return grid;

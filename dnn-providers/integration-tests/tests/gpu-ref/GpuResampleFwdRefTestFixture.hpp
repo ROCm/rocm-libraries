@@ -45,37 +45,39 @@ void runGpuVsCpuResampleFwd(const std::vector<int64_t>& xDims,
         xTensor, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
     xTensor.memory().hostData();
 
-    auto yCpu = Tensor<YDataType>(yDims, layout);
-    auto yGpu = Tensor<YDataType>(yDims, layout);
+    auto yTensorCpu = Tensor<YDataType>(yDims, layout);
+    auto yTensorGpu = Tensor<YDataType>(yDims, layout);
 
     const auto includeIndex = (resampleMode == ResampleMode::MAXPOOL);
-    auto indexCpu = includeIndex ? Tensor<IndexDataType>(yDims, layout) : Tensor<IndexDataType>({});
-    auto indexGpu = includeIndex ? Tensor<IndexDataType>(yDims, layout) : Tensor<IndexDataType>({});
+    auto indexTensorCpu
+        = includeIndex ? Tensor<IndexDataType>(yDims, layout) : Tensor<IndexDataType>({});
+    auto indexTensorGpu
+        = includeIndex ? Tensor<IndexDataType>(yDims, layout) : Tensor<IndexDataType>({});
 
     CpuFpReferenceResampleFwd::forward<XDataType, YDataType, ComputeDataType, IndexDataType>(
         xTensor,
-        yCpu,
+        yTensorCpu,
         prePadding,
         stride,
         window,
         resampleMode,
         paddingMode,
-        includeIndex ? &indexCpu : nullptr);
+        includeIndex ? &indexTensorCpu : nullptr);
     GpuFpReferenceResample::forward<XDataType, YDataType, ComputeDataType, IndexDataType>(
         xTensor,
-        yGpu,
+        yTensorGpu,
         prePadding,
         postPadding,
         stride,
         window,
         resampleMode,
         paddingMode,
-        includeIndex ? &indexGpu : nullptr);
+        includeIndex ? &indexTensorGpu : nullptr);
 
-    assertAllClose(yCpu, yGpu, resample::getTolerance<YDataType>());
+    assertAllClose(yTensorCpu, yTensorGpu, resample::getTolerance<YDataType>());
     if(includeIndex)
     {
-        assertAllExact(indexCpu, indexGpu);
+        assertAllExact(indexTensorCpu, indexTensorGpu);
     }
 }
 

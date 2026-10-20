@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Mapping, Tuple
 
+from kernels.gfx950.attention_dense import gfx950_dense_tile_legality
+
 from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rules)
     KnobAxis,
     Knobs,
@@ -23,7 +25,6 @@ from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rul
     sorted_items as _items,
     values as _values,
 )
-
 
 # AMDGPU ``sched_barrier`` ABI: 0 is a full fence, and each bit lets one
 # instruction class cross it (ALU, VALU, SALU, MFMA, VMEM, VMEM rd, VMEM wr,
@@ -117,9 +118,14 @@ _GFX942_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_causal_mask_phase_split"),
 )
 
+# The K/V cache policy's base value follows the problem (``_kv_cache_policy_3d``).
+# Combinations the spec rejects (e.g. a K/V layout knob without paged fp16/bf16
+# K/V) are dropped.
 _3D_AXES: Tuple[KnobAxis, ...] = (
-    _flag("use_invariant_hoist"),
     _flag("use_wide_kv_load"),
+    _choices_axis("kv_cache_policy", ("stream", "all")),
+    _flag("use_kv_lds_swizzle"),
+    _flag("use_wave_page_id_load"),
 )
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
@@ -147,6 +153,11 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "causal_bottom_right",
     }
 )
+# Problem fields only some arches' dense specs declare (the band's right bound).
+DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"right_bound"}),
+    "gfx942": frozenset(),
+}
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),
@@ -188,10 +199,19 @@ _GFX942_LDS_ROW_PADS = (0, 4, 8, 12, 16, 24, 32)
 _GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
 _GFX942_BLOCK_M = (32, 64, 128, 256, 512)
 _GFX942_BLOCK_N = (32, 64, 128, 256)
-# The gfx950 bodies implement 128- and 256-row query tiles (see
-# supports_attention_dense); the validator prunes block_n the tile cannot take.
-_GFX950_BLOCK_M = (128, 256)
-_GFX950_BLOCK_N = (32, 64, 128)
+# Derive the gfx950 block_m / block_n axes from gfx950_dense_tile_legality so
+# the axis and the LDS predicate are always in sync.  The legality function is
+# the single source of truth: the axes below, the supports_attention_dense gate,
+# and (via this import) the tuning sweep all reference the same budget model.
+_GFX950_LEGAL_TILES: dict = {
+    hs: gfx950_dense_tile_legality(head_size=hs) for hs in (64, 128)
+}
+_GFX950_BLOCK_M: tuple = tuple(
+    sorted({bm for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
+_GFX950_BLOCK_N: tuple = tuple(
+    sorted({bn for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
 
 
 def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
@@ -265,6 +285,76 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("causal_diag_split", False, (True,)),
 )
 
+# RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never
+# varies: the head-width buckets, mask class, bias kind, score features, layout
+# and K/V storage all come from the request.
+WMMA_PROBLEM_FIELDS = frozenset(
+    {
+        "dtype",
+        "head_dim",
+        "head_dim_v",
+        "mask",
+        "bias",
+        "use_softcap",
+        "use_sinks",
+        "use_alibi",
+        "use_qq_bias",
+        "layout",
+        "page_block_size",
+        "kv_dtype",
+        "name",
+    }
+)
+# The policy spells every prefill knob out (``block_m`` and ``wave_pair``
+# included), so each axis offers every setting and the base-equal choice is
+# pruned; the validator drops a wave-pair setting the head widths or the family
+# cannot run (gfx11 splits any width above 128; the pair needs multiples of 32).
+_RDNA_WMMA_AXES: Tuple[KnobAxis, ...] = (
+    _choices_axis("block_m", (32, 64, 128)),
+    _choices_axis("wave_pair", (True, False)),
+    _choices_axis("block_n", (16, 32, 64)),
+    _choices_axis("waves_per_eu", (0, 1, 2, 4)),
+    _choices_axis("scheduler_strategy", (None, "max-ilp")),
+    _choices_axis("lazy_rescale", (True, False)),
+    _choices_axis("k_pad", (0, 8, 16)),
+    _choices_axis("v_pad", (0, 8, 16)),
+    _choices_axis("cta_order", ("hqb", "hbq")),
+)
+
+# RDNA WMMA split-KV decode (``WmmaFmhaDecodeSpec``) fields the space never
+# varies: the bucket, bias kind, score features, layout and K/V storage come
+# from the request; ``wmma_family`` records which family resolved the knobs.
+WMMA_DECODE_PROBLEM_FIELDS = frozenset(
+    {
+        "head_size",
+        "dtype",
+        "bias",
+        "softcap",
+        "sinks",
+        "alibi",
+        "qq_bias",
+        "kv_dtype",
+        "layout",
+        "page_block_size",
+        "name",
+    }
+)
+WMMA_DECODE_PATH_FIELDS = frozenset({"wmma_family"})
+# The policy resolves every decode knob per family and bucket
+# (``resolve_wmma_fmha_decode_spec``), so each axis offers every setting.
+_RDNA_WMMA_DECODE_AXES: Tuple[KnobAxis, ...] = (
+    _choices_axis("num_waves", (1, 2, 4, 8)),
+    _choices_axis("dv_split", (1, 2, 4)),
+    _choices_axis("q_mode", ("reg", "lds")),
+    _choices_axis("v_store_early", (True, False)),
+    _choices_axis("prefetch", (True, False)),
+    _choices_axis("lockstep", (True, False)),
+    _choices_axis("scheduler_strategy", (None, "max-ilp")),
+    _choices_axis("waves_per_eu", (0, 1, 2, 4)),
+    _choices_axis("fp8_cvt", (True, False)),
+    _choices_axis("tanh_fast", (True, False)),
+)
+
 # Axes cover every tuning field; ones an arch rejects are pruned at once.
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
@@ -273,6 +363,14 @@ _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx942", "3d"): _3D_AXES,
     ("gfx950", "dense"): _GFX950_DENSE_AXES,
     ("gfx942", "dense"): _GFX942_DENSE_AXES,
+    **{
+        (arch, path): axes
+        for arch in ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201")
+        for path, axes in (
+            ("wmma", _RDNA_WMMA_AXES),
+            ("wmma_decode", _RDNA_WMMA_DECODE_AXES),
+        )
+    },
 }
 
 # Knobs fixed by the geometry variant's codepath rather than enumerated.
@@ -325,6 +423,7 @@ _R4_HLPV = {
 _VDBUF = {"use_v_double_buffer": True}
 _VDBUF_STGW = {**_VDBUF, "use_staggered_iter_wait": True}
 _PROD_SCHED_BARRIER_MASKS = (0x0, 0x008, 0x108)
+_SWZ_WPID = {"use_kv_lds_swizzle": True, "use_wave_page_id_load": True}
 
 _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = {
     ("gfx950", "narrow"): (
@@ -423,13 +522,19 @@ _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = 
         for depth, seq in ((2, False), (3, False), (3, True))
     )
     + (("kvcp_nt", {"kv_cache_policy": "nt"}),),
+    # 3D: the K/V layout combinations the dispatcher picks on some problem
+    # (``_dispatch_3d_knobs`` leads each problem's production walk).
     ("gfx942", "splitkv"): (
         ("baseline", {}),
-        ("hoist", {"use_invariant_hoist": True}),
         ("widekv", {"use_wide_kv_load": True}),
-        ("hoist_widekv", {"use_invariant_hoist": True, "use_wide_kv_load": True}),
+        ("widekv_swz_wpid", {"use_wide_kv_load": True, **_SWZ_WPID}),
+        ("swz_wpid", _SWZ_WPID),
     ),
-    ("gfx950", "splitkv"): (("baseline", {}),),
+    ("gfx950", "splitkv"): (
+        ("baseline", {}),
+        ("wpid", {"use_wave_page_id_load": True}),
+        ("swz_wpid", _SWZ_WPID),
+    ),
 }
 # Production micro-axes layered on some stacks: padded K for the single-K
 # unaliased-Q stack, the sched_group_barrier interleave on three transposed
