@@ -30,6 +30,7 @@ import pytest
 import yaml
 
 import tensilelite
+import tensilelite.CustomKernels as ck_mod
 import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
 from tensilelite.resources import custom_kernel_text
 from tensilelite.AddCustomConfig import (
@@ -1369,3 +1370,63 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
             if dim in config.get("AssertSizeLessThan", {}):
                 assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
         assert key[6] >= config["AssertSummationElementMultiple"], name
+
+
+# ---------------------------------------------------------------------------
+# Embedded metadata parse cost
+# ---------------------------------------------------------------------------
+
+# rocRoller kernels embed their kernel graph in .amdgpu_metadata, about 13k YAML
+# lines against about 175 for other custom kernels, so they are the case where
+# the loader choice matters and where the two loaders have the most to disagree on.
+_LARGE_METADATA_KERNEL = (
+    "RR_GEMM_TN_FP8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+)
+
+
+@pytest.mark.skipif(not hasattr(yaml, "CSafeLoader"), reason="PyYAML is built without libyaml")
+def test_embedded_metadata_is_parsed_with_libyaml(monkeypatch):
+    loaders = []
+    realLoad = yaml.load
+
+    def spy(stream, Loader):
+        loaders.append(Loader)
+        return realLoad(stream, Loader=Loader)
+
+    # yaml.safe_load also routes through yaml.load, so a revert to it is caught.
+    monkeypatch.setattr(ck_mod.yaml, "load", spy)
+    readCustomKernelConfig(_LARGE_METADATA_KERNEL)
+
+    assert loaders == [yaml.CSafeLoader]
+
+
+def test_get_custom_kernel_config_parses_embedded_metadata_once(tmp_path, monkeypatch):
+    # No CustomKernel block, so the config is inferred from amdhsa.kernels and
+    # both halves of the metadata are needed.
+    write_kernel(tmp_path / "metadata_only.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+    calls = []
+    realRead = ck_mod._readEmbeddedYaml
+
+    def spy(name, directory=None):
+        calls.append(name)
+        return realRead(name, directory)
+
+    monkeypatch.setattr(ck_mod, "_readEmbeddedYaml", spy)
+    config = getCustomKernelConfig("metadata_only", {}, str(tmp_path))
+
+    assert config["CustomKernel"]["args"][0]["semantic"] == "AddressD"
+    assert calls == ["metadata_only"]
+
+
+def test_metadata_loader_matches_pure_python_safe_loader():
+    lines = custom_kernel_text(_LARGE_METADATA_KERNEL).splitlines()
+    start = lines.index("---") + 1
+    end = lines.index("...", start)
+    expected = yaml.load("\n".join(lines[start:end]), Loader=yaml.SafeLoader)
+
+    assert ck_mod._readEmbeddedYaml(_LARGE_METADATA_KERNEL) == expected

@@ -32,6 +32,13 @@ import yaml
 
 import os
 
+# rocRoller kernels embed their full kernel graph in .amdgpu_metadata, which the
+# pure-Python SafeLoader takes over a second per kernel to parse.
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 # ---------------------------------------------------------------------------
 # Mapping from amdgpu_metadata arg .name -> CustomArgSemantic string
 # ---------------------------------------------------------------------------
@@ -204,7 +211,7 @@ def _readEmbeddedYaml(name, directory=None):
     """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
 
     The .s files emitted under this branch contain exactly one such block;
-    we stop at the first '...' and return whatever yaml.safe_load returns
+    we stop at the first '...' and return whatever the safe loader returns
     (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
     """
     contents = getCustomKernelContents(name, directory)
@@ -219,12 +226,14 @@ def _readEmbeddedYaml(name, directory=None):
         if inYaml:
             yamlLines.append(line)
     try:
-        return yaml.safe_load("\n".join(yamlLines))
+        return yaml.load("\n".join(yamlLines), Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
 def readCustomKernelConfig(name, directory=None):
-    parsed = _readEmbeddedYaml(name, directory)
+    return _customConfigFrom(name, _readEmbeddedYaml(name, directory))
+
+def _customConfigFrom(name, parsed):
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
         raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
     config = parsed["custom.config"]
@@ -483,7 +492,8 @@ def getCustomKernelConfig(
     Raises:
         RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
     """
-    kernelConfig = readCustomKernelConfig(kernelName, directory)
+    fullYaml = _readEmbeddedYaml(kernelName, directory)
+    kernelConfig = _customConfigFrom(kernelName, fullYaml)
     if "InternalSupportParams" not in kernelConfig:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
 
@@ -531,7 +541,6 @@ def getCustomKernelConfig(
     kernelConfig["KernelLanguage"] = "Assembly"
 
     if "CustomKernel" not in kernelConfig:
-        fullYaml = _readEmbeddedYaml(kernelName, directory)
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName
