@@ -3,6 +3,11 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.0 for ROCm 7.0.2.1
+### Compatibility note
+* The default user find-db and performance-db suffix includes the MIOpen version. Existing 3.5.0 user databases remain on disk but are not selected automatically by 3.6.0. No automatic migration is performed.
+
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Added
 * Added an informational log when the Composable Kernel (CK) dynamic library is loaded.
