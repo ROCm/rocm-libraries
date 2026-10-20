@@ -441,36 +441,39 @@ dense square atoms (`InterleavedStyle`); `c_transpose`, sparse, and MX remain re
 
 ## helpers/ placement
 
-**Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
-justified. See `dsl_docs/architecture/helpers_classification.md` for the
-dual-engine vs Python-only split.
+**Default: write helpers as you write the kernel.** The `build_*()` body names
+what is special about the op (spec, tile shape, atom, descriptor) and calls
+helpers for the rest. When a block of IR repeats, or hides index math, lane
+maps, layout, masking, or a pipeline stage, make it a named helper in the same
+PR. This holds for a brand-new kernel or family too, even when only that family
+uses the helper today. Raw `IRBuilder` calls in the kernel body are for short,
+one-off glue between helper calls.
 
-### Add to helpers when ALL of:
+### Where a new helper goes
 
-1. Emits reusable kernel SSA (or is intentionally host-only / fusion-planner), AND
-2. At least one of:
-   - Used (or will be used) by ≥2 kernel families
-   - A specific emitter, primitive, or pipeline would potentially be used across
-     different kernel families (e.g. `SoftwarePipeline`, `CoalescedTileLoader`,
-     `mfma_gemm_inner` — even if only one family uses it today)
-   - CK-Tile-parity primitive (tensor view, distribution, sweep, transform DAG)
-   - Prevents a class of silent bugs if duplicated (lane maps, barriers, pipelining)
-   - Cuts instance authoring to a spec + callback skeleton (target: 60–80 line kernels)
-3. If it emits SSA: plan Python + C++ mirror + byte-identity in the same PR
+| Scope | Home |
+|---|---|
+| One family today | A family helper module next to the kernel: `instances/common/_<family>_*.py`, or `library/kernels/common/_<family>_*.py` for a library kernel |
+| ≥2 families, a general emitter/primitive/pipeline (e.g. `SoftwarePipeline`, `CoalescedTileLoader`, `mfma_gemm_inner`), a CK-Tile-parity primitive, or a guard against a class of silent bugs (lane maps, barriers, pipelining) | `helpers/` |
 
-### Keep in instances when ANY of:
+Move a family helper into `helpers/` when a second family needs it
+(KERNEL_AUTHORING.md Process G). Launch orchestration and multi-kernel
+pipelines stay in the instance.
 
-- Single kernel or single family (`instances/common/_<family>_*.py` for family glue)
-- Descriptor/addressing logic specific to one op's layout
-- Launch orchestration or multi-kernel pipelines
-- Doesn't generalize cleanly — use raw `IRBuilder` in the instance
+### The C++ mirror is not a reason to inline
 
-### Do NOT add to helpers:
+Every emission change is mirrored in the C++ engine anyway (byte-identity), so
+inlined raw IR is mirrored too, once per copy. A helper is mirrored once, as one
+function (e.g. `library/kernels/common/_fmha_common.py` and
+`cpp/instances/common/_fmha_common.cpp`). If it emits SSA: Python + C++ mirror +
+byte-identity in the same PR, the same rule the kernel already follows.
 
-- One-off logic "for later reuse" with no plausible cross-family consumer
-- Instance-specific specs, manifests, or dispatch heuristics
-- Emitters without a C++ port path (extends the not-yet-ported cpp-backend gap;
-  see `helpers_classification.md`)
+### Do NOT
+
+- Write a helper that only renames one builder call. A helper earns its place
+  by hiding detail that repeats or that a reader should not have to re-derive.
+- Put instance-specific specs, manifests, or dispatch heuristics in `helpers/`.
+- Add an SSA emitter to `helpers/` without its C++ port in the same PR.
 
 ## Key env flags
 
