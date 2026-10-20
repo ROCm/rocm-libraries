@@ -6,7 +6,7 @@
 // from cudnn_v8_enum_values.inc, so a new C enumerator without a mapping
 // decision fails here; the FE lists are guarded by -Wswitch-enum.
 #include <hipdnn_compatibility/cudnn/cudnn_graph.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
+#include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 
 #include <gtest/gtest.h>
 

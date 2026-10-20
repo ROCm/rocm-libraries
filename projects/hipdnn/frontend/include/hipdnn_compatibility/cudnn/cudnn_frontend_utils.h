@@ -31,8 +31,8 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_Logging.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_shim.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 
 #if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
 #include <nlohmann/json.hpp>

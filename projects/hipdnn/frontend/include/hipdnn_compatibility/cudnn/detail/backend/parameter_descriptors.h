@@ -9,50 +9,22 @@
 
 #pragma once
 
-#include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <initializer_list>
-#include <limits>
+#include <memory>
 #include <optional>
-#include <string>
-#include <utility>
 #include <vector>
 
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/tensor_descriptor.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/records.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
 {
 
-template <typename T>
-std::vector<T> requireSpatialCount(std::vector<T> values,
-                                   std::int64_t spatialDims,
-                                   cudnnBackendAttributeName_t name)
-{
-    if(static_cast<std::int64_t>(values.size()) != spatialDims)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        attributeName(name) + " has " + std::to_string(values.size())
-                            + " elements, expected the spatial dimension count "
-                            + std::to_string(spatialDims));
-    }
-    return values;
-}
-
-inline std::int64_t requireSpatialDims(std::optional<std::int64_t> value,
-                                       cudnnBackendAttributeName_t name)
-{
-    const std::int64_t spatialDims = requireAttribute(value, name);
-    if(spatialDims < 1)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, attributeName(name) + " must be >= 1");
-    }
-    return spatialDims;
-}
+// Lowering facts are valid once finalized; record() is null until then.
 
 class ConvolutionDescriptor final : public Descriptor
 {
@@ -62,95 +34,71 @@ public:
     {
     }
 
-    // Lowering facts; valid once finalized.
+    const std::shared_ptr<const v8::ConvolutionRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
     DataType_t computeType() const noexcept
     {
-        return _computeType;
+        return _record->computeType();
     }
 
     ConvolutionMode_t mode() const noexcept
     {
-        return _mode;
+        return _record->mode();
     }
 
     std::int64_t spatialDims() const noexcept
     {
-        return _spatialDims;
+        return _record->spatialDims();
     }
 
     const std::vector<std::int64_t>& prePaddings() const noexcept
     {
-        return _prePaddings;
+        return _record->prePaddings();
     }
 
     const std::vector<std::int64_t>& postPaddings() const noexcept
     {
-        return _postPaddings;
+        return _record->postPaddings();
     }
 
     const std::vector<std::int64_t>& dilations() const noexcept
     {
-        return _dilations;
+        return _record->dilations();
     }
 
     const std::vector<std::int64_t>& filterStrides() const noexcept
     {
-        return _filterStrides;
+        return _record->filterStrides();
     }
 
 protected:
     void finalizeImpl() override
     {
-        const auto rawComputeType
-            = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_CONVOLUTION_COMP_TYPE),
-                               CUDNN_ATTR_CONVOLUTION_COMP_TYPE);
-        const auto rawMode = requireAttribute(
-            scalarAttribute<cudnnConvolutionMode_t>(CUDNN_ATTR_CONVOLUTION_CONV_MODE),
-            CUDNN_ATTR_CONVOLUTION_CONV_MODE);
-        const std::int64_t spatialDims
-            = requireSpatialDims(scalarAttribute<std::int64_t>(CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS),
-                                 CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS);
-        std::vector<std::int64_t> prePaddings
-            = spatialArray(CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS, spatialDims);
-        std::vector<std::int64_t> postPaddings
-            = spatialArray(CUDNN_ATTR_CONVOLUTION_POST_PADDINGS, spatialDims);
-        std::vector<std::int64_t> dilations
-            = spatialArray(CUDNN_ATTR_CONVOLUTION_DILATIONS, spatialDims);
-        std::vector<std::int64_t> filterStrides
-            = spatialArray(CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES, spatialDims);
-        if(filterStrides.front() <= 0)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            "CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES[0] must be > 0");
-        }
-
-        const DataType_t computeType
-            = requireLowerable(rawComputeType, CUDNN_ATTR_CONVOLUTION_COMP_TYPE);
-        const ConvolutionMode_t mode = requireLowerable(rawMode, CUDNN_ATTR_CONVOLUTION_CONV_MODE);
-
-        _computeType = computeType;
-        _mode = mode;
-        _spatialDims = spatialDims;
-        _prePaddings = std::move(prePaddings);
-        _postPaddings = std::move(postPaddings);
-        _dilations = std::move(dilations);
-        _filterStrides = std::move(filterStrides);
+        static const v8::ConvolutionLabels s_labels{
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_COMP_TYPE),
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_CONV_MODE),
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS),
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS),
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_POST_PADDINGS),
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_DILATIONS),
+            attributeLabel(CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES),
+        };
+        v8::ConvolutionInputs inputs;
+        inputs.computeType = scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_CONVOLUTION_COMP_TYPE);
+        inputs.mode = scalarAttribute<cudnnConvolutionMode_t>(CUDNN_ATTR_CONVOLUTION_CONV_MODE);
+        inputs.spatialDims = scalarAttribute<std::int64_t>(CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS);
+        inputs.prePaddings = arrayAttribute<std::int64_t>(CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS);
+        inputs.postPaddings = arrayAttribute<std::int64_t>(CUDNN_ATTR_CONVOLUTION_POST_PADDINGS);
+        inputs.dilations = arrayAttribute<std::int64_t>(CUDNN_ATTR_CONVOLUTION_DILATIONS);
+        inputs.filterStrides = arrayAttribute<std::int64_t>(CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES);
+        _record = v8::makeConvRecord(std::move(inputs), s_labels);
     }
 
 private:
-    std::vector<std::int64_t> spatialArray(cudnnBackendAttributeName_t name,
-                                           std::int64_t spatialDims) const
-    {
-        return requireSpatialCount(arrayAttribute<std::int64_t>(name), spatialDims, name);
-    }
-
-    DataType_t _computeType = DataType_t::NOT_SET;
-    ConvolutionMode_t _mode = ConvolutionMode_t::NOT_SET;
-    std::int64_t _spatialDims = 0;
-    std::vector<std::int64_t> _prePaddings;
-    std::vector<std::int64_t> _postPaddings;
-    std::vector<std::int64_t> _dilations;
-    std::vector<std::int64_t> _filterStrides;
+    std::shared_ptr<const v8::ConvolutionRecord> _record;
 };
 
 class PointwiseDescriptor final : public Descriptor
@@ -161,117 +109,82 @@ public:
     {
     }
 
-    // Lowering facts; valid once finalized.
+    const std::shared_ptr<const v8::PointwiseRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
     PointwiseMode_t mode() const noexcept
     {
-        return _mode;
+        return _record->mode();
     }
 
     DataType_t computeType() const noexcept
     {
-        return _computeType;
+        return _record->computeType();
     }
 
-    // Mode parameters that differ from upstream's defaults, plus the ReLU lower
-    // clip unless a slope is set. Upstream sets every parameter of the mode,
-    // defaults included, and MIOpen rejects a fusion that carries the others at
-    // all, so lowering forwards only these.
     std::optional<double> reluLowerClip() const noexcept
     {
-        return _reluLowerClip;
+        return _record->reluLowerClip();
     }
 
     std::optional<double> reluUpperClip() const noexcept
     {
-        return _reluUpperClip;
+        return _record->reluUpperClip();
     }
 
     std::optional<double> reluLowerClipSlope() const noexcept
     {
-        return _reluLowerClipSlope;
+        return _record->reluLowerClipSlope();
     }
 
     std::optional<double> eluAlpha() const noexcept
     {
-        return _eluAlpha;
+        return _record->eluAlpha();
     }
 
     std::optional<double> softplusBeta() const noexcept
     {
-        return _softplusBeta;
+        return _record->softplusBeta();
     }
 
     std::optional<double> swishBeta() const noexcept
     {
-        return _swishBeta;
+        return _record->swishBeta();
     }
 
     std::optional<std::int64_t> axis() const noexcept
     {
-        return _axis;
+        return _record->axis();
     }
 
 protected:
     void finalizeImpl() override
     {
-        const auto rawMode
-            = requireAttribute(scalarAttribute<cudnnPointwiseMode_t>(CUDNN_ATTR_POINTWISE_MODE),
-                               CUDNN_ATTR_POINTWISE_MODE);
-        const auto rawComputeType
-            = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_POINTWISE_MATH_PREC),
-                               CUDNN_ATTR_POINTWISE_MATH_PREC);
-        for(const cudnnBackendAttributeName_t name : {CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE,
-                                                      CUDNN_ATTR_POINTWISE_ELU_ALPHA,
-                                                      CUDNN_ATTR_POINTWISE_SOFTPLUS_BETA,
-                                                      CUDNN_ATTR_POINTWISE_SWISH_BETA})
-        {
-            const std::optional<double> value = realAttribute(name);
-            if(value && !std::isfinite(*value))
-            {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM, attributeName(name) + " must be finite");
-            }
-        }
-
-        _mode = requireLowerable(rawMode, CUDNN_ATTR_POINTWISE_MODE);
-        _computeType = requireLowerable(rawComputeType, CUDNN_ATTR_POINTWISE_MATH_PREC);
-        // Defaults from PointWiseDesc_v8 (cudnn_frontend_PointWiseDesc.h).
-        _reluLowerClipSlope = nonDefault(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE, 0.0);
-        _eluAlpha = nonDefault(CUDNN_ATTR_POINTWISE_ELU_ALPHA, 1.0);
-        _softplusBeta = nonDefault(CUDNN_ATTR_POINTWISE_SOFTPLUS_BETA, 1.0);
-        _swishBeta = nonDefault(CUDNN_ATTR_POINTWISE_SWISH_BETA, 1.0);
-        // Every engine reads a lower clip of 0 as standard ReLU, and hipBLASLt's ReLU
-        // epilogue requires it present. Beside a slope it stays elided: hipBLASLt
-        // would take {0, slope} for plain ReLU and drop the slope.
-        _reluLowerClip = _reluLowerClipSlope ? nonDefault(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP, 0.0)
-                                             : realAttribute(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP);
-        // The upper-clip default is DBL_MAX, which upstream clamps to FLT_MAX for
-        // FLOAT math; any bound at or above FLT_MAX clips nothing once narrowed.
-        const std::optional<double> upperClip = realAttribute(CUDNN_ATTR_POINTWISE_RELU_UPPER_CLIP);
-        _reluUpperClip
-            = upperClip && *upperClip < static_cast<double>(std::numeric_limits<float>::max())
-                  ? upperClip
-                  : std::nullopt;
-        const std::optional<std::int64_t> axis
-            = scalarAttribute<std::int64_t>(CUDNN_ATTR_POINTWISE_AXIS);
-        _axis = axis && *axis != -1 ? axis : std::nullopt;
+        static const v8::PointwiseLabels s_labels{
+            attributeLabel(CUDNN_ATTR_POINTWISE_MODE),
+            attributeLabel(CUDNN_ATTR_POINTWISE_MATH_PREC),
+            attributeLabel(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE),
+            attributeLabel(CUDNN_ATTR_POINTWISE_ELU_ALPHA),
+            attributeLabel(CUDNN_ATTR_POINTWISE_SOFTPLUS_BETA),
+            attributeLabel(CUDNN_ATTR_POINTWISE_SWISH_BETA),
+        };
+        v8::PointwiseInputs inputs;
+        inputs.mode = scalarAttribute<cudnnPointwiseMode_t>(CUDNN_ATTR_POINTWISE_MODE);
+        inputs.computeType = scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_POINTWISE_MATH_PREC);
+        inputs.reluLowerClip = realAttribute(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP);
+        inputs.reluUpperClip = realAttribute(CUDNN_ATTR_POINTWISE_RELU_UPPER_CLIP);
+        inputs.reluLowerClipSlope = realAttribute(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE);
+        inputs.eluAlpha = realAttribute(CUDNN_ATTR_POINTWISE_ELU_ALPHA);
+        inputs.softplusBeta = realAttribute(CUDNN_ATTR_POINTWISE_SOFTPLUS_BETA);
+        inputs.swishBeta = realAttribute(CUDNN_ATTR_POINTWISE_SWISH_BETA);
+        inputs.axis = scalarAttribute<std::int64_t>(CUDNN_ATTR_POINTWISE_AXIS);
+        _record = v8::makePointwiseRecord(inputs, s_labels);
     }
 
 private:
-    std::optional<double> nonDefault(cudnnBackendAttributeName_t name, double defaultValue) const
-    {
-        const std::optional<double> value = realAttribute(name);
-        return value && *value != defaultValue ? value : std::nullopt;
-    }
-
-    PointwiseMode_t _mode = PointwiseMode_t::NOT_SET;
-    DataType_t _computeType = DataType_t::NOT_SET;
-    std::optional<double> _reluLowerClip;
-    std::optional<double> _reluUpperClip;
-    std::optional<double> _reluLowerClipSlope;
-    std::optional<double> _eluAlpha;
-    std::optional<double> _softplusBeta;
-    std::optional<double> _swishBeta;
-    std::optional<std::int64_t> _axis;
+    std::shared_ptr<const v8::PointwiseRecord> _record;
 };
 
 class MatmulDescriptor final : public Descriptor
@@ -282,27 +195,31 @@ public:
     {
     }
 
+    const std::shared_ptr<const v8::MatmulRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
     DataType_t computeType() const noexcept
     {
-        return _computeType;
+        return _record->computeType();
     }
 
 protected:
     void finalizeImpl() override
     {
-        const auto rawComputeType
-            = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_MATMUL_COMP_TYPE),
-                               CUDNN_ATTR_MATMUL_COMP_TYPE);
-        if(hasAttribute(CUDNN_ATTR_MATMUL_PADDING_VALUE))
-        {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            "CUDNN_ATTR_MATMUL_PADDING_VALUE is not supported");
-        }
-        _computeType = requireLowerable(rawComputeType, CUDNN_ATTR_MATMUL_COMP_TYPE);
+        static const v8::MatmulLabels s_labels{
+            attributeLabel(CUDNN_ATTR_MATMUL_COMP_TYPE),
+            attributeLabel(CUDNN_ATTR_MATMUL_PADDING_VALUE),
+        };
+        _record
+            = v8::makeMatmulRecord({scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_MATMUL_COMP_TYPE),
+                                    hasAttribute(CUDNN_ATTR_MATMUL_PADDING_VALUE)},
+                                   s_labels);
     }
 
 private:
-    DataType_t _computeType = DataType_t::NOT_SET;
+    std::shared_ptr<const v8::MatmulRecord> _record;
 };
 
 class ReductionDescriptor final : public Descriptor
@@ -313,43 +230,42 @@ public:
     {
     }
 
+    const std::shared_ptr<const v8::ReductionRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
     ReductionMode_t mode() const noexcept
     {
-        return _mode;
+        return _record->mode();
     }
 
     DataType_t computeType() const noexcept
     {
-        return _computeType;
+        return _record->computeType();
     }
 
     bool isDeterministic() const noexcept
     {
-        return _isDeterministic;
+        return _record->isDeterministic();
     }
 
 protected:
     void finalizeImpl() override
     {
-        const auto rawMode = requireAttribute(
-            scalarAttribute<cudnnReduceTensorOp_t>(CUDNN_ATTR_REDUCTION_OPERATOR),
-            CUDNN_ATTR_REDUCTION_OPERATOR);
-        const auto rawComputeType
-            = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_REDUCTION_COMP_TYPE),
-                               CUDNN_ATTR_REDUCTION_COMP_TYPE);
-        const ReductionMode_t mode = requireLowerable(rawMode, CUDNN_ATTR_REDUCTION_OPERATOR);
-        const DataType_t computeType
-            = requireLowerable(rawComputeType, CUDNN_ATTR_REDUCTION_COMP_TYPE);
-        _mode = mode;
-        _computeType = computeType;
-        _isDeterministic
-            = scalarAttribute<bool>(CUDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value_or(false);
+        static const v8::ReductionLabels s_labels{
+            attributeLabel(CUDNN_ATTR_REDUCTION_OPERATOR),
+            attributeLabel(CUDNN_ATTR_REDUCTION_COMP_TYPE),
+        };
+        _record = v8::makeReductionRecord(
+            {scalarAttribute<cudnnReduceTensorOp_t>(CUDNN_ATTR_REDUCTION_OPERATOR),
+             scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_REDUCTION_COMP_TYPE),
+             scalarAttribute<bool>(CUDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value_or(false)},
+            s_labels);
     }
 
 private:
-    ReductionMode_t _mode = ReductionMode_t::NOT_SET;
-    DataType_t _computeType = DataType_t::NOT_SET;
-    bool _isDeterministic = false;
+    std::shared_ptr<const v8::ReductionRecord> _record;
 };
 
 class ResampleDescriptor final : public Descriptor
@@ -360,134 +276,74 @@ public:
     {
     }
 
-    // Lowering facts; valid once finalized. The FRACTION arrays are integral
-    // here (finalize rejects anything else).
+    const std::shared_ptr<const v8::ResampleRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
     ResampleMode_t mode() const noexcept
     {
-        return _mode;
+        return _record->mode();
     }
 
     DataType_t computeType() const noexcept
     {
-        return _computeType;
+        return _record->computeType();
     }
 
     PaddingMode_t paddingMode() const noexcept
     {
-        return _paddingMode;
+        return _record->paddingMode();
     }
 
     const std::vector<std::int64_t>& windowDims() const noexcept
     {
-        return _windowDims;
+        return _record->windowDims();
     }
 
     const std::vector<std::int64_t>& prePaddings() const noexcept
     {
-        return _prePaddings;
+        return _record->prePaddings();
     }
 
     const std::vector<std::int64_t>& postPaddings() const noexcept
     {
-        return _postPaddings;
+        return _record->postPaddings();
     }
 
     const std::vector<std::int64_t>& strides() const noexcept
     {
-        return _strides;
+        return _record->strides();
     }
 
 protected:
     void finalizeImpl() override
     {
-        const auto rawMode
-            = requireAttribute(scalarAttribute<cudnnResampleMode_t>(CUDNN_ATTR_RESAMPLE_MODE),
-                               CUDNN_ATTR_RESAMPLE_MODE);
-        const auto rawComputeType
-            = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_RESAMPLE_COMP_TYPE),
-                               CUDNN_ATTR_RESAMPLE_COMP_TYPE);
-        // Upstream's builder refuses to build without a padding mode, and hipDNN's
-        // resample descriptors require one.
-        const auto rawPadding = requireAttribute(
-            scalarAttribute<cudnnPaddingMode_t>(CUDNN_ATTR_RESAMPLE_PADDING_MODE),
-            CUDNN_ATTR_RESAMPLE_PADDING_MODE);
-        // Upstream sends 0 when the builder never set it, so this is a finalize
-        // check, not a SET check.
-        const std::int64_t spatialDims
-            = requireSpatialDims(scalarAttribute<std::int64_t>(CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS),
-                                 CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS);
-        const std::vector<cudnnFraction_t> windowDims
-            = spatialArray(CUDNN_ATTR_RESAMPLE_WINDOW_DIMS, spatialDims);
-        const std::vector<cudnnFraction_t> prePaddings
-            = spatialArray(CUDNN_ATTR_RESAMPLE_PRE_PADDINGS, spatialDims);
-        const std::vector<cudnnFraction_t> postPaddings
-            = spatialArray(CUDNN_ATTR_RESAMPLE_POST_PADDINGS, spatialDims);
-        const std::vector<cudnnFraction_t> strides
-            = spatialArray(CUDNN_ATTR_RESAMPLE_STRIDES, spatialDims);
-
-        // NEAREST and BILINEAR have no hipDNN resample mode.
-        const ResampleMode_t mode = requireLowerable(rawMode, CUDNN_ATTR_RESAMPLE_MODE);
-        const DataType_t computeType
-            = requireLowerable(rawComputeType, CUDNN_ATTR_RESAMPLE_COMP_TYPE);
-        const PaddingMode_t paddingMode
-            = requireLowerable(rawPadding, CUDNN_ATTR_RESAMPLE_PADDING_MODE);
-        std::vector<std::int64_t> integralWindowDims
-            = integral(windowDims, CUDNN_ATTR_RESAMPLE_WINDOW_DIMS);
-        std::vector<std::int64_t> integralPrePaddings
-            = integral(prePaddings, CUDNN_ATTR_RESAMPLE_PRE_PADDINGS);
-        std::vector<std::int64_t> integralPostPaddings
-            = integral(postPaddings, CUDNN_ATTR_RESAMPLE_POST_PADDINGS);
-        std::vector<std::int64_t> integralStrides = integral(strides, CUDNN_ATTR_RESAMPLE_STRIDES);
-
-        _mode = mode;
-        _computeType = computeType;
-        _paddingMode = paddingMode;
-        _windowDims = std::move(integralWindowDims);
-        _prePaddings = std::move(integralPrePaddings);
-        _postPaddings = std::move(integralPostPaddings);
-        _strides = std::move(integralStrides);
+        static const v8::ResampleLabels s_labels{
+            attributeLabel(CUDNN_ATTR_RESAMPLE_MODE),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_COMP_TYPE),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_PADDING_MODE),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_WINDOW_DIMS),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_PRE_PADDINGS),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_POST_PADDINGS),
+            attributeLabel(CUDNN_ATTR_RESAMPLE_STRIDES),
+        };
+        // SET already rejected zero denominators.
+        v8::ResampleInputs inputs;
+        inputs.mode = scalarAttribute<cudnnResampleMode_t>(CUDNN_ATTR_RESAMPLE_MODE);
+        inputs.computeType = scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_RESAMPLE_COMP_TYPE);
+        inputs.paddingMode = scalarAttribute<cudnnPaddingMode_t>(CUDNN_ATTR_RESAMPLE_PADDING_MODE);
+        inputs.spatialDims = scalarAttribute<std::int64_t>(CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS);
+        inputs.windowDims = arrayAttribute<cudnnFraction_t>(CUDNN_ATTR_RESAMPLE_WINDOW_DIMS);
+        inputs.prePaddings = arrayAttribute<cudnnFraction_t>(CUDNN_ATTR_RESAMPLE_PRE_PADDINGS);
+        inputs.postPaddings = arrayAttribute<cudnnFraction_t>(CUDNN_ATTR_RESAMPLE_POST_PADDINGS);
+        inputs.strides = arrayAttribute<cudnnFraction_t>(CUDNN_ATTR_RESAMPLE_STRIDES);
+        _record = v8::makeResampleRecord(inputs, s_labels);
     }
 
 private:
-    std::vector<cudnnFraction_t> spatialArray(cudnnBackendAttributeName_t name,
-                                              std::int64_t spatialDims) const
-    {
-        return requireSpatialCount(arrayAttribute<cudnnFraction_t>(name), spatialDims, name);
-    }
-
-    // SET already rejected zero denominators.
-    static std::vector<std::int64_t> integral(const std::vector<cudnnFraction_t>& fractions,
-                                              cudnnBackendAttributeName_t name)
-    {
-        std::vector<std::int64_t> values;
-        values.reserve(fractions.size());
-        for(std::size_t i = 0; i < fractions.size(); ++i)
-        {
-            const cudnnFraction_t& fraction = fractions[i];
-            // INT64_MIN / -1 overflows; its quotient is unrepresentable anyway.
-            const bool overflows
-                = fraction.denominator == -1
-                  && fraction.numerator == std::numeric_limits<std::int64_t>::min();
-            if(overflows || fraction.numerator % fraction.denominator != 0)
-            {
-                throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                                attributeName(name) + "[" + std::to_string(i)
-                                    + "] = " + std::to_string(fraction.numerator) + "/"
-                                    + std::to_string(fraction.denominator)
-                                    + " is not an integer; fractional values are not supported");
-            }
-            values.push_back(fraction.numerator / fraction.denominator);
-        }
-        return values;
-    }
-
-    ResampleMode_t _mode = ResampleMode_t::NOT_SET;
-    DataType_t _computeType = DataType_t::NOT_SET;
-    PaddingMode_t _paddingMode = PaddingMode_t::NOT_SET;
-    std::vector<std::int64_t> _windowDims;
-    std::vector<std::int64_t> _prePaddings;
-    std::vector<std::int64_t> _postPaddings;
-    std::vector<std::int64_t> _strides;
+    std::shared_ptr<const v8::ResampleRecord> _record;
 };
 
 // The RNG operation is not lowered (it reports NOT_SUPPORTED), so its
@@ -500,14 +356,21 @@ public:
     {
     }
 
+    const std::shared_ptr<const v8::RngRecord>& record() const noexcept
+    {
+        return _record;
+    }
+
 protected:
     void finalizeImpl() override
     {
-        requireFe(
-            requireAttribute(scalarAttribute<cudnnRngDistribution_t>(CUDNN_ATTR_RNG_DISTRIBUTION),
-                             CUDNN_ATTR_RNG_DISTRIBUTION),
-            CUDNN_ATTR_RNG_DISTRIBUTION);
+        _record = v8::makeRngRecord(
+            scalarAttribute<cudnnRngDistribution_t>(CUDNN_ATTR_RNG_DISTRIBUTION),
+            attributeLabel(CUDNN_ATTR_RNG_DISTRIBUTION));
     }
+
+private:
+    std::shared_ptr<const v8::RngRecord> _record;
 };
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
