@@ -313,3 +313,22 @@ class WarpGrid:
             f"block_size={self.block_size}, "
             f"bound={self.is_bound})"
         )
+
+
+def _implicit_gemm_warp_grid(b, op, spec, block_m, block_n, block_k):
+    """Bind the implicit-GEMM WarpGrid and unpack its lane/warp coordinates."""
+    grid = WarpGrid.from_atom(
+        op,
+        tile_m=block_m,
+        tile_n=block_n,
+        tile_k=block_k,
+        warp_m=spec.warp_m,
+        warp_n=spec.warp_n,
+        wave_size=spec.wave_size,
+    ).bind(b, block_m_axis="y", block_n_axis="x")
+    tid = grid.tid
+    lane = grid.lane
+    warp_id = grid.warp_id
+    warp_m_idx = grid.warp_m_idx
+    warp_n_idx = grid.warp_n_idx
+    return grid, tid, lane, warp_id, warp_m_idx, warp_n_idx

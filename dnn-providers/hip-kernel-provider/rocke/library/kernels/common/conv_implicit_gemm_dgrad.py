@@ -66,7 +66,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
-from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.geometry import _implicit_gemm_warp_grid, WarpGrid
 from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
@@ -1617,20 +1617,9 @@ def _build_tilde_dgrad(
 
     # Warp grid: bind() emits tid/lane/warp decomposition. We override
     # block_m/n_off with our own local tile offsets (not from block_id_x/y).
-    grid = WarpGrid.from_atom(
-        op,
-        tile_m=block_m,
-        tile_n=block_n,
-        tile_k=block_k,
-        warp_m=spec.warp_m,
-        warp_n=spec.warp_n,
-        wave_size=spec.wave_size,
-    ).bind(b, block_m_axis="y", block_n_axis="x")
-    tid = grid.tid
-    lane = grid.lane
-    warp_id = grid.warp_id
-    warp_m_idx = grid.warp_m_idx
-    warp_n_idx = grid.warp_n_idx
+    grid, tid, lane, warp_id, warp_m_idx, warp_n_idx = _implicit_gemm_warp_grid(
+        b, op, spec, block_m, block_n, block_k
+    )
 
     block_m_off_v = b.mul(local_m_tile, b.const_i32(block_m))
     block_n_off_v = b.mul(local_n_tile, b.const_i32(block_n))
