@@ -19,6 +19,7 @@
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_ngchw_to_nhwgc.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_conv_v3.hpp"
+#include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_waveletmodel_cshuffle_conv_v3.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/device_prop.hpp"
@@ -226,6 +227,159 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 
 #endif // end of if (defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__))
 }
+
+template <typename GridwiseGemm,
+          typename AGridDesc_AK0_M_AK1,
+          typename BGridDesc_BK0_N_BK1,
+          typename EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+          index_t MaxGroupedGemmGroupsNum,
+          typename GemmArgs,
+          typename ComputePtrOffsetOfBatch,
+          typename ComputePtrOffsetOfN,
+          InMemoryDataOperationEnum EGlobalMemoryDataOperation,
+          bool HasMainKBlockLoop,
+          bool NoMainKBlockLoop,
+          index_t MinimumOccupancy = 1,
+          TailNumber TailNum       = TailNumber::Full>
+__global__ void
+#if CK_USE_LAUNCH_BOUNDS
+__launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
+#endif
+    kernel_grouped_conv_bwd_data_xdl_cshuffle_v3_2lds(
+        typename GridwiseGemm::Argument karg,
+        const std::array<GemmArgs, MaxGroupedGemmGroupsNum> gemm_kernel_args,
+        const index_t gemms_count,
+        const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
+        const index_t num_k_per_block)
+{
+#if defined(__gfx950__) || defined(__gfx1250__)
+    if constexpr(GridwiseGemm::template IsValidCompilationParameter<EGlobalMemoryDataOperation>())
+    {
+        // offset base pointer for each work-group
+        const index_t block_args_id = __builtin_amdgcn_readfirstlane(blockIdx.x);
+        const index_t g_idx         = __builtin_amdgcn_readfirstlane(blockIdx.y);
+        const index_t k_idx         = __builtin_amdgcn_readfirstlane(blockIdx.z * num_k_per_block);
+
+        const long_index_t a_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetAPtrOffset(g_idx));
+        const long_index_t b_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetBPtrOffset(g_idx));
+        const long_index_t e_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetEPtrOffset(g_idx));
+
+        constexpr index_t LDS_size = GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch());
+        if constexpr(2 * LDS_size <= get_lds_size(get_device_arch()))
+        {
+            __shared__ char p_shared_0[LDS_size];
+            __shared__ char p_shared_1[LDS_size];
+
+            index_t left     = 0;
+            index_t right    = gemms_count;
+            index_t group_id = index_t((left + right) / 2);
+            while((!(block_args_id >= gemm_kernel_args[group_id].BlockStart_ &&
+                     block_args_id < gemm_kernel_args[group_id].BlockEnd_)) &&
+                  left <= right)
+            {
+                if(block_args_id < gemm_kernel_args[group_id].BlockStart_)
+                {
+                    right = group_id;
+                }
+                else
+                {
+                    left = group_id;
+                }
+                group_id = index_t((left + right) / 2);
+            }
+
+            const auto a_grid_desc_transform =
+                GridwiseGemm::template TransformGrid<AGridDesc_AK0_M_AK1,
+                                                     GridwiseGemm::AK0Number,
+                                                     GridwiseGemm::AK1Number>(
+                    gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_, get_device_arch());
+            const auto b_grid_desc_transform =
+                GridwiseGemm::template TransformGrid<BGridDesc_BK0_N_BK1,
+                                                     GridwiseGemm::BK0Number,
+                                                     GridwiseGemm::BK1Number>(
+                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_, get_device_arch());
+
+            if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
+            {
+                GridwiseGemm::template Run<HasMainKBlockLoop,
+                                           EGlobalMemoryDataOperation,
+                                           TailNum,
+                                           decltype(a_grid_desc_transform),
+                                           decltype(b_grid_desc_transform),
+                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                    karg.p_a_grid + a_batch_offset,
+                    karg.p_b_grid + b_batch_offset,
+                    karg.p_c_grid + e_batch_offset,
+                    p_shared_0,
+                    p_shared_1,
+                    karg,
+                    a_grid_desc_transform,
+                    b_grid_desc_transform,
+                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                    k_idx,
+                    gridDim.z,
+                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+            }
+            else
+            {
+                if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+                {
+                    GridwiseGemm::template Run<true,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum,
+                                               decltype(a_grid_desc_transform),
+                                               decltype(b_grid_desc_transform),
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared_0,
+                        p_shared_1,
+                        karg,
+                        a_grid_desc_transform,
+                        b_grid_desc_transform,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+                else
+                {
+                    GridwiseGemm::template Run<false,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum,
+                                               decltype(a_grid_desc_transform),
+                                               decltype(b_grid_desc_transform),
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared_0,
+                        p_shared_1,
+                        karg,
+                        a_grid_desc_transform,
+                        b_grid_desc_transform,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+            }
+        }
+    }
+#else
+    ignore = karg;
+    ignore = gemm_kernel_args;
+    ignore = gemms_count;
+    ignore = compute_ptr_offset_of_batch;
+    ignore = num_k_per_block;
+
+#endif // end of if defined(__gfx950__) || defined(__gfx1250__)
+}
+
 } // namespace
 
 // Conv backward data multiple D:
@@ -285,7 +439,8 @@ template <index_t NDimSpatial,
           typename AComputeType                       = ADataType,
           typename BComputeType                       = AComputeType,
           bool DirectLoad                             = false,
-          bool LargeTensors                           = false>
+          bool LargeTensors                           = false,
+          index_t LoadBlockSize                       = 0>
 struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     : public DeviceGroupedConvBwdDataMultipleD<NDimSpatial,
                                                ALayout,    // output image
@@ -315,6 +470,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     static_assert(std::is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
                       std::is_same_v<ELayout, tensor_layout::convolution::NDHWGC>,
                   "C not NGHWK");
+
+    static constexpr bool WaveletEnabled  = (LoadBlockSize > 0);
+    static constexpr bool UseLdsTranspose = WaveletEnabled && DirectLoad;
 
     // MaxGroupedGemmGroupsNum  is used to specify number of gemm args in compile time. With this
     // implementation we can avoid copy data to workspace before kernel launch since number of
@@ -422,7 +580,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     // Parameterized GridwiseGemm template to support both wave64 (MPerXdl/NPerXdl) and
     // wave32 (Wave32MaxMNPerXdl/Wave32MaxMNPerXdl) XDL instruction sizes.
     template <index_t MRepeat_, index_t MPerXdl_, index_t NPerXdl_>
-    using GridwiseGemmBase = GridwiseGemm_xdl_cshuffle_conv_v3<
+    using GridwiseGemmDefault = GridwiseGemm_xdl_cshuffle_conv_v3<
         tensor_layout::gemm::RowMajor,
         tensor_layout::gemm::RowMajor,
         tensor_layout::gemm::RowMajor,
@@ -473,6 +631,63 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         DirectLoad && ALdsScalarLoadToVgpr,
         DirectLoad && BLdsScalarLoadToVgpr,
         LargeTensors>;
+
+    template <index_t MRepeat_, index_t MPerXdl_, index_t NPerXdl_>
+    using GridwiseGemmWavelet = GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3<
+        tensor_layout::gemm::RowMajor,
+        tensor_layout::gemm::RowMajor,
+        tensor_layout::gemm::RowMajor,
+        ADataType,
+        BDataType,
+        AccDataType,
+        EDataType,
+        EDataType,
+        AElementwiseOp,
+        BElementwiseOp,
+        CDEElementwiseOp,
+        1,
+        LoadBlockSize, // TileLoadThreadGroupSize
+        BlockSize,     // TileMathThreadGroupSize
+        MPerBlock,
+        NPerBlock,
+        KPerBlock,
+        AK1,
+        BK1,
+        MPerXdl_,
+        NPerXdl_,
+        MRepeat_,
+        NRepeat*(NPerXdl / NPerXdl_),
+        ABlockTransferThreadClusterLengths_AK0_M_AK1,
+        ABlockTransferThreadClusterArrangeOrder,
+        ABlockTransferSrcAccessOrder,
+        ABlockTransferSrcVectorDim,
+        ABlockTransferSrcScalarPerVector,
+        ABlockTransferDstScalarPerVector_AK1,
+        false,
+        ABlockLdsExtraM,
+        BBlockTransferThreadClusterLengths_BK0_N_BK1,
+        BBlockTransferThreadClusterArrangeOrder,
+        BBlockTransferSrcAccessOrder,
+        BBlockTransferSrcVectorDim,
+        BBlockTransferSrcScalarPerVector,
+        BBlockTransferDstScalarPerVector_BK1,
+        false,
+        BBlockLdsExtraN,
+        CShuffleMRepeatPerShuffle,
+        CShuffleNRepeatPerShuffle*(NPerXdl / NPerXdl_),
+        CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
+        CShuffleBlockTransferScalarPerVector,
+        AComputeType,
+        BComputeType,
+        DirectLoad,
+        false, // UseTdmB
+        false, // UseNamedBarrier
+        UseLdsTranspose>;
+
+    template <index_t MRepeat_, index_t MPerXdl_, index_t NPerXdl_>
+    using GridwiseGemmBase = std::conditional_t<WaveletEnabled,
+                                                GridwiseGemmWavelet<MRepeat_, MPerXdl_, NPerXdl_>,
+                                                GridwiseGemmDefault<MRepeat_, MPerXdl_, NPerXdl_>>;
 
     using GridwiseGemm64 = GridwiseGemmBase<math::max(MXdlPerWave64, 1), MPerXdl, NPerXdl>;
     using GridwiseGemm32 =
@@ -834,6 +1049,47 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         bool stride_overflow;
     };
 
+    template <typename GridwiseGemm_,
+              bool HasMainLoop,
+              bool NoMainLoop,
+              InMemoryDataOperationEnum MemOp,
+              TailNumber TailNum = TailNumber::Even>
+    static auto SelectKernel()
+    {
+        if constexpr(DirectLoad && WaveletEnabled)
+        {
+            return kernel_grouped_conv_bwd_data_xdl_cshuffle_v3_2lds<
+                GridwiseGemm_,
+                DeviceOp::AGridDesc_AK0_M_AK1,
+                DeviceOp::BGridDesc_BK0_N_BK1,
+                DeviceOp::EGridDesc_MPerBlock_NBlock_NPerBlock,
+                MaxGroupedGemmGroupsNum,
+                GemmArgs,
+                ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>,
+                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                MemOp,
+                HasMainLoop,
+                NoMainLoop,
+                1, // MinOccupancy
+                TailNum>;
+        }
+        else
+        {
+            return kernel_grouped_conv_bwd_data_xdl_cshuffle_v3<
+                GridwiseGemm_,
+                DeviceOp::AGridDesc_AK0_M_AK1,
+                DeviceOp::BGridDesc_BK0_N_BK1,
+                DeviceOp::EGridDesc_MPerBlock_NBlock_NPerBlock,
+                MaxGroupedGemmGroupsNum,
+                GemmArgs,
+                ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>,
+                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                MemOp,
+                HasMainLoop,
+                NoMainLoop>;
+        }
+    }
+
     // Invoker
     struct Invoker : public BaseInvoker
     {
@@ -889,18 +1145,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 auto launch_kernel = [&](auto has_main_k_block_loop_, auto no_main_k_block_loop) {
                     constexpr bool has_main_loop = has_main_k_block_loop_.value;
                     constexpr bool no_main_loop  = no_main_k_block_loop.value;
-                    const auto kernel            = kernel_grouped_conv_bwd_data_xdl_cshuffle_v3<
-                                   GridwiseGemm_,
-                                   DeviceOp::AGridDesc_AK0_M_AK1,
-                                   DeviceOp::BGridDesc_BK0_N_BK1,
-                                   DeviceOp::EGridDesc_MPerBlock_NBlock_NPerBlock,
-                                   MaxGroupedGemmGroupsNum,
-                                   GemmArgs,
-                                   ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>,
-                                   ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
-                                   ElementOp,
-                                   has_main_loop,
-                                   no_main_loop>;
+                    const auto kernel =
+                        SelectKernel<GridwiseGemm_, has_main_loop, no_main_loop, ElementOp>();
 
                     return launch_and_time_kernel_with_preprocess(stream_config,
                                                                   clear_workspace,
@@ -1735,6 +1981,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
         // clang-format off
         str << "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3"
+            << (WaveletEnabled ? "_Wavelet" : "")
             << (get_warp_size() != 64 ? "_WmmaPorted" : "")
             << (DirectLoad ? "_DirectLoad" : "")
             << (LargeTensors ? "_Large_Tensor" : "")
@@ -1788,6 +2035,110 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3::Argument structure!");
     }
 };
+
+template <index_t NDimSpatial,
+          typename ALayout,   // output image
+          typename BLayout,   // weight
+          typename DsLayout,  // bias
+          typename ELayout,   // input image
+          typename ADataType, // output image
+          typename BDataType, // weight
+          typename AccDataType,
+          typename CShuffleDataType,
+          typename DsDataType,       // bias
+          typename EDataType,        // input image
+          typename AElementwiseOp,   // output image
+          typename BElementwiseOp,   // weight
+          typename CDEElementwiseOp, // C, bias, and input image
+          ConvolutionBackwardDataSpecialization ConvBackwardDataSpecialization,
+          bool DoPadGemmM,
+          bool DoPadGemmN,
+          index_t LoadBlockSize,
+          index_t MathBlockSize,
+          index_t MPerBlock,
+          index_t NPerBlock,
+          index_t KPerBlock,
+          index_t AK1,
+          index_t BK1,
+          index_t MPerXdl,
+          index_t NPerXdl,
+          index_t MRepeat,
+          index_t NRepeat,
+          typename ABlockTransferThreadClusterLengths_AK0_M_AK1,
+          typename ABlockTransferThreadClusterArrangeOrder,
+          typename ABlockTransferSrcAccessOrder,
+          index_t ABlockTransferSrcVectorDim,
+          index_t ABlockTransferSrcScalarPerVector,
+          index_t ABlockTransferDstScalarPerVector_AK1,
+          index_t ABlockLdsExtraM,
+          typename BBlockTransferThreadClusterLengths_BK0_N_BK1,
+          typename BBlockTransferThreadClusterArrangeOrder,
+          typename BBlockTransferSrcAccessOrder,
+          index_t BBlockTransferSrcVectorDim,
+          index_t BBlockTransferSrcScalarPerVector,
+          index_t BBlockTransferDstScalarPerVector_BK1,
+          index_t BBlockLdsExtraN,
+          index_t CShuffleMRepeatPerShuffle,
+          index_t CShuffleNRepeatPerShuffle,
+          typename CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
+          index_t CShuffleBlockTransferScalarPerVector,
+          typename AComputeType                       = ADataType,
+          typename BComputeType                       = AComputeType,
+          bool DirectLoad                             = false>
+using DeviceGroupedConvBwdDataMultipleD_Wavelet_Xdl_CShuffleV3 =
+DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<
+        NDimSpatial,
+        ALayout,   // output image
+        BLayout,   // weight
+        DsLayout,  // bias
+        ELayout,   // input image
+        ADataType, // output image
+        BDataType, // weight
+        AccDataType,
+        CShuffleDataType,
+        DsDataType,       // bias
+        EDataType,        // input image
+        AElementwiseOp,   // output image
+        BElementwiseOp,   // weight
+        CDEElementwiseOp, // C, bias, and input image
+        ConvBackwardDataSpecialization,
+        DoPadGemmM,
+        DoPadGemmN,
+        MathBlockSize,
+        MPerBlock,
+        NPerBlock,
+        KPerBlock,
+        AK1,
+        BK1,
+        MPerXdl,
+        NPerXdl,
+        MRepeat,
+        NRepeat,
+        ABlockTransferThreadClusterLengths_AK0_M_AK1,
+        ABlockTransferThreadClusterArrangeOrder,
+        ABlockTransferSrcAccessOrder,
+        ABlockTransferSrcVectorDim,
+        ABlockTransferSrcScalarPerVector,
+        ABlockTransferDstScalarPerVector_AK1,
+        ABlockLdsExtraM,
+        BBlockTransferThreadClusterLengths_BK0_N_BK1,
+        BBlockTransferThreadClusterArrangeOrder,
+        BBlockTransferSrcAccessOrder,
+        BBlockTransferSrcVectorDim,
+        BBlockTransferSrcScalarPerVector,
+        BBlockTransferDstScalarPerVector_BK1,
+        BBlockLdsExtraN,
+        CShuffleMRepeatPerShuffle,
+        CShuffleNRepeatPerShuffle,
+        CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
+        CShuffleBlockTransferScalarPerVector,
+        BlockGemmPipelineScheduler::Intrawave,
+        BlockGemmPipelineVersion::v1,
+        AComputeType,
+        BComputeType,
+        DirectLoad,
+        false, //LargeTensors
+        LoadBlockSize>;
 
 } // namespace device
 } // namespace tensor_operation
