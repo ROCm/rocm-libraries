@@ -56,12 +56,9 @@ inline void checkHipdnn(hipdnnStatus_t status, std::string_view context)
     {
         return;
     }
-    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendMessage{};
-    hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(backendMessage.data(),
-                                                                 backendMessage.size());
     std::string message(context);
     message += ": ";
-    message += backendMessage.data();
+    message += takeHipdnnMessage();
     throw ShimError(toCudnnStatus(status), message);
 }
 

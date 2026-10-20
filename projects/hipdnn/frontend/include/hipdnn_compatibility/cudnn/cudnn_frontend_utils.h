@@ -413,11 +413,11 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 // source-compatible surface.
 
 // Upstream's converters are hand-written switch tables; the shim routes them through
-// backend::toCudnn/toFe so there is one mapping, keeping upstream's fallback values.
+// toCudnn/toFe so there is one mapping, keeping upstream's fallback values.
 template <typename CudnnEnum, typename FeEnum>
 cudnnStatus_t convertToCudnnOrInvalid(const FeEnum mode, CudnnEnum& cudnn_mode)
 {
-    if(auto value = backend::toCudnn(mode))
+    if(auto value = toCudnn(mode))
     {
         cudnn_mode = *value;
         return CUDNN_STATUS_SUCCESS;
@@ -456,12 +456,12 @@ inline cudnnStatus_t convert_to_cudnn_type(const BehaviorNote_t mode,
 
 inline BehaviorNote_t convert_from_cudnn_type(const cudnnBackendBehaviorNote_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(BehaviorNote_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(BehaviorNote_t::NOT_SET);
 }
 
 inline NumericalNote_t convert_from_cudnn_type(const cudnnBackendNumericalNote_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(NumericalNote_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(NumericalNote_t::NOT_SET);
 }
 
 inline cudnnStatus_t convert_to_cudnn_type(const DescriptorType_t mode,
@@ -501,39 +501,39 @@ inline cudnnStatus_t convert_to_cudnn_type(const ReshapeMode_t mode,
 
 inline void convert_from_cudnn_type(const cudnnPaddingMode_t cudnn_mode, PaddingMode_t& mode)
 {
-    mode = backend::toFe(cudnn_mode).value_or(PaddingMode_t::NOT_SET);
+    mode = toFe(cudnn_mode).value_or(PaddingMode_t::NOT_SET);
 }
 
 inline ConvolutionMode_t convert_from_cudnn_type(const cudnnConvolutionMode_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(ConvolutionMode_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(ConvolutionMode_t::NOT_SET);
 }
 
 inline cudnnConvolutionMode_t convert_to_cudnn_type(const ConvolutionMode_t cudnn_mode)
 {
-    return backend::toCudnn(cudnn_mode).value_or(CUDNN_CROSS_CORRELATION);
+    return toCudnn(cudnn_mode).value_or(CUDNN_CROSS_CORRELATION);
 }
 
 // To be deprecated. Only exists as setResampleMode(cudnnResampleMode_t) requires it.
 inline void convert_from_cudnn_type(const cudnnResampleMode_t cudnn_mode, ResampleMode_t& mode)
 {
-    mode = backend::toFe(cudnn_mode).value_or(ResampleMode_t::NOT_SET);
+    mode = toFe(cudnn_mode).value_or(ResampleMode_t::NOT_SET);
 }
 
 inline void convert_from_cudnn_type(const cudnnBackendNormMode_t cudnn_mode, NormMode_t& mode)
 {
-    mode = backend::toFe(cudnn_mode).value_or(NormMode_t::NOT_SET);
+    mode = toFe(cudnn_mode).value_or(NormMode_t::NOT_SET);
 }
 
 inline void convert_from_cudnn_type(const cudnnBackendNormFwdPhase_t cudnn_mode,
                                     NormFwdPhase_t& mode)
 {
-    mode = backend::toFe(cudnn_mode).value_or(NormFwdPhase_t::NOT_SET);
+    mode = toFe(cudnn_mode).value_or(NormFwdPhase_t::NOT_SET);
 }
 
 inline void convert_from_cudnn_type(const cudnnBackendReshapeMode_t cudnn_mode, ReshapeMode_t& mode)
 {
-    mode = backend::toFe(cudnn_mode).value_or(ReshapeMode_t::NOT_SET);
+    mode = toFe(cudnn_mode).value_or(ReshapeMode_t::NOT_SET);
 }
 
 inline cudnnStatus_t convert_to_cudnn_type(const TensorReordering_t mode,
@@ -545,27 +545,27 @@ inline cudnnStatus_t convert_to_cudnn_type(const TensorReordering_t mode,
 inline void convert_from_cudnn_type(const cudnnBackendTensorReordering_t cudnn_mode,
                                     TensorReordering_t& mode)
 {
-    mode = backend::toFe(cudnn_mode).value_or(TensorReordering_t::NONE);
+    mode = toFe(cudnn_mode).value_or(TensorReordering_t::NONE);
 }
 
 inline DescriptorType_t convert_from_cudnn_type(const cudnnBackendDescriptorType_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(DescriptorType_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(DescriptorType_t::NOT_SET);
 }
 
 inline PointwiseMode_t convert_from_cudnn_type(const cudnnPointwiseMode_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(PointwiseMode_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(PointwiseMode_t::NOT_SET);
 }
 
 inline DataType_t convert_from_cudnn_type(const cudnnDataType_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(DataType_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(DataType_t::NOT_SET);
 }
 
 inline ReductionMode_t convert_from_cudnn_type(const cudnnReduceTensorOp_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(ReductionMode_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(ReductionMode_t::NOT_SET);
 }
 
 inline cudnnStatus_t convert_to_cudnn_type(const RngDistribution_t mode,
@@ -576,7 +576,7 @@ inline cudnnStatus_t convert_to_cudnn_type(const RngDistribution_t mode,
 
 inline RngDistribution_t convert_from_cudnn_type(const cudnnRngDistribution_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(RngDistribution_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(RngDistribution_t::NOT_SET);
 }
 
 inline cudnnStatus_t convert_to_cudnn_type(const MoeGroupedMatmulMode_t mode,
@@ -587,7 +587,7 @@ inline cudnnStatus_t convert_to_cudnn_type(const MoeGroupedMatmulMode_t mode,
 
 inline MoeGroupedMatmulMode_t convert_from_cudnn_type(const cudnnMoeGroupedMatmulMode_t cudnn_mode)
 {
-    return backend::toFe(cudnn_mode).value_or(MoeGroupedMatmulMode_t::NOT_SET);
+    return toFe(cudnn_mode).value_or(MoeGroupedMatmulMode_t::NOT_SET);
 }
 
 // NOLINTEND(readability-identifier-naming)

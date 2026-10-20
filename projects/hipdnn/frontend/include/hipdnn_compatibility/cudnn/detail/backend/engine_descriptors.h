@@ -169,11 +169,6 @@ public:
         return _record->index();
     }
 
-    bool isLoadedPlan() const noexcept
-    {
-        return _record->isLoaded();
-    }
-
     const OperationGraphDescriptor& graph() const
     {
         requireGraph();
@@ -191,29 +186,9 @@ public:
         return _record->hipdnnEngine();
     }
 
-    std::vector<cudnnBackendBehaviorNote_t> behaviorNotes() const
-    {
-        return _record->behaviorNotes();
-    }
-
-    std::vector<cudnnBackendNumericalNote_t> numericalNotes() const
-    {
-        return _record->numericalNotes();
-    }
-
     std::optional<std::string> engineName() const
     {
         return _record->name();
-    }
-
-    const std::vector<v8::EngineKnob>& visibleKnobs() const
-    {
-        return _record->knobs();
-    }
-
-    const v8::EngineKnob* visibleKnob(cudnnBackendKnobType_t type) const
-    {
-        return _record->knob(type);
     }
 
 protected:
@@ -411,8 +386,10 @@ protected:
                 *descriptor, CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
             requested.emplace_back(choice.knobType(), choice.value());
         }
-        _record = v8::makeConfigRecord(
-            engine->record(), requested, "CUDNN_ATTR_ENGINECFG_KNOB_CHOICES");
+        _record = v8::makeConfigRecord(engine->record(),
+                                       std::move(requested),
+                                       "CUDNN_ATTR_ENGINECFG_KNOB_CHOICES",
+                                       v8::KnobConfigBuild::ON_FIRST_USE);
         _engine = std::move(engine);
     }
 
@@ -420,6 +397,9 @@ private:
     std::shared_ptr<EngineDescriptor> _engine;
     std::shared_ptr<const v8::ConfigRecord> _record;
 };
+
+inline constexpr v8::HeuristicLabels HEURISTIC_LABELS{"CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET",
+                                                      "CUDNN_ATTR_ENGINEHEUR_DEVICEPROP"};
 
 class EngineHeuristicDescriptor final : public Descriptor
 {
@@ -432,17 +412,12 @@ public:
 protected:
     void validateSet(cudnnBackendAttributeName_t name, const StoredAttribute& /*value*/) override
     {
-        if(name == CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET
-           || name == CUDNN_ATTR_ENGINEHEUR_DEVICEPROP)
-        {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            attributeName(name) + " is not supported by the hipDNN cuDNN shim");
-        }
+        v8::checkHeuristicSettings({name == CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET,
+                                    name == CUDNN_ATTR_ENGINEHEUR_DEVICEPROP},
+                                   HEURISTIC_LABELS);
     }
 
-    // Every mode runs hipDNN's fallback selection; the results are the graph's
-    // rank snapshot, so finalize makes no hipDNN call once the graph has
-    // enumerated its engines.
+    // Finalize makes no hipDNN call once the graph has enumerated its engines.
     void finalizeImpl() override
     {
         const std::shared_ptr<Descriptor> graphRef
@@ -455,12 +430,10 @@ protected:
         const cudnnBackendHeurMode_t mode
             = requireAttribute(scalarAttribute<cudnnBackendHeurMode_t>(CUDNN_ATTR_ENGINEHEUR_MODE),
                                CUDNN_ATTR_ENGINEHEUR_MODE);
-        v8::warnUnhonoredHeuristicMode(mode);
-
         const auto& graph = descriptorCast<OperationGraphDescriptor>(
             *graphRef, CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
         std::vector<std::shared_ptr<const v8::EngineRecord>> engines
-            = v8::rankedEngineRecords(graph.requireCore());
+            = v8::heuristicResults(graph.requireCore(), mode, {}, HEURISTIC_LABELS);
         std::vector<std::shared_ptr<Descriptor>> results;
         results.reserve(engines.size());
         for(std::shared_ptr<const v8::EngineRecord>& engine : engines)

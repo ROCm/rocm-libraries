@@ -35,6 +35,26 @@ private:
     ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _variantPack;
 };
 
+// hipDNN rejects an empty array with a null-pointer error that does not name
+// the caller's array.
+inline void requireVariantPackArray(const void* data, std::int64_t count, std::string_view label)
+{
+    if(count < 0)
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                        std::string(label) + ": element count " + std::to_string(count)
+                            + " is negative");
+    }
+    if(count == 0)
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required (non-empty)");
+    }
+    if(data == nullptr)
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + ": array is null");
+    }
+}
+
 // Names the caller's arrays in variant-pack error messages.
 struct VariantPackLabels
 {
@@ -54,18 +74,9 @@ inline std::shared_ptr<const VariantPackRecord> buildVariantPack(void* const* da
 {
     using ::hipdnn_frontend::detail::hipdnnBackend;
 
-    // hipDNN rejects an empty array with a null-pointer error that does not
-    // name the caller's array.
-    if(pointerCount == 0)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.dataPointers) + " is required (non-empty)");
-    }
-    if(uidCount == 0)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.uniqueIds) + " is required (non-empty)");
-    }
+    requireVariantPackArray(
+        static_cast<const void*>(dataPointers), pointerCount, labels.dataPointers);
+    requireVariantPackArray(uniqueIds, uidCount, labels.uniqueIds);
     if(pointerCount != uidCount)
     {
         throw ShimError(CUDNN_STATUS_BAD_PARAM,

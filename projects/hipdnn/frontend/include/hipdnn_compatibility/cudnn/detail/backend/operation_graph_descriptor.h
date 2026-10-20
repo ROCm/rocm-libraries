@@ -30,12 +30,6 @@ public:
     {
     }
 
-    // Null until finalized.
-    const std::shared_ptr<const v8::GraphCore>& core() const noexcept
-    {
-        return _core;
-    }
-
     const std::shared_ptr<const v8::GraphCore>& requireCore() const
     {
         if(!_core)
@@ -90,41 +84,31 @@ public:
 protected:
     void finalizeImpl() override
     {
-        const std::optional<cudnnHandle_t> handle
-            = scalarAttribute<cudnnHandle_t>(CUDNN_ATTR_OPERATIONGRAPH_HANDLE);
-        if(!handle || *handle == nullptr)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, "CUDNN_ATTR_OPERATIONGRAPH_HANDLE is required");
-        }
+        static const v8::LoweringLabels s_labels{
+            attributeName(CUDNN_ATTR_OPERATIONGRAPH_HANDLE),
+            attributeName(CUDNN_ATTR_OPERATIONGRAPH_OPS),
+            attributeName(CUDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED),
+            attributeName(CUDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED),
+            attributeName(CUDNN_ATTR_TENSOR_CONSTANT_VALUE)};
+        const v8::GraphFlags flags{
+            scalarAttribute<bool>(CUDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED)
+                .value_or(false),
+            scalarAttribute<bool>(CUDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED)
+                .value_or(false)};
         const std::vector<std::shared_ptr<Descriptor>> operations
             = descriptorArrayAttribute(CUDNN_ATTR_OPERATIONGRAPH_OPS);
-        if(operations.empty())
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            "CUDNN_ATTR_OPERATIONGRAPH_OPS is required (non-empty)");
-        }
-        for(const cudnnBackendAttributeName_t name :
-            {CUDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
-             CUDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED})
-        {
-            if(scalarAttribute<bool>(name).value_or(false))
-            {
-                throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                                attributeName(name)
-                                    + " = true is not supported by the hipDNN cuDNN shim");
-            }
-        }
-
         std::vector<std::shared_ptr<const v8::OperationRecord>> records;
         records.reserve(operations.size());
         for(const std::shared_ptr<Descriptor>& operation : operations)
         {
             records.push_back(operationCast(*operation).operationRecord());
         }
-        const v8::LoweringLabels labels{"CUDNN_ATTR_OPERATIONGRAPH_OPS",
-                                        "CUDNN_ATTR_TENSOR_CONSTANT_VALUE",
-                                        &descriptorTypeName};
-        _core = v8::lowerGraph(records, *handle, labels, {});
+        _core = v8::lowerGraph(
+            records,
+            scalarAttribute<cudnnHandle_t>(CUDNN_ATTR_OPERATIONGRAPH_HANDLE).value_or(nullptr),
+            flags,
+            s_labels,
+            {});
     }
 
     std::optional<StoredAttribute> lazyAttribute(cudnnBackendAttributeName_t name,

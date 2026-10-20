@@ -20,6 +20,7 @@
 #include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/engine_space.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/notes.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Types.hpp>
@@ -48,7 +49,7 @@ struct EngineKnob
 
 inline std::string knobTypeLabel(cudnnBackendKnobType_t type)
 {
-    if(const std::optional<KnobType_t> mapped = backend::toFe(type))
+    if(const std::optional<KnobType_t> mapped = toFe(type))
     {
         return std::string("CUDNN_KNOB_TYPE_") + knobTypeName(*mapped);
     }
@@ -74,7 +75,7 @@ inline std::vector<EngineKnob>
     visible.reserve(projectable.size());
     for(std::size_t i = 0; i < projectable.size(); ++i)
     {
-        const std::optional<cudnnBackendKnobType_t> type = backend::toCudnn(ranges[i].type);
+        const std::optional<cudnnBackendKnobType_t> type = toCudnn(ranges[i].type);
         if(!type || lookup.at(ranges[i].type) == nullptr)
         {
             HIPDNN_FE_LOG_WARN("[cudnn_frontend] Omitting hipDNN knob '"
@@ -200,15 +201,9 @@ public:
         return _name;
     }
 
-    // hipDNN engines declare no numerical notes; only a determinism claim
-    // lifts NONDETERMINISTIC.
     std::vector<cudnnBackendNumericalNote_t> numericalNotes() const
     {
-        if(isDeterminismClaimed(_id))
-        {
-            return {};
-        }
-        return {CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+        return v8::numericalNotes(_id);
     }
 
 private:
@@ -252,18 +247,7 @@ private:
                                                                 hipdnnNotes,
                                                                 "engine behavior notes"),
                 "reading the behavior notes of engine " + std::to_string(_id));
-            std::vector<cudnnBackendBehaviorNote_t> notes;
-            for(const hipdnnBackendBehaviorNote_t note : hipdnnNotes)
-            {
-                const std::optional<BehaviorNote_t> mapped
-                    = ::hipdnn_frontend::fromHipdnnBehaviorNote(note);
-                const std::optional<cudnnBackendBehaviorNote_t> cudnnNote
-                    = mapped ? backend::toCudnn(*mapped) : std::nullopt;
-                if(cudnnNote)
-                {
-                    notes.push_back(*cudnnNote);
-                }
-            }
+            std::vector<cudnnBackendBehaviorNote_t> notes = cudnnBehaviorNotes(hipdnnNotes);
             // The name is informational, so a backend without it is not an error.
             std::string name;
             std::optional<std::string> engineName;
@@ -328,6 +312,48 @@ inline std::vector<std::shared_ptr<const EngineRecord>>
     return engines;
 }
 
+// Heuristic inputs the shim cannot honor; set means the caller asked for it.
+struct HeuristicSettings
+{
+    bool smCountTarget = false;
+    bool deviceProp = false;
+};
+
+struct HeuristicLabels
+{
+    std::string_view smCountTarget;
+    std::string_view deviceProp;
+};
+
+inline void checkHeuristicSettings(const HeuristicSettings& settings, const HeuristicLabels& labels)
+{
+    if(settings.smCountTarget)
+    {
+        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
+                        std::string(labels.smCountTarget)
+                            + " is not supported by the hipDNN cuDNN shim");
+    }
+    if(settings.deviceProp)
+    {
+        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
+                        std::string(labels.deviceProp)
+                            + " is not supported by the hipDNN cuDNN shim");
+    }
+}
+
+// Every mode runs hipDNN's fallback selection, so the results are the graph's
+// rank snapshot; modes hipDNN cannot honor are warned about once per process.
+inline std::vector<std::shared_ptr<const EngineRecord>>
+    heuristicResults(const std::shared_ptr<const GraphCore>& graph,
+                     cudnnBackendHeurMode_t mode,
+                     const HeuristicSettings& settings,
+                     const HeuristicLabels& labels)
+{
+    checkHeuristicSettings(settings, labels);
+    warnUnhonoredHeuristicMode(mode);
+    return rankedEngineRecords(graph);
+}
+
 // A hipDNN ENGINECFG for `engine` carrying `settings`, finalized.
 inline ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor
     buildKnobConfig(hipdnnBackendDescriptor_t engine,
@@ -358,9 +384,11 @@ class ConfigRecord final : public RecordOf<CUDNN_BACKEND_ENGINECFG_DESCRIPTOR>
 {
 public:
     ConfigRecord(std::shared_ptr<const EngineRecord> engine,
+                 KnobChoices requested,
                  KnobChoices choices,
                  std::vector<::hipdnn_frontend::KnobSetting> settings)
         : _engine(std::move(engine))
+        , _requested(std::move(requested))
         , _choices(std::move(choices))
         , _settings(std::move(settings))
     {
@@ -391,15 +419,23 @@ public:
         return _engine->isLoaded();
     }
 
-    // In the order the caller chose them.
+    // The validated choices, in the order the caller chose them.
     const KnobChoices& knobChoices() const noexcept
     {
         return _choices;
     }
 
+    // Every choice as the caller passed it, unset -1 entries included: the plan
+    // tag keeps them.
+    const KnobChoices& requestedChoices() const noexcept
+    {
+        return _requested;
+    }
+
     // The finalized hipDNN ENGINECFG. Without knob settings this is the graph's
-    // shared default config; with them it is built on first use, because the
-    // backend accepts knobs only before its config is finalized.
+    // shared default config; with them it is built once, at
+    // KnobConfigBuild::NOW or on first use, because the backend accepts knobs
+    // only before its config is finalized.
     hipdnnBackendDescriptor_t hipdnnEngineConfig() const
     {
         if(isLoaded())
@@ -422,10 +458,20 @@ private:
     // Declared first so the hipDNN config below is released before the engine
     // (and through it the graph) whose ENGINE it references.
     std::shared_ptr<const EngineRecord> _engine;
+    KnobChoices _requested;
     KnobChoices _choices;
     std::vector<::hipdnn_frontend::KnobSetting> _settings;
     mutable std::once_flag _configOnce;
     mutable ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _knobConfig;
+};
+
+// When makeConfigRecord builds the knob ENGINECFG: NOW reports a knob-config
+// failure from the config build (builders); ON_FIRST_USE defers it to the
+// first hipdnnEngineConfig() call (the C API, where plan finalize is first).
+enum class KnobConfigBuild
+{
+    NOW,
+    ON_FIRST_USE,
 };
 
 // Validates `requested` against the engine's visible knobs, in order. A -1
@@ -434,8 +480,9 @@ private:
 // every knob message.
 inline std::shared_ptr<const ConfigRecord>
     makeConfigRecord(std::shared_ptr<const EngineRecord> engine,
-                     const KnobChoices& requested,
-                     std::string_view choicesLabel)
+                     KnobChoices requested,
+                     std::string_view choicesLabel,
+                     KnobConfigBuild build)
 {
     if(engine->isLoaded())
     {
@@ -489,8 +536,13 @@ inline std::shared_ptr<const ConfigRecord>
         }
         choices.emplace_back(type, value);
     }
-    return std::make_shared<const ConfigRecord>(
-        std::move(engine), std::move(choices), std::move(settings));
+    auto config = std::make_shared<const ConfigRecord>(
+        std::move(engine), std::move(requested), std::move(choices), std::move(settings));
+    if(build == KnobConfigBuild::NOW)
+    {
+        static_cast<void>(config->hipdnnEngineConfig());
+    }
+    return config;
 }
 
 inline std::shared_ptr<const ConfigRecord>
@@ -500,8 +552,10 @@ inline std::shared_ptr<const ConfigRecord>
                            KnobChoices knobChoices,
                            std::optional<std::string> name)
 {
+    KnobChoices requested = knobChoices;
     return std::make_shared<const ConfigRecord>(
         std::make_shared<const EngineRecord>(id, index, std::move(behaviorNotes), std::move(name)),
+        std::move(requested),
         std::move(knobChoices),
         std::vector<::hipdnn_frontend::KnobSetting>{});
 }

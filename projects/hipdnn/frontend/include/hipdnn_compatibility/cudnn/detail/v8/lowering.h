@@ -48,16 +48,62 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 // The shim's own `graph` namespace (the v9 API) shadows hipDNN's.
 namespace fe_graph = ::hipdnn_frontend::graph;
 
-// Caller-chosen names that prefix lowering errors, so each caller keeps its
-// own wording.
+// Names the lowerable operation kinds as cuDNN does.
+inline const char* operationKindName(cudnnBackendDescriptorType_t kind) noexcept
+{
+    switch(kind)
+    {
+    case CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_NORM_FORWARD_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_NORM_FORWARD_DESCRIPTOR";
+    case CUDNN_BACKEND_OPERATION_NORM_BACKWARD_DESCRIPTOR:
+        return "CUDNN_BACKEND_OPERATION_NORM_BACKWARD_DESCRIPTOR";
+    default:
+        return "operation";
+    }
+}
+
+// Caller-chosen names that prefix graph errors, so each caller keeps its own
+// wording.
 struct LoweringLabels
 {
-    // Graph-level errors: UID conflicts, double writers, cycles.
+    std::string handle;
+    // OPS required, null records, UID conflicts, double writers, cycles.
     std::string operations;
+    std::string dynamicShape;
+    std::string overrideShape;
     // A constant tensor hipDNN cannot carry.
     std::string constantValue;
-    // Names an operation kind in node-lifecycle errors.
-    const char* (*operationName)(cudnnBackendDescriptorType_t);
+    // Names an operation kind in node-lifecycle errors; null means
+    // operationKindName.
+    const char* (*operationName)(cudnnBackendDescriptorType_t) = &operationKindName;
+};
+
+inline const char* operationLabel(const LoweringLabels& labels, cudnnBackendDescriptorType_t kind)
+{
+    return labels.operationName != nullptr ? labels.operationName(kind) : operationKindName(kind);
+}
+
+// Graph features the shim cannot lower.
+struct GraphFlags
+{
+    bool dynamicShape = false;
+    bool overrideShape = false;
 };
 
 // Tensors an operation reads and writes, in slot order; unset slots are
@@ -197,7 +243,7 @@ decltype(auto)
     case OperationTarget::NOT_SET:
     default:
         throw ShimError(CUDNN_STATUS_INTERNAL_ERROR,
-                        std::string(labels.operationName(op.kind())) + " has no lowering target");
+                        std::string(operationLabel(labels, op.kind())) + " has no lowering target");
     }
 }
 
@@ -468,7 +514,7 @@ void lowerNode(Attributes attributes,
 {
     attributes.set_compute_data_type(computeType);
     Node node(std::move(attributes), fe_graph::GraphAttributes{});
-    const std::string label = std::string("lowering ") + context.labels.operationName(op.kind());
+    const std::string label = std::string("lowering ") + operationLabel(context.labels, op.kind());
     checkFrontend(node.pre_validate_node(), label);
     checkFrontend(node.infer_properties_node(), label);
     checkFrontend(node.post_validate_node(), label);
@@ -831,15 +877,50 @@ inline void lowerOperation(const NormBackwardOperationRecord& op, LoweringContex
     }
 }
 
+// The graph-level rules, checked before any hipDNN call.
+inline void preflightGraph(const std::vector<std::shared_ptr<const OperationRecord>>& operations,
+                           hipdnnHandle_t handle,
+                           GraphFlags flags,
+                           const LoweringLabels& labels)
+{
+    if(handle == nullptr)
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM, labels.handle + " is required");
+    }
+    if(operations.empty())
+    {
+        throw ShimError(CUDNN_STATUS_BAD_PARAM, labels.operations + " is required (non-empty)");
+    }
+    for(const auto& [enabled, label] : {std::pair{flags.dynamicShape, &labels.dynamicShape},
+                                        std::pair{flags.overrideShape, &labels.overrideShape}})
+    {
+        if(enabled)
+        {
+            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
+                            *label + " = true is not supported by the hipDNN cuDNN shim");
+        }
+    }
+    for(std::size_t i = 0; i < operations.size(); ++i)
+    {
+        if(!operations[i])
+        {
+            throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                            labels.operations + ": operation " + std::to_string(i) + " is null");
+        }
+    }
+}
+
 // Lowers `operations` to a finalized hipDNN operation graph on `handle`. The
 // per-tensor and per-operation hipDNN descriptors are released on return;
 // hipDNN's refcounts keep what the graph references.
 inline std::shared_ptr<const GraphCore>
     lowerGraph(const std::vector<std::shared_ptr<const OperationRecord>>& operations,
                hipdnnHandle_t handle,
+               GraphFlags flags,
                const LoweringLabels& labels,
                std::string tag)
 {
+    preflightGraph(operations, handle, flags, labels);
     std::vector<OperationPorts> ports;
     ports.reserve(operations.size());
     CanonicalTensors tensors(labels);

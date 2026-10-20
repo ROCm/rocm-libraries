@@ -562,6 +562,128 @@ TEST(TestCudnnShimV8CoreFactories, ConvolutionOperationRankAndScaling)
         "beta = 1 is not supported by the hipDNN cuDNN shim; only 0 is");
 }
 
+TEST(TestCudnnShimV8CoreFactories, ReductionOperationRequiresDescThenTensors)
+{
+    const v8::ReductionOperationLabels labels{"reduction", "x", "y"};
+    v8::ReductionOperationInputs inputs;
+    inputs.y = tensor({1, 4, 1, 1}, 2);
+    expectShimError([&] { v8::makeOperationRecord(inputs, labels); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "reduction is required");
+
+    inputs.reduction = v8::makeReductionRecord({CUDNN_REDUCE_TENSOR_ADD, CUDNN_DATA_FLOAT, false},
+                                               {"operator", "computeType"});
+    inputs.y = nullptr;
+    expectShimError(
+        [&] { v8::makeOperationRecord(inputs, labels); }, CUDNN_STATUS_BAD_PARAM, "x is required");
+
+    inputs.x = tensor({1, 4, 8, 8}, 1);
+    expectShimError(
+        [&] { v8::makeOperationRecord(inputs, labels); }, CUDNN_STATUS_BAD_PARAM, "y is required");
+
+    inputs.y = tensor({1, 4, 1, 1}, 2);
+    const std::shared_ptr<const v8::ReductionOperationRecord> record
+        = v8::makeOperationRecord(inputs, labels);
+    EXPECT_EQ(record->kind(), CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR);
+    EXPECT_EQ(record->target(), OperationTarget::REDUCTION);
+    EXPECT_EQ(record->reduction(), inputs.reduction);
+    EXPECT_EQ(record->x(), inputs.x);
+    EXPECT_EQ(record->y(), inputs.y);
+}
+
+TEST(TestCudnnShimV8CoreFactories, ResampleForwardOperationRequiredBeforeScaling)
+{
+    const v8::ResampleForwardOperationLabels labels{"resample", "x", "y", "alpha", "beta"};
+    v8::ResampleForwardOperationInputs inputs;
+    inputs.x = tensor({1, 4, 8, 8}, 1);
+    inputs.alpha = 2.0;
+    expectShimError([&] { v8::makeOperationRecord(inputs, labels); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "resample is required");
+
+    inputs.resample = v8::makeResampleRecord(resampleInputs(), RESAMPLE_LABELS);
+    inputs.x = nullptr;
+    expectShimError(
+        [&] { v8::makeOperationRecord(inputs, labels); }, CUDNN_STATUS_BAD_PARAM, "x is required");
+
+    inputs.x = tensor({1, 4, 8, 8}, 1);
+    expectShimError(
+        [&] { v8::makeOperationRecord(inputs, labels); }, CUDNN_STATUS_BAD_PARAM, "y is required");
+
+    inputs.y = tensor({1, 4, 4, 4}, 2);
+    inputs.beta = 1.0;
+    expectShimError([&] { v8::makeOperationRecord(inputs, labels); },
+                    CUDNN_STATUS_NOT_SUPPORTED,
+                    "alpha = 2 is not supported by the hipDNN cuDNN shim; only 1 is");
+
+    inputs.alpha.reset();
+    expectShimError([&] { v8::makeOperationRecord(inputs, labels); },
+                    CUDNN_STATUS_NOT_SUPPORTED,
+                    "beta = 1 is not supported by the hipDNN cuDNN shim; only 0 is");
+
+    inputs.alpha = 1.0;
+    inputs.beta = 0.0;
+    std::shared_ptr<const v8::ResampleForwardOperationRecord> record
+        = v8::makeOperationRecord(inputs, labels);
+    EXPECT_EQ(record->target(), OperationTarget::RESAMPLE_FWD);
+    EXPECT_EQ(record->resample(), inputs.resample);
+    EXPECT_EQ(record->x(), inputs.x);
+    EXPECT_EQ(record->y(), inputs.y);
+    EXPECT_EQ(record->index(), nullptr);
+
+    inputs.index = tensor({1, 4, 4, 4}, 3);
+    record = v8::makeOperationRecord(inputs, labels);
+    EXPECT_EQ(record->index(), inputs.index);
+}
+
+TEST(TestCudnnShimV8CoreFactories, SetTimeRulesApplyWithoutTheCApi)
+{
+    v8::ResampleInputs resample = resampleInputs();
+    resample.prePaddings = {{0, 1}, {1, 0}};
+    expectShimError([&] { v8::makeResampleRecord(resample, RESAMPLE_LABELS); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "prePaddings[1] has a zero denominator");
+
+    v8::TensorInputs tensorEnum = tensorInputs();
+    tensorEnum.dataType = static_cast<cudnnDataType_t>(20);
+    expectShimError([&] { v8::makeTensorRecord(std::move(tensorEnum), TENSOR_LABELS); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "dataType = 20 is not a valid enumerator");
+
+    v8::PointwiseInputs pointwiseEnum;
+    pointwiseEnum.mode = static_cast<cudnnPointwiseMode_t>(50);
+    pointwiseEnum.computeType = CUDNN_DATA_FLOAT;
+    expectShimError([&] { v8::makePointwiseRecord(pointwiseEnum, POINTWISE_LABELS); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "mode = 50 is not a valid enumerator");
+
+    expectShimError(
+        [] {
+            v8::makeOperationRecord(
+                normForward(static_cast<cudnnBackendNormMode_t>(6), CUDNN_NORM_FWD_TRAINING),
+                NORM_FWD_LABELS);
+        },
+        CUDNN_STATUS_BAD_PARAM,
+        "mode = 6 is not a valid enumerator");
+
+    expectShimError(
+        [] { v8::makeTensorRecord(tensorInputs({1, 1, 1, 1, 1, 1, 1, 1, 1, 1}), TENSOR_LABELS); },
+        CUDNN_STATUS_BAD_PARAM,
+        "dimensions: element count 10 outside [0, 9]");
+
+    v8::ConvolutionInputs conv;
+    conv.computeType = CUDNN_DATA_FLOAT;
+    conv.mode = CUDNN_CROSS_CORRELATION;
+    conv.spatialDims = 9;
+    conv.prePaddings.assign(9, 0);
+    conv.postPaddings.assign(9, 0);
+    conv.dilations.assign(9, 1);
+    conv.filterStrides.assign(9, 1);
+    expectShimError([&] { v8::makeConvRecord(std::move(conv), CONV_LABELS); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "prePaddings: element count 9 outside [0, 8]");
+}
+
 TEST(TestCudnnShimV8CoreFactories, PointwiseOperationSlotMap)
 {
     const v8::TensorPtr x = tensor({4}, 1);
