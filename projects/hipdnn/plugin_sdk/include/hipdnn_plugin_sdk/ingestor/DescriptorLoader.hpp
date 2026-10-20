@@ -32,6 +32,7 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/GpuGenericTargets.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -95,10 +96,12 @@
  *    bare base id: a device reports feature suffixes and matching stops at ':', so a
  *    partial target id (`gfx942:xnack-`) would match nothing while reading as deliberate.
  *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
- *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus an unprefixed
- *    `provenance`, is warned about and ignored instead, so a descriptor may carry
- *    tracking data. Every other unknown key is still the hard rejection the RFC asks
- *    for, including a leftover `schema`.
+ *    (`additionalProperties: false`); a key prefixed `x-` or `_` is warned about and
+ *    ignored instead, so a descriptor may carry tracking data. The packager's own
+ *    unprefixed `provenance` block is ignored without a warning: a KDP header carries it
+ *    inline, and an unpacked or authored tree carries it on any descriptor, so warning
+ *    would bury real diagnostics. Every other unknown key is still the hard rejection the
+ *    RFC asks for, including a leftover `schema`.
  *
  * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
  * parseEngineDescriptor().
@@ -225,11 +228,15 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
     }
 }
 
+/// The descriptor packager's one unprefixed tracking block.
+inline constexpr std::string_view PROVENANCE_KEY = "provenance";
+
 /// Extension data has to look like extension data: a key starting `x-` or `_`, plus
-/// `provenance`, the one unprefixed block. The packager keeps it inline only on a KDP
-/// header (a packed UKD's lives in the provenance sidecar), but unpacked and authored
-/// trees carry it on any descriptor. Those warn and are ignored, so a descriptor can
-/// carry tracking fields the loader has no use for.
+/// `provenance`, the one unprefixed block the descriptor packager emits. Those are
+/// ignored, so a descriptor can carry tracking fields the loader has no use for. Prefixed
+/// keys warn; `provenance` does not. The packager keeps it inline only on a KDP header (a
+/// packed UKD's lives in the provenance sidecar), but unpacked and authored trees carry it
+/// on any descriptor, so it is ignored silently rather than warning once per kernel.
 ///
 /// Anything else the struct does not spell fails the file, because the alternative is
 /// silent damage. A UED spelling `heuristik` has no heuristic key, and absence is legal:
@@ -240,7 +247,7 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
 /// a descriptor tree that otherwise cannot be trusted to mean what it spells.
 inline bool isExtensionKey(std::string_view key)
 {
-    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == "provenance";
+    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == PROVENANCE_KEY;
 }
 
 inline void requireKnownKeys(const nlohmann::json& object,
@@ -257,6 +264,10 @@ inline void requireKnownKeys(const nlohmann::json& object,
         {
             fail("unknown key '" + item.key() + "' in " + where
                  + "; extension keys must start with 'x-' or '_'");
+        }
+        if(item.key() == PROVENANCE_KEY)
+        {
+            continue;
         }
         HIPDNN_PLUGIN_LOG_WARN("descriptor loader: extension key '" << item.key() << "' in "
                                                                     << where << "; ignoring it");
@@ -669,10 +680,12 @@ inline void requireNoDuplicates(const std::vector<std::string>& values,
 /// reports features too (`gfx942:sramecc+:xnack-`) and archMatches stops the candidate
 /// at ':', so a bare id matches such a device -- but an authored entry may not carry
 /// features. Matching compares target-id text, so a partial id like `gfx942:xnack-`
-/// reads as reasonable and matches nothing. LLVM generic targets (`gfx9-4-generic`) stay
-/// legal: the '-' is part of the base id. Catches an authoring typo, which would
+/// reads as reasonable and matches nothing. LLVM generic targets (`gfx9-4-generic`) are
+/// well-formed: the '-' is part of the base id. Catches an authoring typo, which would
 /// otherwise disable the pack everywhere with nothing louder than an INFO decline; not
-/// an existence check, so an unheard-of but well-formed id still parses.
+/// an existence check on its own, so an unheard-of but well-formed id still passes here.
+/// A generic name absent from the generic target table is rejected separately, by
+/// requireArchList.
 inline bool isPlausibleArchBaseId(std::string_view value)
 {
     constexpr std::string_view PREFIX = "gfx";
@@ -704,6 +717,74 @@ inline std::string describeArch(const std::vector<std::string>& arch)
     return text + "]";
 }
 
+/// A device both table entries @p x and @p y cover, or empty.
+inline std::string sharedGenericMember(const std::string& x, const std::string& y)
+{
+    const auto* generic = findGenericTarget(x);
+    const std::string& other = generic != nullptr ? y : x;
+    if(generic == nullptr)
+    {
+        generic = findGenericTarget(y);
+    }
+    if(generic == nullptr)
+    {
+        return {};
+    }
+    for(size_t i = 0; i < generic->memberCount; ++i)
+    {
+        if(entryTier(other, generic->members[i]).has_value())
+        {
+            return std::string(generic->members[i]);
+        }
+    }
+    return {};
+}
+
+/// Why @p kernelArch breaks the generic rules against its pack's @p packArch, or empty: a
+/// kernel with its own arch must list every pack generic and only entries the pack lists.
+inline std::string genericArchViolation(const std::vector<std::string>& packArch,
+                                        const std::vector<std::string>& kernelArch)
+{
+    const auto lists = [](const std::vector<std::string>& arch, const std::string& entry) {
+        return std::find(arch.begin(), arch.end(), entry) != arch.end();
+    };
+    for(const auto& entry : kernelArch)
+    {
+        if(isGenericShapedArchName(entry) && !lists(packArch, entry))
+        {
+            return "declares generic target '" + entry + "', which its pack does not list";
+        }
+    }
+    if(kernelArch.empty())
+    {
+        return {};
+    }
+    bool packHasGeneric = false;
+    for(const auto& entry : packArch)
+    {
+        if(isGenericShapedArchName(entry))
+        {
+            packHasGeneric = true;
+            if(!lists(kernelArch, entry))
+            {
+                return "declares arch " + describeArch(kernelArch)
+                       + " without the pack's generic target '" + entry + "'";
+            }
+        }
+    }
+    if(packHasGeneric)
+    {
+        for(const auto& entry : kernelArch)
+        {
+            if(!lists(packArch, entry))
+            {
+                return "declares arch '" + entry + "', which its generic-target pack does not list";
+            }
+        }
+    }
+    return {};
+}
+
 /// `arch`: every entry must be non-empty, non-repeated, and a plausible gfx base id.
 /// archSupports is a case-sensitive exact compare, so `""`, `" gfx942"`, or `"gfx94"`
 /// would otherwise silently disable the pack everywhere with nothing louder than an
@@ -733,6 +814,36 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
         }
     }
     requireNoDuplicates(values, "arch entry", where);
+    for(const auto& value : values)
+    {
+        if(isGenericShapedArchName(value) && findGenericTarget(value) == nullptr)
+        {
+            std::string message = "key 'arch' in ";
+            message += where;
+            message += " names '";
+            message += value;
+            message += "', a generic target absent from the generic target table";
+            fail(message);
+        }
+    }
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        for(size_t j = i + 1; j < values.size(); ++j)
+        {
+            if(const auto shared = sharedGenericMember(values[i], values[j]); !shared.empty())
+            {
+                std::string message = "key 'arch' in ";
+                message += where;
+                message += " lists '";
+                message += values[i];
+                message += "' and '";
+                message += values[j];
+                message += "', which both cover ";
+                message += shared;
+                fail(message);
+            }
+        }
+    }
     return values;
 }
 
@@ -1108,6 +1219,16 @@ inline void addPackKernelEntry(KernelDescriptorPack& pack,
         fail("kernel '" + kernel->name + "' in " + where + " declares arch "
              + describeArch(kernel->arch) + ", which reaches past the pack's "
              + describeArch(pack.arch));
+    }
+    if(const auto violation = genericArchViolation(pack.arch, kernel->arch); !violation.empty())
+    {
+        std::string message = "kernel '";
+        message += kernel->name;
+        message += "' in ";
+        message += where;
+        message += " ";
+        message += violation;
+        fail(message);
     }
     pack.kernels.push_back(std::move(*kernel));
 }
@@ -2145,9 +2266,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         {
             // Failure granularity is the pack: a pack whose cross-references dangle or
             // whose kernels contradict the KMD is dropped while the engine keeps its other
-            // packs. A duplicate kernel metadata tuple is the exception, for packs whose
-            // arch lists overlap -- the state manager's constructor throws on it, taking
-            // the whole engine. RFC 0017 §10
+            // packs. A duplicate kernel metadata tuple is the exception, for kernels that
+            // compete at the same arch tier -- the state manager's constructor throws on it,
+            // taking the whole engine. RFC 0017 §10
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.
@@ -2207,6 +2328,13 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                         // not claim -- what a missing shard stamp looks like -- sends the
                         // reader hunting for the wrong thing.
                         reason = match.reason;
+                        break;
+                    }
+                    if(const auto violation
+                       = detail::genericArchViolation(pack.arch, match.kernel->arch);
+                       !violation.empty())
+                    {
+                        reason = "names kernel " + toString(kernelId) + ", which " + violation;
                         break;
                     }
                     pack.kernels.push_back(*match.kernel);

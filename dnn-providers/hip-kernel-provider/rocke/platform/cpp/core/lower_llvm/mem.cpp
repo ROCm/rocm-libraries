@@ -37,7 +37,8 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0)
+    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0 || strcmp(name, "fp8e4m3") == 0
+       || strcmp(name, "bf8e5m2") == 0)
     {
         return 1;
     }
@@ -632,12 +633,13 @@ static void op_tile_smem_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                    base_ptr,
                    gidx);
     rocke_ll_emitf(L,
-                   "  store <%lld x %s> %s, ptr addrspace(3) %s, align %lld",
+                   "  store <%lld x %s> %s, ptr addrspace(3) %s, align %lld%s",
                    (long long)vec,
                    elem_ty,
                    rocke_ll_operand(L, value),
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   rocke_ll_lds_aa_suffix(L, gname));
 }
 
 static void op_tile_smem_load_v4(rocke_lower_t* L, const rocke_op_t* op)
@@ -697,12 +699,12 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
      * 2 (not 1). Replicate that exact dict here rather than the shared
      * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
      * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
+     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
     {
-        if(strcmp(en, "i8") == 0)
+        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
         {
             elem_bytes = 1;
         }
@@ -737,12 +739,13 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     {
         const char* scalar = rocke_ll_fresh(L, "smem.s");
         rocke_ll_emitf(L,
-                       "  %s = load %s%s, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s%s, ptr addrspace(3) %s, align %lld%s",
                        scalar,
                        volatile_kw,
                        elem_ty,
                        base,
-                       (long long)align);
+                       (long long)align,
+                       rocke_ll_lds_aa_suffix(L, gname));
         rocke_ll_emitf(L,
                        "  %s = insertelement <1 x %s> undef, %s %s, i32 0",
                        ll_res(op),
@@ -753,13 +756,14 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     else
     {
         rocke_ll_emitf(L,
-                       "  %s = load %s<%lld x %s>, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s<%lld x %s>, ptr addrspace(3) %s, align %lld%s",
                        ll_res(op),
                        volatile_kw,
                        (long long)vec,
                        elem_ty,
                        base,
-                       (long long)align);
+                       (long long)align,
+                       rocke_ll_lds_aa_suffix(L, gname));
     }
 }
 
@@ -896,6 +900,7 @@ static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_type_t* stype = smem->type;
     const char* gname = rocke_ll_smem_global_name(L, smem, NULL);
     const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+    rocke_ll_lds_prov_set(L, op->results[0], gname);
     rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
 }
 
@@ -903,6 +908,9 @@ static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* base = op->operands[0];
     const rocke_value_t* off = op->operands[1];
+    const char* prov = rocke_ll_lds_prov_get(L, base);
+    if(prov)
+        rocke_ll_lds_prov_set(L, op->results[0], prov);
     rocke_ll_emitf(L,
                    "  %s = add i64 %s, %s",
                    ll_res(op),
@@ -1135,6 +1143,22 @@ static void op_tile_buffer_load_f16(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset));
     rocke_ll_emitf(L, "  %s = bitcast i16 %s to half", ll_res(op), tmp);
+}
+
+/* Python _op_tile_buffer_load_f16_d16: a direct half-return D16 buffer load. */
+static void op_tile_buffer_load_f16_d16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    rocke_ll_need(L, "raw.ptr.buffer.load.f16");
+    rocke_ll_emitf(L,
+                   "  %s = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   ll_res(op),
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset));
 }
 
 static void op_tile_buffer_store_vN_f16(rocke_lower_t* L, const rocke_op_t* op)
@@ -1470,13 +1494,14 @@ static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)",
+                   "i32 0, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    ptr_name,
                    (long long)size_bytes,
                    rocke_ll_operand(L, voff),
                    rocke_ll_operand(L, soff),
-                   (long long)aux);
+                   (long long)aux,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_lds_prov_get(L, lds_addr)));
 }
 
 static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op)
@@ -1975,6 +2000,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN, op_tile_buffer_load_vN);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, op_tile_buffer_load_f16_d16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_BF16, op_tile_buffer_load_bf16);

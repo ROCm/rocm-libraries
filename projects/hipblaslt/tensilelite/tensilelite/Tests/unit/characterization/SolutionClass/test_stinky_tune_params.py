@@ -58,9 +58,9 @@ def test_unset_leaves_name_unchanged(tuned):
 
 def test_set_tags_name_and_drop_restores_it(tuned):
     base = _names(tuned)
-    tuned[KEY] = {"DsReadPerCap": 4}
+    tuned[KEY] = {"DsReadCyclesPerLoad": 4}
     tagged = _names(tuned)
-    assert all("_STP_DsReadPerCap4" in n for n in tagged)
+    assert all("_STP_DsReadCyclesPerLoad4" in n for n in tagged)
     assert tagged != base
     tuned.dropStinkyTofuParameters()
     assert KEY not in tuned
@@ -68,27 +68,27 @@ def test_set_tags_name_and_drop_restores_it(tuned):
 
 
 def test_tag_is_human_readable_and_filename_safe(tuned):
-    tuned[KEY] = {"WmmaBatchSize": 2, "DsReadPerCap": -1, "Scale": 0.5}
+    tuned[KEY] = {"WmmaBatchSize": 2, "DsReadCyclesPerLoad": -1, "Scale": 0.5}
     for n in _names(tuned):
-        assert "_STP_DsReadPerCapn1_Scale0p5_WmmaBatchSize2" in n
+        assert "_STP_DsReadCyclesPerLoadn1_Scale0p5_WmmaBatchSize2" in n
         assert "/" not in n and " " not in n
 
 
 def test_tag_depends_on_values_not_order(tuned):
-    tuned[KEY] = {"DsReadPerCap": 4, "WmmaBatchSize": 2}
+    tuned[KEY] = {"DsReadCyclesPerLoad": 4, "WmmaBatchSize": 2}
     a = _names(tuned)
-    tuned[KEY] = {"WmmaBatchSize": 2, "DsReadPerCap": 4}
+    tuned[KEY] = {"WmmaBatchSize": 2, "DsReadCyclesPerLoad": 4}
     assert _names(tuned) == a
-    tuned[KEY] = {"DsReadPerCap": 3, "WmmaBatchSize": 2}
+    tuned[KEY] = {"DsReadCyclesPerLoad": 3, "WmmaBatchSize": 2}
     assert _names(tuned) != a
 
 
 def test_constructor_moves_public_key_to_internal(solution, assembler, isa_info_map):
     config = dict(solution)
-    config["StinkyTofuParameters"] = {"DsReadPerCap": 4}
+    config["StinkyTofuParameters"] = {"DsReadCyclesPerLoad": 4}
     s = Solution(config, False, False, False, assembler, isa_info_map)
     assert "StinkyTofuParameters" not in s
-    assert s[KEY] == {"DsReadPerCap": 4}
+    assert s[KEY] == {"DsReadCyclesPerLoad": 4}
 
 
 def test_constructor_unset_adds_no_key(solution, assembler, isa_info_map):

@@ -26,6 +26,7 @@ from dispatch.attention.axes import (
     _CODEPATH_KNOBS,
     DENSE_BASE_RELATIVE_KNOBS,
     DENSE_LOOP_FIELDS,
+    DENSE_ARCH_PROBLEM_FIELDS,
     DENSE_OUTPUT_FIELDS,
     DENSE_PROBLEM_FIELDS,
     DENSE_UNTUNABLE_KNOBS,
@@ -43,7 +44,12 @@ from dispatch.attention.unified_rules import (
     unified_space,
 )
 from rocke.core.arch import ArchTarget
-from kernels.common.attention_unified import _tiled_2d_impl, _tiled_3d_impl
+from kernels.common.attention_unified import (
+    _num_segments,
+    _tiled_2d_impl,
+    _tiled_3d_impl,
+    _tiled_3d_spec_from_problem,
+)
 from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
     supports_attention_dense as supports_gfx942,
@@ -103,6 +109,9 @@ _GEOMETRY_FIELDS = frozenset(
     }
 )
 
+# Inert 3D spec fields, kept so saved specs that set them still load.
+_INERT_3D_FIELDS = frozenset({"use_invariant_hoist"})
+
 
 class TestTuningSpace(unittest.TestCase):
     def test_every_kernel_tuning_field_is_swept(self):
@@ -132,6 +141,7 @@ class TestTuningSpace(unittest.TestCase):
                         - swept
                         - codepath
                         - KNOWN_WRONG_KNOBS[arch]
+                        - (_INERT_3D_FIELDS if path == "3d" else frozenset())
                     )
                     self.assertFalse(missing, sorted(missing))
 
@@ -153,7 +163,96 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
-        self.assertEqual(len(specs), 5)
+        # waves_per_eu (5) x kv_cache_policy ("stream" or "all") x
+        # use_kv_lds_swizzle x use_wave_page_id_load.
+        self.assertEqual(len(specs), 40)
+
+    def test_3d_cache_policy_base_follows_the_problem(self):
+        """The 3D builder resolves the K/V cache policy per problem
+        (``_kv_cache_policy_3d``): restating it names the default kernel, the
+        other value stays reachable, and every id records the policy built."""
+        for arch in ("gfx950", "gfx942"):
+            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+                    prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
+                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    specs = _sampled(prefix, 1000, **kw)
+                    kernels = {repr(s.kernel_spec) for s in specs}
+                    self.assertEqual(len(kernels), len(specs))
+                    self.assertEqual(
+                        {s.kernel_spec.kv_cache_policy for s in specs},
+                        {"stream", "all"},
+                    )
+                    for s in specs:
+                        self.assertEqual(
+                            dict(s.knobs)["kv_cache_policy"],
+                            s.kernel_spec.kv_cache_policy,
+                        )
+                    candidate, req, _ = _specs_for(prefix, n=1, **kw)
+                    default = tuning_spec_with_knobs(req, candidate.spec_id, {})
+                    self.assertEqual(default.kernel_spec.kv_cache_policy, auto)
+                    others = {k: v for k, v in default.knobs if k != "kv_cache_policy"}
+                    restated = tuning_spec_with_knobs(
+                        req, candidate.spec_id, {**others, "kv_cache_policy": auto}
+                    )
+                    self.assertEqual(restated.tuning_id, default.tuning_id)
+                    for policy in ("stream", "all"):
+                        pinned = tuning_spec_with_knobs(
+                            req, candidate.spec_id, {"kv_cache_policy": policy}
+                        )
+                        self.assertEqual(pinned.kernel_spec.kv_cache_policy, policy)
+
+    def test_3d_auto_segment_variant_defaults_to_the_dispatched_spec(self):
+        """At the dispatcher's tile, an auto-segment variant's default spec is
+        the 3D kernel the dispatcher builds: same segments and K/V layout knobs."""
+        cus = {"gfx950": 256, "gfx942": 304}
+        for arch, batch, head_size, seqlen_k in (
+            ("gfx950", 1, 128, 32768),  # 64-token tiles, swizzle, page ids
+            ("gfx950", 16, 128, 8192),
+            ("gfx950", 64, 128, 4096),
+            ("gfx942", 1, 128, 4096),  # wide loads, swizzle, page ids
+            ("gfx942", 32, 128, 8192),
+            ("gfx942", 4, 256, 8192),  # async copies, swizzle, page ids
+        ):
+            with self.subTest(arch=arch, batch=batch, head_size=head_size):
+                kw = dict(
+                    arch=arch,
+                    batch=batch,
+                    hdim_q=head_size,
+                    hdim_v=head_size,
+                    seqlen_q=1,
+                    seqlen_k=seqlen_k,
+                    num_cus=cus[arch],
+                )
+                problem = _problem(_request(**kw))
+                want = _tiled_3d_spec_from_problem(problem, arch)
+                tile = want.tile_size // problem.block_size
+                prefix = f"attention_{arch}_u3d_splitkv_segauto_t{tile}xb"
+                candidate, req, _ = _specs_for(prefix, n=1, **kw)
+                got = tuning_spec_with_knobs(req, candidate.spec_id, {})
+                self.assertEqual(got.kernel_spec, want)
+
+    def test_3d_auto_segment_variant_records_and_checks_its_count(self):
+        prefix = "attention_gfx950_u3d_splitkv_segauto_t1xb"
+        kw = dict(batch=16, seqlen_q=1, seqlen_k=8192, num_cus=256)
+        candidate, req, _ = _specs_for(prefix, n=1, **kw)
+        rule = _num_segments(_problem(req), "gfx950")
+        default = tuning_spec_with_knobs(req, candidate.spec_id, {})
+        self.assertEqual(dict(default.knobs)["num_segments"], rule)
+        self.assertEqual(default.kernel_spec.num_segments, rule)
+        again = tuning_spec_with_knobs(req, candidate.spec_id, dict(default.knobs))
+        self.assertEqual(again.tuning_id, default.tuning_id)
+        with self.assertRaisesRegex(ValueError, "split rule"):
+            tuning_spec_with_knobs(
+                req,
+                candidate.spec_id,
+                {**dict(default.knobs), "num_segments": rule + 1},
+            )
+        # The same knobs on a device where the rule splits differently.
+        _c, smaller, _ = _specs_for(prefix, n=1, **{**kw, "num_cus": 128})
+        self.assertNotEqual(_num_segments(_problem(smaller), "gfx950"), rule)
+        with self.assertRaisesRegex(ValueError, "split rule"):
+            tuning_spec_with_knobs(smaller, candidate.spec_id, dict(default.knobs))
 
     def test_tuning_ids_are_unique_and_hashed(self):
         _candidate, _req, specs = _specs_for(
@@ -398,6 +497,75 @@ def _gfx950_variant(spec_id):
 _KQ_PAD = {"use_k_single_buffer": True, "use_kq_lds_pad": True, "kq_lds_pad_halves": 16}
 
 
+# (label, request kwargs). Decode (3D) bands use seqlen_q=2 so full attention keeps its
+# own body; at seqlen_q=1 it is the causal kernel.
+_BAND_REQUESTS = {
+    "causal_br": dict(mask_type=2),
+    "causal_tl": dict(mask_type=1),
+    "full": dict(mask_type=0),
+    "lookahead": dict(mask_type=0, right_bound=16),
+    "left_only": dict(mask_type=0, sliding_window=256),
+    "two_sided": dict(mask_type=0, sliding_window=256, right_bound=64),
+    "causal_window": dict(mask_type=2, sliding_window=256),
+}
+
+
+class TestBandTuning(unittest.TestCase):
+    """Band requests through the unified tuning space: every spec carries the mask
+    it was asked for, and masks never share a kernel identity or cache key."""
+
+    def _first_specs(self, path, **kw):
+        from dispatch.attention.unified_rules import iter_tuning_specs
+
+        variant = next(v for v in GFX950_TUNING_VARIANTS if v.path == path)
+        shape = (
+            dict(seqlen_q=700, seqlen_k=1400)
+            if path == "2d"
+            else dict(seqlen_q=2, seqlen_k=8192)
+        )
+        req = _request(**shape, **kw)
+        problem = _problem(req)
+        return problem, list(islice(iter_tuning_specs(req, variant), 3))
+
+    def test_specs_carry_the_requested_band(self):
+        for path in ("2d", "3d"):
+            for label, kw in _BAND_REQUESTS.items():
+                with self.subTest(path=path, band=label):
+                    problem, specs = self._first_specs(path, **kw)
+                    self.assertTrue(specs)
+                    for spec in specs:
+                        ks = spec.kernel_spec
+                        self.assertEqual(ks.causal_top_left, problem.causal_top_left)
+                        self.assertEqual(ks.right_bound, problem.right_bound)
+                        self.assertEqual(ks.sliding_window, problem.sliding_window)
+
+    def test_masks_do_not_share_identity_or_cache_key(self):
+        for path in ("2d", "3d"):
+            with self.subTest(path=path):
+                seen = {}
+                for label, kw in _BAND_REQUESTS.items():
+                    _, specs = self._first_specs(path, **kw)
+                    spec = specs[0]
+                    for what, value in (
+                        ("identity", repr(spec.identity())),
+                        ("cache_key", repr(spec.cache_key)),
+                        ("kernel_name", spec.kernel_name),
+                    ):
+                        other = seen.setdefault((what, value), label)
+                        self.assertEqual(
+                            other, label, f"{what} shared: {other} / {label}"
+                        )
+
+    def test_gfx942_tuning_declines_a_top_left_band_without_raising(self):
+        from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
+        from dispatch.attention.unified_rules import iter_tuning_specs
+
+        req = _request("gfx942", mask_type=1, seqlen_q=700, seqlen_k=1400)
+        for variant in GFX942_TUNING_VARIANTS[:8]:
+            with self.subTest(variant=variant.variant_id):
+                self.assertEqual(list(islice(iter_tuning_specs(req, variant), 3)), [])
+
+
 class TestGfx950UnifiedLegality(unittest.TestCase):
     """What the tiled 2D validator does not model: the LDS footprint, and the
     padded-K layout the kernel disables or cannot share with Q."""
@@ -564,6 +732,7 @@ def _assert_dense_fields_classified(case, arch, spec_type):
     swept = _dense_swept_fields(arch)
     fixed = (
         DENSE_PROBLEM_FIELDS
+        | DENSE_ARCH_PROBLEM_FIELDS[arch]
         | DENSE_OUTPUT_FIELDS[arch]
         | DENSE_VARIANT_FIELDS[arch]
         | DENSE_LOOP_FIELDS
