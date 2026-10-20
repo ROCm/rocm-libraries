@@ -137,6 +137,8 @@ def main():
     arch = normalize_arch(args.arch) if args.arch else _get_arch()
     config_paths = resolve_configs(args.configs, arch)
     devices = gfb.resolve_devices(args.devices)
+    if not args.compile_only and not devices:
+        parser.error("No GPUs detected; set --devices explicitly or use --compile-only")
 
     # ========================================================================
     # Phase 1: Compile kernels (parallel, no GPU)
