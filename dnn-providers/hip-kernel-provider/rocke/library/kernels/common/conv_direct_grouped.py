@@ -757,6 +757,14 @@ def _direct_conv_h_loop_args(b, p, A_smem, p_Hi, params, q_subtiles, zero_acc,
     return UNROLL, c_unroll, n_iters_v, d_desc, acc_args
 
 
+def _direct_conv_lane_s(b, lane):
+    """Shared direct-conv lane decode for the S=2 residual: c4, q_in_lane, s_lane."""
+    c4 = b.div(lane, b.const_i32(16))
+    q_in_lane = b.mod(lane, b.const_i32(16))
+    s_lane = b.div(c4, b.const_i32(2))
+    return c4, q_in_lane, s_lane
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -797,13 +805,7 @@ def build_direct_conv_16c(
     tid = b.thread_id_x()
     wave_id = b.div(tid, c_wave)
     lane = b.mod(tid, c_wave)
-    c4 = b.div(lane, b.const_i32(16))  # 0..3
-    q_in_lane = b.mod(lane, b.const_i32(16))  # 0..15
-    # K=32 folded direct-conv mapping:
-    #   c4=0,1 -> S=0 with channel blocks 0..7 and 8..15
-    #   c4=2,3 -> S=1 with channel blocks 0..7 and 8..15
-    # S=2 remains a residual K=16 MFMA using the original c4*4 mapping.
-    s_lane_k32 = b.div(c4, b.const_i32(2))
+    c4, q_in_lane, s_lane_k32 = _direct_conv_lane_s(b, lane)
     ch_lane_k32 = b.mul(b.mod(c4, b.const_i32(2)), b.const_i32(8))
     ch_lane_k16 = b.mul(c4, b.const_i32(4))
 
@@ -1733,13 +1735,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     # Lane decomposition: identical to 16c kernel.
     # c4: K-block index (0..3); selects s-position and channel block.
     # q_in_lane: M row (k_out within group) and N column (output W position).
-    c4 = b.div(lane, b.const_i32(16))
-    q_in_lane = b.mod(lane, b.const_i32(16))
-
-    # K-fold mapping (mirrors fold_k32 in 16c but at K=16 scale):
-    #   c4 in {0,1} → s=0, ch_block = (c4 % 2) * 4 ∈ {0, 4}
-    #   c4 in {2,3} → s=1, ch_block = (c4 % 2) * 4 ∈ {0, 4}
-    s_lane = b.div(c4, b.const_i32(2))  # 0, 0, 1, 1
+    c4, q_in_lane, s_lane = _direct_conv_lane_s(b, lane)
     ch_lane = b.mul(b.mod(c4, b.const_i32(2)), b.const_i32(4))  # 0, 4, 0, 4
 
     # Lanes in the "low half" (c4 ∈ {0,1}) carry valid data for the s=2
