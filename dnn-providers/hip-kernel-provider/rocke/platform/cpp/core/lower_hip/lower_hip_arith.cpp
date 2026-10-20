@@ -7,7 +7,7 @@
  *
  * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
  * (lw, op) signature from lower_hip_internal.h. Shared helpers (rocke_h_emit /
- * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
+ * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_require_hip_scalar /
  * rocke_h_f32_literal / rocke_attr_get_*) are DEFINED in lower_hip_core.c and only
  * called here. The registration table is exported via rocke_h_handlers_arith(),
  * which the core bucket stitches into the dispatch table.
@@ -20,6 +20,7 @@
 #include <string.h> /* strcmp   */
 
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 
@@ -81,11 +82,7 @@ static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const roc
     {
         ity = "i32";
     }
-    cpp_t = rocke_h_hip_scalar(ity);
-    if(!cpp_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.constant: unknown ity %s", ity);
-    }
+    cpp_t = rocke_h_require_hip_scalar(lw, ity);
     val = rocke_attr_get(&op->attrs, "value");
     if(!val)
     {
@@ -362,11 +359,13 @@ static rocke_status_t rocke_h_op_arith_or(rocke_h_lowerer_t* lw, const rocke_op_
     return lw->status;
 }
 
-/* def _op_arith_smax(self, op):
+/* def _select_by_compare(self, op, compare):
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
- *                f"({_name(a)} > {_name(b)} ? {_name(a)} : {_name(b)});") */
-static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+ *                f"({_name(a)} {compare} {_name(b)} ? {_name(a)} : {_name(b)});")
+ * The maximum (">") or minimum ("<") of the two operands, as a C ternary. */
+static rocke_status_t
+    h_select_by_compare(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* compare)
 {
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
@@ -374,36 +373,40 @@ static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_o
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
     rocke_h_emitf(lw,
-                  "%s %s = (%s > %s ? %s : %s);",
+                  "%s %s = (%s %s %s ? %s : %s);",
                   rocke_h_type_to_hip(lw, r->type),
                   rocke_h_name(lw, r),
                   an,
+                  compare,
                   bn,
                   an,
                   bn);
     return lw->status;
 }
 
-/* def _op_arith_smin(self, op):
- *     a, b = op.operands
- *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
- *                f"({_name(a)} < {_name(b)} ? {_name(a)} : {_name(b)});") */
+/* smax / smin are signed, so they refuse a u8 operand; umax / umin take u8.
+ * uint8_t operands promote to int, so C's own comparison and the ternary are
+ * the unsigned maximum / minimum. */
+static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_i_refuse_unsigned_operands(op, "arith.umax");
+    return h_select_by_compare(lw, op, ">");
+}
+
 static rocke_status_t rocke_h_op_arith_smin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const rocke_value_t* a = op->operands[0];
-    const rocke_value_t* b = op->operands[1];
-    const rocke_value_t* r = h_res(op);
-    const char* an = rocke_h_name(lw, a);
-    const char* bn = rocke_h_name(lw, b);
-    rocke_h_emitf(lw,
-                  "%s %s = (%s < %s ? %s : %s);",
-                  rocke_h_type_to_hip(lw, r->type),
-                  rocke_h_name(lw, r),
-                  an,
-                  bn,
-                  an,
-                  bn);
-    return lw->status;
+    rocke_i_refuse_unsigned_operands(op, "arith.umin");
+    return h_select_by_compare(lw, op, "<");
+}
+
+static rocke_status_t rocke_h_op_arith_umax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return h_select_by_compare(lw, op, ">");
+}
+
+static rocke_status_t rocke_h_op_arith_umin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return h_select_by_compare(lw, op, "<");
 }
 
 /* def _op_arith_not(self, op):
@@ -875,6 +878,8 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_OR, rocke_h_op_arith_or},
         {ROCKE_OP_ARITH_SMAX, rocke_h_op_arith_smax},
         {ROCKE_OP_ARITH_SMIN, rocke_h_op_arith_smin},
+        {ROCKE_OP_ARITH_UMAX, rocke_h_op_arith_umax},
+        {ROCKE_OP_ARITH_UMIN, rocke_h_op_arith_umin},
         {ROCKE_OP_ARITH_NOT, rocke_h_op_arith_not},
         {ROCKE_OP_ARITH_XOR, rocke_h_op_arith_xor},
         {ROCKE_OP_ARITH_SHL, rocke_h_op_arith_shl},

@@ -171,6 +171,8 @@ load_block_count # BlockCount[q_block]
 IOSpecRule, validate_io
 SignatureBuilder, kernel_name_join
 ceil_div_grid, ptr_type_str, sig_param, sig_scalar
+ceil_div, align_up # host integer math (no IR)
+non_default_fields, salted_kernel_name # spec-keyed kernel names
 
 # Quantization (helpers/quant.py)
 QDType, QUANT_MAX_ABS

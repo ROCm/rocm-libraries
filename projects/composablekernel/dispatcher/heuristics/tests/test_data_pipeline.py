@@ -86,6 +86,56 @@ class TestParseKernelName:
             result = parse_kernel_name(name)
             assert result["layout"] == layout
 
+    @pytest.mark.parametrize(
+        "pipeline,epilogue,pads",
+        [
+            ("comp_async", "cshuffle", "True_True_True"),
+            ("comp_tdm", "tdm", "False_False_False"),
+            ("comp_tdm_v2", "tdm", "False_False_False"),
+            ("basic_v1", "cshuffle", "True_True_True"),
+        ],
+    )
+    def test_pipelines_with_underscores(self, pipeline, epilogue, pads):
+        # A one-token split read comp_tdm_v2 as pipeline "comp", epilogue "tdm",
+        # scheduler "v2", and failed on the tile.
+        name = (
+            f"gemm_bf16_rcr_{pipeline}_{epilogue}_intrawave_{pads}_False"
+            "_64x128x64_4x1x1_16x16x32"
+        )
+        result = parse_kernel_name(name)
+        assert result["pipeline"] == pipeline
+        assert result["epilogue"] == epilogue
+        assert result["scheduler"] == "intrawave"
+        assert result["pad_m"] is (pads == "True_True_True")
+        assert result["persistent"] is False
+        assert (result["tile_m"], result["tile_n"], result["tile_k"]) == (64, 128, 64)
+        assert (result["warp_m"], result["warp_n"], result["warp_k"]) == (4, 1, 1)
+        assert result["warp_tile_k"] == 32
+
+    def test_default_scheduler(self):
+        # preshufflev2 kernels use scheduler "default", also an epilogue name.
+        name = (
+            "gemm_bf16_rcr_preshufflev2_default_default_False_False_False_False"
+            "_128x128x64_1x4x1_16x16x32"
+        )
+        result = parse_kernel_name(name)
+        assert (result["pipeline"], result["epilogue"], result["scheduler"]) == (
+            "preshufflev2",
+            "default",
+            "default",
+        )
+        assert result["tile_m"] == 128
+
+    def test_multi_token_pipeline_with_suffixes(self):
+        name = (
+            "gemm_bf16_rcr_comp_tdm_v2_tdm_intrawave_False_False_False_False"
+            "_128x128x64_2x2x1_16x16x32_vec4_4_8_preshuffle"
+        )
+        result = parse_kernel_name(name)
+        assert result["pipeline"] == "comp_tdm_v2"
+        assert (result["vec_a"], result["vec_b"], result["vec_c"]) == (4, 4, 8)
+        assert result["warp_tile_k"] == 32
+
 
 # ---------------------------------------------------------------------------
 # _layout_from_problem
@@ -428,6 +478,149 @@ class TestVectorWidthSuffix:
     def test_single_digit_and_multi_digit_widths_both_parse(self):
         assert parse_kernel_name(self.BASE + "_vec16_2_16")["vec_a"] == 16
 
+    def test_a_trailing_batched_suffix_does_not_change_the_config(self):
+        plain = parse_kernel_name(self.BASE)
+        batched = parse_kernel_name(self.BASE + "_batched")
+        assert batched["tile_m"] == plain["tile_m"] == 128
+        assert (batched["vec_a"], batched["vec_b"], batched["vec_c"]) == (0, 0, 0)
+        assert batched["is_fixed_width"] is False
+        assert batched["pipeline"] == plain["pipeline"]
+
+    def test_is_fixed_width_follows_the_vec_suffix(self):
+        assert parse_kernel_name(self.BASE)["is_fixed_width"] is False
+        assert parse_kernel_name(self.BASE + "_vec4_4_8")["is_fixed_width"] is True
+        both = parse_kernel_name(self.BASE + "_vec4_4_8_batched")
+        assert (both["vec_a"], both["vec_b"], both["vec_c"]) == (4, 4, 8)
+        assert both["is_fixed_width"] is True
+        assert both["tile_m"] == 128
+
+
+def _rocminfo(gfx, generic, features=""):
+    """rocminfo-shaped text: a CPU agent, then one GPU agent named ``gfx``.
+
+    The layout is what the parser depends on, as rocminfo prints it: each
+    agent's Name precedes its Device Type, and the GPU's ISA list after
+    "ISA Info:" ends with a generic target. The values are arbitrary markers,
+    not any real part's; the CPU's differ from the GPU's, so a field read from
+    the wrong agent shows.
+    """
+    return f"""\
+*******
+Agent 1
+*******
+  Name:                    Test CPU
+  Marketing Name:          Test CPU
+  Device Type:             CPU
+  Cache Info:
+    L1:                      999(0x3e7) KB
+  Compute Unit:            999
+*******
+Agent 2
+*******
+  Name:                    {gfx}
+  Marketing Name:          Test GPU
+  Device Type:             GPU
+  Cache Info:
+    L1:                      11(0xb) KB
+    L2:                      22(0x16) KB
+    L3:                      33(0x21) KB
+  Max Clock Freq. (MHz):   1234
+  Compute Unit:            77
+  SIMDs per CU:            4
+  Shader Engines:          5
+  Wavefront Size:          32(0x20)
+  Max Waves Per CU:        16(0x10)
+  ISA Info:
+    ISA 1
+      Name:                    amdgcn-amd-amdhsa--{gfx}{features}
+    ISA 2
+      Name:                    amdgcn-amd-amdhsa--{generic}{features}
+*** Done ***
+"""
+
+
+#: rocminfo text per arch; gfx950 nodes report ISA names with feature suffixes.
+_ROCMINFO_CASES = {
+    "gfx1250": _rocminfo("gfx1250", "gfx12-5-generic"),
+    "gfx950": _rocminfo("gfx950", "gfx9-4-generic", ":sramecc+:xnack-"),
+}
+
+#: The GPU agent's marker values, as the profile should report them.
+_GPU_FIELDS = {
+    "marketing_name": "Test GPU",
+    "num_cus": 77,
+    "simds_per_cu": 4,
+    "l1_cache_kb": 11,
+    "l2_cache_kb": 22,
+    "l3_cache_kb": 33,
+    "wavefront_size": 32,
+    "max_waves_per_cu": 16,
+    "shader_engines": 5,
+    "max_clock_mhz": 1234,
+}
+
+#: A further GPU agent, as on a node that exposes several GPUs.
+_ROCMINFO_EXTRA_GPU = """\
+*******
+Agent 3
+*******
+  Name:                    gfx1250
+  Device Type:             GPU
+  Cache Info:
+    L1:                      88(0x58) KB
+  Compute Unit:            888
+"""
+
+
+def _profile_from(monkeypatch, stdout):
+    import subprocess
+
+    import data_pipeline as dp
+
+    def fake_run(*a, **k):
+        class R:
+            pass
+
+        R.stdout = stdout
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return dp.get_hardware_profile()
+
+
+@pytest.mark.parametrize("arch", sorted(_ROCMINFO_CASES))
+class TestHardwareProfileRocminfoLayout:
+    """rocminfo's layout: an agent's Name precedes its Device Type, and its ISA
+    list ends with a generic target."""
+
+    def test_the_target_is_the_agent_name_not_the_last_isa(self, arch, monkeypatch):
+        # Reading Name after Device Type took the generic ISA, so the LDS lookup
+        # missed and --capture_hw refused the node's own arch.
+        from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH
+
+        profile = _profile_from(monkeypatch, _ROCMINFO_CASES[arch])
+        assert profile["gfx_name"] == arch
+        assert profile["lds_capacity"] == LDS_TOTAL_CAPACITY_BY_ARCH[arch]
+
+    def test_the_arch_check_accepts_the_node(self, arch, monkeypatch):
+        from data_pipeline import check_capture_hw_arch
+
+        profile = _profile_from(monkeypatch, _ROCMINFO_CASES[arch])
+        check_capture_hw_arch(profile, arch)
+        other = "gfx950" if arch == "gfx1250" else "gfx1250"
+        with pytest.raises(SystemExit):
+            check_capture_hw_arch(profile, other)
+
+    def test_fields_come_from_the_gpu_agent(self, arch, monkeypatch):
+        profile = _profile_from(monkeypatch, _ROCMINFO_CASES[arch])
+        assert {k: profile.get(k) for k in _GPU_FIELDS} == _GPU_FIELDS
+
+    def test_only_the_first_gpu_agent_is_read(self, arch, monkeypatch):
+        text = _ROCMINFO_CASES[arch].replace("*** Done ***\n", _ROCMINFO_EXTRA_GPU)
+        profile = _profile_from(monkeypatch, text)
+        assert profile["num_cus"] == _GPU_FIELDS["num_cus"]
+        assert profile["l1_cache_kb"] == _GPU_FIELDS["l1_cache_kb"]
+
 
 class TestHardwareProfileLdsCapacity:
     @pytest.mark.parametrize(
@@ -656,6 +849,71 @@ class TestHardwareProfileLdsCapacity:
         assert out.exists()
         df = pd.read_parquet(out)
         assert df["hw_lds_capacity"].iloc[0] == 163840
+
+
+_BATCHED_KERNEL = (
+    "gemm_bf16_rcr_compv3_default_intrawave_False_False_False_True_"
+    "128x128x128_2x2x1_32x32x16_batched"
+)
+
+
+class TestBatchedGemmCsv:
+    def _write(self, directory: Path, name: str, rows: str) -> None:
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "kernel,M,N,K,batch_count,tflops,latency_ms,verified\n" + rows
+        )
+
+    def test_directory_merge_skips_csv_copies_and_keeps_the_median(self, tmp_path):
+        from data_pipeline import load_batched_gemm_results
+
+        self._write(
+            tmp_path / "run_a",
+            "batched_gemm_results.csv",
+            f"{_BATCHED_KERNEL},16,32,64,8,10,1.0,true\n"
+            f"{_BATCHED_KERNEL},16,32,64,8,30,3.0,true\n"
+            f"{_BATCHED_KERNEL},16,32,64,8,999,9.0,false\n",
+        )
+        self._write(
+            tmp_path / "run_a" / "csv",
+            "batched_gemm_results.csv",
+            f"{_BATCHED_KERNEL},16,32,64,8,1000,1.0,true\n",
+        )
+        self._write(
+            tmp_path / "full-run" / "job_7",
+            "batched_gemm_results.csv",
+            f"{_BATCHED_KERNEL},16,32,64,4,5,1.0,true\n",
+        )
+
+        df = load_batched_gemm_results(tmp_path, arch="gfx950", dtype="bf16")
+        assert set(df["op_type"]) == {"batched_gemm"}
+        assert set(df["dtype"]) == {"bf16"}
+        trim = df[df["batch_count"] == 8].iloc[0]
+        assert trim["measured_tflops"] == pytest.approx(20)
+        assert trim["latency_ms"] == pytest.approx(2)
+        assert trim["source"] == "trim"
+        assert trim["is_fixed_width"] == False  # noqa: E712
+        assert (trim["vec_a"], trim["vec_b"], trim["vec_c"]) == (0, 0, 0)
+        assert df["batch_count"].tolist() == [4, 8] or set(df["batch_count"]) == {4, 8}
+        full = df[df["batch_count"] == 4].iloc[0]
+        assert full["source"] == "full"
+        assert "hw_num_cus" not in df.columns
+
+    def test_convert_csv_attaches_the_hardware_profile(self, tmp_path):
+        from convert_csv_to_parquet import convert_csv_to_parquet
+
+        src = tmp_path / "batched_gemm_results.csv"
+        src.write_text(
+            "kernel,M,N,K,batch_count,tflops,latency_ms,verified\n"
+            f"{_BATCHED_KERNEL},16,32,64,8,12,1.5,true\n"
+        )
+        out = tmp_path / "out.parquet"
+        df = convert_csv_to_parquet(src, out, arch="gfx950", op_type="batched_gemm")
+        assert out.exists()
+        assert df["hw_num_cus"].iloc[0] == 256
+        assert df["hw_lds_capacity"].iloc[0] > 0
+        assert df["op_type"].iloc[0] == "batched_gemm"
 
 
 if __name__ == "__main__":
