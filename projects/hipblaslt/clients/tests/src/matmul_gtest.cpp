@@ -223,6 +223,10 @@ namespace
                     name << "_SAMX_32_UE8M0";
                 else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                     name << "_SAMX_32_UE8M0_32_8";
+                else if(isW4A16Scaling(arg.scaleA))
+                    name << "_SAG" << w4a16GroupSize(arg.scaleA)
+                         << (isW4A16ZeroPoint(arg.scaleA) ? "_ZP" : "")
+                         << (arg.int4_encoding ? "_U4" : "_S4");
 
                 if(arg.scaleB == hipblaslt_scaling_format::Scalar)
                     name << "_SB";
