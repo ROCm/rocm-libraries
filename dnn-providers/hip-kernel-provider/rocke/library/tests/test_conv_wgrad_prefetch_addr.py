@@ -190,7 +190,7 @@ class TestDefaultPrefetchAddr(unittest.TestCase):
             self.assertTrue(is_valid_wgrad_spec(spec, "gfx950")[0])
 
     def test_aot_job_generator_uses_the_policy(self):
-        from benchmarks.common.kernel_sweep import _wgrad_prefetch_addr
+        from kernels.conv.aot_jobs import _wgrad_prefetch_addr
 
         cfg = dict(tile_m=128, tile_n=64, tile_k=64, wave_size=64, lds_k_outer=True)
         self.assertTrue(_wgrad_prefetch_addr("gfx950", cfg))
@@ -201,7 +201,7 @@ class TestDefaultPrefetchAddr(unittest.TestCase):
         self.assertFalse(_wgrad_prefetch_addr("gfx950", cfg))
 
     def test_jobs_carry_it_in_spec_and_identity(self):
-        from benchmarks.common import kernel_sweep as ks
+        from kernels.conv import aot_jobs as ks
         from rocke.core.arch import ArchTarget
 
         target = ArchTarget.from_gfx("gfx950")

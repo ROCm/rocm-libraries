@@ -690,13 +690,40 @@ static int test_fp32_never_reaches_an_xf32_atom()
     return 0;
 }
 
+/* Mirrors test_rdna_integer_wmma_rows_name_i8_and_i4: the instruction names keep
+ * "iu8"/"iu4", the operand dtypes are i8/i4, and only i8/i4 select the op. */
+static int test_rdna_integer_wmma_rows_name_i8_and_i4()
+{
+    const char* rows[][3]
+        = {{"wmma_i32_16x16x16_iu8", "i8", "iu8"}, {"wmma_i32_16x16x16_iu4", "i4", "iu4"}};
+    for(const char* gfx : {"gfx1151", "gfx11-generic"})
+    {
+        const auto* arch = rocke_arch_target_from_gfx(gfx);
+        CHECK(arch);
+        for(const auto& row : rows)
+        {
+            const auto* op = rocke_mma_catalog_by_op_id(&arch->mma, row[0]);
+            CHECK(op && strcmp(op->a_dtype, row[1]) == 0 && strcmp(op->b_dtype, row[1]) == 0
+                  && strcmp(op->c_dtype, "i32") == 0);
+            CHECK(rocke_mma_catalog_op_for_shape(
+                      &arch->mma, "wmma", row[1], row[1], "i32", 16, 16, 16)
+                  == op);
+            CHECK(rocke_mma_catalog_op_for_shape(
+                      &arch->mma, "wmma", row[2], row[2], "i32", 16, 16, 16)
+                  == NULL);
+        }
+    }
+    return 0;
+}
+
 int main()
 {
     // Keep this first: no previous query may prime the shared family index.
     if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
        || test_scale_contracts() || test_scale_layouts_and_families()
        || test_scaled_wmma_supported_combinations() || test_emulated_rows_mirror_physical()
-       || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom())
+       || test_pre_existing_selection_is_native_only() || test_fp32_never_reaches_an_xf32_atom()
+       || test_rdna_integer_wmma_rows_name_i8_and_i4())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})
