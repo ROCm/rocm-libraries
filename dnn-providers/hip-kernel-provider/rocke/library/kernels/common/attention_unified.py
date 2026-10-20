@@ -3113,6 +3113,15 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
     # universally-safe ceiling: clamping to it can never do worse than shipped.
 
     if arch == "gfx942" and problem.sliding_window == 0:
+        # Decode split rule (``_gfx942_3d_decode_ctas_per_segment``): about 4
+        # CTAs per CU (6 at head size 64), the target of the formula above
+        # without its decode distortions, as on gfx950. The measured counts
+        # below stay for everything else.
+        ctas = _gfx942_3d_decode_ctas_per_segment(problem, arch=arch)
+        if ctas is not None:
+            per_cu = 6 if problem.head_size == 64 else 4
+            cap = 64 if problem.max_seqlen_k < 8192 else 128
+            return max(2, min(per_cu * problem.num_cus // ctas, cap))
         pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
@@ -3161,11 +3170,23 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
         # also why the knob's contract ("replaces num_cus*4 for routing AND
         # segmentation") only holds here if the clamp steps aside.
         #
-        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
-        # every shape is clamped, none falls through. Carve-outs for shapes where
-        # a finer split is measured to win on gfx950 can be added here later, each
-        # gated by its own measurement -- never assumed from gfx942, whose CU
-        # count, LDS, and reduce cost all differ.
+        # Measured carve-out, gated by its own gfx950 measurement -- never
+        # assumed from gfx942, whose CU count, LDS, and reduce cost all differ:
+        # decode (``_gfx950_3d_decode_ctas_per_segment``) gets about 4 CTAs per
+        # CU, the target the formula above aims at, without its decode
+        # distortions (q-blocks counted as for prefill, powers of 2, at least
+        # 16 segments). When 64 segments still leave fewer than 2 CTAs per CU,
+        # the kernel runs 64-token tiles (``_gfx950_3d_tile_size_override``)
+        # with 64 segments, 128 from 64K KV tokens when under 1 CTA per CU, and
+        # at most one tile per segment.
+        # Every other shape is clamped.
+        ctas = _gfx950_3d_decode_ctas_per_segment(problem, arch=arch)
+        if ctas is not None:
+            cus, kv = problem.num_cus, problem.max_seqlen_k
+            if ctas * 32 <= cus:
+                segments = 128 if kv >= 65536 and ctas * 64 <= cus else 64
+                return max(1, min(segments, kv // 64))
+            return max(2, min(4 * cus // ctas, 64 if kv < 8192 else 128))
         pre_bump = _pre_bump_segments(problem)
         return min(segments, pre_bump)
     return segments
@@ -3189,21 +3210,10 @@ def _select_3d_waves_per_eu(
     return None
 
 
-def _enable_gfx942_3d_invariant_hoist(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
-    if arch != "gfx942":
-        return False
-    env = __import__("os").environ.get("HIPDNN_GFX942_3D_HOIST", "").strip().lower()
-    return env in ("1", "on", "enable", "enabled", "yes", "true")
-
-
 def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Wide 128-bit direct global->register->LDS KV feed for the 3D decode
-    segment kernel (replaces the gfx942 1-DWORD async DMA). fp16/bf16 only.
-
-    Opt-in via HIPDNN_GFX942_3D_WKV while it is A/B'd against the async path;
-    promoted to default once the win is confirmed.
+    segment kernel (instead of the gfx942 1-DWORD async DMA). fp16/bf16, head
+    size up to 128; ``HIPDNN_GFX942_3D_WKV=0`` turns it off.
     """
     if arch != "gfx942":
         return False
@@ -3212,11 +3222,174 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem, arch: str) 
     env = __import__("os").environ.get("HIPDNN_GFX942_3D_WKV", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
         return False
-    # Default ON: validated bit-identical and ~8% faster on D128 decode, neutral
-    # on D64, never slower (decode_ab.py A/B). Strict improvement over the 1-DWORD
-    # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
-    # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
+    # The wide feed loads each 16-byte chunk into registers and stores it to LDS
+    # right away, so its copies overlap only if the compiler schedules the loads
+    # ahead of the stores. LLVM 22 does; at head size 256 (more chunks, high
+    # register pressure) LLVM 23 serializes them (each load waits before its
+    # store), which makes the kernel several times slower. The async DMA does
+    # not depend on that schedule.
+    if problem.head_size > 128:
+        return False
+    # Default on up to head size 128: bit-identical to the async DMA and faster
+    # there.
     return True
+
+
+def _use_decode_grid(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """All-decode launch grid: one CTA per sequence along the q-block axis.
+
+    Derived from the problem, not tuned: legal exactly when every sequence has
+    at most one query token (``all_decode``). The q-block axis is then
+    ``num_seqs`` instead of the prefill upper bound (:func:`_num_q_blocks`),
+    which removes the empty early-exit CTAs and the per-CTA binary search over
+    ``query_start_len``; at BLOCK_Q == 1 the upper bound also left every useful
+    CTA on an even index and so on half of the XCDs. Implemented by the
+    gfx942/gfx950 3D segment kernels (``use_decode_grid``).
+    """
+    return problem.all_decode and arch in ("gfx942", "gfx950")
+
+
+def _kv_cache_policy_3d(problem: UnifiedAttentionProblem, arch: str) -> str:
+    """Cache policy of the gfx942/gfx950 3D segment kernels' K/V copies.
+
+    "stream" (NT) when every sequence decodes: each K/V byte is then read once,
+    so keeping it in the caches only evicts other data. Otherwise "all". fp8
+    K/V loads synchronously and keeps "all".
+    """
+    if (
+        arch in ("gfx942", "gfx950")
+        and problem.all_decode
+        and _kv_storage_dtype(problem) is None
+    ):
+        return "stream"
+    return "all"
+
+
+def _gfx950_3d_decode_ctas_per_segment(
+    problem: UnifiedAttentionProblem, arch: str
+) -> int | None:
+    """CTAs per split-KV segment (``num_seqs * num_kv_heads``) of a gfx950 3D
+    decode problem in the measured scope of the decode split rule
+    (``_num_segments``, ``_gfx950_3d_tile_size_override``), else None.
+
+    Scope as measured: all-decode, fp16/bf16 K/V (paged with 16-token pages, or
+    strided), head_size 128 or 256, no sliding window and no explicit
+    ``target_ctas``. Head size 256 only with enough CTAs for page-sized tiles:
+    its few-CTA splits measured faster under one compiler and slower under
+    another.
+    """
+    ctas = problem.num_seqs * problem.num_kv_heads
+    if (
+        arch == "gfx950"
+        and problem.all_decode
+        and (
+            problem.head_size == 128
+            or (problem.head_size == 256 and ctas * 32 > problem.num_cus)
+        )
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and _kv_storage_dtype(problem) is None
+    ):
+        return ctas
+    return None
+
+
+def _gfx942_3d_decode_ctas_per_segment(
+    problem: UnifiedAttentionProblem, arch: str
+) -> int | None:
+    """CTAs per split-KV segment (``num_seqs * num_kv_heads``) of a gfx942 3D
+    decode problem in the measured scope of the decode split rule
+    (``_num_segments``), else None.
+
+    Scope as measured: all-decode, fp16/bf16 K/V (paged with 16-token pages, or
+    strided), head_size 64 or 128, no sliding window and no explicit
+    ``target_ctas``; at least ``num_cus / 16`` CTAs per segment or fewer than
+    8K KV tokens. Few CTAs at long KV keep the previous counts, which measured
+    as good there.
+    """
+    ctas = problem.num_seqs * problem.num_kv_heads
+    if (
+        arch == "gfx942"
+        and problem.all_decode
+        and problem.head_size in (64, 128)
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and _kv_storage_dtype(problem) is None
+        and (ctas * 16 >= problem.num_cus or problem.max_seqlen_k < 8192)
+    ):
+        return ctas
+    return None
+
+
+def _gfx950_3d_tile_size_override(
+    problem: UnifiedAttentionProblem, arch: str
+) -> int | None:
+    """gfx950 3D KV tile, in tokens; None keeps one page per tile.
+
+    Decode with too few CTAs to fill the device even at 64 segments (at most
+    ``num_cus / 32`` per segment) is latency-bound per CTA: 64-token tiles
+    (with the swizzled K/V LDS) shorten each CTA's KV loop. Measured scope:
+    ``_gfx950_3d_decode_ctas_per_segment``.
+    """
+    ctas = _gfx950_3d_decode_ctas_per_segment(problem, arch=arch)
+    if ctas is not None and ctas * 32 <= problem.num_cus:
+        return 64
+    return None
+
+
+def _wave_page_id_load_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_wave_page_id_load``. gfx950: on for decode in the measured
+    scope of the split rule (``_gfx950_3d_decode_ctas_per_segment``), whose
+    segment counts assume it. gfx942: on with the K/V LDS swizzle
+    (``_kv_lds_swizzle_3d``), with which it was measured, for page-sized tiles."""
+    if arch == "gfx950":
+        return _gfx950_3d_decode_ctas_per_segment(problem, arch=arch) is not None
+    if arch == "gfx942":
+        return (
+            _kv_lds_swizzle_3d(problem, arch=arch)
+            and _gfx942_3d_tile_size_override(problem, arch=arch) is None
+        )
+    return False
+
+
+def _kv_lds_swizzle_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_kv_lds_swizzle``. gfx950: on with multi-page KV tiles
+    (``_gfx950_3d_tile_size_override``); with page-sized tiles it measured
+    neutral. gfx942, all-decode: head size 64/128 on the wide K/V loader
+    (``_enable_gfx942_3d_wide_kv_load``); head size 256 (async copies) with
+    page-sized fp16/bf16 tiles, where it pays only together with the page ids
+    (``_wave_page_id_load_3d``): alone it is slower under some compilers."""
+    if arch == "gfx950":
+        return _gfx950_3d_tile_size_override(problem, arch=arch) is not None
+    if arch == "gfx942":
+        if not problem.all_decode:
+            return False
+        if problem.head_size in (64, 128):
+            return _enable_gfx942_3d_wide_kv_load(problem, arch)
+        return (
+            problem.head_size == 256
+            and _kv_storage_dtype(problem) is None
+            and _gfx942_3d_tile_size_override(problem, arch=arch) is None
+        )
+    return False
+
+
+def _num_q_blocks(
+    problem: UnifiedAttentionProblem, block_q: int, *, decode_grid: bool = False
+) -> int:
+    """Length of the q-block launch axis: ``num_seqs`` on the all-decode grid
+    (:func:`_use_decode_grid`), else the prefill upper bound
+    ``total_q // block_q + num_seqs`` (each sequence may start mid-block)."""
+    if decode_grid:
+        if not problem.all_decode:
+            raise ValueError(
+                "the decode grid requires an all-decode problem "
+                f"(max_seqlen_q == 1, got {problem.max_seqlen_q})"
+            )
+        return int(problem.num_seqs)
+    return problem.total_q // block_q + problem.num_seqs
 
 
 def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
@@ -3358,7 +3531,8 @@ def _tiled_3d_spec_from_problem(
 
 
 def _tiled_3d_segment_lds_bytes(spec) -> int:
-    """Q[M,D], K/V[2,T,D], P[M,T] in the gfx942/gfx950 3D schedule.
+    """Q[M,D], K[2,T,D] and V[T,D] in the gfx942/gfx950 3D schedule (P stays in
+    registers).
 
     These tiles overlap in lifetime. Supported tile dimensions need no
     inter-allocation padding; the lowering aligns the final pool to 16 bytes.
@@ -3370,7 +3544,7 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
     if bits % 8:
         raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
     m, d, t = spec.block_m, spec.head_size, spec.tile_size
-    size = (m * d + 4 * t * d + m * t) * (bits // 8)
+    size = (m * d + 3 * t * d) * (bits // 8)
     return (size + 15) & ~15
 
 
@@ -3418,9 +3592,18 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         num_segments=_num_segments(problem, arch),
         num_seqs=problem.num_seqs,
         waves_per_eu=waves,
-        tile_size_override=_gfx942_3d_tile_size_override(problem, arch=arch),
-        use_invariant_hoist=False,
+        tile_size_override=(
+            _gfx950_3d_tile_size_override(problem, arch=arch)
+            if arch == "gfx950"
+            else _gfx942_3d_tile_size_override(problem, arch=arch)
+        ),
         kv_layout="strided",
+        use_decode_grid=_use_decode_grid(problem, arch=arch),
+        **(
+            {"kv_cache_policy": _kv_cache_policy_3d(problem, arch=arch)}
+            if arch in ("gfx942", "gfx950")
+            else {}
+        ),
     )
     reduce = reduce_type(
         head_size=problem.head_size,
@@ -3493,10 +3676,14 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _num_segments(problem, arch),
         _gfx942_3d_tile_size_override(problem, arch),
         _select_3d_waves_per_eu(problem, arch),
-        _enable_gfx942_3d_invariant_hoist(problem, arch),
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),
+        _use_decode_grid(problem, arch),
+        _kv_cache_policy_3d(problem, arch),
+        _gfx950_3d_tile_size_override(problem, arch),
+        _kv_lds_swizzle_3d(problem, arch),
+        _wave_page_id_load_3d(problem, arch),
     ) + _mask_key(problem)
     if arch == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem, arch)
@@ -4256,6 +4443,12 @@ def _explicit_path_supported(
     if tuning_spec is not None and tuning_spec.allow_unsupported:
         return True, f"explicit {kind} tuning spec (unsupported override)"
     if kind == "3d":
+        if (
+            tuning_spec is not None
+            and getattr(tuning_spec.kernel_spec, "use_decode_grid", False)
+            and not problem.all_decode
+        ):
+            return False, "use_decode_grid requires an all-decode problem"
         return supports_native_unified_attention_3d_tiled(problem, arch)
     if kind == "2d":
         return supports_native_unified_attention_tiled(problem, arch)
@@ -4635,10 +4828,17 @@ def _get_3d_pipeline(
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
+    if tuning_spec is not None:
+        decode_grid = getattr(tuning_spec.kernel_spec, "use_decode_grid", False)
+    elif strided_kv:
+        segment_spec, _ = _strided_3d_specs_from_problem(problem, arch=arch)
+        decode_grid = segment_spec.use_decode_grid
+    else:
+        decode_grid = _tiled_3d_spec_from_problem(problem, arch).use_decode_grid
     block_q = (
         16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
     )
-    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
+    total_num_q_blocks = _num_q_blocks(problem, block_q, decode_grid=decode_grid)
     # gfx1250 (gfx1250) runs the split-KV segment + reduce as one wave32 CTA; the
     # CDNA wave64 archs (gfx950/gfx942) use a wave64 CTA.
     wave_size = 32 if arch == "gfx1250" else 64

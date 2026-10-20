@@ -60,6 +60,8 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _is_unsigned,
+    _refuse_unsigned_operands,
     _sync_attr,
     check_cluster_dims,
     dpp_ctrl_attr,
@@ -67,6 +69,12 @@ from .ir import (
     require_streaming_arch,
     split_loc,
 )
+from .mma_operand import (
+    MmaOperandRole,
+    mma_operand_needs_reinterpret,
+    mma_operand_value,
+)
+from .tf32 import tf32_mma_target_error, tf32_op_error
 
 
 # Datalayout / triple. Copied verbatim from clang's output for the same
@@ -363,9 +371,18 @@ def _detect_llvm_flavor() -> str:
     PATH are not evidence about that compiler. If COMGR cannot be loaded or
     queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
     or the lowering API's llvm_flavor argument.
+
+    A set-but-unrecognized ROCKE_LLVM_FLAVOR raises immediately rather than
+    silently falling back to auto-detection -- a typo'd override otherwise
+    looks like it pinned a flavor while actually asking COMGR to guess.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in LLVM_FLAVORS:
+    if env:
+        if env not in LLVM_FLAVORS:
+            raise ValueError(
+                f"ROCKE_LLVM_FLAVOR={env!r} is not a recognized flavor; "
+                f"expected one of {LLVM_FLAVORS}"
+            )
         return env
     from ..runtime.comgr import _require_compiler_info
 
@@ -841,6 +858,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "rint.f32": "declare float @llvm.rint.f32(float)",
     "smax.i32": "declare i32 @llvm.smax.i32(i32, i32)",
     "smin.i32": "declare i32 @llvm.smin.i32(i32, i32)",
+    # Unsigned u8 maximum / minimum (u8 renders as i8).
+    "umax.i8": "declare i8 @llvm.umax.i8(i8, i8)",
+    "umin.i8": "declare i8 @llvm.umin.i8(i8, i8)",
     # AMDGPU ``v_perm_b32`` byte-select. Used by P09's packed i8 quant
     # to fuse four clamped i32s into one i32 in 2 perm calls (lo half +
     # hi half) followed by one perm to interleave.
@@ -1229,9 +1249,12 @@ def _llvm_type(t: Type) -> str:
         # The value-level type of a smem allocation token is "the pointer
         # to its base", since uses GEP into it.
         return "ptr addrspace(3)"
+    # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+    # keeps its values out of the IR.
     if t.name == "i1":
         return "i1"
-    if t.name == "i8":
+    if t.name in ("i8", "u8"):
+        # LLVM integers carry no sign; signedness lives in the operations.
         return "i8"
     if t.name == "i16":
         return "i16"
@@ -1682,6 +1705,13 @@ _BF16_MAX_FINITE = 0x7F7F
 _BF16_SIGN_BIT = -0x8000
 
 
+def _mma_op_id(op: Op) -> str:
+    """The op_id of an MMA op; MMA ops reach their handlers as ``tile.<op_id>``."""
+    if not op.name.startswith("tile."):
+        raise ValueError(f"{op.name!r} is not an MMA op named 'tile.<op_id>'")
+    return op.name.removeprefix("tile.")
+
+
 class _Lowerer:
     def __init__(
         self,
@@ -1781,6 +1811,33 @@ class _Lowerer:
 
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
+
+    def _reinterpret(self, v: Value, register_type: Type) -> str:
+        """Emit one ``bitcast`` of ``v`` to ``register_type``; return its name.
+
+        Only renders: the caller has established that the bit widths match
+        (:func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret`).
+        """
+        reinterpreted = self._fresh("reg")
+        self._current().emit(
+            f"  {reinterpreted} = bitcast {self._operand_with_type(v)} "
+            f"to {_llvm_type(register_type)}"
+        )
+        return reinterpreted
+
+    def _mma_operand(self, op: Op, role: MmaOperandRole, register_type: Type) -> str:
+        """Return MMA operand ``role`` of ``op`` as the instruction's register type.
+
+        The operand passes through unchanged, or is reinterpreted with one
+        ``bitcast``, as :func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret`
+        decides; that rule also raises for an operand it refuses.
+        """
+        value = mma_operand_value(op, role)
+        if mma_operand_needs_reinterpret(
+            _mma_op_id(op), role, value.type, register_type, self._backend.arch
+        ):
+            return self._reinterpret(value, register_type)
+        return self._operand(value)
 
     @staticmethod
     def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
@@ -2089,8 +2146,11 @@ class _Lowerer:
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
         """
+        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+        # refuses its LDS tiles.
         _elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -2118,9 +2178,11 @@ class _Lowerer:
             return seg
 
         def _align(stype: "SmemType") -> int:
+            # A packed-only type never reaches here: core/ir.py
+            # _refuse_packed_only_value refuses its LDS tiles.
             if stype.elem.name == "f64":
                 return 8
-            return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
+            return 16 if stype.elem.name in ("i8", "u8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
         live, used = self._collect_smem_liveness(self.kernel.body)
@@ -2281,8 +2343,6 @@ class _Lowerer:
     # ----- per-op lowerings -----
 
     def lower_op(self, op: Op) -> None:
-        from .tf32 import tf32_op_error
-
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
@@ -2336,20 +2396,26 @@ class _Lowerer:
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
+    def _wrapping_binop(self, op: Op, llvm_op: str) -> None:
+        # ``nsw`` makes a signed overflow poison, as C does for signed types;
+        # unsigned values wrap modulo 2**N, so they get no flag.
+        flag = "" if _is_unsigned(op.result.type) else " nsw"
+        self._binop(op, llvm_op + flag)
+
     def _op_arith_add(self, op: Op) -> None:
-        self._binop(op, "add nsw")
+        self._wrapping_binop(op, "add")
 
     def _op_arith_sub(self, op: Op) -> None:
-        self._binop(op, "sub nsw")
+        self._wrapping_binop(op, "sub")
 
     def _op_arith_mul(self, op: Op) -> None:
-        self._binop(op, "mul nsw")
+        self._wrapping_binop(op, "mul")
 
     def _op_arith_div(self, op: Op) -> None:
-        self._binop(op, "sdiv")
+        self._binop(op, "udiv" if _is_unsigned(op.result.type) else "sdiv")
 
     def _op_arith_mod(self, op: Op) -> None:
-        self._binop(op, "srem")
+        self._binop(op, "urem" if _is_unsigned(op.result.type) else "srem")
 
     def _op_arith_fadd(self, op: Op) -> None:
         self._binop(op, "fadd")
@@ -2459,18 +2525,10 @@ class _Lowerer:
         )
 
     def _op_arith_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
-        pmap = {
-            "lt": "slt",
-            "le": "sle",
-            "gt": "sgt",
-            "ge": "sge",
-            "eq": "eq",
-            "ne": "ne",
-        }
         a, b = op.operands
+        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
-            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
@@ -2565,6 +2623,7 @@ class _Lowerer:
         )
 
     def _op_arith_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umax")
         a, b = op.operands
         self._need("smax.i32")
         self._current().emit(
@@ -2573,12 +2632,28 @@ class _Lowerer:
         )
 
     def _op_arith_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umin")
         a, b = op.operands
         self._need("smin.i32")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.smin.i32(i32 {self._operand(a)}, "
             f"i32 {self._operand(b)})"
         )
+
+    def _unsigned_min_max(self, op: Op, which: str) -> None:
+        a, b = op.operands
+        ty = _llvm_type(a.type)
+        self._need(f"{which}.{ty}")
+        self._current().emit(
+            f"  {op.result.name} = call {ty} @llvm.{which}.{ty}({ty} {self._operand(a)}, "
+            f"{ty} {self._operand(b)})"
+        )
+
+    def _op_arith_umax(self, op: Op) -> None:
+        self._unsigned_min_max(op, "umax")
+
+    def _op_arith_umin(self, op: Op) -> None:
+        self._unsigned_min_max(op, "umin")
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
@@ -2588,6 +2663,7 @@ class _Lowerer:
         )
 
     def _op_arith_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.zext")
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
@@ -2625,6 +2701,19 @@ class _Lowerer:
             f"  {op.result.name} = fptrunc float {self._operand(v)} to {_llvm_type(op.result.type)}"
         )
 
+    def _op_arith_cvt_f32_to_f64(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fpext float {self._operand(v)} to double"
+        )
+
+    def _op_arith_cvt_f64_to_f32(self, op: Op) -> None:
+        # LLVM's fptrunc rounds to nearest even under the default FP environment.
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fptrunc double {self._operand(v)} to float"
+        )
+
     def _op_arith_sitofp_f32(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "i32":
@@ -2633,6 +2722,12 @@ class _Lowerer:
             )
         self._current().emit(
             f"  {op.result.name} = sitofp i32 {self._operand(v)} to float"
+        )
+
+    def _op_arith_uitofp_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = uitofp {_llvm_type(v.type)} {self._operand(v)} to float"
         )
 
     def _op_arith_cvt_fp8_to_f32(self, op: Op) -> None:
@@ -2971,6 +3066,37 @@ class _Lowerer:
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {smin_v} to i8")
 
+    def _op_arith_cvt_f32_to_u8_sat(self, op: Op) -> None:
+        """Lower saturating f32->u8 (round-to-nearest-even).
+
+        .. code-block:: text
+
+        %r = call float @llvm.rint.f32(float %v)
+        %lo = call float @llvm.maxnum.f32(float %r, float 0.0)
+        %hi = call float @llvm.minnum.f32(float %lo, float 255.0)
+        %q = fptoui float %hi to i8
+
+        Clamping in f32 keeps ``fptoui`` in range; ``maxnum`` turns a NaN
+        into 0.
+        """
+        (v,) = op.operands
+        self._need("rint.f32")
+        self._need("maxnum.f32")
+        self._need("minnum.f32")
+        rounded = f"{op.result.name}r"
+        low = f"{op.result.name}lo"
+        high = f"{op.result.name}hi"
+        self._current().emit(
+            f"  {rounded} = call float @llvm.rint.f32(float {self._operand(v)})"
+        )
+        self._current().emit(
+            f"  {low} = call float @llvm.maxnum.f32(float {rounded}, float 0.000000e+00)"
+        )
+        self._current().emit(
+            f"  {high} = call float @llvm.minnum.f32(float {low}, float 2.550000e+02)"
+        )
+        self._current().emit(f"  {op.result.name} = fptoui float {high} to i8")
+
     def _op_arith_rint_f32(self, op: Op) -> None:
         """Round an f32 to nearest integer (still f32), round-to-nearest-even."""
         (v,) = op.operands
@@ -3054,8 +3180,12 @@ class _Lowerer:
         # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
         # Coefficients are in Horner power-basis order, not Taylor coefficients.
         # Source: amd/device-libs/ocml/src/tanhF.cl.
-        f32 = lambda value: self._composed_constant(value, F32, "f32")
-        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        def f32(value):
+            return self._composed_constant(value, F32, "f32")
+
+        def i32(value):
+            return self._composed_constant(value, I32, "i32")
+
         lower = self._lower_composed_op
 
         one = f32(1.0)
@@ -3427,11 +3557,12 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
+        # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
         # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
         align = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -3498,6 +3629,7 @@ class _Lowerer:
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "f16": 2,
@@ -3585,6 +3717,7 @@ class _Lowerer:
         # (i64 / f64): 8 bytes.
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "f16": 2,
             "bf16": 2,
             "i32": 4,
@@ -3635,10 +3768,9 @@ class _Lowerer:
         self._backend.emit_wmma(self, op)
 
     def _op_tile_mma(self, op: Op) -> None:
-        from .tf32 import TF32_MMA
-
-        if op.attrs.get("op_id") in TF32_MMA and self._backend.arch.gfx != "gfx942":
-            raise ValueError("XF32 MMA requires gfx942")
+        error = tf32_mma_target_error(op.attrs.get("op_id"), self._backend.arch)
+        if error:
+            raise ValueError(error)
         # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
@@ -3872,8 +4004,9 @@ class _Lowerer:
         self._emit_xf32(op, "mfma.f32.32x32x4.xf32", 16)
 
     def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
-        if self._backend.arch.gfx != "gfx942":
-            raise ValueError("XF32 MMA requires gfx942")
+        error = tf32_mma_target_error(_mma_op_id(op), self._backend.arch)
+        if error:
+            raise ValueError(error)
         a, b, c = op.operands
         self._need(intrinsic)
         a_cast = self._fresh("mfma_a_i16")
@@ -3891,23 +4024,27 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.32x32x2f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -5463,8 +5600,28 @@ class _Lowerer:
         # the raw s_barrier does NOT auto-drain LDS, so an explicit wait is
         # required or the same-wave LDS write->read races -> stale LDS / NaN).
         self._backend.emit_lds_barrier_drain(self, drain_vmem=True)
+        self._emit_s_barrier(op)
+
+    def _emit_s_barrier(self, op: Op) -> None:
+        # ``fence`` attr (IRBuilder.sync): the barrier orders memory accesses
+        # across waves. The barrier intrinsic itself does not access memory,
+        # so LLVM may move an LDS load or store across it; machine-level
+        # sinking moves a load above the barrier into a successor block. A
+        # compiler memory barrier after it (inline asm with a memory clobber,
+        # CK Tile's ``block_sync_lds``) prevents that and emits nothing.
+        # "workgroup" adds the ``__syncthreads`` release / acquire fences
+        # (which on their own do not stop the sinking).
+        fence = op.attrs.get("fence")
+        if fence not in (None, "compiler", "workgroup"):
+            raise ValueError(f"{op.name}: unknown fence {fence!r}")
+        if fence == "workgroup":
+            self._current().emit('  fence syncscope("workgroup") release')
         self._need("s.barrier")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        if fence == "workgroup":
+            self._current().emit('  fence syncscope("workgroup") acquire')
+        if fence is not None:
+            self._current().emit('  call void asm sideeffect "", "~{memory}"()')
 
     def _op_tile_s_barrier_bare(self, op: Op) -> None:
         # Bare full-CTA barrier: emit ONLY s_barrier, no implicit s_waitcnt.
@@ -5472,8 +5629,7 @@ class _Lowerer:
         # producer/consumer loop issues s_waitcnt(vmcnt=0) explicitly so
         # the producers' async LDS writes are drained but NOT serialized
         # against the next iteration's in-flight loads).
-        self._need("s.barrier")
-        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        self._emit_s_barrier(op)
 
     # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
 
@@ -5549,8 +5705,7 @@ class _Lowerer:
         # overlap. Matches CK Tile's ``block_sync_lds``.
         # LDS-only drain (keep VMEM in flight for the async-DMA ping-pong).
         self._backend.emit_lds_barrier_drain(self, drain_vmem=False)
-        self._need("s.barrier")
-        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+        self._emit_s_barrier(op)
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
@@ -6184,6 +6339,7 @@ class _Lowerer:
         )
         elem_bytes = {
             "i8": 1,
+            "u8": 1,
             "fp8e4m3": 1,
             "bf8e5m2": 1,
             "i16": 2,
@@ -6351,22 +6507,15 @@ class _Lowerer:
         self._vector_binop(op, "lshr")
 
     def _op_vector_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
-        pmap = {
-            "lt": "slt",
-            "le": "sle",
-            "gt": "sgt",
-            "ge": "sge",
-            "eq": "eq",
-            "ne": "ne",
-        }
         a, b = op.operands
+        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
-            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
     def _op_vector_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, b = op.operands
         # Prefer the ``llvm.smax.v<N>i<W>`` intrinsic over icmp+select: the
         # AMDGPU backend reliably lowers the i16 vector form to packed
@@ -6391,6 +6540,7 @@ class _Lowerer:
         )
 
     def _op_vector_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, b = op.operands
         cmp = self._fresh("vsmin.cmp")
         self._current().emit(
@@ -6409,6 +6559,7 @@ class _Lowerer:
         )
 
     def _op_vector_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
@@ -7096,6 +7247,24 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
     lk_b = 0x3F if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0x3F)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
+
+
+# arith.cmp / vector.cmp predicate -> (signed icmp predicate, unsigned one).
+_ICMP_PREDICATES = {
+    "lt": ("slt", "ult"),
+    "le": ("sle", "ule"),
+    "gt": ("sgt", "ugt"),
+    "ge": ("sge", "uge"),
+    "eq": ("eq", "eq"),
+    "ne": ("ne", "ne"),
+}
+
+
+def _icmp_predicate(pred: str, t: Type) -> str:
+    """The icmp predicate for ``pred`` on operands of type ``t``: ordered
+    compares of unsigned integers are unsigned."""
+    signed, unsigned = _ICMP_PREDICATES[pred]
+    return unsigned if _is_unsigned(t) else signed
 
 
 def _fp64_hex(x: float) -> str:

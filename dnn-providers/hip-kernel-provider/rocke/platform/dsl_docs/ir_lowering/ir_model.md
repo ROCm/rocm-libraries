@@ -24,16 +24,20 @@ Composite types:
   - other     -> LLVM `ptr`
 - `SmemType(elem, shape)` — opaque token for an LDS allocation. Lowers to `ptr addrspace(3)`.
 
-Cache-coherence AUX hints (constants in `core/ir.py`) for `async_buffer_load_lds_addr` / `buffer_load_vN_*`:
+Cache-policy bits (the AUX operand; constants in `core/ir.py`) for `async_buffer_load_lds_addr` /
+`buffer_load_vN_*`:
 
 ```text
-CACHE_ALL    = 0   # default, cache at all levels
-CACHE_GLOBAL = 1   # GLC set, skip L2
-CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
-NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
+CACHE_ALL    = 0   # no bits: the default caching
+CACHE_GLOBAL = 1   # GLC (gfx90a) / SC0 (gfx942, gfx950)
+CACHE_STREAM = 2   # SLC (gfx90a) / NT (gfx942, gfx950): streaming data
+NON_TEMPORAL = 3   # GLC + SLC / SC0 + NT
 ```
 
-GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same values are SC0 (1) and NT (2).
+On gfx942 / gfx950, SC0 selects the coherence scope and NT marks the data as streaming; for loads, NT
+caches the same with or without SC0. Spec fields name a policy with one of `CACHE_POLICY_NAMES`
+(`"all"`, `"global"`, `"stream"`, `"nt"`); `cache_policy_from_name` gives its bits (C:
+`rocke_cache_policy_from_name`).
 These are raw bit values for buffer ops. They are **not** `temporal_hint=TemporalHint.STREAMING`
 on `global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
 gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
@@ -92,7 +96,7 @@ const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
-zero_vec(elem, n)          # f32 / f16 / bf16
+zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i16 / i32
 ```
 
 ### Arithmetic / compare / cast
@@ -111,6 +115,8 @@ masked_select                              # alias for select
 sitofp_f32(v)                              # i32 -> f32 (LLVM sitofp)
 cast_to_f32(v)                             # f16/bf16 -> f32
 cast_f32_to(v, target)                     # f32 -> f16/bf16
+cvt_f32_to_f64(v)                          # f32 -> f64 (fpext, exact)
+cvt_f64_to_f32(v)                          # f64 -> f32 (fptrunc, round to nearest even)
 trunc_f32_to_f16(v)                        # f32 -> f16 (fptrunc with attrs)
 bitcast(v, target)                         # scalar bitcast of equal size
 vec_bitcast(v, target_vec_type)            # vector bitcast (e.g. <2xi32> <-> <4xf16>)
@@ -198,7 +204,7 @@ smem_ptr_add(lds_addr, byte_off)              # i64 LDS address arithmetic
 smem_load_f16(smem, indices)
 smem_load_vN_f16(smem, *indices, n in {1,2,4,8})
 smem_load_v4_f16(smem, row, col)
-smem_load_vN(smem, *indices, dtype, n)        # f16/bf16
+smem_load_vN(smem, *indices, dtype, n)        # 8/16/32/64-bit dtypes; see the docstring
 smem_store_f16(smem, indices, value)
 smem_store_vN_f16(smem, indices, value, n)    # ds_write_b{16,32,64,128}
 smem_store_vN(smem, indices, value, n)        # n in {1,2,4,8}
