@@ -1146,9 +1146,14 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
 }
 
 
-# Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
-# already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
-# differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
+# Per-flavor declaration overrides. Each table holds only the entries whose
+# text changed AT that flavor; a flavor inherits every older flavor's overrides
+# in :data:`LLVM_FLAVORS` order (see :func:`_decls_for_flavor`), so an entry is
+# written once, at the flavor where its ABI changed. Keys MUST already exist in
+# :data:`_INTRINSIC_DECLS`; only the declaration TEXT differs, so call-site
+# ``_need(...)`` lookups stay flavor-agnostic.
+#
+# LLVM 21+ hosts (ROCm 7.2+).
 _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     "mfma.f32.16x16x32.fp8.fp8": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -1172,10 +1177,9 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
-# intrinsic's ABI changed again.
+# LLVM 23 (ROCm 7.13+): only the intrinsics whose ABI changed again; the
+# LLVM 22 overrides reach llvm23 through inheritance, never by copying.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
-    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
     "mfma.scale.f32.16x16x128.f8f6f4": (
         "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
@@ -1184,21 +1188,39 @@ _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
 }
 
 
+# Each flavor's own overrides, one entry per member of :data:`LLVM_FLAVORS`
+# (llvm20 is the base table itself, so it overrides nothing). A dict, not a
+# flavor list: the order of inheritance comes from ``LLVM_FLAVORS`` alone.
+_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR: Dict[str, Dict[str, str]] = {
+    LLVM_FLAVOR_LLVM20: {},
+    LLVM_FLAVOR_LLVM22: _INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    LLVM_FLAVOR_LLVM23: _INTRINSIC_DECLS_LLVM23_OVERRIDES,
+}
+
+
 def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     """The declaration table a lowering at ``flavor`` resolves against.
+
+    The rule, in one place: the base table, then the overrides of every flavor
+    up to and including ``flavor``, oldest first in :data:`LLVM_FLAVORS` order.
+    A newer flavor's entry replaces an older one's text; a key keeps the
+    position it first appeared at.
 
     Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
     order in ``finalize``, so the result is byte-significant.
 
     Kept as one copy because there are two readers -- ``_Lowerer.__init__``
     and :func:`check_arch_domain_in_ir`, which needs the table without a
-    lowerer to ask.
+    lowerer to ask. The C++ engine resolves the same chain in
+    ``rocke_ll_decl_text`` / ``rocke_ll_decl_at`` (``cpp/core/lower_llvm/data.cpp``).
     """
+    if flavor not in LLVM_FLAVORS:
+        raise ValueError(
+            f"unknown LLVM flavor {flavor!r}; expected one of {LLVM_FLAVORS}"
+        )
     decls = dict(_INTRINSIC_DECLS)
-    if flavor == LLVM_FLAVOR_LLVM22:
-        decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == LLVM_FLAVOR_LLVM23:
-        decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    for inherited in LLVM_FLAVORS[: LLVM_FLAVORS.index(flavor) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
     return decls
 
 

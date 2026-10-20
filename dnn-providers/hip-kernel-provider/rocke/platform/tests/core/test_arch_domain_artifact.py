@@ -116,6 +116,24 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
 
                 self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
 
+    def test_the_tool_measures_the_table_the_lowerer_resolves(self):
+        """The generator's own copy of the per-flavor merge must equal the
+        lowerer's, items and order, for every flavor.
+
+        The tool keeps an independent copy so it stays honest about what it
+        measured. Without this check a declaration added by a new resolution
+        rung would reach the lowerer but never the measured columns, and the
+        arch-domain lane would stay silent on it while every test passed.
+        """
+        from rocke.core.lower_llvm import LLVM_FLAVORS, _decls_for_flavor
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                self.assertEqual(
+                    list(G._decl_table(flavor).items()),
+                    list(_decls_for_flavor(flavor).items()),
+                )
+
     def test_every_decl_key_is_covered_on_every_wired_arch(self):
         """The drift this file exists to catch: a decl key the artifact has no
         opinion on, in JSON that is still valid and still looks authoritative.

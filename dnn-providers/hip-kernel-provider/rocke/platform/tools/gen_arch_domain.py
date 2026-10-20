@@ -830,18 +830,18 @@ def _assemble(
 def _decl_table(flavor: str) -> dict[str, str]:
     """The decls a _Lowerer would resolve for this flavor.
 
-    Mirrors `_Lowerer.__init__` exactly -- base table, then the per-flavor
-    override dict. Duplicating the merge here rather than importing a private
-    helper keeps the tool honest about what it measured, but it is a mirror and
-    must be updated if the resolution rule gains a rung.
+    Mirrors `_decls_for_flavor` exactly -- base table, then the own overrides of
+    every flavor up to and including this one, oldest first in `LLVM_FLAVORS`
+    order. Duplicating the merge here rather than importing a private helper
+    keeps the tool honest about what it measured, but it is a mirror and must be
+    updated if the resolution rule gains a rung;
+    `tests/core/test_arch_domain_artifact.py` fails until it is.
     """
     from rocke.core import lower_llvm as L
 
     decls = dict(L._INTRINSIC_DECLS)
-    if flavor == L.LLVM_FLAVOR_LLVM22:
-        decls.update(L._INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == L.LLVM_FLAVOR_LLVM23:
-        decls.update(L._INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    for inherited in L.LLVM_FLAVORS[: L.LLVM_FLAVORS.index(flavor) + 1]:
+        decls.update(L._INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
     return decls
 
 

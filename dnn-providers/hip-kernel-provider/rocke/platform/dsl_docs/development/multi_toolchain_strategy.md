@@ -94,17 +94,24 @@ when a newer generation lands. The partition is exhaustiveness-checked by
 `test_datalayout_kinds_partition_every_flavor` — a hand-rolled substitute for
 the check a language-level `match` would give for free.
 
-**(b) Intrinsic declare text — modelled as base + per-flavor override dicts.**
+**(b) Intrinsic declare text — modelled as base + an inherited chain of per-flavor override dicts.**
 
 ```python
-self._decls = dict(_INTRINSIC_DECLS)                    # LLVM 20 shapes
-if flavor == LLVM_FLAVOR_LLVM22: self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-elif flavor == LLVM_FLAVOR_LLVM23: self._decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+def _decls_for_flavor(flavor):
+    decls = dict(_INTRINSIC_DECLS)                      # LLVM 20 shapes
+    for inherited in LLVM_FLAVORS[: LLVM_FLAVORS.index(flavor) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
+    return decls
 ```
 
 The **key is stable across flavors**, so all ~151 `_need(...)` call sites are
-flavor-agnostic. Only the text differs. Five overrides per modern flavor today
-(4 fp8/bf8 MFMA operand-width changes + `make.buffer.rsrc.p1`'s `i32`→`i64`).
+flavor-agnostic. Only the text differs. Each override dict holds only the
+entries whose text changed at its own flavor: llvm22 has five (4 fp8/bf8 MFMA
+operand-width changes + `make.buffer.rsrc.p1`'s `i32`→`i64`), and llvm23 inherits
+them and adds its own (the `mfma.scale` f8f6f4 signature). The C++ engine walks
+the same chain along its flavor ladder (`rocke_ll_decl_text` /
+`rocke_ll_decl_at`), and `tools/gen_arch_domain._decl_table` keeps an
+independent copy that a test pins equal, items and order, for every flavor.
 
 Why it has to be emitted correctly up front rather than left to auto-upgrade:
 **comgr verifies the toplevel `declare` lines *before* running the auto-upgrade

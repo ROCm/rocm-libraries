@@ -11,6 +11,7 @@
  *                                                (Python ..._LLVM22_OVERRIDES)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM23_OVERRIDES)
+ *   - rocke_ll_decl_text / rocke_ll_decl_at        (Python _decls_for_flavor)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -22,6 +23,8 @@
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
+
+#include <string.h>
 
 namespace ckc
 {
@@ -516,9 +519,13 @@ const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT
     = (int)(sizeof(ROCKE_LL_AV_B128_PTR_TYPES) / sizeof(ROCKE_LL_AV_B128_PTR_TYPES[0]));
 
 /* ---------------------------------------------------------------------- */
-/* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES)            */
-/* Same keys, different decl text.                                         */
+/* Per-flavor overrides. Each array holds only the entries whose text      */
+/* changed AT that flavor; a flavor inherits every older flavor's arrays   */
+/* in flavor-ladder order (rocke_ll_decl_text below). Keys must exist in   */
+/* the base table; only the declaration text differs.                      */
 /* ---------------------------------------------------------------------- */
+
+/* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES). */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
     {"mfma.f32.16x16x32.fp8.fp8",
@@ -542,27 +549,10 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[0]));
 
-/* ---------------------------------------------------------------------- */
-/* LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES)            */
-/* Inherits the LLVM22 entries plus declarations whose ABI changed again. */
-/* ---------------------------------------------------------------------- */
-
+/* LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): only the
+ * declarations whose ABI changed again; the LLVM22 entries reach llvm23
+ * through inheritance, never by copying. */
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
-    {"mfma.f32.16x16x32.fp8.fp8",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
-     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.16x16x32.bf8.bf8",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8("
-     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.32x32x16.fp8.fp8",
-     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8("
-     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.32x32x16.bf8.bf8",
-     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8("
-     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"make.buffer.rsrc.p1",
-     "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-     "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
     {"mfma.scale.f32.16x16x128.f8f6f4",
      "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
      "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
@@ -572,9 +562,9 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[0]));
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors),
- * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */
-const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count)
+/* One flavor's own override array (Python _INTRINSIC_DECL_OVERRIDES_BY_FLAVOR).
+ * LLVM20 is the base table itself and overrides nothing. */
+const rocke_ll_decl_t* rocke_ll_flavor_own_overrides(rocke_llvm_flavor_t flavor, int* out_count)
 {
     if(flavor == ROCKE_LLVM_FLAVOR_LLVM22)
     {
@@ -591,6 +581,62 @@ const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int
     if(out_count)
         *out_count = 0;
     return NULL;
+}
+
+/* The base-table index of `key`, or -1. */
+static int ll_base_decl_index(const char* key)
+{
+    for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
+    {
+        if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* The flavor at position `rung` of the flavor ladder (oldest first, the C++
+ * spelling of LLVM_FLAVORS). The ladder is the only source of inheritance
+ * order, so the override chain is walked through it rather than restated. */
+static rocke_llvm_flavor_t ll_ladder_flavor(int rung)
+{
+    return rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(rung));
+}
+
+/* Python _decls_for_flavor, one key at a time: the text of the newest flavor
+ * at or below `flavor` (flavor-ladder order) that overrides `key`, else the
+ * base text. NULL for an unknown key or a flavor that is not on the ladder. */
+const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key)
+{
+    int rung = -1;
+    for(int i = 0; i < rocke_llvm_flavor_count(); i++)
+    {
+        if(ll_ladder_flavor(i) == flavor)
+            rung = i;
+    }
+    if(rung < 0 || !key)
+        return NULL;
+    for(int i = rung; i >= 0; i--)
+    {
+        int n = 0;
+        const rocke_ll_decl_t* own = rocke_ll_flavor_own_overrides(ll_ladder_flavor(i), &n);
+        for(int j = 0; j < n; j++)
+        {
+            if(strcmp(own[j].key, key) == 0)
+                return own[j].decl;
+        }
+    }
+    int base = ll_base_decl_index(key);
+    return base < 0 ? NULL : ROCKE_LL_INTRINSIC_DECLS[base].decl;
+}
+
+/* Python _decls_for_flavor(flavor).items()[index]: overrides only change the
+ * text of base keys, so the resolved table has the base table's keys in the
+ * base table's order. index is [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index)
+{
+    const char* key = ROCKE_LL_INTRINSIC_DECLS[index].key;
+    rocke_ll_decl_t out = {key, rocke_ll_decl_text(flavor, key)};
+    return out;
 }
 
 } /* namespace ckc */
