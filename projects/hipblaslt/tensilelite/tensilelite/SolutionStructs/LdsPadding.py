@@ -45,7 +45,7 @@ get_fp32_mt_config, get_mxs_mt_config, get_metadata_mt_config. key is
 "perBlock" or "pad".
 """
 
-from collections import namedtuple
+from collections import Counter, namedtuple
 from functools import lru_cache
 from typing import Dict
 
@@ -93,12 +93,24 @@ def _b64_base_addrs_fp8(mt: int) -> list:
         0,0,0,0,8,8,8,8,0,0,0,0,8,8,8,8)
   return [t[i] + k[i] * mt for i in range(32)]
 
-def _max_threads_per_bank(addrs, banksPerThread: int) -> int:
+def _max_threads_per_bank(addrs, banksPerThread: int, aligned: bool = False) -> int:
   """Largest number of threads landing on any one of the 64 LDS banks.
 
   A thread whose load is `banksPerThread` dwords wide occupies that many
   consecutive banks starting at its own address.
+
+  aligned=True promises every address is a multiple of 4 * banksPerThread
+  bytes. Each thread then starts on a bank that is a multiple of
+  banksPerThread, so two threads cover either the same group of banks or
+  disjoint groups, never a partial overlap. The busiest bank therefore holds
+  as many threads as the most common start bank, and counting start banks
+  alone gives the same answer without visiting every bank a thread touches.
+  The default keeps the general loop, which is also right for unaligned
+  addresses.
   """
+  if aligned:
+    return max(Counter([(a >> 2) & 63 for a in addrs]).values())
+  
   counts = {}
   for a in addrs:
     first = (a >> 2) % 64
@@ -246,7 +258,7 @@ def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
       addrs = [a + delta for a in base]
       if any(a % 8 for a in addrs):
         return None
-      total += _max_threads_per_bank(addrs, 2)
+      total += _max_threads_per_bank(addrs, 2, aligned=True)
     perWave.append(total)
   return perWave
 
@@ -435,7 +447,7 @@ def _b128_wave_costs(half, B, P, wOffsets, instOffs=(0,)):
       addrs = [a + pad(instOff) for a in base]
       if any(a % 16 for a in addrs):
         return None
-      total += _max_threads_per_bank(addrs, 4)
+      total += _max_threads_per_bank(addrs, 4, aligned=True)
     perWave.append(total)
   return perWave
 
@@ -541,7 +553,7 @@ def _b32_wave_costs(rawAddrs, B, P, wOffsets, instOffs=(0,)):
       addrs = [a + pad(instOff) for a in base]
       if any(a % 4 for a in addrs):
         return None
-      total += _max_threads_per_bank(addrs, 1)
+      total += _max_threads_per_bank(addrs, 1, aligned=True)
     perWave.append(total)
   return perWave
 
