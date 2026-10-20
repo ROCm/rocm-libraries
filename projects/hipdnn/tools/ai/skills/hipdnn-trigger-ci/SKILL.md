@@ -21,7 +21,7 @@ Infer options from the user request:
 - **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. If that upstream is on a remote other than `ROCm/rocm-libraries` (a fork), or the `--pr` is from a fork, the script stops and asks for `--branch`; `--pr <pr-number> status` still works on fork PRs. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it. The run tests the branch head on GitHub, not the checkout: when the branch comes from the checkout and that head is not the local `HEAD` (unpushed commits, or a checkout behind the remote), `dispatch` warns, in the dry-run too, and `--yes` refuses unless `--allow-head-mismatch` is passed. Prefer pushing or pulling; add the flag only after the user approves testing the GitHub head. `--reuse-build` is checked against the GitHub head as well.
 
   **A dispatch can cancel other runs.** Both workflows use the concurrency group `<workflow>-<PR number or commit SHA>` with `cancel-in-progress: true`. A dispatch has no PR number, so it shares the group of every queued or in-progress run of the same workflow at the branch's head commit that was not started by a pull request: an earlier dispatch on the same commit (for example the same branch with other families or labels), and the push postsubmit or scheduled run of that commit. Pull-request runs are keyed by PR number and are not affected. `dispatch` lists those runs as a warning, in the dry-run too; `--yes` then refuses unless `--cancel-active` is also passed. Show the list to the user and add `--cancel-active` only after they approve cancelling those runs. `dispatch` also refuses `develop` and `release/*`, whose postsubmit runs share the group, unless `--allow-shared-branch` is passed; pass it only when the user explicitly asks to dispatch on such a branch.
-- **Inputs** (`-f <input>=<value>`, repeat per input): the `workflow_dispatch.inputs` of the workflow file on the target branch. Read them there; do not rely on remembered names. `dispatch` reads the same file at the same branch and rejects an unknown name (listing the current inputs), an input given twice, and a missing input that has no default. Omitted inputs keep the workflow default.
+- **Inputs** (`-f <input>=<value>`, repeat per input): the `workflow_dispatch.inputs` of the workflow file on the target branch. Read them there; do not rely on remembered names. `dispatch` reads the same file at the same branch and rejects an unknown name (listing the current inputs), an input given twice, and a missing input that has no default. Omitted inputs keep the workflow default. When the workflow declares a `trigger_source` input (today `hipdnn-superbuild`), `dispatch` sets it to `hipdnn-trigger-ci` so the run's name shows where it came from; an explicit `-f trigger_source=...` wins.
 - **Values**: the workflow passes GPU families and test labels to TheRock, so the valid values are defined there, at the TheRock ref the target branch uses. Today that ref is `therock-ref` in `.github/actions/ci-env/action.yml`; if that moves, follow the workflow's checkout of TheRock. Read the files at that ref (`gh api -H "Accept: application/vnd.github.raw" "repos/ROCm/TheRock/contents/<path>?ref=<therock-ref>"`):
   - GPU families: `build_tools/github_actions/amdgpu_family_matrix.py`.
   - Test labels and components: `build_tools/github_actions/fetch_test_configurations.py` (`test_matrix`).
@@ -79,10 +79,10 @@ Re-run the tests of a finished multi-arch run without rebuilding (the run must b
 python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> dispatch -w multi-arch -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none -f pr_labels=test:miopenprovider,test_filter:quick --reuse-build <run-id> --dry-run
 ```
 
-The hipDNN superbuild CI (no inputs):
+The hipDNN superbuild CI, Linux lane only (`lanes` is `both`, `linux` or `windows`; omit it for both):
 
 ```bash
-python3 <skill-directory>/scripts/trigger_ci.py dispatch -w hipdnn-superbuild --dry-run
+python3 <skill-directory>/scripts/trigger_ci.py dispatch -w hipdnn-superbuild -f lanes=linux --dry-run
 ```
 
 Check or follow the run on a PR's branch:
