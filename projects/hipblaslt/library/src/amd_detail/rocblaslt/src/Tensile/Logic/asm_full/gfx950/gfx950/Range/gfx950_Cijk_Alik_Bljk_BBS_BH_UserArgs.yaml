@@ -498,6 +498,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 3
+  SolutionUID: 0uVIilprF9EF
   KernelNameMin: wvSplitK_vllm_bf16_tn_n1_y1u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n1_y1u2
   AssertSizeEqual: {1: 1, 2: 1}
@@ -580,6 +581,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 4
+  SolutionUID: 0uVIilprSZjD
   KernelNameMin: wvSplitK_vllm_bf16_tn_n1_y1u4
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n1_y1u4
   AssertSizeEqual: {1: 1, 2: 1}
@@ -662,6 +664,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 5
+  SolutionUID: 0uVIilprm1wN
   KernelNameMin: wvSplitK_vllm_bf16_tn_n1_y3u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n1_y3u2
   AssertSizeEqual: {1: 1, 2: 1}
@@ -744,6 +747,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 6
+  SolutionUID: 0uVIilprt9qb
   KernelNameMin: wvSplitK_vllm_bf16_tn_n2_y1u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n2_y1u2
   AssertSizeEqual: {1: 2, 2: 1}
@@ -826,6 +830,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 7
+  SolutionUID: 0uVIilprZFAt
   KernelNameMin: wvSplitK_vllm_bf16_tn_n2_y1u4
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n2_y1u4
   AssertSizeEqual: {1: 2, 2: 1}
@@ -908,6 +913,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 8
+  SolutionUID: 0uVIilpraDN0
   KernelNameMin: wvSplitK_vllm_bf16_tn_n3_y1u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n3_y1u2
   AssertSizeEqual: {1: 3, 2: 1}
@@ -990,6 +996,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 9
+  SolutionUID: 0uVIilprvJRx
   KernelNameMin: wvSplitK_vllm_bf16_tn_n3_y1u4
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n3_y1u4
   AssertSizeEqual: {1: 3, 2: 1}
@@ -1072,6 +1079,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 10
+  SolutionUID: 0uVIilprjFrR
   KernelNameMin: wvSplitK_vllm_bf16_tn_n3_y3u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n3_y3u2
   AssertSizeEqual: {1: 3, 2: 1}
@@ -1154,6 +1162,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 11
+  SolutionUID: 0uVIilpsE1pg
   KernelNameMin: wvSplitK_vllm_bf16_tn_n4_y1u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n4_y1u2
   AssertSizeEqual: {1: 4, 2: 1}
@@ -1236,6 +1245,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 12
+  SolutionUID: 0uVIilprK7Xv
   KernelNameMin: wvSplitK_vllm_bf16_tn_n4_y1u4
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n4_y1u4
   AssertSizeEqual: {1: 4, 2: 1}
@@ -1318,6 +1328,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 13
+  SolutionUID: 0uVIilps5hQV
   KernelNameMin: wvSplitK_vllm_bf16_tn_n4_y3u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n4_y3u2
   AssertSizeEqual: {1: 4, 2: 1}
@@ -1400,6 +1411,7 @@ Solutions:
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
 - SolutionIndex: 14
+  SolutionUID: 0uVIilps5VWY
   KernelNameMin: wvSplitK_vllm_bf16_tn_n5_y1u2
   SolutionNameMin: wvSplitK_vllm_bf16_tn_n5_y1u2
   AssertSizeEqual: {1: 5, 2: 1}
