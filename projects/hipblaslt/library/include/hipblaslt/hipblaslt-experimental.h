@@ -19,8 +19,8 @@
  *  \endcode
  *
  *  Compilation fails if the value does not match
- *  ``HIPBLASLT_EXPERIMENTAL_API_VERSION``, so any change to the experimental
- *  surface forces every consumer to re-review and opt in again.
+ *  ``HIPBLASLT_EXPERIMENTAL_API_VERSION``, so any breaking change to the
+ *  experimental surface forces every consumer to re-review and opt in again.
  *
  *  \defgroup experimental_module Experimental API
  *  Unstable APIs that are shipped for evaluation and may change or be removed
@@ -34,8 +34,10 @@
 /*! \ingroup experimental_module
  *  \brief Version of the experimental API surface declared in this header.
  *
- *  Incremented on every addition, change, graduation, or removal of an
- *  experimental declaration. Unrelated to the hipBLASLt library version.
+ *  Incremented on every breaking change to the experimental API: removal,
+ *  graduation, or a change to a signature, enum value, or documented behavior.
+ *  Additions do not increment it. tools/scripts/check_experimental_api.py
+ *  enforces this in CI. Unrelated to the hipBLASLt library version.
  */
 #define HIPBLASLT_EXPERIMENTAL_API_VERSION 1
 
@@ -83,5 +85,8 @@ int hipblasLtExperimentalGetApiVersion(void);
 #ifdef __cplusplus
 }
 #endif
+
+// One header per experimental feature, generated from library/experimental/features.cmake.
+#include "hipblaslt/hipblaslt-experimental-features.h"
 
 #endif // _HIPBLASLT_EXPERIMENTAL_H_

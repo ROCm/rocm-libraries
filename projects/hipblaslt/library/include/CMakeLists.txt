@@ -23,6 +23,7 @@ target_sources(hipblaslt
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext.hpp>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext-op.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-experimental.h>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/hipblaslt/hipblaslt-experimental-features.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_float8.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_float4.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_bfloat6.h>
@@ -37,6 +38,7 @@ target_sources(hipblaslt
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-ext.hpp>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-ext-op.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-experimental.h>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-experimental-features.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_float8.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_float4.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_bfloat6.h>
@@ -49,3 +51,13 @@ target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_xfloat32.h"
 )
+
+# One header per experimental feature, from library/experimental/features.cmake.
+foreach(fragment IN LISTS HIPBLASLT_EXPERIMENTAL_FRAGMENTS)
+    get_filename_component(fragment_name "${fragment}" NAME)
+    target_sources(hipblaslt
+        PUBLIC
+            $<BUILD_INTERFACE:${fragment}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/${fragment_name}>
+    )
+endforeach()

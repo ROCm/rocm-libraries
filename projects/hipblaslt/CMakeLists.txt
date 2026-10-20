@@ -321,6 +321,16 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
+# Experimental API registry: fails configure once a feature is past its deadline, and
+# generates hipblaslt-experimental-features.h. Sets HIPBLASLT_EXPERIMENTAL_FRAGMENTS.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_experimental.cmake")
+set(HIPBLASLT_EXPERIMENTAL_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt")
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/experimental/features.cmake")
+hipblaslt_experimental_finalize(
+    TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-experimental-features.h.in"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-experimental-features.h"
+)
+
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
 # libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
 # DLL reports file/product version metadata in its Windows file properties.
