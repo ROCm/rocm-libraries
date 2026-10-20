@@ -1052,6 +1052,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     k_lds_store(i_buf), k_dram_window_ref, number<-1>{}, k_oob_ck, pre_nop);
             }
         };
+        // Sync K loads land in LDS through ds_store, which the vmcnt fences before the
+        // gemm0 barriers do not retire.
+        auto k_lds_store_fence = [&]() {
+            if constexpr(Policy::kUseSyncKLoad)
+                s_waitcnt_lgkm<0>();
+        };
 
         // prefetch K tile
         load_k_tile(LdsSeq.at(number<0>{}), k_dram_window, k_pre_np);
@@ -1116,6 +1122,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                         move_tile_window(k_dram_window, {0, kK0});
 
                     async_load_fence(k_dram_window.get_num_of_access());
+                    k_lds_store_fence();
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
                     gemm_0(s_acc,
@@ -1133,6 +1140,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 __builtin_amdgcn_sched_barrier(0);
 
             async_load_fence();
+            k_lds_store_fence();
             __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_sched_barrier(0);
@@ -1570,7 +1578,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     auto* independent_v_ptr = reinterpret_cast<VDataType*>(
                         reinterpret_cast<char*>(smem_ptr) +
                         Policy::template GetIndependentVByteOffset<Problem>());
-                    block_sync_lds_direct_load<0>();
+                    // The V tile was written with ds_store, so the barrier that publishes
+                    // it has to retire lgkmcnt.
+                    block_sync_lds();
                     // The B-window loads below use compile-time offsets, so a barrier alone
                     // lets the compiler hoist them above the V store. Reading one element
                     // back and folding it into the offset forces the ordering.
