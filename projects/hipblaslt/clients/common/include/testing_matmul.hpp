@@ -76,28 +76,6 @@
 #include <stdexcept>
 #include <vector>
 
-extern "C" __global__ void flush_icache()
-{
-    asm __volatile__("s_icache_inv \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t"
-                     "s_nop 0 \n\t" ::
-                         :);
-}
-
 template <typename T>
 void swizzle_tensor(T*               dst,
                     const T*         src,
@@ -227,37 +205,6 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
         return;
     default:
         throw std::invalid_argument("Unsupported datatype in swizzle_tensor_type().");
-    }
-}
-
-inline void pre_gpu_time(bool         use_gpu_timer,
-                         hipEvent_t&  event_gpu_time_start,
-                         double&      gpu_time_used,
-                         hipStream_t& stream)
-{
-    if(use_gpu_timer)
-        CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-    else
-        gpu_time_used = get_time_us_sync(stream);
-}
-inline void post_gpu_time(bool         use_gpu_timer,
-                          hipEvent_t&  event_gpu_time_start,
-                          hipEvent_t&  event_gpu_time_end,
-                          double&      gpu_time_used,
-                          hipStream_t& stream)
-{
-    if(use_gpu_timer)
-    {
-        CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
-        CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
-        float gpu_time_ms;
-        CHECK_HIP_ERROR(
-            hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-        gpu_time_used = gpu_time_ms * 1000; // ms to us
-    }
-    else
-    {
-        gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
     }
 }
 
@@ -4681,7 +4628,10 @@ void testing_matmul_with_bias(const Arguments&                                  
         };
 
         // Every path prepares a candidate with this first.
-        auto prepareCandidate = [&](size_t) {
+        auto prepareCandidate = [&](size_t sol) {
+            if(placedWorkspace)
+                workspacePtr
+                    = placedWorkspace->straddle(heuristicResult[sol].workspaceSize, workspace_size);
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && firstProblem.cEqualsD)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -5087,14 +5037,14 @@ void testing_matmul_with_bias(const Arguments&                                  
                                 CHECK_HIPBLASLT_ERROR(
                                     gemmVec[b].initialize(heuristicResult[sol].algo,
                                                           tuningVec[heuristicTuningIndex[sol]],
-                                                          *dWorkspace));
+                                                          workspacePtr));
                             }
                             startCotenant();
                         })
                         .cold([&](size_t, int32_t i) {
                             CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copy_gemm_to_host(stream, problem_count, hD_1, dOutput);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
@@ -5106,34 +5056,28 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 // One launch of candidate sol on rotation block i % block_count, cold or timed.
                 auto launchBatched = [&](size_t sol, int64_t i) {
-                    int  b          = static_cast<int>(i % block_count);
-                    auto ptr_matmul = matmul[b][0];
-                    auto ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
-                                                                 + b * size_scaleAlphaVec[0]
-                                                            : alpha_in[0];
-                    // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
-                    // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
-                    // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
-                    // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for
-                    // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
-                    // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for
-                    // General Batched GEMM happens before the alphaNonZero check.
-                    void* ptrA = (size_dA[0]) ? dda[b] : nullptr;
-                    void* ptrB = (size_dB[0]) ? ddb[b] : nullptr;
+                    int   b          = static_cast<int>(i % block_count);
+                    auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[b];
+                    auto  ptr_alpha  = arg.scaleAlpha_vector
+                                           ? rotatingBlockAddress(dScaleAlphaVec[0], b)
+                                           : firstRuntimeProblem.alphaPointer;
+                    // Empty prepared A and B buffers must pass null pointer arrays when K is zero.
+                    void* ptrA = firstPreparedProblem.a.elements ? dda[b] : nullptr;
+                    void* ptrB = firstPreparedProblem.b.elements ? ddb[b] : nullptr;
                     return hipblasLtMatmul(handle,
                                            ptr_matmul,
                                            ptr_alpha,
                                            ptrA,
-                                           matA[0],
+                                           firstRuntimeProblem.matrixA,
                                            ptrB,
-                                           matB[0],
-                                           &(h_beta[0]),
+                                           firstRuntimeProblem.matrixB,
+                                           &(firstPreparedProblem.beta),
                                            ddc[b],
-                                           matC[0],
+                                           firstRuntimeProblem.matrixC,
                                            ddd[b],
-                                           matD[0],
+                                           firstRuntimeProblem.matrixD,
                                            &heuristicResult[sol].algo,
-                                           *dWorkspace,
+                                           workspacePtr,
                                            workspace_size,
                                            stream);
                 };
@@ -5155,7 +5099,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         .cold([&](size_t sol, int32_t i) {
                             EXPECT_HIPBLAS_STATUS(launchBatched(sol, i), HIPBLAS_STATUS_SUCCESS);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                                copy_gemm_to_host(stream, arg.batch_count, hD_1, dOutput);
                         })
                         .launch([&](size_t sol, int64_t i) {
                             EXPECT_HIPBLAS_STATUS(launchBatched(sol, i), HIPBLAS_STATUS_SUCCESS);
@@ -5166,25 +5110,26 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 // One launch of candidate sol on rotation block i % block_count, cold or timed.
                 auto launchMatmul = [&](size_t sol, int64_t i) {
-                    int  b          = static_cast<int>(i % block_count);
-                    auto ptr_matmul = matmul[b][0];
-                    return hipblasLtMatmul(
-                        handle,
-                        ptr_matmul,
-                        alpha_ptr,
-                        dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
-                        matA[0],
-                        dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
-                        matB[0],
-                        beta_ptr,
-                        dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
-                        matC[0],
-                        (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
-                        matD[0],
-                        &heuristicResult[sol].algo,
-                        *dWorkspace,
-                        workspace_size,
-                        stream);
+                    int   b          = static_cast<int>(i % block_count);
+                    auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[b];
+                    return hipblasLtMatmul(handle,
+                                           ptr_matmul,
+                                           arg.scaleAlpha_vector
+                                               ? rotatingBlockAddress(dScaleAlphaVec[0], b)
+                                               : firstRuntimeProblem.alphaPointer,
+                                           rotatingBlockAddress(dA[0], b),
+                                           firstRuntimeProblem.matrixA,
+                                           rotatingBlockAddress(dB[0], b),
+                                           firstRuntimeProblem.matrixB,
+                                           beta_ptr,
+                                           rotatingBlockAddress(dC[0], b),
+                                           firstRuntimeProblem.matrixC,
+                                           rotatingBlockAddress(dOutput[0], b),
+                                           firstRuntimeProblem.matrixD,
+                                           &heuristicResult[sol].algo,
+                                           workspacePtr,
+                                           workspace_size,
+                                           stream);
                 };
                 relaunch = [&](size_t sol) {
                     EXPECT_HIPBLAS_STATUS(launchMatmul(sol, 0), HIPBLAS_STATUS_SUCCESS);
@@ -5204,7 +5149,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         .cold([&](size_t sol, int32_t i) {
                             EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copy_gemm_to_host(stream, problem_count, hD_1, dOutput);
                         })
                         .launch([&](size_t sol, int64_t i) {
                             EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
@@ -5280,16 +5225,16 @@ void testing_matmul_with_bias(const Arguments&                                  
                                 CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
                                     heuristicResult[sol].algo,
                                     tuningVec[heuristicTuningIndex[sol]],
-                                    ((unsigned char*)(*dWorkspace) + b * workspace_size)));
+                                    ((unsigned char*)(workspacePtr) + b * workspace_size)));
                                 groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
                                 d_userArgsVec[b]
                                     = (unsigned char*)d_userArgs
-                                      + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
+                                      + b * problem_count * sizeof(hipblaslt_ext::UserArguments);
                                 // Copy them to device memory
                                 CHECK_HIP_ERROR(
                                     hipMemcpy(d_userArgsVec[b],
                                               userArgs,
-                                              gemm_count * sizeof(hipblaslt_ext::UserArguments),
+                                              problem_count * sizeof(hipblaslt_ext::UserArguments),
                                               hipMemcpyHostToDevice));
                             }
                             startCotenant();
@@ -5298,7 +5243,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                             CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
                                 d_userArgsVec[i % block_count], stream));
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copy_gemm_to_host(stream, problem_count, hD_1, dOutput);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
@@ -5326,7 +5271,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                 CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
                                     heuristicResult[sol].algo,
                                     tuningVec[heuristicTuningIndex[sol]],
-                                    ((unsigned char*)(*dWorkspace) + b * workspace_size),
+                                    ((unsigned char*)(workspacePtr) + b * workspace_size),
                                     false,
                                     stream));
                             }
@@ -5335,7 +5280,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         .cold([&](size_t, int32_t i) {
                             CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copy_gemm_to_host(stream, problem_count, hD_1, dOutput);
                         })
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
