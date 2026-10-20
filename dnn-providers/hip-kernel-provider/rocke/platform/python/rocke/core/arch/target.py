@@ -1073,6 +1073,35 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "wmma_gfx12_f32_16x16x16_bf16": _FragInfo(
         8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
     ),
+    # --- WMMA fp8 / bf8 -> f32, i8 -> i32, f16 -> f16, bf16 -> bf16 (gfx12) --
+    # Eight values per lane on the f16 atom's maps: A row lane % 16 with the K
+    # run (lane // 16) * 8 + slot, B the same by column, and the accumulator
+    # (or 16-bit result) slot i at row (lane // 16) * 8 + i. The public matrix
+    # instruction calculator gives these A and B maps exactly for the 8-bit
+    # ops; for the two 16-bit-output ops, as for the f16 atom itself, it orders
+    # K within a lane differently but identically for A and B, which leaves the
+    # product unchanged. The result map is exact for all seven.
+    "wmma_gfx12_f32_16x16x16_fp8_fp8": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_fp8_bf8": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_bf8_fp8": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_bf8_bf8": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_i32_16x16x16_iu8": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_f16_16x16x16_f16": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_bf16_16x16x16_bf16": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
     # --- WMMA fp32 (wave32, gfx1250, CDNA) --------------------------------
     # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2).
     # kABKLane=2, kAK1PerLane=2: row=lane//2, K=(lane%2)*2+slot (slot ∈ {0,1}).
