@@ -54,6 +54,13 @@
 //     N=64 -> 3,906,994,176 bytes, inside the window
 //     N=71 -> 4,334,321,664 bytes, over it
 //
+// The fp32 NCHW cases cover the same window on the IsLayoutDefault() branch. That is the layout
+// of every gfx950 fp32 find-db row this bound restores, and the layout the ResNet recovery runs
+// in. They use one of those restored shapes, x = 256x64x64 with a 1024x256x1x1 filter, whose
+// larger activation is N * 1024 * 64 * 64 * 4 bytes, so N alone moves it across both ends:
+//     N=128 -> 2,147,483,648 bytes, one byte over INT_MAX, inside the window
+//     N=256 -> 4,294,967,296 bytes, one byte over the window
+//
 // The backward-weights batch-padding cases cover the hazard behind ROCM-31718. The fp16
 // kernels with filter padding read batch rows in packs of 4 or 8 and rely on the buffer range
 // check to zero the rows past N, but compute the row offsets in 32 bits. With N=1 and a
@@ -62,6 +69,12 @@
 // real data, so this shape is now gated on every device although it is under the old bound.
 // The C=K=256 case is the 2 GiB shape that failed GPU verification. With N=4 and a 1024x1024
 // image there are no padding rows and every read stays below 4 GiB.
+//
+// GetFp32NchwBatchPaddingWrapsConvCase() keeps both tensors inside the window and still has to
+// be declined, which is the fp32 half of the same hazard. It is another restored shape,
+// x = 512x127x127 with a 1024x512x1x1 stride-2 filter, with N raised from 128 to 130: its larger
+// activation is 4,294,184,960 bytes, 782,336 under the window, but the tail of the last gemm-k
+// split reads one batch row past N, and that row starts at 4,327,217,152.
 
 namespace {
 
@@ -110,6 +123,24 @@ auto GetFp32OverWindowConvCase()
                         {{1, 1}, {1, 1}, {1, 1}}};
 }
 
+auto GetFp32NchwInWindowConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNCHW, {128, 256, 64, 64}},
+                        {miopenFloat, miopenTensorNCHW, {1024, 256, 1, 1}},
+                        miopenFloat,
+                        {{0, 0}, {1, 1}, {1, 1}}};
+}
+
+auto GetFp32NchwOverWindowConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNCHW, {256, 256, 64, 64}},
+                        {miopenFloat, miopenTensorNCHW, {1024, 256, 1, 1}},
+                        miopenFloat,
+                        {{0, 0}, {1, 1}, {1, 1}}};
+}
+
 auto GetBatchPaddingWrapsUnderInt32ConvCase()
 {
     using miopen::unit_tests::ConvTestCase;
@@ -126,6 +157,15 @@ auto GetBatchPaddingWrapsInWindowConvCase()
                         {miopenHalf, miopenTensorNHWC, {256, 256, 3, 3}},
                         miopenHalf,
                         {{1, 1}, {1, 1}, {1, 1}}};
+}
+
+auto GetFp32NchwBatchPaddingWrapsConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNCHW, {130, 512, 127, 127}},
+                        {miopenFloat, miopenTensorNCHW, {1024, 512, 1, 1}},
+                        miopenFloat,
+                        {{0, 0}, {2, 2}, {1, 1}}};
 }
 
 auto GetBatchPaddingFitsConvCase()
@@ -247,6 +287,16 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp32OverWindow,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32OverWindowConvCase())));
 
+INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwInWindow,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetGfx950WindowParams()),
+                                          testing::Values(GetFp32NchwInWindowConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwOverWindow,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetGatedParams()),
+                                          testing::Values(GetFp32NchwOverWindowConvCase())));
+
 INSTANTIATE_TEST_SUITE_P(
     SmokeBatchPaddingWrapsUnderInt32,
     CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
@@ -257,6 +307,11 @@ INSTANTIATE_TEST_SUITE_P(SmokeBatchPaddingWrapsInWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetBatchPaddingWrapsInWindowConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwBatchPaddingWraps,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetGatedParams()),
+                                          testing::Values(GetFp32NchwBatchPaddingWrapsConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(SmokeBatchPaddingFits,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
