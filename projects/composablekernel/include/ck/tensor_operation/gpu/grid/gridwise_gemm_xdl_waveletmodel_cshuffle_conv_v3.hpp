@@ -367,7 +367,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     }
 
     template <typename GridDesc_K0_MN_K1_T, index_t K0Number, index_t K1Value, typename DeviceArch>
-    __host__ __device__ static auto TransformGrid(GridDesc_K0_MN_K1_T& desc, DeviceArch)
+    __host__ __device__ static auto TransformGrid(const GridDesc_K0_MN_K1_T& desc, DeviceArch)
     {
         // gfx1250 doesn't need swizzling for DirectLoad pipeline
         if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t> || UseLdsTranspose)
@@ -749,8 +749,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
-                               const index_t k_id    = 0,
-                               const index_t k_batch = 1)
+                               const index_t k_id        = 0,
+                               const index_t k_batch     = 1,
+                               const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
     {
         const long_index_t a_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
         const long_index_t b_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
@@ -767,8 +768,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         // divide block work by [M, N]
         const auto block_2_ctile_map = Block2CTileMap{problem.M, problem.N, 4};
 
-        const auto block_work_idx = block_2_ctile_map.CalculateBottomIndex(
-            make_multi_index(static_cast<index_t>(blockIdx.x)));
+        const auto block_work_idx =
+            block_2_ctile_map.CalculateBottomIndex(make_multi_index(block_idx_x));
 
         if(!block_2_ctile_map.ValidCTileIndex(
                block_work_idx,
@@ -968,8 +969,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                 const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                     c_grid_desc_mblock_mperblock_nblock_nperblock,
                                 const NamedBarrierType& barrier,
-                                const index_t k_id    = 0,
-                                const index_t k_batch = 1)
+                                const index_t k_id        = 0,
+                                const index_t k_batch     = 1,
+                                const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
     {
         barrier.Init();
 
@@ -986,8 +988,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         // divide block work by [M, N]
         const auto block_2_ctile_map = Block2CTileMap{problem.M, problem.N, 4};
 
-        const auto block_work_idx = block_2_ctile_map.CalculateBottomIndex(
-            make_multi_index(static_cast<index_t>(blockIdx.x)));
+        const auto block_work_idx =
+            block_2_ctile_map.CalculateBottomIndex(make_multi_index(block_idx_x));
 
         if(!block_2_ctile_map.ValidCTileIndex(
                block_work_idx,
@@ -1241,8 +1243,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
-                               const index_t k_id    = 0,
-                               const index_t k_batch = 1)
+                               const index_t k_id        = 0,
+                               const index_t k_batch     = 1,
+                               const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
     {
         if constexpr(UseNamedBarrier)
         {
@@ -1261,7 +1264,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 c_grid_desc_mblock_mperblock_nblock_nperblock,
                 barrier,
                 k_id,
-                k_batch);
+                k_batch,
+                block_idx_x);
         }
         else
         {
@@ -1278,7 +1282,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 c_grid_desc_mblock_mperblock_nblock_nperblock,
                 barrier,
                 k_id,
-                k_batch);
+                k_batch,
+                block_idx_x);
         }
     }
 };
