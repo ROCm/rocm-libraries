@@ -874,6 +874,50 @@ class ValidityGateTest(unittest.TestCase):
         self.assertIn("-O0", argv)
         self.assertNotIn("-O3", argv)
 
+    def test_a_bundled_comgr_does_not_send_the_lookup_to_path(self):
+        """A comgr bundled with another package (the ROCm torch wheel) has no LLVM
+        beside it. The lookup must then find the installed ROCm toolchain, not the
+        first clang on PATH, which is typically a distro clang that cannot link
+        AMDGPU code objects."""
+        from unittest import mock
+
+        import check_ir_validity as V
+        from rocke.runtime.runtime_coexistence import _rocm_root_libdirs
+
+        # Only installs that ship a compiler can answer: a runtime-only ROCm has
+        # no <root>/llvm/bin/clang, and the lookup then rightly finds none.
+        installs = [
+            d
+            for d in _rocm_root_libdirs()
+            if any(
+                (root / "llvm" / "bin" / "clang").is_file()
+                for root in list(Path(d).resolve().parents)[:3]
+            )
+        ]
+        if not installs:
+            self.skipTest("no ROCm install with an LLVM toolchain on this host")
+        with tempfile.TemporaryDirectory() as bundled:
+            fake_comgr = Path(bundled) / "lib" / "libamd_comgr.so"
+            fake_comgr.parent.mkdir()
+            fake_comgr.touch()
+            env = {k: v for k, v in os.environ.items() if k != "ROCKE_LLVM_BIN"}
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch(
+                    "rocke.runtime.comgr.resolved_lib_path",
+                    return_value=str(fake_comgr),
+                ),
+            ):
+                found = V._llvm_tool("clang")
+        self.assertIsNotNone(found)
+        self.assertTrue(
+            any(
+                Path(found).resolve().is_relative_to(Path(d).resolve().parents[1])
+                for d in installs
+            ),
+            f"{found} is not inside a ROCm install {installs}",
+        )
+
     def test_a_target_this_clang_cannot_build_is_not_an_emission_failure(self):
         """rocke wires arches ahead of the toolchains that can build for them.
 
