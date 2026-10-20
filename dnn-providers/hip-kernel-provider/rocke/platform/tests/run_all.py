@@ -14,16 +14,17 @@
 #       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
 #       [--config CONFIG]
 #
-# The two filters are deliberately separate. `--only` selects *families* for the
-# byte-identity gate; `--only-ir` selects *case ids* for the emitted-IR validity
-# gate, and a case id is `family/arch/variant`, so the two vocabularies overlap
-# without being the same. Forwarding one substring to both was a real trap: a
-# word can be a legal family while matching no corpus case, and the two tools
-# read an empty selection oppositely -- run_diff runs zero families and reports
-# green, check_ir_validity calls it FATAL -- so a partial run could go red for a
-# filter that was valid where the user aimed it. Filtering is also kept separate
-# from skipping: an unfiltered gate still runs in full; use `--no-gate` /
-# `--no-ir-validity` to opt out of one.
+# The two filters are separate by *vocabulary*, not by gate. `--only` selects
+# *families* for the byte-identity gate; `--only-ir` selects *case ids*
+# (`family/arch/variant`) for both corpus gates -- emitted-IR validity and
+# arch-domain. The vocabularies overlap without being the same, and a word can
+# be a legal family while matching no corpus case; the tools read an empty
+# selection oppositely (run_diff reports green, the corpus gates call it FATAL),
+# so forwarding one substring to all of them can go red for a filter that was
+# valid where the user aimed it. Any new corpus gate belongs on `--only-ir`.
+#
+# Filtering is separate from skipping: an unfiltered gate still runs in full;
+# use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` to opt out of one.
 
 from __future__ import annotations
 
@@ -132,6 +133,7 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 # instead of skipping: (env var, CTest name, label).
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
     (
         "ROCKE_NONTEMPORAL_HIP_TEST",
         "rocke_nontemporal_hip",
@@ -266,6 +268,12 @@ def main() -> int:
         help="skip the emitted-IR validity gate (compile+link every corpus case)",
     )
     ap.add_argument(
+        "--no-arch-domain",
+        action="store_true",
+        help="skip the arch-domain warning gate (lower every corpus case at "
+        "every committed LLVM flavor)",
+    )
+    ap.add_argument(
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
@@ -274,13 +282,14 @@ def main() -> int:
         "--only",
         default="",
         help="restrict byte-identity gate to families containing SUBSTR "
-        "(comma-separated); does not affect the emitted-IR validity gate",
+        "(comma-separated); does not affect the corpus gates",
     )
     ap.add_argument(
         "--only-ir",
         default="",
-        help="restrict emitted-IR validity gate to case ids containing SUBSTR "
-        "(comma-separated); a case id is family/arch/variant",
+        help="restrict the corpus gates (emitted-IR validity, arch-domain) to "
+        "case ids containing SUBSTR (comma-separated); a case id is "
+        "family/arch/variant",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
@@ -321,6 +330,18 @@ def main() -> int:
         if args.only_ir:
             ir_gate += ["--only", args.only_ir]
         status |= subprocess.run(ir_gate).returncode
+
+    if not args.no_arch_domain:
+        # The gate above's question asked of committed data instead of a
+        # compiler: does any kernel demand an intrinsic its target provably
+        # cannot lower? Needs no toolchain, so it rules on every LLVM flavor.
+        print("\n== arch-domain warning gate ==")
+        ad_gate = [sys.executable, str(TOOLS / "check_arch_domain.py")]
+        # `--only-ir`, not `--only`: this gate matches case ids, like
+        # check_ir_validity. See the note at the top of this file.
+        if args.only_ir:
+            ad_gate += ["--only", args.only_ir]
+        status |= subprocess.run(ad_gate).returncode
 
     if not args.no_pytest:
         try:

@@ -89,6 +89,31 @@ Coverage: fp16 / bf16, head_size in `{64, 128, 256}`, block_size in `{16, 64}`, 
 
 FP8 K/V cache + output scale/clamp is wired through `UnifiedAttentionProblem.use_fp8` (the kernel takes per-tensor `k_scale` / `v_scale` and stores the cache as `fp8e4m3`); see attention parity README.
 
+## Attention Backward Family (SDPA dQ / dK / dV)
+
+Library builders under `library/kernels/` (Python-only; see the C++-engine
+statement in `instances/attention_bwd.md` section 0.3). The `fmha_bwd.py`
+row above is a separate, older scalar backward.
+
+| File | Spec / entry points | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `common/attention_bwd.py` | `AttnBwdSpec`, `validate_attn_bwd_spec`, `build_attn_bwd_main` (layout-general main kernel) | `instances/attention_bwd.md` |
+| `common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `build_attn_bwd_dq` (split dQ kernel) | `instances/attention_bwd.md` |
+| `common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, `build_attn_bwd_prep`, `build_attn_bwd_convert`, `build_attn_bwd_reduce`, `build_attn_bwd_page_zero`, `build_attn_bwd_page_convert` | `instances/attention_bwd.md` |
+| `common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy` | `instances/attention_bwd.md` |
+| `common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | launch glue, the on-disk code-object cache, the torch-free production comgr pin | `instances/attention_bwd.md` |
+| `common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`; `gfx942/attention_dense_bwd.py`, `gfx950/attention_dense_bwd.py` | `AttentionDenseBwdSpec`, `ArchAttentionDenseBwdSpec` (bound per target by `Gfx942AttentionDenseBwdSpec`, `Gfx950AttentionDenseBwdSpec`), `build_attention_dense_bwd`, `AttentionDenseBwdDqSpec`, `attn_dense_bwd_plan` (dense family) | `instances/attention_bwd.md` (8.2) |
+| `common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | `AttnBwdUnifiedSpec`, `build_attn_bwd_unified_main`, `AttnBwdUnifiedRequest`, `attn_bwd_unified_support`, `attn_bwd_unified_plan` (paged KV) | `instances/attention_bwd_unified.md` |
+| `common/_attention_bwd_*.py`, `_attention_dense_bwd_shell.py`, `_lse_store.py` | family glue (tile step, LDS planner, rings, schedules, addressing, sinks, refusals); the forward LSE store | `instances/attention_bwd.md` (0.2) |
+
+Routing, tuning and the dispatcher: `library/dispatch/attention_bwd/`
+(`tuning_common.py`, `dense_tuning.py`, `unified_tuning.py`,
+`gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py`,
+`registry.py`). Coverage: fp16 / bf16, head sizes 32 / 64 / 128 (d = 256
+declined); general family on gfx942, gfx950, gfx1151, gfx1201; dense and
+split dQ on gfx942 / gfx950; unified served on gfx942 / gfx950 (built on
+RDNA, declined `ARCH_NOT_VALIDATED` there).
+
 ## Linear Attention Family
 
 A gated delta-rule recurrence rather than softmax attention, so it shares no
@@ -165,6 +190,24 @@ allowed_block_sizes = (64, 128, 256, 512, 1024)
 allowed_vecs = (2, 4, 8)
 ```
 
+## Sparse Attention Family (DSA)
+
+The DeepSeek Sparse Attention scorer. A score-only kernel: it rates every allowed
+key against the query so a later top-k can keep the highest-scoring subset. No
+softmax and no value output, and the index-key is shared across heads (MQA-style,
+one D_I vector per token).
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `common/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
+
+Arch-neutral kernel on gfx942 and gfx950 (bf16), runtime seqlen_q/seqlen_k, with
+two bodies: a scalar reduction (sub-tile seqlen_q and single-query decode
+fallback, correctness oracle) and an MFMA matrix-core body (tail-masked for any
+seqlen_q/seqlen_k; index_head_dim 16-aligned). fp8 is a later phase. Dispatch is
+`library/dispatch/dsa/` (`dispatch_lightning_indexer`) in its own registry, so a
+DSA request never selects a standard-attention kernel and vice versa.
+
 ## Cross-Family Capability Matrix
 
 From `helpers/README.md`:
@@ -188,6 +231,7 @@ From `helpers/README.md`:
 | attention_tiled_2d | - | Q + output + paged-KV | - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | attention_tiled_3d | - | Q + workspace + paged-KV| - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | kda_chunkwise | - | - | - | - | yes (grouped cumsum) | yes | - | `MfmaAtom` (bf16 16x16x16 / 32x32x8), `SignatureBuilder` |
+| lightning_indexer | - | - | - | - | yes (dot + head sum) | yes | - | scalar FMA reduction (bf16), `SignatureBuilder` |
 
 ## Building Any Instance
 
@@ -210,3 +254,11 @@ art = compile_kernel(kernel)
 `art.hsaco` is ready for `KernelLauncher`; `art.llvm_text` is ready for `analyze_llvm_ir`; `art.timings` is the per-stage codegen budget.
 
 For end-to-end execution, see `runtime/compile_launch_and_manifest.md` and `runtime/manifest_schema.md`.
+
+## Native gfx950 block-scaled GEMM
+
+[`gfx950/block_scaled_gemm.py`](../../python/rocke/instances/gfx950/block_scaled_gemm.py)
+provides `BlockScaledGemmSpec`, `build_block_scaled_gemm`, signature and grid helpers.
+It consumes all 25 F8/F6/F4 format pairs with K32 E8M0 scales and a wave64
+32x32x64 native scaled MFMA. See [the family contract](gfx950_block_scaled_gemm.md)
+and [F8, F6, F4 and mixed examples](../../python/rocke/examples/gfx950/gemm/README.md).

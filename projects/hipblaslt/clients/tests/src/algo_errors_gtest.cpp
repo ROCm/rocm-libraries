@@ -8,6 +8,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -115,6 +116,60 @@ namespace
         EXPECT_EQ(returned, 0);
     }
 
+    // Kernels take batch strides as 32-bit values, so a strided batch whose stride does not fit
+    // must get no algorithms, while the largest stride that fits still gets some.
+    TEST_F(AlgoErrors, smoke_HeuristicRefusesBatchStridesPast32Bits)
+    {
+        auto algosFor = [&](int64_t stride) {
+            hipblasLtMatrixLayout_t batched = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&batched, kType, kSize, kSize, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            const int32_t count = 2;
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          batched, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &count, sizeof(count)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(
+                hipblasLtMatrixLayoutSetAttribute(
+                    batched, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride, sizeof(stride)),
+                HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = 0;
+            static_cast<void>(hipblasLtMatmulAlgoGetHeuristic(
+                handle, desc, batched, batched, batched, batched, pref, 1, &result, &returned));
+            hipblasLtMatrixLayoutDestroy(batched);
+            return returned;
+        };
+        EXPECT_GT(algosFor(std::numeric_limits<uint32_t>::max()), 0);
+        EXPECT_EQ(algosFor(int64_t(1) << 32), 0);
+    }
+
+    // Kernels take M, N, K and the leading dimensions as 32-bit values too. With both
+    // operations N, A is M x K, B is K x N, and C and D are M x N, so a K of 2^32 also makes
+    // ldb 2^32 and an M of 2^32 also makes ldc and ldd 2^32.
+    TEST_F(AlgoErrors, smoke_HeuristicRefusesSizesPast32Bits)
+    {
+        auto algosFor = [&](int64_t m, int64_t n, int64_t k, int64_t lda) {
+            hipblasLtMatrixLayout_t a = nullptr, b = nullptr, cd = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&a, kType, m, k, lda), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&b, kType, k, n, k), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&cd, kType, m, n, m), HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = 0;
+            static_cast<void>(hipblasLtMatmulAlgoGetHeuristic(
+                handle, desc, a, b, cd, cd, pref, 1, &result, &returned));
+            hipblasLtMatrixLayoutDestroy(a);
+            hipblasLtMatrixLayoutDestroy(b);
+            hipblasLtMatrixLayoutDestroy(cd);
+            return returned;
+        };
+        constexpr int64_t past = int64_t(1) << 32;
+        EXPECT_GT(algosFor(kSize, kSize, kSize, kSize), 0);
+        EXPECT_EQ(algosFor(kSize, kSize, kSize, past), 0);
+        EXPECT_EQ(algosFor(kSize, past, kSize, kSize), 0);
+        EXPECT_EQ(algosFor(kSize, kSize, past, kSize), 0);
+        EXPECT_EQ(algosFor(past, kSize, kSize, past), 0);
+    }
+
     TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndex)
     {
         const hipblasLtMatmulAlgo_t algo = algoWithUnknownIndex();
@@ -135,6 +190,39 @@ namespace
                                   0,
                                   nullptr),
                   HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // No kernel applies an aux scale, so both APIs refuse a non-null one.
+    TEST_F(AlgoErrors, smoke_AuxScaleIsRefused)
+    {
+        void* scaleAux = c;
+        EXPECT_EQ(
+            hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &scaleAux, sizeof(void*)),
+            HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        void* noScale = nullptr;
+        EXPECT_EQ(
+            hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &noScale, sizeof(void*)),
+            HIPBLAS_STATUS_SUCCESS);
+
+        hipblaslt_ext::GemmEpilogue epilogue;
+        hipblaslt_ext::GemmInputs   in = inputs();
+        in.setScaleAux(scaleAux);
+
+        hipblaslt_ext::Gemm gemm(
+            handle, HIPBLAS_OP_N, HIPBLAS_OP_N, kType, kType, kType, kType, HIPBLAS_COMPUTE_32F);
+        EXPECT_EQ(gemm.setProblem(kSize, kSize, kSize, 1, epilogue, in),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        hipblaslt_ext::GroupedGemm grouped(
+            handle, HIPBLAS_OP_N, HIPBLAS_OP_N, kType, kType, kType, kType, HIPBLAS_COMPUTE_32F);
+        std::vector<int64_t>                     size(2, kSize), batch(2, 1);
+        std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+        std::vector<hipblaslt_ext::GemmInputs>   ins{inputs(), in};
+        EXPECT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
     }
 
     struct WorkspaceConfig
