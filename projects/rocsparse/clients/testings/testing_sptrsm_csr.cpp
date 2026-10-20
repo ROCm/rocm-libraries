@@ -20,6 +20,7 @@
 * THE SOFTWARE.
 *
 * ************************************************************************ */
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "testing.hpp"
 
@@ -748,7 +749,8 @@ void testing_sptrsm_csr(const Arguments& arg)
         std::cout << "C_{" << C_m << " x " << C_n
                   << "}( order: " << ((order_C == rocsparse_order_row) ? "row" : "col")
                   << ", ld = " << ldc << " )";
-        std::cout << " = " << "(" << halpha[0] << ")"
+        std::cout << " = "
+                  << "(" << halpha[0] << ")"
                   << ((uplo == rocsparse_fill_mode_lower)
                           ? ((diag == rocsparse_diag_type_unit) ? "(L + Id)" : "(L + D)")
                           : ((diag == rocsparse_diag_type_unit) ? "(U + Id)" : "(U + D_U)"))

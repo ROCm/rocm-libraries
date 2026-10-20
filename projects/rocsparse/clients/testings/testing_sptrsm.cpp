@@ -370,18 +370,13 @@ namespace rocsparse_clients
 #endif
                      )
 
-            : config({operation_A,
-                      operation_X,
-                      alg,
-                      scalar_datatype,
-                      compute_datatype,
-                      apol
+            : config({
+                operation_A, operation_X, alg, scalar_datatype, compute_datatype, apol
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-                      ,
-                      solve_mode,
-                      diagonal_modifier
+                    ,
+                    solve_mode, diagonal_modifier
 #endif
-              })
+            })
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_status status = rocsparse_create_sptrsm_descr(&this->m_descr);

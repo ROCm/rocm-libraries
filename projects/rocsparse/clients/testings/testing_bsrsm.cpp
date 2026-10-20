@@ -529,10 +529,10 @@ void testing_bsrsm(const Arguments& arg)
         {
             const rocsparse_status status
                 = rocsparse_bsrsm_zero_pivot(handle, info, analysis_pivot_gold);
-            if(status != rocsparse_status_zero_pivot)
-            {
-                CHECK_ROCSPARSE_ERROR(status);
-            }
+            const rocsparse_status expected = (*analysis_pivot_gold == -1)
+                                                  ? rocsparse_status_success
+                                                  : rocsparse_status_zero_pivot;
+            EXPECT_ROCSPARSE_STATUS(status, expected);
         }
 
         const double gpu_solve_time_used
@@ -562,10 +562,10 @@ void testing_bsrsm(const Arguments& arg)
         {
             const rocsparse_status status
                 = rocsparse_bsrsm_zero_pivot(handle, info, solve_pivot_gold);
-            if(status != rocsparse_status_zero_pivot)
-            {
-                CHECK_ROCSPARSE_ERROR(status);
-            }
+            const rocsparse_status expected = (*solve_pivot_gold == -1)
+                                                  ? rocsparse_status_success
+                                                  : rocsparse_status_zero_pivot;
+            EXPECT_ROCSPARSE_STATUS(status, expected);
         }
 
         double gflop_count
