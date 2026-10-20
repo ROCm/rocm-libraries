@@ -150,9 +150,11 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
     {"rsqrt.f32", "declare float @llvm.amdgcn.rsq.f32(float)"},
     {"rcp.f32", "declare float @llvm.amdgcn.rcp.f32(float)"},
+    {"maxnum.f64", "declare double @llvm.maxnum.f64(double, double)"},
     {"maxnum.f32", "declare float @llvm.maxnum.f32(float, float)"},
     {"maxnum.f16", "declare half @llvm.maxnum.f16(half, half)"},
     {"maxnum.bf16", "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)"},
+    {"minnum.f64", "declare double @llvm.minnum.f64(double, double)"},
     {"minnum.f32", "declare float @llvm.minnum.f32(float, float)"},
     {"minnum.f16", "declare half @llvm.minnum.f16(half, half)"},
     {"minnum.bf16", "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)"},
@@ -316,6 +318,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.i16",
      "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    {"raw.ptr.buffer.load.f16",
+     "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
@@ -337,6 +342,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"rint.f32", "declare float @llvm.rint.f32(float)"},
     {"smax.i32", "declare i32 @llvm.smax.i32(i32, i32)"},
     {"smin.i32", "declare i32 @llvm.smin.i32(i32, i32)"},
+    /* Unsigned u8 maximum / minimum (u8 renders as i8). */
+    {"umax.i8", "declare i8 @llvm.umax.i8(i8, i8)"},
+    {"umin.i8", "declare i8 @llvm.umin.i8(i8, i8)"},
     {"amdgcn.perm", "declare i32 @llvm.amdgcn.perm(i32, i32, i32)"},
     {"amdgcn.cvt.scalef32.pk.f32.fp8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
@@ -415,6 +423,51 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.prefetch.inst.p0", "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)"},
     {"s.prefetch.inst.p1", "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"},
     {"s.prefetch.inst.p4", "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"},
+    {"mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
+     "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
+     "i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
+    /* gfx1250 data prefetch (llvm23). s.prefetch.data is llvm_anyptr_ty like
+     * s.prefetch.inst above; see ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES. */
+    {"s.setreg", "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)"},
+    {"s.prefetch.data.p0", "declare void @llvm.amdgcn.s.prefetch.data.p0(ptr, i32)"},
+    {"s.prefetch.data.p1", "declare void @llvm.amdgcn.s.prefetch.data.p1(ptr addrspace(1), i32)"},
+    {"s.prefetch.data.p4", "declare void @llvm.amdgcn.s.prefetch.data.p4(ptr addrspace(4), i32)"},
+    {"s.buffer.prefetch.data",
+     "declare void @llvm.amdgcn.s.buffer.prefetch.data(ptr addrspace(8), i32 immarg, i32)"},
+    {"global.prefetch", "declare void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32 immarg)"},
+    {"flat.prefetch", "declare void @llvm.amdgcn.flat.prefetch(ptr, i32 immarg)"},
+    /* gfx1250 workgroup clusters (llvm23). */
+    {"cluster.id.x", "declare i32 @llvm.amdgcn.cluster.id.x()"},
+    {"cluster.id.y", "declare i32 @llvm.amdgcn.cluster.id.y()"},
+    {"cluster.id.z", "declare i32 @llvm.amdgcn.cluster.id.z()"},
+    {"cluster.workgroup.id.x", "declare i32 @llvm.amdgcn.cluster.workgroup.id.x()"},
+    {"cluster.workgroup.id.y", "declare i32 @llvm.amdgcn.cluster.workgroup.id.y()"},
+    {"cluster.workgroup.id.z", "declare i32 @llvm.amdgcn.cluster.workgroup.id.z()"},
+    {"cluster.workgroup.max.id.x", "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.x()"},
+    {"cluster.workgroup.max.id.y", "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.y()"},
+    {"cluster.workgroup.max.id.z", "declare i32 @llvm.amdgcn.cluster.workgroup.max.id.z()"},
+    {"cluster.workgroup.flat.id", "declare i32 @llvm.amdgcn.cluster.workgroup.flat.id()"},
+    {"cluster.workgroup.max.flat.id", "declare i32 @llvm.amdgcn.cluster.workgroup.max.flat.id()"},
+    {"s.cluster.barrier", "declare void @llvm.amdgcn.s.cluster.barrier()"},
+    /* gfx1250 cluster multicast loads (llvm23): (ptr, cachepolicy, M0 mask). */
+    {"cluster.load.b32.i32",
+     "declare i32 @llvm.amdgcn.cluster.load.b32.i32(ptr addrspace(1), i32 immarg, i32)"},
+    {"cluster.load.b64.v2i32",
+     "declare <2 x i32> @llvm.amdgcn.cluster.load.b64.v2i32(ptr addrspace(1), i32 immarg, i32)"},
+    {"cluster.load.b128.v4i32",
+     "declare <4 x i32> @llvm.amdgcn.cluster.load.b128.v4i32(ptr addrspace(1), i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b8",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b8(ptr addrspace(1), ptr addrspace(3), "
+     "i32 immarg, i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b32",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b32(ptr addrspace(1), ptr addrspace(3), "
+     "i32 immarg, i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b64",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b64(ptr addrspace(1), ptr addrspace(3), "
+     "i32 immarg, i32 immarg, i32)"},
+    {"cluster.load.async.to.lds.b128",
+     "declare void @llvm.amdgcn.cluster.load.async.to.lds.b128(ptr addrspace(1), ptr "
+     "addrspace(3), i32 immarg, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_COUNT
@@ -435,6 +488,16 @@ const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[] = {
 const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT
     = (int)(sizeof(ROCKE_LL_S_PREFETCH_INST_PTR_TYPES)
             / sizeof(ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[0]));
+
+/* s.prefetch.data takes the same flat, global, or constant pointers. */
+const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[] = {
+    {0, "ptr"},
+    {1, "ptr addrspace(1)"},
+    {4, "ptr addrspace(4)"},
+};
+const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT
+    = (int)(sizeof(ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES)
+            / sizeof(ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[0]));
 
 /* av.load/store.b128 are documented as flat or global only: a global pointer
  * selects global_load/store, a flat pointer flat_load/store. */

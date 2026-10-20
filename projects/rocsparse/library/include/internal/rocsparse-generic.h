@@ -53,6 +53,9 @@
 #include "generic/rocsparse_spmm.h"
 #include "generic/rocsparse_spmv.h"
 #include "generic/rocsparse_spsm.h"
+#if defined(ROCSPARSE_WITH_SPSORT)
+#include "generic/rocsparse_spsort.h"
+#endif
 #include "generic/rocsparse_spsv.h"
 #include "generic/rocsparse_sptrsm.h"
 #include "generic/rocsparse_sptrsv.h"

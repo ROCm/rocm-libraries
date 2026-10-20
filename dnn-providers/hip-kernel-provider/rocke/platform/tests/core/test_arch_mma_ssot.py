@@ -11,8 +11,10 @@ across the arches that list a given op_id.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
+from copy import deepcopy
 from dataclasses import asdict, replace
 from unittest import mock
 
@@ -23,10 +25,76 @@ from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
     _load_specs,
+    _expand_mma_rows,
+    _GFX1250_SCALED_FAMILY,
     _op_id_c_dtype,
     _op_id_family,
     normalize_dtype,
 )
+
+
+def test_filtered_catalog_preserves_supported_order_and_fields():
+    # Independent snapshot of the supported rows at 72c28a69, filtered with
+    # the LLVM legality table. Preserve all remaining fields and relative order.
+    rows = _load_specs()["gfx1250"]["mma"]
+    assert len(rows) == 93
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    assert hashlib.sha256(encoded).hexdigest() == (
+        "d31fe60f6172c7c2172a420cc4558591fa1389d41cc2829eafc99bceb66e858a"
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("generate", "gfx1250_wmma_scaled_v2"),
+        ("family", "wmma"),
+        ("input_dtypes", ["fp8", "bf8", "fp6", "bf6", "fp8"]),
+        ("input_dtypes", ["fp8"]),
+        ("scale_dtypes", ["e8m0", "e5m2", "e4m3"]),
+        ("scale_dtypes", ["e8m0", "e4m3", "e5m3"]),
+        ("block_k", [32, 8]),
+        ("block_k", [32.0, 16]),
+        ("shape", [16, 16, 64]),
+        ("c", "fp16"),
+        ("unexpected", True),
+    ],
+)
+def test_family_declaration_rejects_unsupported_axes(field, value):
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    declaration[field] = value
+    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+        _expand_mma_rows("gfx1250", [declaration])
+
+
+def test_family_declaration_rejects_wrong_arch_missing_fields_and_duplicates():
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+        _expand_mma_rows("gfx950", [declaration])
+    for field in declaration:
+        if field == "generate":
+            with pytest.raises(ValueError, match="invalid MMA declaration"):
+                _expand_mma_rows(
+                    "gfx1250", [{k: v for k, v in declaration.items() if k != field}]
+                )
+            continue
+        missing = {k: v for k, v in declaration.items() if k != field}
+        with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+            _expand_mma_rows("gfx1250", [missing])
+    rows = _expand_mma_rows("gfx1250", [declaration])
+    for declarations in (
+        [declaration, declaration],
+        [rows[0], declaration],
+        [declaration, rows[-1]],
+    ):
+        with pytest.raises(ValueError, match="duplicate MMA op_id"):
+            _expand_mma_rows("gfx1250", declarations)
+
+
+@pytest.mark.parametrize("declarations", [None, {}, [None], [42], [{}]])
+def test_invalid_family_schema_fails_loudly(declarations):
+    with pytest.raises(ValueError, match="MMA declaration"):
+        _expand_mma_rows("gfx1250", declarations)
 
 
 class TestOpIdCDtype(unittest.TestCase):
@@ -223,8 +291,8 @@ def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
 def test_scaled_catalog_identity_and_backend_contract():
     catalog = ArchTarget.from_gfx("gfx1250").mma
     rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
-    assert len(rows) == 50
-    assert len({row.op_id for row in rows}) == 50
+    assert len(rows) == 86
+    assert len({row.op_id for row in rows}) == 86
     for row in rows:
         tokens = {
             "fp8e4m3": "fp8",
@@ -235,10 +303,10 @@ def test_scaled_catalog_identity_and_backend_contract():
         }
         assert row.op_id == (
             f"wmma_gfx1250_f32_16x16x128_{tokens[row.a_dtype]}_{tokens[row.b_dtype]}"
-            f"_scale_e8m0_e8m0_k{row.scale_block_k}"
+            f"_scale_{row.a_scale_dtype}_{row.b_scale_dtype}_k{row.scale_block_k}"
         )
-        assert row.a_scale_dtype == row.b_scale_dtype == "e8m0"
-        assert row.a_scale_dtype is row.b_scale_dtype is MmaScaleDType.E8M0
+        assert isinstance(row.a_scale_dtype, MmaScaleDType)
+        assert isinstance(row.b_scale_dtype, MmaScaleDType)
         assert isinstance(row.scale_block_k, MmaScaleBlockK)
         packing = gfx1250_scaled_wmma(row.op_id)
         assert packing.atom is row
@@ -252,6 +320,10 @@ def test_scaled_catalog_identity_and_backend_contract():
         assert packing.matrix_formats == (
             selectors[row.a_dtype],
             selectors[row.b_dtype],
+        )
+        assert packing.scale_formats == tuple(
+            {"e8m0": 0, "e5m3": 1, "e4m3": 2}[dtype]
+            for dtype in (row.a_scale_dtype, row.b_scale_dtype)
         )
         assert packing.scales.count * packing.scales.block_k == row.k
         assert (row.a_frag_len, row.b_frag_len) == (16, 16)
@@ -407,3 +479,27 @@ def test_mma_naming_without_target_lookup():
                 )
                 result = b.mma(arg, a, a, c, *extra)
                 assert result.name.lstrip("%").startswith(hint)
+
+
+def test_rdna_integer_wmma_rows_name_i8_and_i4():
+    # The instruction names keep "iu8"/"iu4"; the operand dtypes are i8/i4, and only
+    # i8/i4 select the ops ("iu8"/"iu4" are not dtypes).
+    for gfx in ("gfx1151", "gfx11-generic"):
+        mma = ArchTarget.from_gfx(gfx).mma
+        for op_id, dtype, old in (
+            ("wmma_i32_16x16x16_iu8", "i8", "iu8"),
+            ("wmma_i32_16x16x16_iu4", "i4", "iu4"),
+        ):
+            op = mma.by_op_id(op_id)
+            assert (op.a_dtype, op.b_dtype, op.c_dtype) == (dtype, dtype, "i32")
+            for spelling, want in ((dtype, op_id), (old, None)):
+                found = mma.op_for_shape(
+                    family="wmma",
+                    a_dtype=spelling,
+                    b_dtype=spelling,
+                    c_dtype="i32",
+                    m=16,
+                    n=16,
+                    k=16,
+                )
+                assert (found and found.op_id) == want

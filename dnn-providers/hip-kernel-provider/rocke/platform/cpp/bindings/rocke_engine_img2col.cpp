@@ -15,6 +15,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "llvm_flavor.hpp"
+
 #include <cstdlib>
 #include <deque>
 #include <string>
@@ -90,11 +92,6 @@ bool i2c_dict_str(const py::dict& d, const char* key, std::string& out)
     return false;
 }
 
-const char* i2c_arch(const std::string& arch)
-{
-    return arch.empty() ? "gfx950" : arch.c_str();
-}
-
 /* Fill the img2col conv problem from a "problem" sub-dict. */
 void fill_problem(rocke_conv_problem_t* p, const py::dict& d)
 {
@@ -137,13 +134,14 @@ rocke_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& stor
 
 std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     std::deque<std::string> store;
     rocke_img2col_spec_t s = build_spec(d, store);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_img2col_lower_to_llvm(
-        &s, i2c_arch(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
@@ -159,25 +157,27 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string serialize_ir(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.img2col_serialize_ir",
                                 rocke_img2col_spec_t,
                                 build_spec,
-                                rocke_build_img2col_new(&b, &s, i2c_arch(arch)));
+                                rocke_build_img2col_new(&b, &s, arch.c_str()));
 }
 
 std::vector<std::string> verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     ROCKE_FAMILY_VERIFY_BODY("rocke_engine.img2col_verify",
                              rocke_img2col_spec_t,
                              build_spec,
-                             rocke_build_img2col_new(&b, &s, i2c_arch(arch)));
+                             rocke_build_img2col_new(&b, &s, arch.c_str()));
 }
 
 } // namespace
 
 void register_img2col(py::module_& m)
 {
-    m.def("img2col_lower_llvm", &lower_llvm, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def("img2col_serialize_ir", &serialize_ir, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def("img2col_verify", &verify, py::arg("spec"), py::arg("arch") = "gfx950");
+    m.def("img2col_lower_llvm", &lower_llvm, py::arg("spec"), py::arg("arch"));
+    m.def("img2col_serialize_ir", &serialize_ir, py::arg("spec"), py::arg("arch"));
+    m.def("img2col_verify", &verify, py::arg("spec"), py::arg("arch"));
 }
