@@ -485,8 +485,8 @@ TEST(PersistentArgumentLayout, ClusterStreamKPacksRaggedBatchedSchedule)
     EXPECT_EQ(value<void*>(call.args, "Flags"), inputs.Synchronizer);
     EXPECT_FLOAT_EQ(value<float>(call.args, "alpha"), 2.5f);
     const auto decisions = solution.computeStreamKDecisions(problem, device);
-    EXPECT_EQ(decisions.skGrid, 4u);
-    EXPECT_EQ(decisions.skTiles, 2u);
+    EXPECT_EQ(decisions.grid(), 4u);
+    EXPECT_EQ(decisions.skTiles(), 2u);
     EXPECT_TRUE(decisions.partialsPresent);
     EXPECT_EQ(decisions.requiredWorkspaceBytes, launch.workspaceBytes);
 }
@@ -510,7 +510,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKRoundsBudgetToCompleteClusters)
             EXPECT_EQ(launch.selectedGrid, budget);
             EXPECT_EQ(launch.grid, grid);
             EXPECT_EQ(launch.clusterSchedule.physicalGrid, grid * 8);
-            EXPECT_EQ(launch.clusterSchedule.split.skItersPerWG, iters);
+            EXPECT_EQ(launch.clusterSchedule.split.args.itersPerWG, iters);
             EXPECT_EQ(launch.clusterSchedule.split.extraIters, extra);
             EXPECT_EQ(launch.workspaceBytes, grid == 1 ? 0 : grid * 8 * 128 * 128 * sizeof(float));
         }
@@ -534,8 +534,8 @@ TEST(PersistentArgumentLayout, ClusterStreamKWorkspaceFallbackPreservesWholeClus
     EXPECT_EQ(fallback.workspaceBytes, 0u);
     EXPECT_TRUE(fallback.clusterSchedule.workspaceFallback);
     EXPECT_TRUE(fallback.clusterSchedule.wholeBlocksOnly);
-    EXPECT_EQ(fallback.clusterSchedule.split.skTiles, 0u);
-    EXPECT_EQ(fallback.clusterSchedule.split.skItersPerWG, 0u);
+    EXPECT_EQ(fallback.clusterSchedule.split.args.skTiles, 0u);
+    EXPECT_EQ(fallback.clusterSchedule.split.args.itersPerWG, 0u);
     EXPECT_EQ(fallback.clusterSchedule.physicalGrid, fallback.grid * 8);
     EXPECT_LE(fallback.grid, fallback.clusterSchedule.blocks);
     EXPECT_EQ(fallback.reduction, origami::reduction_t::tree);
@@ -554,7 +554,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKRejectsOverflowAndBoundsTreeArithme
     auto problem = clusterProblem(1, 1, 64 * 65536, 1);
     auto launch = solution.resolvePersistentSettings(problem, device);
     EXPECT_TRUE(launch.clusterSchedule.treeBoundsFallback);
-    EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+    EXPECT_EQ(launch.clusterSchedule.split.args.skTiles, 0u);
     EXPECT_EQ(launch.workspaceBytes, 0u);
     solution.sizeMapping.depthU = 1;
     problem = clusterProblem(1, 1, 1 << 24, 1);
@@ -589,9 +589,9 @@ TEST(PersistentArgumentLayout, ClusterStreamKVersionZeroKeepsPrebuiltScheduling)
     EXPECT_EQ(invocation.clusterDim.x, 2u);
     EXPECT_EQ(invocation.clusterDim.y, 1u);
     EXPECT_EQ(value<uint32_t>(invocation.args, "skGrid"), 8u);
-    const auto expected = streamKStaticSplit(36, 3, 8, device.skFullTiles, false);
-    EXPECT_EQ(value<uint32_t>(invocation.args, "skTiles"), expected.skTiles);
-    EXPECT_EQ(value<uint32_t>(invocation.args, "SKItersPerWG"), expected.skItersPerWG);
+    const auto expected = StreamK::Static::computeSplit(36, 3, 8, device.skFullTiles, false);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "skTiles"), expected.args.skTiles);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "SKItersPerWG"), expected.args.itersPerWG);
 
     solution.internalArgsSupport.persistentLoopArgsVersion = 2;
     EXPECT_TRUE(solution.usesStreamKSpatialCluster());
@@ -698,8 +698,8 @@ TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
         ASSERT_GT(cluster.partialSlots, 0u);
         ASSERT_GT(launch.grid, cluster.blocks);
         EXPECT_EQ(cluster.split.extraIters, 0u);
-        EXPECT_EQ(cluster.split.skTiles, cluster.blocks);
-        EXPECT_TRUE(streamKStaticSplitRowUniform(cluster.split, cluster.blocks,
+        EXPECT_EQ(cluster.split.args.skTiles, cluster.blocks);
+        EXPECT_TRUE(StreamK::Static::isRowUniform(cluster.split, cluster.blocks,
             cluster.itersPerTile, launch.grid, false, true));
         EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
         const auto call = solution.generateSingleCall<true>(
@@ -709,8 +709,8 @@ TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
         solution.problemType.useInitialStridesCD = true;
         EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
     }
-    const auto irregular = streamKStaticSplit(3, 65, 7, 1, false);
-    EXPECT_FALSE(streamKStaticSplitRowUniform(irregular, 3, 65, 7, false, true));
+    const auto irregular = StreamK::Static::computeSplit(3, 65, 7, 1, false);
+    EXPECT_FALSE(StreamK::Static::isRowUniform(irregular, 3, 65, 7, false, true));
 }
 
 TEST(PersistentArgumentLayout, ClusterStreamKWholeTileGridDoesNotCreateResidentTreeSplits)
@@ -735,7 +735,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKWholeTileGridDoesNotCreateResidentT
         EXPECT_EQ(launch.grid, 4096u / (cs * cn));
         EXPECT_TRUE(launch.clusterSchedule.wholeBlocksOnly);
         EXPECT_FALSE(launch.clusterSchedule.workspaceFallback);
-        EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+        EXPECT_EQ(launch.clusterSchedule.split.args.skTiles, 0u);
         EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
         EXPECT_EQ(launch.workspaceBytes, 0u);
         EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
@@ -855,7 +855,8 @@ TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
         size_t previousEnd = 0;
         for(size_t w = 0; w < launch.grid; ++w)
         {
-            const auto range = streamKWorkgroupIterRange(w, blocks, iters, launch.grid, true, true);
+            const auto range
+                = StreamK::Static::workgroupIterRange(w, blocks, iters, launch.grid, true, true);
             EXPECT_EQ(range.start, previousEnd);
             ASSERT_GT(range.end, range.start);
             EXPECT_EQ(range.start / iters, (range.end - 1) / iters);
@@ -899,7 +900,7 @@ TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSp
             EXPECT_EQ(launch.clusterSchedule.fallbackReason, "whole-block-cost");
             EXPECT_EQ(launch.grid, launch.clusterSchedule.blocks);
             EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
-            EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+            EXPECT_EQ(launch.clusterSchedule.split.args.skTiles, 0u);
         }
         // Explicit fixed grids bypass the performance policy.
         device.persistentFixedGrid = launch.selectedGrid;
@@ -972,7 +973,8 @@ TEST(PersistentArgumentLayout, ClusterParallelEligibilityAndPackedOutputContract
     EXPECT_FLOAT_EQ(value<float>(conversion.args, "alpha"), 2.5f);
     EXPECT_FLOAT_EQ(value<float>(conversion.args, "beta"), -1.25f);
     const auto decisions = solution.computeStreamKDecisions(problem, device);
-    EXPECT_EQ(decisions.skSplit, 4u);
+    EXPECT_EQ(decisions.clusterSchedule.parallelSplits, 4u);
+    EXPECT_EQ(decisions.skTiles(), 4u);
     EXPECT_EQ(decisions.requiredWorkspaceBytes, launch.workspaceBytes);
 
     problem.setWorkspaceSize(launch.workspaceBytes - 1);
