@@ -293,6 +293,16 @@ class TraitSpec:
     # tile. WMMA ``mem`` pipeline with ``tdm`` and ``tdm_depth >= 2`` only.
     # False (default) keeps the joint barrier and byte-identical output.
     split_barrier: bool = False
+    # Alternate the TDM issuer waves of the depth-2 ping-pong by LDS half: the
+    # tile filled into half ``p`` is issued by waves ``2p`` (A) and ``2p + 1``
+    # (B) instead of always by waves 0 and 1. The waves that wait for one fill
+    # to land then never issue the next one, so the refill goes out as soon as
+    # the barrier releases rather than after those waves' last WMMAs. Each
+    # issuer still has at most one fill outstanding, so every existing
+    # TENSORcnt wait stays exact. ``tdm`` with ``tdm_depth == 2`` and at least
+    # four waves only. False (default) keeps waves 0 and 1 and byte-identical
+    # output.
+    tdm_alternate_issuers: bool = False
 
 
 @dataclass(frozen=True)
@@ -741,6 +751,14 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             return False, "split_barrier needs tdm=True with tdm_depth >= 2"
         if spec.trait.split_k != 1:
             return False, "split_barrier does not support split_k"
+
+    # The issuer of a half is chosen per fill, which only keeps one fill per
+    # issuer outstanding (and so every TENSORcnt wait exact) in the ping-pong.
+    if spec.trait.tdm_alternate_issuers:
+        if not spec.trait.tdm or spec.trait.tdm_depth != 2:
+            return False, "tdm_alternate_issuers needs tdm=True with tdm_depth == 2"
+        if spec.block_size // spec.wave_size < 4:
+            return False, "tdm_alternate_issuers needs at least four waves"
 
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
@@ -1605,9 +1623,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # per wave. One wave owns each operand; the rest reach the LDS
             # contents through the barrier in the drain.
             if _tdm_waves > 1:
-                with b.scf_if(b.cmp_eq(_tdm_wave_id, zero)):
+                # Waves 2p / 2p+1 own the fills of half p with the trait on;
+                # waves 0 / 1 otherwise. ``b_wave`` stays a thunk so the default
+                # emits its constant where it always has.
+                a_wave, b_wave = zero, lambda: b.const_i32(1)
+                if spec.trait.tdm_alternate_issuers:
+                    if isinstance(lds_parity, Value):
+                        a_wave = b.mul(lds_parity, b.const_i32(2))
+                    else:
+                        a_wave = b.const_i32(2 * lds_parity)
+                    _b_wave = b.add(a_wave, b.const_i32(1))
+                    b_wave = lambda: _b_wave
+                with b.scf_if(b.cmp_eq(_tdm_wave_id, a_wave)):
                     _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
-                with b.scf_if(b.cmp_eq(_tdm_wave_id, b.const_i32(1))):
+                with b.scf_if(b.cmp_eq(_tdm_wave_id, b_wave())):
                     _issue(Bp, block_n_off, block_n, N, b_lds, batch_off_b)
             else:
                 _issue(A, block_m_off, block_m, M, a_lds, batch_off_a)
