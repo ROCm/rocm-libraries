@@ -520,3 +520,14 @@ def _declare_fmha_fwd_params(kb):
     kb.add_scalar("seqlen_q", "i32")
     kb.add_scalar("seqlen_k", "i32")
     kb.add_strides("q", "k", "v", "o")
+
+
+def _sparse_builder_setup(kb):
+    """Decode the grid and read the attention tensor handles for sparse builders."""
+    kb.decode_grid()
+    b = kb.builder
+    Q = kb.tensor("Q")
+    K = kb.tensor("K")
+    V = kb.tensor("V")
+    O = kb.tensor("O")  # noqa: E741 - standard attention notation
+    return b, Q, K, V, O

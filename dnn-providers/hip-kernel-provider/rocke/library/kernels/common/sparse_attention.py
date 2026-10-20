@@ -53,7 +53,12 @@ from rocke.helpers.mfma_attention import (
 )
 from rocke.helpers.spec import kernel_name_join
 from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
-from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
+from ._fmha_common import (
+    FmhaCommonSpec,
+    FmhaKernelBuilder,
+    _sparse_builder_setup,
+    validate_common_spec,
+)
 from .fmha_arch import validate_fmha_mfma_atom
 
 
@@ -471,13 +476,7 @@ def build_jenga_sparse_attention(
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
     kb.block_size(_BLOCK_SIZE)
     _declare_jenga_params(kb)
-    kb.decode_grid()
-    b = kb.builder
-
-    Q = kb.tensor("Q")
-    K = kb.tensor("K")
-    V = kb.tensor("V")
-    O = kb.tensor("O")  # noqa: E741 - standard attention notation
+    b, Q, K, V, O = _sparse_builder_setup(kb)
     mask = kb.ptr("mask")
     scale_log2 = kb.scalar("scale_log2")
     seqlen_k_arg = kb.scalar("seqlen_k")
@@ -568,13 +567,7 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec, arch: str = "gfx950") -> Ker
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
     kb.block_size(_BLOCK_SIZE)
     _declare_vsa_params(kb)
-    kb.decode_grid()
-    b = kb.builder
-
-    Q = kb.tensor("Q")
-    K = kb.tensor("K")
-    V = kb.tensor("V")
-    O = kb.tensor("O")  # noqa: E741 - standard attention notation
+    b, Q, K, V, O = _sparse_builder_setup(kb)
     block_lut = kb.ptr("block_lut")
     block_count = kb.ptr("block_count")
     scale_log2 = kb.scalar("scale_log2")
