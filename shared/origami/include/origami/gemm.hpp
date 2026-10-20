@@ -511,8 +511,8 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
  * @return double Latency in cycles.
  */
 ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
-                             const hardware_t& hardware,
-                             const config_t& config);
+                                            const hardware_t& hardware,
+                                            const config_t& config);
 
 }  // namespace gemm
 }  // namespace origami

@@ -903,7 +903,7 @@ void memoize_non_temporal_availability(std::vector<config_t>& configs) {
   }
 
   for (auto& config : configs) {
-    const auto& flags = nt_by_tile.at({config.mt.m, config.mt.n, config.mt.k});
+    const auto& flags               = nt_by_tile.at({config.mt.m, config.mt.n, config.mt.k});
     config.non_temporal_a_available = flags.first;
     config.non_temporal_b_available = flags.second;
   }
