@@ -1687,12 +1687,12 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # The builder derives the scalar-state / mask / skip-qreg / fast-paged-KV
         # spec fields from the combo predicate, which reads max_seqlen_q.
         _enable_combo_2d(problem, arch),
-        # gfx950 schedule tail of `_spec_gfx950_generic`. All three are false
+        # gfx950 schedule tail of `_spec_gfx950_generic`. Both are false
         # outside the single-batch cohort (num_seqs == 1), so gate on it and
-        # spare every other launch the selector walks.
+        # spare every other launch the selector walks. sched_barrier is implied
+        # by _enable_v_double_buffer, which is already in the key above.
         (
             (
-                _enable_sched_barrier(problem, arch),
                 _enable_softmax_mfma_interleave(problem, arch),
                 _enable_k_single_buffer(
                     problem,

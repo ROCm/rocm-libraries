@@ -165,9 +165,23 @@ def _sweep(arch):
             )
 
 
+# Env states to pool per arch. Routing knobs are read on every launch and can
+# flip mid-process; pooling them catches a selector whose output only changes
+# when a knob flips.
+_ENV_STATES = {
+    "gfx950": (
+        {},
+        {
+            "HIPDNN_GFX950_D128_SMALL_TILE": "0",
+            "HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE": "off",
+        },
+    ),
+}
+
+
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("path", ("2d", "3d"))
-def test_key_matches_build_identity(routing_env, arch, path):
+def test_key_matches_build_identity(routing_env, monkeypatch, arch, path):
     """Key equality and build equality must coincide across the sweep.
 
     Equal key, different build: under-keying. This is the guard for the next
@@ -176,6 +190,9 @@ def test_key_matches_build_identity(routing_env, arch, path):
 
     Equal build, different key: over-keying. A raw shape field, or a selector
     the arch's builder never reads, compiles duplicate binaries.
+
+    Pooling the env states also catches a selector whose output only changes
+    when a knob flips.
     """
     if path == "2d":
         supported = au.supports_native_unified_attention_tiled
@@ -187,40 +204,52 @@ def test_key_matches_build_identity(routing_env, arch, path):
     first = {}
     key_of_build = {}
     checked = 0
-    for problem in _sweep(arch):
-        if not supported(problem, arch)[0]:
-            continue
-        try:
-            # gfx1250's 3D key builds the spec itself, so it raises too.
-            key = key_fn(problem, arch)
-            built = built_fn(problem, arch)
-        except (ValueError, NotImplementedError):
-            # Admitted by the gate but rejected by the spec; never launches.
-            continue
-        checked += 1
-        seen = first.setdefault(key, (problem, built))
-        if seen[1] != built:
-            other, other_built = seen
-            diff = {
-                name: (other_built["spec"].get(name), built["spec"].get(name))
-                for name in built["spec"]
-                if other_built["spec"].get(name) != built["spec"].get(name)
-            }
-            for name in built:
-                if name != "spec" and other_built[name] != built[name]:
-                    diff[name] = (other_built[name], built[name])
-            pytest.fail(
-                f"{arch} {path}: one key, two kernels\n  {other}\n  {problem}\n"
-                f"  differing: {diff}"
+    for env in _ENV_STATES.get(arch, ({},)):
+        for var, val in env.items():
+            monkeypatch.setenv(var, val)
+        for problem in _sweep(arch):
+            if not supported(problem, arch)[0]:
+                continue
+            try:
+                # gfx1250's 3D key builds the spec itself, so it raises too.
+                key = key_fn(problem, arch)
+                built = built_fn(problem, arch)
+            except (ValueError, NotImplementedError):
+                # Admitted by the gate but rejected by the spec; never launches.
+                continue
+            checked += 1
+            launch = (problem, env)
+            seen = first.setdefault(key, (launch, built))
+            if seen[1] != built:
+                other_launch, other_built = seen
+                diff = {
+                    name: (other_built["spec"].get(name), built["spec"].get(name))
+                    for name in built["spec"]
+                    if other_built["spec"].get(name) != built["spec"].get(name)
+                }
+                for name in built:
+                    if name != "spec" and other_built[name] != built[name]:
+                        diff[name] = (other_built[name], built[name])
+                pytest.fail(
+                    f"{arch} {path}: one key, two kernels\n"
+                    f"  {other_launch}\n  {launch}\n"
+                    f"  differing: {diff}"
+                )
+            build_id = repr(
+                sorted((name, repr(value)) for name, value in built.items())
             )
-        build_id = repr(sorted((name, repr(value)) for name, value in built.items()))
-        other_key, other = key_of_build.setdefault(build_id, (key, problem))
-        if other_key != key:
-            diff = [(i, a, b) for i, (a, b) in enumerate(zip(other_key, key)) if a != b]
-            pytest.fail(
-                f"{arch} {path}: one kernel, two keys\n  {other}\n  {problem}\n"
-                f"  differing key entries (index, a, b): {diff}"
-            )
+            other_key, other_launch = key_of_build.setdefault(build_id, (key, launch))
+            if other_key != key:
+                diff = [
+                    (i, a, b) for i, (a, b) in enumerate(zip(other_key, key)) if a != b
+                ]
+                pytest.fail(
+                    f"{arch} {path}: one kernel, two keys\n"
+                    f"  {other_launch}\n  {launch}\n"
+                    f"  differing key entries (index, a, b): {diff}"
+                )
+        for var in env:
+            monkeypatch.delenv(var, raising=False)
     assert checked > 0
 
 
@@ -418,13 +447,16 @@ _SHARED_PAIRS = [
         P(total_q=1200, num_seqs=2, max_seqlen_q=600, max_seqlen_k=600, **_D64_GQA8),
         P(total_q=1400, num_seqs=2, max_seqlen_q=700, max_seqlen_k=700, **_D64_GQA8),
     ),
+    # The decode split rule sizes segments by num_seqs * num_kv_heads, so a
+    # shared 3D binary needs a shared segment count too: ns 32 and 63 both clamp
+    # to 2 segments and sit in one search bucket.
     *(
         (
-            f"{arch}-3d-ns4-vs-ns7",
+            f"{arch}-3d-ns32-vs-ns63",
             arch,
             "3d",
-            P(total_q=4, num_seqs=4, **_D128_DECODE),
-            P(total_q=7, num_seqs=7, **_D128_DECODE),
+            P(total_q=32, num_seqs=32, **_D128_DECODE),
+            P(total_q=63, num_seqs=63, **_D128_DECODE),
         )
         for arch in ("gfx942", "gfx950")
     ),
