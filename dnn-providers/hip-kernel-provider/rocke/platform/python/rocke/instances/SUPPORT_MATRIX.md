@@ -8,7 +8,7 @@ matrix atom / unsupported path).
 | Arch | µarch | Matrix engine | Wave | f16 fp32-acc atoms |
 |---|---|---|---|---|
 | gfx942 | CDNA3 | MFMA | 64 | 16x16x16, 32x32x8 |
-| gfx950 | CDNA4 | MFMA | 64 | 16x16x16, 16x16x32, 32x32x8, 32x32x16 |
+| gfx950 | CDNA4 | MFMA | 64 | 16x16x16, 16x16x32, 32x32x8, 32x32x16, scaled 32x32x64 |
 | gfx1151 | RDNA3.5 | WMMA | 32 | 16x16x16 (`wmma_f32_16x16x16_{f16,bf16}`) |
 
 Matrix-core instances below were exercised with a portable f16 **16x16x16**
@@ -40,13 +40,36 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
+`elementwise` and `reduce2d` also accept `dtype="f64"` (native f64
+compute, `vec=2`). f64 elementwise is limited to the native f64 ops `copy`,
+`neg`, `abs`, `relu`, `add`, `sub`, `mul`, `max` and `min`.
+
 ---
+
+## gfx950 native scaled GEMM
+
+`gfx950/block_scaled_gemm` supports all 25 ordered homogeneous/mixed FP8 E4M3,
+BF8 E5M2, FP6 E2M3, BF6 E3M2 and FP4 E2M1 pairs with native 32x32x64 scaled
+MFMA. E8M0 scales cover K32 groups; accumulation is FP32 and output BF16/FP16.
+M/N must be multiples of 32 and K a multiple of 64, within signed i32 indexing.
+LLVM 20/22/23 lowering is supported on gfx950. Use the spec-driven builder
+directly. The [four focused examples](../examples/gfx950/gemm/README.md)
+cover F8, F6, F4 and mixed inputs with independent non-unity scales. These are
+untuned correctness examples and make no performance claim. Python/C++
+IR and LLVM identity, compiler ISA checks and bounded hardware numeric suites
+cover this consumer; arbitrary-input rounding and special scales remain outside
+the finite verification fixtures.
 
 ## gfx1250 native scaled GEMM
 
-`block_scaled_gemm` supports homogeneous and mixed FP8 E4M3, BF8 E5M2, FP6 E2M3, FP6 E3M2,
-and FP4 E2M1 through SCALE and SCALE16 with LLVM 23 and E8M0 scales.
-See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
+`block_scaled_gemm` supports homogeneous and mixed FP8 E4M3, BF8 E5M2,
+FP6 E2M3/E3M2, and FP4 E2M1 through SCALE and SCALE16 with the `llvm23`
+emission flavor. FP8/BF8/FP6/BF6 operands require E8M0 scales; FP4 accepts
+E8M0, E4M3, or E5M3. FP4 × FP4 requires matching scale formats. Host tests
+cover admission and rejection; numeric fixtures cover bounded finite inputs,
+varying non-unit scales, and fixed-byte selector discrimination through COMGR/HIP.
+See the [scale-format contract](../examples/gfx1250/gemm/SCALE_FORMATS.md)
+and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 
 ## GEMM family
 
@@ -113,6 +136,17 @@ as described in the notes.
 | `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
 | `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
 
+## Sparse attention (DSA lightning indexer)
+
+Added with the DSA lightning-indexer family. The kernel is arch-neutral
+(`kernels/common/lightning_indexer.py`): the ✅ cells are compile- and
+golden-verified (spec, wiring, IR sha, Python/C++ byte-identity); on-GPU numeric
+parity runs on the matching device and is not implied by the ✅ here.
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `lightning_indexer` | ✅ | ✅ | ❌ | bf16; score-only DSA scorer (no softmax/value); runtime seqlen_q/seqlen_k; scalar body (sub-tile seqlen_q / single-query decode fallback, correctness oracle) + MFMA body (tail-masked for any seqlen_q/seqlen_k; index_head_dim 16-aligned); fp8 is a later phase; gfx1151 (RDNA wave32) unsupported |
+
 ## Linear attention / recurrent-state decode
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
@@ -126,7 +160,9 @@ as described in the notes.
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `gfx1151/wmma_gemm` | ❌ | ❌ | ✅ | native WMMA GEMM (GPU-verified) |
-| `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified) |
+| `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified); kept for the hipDNN catalog, no longer selected by rocKE dispatch |
+| `gfx1151/wmma_fmha_fwd_v2` | ❌ | ❌ | ✅ | native WMMA FMHA prefill, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
+| `gfx1151/wmma_fmha_decode` | ❌ | ❌ | ✅ | native split-KV WMMA FMHA decode, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
 
 ---
 

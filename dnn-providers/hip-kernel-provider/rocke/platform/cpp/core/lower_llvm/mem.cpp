@@ -37,7 +37,8 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0)
+    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0 || strcmp(name, "fp8e4m3") == 0
+       || strcmp(name, "bf8e5m2") == 0)
     {
         return 1;
     }
@@ -49,7 +50,7 @@ static int ll_elem_bytes(const char* name)
     {
         return 4;
     }
-    if(strcmp(name, "i64") == 0)
+    if(strcmp(name, "i64") == 0 || strcmp(name, "f64") == 0)
     {
         return 8;
     }
@@ -697,12 +698,12 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
      * 2 (not 1). Replicate that exact dict here rather than the shared
      * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
      * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8}.get(name, 2) */
+     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
     {
-        if(strcmp(en, "i8") == 0)
+        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
         {
             elem_bytes = 1;
         }
@@ -714,7 +715,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         {
             elem_bytes = 4;
         }
-        else if(strcmp(en, "i64") == 0)
+        else if(strcmp(en, "i64") == 0 || strcmp(en, "f64") == 0)
         {
             elem_bytes = 8;
         }
@@ -1135,6 +1136,22 @@ static void op_tile_buffer_load_f16(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset));
     rocke_ll_emitf(L, "  %s = bitcast i16 %s to half", ll_res(op), tmp);
+}
+
+/* Python _op_tile_buffer_load_f16_d16: a direct half-return D16 buffer load. */
+static void op_tile_buffer_load_f16_d16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    rocke_ll_need(L, "raw.ptr.buffer.load.f16");
+    rocke_ll_emitf(L,
+                   "  %s = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   ll_res(op),
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset));
 }
 
 static void op_tile_buffer_store_vN_f16(rocke_lower_t* L, const rocke_op_t* op)
@@ -1975,6 +1992,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN, op_tile_buffer_load_vN);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, op_tile_buffer_load_f16_d16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_BF16, op_tile_buffer_load_bf16);

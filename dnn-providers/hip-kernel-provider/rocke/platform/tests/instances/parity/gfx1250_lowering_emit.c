@@ -17,6 +17,7 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
+#include "rocke/wmma_scale_internal.h"
 
 /* Every builder call below is its own statement, and the statement order
  * matches the Python emitter exactly. Nesting a builder call inside an argument
@@ -118,13 +119,18 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
     wmma_k64(b, "wmma_gfx1250_f32_16x16x64_bf8_bf8");
 }
 
-/* K=128 SCALE/SCALE16 WMMA with independent FP8/BF8/FP6/BF6/FP4 A/B formats.
- * Matrix fragments are <16 x i32>; packed E8M0 scale operands are i32 for SCALE
+/* K=128 SCALE/SCALE16 WMMA with independent matrix and scale formats.
+ * Matrix fragments are <16 x i32>; packed scale operands are i32 for SCALE
  * and i64 for SCALE16. */
-static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* dtype, const char* dtype_b)
+static void wmma_scaled(rocke_ir_builder_t* b,
+                        bool scale16,
+                        const char* dtype,
+                        const char* dtype_b,
+                        const char* scale_a,
+                        const char* scale_b)
 {
     const rocke_mma_scale_block_k_t block = scale16 ? ROCKE_MMA_SCALE_K16 : ROCKE_MMA_SCALE_K32;
-    const rocke_mma_scale_filter_t query = {"e8m0", "e8m0", block};
+    const rocke_mma_scale_filter_t query = {scale_a, scale_b, block};
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
     const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
         &target->mma, "wmma_scaled", dtype, dtype_b, "fp32", 16, 16, 128, &query);
@@ -153,37 +159,38 @@ static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* dtype, 
 
 static void build_wmma_scale(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "fp8e4m3", "fp8e4m3");
+    wmma_scaled(b, false, "fp8e4m3", "fp8e4m3", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "bf8e5m2", "bf8e5m2");
+    wmma_scaled(b, false, "bf8e5m2", "bf8e5m2", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "fp8e4m3", "fp8e4m3");
+    wmma_scaled(b, true, "fp8e4m3", "fp8e4m3", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "bf8e5m2", "bf8e5m2");
+    wmma_scaled(b, true, "bf8e5m2", "bf8e5m2", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "fp4e2m1", "fp4e2m1");
+    wmma_scaled(b, false, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "fp4e2m1", "fp4e2m1");
+    wmma_scaled(b, true, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
- * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
+ * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret.
+ */
 static void tr16_b128(rocke_ir_builder_t* b, const rocke_type_t* elem)
 {
     rocke_param_opts_t o;
@@ -301,8 +308,12 @@ static void build_async_store(rocke_ir_builder_t* b)
     rocke_value_t* lds_ptr = rocke_b_smem_addr_of(b, smem);
     const int widths[] = {1, 4, 8, 16};
     for(int i = 0; i < 4; ++i)
-        rocke_b_global_store_async_from_lds(
-            b, out, lds_ptr, widths[i], widths[i], /*cachepolicy=*/3);
+        rocke_b_global_store_async_from_lds(b,
+                                            out,
+                                            lds_ptr,
+                                            widths[i],
+                                            widths[i],
+                                            /*cachepolicy=*/3);
     rocke_b_ret(b);
 }
 
@@ -554,12 +565,14 @@ typedef struct config
     const char* dtype;
     bool scale16;
     const char* dtype_b;
+    const char* scale_a;
+    const char* scale_b;
 } config_t;
 
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
  * gfx950 twin, so the pair pins both branches. Index-for-index with the Python
  * emitter's CONFIGS list. */
-static const config_t CONFIGS[] = {
+static const config_t BASE_CONFIGS[] = {
     {build_wmma_k32_f16, "gfx1250"},
     {build_wmma_k32_bf16, "gfx1250"},
     {build_wmma_k64_fp8_fp8, "gfx1250"},
@@ -632,14 +645,68 @@ static const config_t CONFIGS[] = {
     {NULL, "gfx1250", "fp4", true, "bf8"},
     {NULL, "gfx1250", "fp4", true, "fp6"},
     {NULL, "gfx1250", "fp4", true, "bf6"},
+};
+
+static const config_t FEATURE_CONFIGS[] = {
     {build_data_prefetch, "gfx1250"},
     {build_cluster, "gfx1250"},
     {build_cluster_dims, "gfx1250"},
     {build_multicast, "gfx1250"},
     {build_tdm, "gfx1250"},
 };
+static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
 
-static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
+static const int NUM_BASE_CONFIGS = (int)(sizeof(BASE_CONFIGS) / sizeof(BASE_CONFIGS[0]));
+static const char* const MATRIX_DTYPES[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
+static const char* const SCALE_DTYPES[] = {"e8m0", "e5m3", "e4m3"};
+static const int NUM_MATRIX_DTYPES = (int)(sizeof(MATRIX_DTYPES) / sizeof(MATRIX_DTYPES[0]));
+static const int NUM_SCALE_DTYPES = (int)(sizeof(SCALE_DTYPES) / sizeof(SCALE_DTYPES[0]));
+static const int NUM_CONFIGS
+    = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS
+      + 2 * (2 * (NUM_MATRIX_DTYPES - 1) * (NUM_SCALE_DTYPES - 1) + NUM_SCALE_DTYPES - 1);
+
+/* Mirror the Python emitter's supported scale pairs in their original order.
+ * Selecting by index keeps the table immutable.
+ */
+static bool select_config(int idx, config_t* out)
+{
+    if(idx < 0 || idx >= NUM_CONFIGS)
+        return false;
+    if(idx < NUM_BASE_CONFIGS)
+    {
+        *out = BASE_CONFIGS[idx];
+        return true;
+    }
+    if(idx >= NUM_CONFIGS - NUM_FEATURE_CONFIGS)
+    {
+        *out = FEATURE_CONFIGS[idx - (NUM_CONFIGS - NUM_FEATURE_CONFIGS)];
+        return true;
+    }
+    idx -= NUM_BASE_CONFIGS;
+    for(int mode = 0; mode < 2; ++mode)
+        for(int a = 0; a < NUM_MATRIX_DTYPES; ++a)
+            for(int b = 0; b < NUM_MATRIX_DTYPES; ++b)
+                for(int sa = 0; sa < NUM_SCALE_DTYPES; ++sa)
+                    for(int sb = 0; sb < NUM_SCALE_DTYPES; ++sb)
+                    {
+                        if(sa == 0 && sb == 0)
+                            continue;
+                        if(!rocke_scaled_wmma_formats_valid(a, b, sa, sb))
+                            continue;
+                        if(idx-- == 0)
+                        {
+                            *out = (config_t){NULL,
+                                              "gfx1250",
+                                              MATRIX_DTYPES[a],
+                                              mode != 0,
+                                              MATRIX_DTYPES[b],
+                                              SCALE_DTYPES[sa],
+                                              SCALE_DTYPES[sb]};
+                            return true;
+                        }
+                    }
+    return false;
+}
 
 int main(int argc, char** argv)
 {
@@ -657,7 +724,8 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }
-    if(idx < 0 || idx >= NUM_CONFIGS)
+    config_t config;
+    if(!select_config(idx, &config))
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -671,16 +739,18 @@ int main(int argc, char** argv)
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    if(CONFIGS[idx].build)
+    if(config.build)
     {
-        CONFIGS[idx].build(&b);
+        config.build(&b);
     }
     else
     {
         wmma_scaled(&b,
-                    CONFIGS[idx].scale16,
-                    CONFIGS[idx].dtype,
-                    CONFIGS[idx].dtype_b ? CONFIGS[idx].dtype_b : CONFIGS[idx].dtype);
+                    config.scale16,
+                    config.dtype,
+                    config.dtype_b ? config.dtype_b : config.dtype,
+                    config.scale_a ? config.scale_a : "e8m0",
+                    config.scale_b ? config.scale_b : "e8m0");
     }
 
     if(!rocke_ir_builder_ok(&b))
@@ -697,7 +767,7 @@ int main(int argc, char** argv)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
         rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-            kernel, ROCKE_LLVM_FLAVOR_AUTO, CONFIGS[idx].arch, &llvm_text, err, sizeof err);
+            kernel, ROCKE_LLVM_FLAVOR_AUTO, config.arch, &llvm_text, err, sizeof err);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
