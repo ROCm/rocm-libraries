@@ -699,6 +699,18 @@ def _direct_conv_d_desc_and_acc_args(b, params, q_subtiles, zero_acc, p_KH):
     return d_desc, acc_args
 
 
+def _direct_conv_constants(b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo):
+    """Shared direct-conv scalar constants: c0..c_W."""
+    c0 = b.const_i32(0)
+    c_wave = b.const_i32(WAVE)
+    c_BG = b.const_i32(BLOCK_GROUPS)
+    c_BQ = b.const_i32(BLOCK_Q)
+    c_cpg = b.const_i32(p.cpg)
+    c_kpg = b.const_i32(p.kpg)
+    c_W = p_Wo  # output-width bound for the store guard (runtime)
+    return c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -736,13 +748,9 @@ def build_direct_conv_16c(
         spec, THREADS, io_type
     )
 
-    c0 = b.const_i32(0)
-    c_wave = b.const_i32(WAVE)
-    c_BG = b.const_i32(BLOCK_GROUPS)
-    c_BQ = b.const_i32(BLOCK_Q)
-    c_cpg = b.const_i32(p.cpg)
-    c_kpg = b.const_i32(p.kpg)
-    c_W = p_Wo  # output-width bound for the store guard (runtime)
+    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
+        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
+    )
 
     # The address constants previously hand-rolled here
     # (``c_W_totalC``, ``c_H_W_totalC``, …) are now folded into the
@@ -1697,13 +1705,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         spec, THREADS, io_type
     )
 
-    c0 = b.const_i32(0)
-    c_wave = b.const_i32(WAVE)
-    c_BG = b.const_i32(BLOCK_GROUPS)
-    c_BQ = b.const_i32(BLOCK_Q)
-    c_cpg = b.const_i32(p.cpg)
-    c_kpg = b.const_i32(p.kpg)
-    c_W = p_Wo  # output-width bound for the store guard (runtime)
+    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
+        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
+    )
     c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
@@ -2140,13 +2144,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
         spec, THREADS, io_type
     )
 
-    c0 = b.const_i32(0)
-    c_wave = b.const_i32(WAVE)
-    c_BG = b.const_i32(BLOCK_GROUPS)
-    c_BQ = b.const_i32(BLOCK_Q)
-    c_cpg = b.const_i32(p.cpg)
-    c_kpg = b.const_i32(p.kpg)
-    c_W = p_Wo  # output-width bound for the store guard (runtime)
+    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
+        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
+    )
     c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
