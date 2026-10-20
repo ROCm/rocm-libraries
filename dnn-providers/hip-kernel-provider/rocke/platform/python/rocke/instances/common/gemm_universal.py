@@ -2468,20 +2468,9 @@ def _emit_epilogue_split_k(
 
     atom = mfma_atom(spec.data.dtype_a, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
     _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
-
-    c_nlane = b.const_i32(kc_nlane)
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
-    row_in_atom: List[Value] = []
-    col_in_atom: Optional[Value] = None
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        row_in_atom.append(x_row)
-        col_in_atom = x_col
+    row_in_atom, col_in_atom = _gemm_universal_c_lane(
+        b, atom, lane, kc_m1, kc_nlane, c_per_lane
+    )
 
     pad_m = bool(spec.trait.pad_m)
     pad_n = bool(spec.trait.pad_n)
