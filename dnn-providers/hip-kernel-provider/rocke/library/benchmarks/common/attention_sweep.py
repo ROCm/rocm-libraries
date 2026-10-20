@@ -83,7 +83,7 @@ def run_sweep(
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_cus=bench.num_sms,
+        num_cus=bench.num_cus,
         use_fp8=bool(problem.use_fp8),
         fp8_fnuz=bool(problem.fp8_fnuz),
         # The paged unified kernels (and this harness' reference) are bottom-right
