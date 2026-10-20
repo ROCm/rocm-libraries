@@ -205,7 +205,7 @@ Analysis of stalls using threadtrace found a large number of waiting at sync poi
 | bf16 | 16 | 4096 | 32 | 16 | 128 | 1.1376x | 12.10% | 11.69% | 12.82% |
 | bf16 | 16 | 8192 | 32 | 8 | 128 | 1.1702x | 14.55% | 13.89% | 14.78% |
 
-Min/max are paired within-round baseline-to-full latency reductions. The B=1, S=2048, Hkv=8 minimum includes a first-round 1.188339 ms combined-kernel timing outlier; post-batch correctness passed.
+Min/max are paired within-round baseline-to-full latency reductions. The B=1, S=2048, Hkv=8 minimum reflects a first-round timing outlier; post-batch correctness passed.
 
 #### Ablation studies of optimizations
 We performed ablation study to isolate the optimizations and understand its individual contributions.
