@@ -58,6 +58,137 @@ namespace
         }
     }
 
+    // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on f32 host
+    // buffers, M x N per batch, and counts the checks that failed.
+    struct BenchVerifyD
+    {
+        int64_t                    m, n, batches;
+        hipblasLtBatchMode_t       mode;
+        std::vector<HipHostBuffer> gold, result;
+        double                     norm_error = 0, atol = 1, rtol = 1;
+
+        BenchVerifyD(int64_t m, int64_t n, int64_t batches, hipblasLtBatchMode_t mode)
+            : m(m)
+            , n(n)
+            , batches(batches)
+            , mode(mode)
+        {
+            const bool   strided = mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            const size_t count   = strided ? 1 : batches;
+            for(size_t i = 0; i < count; i++)
+            {
+                gold.emplace_back(HIP_R_32F, m * n * (strided ? batches : 1));
+                result.emplace_back(HIP_R_32F, m * n * (strided ? batches : 1));
+            }
+            for(int64_t b = 0; b < batches; b++)
+                for(int64_t i = 0; i < m * n; i++)
+                    at(gold, b, i) = at(result, b, i) = float(1 + (i + b) % 3);
+        }
+
+        float& at(std::vector<HipHostBuffer>& buffers, int64_t batch, int64_t i)
+        {
+            if(mode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                return static_cast<float*>(buffers[batch].buf())[i];
+            return static_cast<float*>(buffers[0].buf())[batch * m * n + i];
+        }
+
+        int64_t run()
+        {
+            Arguments arg{};
+            arg.init();
+            arg.unit_check        = 0;
+            arg.norm_check        = 1;
+            arg.allclose_check    = 1;
+            arg.norm_check_assert = false;
+            arg.compute_type      = HIPBLAS_COMPUTE_32F;
+            arg.a_type = arg.b_type = HIP_R_32F;
+
+            const uint32_t               gemm_count = 1;
+            std::vector<HipDeviceBuffer> no_device;
+            std::vector<HipHostBuffer>   no_host_gold, no_host;
+            std::vector<double>          tol{0};
+            double                       max_ulp = 0, avg_ulp = 0;
+            const int64_t                before = hipblaslt_bench_options::verification_failures();
+            check(nullptr,
+                  arg,
+                  gemm_count,
+                  {m},
+                  {n},
+                  {m},
+                  {m},
+                  {m * n},
+                  {m * n},
+                  {int(batches)},
+                  {0},
+                  gold,
+                  result,
+                  no_device,
+                  no_host_gold,
+                  no_host,
+                  no_device,
+                  no_host_gold,
+                  no_host,
+                  no_device,
+                  no_host_gold,
+                  no_host,
+                  no_device,
+                  tol,
+                  norm_error,
+                  atol,
+                  rtol,
+                  max_ulp,
+                  avg_ulp,
+                  HIP_R_32F,
+                  HIP_R_32F,
+                  HIP_R_32F,
+                  HIP_R_32F,
+                  mode);
+            return hipblaslt_bench_options::verification_failures() - before;
+        }
+    };
+
+    // ROCM-32137: one wrong element in the last batch fails both checks.
+    TEST(BenchVerify, smoke_WrongLaterBatchCountsBothChecks)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        d.at(d.result, 2, 5) = 7;
+        EXPECT_EQ(d.run(), 2);
+        EXPECT_EQ(d.atol, 1);
+        EXPECT_GT(d.norm_error, 0.1);
+    }
+
+    TEST(BenchVerify, smoke_MatchingResultCountsNothing)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
+        EXPECT_EQ(d.run(), 0);
+        EXPECT_EQ(d.norm_error, 0);
+        EXPECT_EQ(d.atol, 1e-6);
+    }
+
+    // Every batch is off by about 4e-6 relative, under the f32 limit of 1e-5. The reported
+    // norm_error sums the 8 batches past the limit, but each batch passes on its own.
+    TEST(BenchVerify, smoke_AccurateBatchesDoNotAddUpToFailure)
+    {
+        BenchVerifyD d(8, 4, 8, HIPBLASLT_BATCH_MODE_STRIDED);
+        for(int64_t b = 0; b < 8; b++)
+            for(int64_t i = 0; i < 32; i++)
+                d.at(d.result, b, i) *= 1.000004f;
+        EXPECT_EQ(d.run(), 0);
+        EXPECT_GT(d.norm_error, 1e-5);
+    }
+
+    // Pointer-array mode used to add the last batch's norm_error twice.
+    TEST(BenchVerify, smoke_PointerArrayNormCountsEachBatchOnce)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
+        d.at(d.result, 2, 5) += 0.5f;
+        const double last
+            = norm_check_general('F', 8, 4, 8, 0, d.gold[2].buf(), d.result[2].buf(), 1, HIP_R_32F);
+        d.run();
+        EXPECT_GT(last, 0);
+        EXPECT_DOUBLE_EQ(d.norm_error, last);
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
