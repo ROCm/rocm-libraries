@@ -263,6 +263,14 @@ list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_reference)
 # Keep the umbrella a superset of what the regex matches.
 add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
 
+# Host test of the simplified attention mask's edge-tile check for partial query tiles.
+add_gtest_executable(test_ck_tile_fmha_mask_edge_tile test_fmha_mask_edge_tile.cpp)
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_mask_edge_tile)
+get_test_property(test_ck_tile_fmha_mask_edge_tile LABELS FMHA_MASK_COMMON_LABELS)
+set_tests_properties(test_ck_tile_fmha_mask_edge_tile PROPERTIES
+    LABELS "${FMHA_MASK_COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
+list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_mask_edge_tile)
+
 # Python integration test for the fmha_fwd codegen path.
 #
 # Drives the real `generate.py` with a JSON tune-config
