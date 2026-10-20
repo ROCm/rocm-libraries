@@ -124,15 +124,15 @@ namespace
         // ClientProblemFactory calls setMXScaleA/B on the *internal dummy*
         // problem it builds for sizing purposes (see ClientProblemFactory.cpp),
         // which is unrelated to the `problem` object this test passes directly
-        // into referenceNeedsPerSolutionRecompute(). When non-zero here, the
+        // into the DataInitialization tests. When non-zero here, the
         // DataInitialization ctor's storage-geometry computation for the
         // swizzled MX-scale tensor indexes problem.freeIndicesA()[0] /
         // freeIndicesB()[0] on that dummy problem without a bounds check; for
         // the minimal synthetic problem-size/identifier used here those
         // indices can be empty, which segfaults (only reachable on real
         // hardware, so it stays hidden behind GTEST_SKIP() on any other arch).
-        // m_mxScaleFormat (checked by referenceNeedsPerSolutionRecompute) is
-        // read directly from "mx-scale-format" below, independent of these.
+        // m_mxScaleFormat is read directly from "mx-scale-format" below,
+        // independent of these.
         setOption(args, "mx-a-block", 0);
         setOption(args, "mx-b-block", 0);
         setOption(args, "mx-a-type", rocisa::DataType::E8);
@@ -349,49 +349,36 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
+// The CPU reference is recomputed only when DataInitialization::inputEpoch() moves. The epoch is
+// published by DataInitialization::preSolution(), so asking for it before that has run for the
+// solution must be a loud error (a listener-ordering mistake would otherwise give a stale
+// reference silently).
+TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
 {
     hipDeviceProp_t prop{};
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
-    if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
-        GTEST_SKIP() << "gfx950-specific recompute behavior is only observable on gfx950";
+    if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos
+       && std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
+        GTEST_SKIP() << "MX data initialization is only exercised on gfx950/gfx1250";
 
-    auto problem = makeProblem(rocisa::DataType::Float8,
-                               rocisa::DataType::Float8,
-                               /*mxBlockA=*/32,
-                               /*mxBlockB=*/32);
     auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
     TensileLite::Client::ClientProblemFactory factory(args);
     TensileLite::Client::DataInitialization   dataInit(args, factory);
 
-    ContractionSolution noSwizzleSolution;
-    noSwizzleSolution.problemType.mxScaleFormat = 0;
-    ContractionSolution swizzleSolution;
-    swizzleSolution.problemType.mxScaleFormat = 1;
+    ContractionSolution solution;
+    solution.problemType.mxScaleFormat = 1;
+    ContractionSolution otherSolution;
 
-    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &noSwizzleSolution));
-    EXPECT_TRUE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
-}
+    EXPECT_THROW(dataInit.inputEpoch(&solution), std::logic_error);
+    EXPECT_THROW(dataInit.inputEpoch(nullptr), std::logic_error);
 
-TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
-{
-    hipDeviceProp_t prop{};
-    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
-    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
-        GTEST_SKIP() << "gfx1250-specific reuse behavior is only observable on gfx1250";
+    auto const problemEpoch = dataInit.inputEpoch();
+    // No problem is registered, so preSolution() has nothing to refresh: the epoch must not move.
+    dataInit.preSolution(&solution);
+    EXPECT_EQ(dataInit.inputEpoch(&solution), problemEpoch);
 
-    auto problem = makeProblem(rocisa::DataType::Float8,
-                               rocisa::DataType::Float8,
-                               /*mxBlockA=*/32,
-                               /*mxBlockB=*/32);
-    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
-    TensileLite::Client::ClientProblemFactory factory(args);
-    TensileLite::Client::DataInitialization   dataInit(args, factory);
-
-    ContractionSolution swizzleSolution;
-    swizzleSolution.problemType.mxScaleFormat = 1;
-
-    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+    // A different solution that preSolution() has not seen is still rejected.
+    EXPECT_THROW(dataInit.inputEpoch(&otherSolution), std::logic_error);
 }
 #endif
 
