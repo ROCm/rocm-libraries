@@ -207,3 +207,15 @@ TEST(DsSpreadPacer, WindowsForIsTheEvenSpreadRoundedUp) {
     EXPECT_EQ(DsSpreadPacer::windowsFor(0, 128, 140), 0);
     EXPECT_EQ(DsSpreadPacer::windowsFor(10, 100, 0), 0);
 }
+
+TEST(DsSpreadPacer, AStageOpeningOffABatchBoundaryCountsBatchesFromItsStart) {
+    // start 3, end 11, batch 4, 6 loads: two full batches (WMMAs 3..6 and 7..10), 3 loads each.
+    Loads v;
+    add(v, 6, 0, /*start=*/3, /*end=*/11);
+    DsSpreadPacer p;
+    p.plan(v, /*wmmaTotal=*/16, /*batch=*/4, /*catchUp=*/0, /*drain=*/0);
+    auto pending = ids(v);
+    std::vector<int> per;
+    for (int w = 3; w < 11; ++w) per.push_back(issueBatch(p, w, pending));
+    EXPECT_EQ(per, (std::vector<int>{3, 0, 0, 0, 3, 0, 0, 0}));
+}
