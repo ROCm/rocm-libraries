@@ -489,7 +489,9 @@ class CkVariantBench:
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
-            backend = self.compile_backend or _select_2d_compile_backend(problem)
+            backend = self.compile_backend or _select_2d_compile_backend(
+                problem, "gfx950"
+            )
             if backend == "hipcc":
                 from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -734,7 +736,8 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks in the 'sweep' lane. "
+        help="production walks the curated unified-tuning stacks in the 'sweep' "
+        "lane (unified specs only; dense runs in the combo / table sweeps). "
         "full samples every kernel knob; see --sweep-tuning-sample",
     )
     ap.add_argument(
@@ -1139,7 +1142,11 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     code path as the production provider.
     """
     import torch
-    from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention import (
+        AttentionMaskType,
+        AttentionRequest,
+        dispatch_attention,
+    )
     from kernels import run_unified_attention_torch
     from kernels.common.attention_unified import _resolve_attention_arch
     from rocke.runtime import synchronize_and_release, time_launches
@@ -1159,6 +1166,10 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         sliding_window=sw,
         kv_block_size=shape.block_size,
         num_cus=bench.num_cus,
+        # The paged unified kernels (and this harness' reference) are bottom-right
+        # causal; AttentionRequest defaults to NO_MASK, which now means full
+        # attention on gfx950 and rejects a sliding window.
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").
@@ -1184,14 +1195,16 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         from kernels import supports_native_unified_attention_tiled
         from kernels.common.attention_unified import _tiled_spec_from_problem
 
-        ok_t, _ = supports_native_unified_attention_tiled(problem)
+        ok_t, _ = supports_native_unified_attention_tiled(problem, "gfx950")
         instance_name = (
-            _tiled_spec_from_problem(problem).kernel_name() if ok_t else "scalar"
+            _tiled_spec_from_problem(problem, "gfx950").kernel_name()
+            if ok_t
+            else "scalar"
         )
     elif run_backend == "3d":
         from kernels import supports_native_unified_attention_3d_tiled
 
-        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem, "gfx950")
         instance_name = "3d" if ok_3d else "scalar"
     else:
         instance_name = "scalar"

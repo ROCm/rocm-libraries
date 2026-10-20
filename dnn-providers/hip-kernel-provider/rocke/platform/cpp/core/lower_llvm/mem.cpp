@@ -37,7 +37,8 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0)
+    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0 || strcmp(name, "fp8e4m3") == 0
+       || strcmp(name, "bf8e5m2") == 0)
     {
         return 1;
     }
@@ -45,11 +46,11 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i32") == 0 || strcmp(name, "f32") == 0)
+    if(strcmp(name, "i32") == 0 || strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0)
     {
         return 4;
     }
-    if(strcmp(name, "i64") == 0)
+    if(strcmp(name, "i64") == 0 || strcmp(name, "f64") == 0)
     {
         return 8;
     }
@@ -183,6 +184,115 @@ static void op_memref_global_store_typed(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)align);
 }
 
+/* ir._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_ll_sync_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_ll_fence_orderings[]
+    = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_ll_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+/* Python ir._sync_attr: the lowerer may run on unverified IR, so a missing or
+ * unknown scope / ordering is rejected rather than defaulted or rendered into
+ * invalid IR. */
+static const char* ll_sync_attr(rocke_lower_t* L,
+                                const rocke_op_t* op,
+                                const char* key,
+                                const char* const* allowed)
+{
+    const char* s = rocke_attr_get_str(&op->attrs, key);
+    if(!s)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s: %s attribute missing or not a string", op->name, key);
+    for(const char* const* a = allowed; *a; ++a)
+        if(strcmp(s, *a) == 0)
+            return s;
+    rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s: unknown %s '%s'", op->name, key, s);
+}
+
+/* Python _llvm_syncscope: "system" is LLVM's default scope (no clause). */
+static const char* ll_syncscope(rocke_lower_t* L, const char* scope)
+{
+    if(strcmp(scope, "system") == 0)
+        return "";
+    return rocke_arena_printf(&L->arena, " syncscope(\"%s\")", scope);
+}
+
+/* Python _op_memref_fence. */
+static void op_memref_fence(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* ordering = ll_sync_attr(L, op, "ordering", k_ll_fence_orderings);
+    rocke_ll_emitf(L, "  fence%s %s", ll_syncscope(L, scope), ordering);
+}
+
+/* Python _op_memref_global_flag_store. */
+static void op_memref_global_flag_store(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(op->num_operands != 3)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "memref.global_flag_store expects three operands");
+    const rocke_value_t* ptr = op->operands[0];
+    const rocke_value_t* idx = op->operands[1];
+    const rocke_value_t* val = op->operands[2];
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* ordering = ll_sync_attr(L, op, "ordering", k_ll_flag_store_orderings);
+    const char* gep = rocke_ll_fresh(L, "gep");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, i32 %s",
+                   gep,
+                   rocke_ll_operand(L, ptr),
+                   rocke_ll_operand(L, idx));
+    rocke_ll_emitf(L,
+                   "  store atomic i32 %s, ptr addrspace(1) %s%s %s, align 4",
+                   rocke_ll_operand(L, val),
+                   gep,
+                   ll_syncscope(L, scope),
+                   ordering);
+}
+
+/* Python _op_memref_global_flag_wait_eq: a self-contained spin loop around an
+ * acquire atomic load; the fall-through block becomes current. */
+static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(op->num_operands != 3)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq expects three operands");
+    const rocke_value_t* ptr = op->operands[0];
+    const rocke_value_t* idx = op->operands[1];
+    const rocke_value_t* expect = op->operands[2];
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* gep = rocke_ll_fresh(L, "gep");
+    rocke_ll_block_t* cur = rocke_ll_current(L);
+    rocke_ll_block_t* spin;
+    rocke_ll_block_t* done;
+    const char* val;
+    const char* hit;
+    rocke_ll_block_emitf(L,
+                         cur,
+                         "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, i32 %s",
+                         gep,
+                         rocke_ll_operand(L, ptr),
+                         rocke_ll_operand(L, idx));
+    spin = rocke_ll_new_block(L, "flag.wait");
+    if(!cur || !spin)
+        return;
+    rocke_ll_block_emitf(L, cur, "  br label %%%s", spin->label);
+    cur->terminated = true;
+    val = rocke_ll_fresh(L, "flag");
+    hit = rocke_ll_fresh(L, "flag.hit");
+    rocke_ll_block_emitf(L,
+                         spin,
+                         "  %s = load atomic i32, ptr addrspace(1) %s%s acquire, align 4",
+                         val,
+                         gep,
+                         ll_syncscope(L, scope));
+    rocke_ll_block_emitf(
+        L, spin, "  %s = icmp eq i32 %s, %s", hit, val, rocke_ll_operand(L, expect));
+    done = rocke_ll_new_block(L, "flag.done");
+    if(!done)
+        return;
+    rocke_ll_block_emitf(
+        L, spin, "  br i1 %s, label %%%s, label %%%s", hit, done->label, spin->label);
+    spin->terminated = true;
+}
+
 static void op_memref_global_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -301,6 +411,41 @@ static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_
                    rocke_ll_operand(L, val));
 }
 
+/* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
+ * lowering is validated. Other admitted targets map !nontemporal to different
+ * cache bits or are unverified, so the hint is rejected there. */
+static bool ll_streaming_arch(const char* gfx)
+{
+    return gfx && (strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx950") == 0);
+}
+
+/* Python _Lowerer._nontemporal_md: ", !nontemporal !5" when the op carries
+ * nontemporal=True, "" when the attr is absent/false. A non-bool attr is
+ * rejected rather than coerced, and so is a streaming op on a target outside
+ * gfx942 / gfx950. */
+static const char* ll_nontemporal_md(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "nontemporal");
+    if(!v)
+        return "";
+    if(v->kind != ROCKE_ATTR_BOOL)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: nontemporal attr must be a bool",
+                      rocke_opcode_name(op->opcode));
+    if(!v->u.b)
+        return "";
+    const char* gfx = L->backend ? L->backend->gfx : nullptr;
+    if(!ll_streaming_arch(gfx))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: temporal_hint STREAMING requires gfx942 or gfx950, got %s",
+                      rocke_opcode_name(op->opcode),
+                      gfx ? gfx : "(unknown)");
+    L->needs_nontemporal_md = true;
+    return ", !nontemporal !5";
+}
+
 static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -319,12 +464,13 @@ static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, idx));
     align = ll_attr_int(op, "align", vec * 2);
     rocke_ll_emitf(L,
-                   "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld",
+                   "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld%s",
                    ll_res(op),
                    (long long)vec,
                    elem_ty,
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   ll_nontemporal_md(L, op));
 }
 
 static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
@@ -338,7 +484,10 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                                                : rocke_ll_llvm_type(L, val->type);
     const char* elem_name = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
     int elem_bytes = ll_elem_bytes(elem_name);
-    int64_t align = vec * elem_bytes;
+    int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
+    if(align <= 0 || (align & (align - 1)))
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
     const char* ty = rocke_ll_llvm_type(L, val->type);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
@@ -347,11 +496,12 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, ptr),
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(L,
-                   "  store %s %s, ptr addrspace(1) %s, align %lld",
+                   "  store %s %s, ptr addrspace(1) %s, align %lld%s",
                    ty,
                    rocke_ll_operand(L, val),
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   ll_nontemporal_md(L, op));
 }
 
 static void op_memref_cooperative_global_store(rocke_lower_t* L, const rocke_op_t* op)
@@ -548,12 +698,12 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
      * 2 (not 1). Replicate that exact dict here rather than the shared
      * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
      * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8}.get(name, 2) */
+     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
     {
-        if(strcmp(en, "i8") == 0)
+        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
         {
             elem_bytes = 1;
         }
@@ -561,16 +711,17 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         {
             elem_bytes = 2;
         }
-        else if(strcmp(en, "i32") == 0 || strcmp(en, "f32") == 0)
+        else if(strcmp(en, "i32") == 0 || strcmp(en, "tf32") == 0 || strcmp(en, "f32") == 0)
         {
             elem_bytes = 4;
         }
-        else if(strcmp(en, "i64") == 0)
+        else if(strcmp(en, "i64") == 0 || strcmp(en, "f64") == 0)
         {
             elem_bytes = 8;
         }
     }
-    int64_t align = vec * elem_bytes;
+    /* New 96-bit widths guarantee only element alignment, including FP8. */
+    int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
      * pass from substituting ds_load_tr16_b128 (transposed) for the plain
      * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
@@ -787,6 +938,20 @@ static void op_tile_global_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
                    off64);
 }
 
+static void op_tile_global_ptr_to_i64(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr;
+    if(!rocke_ll_live(L))
+        return;
+    if(op->num_operands != 1 || op->num_results != 1)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_ptr_to_i64 expects one operand and one result");
+    ptr = op->operands[0];
+    if(strcmp(rocke_ll_value_ptr_type(L, ptr), "ptr addrspace(1)") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_ptr_to_i64 ptr must be a global pointer");
+    rocke_ll_emitf(
+        L, "  %s = ptrtoint ptr addrspace(1) %s to i64", ll_res(op), rocke_ll_operand(L, ptr));
+}
+
 /* ====================================================================== */
 /* tile.* buffer resource descriptor + buffer load/store                  */
 /* ====================================================================== */
@@ -971,6 +1136,22 @@ static void op_tile_buffer_load_f16(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset));
     rocke_ll_emitf(L, "  %s = bitcast i16 %s to half", ll_res(op), tmp);
+}
+
+/* Python _op_tile_buffer_load_f16_d16: a direct half-return D16 buffer load. */
+static void op_tile_buffer_load_f16_d16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    rocke_ll_need(L, "raw.ptr.buffer.load.f16");
+    rocke_ll_emitf(L,
+                   "  %s = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   ll_res(op),
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset));
 }
 
 static void op_tile_buffer_store_vN_f16(rocke_lower_t* L, const rocke_op_t* op)
@@ -1543,6 +1724,158 @@ static void op_tile_global_load_tr16_b128(rocke_lower_t* L, const rocke_op_t* op
                    rocke_ll_operand(L, src));
 }
 
+static int ll_is_i32_value(const rocke_value_t* v)
+{
+    return v && v->type && v->type->kind == ROCKE_TYPE_SCALAR
+           && v->type->scalar == ROCKE_SCALAR_I32;
+}
+
+static void op_tile_cluster_load(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr;
+    const rocke_value_t* mask;
+    const rocke_type_t* rty;
+    const char* ptr_ty;
+    const char* bits;
+    const char* suffix;
+    const char* expected;
+    const char* key;
+    int64_t width;
+    int64_t cachepolicy;
+    int lanes;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "cluster_load");
+    if(op->num_operands != 2 || op->num_results != 1)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load expects two operands and one result");
+    ptr = op->operands[0];
+    mask = op->operands[1];
+    ptr_ty = rocke_ll_value_ptr_type(L, ptr);
+    if(strcmp(ptr_ty, "ptr addrspace(1)") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load ptr must be a global pointer");
+    if(!ll_is_i32_value(mask))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load mask must be i32");
+    width = ll_attr_int(op, "width_bytes", 0);
+    if(width == 4)
+    {
+        bits = "b32";
+        suffix = "i32";
+        expected = "i32";
+        lanes = 1;
+    }
+    else if(width == 8)
+    {
+        bits = "b64";
+        suffix = "v2i32";
+        expected = "vec<i32x2>";
+        lanes = 2;
+    }
+    else if(width == 16)
+    {
+        bits = "b128";
+        suffix = "v4i32";
+        expected = "vec<i32x4>";
+        lanes = 4;
+    }
+    else
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load width_bytes must be 4, 8, or 16, got %lld",
+                      (long long)width);
+    rty = op->results[0]->type;
+    if(lanes == 1
+           ? !ll_is_i32_value(op->results[0])
+           : (!rty || rty->kind != ROCKE_TYPE_VECTOR || rty->count != lanes || !rty->elem
+              || rty->elem->kind != ROCKE_TYPE_SCALAR || rty->elem->scalar != ROCKE_SCALAR_I32))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load result must be %s, got %s",
+                      expected,
+                      rty && rty->name ? rty->name : "?");
+    cachepolicy = ll_attr_int(op, "cachepolicy", 0);
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load cachepolicy must be in 0..31, got %lld",
+                      (long long)cachepolicy);
+    key = rocke_arena_printf(&L->arena, "cluster.load.%s.%s", bits, suffix);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.cluster.load.%s.%s("
+                   "ptr addrspace(1) %s, i32 %lld, i32 %s)",
+                   ll_res(op),
+                   rocke_ll_llvm_type(L, rty),
+                   bits,
+                   suffix,
+                   rocke_ll_operand(L, ptr),
+                   (long long)cachepolicy,
+                   rocke_ll_operand(L, mask));
+}
+
+static void op_tile_cluster_load_async_to_lds(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* src;
+    const rocke_value_t* lds;
+    const rocke_value_t* mask;
+    const char* local;
+    const char* suffix;
+    const char* key;
+    int64_t width;
+    int64_t offset;
+    int64_t cachepolicy;
+    if(!rocke_ll_live(L))
+        return;
+    ll_require_gfx1250_llvm23(L, "cluster_load_async_to_lds");
+    if(op->num_operands != 3)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds expects three operands");
+    src = op->operands[0];
+    lds = op->operands[1];
+    mask = op->operands[2];
+    if(strcmp(rocke_ll_value_ptr_type(L, src), "ptr addrspace(1)") != 0)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds src_ptr must be a global pointer");
+    if(!ll_is_i32_value(mask))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds mask must be i32");
+    width = ll_attr_int(op, "width_bytes", 0);
+    if(width == 1)
+        suffix = "b8";
+    else if(width == 4)
+        suffix = "b32";
+    else if(width == 8)
+        suffix = "b64";
+    else if(width == 16)
+        suffix = "b128";
+    else
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16, got %lld",
+                      (long long)width);
+    offset = ll_attr_int(op, "offset_bytes", 0);
+    if(offset < INT32_MIN || offset > INT32_MAX)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load_async_to_lds offset_bytes must fit signed i32, got %lld",
+                      (long long)offset);
+    cachepolicy = ll_attr_int(op, "cachepolicy", 0);
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "cluster_load_async_to_lds cachepolicy must be in 0..31, got %lld",
+                      (long long)cachepolicy);
+    local = ll_lds_ptr_operand(L, "cluster_load_async_to_lds", lds);
+    key = rocke_arena_printf(&L->arena, "cluster.load.async.to.lds.%s", suffix);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.cluster.load.async.to.lds.%s("
+                   "ptr addrspace(1) %s, ptr addrspace(3) %s, i32 %lld, i32 %lld, i32 %s)",
+                   suffix,
+                   rocke_ll_operand(L, src),
+                   local,
+                   (long long)offset,
+                   (long long)cachepolicy,
+                   rocke_ll_operand(L, mask));
+}
+
 static void op_tile_tensor_lds_transfer(rocke_lower_t* L,
                                         const rocke_op_t* op,
                                         const char* short_name,
@@ -1631,6 +1964,9 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, op_memref_global_store_typed);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_STORE_VN, op_memref_global_store_vN);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD, op_memref_global_atomic_add);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_FENCE, op_memref_fence);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, op_memref_global_flag_store);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, op_memref_global_flag_wait_eq);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, op_memref_global_atomic_add_f32);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
                          op_memref_global_atomic_add_pk_bf16);
@@ -1650,11 +1986,13 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_ADDR_OF, op_tile_smem_addr_of);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, op_tile_global_ptr_to_i64);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_RSRC, op_tile_buffer_rsrc);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN, op_tile_buffer_load_vN);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, op_tile_buffer_load_f16_d16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_BF16, op_tile_buffer_load_bf16);
@@ -1672,6 +2010,9 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS,
                          op_tile_global_store_async_from_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128, op_tile_global_load_tr16_b128);
+    rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_LOAD, op_tile_cluster_load);
+    rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS,
+                         op_tile_cluster_load_async_to_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS, op_tile_tensor_load_to_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS, op_tile_tensor_store_from_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_LDS, op_tile_global_load_lds);

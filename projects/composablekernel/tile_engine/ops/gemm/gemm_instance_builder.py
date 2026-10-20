@@ -54,6 +54,11 @@ def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
 
 
 class GemmKernelBuilder:
+    # Ops that generate (arch, dtype) pairs the shared warp-tile table does not
+    # cover (gfx1250, fp32, gfx1201 non-fp16) set this to True so their warp
+    # tiles are also checked against op_warp_tile_allowed().
+    USE_OP_WARP_TILE_ROWS = False
+
     def __init__(
         self,
         kernel_name_prefix,
@@ -500,6 +505,11 @@ class GemmKernelBuilder:
         pipeline,
     ):
         """Validate that tile configuration is reasonable"""
+        if self.USE_OP_WARP_TILE_ROWS and not _validation_utils.op_warp_tile_allowed(
+            self.gpu_target, self.datatype, (warp_tile_m, warp_tile_n, warp_tile_k)
+        ):
+            return False
+
         # Validate preshuffle specific constraints
         if (
             self.config.get("permute_n") is not None
@@ -915,7 +925,9 @@ struct SelectedKernel {{
     static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
     static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
     static constexpr ck_tile::index_t BContiguousItemsPerAccess =
-        std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;"""
+        std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;
+    // gfx12 shuffle_b: the MX weight-preshuffle interleaved per-lane K layout.
+    static constexpr bool BPreshuffleLaneInterleavedK = true;"""
             else:
                 instance_code += """
     static constexpr bool Preshuffle = false;"""

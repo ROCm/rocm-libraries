@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 enum struct GemmPipelineType
@@ -25,10 +26,32 @@ enum struct GemmPipelineType
     CompV4,
     CompV6,
     CompAsync,
+    CompAsyncV2,
     CompAsyncEightWaves,
     CompTDMV1,
     CompTDMV2
 };
+
+// Tail coverage loop shared by the async pipeline tests: calls run(M, N, K) for every {M, N}
+// in MNs and every num_loop in num_loops, with K = num_loop * k_tile - k_short. A non-zero
+// k_short makes K end inside the last K tile without changing num_loop = ceil(K / k_tile).
+template <typename RunFn>
+void run_tail_coverage(int k_tile,
+                       const std::vector<std::pair<int, int>>& MNs,
+                       int k_short,
+                       RunFn&& run,
+                       const std::vector<int>& num_loops = {1, 2, 3, 4, 5, 7, 32})
+{
+    for(const auto& [M, N] : MNs)
+    {
+        for(int nl : num_loops)
+        {
+            SCOPED_TRACE(::testing::Message() << "M=" << M << ", N=" << N << ", num_loop=" << nl
+                                              << ", K=" << nl * k_tile - k_short);
+            run(M, N, nl * k_tile - k_short);
+        }
+    }
+}
 
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
@@ -156,6 +179,15 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompAsync, Problem>
 };
 
 template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncV2, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsyncV2<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompAsyncV2<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsyncV2"; }
+};
+
+template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::CompAsyncEightWaves, Problem>
 {
     using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<Problem>;
@@ -267,14 +299,19 @@ class TestCkTileGemmPipeline : public ::testing::Test
     static constexpr bool ClusterLaunch =
         ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
+    // Waves per block as ck_tile::sequence<M_Warp, N_Warp, K_Warp>
+    using BlockWarps = ck_tile::tuple_element_or_default_t<
+        Tuple,
+        16,
+        ck_tile::sequence<PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2, 2, 1>>;
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
     {
-        constexpr ck_tile::index_t M_Warp =
-            PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2;
-        constexpr ck_tile::index_t N_Warp = 2;
-        constexpr ck_tile::index_t K_Warp = 1;
+        constexpr ck_tile::index_t M_Warp = BlockWarps::at(ck_tile::number<0>{});
+        constexpr ck_tile::index_t N_Warp = BlockWarps::at(ck_tile::number<1>{});
+        constexpr ck_tile::index_t K_Warp = BlockWarps::at(ck_tile::number<2>{});
 
         // if cluster launch is enabled, set cluster dim to 2x2x1
         constexpr ck_tile::index_t kClusterSizeM =
@@ -291,6 +328,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
 
         constexpr bool DoubleSmemBuffer = (PipelineType == GemmPipelineType::CompV4 ||
                                            PipelineType == GemmPipelineType::CompAsync ||
+                                           PipelineType == GemmPipelineType::CompAsyncV2 ||
                                            PipelineType == GemmPipelineType::CompTDMV1 ||
                                            PipelineType == GemmPipelineType::CompTDMV2);
 
@@ -465,12 +503,14 @@ class TestCkTileGemmPipeline : public ::testing::Test
         }
         // for TDM it used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
+                     PipelineType == GemmPipelineType::CompAsyncV2 ||
                      PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
                      PipelineType == GemmPipelineType::CompTDMV1 ||
                      PipelineType == GemmPipelineType::CompTDMV2 ||
                      std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
-            // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline
+            // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline.
+            // CompAsyncV2 pins k_batch = 1 so the tests control num_loop (tail) exactly.
             k_batches_ = {1};
         }
         else

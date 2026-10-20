@@ -20,8 +20,10 @@ Modules:
                      `canonicalize` / `canonical_equal` for semantic diff.
   - ``verify``     : LLVM-`verify`-style well-formedness pass
                      (`verify(kernel) -> list[Diagnostic]`).
-  - ``lower_llvm`` : `lower_kernel_to_llvm(kernel) -> str` AMDGPU LLVM IR
+  - ``lower_llvm`` : `lower_kernel_to_llvm(kernel, *, arch) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
+  - ``ir_golden``  : `check_golden(path, run)` all-flavor comparator for
+                     flavor-keyed IR sha256 golden fixtures.
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
                      hipcc; useful for IR inspection and ISA diffs).
@@ -45,16 +47,27 @@ from .codegen_policy import (
     apply_codegen_policy,
     codegen_policy_for_kernel,
 )
-from .dtypes import normalize_dtype
+from .dtypes import DTypeCategory, DTypeInfo, dtype_info, normalize_dtype
 from .ir import (
     BF16,
     F16,
     F32,
+    F64,
     FP8E4M3,
+    FP4E2M1,
+    FP6E2M3,
+    FP6E3M2,
+    E8M0,
+    E5M3,
+    dtype_to_ir_type,
     I1,
+    I4,
+    U4,
+    U8,
     I8,
     I32,
     I64,
+    TF32,
     IRBuilder,
     KernelDef,
     Op,
@@ -96,6 +109,15 @@ from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
     "normalize_dtype",
+    "DTypeCategory",
+    "DTypeInfo",
+    "dtype_info",
+    "dtype_to_ir_type",
+    "FP4E2M1",
+    "FP6E2M3",
+    "FP6E3M2",
+    "E8M0",
+    "E5M3",
     "CodegenPolicy",
     "SchedulerStrategy",
     "apply_codegen_policy",
@@ -103,11 +125,16 @@ __all__ = [
     "BF16",
     "F16",
     "F32",
+    "F64",
     "FP8E4M3",
     "I1",
+    "I4",
+    "U4",
+    "U8",
     "I8",
     "I32",
     "I64",
+    "TF32",
     "IRBuilder",
     "KernelDef",
     "Op",

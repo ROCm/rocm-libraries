@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import OrderedDict, Callable, Dict, Any
 import sys
 import os
 
@@ -35,8 +35,6 @@ Inclusive range for params tuning, edit these to adjust tuning grid range.
 BLOCK_SIZES = [64, 128, 256, 512, 1024]
 IPT = [1, 2, 4, 8, 16]
 THRESHOLD = [4, 8, 12, 16]
-COUNT_FUNC = ['count_equal_to', 'count_is_percent_of_size']
-COUNT = [1, 6, 10, 14, 25, 50, 100]
 
 class Tuner(BaseTuner):
     @classmethod
@@ -46,36 +44,23 @@ class Tuner(BaseTuner):
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         params['threshold'] = THRESHOLD
-        params['count_func'] = COUNT_FUNC
-        params['count'] = COUNT
         return params
 
-    def _get_key_type_name(self) -> str:
-        return "data_type"
-
-    def _get_value_type_name(self):
-        return ""
-
-    def _get_restrictions(
-        self, value_type: str, _: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types):
         def validate(params):
-            count = params['count']
-            count_func = params['count_func']
-
-            return (count >= 50 and count_func == 'count_is_percent_of_size') or (count <= 25 and count_func == 'count_equal_to')
+            return True
 
         return validate
 
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
         for data_type in COMMON_KEY_TYPES:
-            self.tune_type(data_type)
+            self.tune_type({"data_type": data_type})
 
 if __name__ == "__main__":
     Tuner.cli()

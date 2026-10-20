@@ -19,7 +19,7 @@
 # artifact fetch) rather than real test regressions. Those clear on a fresh
 # runner, which a same-runner step retry cannot provide. The nightlies get a
 # higher cap since they run once a day and have no human watching in real
-# time; `TheRock CI` (per-PR) gets only a single auto-retry so a genuine
+# time; the per-PR workflows get only a single auto-retry so a genuine
 # regression still surfaces quickly instead of being masked by repeated
 # reruns, and so flaky infra doesn't multiply runner usage on every PR push.
 #
@@ -35,6 +35,7 @@ on:
       - "TheRock CI Nightly"
       - "TheRock Multi-Arch Nightly CI"
       - "TheRock CI"
+      - "TheRock Multi-Arch CI"
     types:
       - completed
 
@@ -53,13 +54,23 @@ jobs:
     # excluded so we never retry work that was deliberately abandoned.
     # - Nightlies: run_attempt < 4 allows up to 4 total attempts (the original
     #   run plus 3 auto-retries).
-    # - Per-PR `TheRock CI`: run_attempt < 2 allows only 1 auto-retry (2 total
-    #   attempts), since it runs on every push and a human is already watching.
+    # - Per-PR CI: run_attempt < 2 allows only 1 auto-retry (2 total attempts),
+    #   since these run on every push and a human is already watching.
+    # Every workflow in the `workflows:` list above must also appear in one of
+    # the two lists below; a watched workflow that is in neither gets no
+    # auto-retry at all, which fails safe on runner spend rather than silently
+    # inheriting the looser nightly cap.
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
       (
-        (github.event.workflow_run.name == 'TheRock CI' && github.event.workflow_run.run_attempt < 2) ||
-        (github.event.workflow_run.name != 'TheRock CI' && github.event.workflow_run.run_attempt < 4)
+        (
+          contains(fromJSON('["TheRock CI", "TheRock Multi-Arch CI"]'), github.event.workflow_run.name) &&
+          github.event.workflow_run.run_attempt < 2
+        ) ||
+        (
+          contains(fromJSON('["TheRock CI Nightly", "TheRock Multi-Arch Nightly CI"]'), github.event.workflow_run.name) &&
+          github.event.workflow_run.run_attempt < 4
+        )
       )
     env:
       GH_TOKEN: ${{ github.token }}

@@ -1175,7 +1175,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     }
 
     constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         miopen::reduction::reduce2_2d<fp_prec_c_type,
@@ -1271,7 +1271,7 @@ extern "C" __global__ void __launch_bounds__(
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         miopen::reduction::reduce2_2d<fp_prec_c_type,
@@ -1442,7 +1442,7 @@ extern "C" __global__ void __launch_bounds__(
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         miopen::reduction::reduce2_2d<fp_prec_c_type,
@@ -1539,7 +1539,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     }
 
     constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         miopen::reduction::reduce2_2d<fp_prec_c_type,
