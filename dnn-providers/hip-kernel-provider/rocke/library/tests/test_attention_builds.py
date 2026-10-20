@@ -1124,6 +1124,15 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # LDS: Q [16,128] + K [2,16,128] + one V slot [1,16,128], fp16. V(i)
+        # is loaded and consumed within iteration i, so a second V slot would
+        # never be live; P stays in registers.
+        lds_bytes = 2 * (16 * 128 + 2 * 16 * 128 + 16 * 128)
+        self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", seg_ll)
+        # Softmax exponents are <= 0, so p and alpha use the native exp2
+        # (one v_exp_f32), not the range-reduced llvm.exp2.f32.
+        self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
+        self.assertNotIn("@llvm.exp2.f32", seg_ll)
         red = build_unified_attention_reduce_tiled(
             UnifiedAttentionReduceTiledSpec(
                 head_size=128,
@@ -1134,9 +1143,11 @@ class TestAttentionHelpers(unittest.TestCase):
             )
         )
         red_ll = lower_kernel_to_llvm(red, arch="gfx950")
-        # Reduce must compute exp2-weighted segment combine and use NaN-safe
-        # factor (`-inf - overall_max -> 0`).
-        self.assertIn("@llvm.exp2.f32", red_ll)
+        # Reduce must compute exp2-weighted segment combine (native exp2: the
+        # exponent is seg_max - overall_max <= 0) and use NaN-safe factor
+        # (`-inf - overall_max -> 0`).
+        self.assertIn("@llvm.amdgcn.exp2.f32", red_ll)
+        self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
         # Reach comgr for both the segment and reduce kernels + LDS budget.
         seg_art = _compile_or_skip(seg, arch="gfx950")
@@ -2345,8 +2356,35 @@ class TestAttentionHelpers(unittest.TestCase):
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
         with _patch_resolved_arch("gfx950"):
             self.assertIsNone(au._gfx942_3d_tile_size_override(p, "gfx950"))
-            self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p, "gfx950"))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p, "gfx950"))
+
+    def test_gfx942_3d_wide_kv_load_up_to_head_size_128(self):
+        """The gfx942 3D wide K/V feed is on for fp16/bf16 up to head size 128;
+        head size 256 keeps the async DMA (the wide feed relies on the
+        compiler to overlap its copies). fp8 K/V turns it off."""
+        import kernels.common.attention_unified as au
+
+        def problem(head_size, **kw):
+            return UnifiedAttentionProblem(
+                total_q=4,
+                num_seqs=4,
+                num_query_heads=8,
+                num_kv_heads=1,
+                head_size=head_size,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=4096,
+                dtype="bf16",
+                **kw,
+            )
+
+        with _patch_resolved_arch("gfx942"):
+            self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(64), "gfx942"))
+            self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(128), "gfx942"))
+            self.assertFalse(au._enable_gfx942_3d_wide_kv_load(problem(256), "gfx942"))
+            self.assertFalse(
+                au._enable_gfx942_3d_wide_kv_load(problem(128, use_fp8=True), "gfx942")
+            )
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
@@ -2575,6 +2613,152 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
                 self.assertTrue(reason)
 
+    def test_gfx942_3d_dispatch_specs_fit_lds(self):
+        """Every gfx942 3D segment spec default dispatch builds fits the 64 KiB
+        LDS (one V slot; D256 at block 64 needs it)."""
+        import re
+
+        import kernels.common.attention_unified as au
+
+        with _patch_resolved_arch("gfx942"):
+            _, _, build, _, _ = au._tiled_3d_impl("gfx942")
+            for head_size in (64, 128, 256):
+                for block_size in (16, 32, 64):
+                    with self.subTest(head_size=head_size, block_size=block_size):
+                        problem = au.UnifiedAttentionProblem(
+                            total_q=4,
+                            num_seqs=4,
+                            num_query_heads=16,
+                            num_kv_heads=2,
+                            head_size=head_size,
+                            block_size=block_size,
+                            max_seqlen_q=1,
+                            max_seqlen_k=4096,
+                            dtype="bf16",
+                            num_cus=304,
+                        )
+                        spec = au._tiled_3d_spec_from_problem(problem, "gfx942")
+                        ll = lower_kernel_to_llvm(
+                            build(spec, arch="gfx942"), arch="gfx942"
+                        )
+                        lds = int(
+                            re.search(
+                                r"addrspace\(3\) global \[(\d+) x i8\]", ll
+                            ).group(1)
+                        )
+                        self.assertLessEqual(lds, 64 * 1024)
+
+    def test_unified_attention_3d_tiled_decode_grid(self):
+        """``use_decode_grid``: seq_idx = block_id_x, no binary search over
+        ``query_start_len`` (its ``bs_i`` induction variable), on both arches."""
+        from dataclasses import replace
+
+        import kernels.common.attention_unified as au
+
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), _patch_resolved_arch(arch):
+                spec_type, _, build, _, _ = au._tiled_3d_impl(arch)
+                spec = spec_type(
+                    head_size=128,
+                    block_size=16,
+                    num_query_heads=32,
+                    num_kv_heads=2,
+                    dtype="fp16",
+                    use_sinks=False,
+                    sliding_window=0,
+                    has_softcap=False,
+                    num_segments=16,
+                    num_seqs=16,
+                )
+                dg_spec = replace(spec, use_decode_grid=True)
+                base_ll = lower_kernel_to_llvm(build(spec, arch=arch), arch=arch)
+                dg_ll = lower_kernel_to_llvm(build(dg_spec, arch=arch), arch=arch)
+                self.assertTrue(dg_spec.kernel_name().endswith("_dg"))
+                self.assertIn("bs_i", base_ll)
+                self.assertNotIn("bs_i", dg_ll)
+
+    def test_gfx950_3d_multipage_tile(self):
+        """``tile_size_override`` = k * block_size: one loop iteration stages a
+        k-page KV tile, with each page id loaded once per tile (wave-uniform)
+        and passed as the DMA soffset; invalid tiles are rejected."""
+        import re
+        from dataclasses import replace
+
+        from kernels.gfx950.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=128,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=16,
+            tile_size_override=32,
+        )
+        self.assertEqual(spec.tile_size, 32)
+        self.assertEqual(spec.n_blocks_per_tile, 2)
+        self.assertIn("_b16_t32_", spec.kernel_name())
+        ll = lower_kernel_to_llvm(build_unified_attention_3d_tiled(spec), arch="gfx950")
+        # LDS: Q [16,128] + K [2,32,128] + V [1,32,128], fp16 (P stays in
+        # registers).
+        lds_bytes = 2 * (16 * 128 + 2 * 32 * 128 + 32 * 128)
+        self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", ll)
+        # The page-sized tile keeps the old name and IR.
+        page = replace(spec, tile_size_override=None)
+        self.assertIsNone(re.search(r"_t\d+_", page.kernel_name()))
+        for bad in (24, 8, 256):
+            with self.subTest(tile=bad), self.assertRaises(ValueError):
+                replace(spec, tile_size_override=bad)
+        # D256 at T128 needs more async calls per tile than vmcnt can count.
+        with self.assertRaises(ValueError):
+            replace(spec, head_size=256, tile_size_override=128)
+        # fp8 KV loads synchronously and keeps page-sized tiles.
+        with self.assertRaises(ValueError):
+            replace(spec, dtype="bf16", kv_storage_dtype="fp8e4m3")
+        replace(spec, tile_size_override=16, dtype="bf16", kv_storage_dtype="fp8e4m3")
+
+    def test_3d_dispatch_derives_decode_grid(self):
+        """Default dispatch turns the decode grid on for all-decode problems on
+        gfx942/gfx950 and keys the kernel cache on it."""
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+
+        def problem(sq):
+            return au.UnifiedAttentionProblem(
+                total_q=16 * sq,
+                num_seqs=16,
+                num_query_heads=32,
+                num_kv_heads=2,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=sq,
+                max_seqlen_k=4096,
+                dtype="fp16",
+                num_cus=256,
+            )
+
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), _patch_resolved_arch(arch):
+                self.assertTrue(
+                    au._tiled_3d_spec_from_problem(problem(1), arch).use_decode_grid
+                )
+                self.assertFalse(
+                    au._tiled_3d_spec_from_problem(problem(4), arch).use_decode_grid
+                )
+                keys = {}
+                for on in (False, True):
+                    with mock.patch.object(au, "_use_decode_grid", return_value=on):
+                        keys[on] = au._tiled_3d_cache_key(problem(1), arch)
+                self.assertNotEqual(keys[False], keys[True])
+
     def test_unified_attention_3d_tiled_kernel_compiles_gfx942(self):
         """gfx942 analogue of ``test_unified_attention_3d_tiled_kernel_compiles``
         (which exercises the default gfx950 arch only). Builds the gfx942 3D
@@ -2633,8 +2817,12 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
+        # Native exp2 in the softmax (exponents <= 0).
+        self.assertIn("@llvm.amdgcn.exp2.f32", seg_ll)
+        self.assertNotIn("@llvm.exp2.f32", seg_ll)
         # Reduce kernel: exp2-weighted segment combine + NaN-safe factor.
-        self.assertIn("@llvm.exp2.f32", red_ll)
+        self.assertIn("@llvm.amdgcn.exp2.f32", red_ll)
+        self.assertNotIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
 
 

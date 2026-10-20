@@ -596,7 +596,8 @@ int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
         return -1;
     }
     /* signedA=1, signedB=1 (our quantized data is signed), clamp=0 (values stay
-     * within i32 range). Operands arrive as <op_vec x i32> in SSA, no bitcast. */
+     * within i32 range). a_name and b_name already name <op_vec x i32> values;
+     * the lowerer reinterprets an operand of another shape before the call. */
     if(rocke_strbuf_appendf(out,
                             "  %s = call <%d x i32> @%s("
                             "i1 1, <%d x i32> %s, "
