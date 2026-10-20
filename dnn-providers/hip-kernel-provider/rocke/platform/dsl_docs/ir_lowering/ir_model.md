@@ -24,16 +24,20 @@ Composite types:
   - other     -> LLVM `ptr`
 - `SmemType(elem, shape)` — opaque token for an LDS allocation. Lowers to `ptr addrspace(3)`.
 
-Cache-coherence AUX hints (constants in `core/ir.py`) for `async_buffer_load_lds_addr` / `buffer_load_vN_*`:
+Cache-policy bits (the AUX operand; constants in `core/ir.py`) for `async_buffer_load_lds_addr` /
+`buffer_load_vN_*`:
 
 ```text
-CACHE_ALL    = 0   # default, cache at all levels
-CACHE_GLOBAL = 1   # GLC set, skip L2
-CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
-NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
+CACHE_ALL    = 0   # no bits: the default caching
+CACHE_GLOBAL = 1   # GLC (gfx90a) / SC0 (gfx942, gfx950)
+CACHE_STREAM = 2   # SLC (gfx90a) / NT (gfx942, gfx950): streaming data
+NON_TEMPORAL = 3   # GLC + SLC / SC0 + NT
 ```
 
-GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same values are SC0 (1) and NT (2).
+On gfx942 / gfx950, SC0 selects the coherence scope and NT marks the data as streaming; for loads, NT
+caches the same with or without SC0. Spec fields name a policy with one of `CACHE_POLICY_NAMES`
+(`"all"`, `"global"`, `"stream"`, `"nt"`); `cache_policy_from_name` gives its bits (C:
+`rocke_cache_policy_from_name`).
 These are raw bit values for buffer ops. They are **not** `temporal_hint=TemporalHint.STREAMING`
 on `global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
 gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
