@@ -379,10 +379,14 @@ def test_retarget_rewrites_mismatched_target(tmp_path):
         "\tamdhsa.target: amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-\n"
         "s_endpgm\n"
     )
-    Assembler._retargetAssemblySource("gfx942", str(src))
+    # The whole target id is replaced, features included: the directive has to
+    # spell what -mcpu spells, and the source's own tail is not that.
+    Assembler._retargetAssemblySource("gfx942:sramecc+", str(src))
     updated = src.read_text()
-    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"' in updated
-    assert "amdhsa.target: amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-" in updated
+    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx942:sramecc+"' in updated
+    assert "amdhsa.target: amdgcn-amd-amdhsa--gfx942:sramecc+" in updated
+    assert "xnack" not in updated
+    assert "gfx900" not in updated
 
 
 def test_retarget_leaves_matching_target_untouched(tmp_path):
