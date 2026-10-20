@@ -195,6 +195,11 @@ class MLARequest(OperatorRequest):
         coerced (which raises on ``None`` / ``"abc"`` / ``[1]``) or dropped
         (which would refuse it as a missing dim). The stand-in never reaches a
         spec: the predicate refuses the request first.
+
+        ``max_seqlen_q`` is the one dim the regimes split (decode ``<= 1``,
+        prefill ``>= 2``), so no stand-in passes both: its 1 lets the decode
+        candidate's predicate name the error, and a prefill candidate refuses it
+        on the range.
         """
         value = getattr(self, name)
         if type(value) is int:

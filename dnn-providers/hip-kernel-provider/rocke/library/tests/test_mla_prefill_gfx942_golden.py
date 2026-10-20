@@ -299,6 +299,7 @@ def test_dispatch_case_tracks_the_shipped_spec():
             num_heads=128,
             total_q=64,
             num_seqs=2,
+            max_seqlen_q=32,
             max_seqlen_k=96,
             arch=_ARCH,
             num_cus=228,

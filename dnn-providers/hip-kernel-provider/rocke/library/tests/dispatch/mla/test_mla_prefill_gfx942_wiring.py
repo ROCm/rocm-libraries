@@ -44,9 +44,12 @@ def _req(**overrides) -> MLARequest:
 
     The base batch is two 32-query sequences. ``max_seqlen_q`` cannot be
     derived from the totals -- it is what routes decode vs prefill -- so a test
-    that changes ``total_q`` or ``num_seqs`` must state it too.
+    that changes ``total_q`` or ``num_seqs`` to another int must state it too.
+    A mistyped override is a malformed request, not a new shape, so it needs
+    none.
     """
-    if {"total_q", "num_seqs"} & overrides.keys() and "max_seqlen_q" not in overrides:
+    resized = [k for k in ("total_q", "num_seqs") if type(overrides.get(k)) is int]
+    if resized and "max_seqlen_q" not in overrides:
         raise TypeError("_req: state max_seqlen_q when overriding total_q/num_seqs")
     base = dict(
         num_heads=128,
@@ -381,11 +384,21 @@ class TestExtentAdmission(unittest.TestCase):
             with self.subTest(num_heads=h):
                 self.assertTrue(
                     candidate.admits(
-                        _req(num_heads=h, total_q=top, absorbed_query=True)
+                        _req(
+                            num_heads=h,
+                            total_q=top,
+                            max_seqlen_q=top,
+                            absorbed_query=True,
+                        )
                     )[0]
                 )
                 ok, why = candidate.admits(
-                    _req(num_heads=h, total_q=top + 1, absorbed_query=True)
+                    _req(
+                        num_heads=h,
+                        total_q=top + 1,
+                        max_seqlen_q=top + 1,
+                        absorbed_query=True,
+                    )
                 )
                 self.assertFalse(ok)
                 self.assertIn("query extent", why)
@@ -1026,6 +1039,7 @@ class TestRequestTypes(unittest.TestCase):
             "num_heads",
             "total_q",
             "num_seqs",
+            "max_seqlen_q",
             "max_seqlen_k",
             "d_nope",
             "d_rope",
@@ -1047,6 +1061,8 @@ class TestRequestTypes(unittest.TestCase):
             ({"causal": "false"}, "causal"),
             ({"num_heads": True}, "num_heads"),
             ({"total_q": 1.0}, "total_q"),
+            # Would truncate to 1 and select decode's contract.
+            ({"max_seqlen_q": 1.9}, "max_seqlen_q"),
         ):
             with self.subTest(**overrides):
                 self.assertIn(field, self._refused(**overrides))
@@ -1066,10 +1082,14 @@ class TestRequestTypes(unittest.TestCase):
             ("num_heads", None),
             ("total_q", "abc"),
             ("num_seqs", [1]),
+            ("max_seqlen_q", None),
             ("d_rope", None),
         ):
+            # max_seqlen_q's stand-in (1) is decode's regime, so it is the
+            # decode candidate that names it; prefill refuses it on the range.
+            name_of = "mla_decode_gfx942" if name == "max_seqlen_q" else _NAME
             with self.subTest(name=name, value=value):
-                ok, why = MLA_REGISTRY.get(_NAME).admits(_req(**{name: value}))
+                ok, why = MLA_REGISTRY.get(name_of).admits(_req(**{name: value}))
                 self.assertFalse(ok)
                 self.assertIn(f"{name} must be an int", why)
                 self.assertIn(f"{name} must be an int", self._refused(**{name: value}))
@@ -1188,7 +1208,7 @@ class TestAbsorbedQueryRequest(unittest.TestCase):
         for (total_q, seqs), agpr in (((64, 2), False), ((512, 1), True)):
             with self.subTest(total_q=total_q, seqs=seqs), _flavor("llvm22"):
                 result = dispatch_mla(
-                    _req(total_q=total_q, num_seqs=seqs, absorbed_query=True)
+                    _uniform_req(total_q=total_q, num_seqs=seqs, absorbed_query=True)
                 )
                 self.assertEqual(result.candidate.name, _NAME)
                 self.assertEqual(result.spec.agpr_acc, agpr)
