@@ -2010,7 +2010,10 @@ def _build_attention_dense_single_buffer(
             # the clamp then runs one fully masked tile instead of a zero-trip
             # loop, and its rows still output 0 (empty-row guard, LSE row_has_key,
             # or the sink seed). The default grid runs one item per CTA, so it keeps
-            # its IR unchanged.
+            # its IR unchanged. It needs no clamp either: unlike the gfx950 sibling
+            # there is no prologue that loads start_tile unconditionally, and the
+            # top-tested loop runs zero trips when start_tile >= n_up, so a q-block
+            # past seqlen_kv + W never reads the next batch's keys.
             if spec.persistent:
                 _last = b.sub(n_up, b.const_i32(1))
                 start_tile = b.select(b.cmp_lt(start_tile, _last), start_tile, _last)

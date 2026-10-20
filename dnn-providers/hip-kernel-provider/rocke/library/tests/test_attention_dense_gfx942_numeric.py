@@ -1675,8 +1675,15 @@ _BAND_CASES = [
 ]
 
 
+# batch > 1 matters: a q-block that sits entirely past the keys must not read the next
+# batch's tokens, and with batch == 1 such an over-read lands in zero-filled
+# (out-of-range) memory, which hides it (the gfx950 start-tile bug found on #13125).
+# _check_band asserts the empty rows are exactly zero in every batch.
+_BAND_BATCH = 2
+
+
 def _band_direct_spec(
-    sq, skv, window, right, persistent, ragged, *, batch=1, head_size=128
+    sq, skv, window, right, persistent, ragged, *, batch=_BAND_BATCH, head_size=128
 ):
     from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 
@@ -1798,7 +1805,7 @@ class TestDenseBandNumeric:
         )
 
         req = AttentionRequest(
-            batch=1,
+            batch=_BAND_BATCH,
             nhead_q=4,
             nhead_k=1,
             seqlen_q=sq,
@@ -1925,6 +1932,78 @@ class TestDenseBandSinksLseNumeric:
             assert torch.equal(torch.isfinite(lse), finite), "LSE -inf rows differ"
             err = (lse - lse_ref)[finite].abs().max().item()
             assert err < _BAND_TOL, f"LSE max_abs={err:.3e} >= {_BAND_TOL}"
+
+
+#   (id, window, right): right = -1 is unbounded, 0 causal, R > 0 lookahead.
+_ONE_HOT_BANDS = [
+    ("causal_w64", 64, 0),
+    ("left_only_w64", 64, -1),
+    ("two_sided_w64_r4", 64, 4),
+    ("lookahead_r4", 0, 4),
+    ("full", 0, -1),
+    ("causal", 0, 0),
+]
+# (id, sq, skv, ragged). Both tile alignments: the aligned path, and the ragged path
+# with its key-pad mask (gfx942 dense has no bottom-right body). ``past_keys`` puts
+# whole q-blocks past ``skv + W``, so the window rows there see no key at all.
+_ONE_HOT_GEOMETRIES = [
+    ("aligned", 256, 128, False),
+    ("aligned_past_keys", 768, 128, False),
+    ("ragged", 300, 100, True),
+]
+# The spec rejects ragged with a sliding window, so those pairs are not generated.
+_ONE_HOT_DENSE = [
+    pytest.param(window, right, sq, skv, ragged, id=f"{band}-{geom}")
+    for band, window, right in _ONE_HOT_BANDS
+    for geom, sq, skv, ragged in _ONE_HOT_GEOMETRIES
+    if not (ragged and window)
+]
+
+
+class TestDenseBandIndexTruthTable:
+    """Index-level check of the dense band inequalities (top-left diagonal), the
+    gfx942 mirror of the gfx950 class of the same name.
+
+    ``q = 0`` makes the visible scores equal (uniform softmax) and ``V[k] = e_k``
+    turns each output row into the indicator of its visible keys over ``1/n``, so
+    ``left = W`` seeing W keys counting the diagonal (``d - k < W``) and
+    ``k <= d + right`` are checked per key index. Rows with no visible key must be
+    exactly zero in every batch.
+    """
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("window,right,sq,skv,ragged", _ONE_HOT_DENSE)
+    def test_visible_key_set_is_exact(self, window, right, sq, skv, ragged, persistent):
+        head = 128  # V[k] = e_k needs skv <= head_size
+        spec = _band_direct_spec(sq, skv, window, right, persistent, ragged)
+        b, hq = spec.batch, spec.num_query_heads
+        q = torch.zeros(b, sq, hq, head, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(b, skv, 1, head, device="cuda", dtype=torch.bfloat16)
+        v = torch.zeros(b, skv, 1, head, device="cuda", dtype=torch.bfloat16)
+        v[:, torch.arange(skv), 0, torch.arange(skv)] = 1.0
+        out = torch.full_like(q, float("nan"))
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1.0)
+        torch.cuda.synchronize()
+        qi = torch.arange(sq)[:, None]
+        ki = torch.arange(skv)[None, :]
+        visible = torch.ones(sq, skv, dtype=torch.bool)
+        if window:
+            visible &= qi - ki < window
+        if right >= 0:
+            visible &= ki <= qi + right
+        n = visible.sum(dim=1, keepdim=True)
+        expected = torch.zeros(sq, head, dtype=torch.float32)
+        expected[:, :skv] = visible.float() / n.clamp(min=1)
+        got = out.float().cpu()
+        assert not torch.isnan(got).any(), f"{spec.kernel_name()}: unwritten rows"
+        err = (got - expected[None, :, None, :]).abs().max().item()
+        assert err < 1e-2, f"{spec.kernel_name()}: max_abs={err:.3e}"
+        empty = n[:, 0] == 0
+        if empty.any():
+            worst = got[:, empty].abs().max().item()
+            assert worst == 0.0, f"{spec.kernel_name()}: empty rows not zero: {worst}"
 
 
 if __name__ == "__main__":
