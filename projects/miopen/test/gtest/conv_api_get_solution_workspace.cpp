@@ -5,9 +5,9 @@
 // Shipped find-db records can hold a smaller value than the solver needs (ROCM-30131:
 // gfx120140 stores 0 for GemmFwd1x1_0_2 at 1024-14-14-1x1-2048-7-7-128 stride 2 FP16), so
 // frameworks that allocate exactly the reported size got "Not enough workspace for GEMM" from
-// Immediate. These tests point the find-db at a temporary file holding such a record and check
-// that GetSolution reports what GetSolutionWorkspaceSize reports, and that Immediate succeeds
-// with that size.
+// Immediate. These tests use temporary find-db records to check that GetSolution reports enough
+// workspace for the configuration Immediate will run, retains a larger stored value, and executes
+// correctly with the size it reports.
 
 #include <miopen/miopen.h>
 #include <miopen/conv/problem_description.hpp>
