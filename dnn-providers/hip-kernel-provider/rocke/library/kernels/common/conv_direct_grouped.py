@@ -702,6 +702,18 @@ def _direct_conv_constants(b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo):
     return c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W
 
 
+def _direct_dgrad_params(b, io_type):
+    """Shared dgrad preamble: emit params, read them, c0/c1 constants."""
+    params = emit_direct_params(b, direction="dgrad", io_type=io_type)
+    (
+        A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
+    ) = _direct_dgrad_params_read(params)
+
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    return params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo, c0, c1
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -5307,13 +5319,9 @@ def build_direct_conv_dgrad(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, direction="dgrad", io_type=io_type)
-    (
-        A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
-    ) = _direct_dgrad_params_read(params)
-
-    c0 = b.const_i32(0)
-    c1 = b.const_i32(1)
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo, c0, c1 = _direct_dgrad_params(
+        b, io_type
+    )
     c_total_c = params["p_total_c"]
     c_total_k = params["p_total_k"]
     c_half_bytes = b.const_i32(2)
@@ -5626,13 +5634,9 @@ def build_direct_depthwise_dgrad(
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, direction="dgrad", io_type=io_type)
-    (
-        A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo
-    ) = _direct_dgrad_params_read(params)
-
-    c0 = b.const_i32(0)
-    c1 = b.const_i32(1)
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo, c0, c1 = _direct_dgrad_params(
+        b, io_type
+    )
     c_groups = params["p_groups"]
     c_half_bytes = b.const_i32(2)
     c_wave = b.const_i32(WAVE)
