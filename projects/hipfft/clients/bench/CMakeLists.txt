@@ -27,6 +27,12 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   find_package( hipfft REQUIRED CONFIG PATHS )
 endif()
 
+find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+endif( )
+include(ROCMInstallTargets)
+
 set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp ../../shared/data_gen_device.cpp )
 set( hipfft_bench_includes bench.h ../../shared/array_validator.h )
 

@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -32,9 +32,15 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-# Dependencies
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( hipfft-clients-tests LANGUAGES CXX )
+  find_package( hipfft REQUIRED CONFIG PATHS )
+endif()
 
-find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
+find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+endif( )
 include(ROCMInstallTargets)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
 
@@ -95,10 +101,6 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  project( hipfft-clients-tests LANGUAGES CXX )
-  find_package( hipfft REQUIRED CONFIG PATHS )
-endif()
 
 # searching FFTW with FindFFTW.cmake that is provided by project
 # because distro versions of FFTW does not include the cmake specific
