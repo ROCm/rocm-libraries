@@ -94,11 +94,11 @@ public:
                                    VariantPack& variantPack)
         = 0;
 
-    /// Times the plan execute() built, on `variantPack`. Called only after the
-    /// outputs of execute() were verified.
-    virtual BenchmarkResult benchmark(GraphSession& session,
-                                      VariantPack& variantPack,
-                                      const BenchmarkSettings& settings)
+    /// Times the engine of the plan execute() built, on `variantPack`, with
+    /// Graph::autotune(). Called only after the outputs of execute() were verified.
+    virtual hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
+                                                      VariantPack& variantPack,
+                                                      const BenchmarkSettings& settings)
         = 0;
 };
 

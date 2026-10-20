@@ -148,14 +148,13 @@ EngineOpResult
     return result;
 }
 
-BenchmarkResult FrontendGraphEngineRunner::benchmark(GraphSession& session,
-                                                     VariantPack& variantPack,
-                                                     const BenchmarkSettings& settings)
+hipdnn_frontend::AutotuneResult FrontendGraphEngineRunner::benchmark(
+    GraphSession& session, VariantPack& variantPack, const BenchmarkSettings& settings)
 {
     if(session.graph == nullptr)
     {
-        BenchmarkResult failed;
-        failed.error = "openGraph() produced no graph to benchmark";
+        hipdnn_frontend::AutotuneResult failed;
+        failed.errorMessage = "openGraph() produced no graph to benchmark";
         return failed;
     }
     return benchmarkGraph(*session.graph, getSharedHandle(), variantPack, settings);

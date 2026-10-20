@@ -3,21 +3,16 @@
 
 #pragma once
 
-#include <algorithm>
-#include <cstddef>
-#include <functional>
 #include <iomanip>
 #include <iostream>
-#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <vector>
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 namespace hipdnn_integration_tests
 {
@@ -87,56 +82,6 @@ inline BenchmarkResolution resolveBenchmark(const BenchmarkRequest& request)
     return {settings, std::nullopt};
 }
 
-/// The timings of one graph on one engine.
-struct BenchmarkResult
-{
-    std::string engine;
-    std::vector<float> samplesMs;
-
-    /// DEVICE_ONLY only when every sample was. One UNSTALLED sample makes the set
-    /// UNSTALLED, because that sample can include host submission time.
-    hipdnn_frontend::TimingQuality quality = hipdnn_frontend::TimingQuality::INVALID;
-
-    /// Timed runs that returned no measurement (stall watchdog timeout or a negative
-    /// reading). They are retried and are not in samplesMs.
-    int discardedSamples = 0;
-
-    /// Why the benchmark failed. Empty on success.
-    std::string error;
-
-    bool ok() const
-    {
-        return error.empty() && !samplesMs.empty();
-    }
-
-    float minMs() const
-    {
-        return samplesMs.empty() ? 0.0f : *std::min_element(samplesMs.begin(), samplesMs.end());
-    }
-
-    float medianMs() const
-    {
-        if(samplesMs.empty())
-        {
-            return 0.0f;
-        }
-        auto sorted = samplesMs;
-        std::sort(sorted.begin(), sorted.end());
-        const std::size_t mid = sorted.size() / 2;
-        return sorted.size() % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0f;
-    }
-
-    float meanMs() const
-    {
-        if(samplesMs.empty())
-        {
-            return 0.0f;
-        }
-        const double sum = std::accumulate(samplesMs.begin(), samplesMs.end(), 0.0);
-        return static_cast<float>(sum / static_cast<double>(samplesMs.size()));
-    }
-};
-
 inline const char* toString(hipdnn_frontend::TimingQuality quality)
 {
     switch(quality)
@@ -151,75 +96,16 @@ inline const char* toString(hipdnn_frontend::TimingQuality quality)
     }
 }
 
-using BenchmarkRunOnce = std::function<hipdnn_frontend::Error()>;
-using BenchmarkTimeOnce = std::function<hipdnn_frontend::Error(hipdnn_frontend::ExecutionTiming&)>;
-
-/// Runs `warmupIterations` untimed executions, then collects `timedIterations` valid
-/// samples. A timed run with no measurement is retried, up to `timedIterations` extra
-/// attempts. Any execution error stops the benchmark and is returned in `error`.
-///
-/// Takes callables rather than a graph so the loop is testable without a device.
-inline BenchmarkResult runBenchmarkLoop(const BenchmarkSettings& settings,
-                                        const BenchmarkRunOnce& runOnce,
-                                        const BenchmarkTimeOnce& timeOnce)
+/// Publishes the autotune result of one engine for the running test: a
+/// "[ BENCHMARK ]" line on stdout and benchmark_* properties in --gtest_output
+/// files. A result that did not succeed fails the test.
+inline void reportBenchmark(const hipdnn_frontend::AutotuneResult& result)
 {
-    BenchmarkResult result;
-
-    for(int i = 0; i < settings.warmupIterations; ++i)
-    {
-        if(auto status = runOnce(); !status.is_good())
-        {
-            result.error = "warmup execution failed: " + status.get_message();
-            return result;
-        }
-    }
-
-    bool anyUnstalled = false;
-    const int maxAttempts = 2 * settings.timedIterations;
-    for(int attempt = 0; attempt < maxAttempts
-                         && static_cast<int>(result.samplesMs.size()) < settings.timedIterations;
-        ++attempt)
-    {
-        hipdnn_frontend::ExecutionTiming timing;
-        if(auto status = timeOnce(timing); !status.is_good())
-        {
-            result.error = "timed execution failed: " + status.get_message();
-            result.samplesMs.clear();
-            return result;
-        }
-        if(timing.quality == hipdnn_frontend::TimingQuality::INVALID || !timing.elapsedMs)
-        {
-            ++result.discardedSamples;
-            continue;
-        }
-        anyUnstalled = anyUnstalled || timing.quality == hipdnn_frontend::TimingQuality::UNSTALLED;
-        result.samplesMs.push_back(*timing.elapsedMs);
-    }
-
-    if(static_cast<int>(result.samplesMs.size()) < settings.timedIterations)
-    {
-        result.error = std::to_string(result.discardedSamples) + " of "
-                       + std::to_string(maxAttempts)
-                       + " timed executions returned no measurement; collected "
-                       + std::to_string(result.samplesMs.size()) + " of "
-                       + std::to_string(settings.timedIterations) + " samples";
-        result.samplesMs.clear();
-        return result;
-    }
-
-    result.quality = anyUnstalled ? hipdnn_frontend::TimingQuality::UNSTALLED
-                                  : hipdnn_frontend::TimingQuality::DEVICE_ONLY;
-    return result;
-}
-
-/// Publishes a benchmark for the running test: a "[ BENCHMARK ]" line on stdout and
-/// benchmark_* properties in --gtest_output files. A failed benchmark fails the test.
-inline void reportBenchmark(const BenchmarkResult& result)
-{
-    if(!result.ok())
+    if(!result.succeeded)
     {
         ADD_FAILURE() << "benchmark failed: "
-                      << (result.error.empty() ? "no samples were collected" : result.error);
+                      << (result.errorMessage.empty() ? "the engine was not benchmarked"
+                                                      : result.errorMessage);
         return;
     }
 
@@ -229,16 +115,18 @@ inline void reportBenchmark(const BenchmarkResult& result)
         return out.str();
     };
 
-    const auto minMs = ms(result.minMs());
-    const auto medianMs = ms(result.medianMs());
-    const auto meanMs = ms(result.meanMs());
+    const auto minMs = ms(result.minTimeMs);
+    const auto robustMs = ms(result.robustTimeMs);
+    const auto meanMs = ms(result.avgTimeMs);
+    const auto stddevMs = ms(result.stddevMs);
 
-    ::testing::Test::RecordProperty("benchmark_engine", result.engine);
-    ::testing::Test::RecordProperty("benchmark_timing", toString(result.quality));
-    ::testing::Test::RecordProperty("benchmark_samples", static_cast<int>(result.samplesMs.size()));
+    ::testing::Test::RecordProperty("benchmark_engine", result.engineName);
+    ::testing::Test::RecordProperty("benchmark_timing", toString(result.timingQuality));
+    ::testing::Test::RecordProperty("benchmark_samples", result.iterationsRun);
     ::testing::Test::RecordProperty("benchmark_min_ms", minMs);
-    ::testing::Test::RecordProperty("benchmark_median_ms", medianMs);
+    ::testing::Test::RecordProperty("benchmark_robust_ms", robustMs);
     ::testing::Test::RecordProperty("benchmark_mean_ms", meanMs);
+    ::testing::Test::RecordProperty("benchmark_stddev_ms", stddevMs);
 
     std::string testName = "<unknown test>";
     if(const auto* info = ::testing::UnitTest::GetInstance()->current_test_info())
@@ -246,14 +134,10 @@ inline void reportBenchmark(const BenchmarkResult& result)
         testName = std::string(info->test_suite_name()) + "." + info->name();
     }
 
-    std::cout << "[ BENCHMARK ] " << testName << ": engine=" << result.engine
-              << " timing=" << toString(result.quality) << " samples=" << result.samplesMs.size()
-              << " min=" << minMs << " ms median=" << medianMs << " ms mean=" << meanMs << " ms";
-    if(result.discardedSamples > 0)
-    {
-        std::cout << " discarded=" << result.discardedSamples;
-    }
-    std::cout << '\n';
+    std::cout << "[ BENCHMARK ] " << testName << ": engine=" << result.engineName
+              << " timing=" << toString(result.timingQuality) << " samples=" << result.iterationsRun
+              << " min=" << minMs << " ms robust=" << robustMs << " ms mean=" << meanMs
+              << " ms stddev=" << stddevMs << " ms\n";
 }
 
 } // namespace hipdnn_integration_tests

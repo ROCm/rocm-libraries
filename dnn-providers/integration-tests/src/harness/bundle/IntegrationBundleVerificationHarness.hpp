@@ -547,7 +547,7 @@ private:
     // they live exactly as long as the test.
     TensorMap _inputs;
     // Set by benchmarkIfVerified(); reported at the end of TestBody().
-    std::optional<BenchmarkResult> _benchmark;
+    std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
 };
 
 } // namespace hipdnn_integration_tests::bundle

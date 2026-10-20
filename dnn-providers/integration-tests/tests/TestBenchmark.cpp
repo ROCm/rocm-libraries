@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -25,54 +24,11 @@
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
-using hipdnn_frontend::Error;
-using hipdnn_frontend::ErrorCode;
-using hipdnn_frontend::ExecutionTiming;
+using hipdnn_frontend::AutotuneResult;
 using hipdnn_frontend::TimingQuality;
 
 namespace
 {
-
-Error ok()
-{
-    return {ErrorCode::OK, ""};
-}
-
-Error broken(const std::string& message)
-{
-    return {ErrorCode::HIPDNN_BACKEND_ERROR, message};
-}
-
-ExecutionTiming measured(float ms, TimingQuality quality = TimingQuality::DEVICE_ONLY)
-{
-    ExecutionTiming timing;
-    timing.elapsedMs = ms;
-    timing.quality = quality;
-    return timing;
-}
-
-ExecutionTiming watchdogTimeout()
-{
-    ExecutionTiming timing;
-    timing.timedOut = true;
-    return timing;
-}
-
-/// A timer that replays `script` in order, then repeats its last entry.
-struct ScriptedTimer
-{
-    std::vector<ExecutionTiming> script;
-    int calls = 0;
-
-    Error operator()(ExecutionTiming& timing)
-    {
-        const auto index
-            = std::min<std::size_t>(static_cast<std::size_t>(calls), script.size() - 1);
-        timing = script[index];
-        ++calls;
-        return ok();
-    }
-};
 
 BenchmarkSettings settings(int timed, int warmup)
 {
@@ -82,153 +38,28 @@ BenchmarkSettings settings(int timed, int warmup)
     return result;
 }
 
-BenchmarkResult successfulResult(std::vector<float> samples)
+AutotuneResult successfulResult()
 {
-    BenchmarkResult result;
-    result.engine = "TEST_ENGINE";
-    result.samplesMs = std::move(samples);
-    result.quality = TimingQuality::DEVICE_ONLY;
+    AutotuneResult result;
+    result.engineName = "TEST_ENGINE";
+    result.succeeded = true;
+    result.iterationsRun = 3;
+    result.minTimeMs = 0.25f;
+    result.robustTimeMs = 0.375f;
+    result.avgTimeMs = 0.5f;
+    result.stddevMs = 0.125f;
+    result.timingQuality = TimingQuality::DEVICE_ONLY;
+    return result;
+}
+
+AutotuneResult failedResult(std::string message)
+{
+    AutotuneResult result;
+    result.errorMessage = std::move(message);
     return result;
 }
 
 } // namespace
-
-// ---- runBenchmarkLoop ------------------------------------------------------
-
-TEST(TestBenchmarkLoop, RunsWarmupThenCollectsTheRequestedSamples)
-{
-    int warmups = 0;
-    ScriptedTimer timer{{measured(3.0f), measured(1.0f), measured(2.0f)}};
-
-    const auto result = runBenchmarkLoop(
-        settings(3, 2),
-        [&] {
-            ++warmups;
-            EXPECT_EQ(timer.calls, 0) << "warmup must finish before timing starts";
-            return ok();
-        },
-        std::ref(timer));
-
-    ASSERT_TRUE(result.ok()) << result.error;
-    EXPECT_EQ(warmups, 2);
-    EXPECT_EQ(timer.calls, 3);
-    EXPECT_EQ(result.samplesMs, (std::vector<float>{3.0f, 1.0f, 2.0f}));
-    EXPECT_EQ(result.quality, TimingQuality::DEVICE_ONLY);
-    EXPECT_EQ(result.discardedSamples, 0);
-}
-
-TEST(TestBenchmarkLoop, ZeroWarmupStartsTimingImmediately)
-{
-    int warmups = 0;
-    ScriptedTimer timer{{measured(1.0f)}};
-
-    const auto result = runBenchmarkLoop(
-        settings(1, 0),
-        [&] {
-            ++warmups;
-            return ok();
-        },
-        std::ref(timer));
-
-    ASSERT_TRUE(result.ok()) << result.error;
-    EXPECT_EQ(warmups, 0);
-    EXPECT_EQ(timer.calls, 1);
-}
-
-TEST(TestBenchmarkLoop, OneUnstalledSampleMarksTheWholeSetUnstalled)
-{
-    ScriptedTimer timer{{measured(1.0f), measured(1.5f, TimingQuality::UNSTALLED), measured(1.0f)}};
-
-    const auto result = runBenchmarkLoop(settings(3, 0), [] { return ok(); }, std::ref(timer));
-
-    ASSERT_TRUE(result.ok()) << result.error;
-    EXPECT_EQ(result.quality, TimingQuality::UNSTALLED);
-}
-
-TEST(TestBenchmarkLoop, RunsWithoutAMeasurementAreRetriedAndCounted)
-{
-    ScriptedTimer timer{{watchdogTimeout(), measured(2.0f), ExecutionTiming{}, measured(4.0f)}};
-
-    const auto result = runBenchmarkLoop(settings(2, 0), [] { return ok(); }, std::ref(timer));
-
-    ASSERT_TRUE(result.ok()) << result.error;
-    EXPECT_EQ(timer.calls, 4);
-    EXPECT_EQ(result.samplesMs, (std::vector<float>{2.0f, 4.0f}));
-    EXPECT_EQ(result.discardedSamples, 2);
-    EXPECT_EQ(result.quality, TimingQuality::DEVICE_ONLY);
-}
-
-TEST(TestBenchmarkLoop, TooFewMeasurementsFailAfterABoundedNumberOfAttempts)
-{
-    ScriptedTimer timer{{measured(1.0f), watchdogTimeout()}};
-
-    const auto result = runBenchmarkLoop(settings(5, 0), [] { return ok(); }, std::ref(timer));
-
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(timer.calls, 10) << "retries are capped at timedIterations extra attempts";
-    EXPECT_TRUE(result.samplesMs.empty()) << "a partial set must not be reported as a result";
-    EXPECT_NE(result.error.find("9 of 10 timed executions returned no measurement"),
-              std::string::npos)
-        << result.error;
-    EXPECT_NE(result.error.find("collected 1 of 5 samples"), std::string::npos) << result.error;
-}
-
-TEST(TestBenchmarkLoop, WarmupFailureStopsBeforeAnyTimedRun)
-{
-    ScriptedTimer timer{{measured(1.0f)}};
-
-    const auto result
-        = runBenchmarkLoop(settings(3, 2), [] { return broken("bad kernel"); }, std::ref(timer));
-
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(timer.calls, 0);
-    EXPECT_EQ(result.error, "warmup execution failed: bad kernel");
-}
-
-TEST(TestBenchmarkLoop, TimedFailureFailsAndDropsEarlierSamples)
-{
-    int calls = 0;
-    const auto result = runBenchmarkLoop(
-        settings(3, 0),
-        [] { return ok(); },
-        [&](ExecutionTiming& timing) {
-            if(++calls == 2)
-            {
-                return broken("device lost");
-            }
-            timing = measured(1.0f);
-            return ok();
-        });
-
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(calls, 2);
-    EXPECT_TRUE(result.samplesMs.empty());
-    EXPECT_EQ(result.error, "timed execution failed: device lost");
-}
-
-// ---- BenchmarkResult statistics -------------------------------------------
-
-TEST(TestBenchmarkResult, StatisticsOfAnOddSampleCount)
-{
-    const auto result = successfulResult({5.0f, 1.0f, 3.0f});
-
-    EXPECT_FLOAT_EQ(result.minMs(), 1.0f);
-    EXPECT_FLOAT_EQ(result.medianMs(), 3.0f);
-    EXPECT_FLOAT_EQ(result.meanMs(), 3.0f);
-}
-
-TEST(TestBenchmarkResult, MedianOfAnEvenSampleCountAveragesTheMiddlePair)
-{
-    const auto result = successfulResult({4.0f, 1.0f, 3.0f, 2.0f});
-
-    EXPECT_FLOAT_EQ(result.medianMs(), 2.5f);
-    EXPECT_FLOAT_EQ(result.meanMs(), 2.5f);
-}
-
-TEST(TestBenchmarkResult, AResultWithoutSamplesIsNotOk)
-{
-    EXPECT_FALSE(BenchmarkResult{}.ok());
-}
 
 // ---- resolveBenchmark -----------------------------------------------------
 
@@ -323,7 +154,7 @@ TEST(TestResolveBenchmark, ModesThatDoNotExecuteAreRefused)
 
 TEST(TestReportBenchmark, RecordsTheResultAsProperties)
 {
-    reportBenchmark(successfulResult({0.5f, 0.25f, 1.0f}));
+    reportBenchmark(successfulResult());
 
     const auto* result = ::testing::UnitTest::GetInstance()->current_test_info()->result();
     std::map<std::string, std::string> properties;
@@ -337,19 +168,17 @@ TEST(TestReportBenchmark, RecordsTheResultAsProperties)
     EXPECT_EQ(properties["benchmark_timing"], "DEVICE_ONLY");
     EXPECT_EQ(properties["benchmark_samples"], "3");
     EXPECT_EQ(properties["benchmark_min_ms"], "0.2500");
-    EXPECT_EQ(properties["benchmark_median_ms"], "0.5000");
-    EXPECT_EQ(properties["benchmark_mean_ms"], "0.5833");
+    EXPECT_EQ(properties["benchmark_robust_ms"], "0.3750");
+    EXPECT_EQ(properties["benchmark_mean_ms"], "0.5000");
+    EXPECT_EQ(properties["benchmark_stddev_ms"], "0.1250");
 }
 
 TEST(TestReportBenchmark, AFailedBenchmarkAddsAFailure)
 {
-    BenchmarkResult failed;
-    failed.error = "timed execution failed: device lost";
-
-    EXPECT_NONFATAL_FAILURE(reportBenchmark(failed),
-                            "benchmark failed: timed execution failed: device lost");
-    EXPECT_NONFATAL_FAILURE(reportBenchmark(BenchmarkResult{}),
-                            "benchmark failed: no samples were collected");
+    EXPECT_NONFATAL_FAILURE(reportBenchmark(failedResult("Benchmark failed on iteration 2")),
+                            "benchmark failed: Benchmark failed on iteration 2");
+    EXPECT_NONFATAL_FAILURE(reportBenchmark(AutotuneResult{}),
+                            "benchmark failed: the engine was not benchmarked");
 }
 
 // ---- bundle harness -------------------------------------------------------
@@ -387,7 +216,7 @@ protected:
     testing_support::HarnessMocks _mocks;
 
     /// What the mocked runner returns from benchmark().
-    BenchmarkResult _benchmarkResult = successfulResult({1.0f});
+    AutotuneResult _benchmarkResult = successfulResult();
     /// The settings of every benchmark() call, and whether its variant pack held
     /// the verified output tensor.
     std::vector<BenchmarkSettings> _benchmarkCalls;
@@ -483,8 +312,7 @@ TEST_P(TestBundleHarnessBenchmark, WithoutBenchmarkAMismatchStillFails)
 
 TEST_P(TestBundleHarnessBenchmark, ABenchmarkFailureFailsAVerifiedBundle)
 {
-    _benchmarkResult = BenchmarkResult{};
-    _benchmarkResult.error = "timed execution failed: device lost";
+    _benchmarkResult = failedResult("timed execution failed: device lost");
 
     ::testing::TestPartResultArray results;
     run(fixtures::K_OUTPUT_VALUE, settings(4, 1), &results);

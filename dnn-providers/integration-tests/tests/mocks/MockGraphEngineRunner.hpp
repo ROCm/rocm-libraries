@@ -38,7 +38,7 @@ public:
                  VariantPack& variantPack),
                 (override));
 
-    MOCK_METHOD(BenchmarkResult,
+    MOCK_METHOD(hipdnn_frontend::AutotuneResult,
                 benchmark,
                 (GraphSession & session,
                  VariantPack& variantPack,

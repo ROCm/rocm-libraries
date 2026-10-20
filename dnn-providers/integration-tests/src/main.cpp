@@ -194,10 +194,10 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--benchmark")
             .default_value(false)
             .implicit_value(true)
-            .help("After a test verifies the engine's outputs, time the same plan on the "
-                  "same tensors and print min/median/mean device time per test. The "
-                  "values are also written as benchmark_* properties in "
-                  "--gtest_output files.");
+            .help("After a test verifies the engine's outputs, time the same engine on "
+                  "the same tensors with Graph::autotune() and print min/robust/mean/"
+                  "stddev device time per test. The values are also written as "
+                  "benchmark_* properties in --gtest_output files.");
         parser.add_argument("--benchmark-iterations")
             .scan<'i', int>()
             .help("Timed executions per test (default 20). Requires --benchmark.");

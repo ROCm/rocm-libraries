@@ -132,8 +132,8 @@ build/bin/hipdnn_integration_tests \
 
 `--benchmark` adds a performance measurement to each test. The test first
 verifies the engine output in the usual way. If the output passes, the harness
-runs the same plan on the same tensors again and times it. The C++ graph tests
-and the bundles both support it.
+times the same engine on the same tensors with `Graph::autotune()`, limited to
+that one engine. The C++ graph tests and the bundles both support it.
 
 A test is not timed when it skips, fails, or passes without output
 verification (a bundle at enforcement level APPLICABLE or BUILDABLE). Such a
@@ -152,24 +152,26 @@ build/bin/hipdnn_integration_tests \
 Each timed test prints one line:
 
 ```text
-[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE timing=DEVICE_ONLY samples=20 min=0.0182 ms median=0.0184 ms mean=0.0185 ms
+[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE timing=DEVICE_ONLY samples=20 min=0.0182 ms robust=0.0184 ms mean=0.0185 ms stddev=0.0003 ms
 ```
 
-- The harness runs `--benchmark-warmup` untimed executions (default 3). Then
-  it collects `--benchmark-iterations` timed executions (default 20) with
-  `Graph::execute_timed_ext()`.
-- `timing=DEVICE_ONLY` means that the stream was stalled for every sample, so
-  the times exclude host submission overhead. `timing=UNSTALLED` means that at
-  least one sample was not stalled and can include host time. Do not compare
-  the two kinds.
-- A timed execution that returns no measurement (a stall watchdog timeout) is
-  retried. The line then shows `discarded=N`. The harness makes at most two
-  attempts for each requested sample. The test fails with
-  `benchmark failed: …` if it cannot collect all the samples in those attempts,
-  or if an execution fails.
+- Autotune runs `--benchmark-warmup` untimed executions (default 3). Then it
+  runs `--benchmark-iterations` timed executions (default 20), with the
+  `FIXED_AVERAGE` strategy and the same stall gate, retry and statistics
+  rules as any other autotune call.
+- `robust` is the mean after autotune drops the slow tail: what the engine
+  usually costs. `min`, `mean` and `stddev` are over all timed samples.
+- `timing=DEVICE_ONLY` means that the stream was stalled, so the times exclude
+  host submission overhead. `timing=UNSTALLED` means that autotune could not
+  stall the stream and re-measured without the stall gate, so the times can
+  include host time. Do not compare the two kinds.
+- The test fails with `benchmark failed: …` when autotune cannot benchmark the
+  engine, for example when an execution fails or too many timed executions
+  return no measurement.
 - `--gtest_output=json:<file>` or `xml:<file>` writes the same values as the
   test properties `benchmark_engine`, `benchmark_timing`, `benchmark_samples`,
-  `benchmark_min_ms`, `benchmark_median_ms` and `benchmark_mean_ms`.
+  `benchmark_min_ms`, `benchmark_robust_ms`, `benchmark_mean_ms` and
+  `benchmark_stddev_ms`.
 - `engine=` names the engine that ran. To compare engines, run once for each
   `--test-engine`. Without `--test-engine`, hipDNN selects the engine.
 - To time your own graph, write it as a single-graph bundle

@@ -5,56 +5,62 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 #include "harness/Benchmark.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/VariantPack.hpp"
-#include "harness/bundle/LoadedEngineTable.hpp"
 
 namespace hipdnn_integration_tests
 {
 
-/// Times the plan `graph` already built, on the inputs and outputs in `variantPack`.
-inline BenchmarkResult benchmarkGraph(hipdnn_frontend::graph::Graph& graph,
-                                      hipdnnHandle_t handle,
-                                      VariantPack& variantPack,
-                                      const BenchmarkSettings& settings)
+/// Times the engine of the plan `graph` already built, on the tensors in
+/// `variantPack`. Graph::autotune() does the timing, limited to that one engine,
+/// so the warmup, the stall gate, the retries and the statistics are the same as
+/// in autotune.
+inline hipdnn_frontend::AutotuneResult benchmarkGraph(hipdnn_frontend::graph::Graph& graph,
+                                                      hipdnnHandle_t handle,
+                                                      VariantPack& variantPack,
+                                                      const BenchmarkSettings& settings)
 {
-    BenchmarkResult failed;
+    hipdnn_frontend::AutotuneResult failed;
 
     int64_t engineId = -1;
     if(auto status = graph.get_execution_plan_engine_id(engineId); !status.is_good())
     {
-        failed.error = status.get_message();
+        failed.errorMessage = status.get_message();
         return failed;
     }
 
-    auto workspace = allocatePlanWorkspace(graph, failed.error);
+    auto workspace = allocatePlanWorkspace(graph, failed.errorMessage);
     if(!workspace.has_value())
     {
         return failed;
     }
 
-    auto result = runBenchmarkLoop(
-        settings,
-        [&] { return graph.execute(handle, variantPack, workspace->get()); },
-        [&](hipdnn_frontend::ExecutionTiming& timing) {
-            return graph.execute_timed_ext(handle, variantPack, workspace->get(), timing);
-        });
+    hipdnn_frontend::AutotuneConfig config;
+    config.strategy = hipdnn_frontend::AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = settings.timedIterations;
+    config.warmupIterations = settings.warmupIterations;
+    config.engineIdFilter = {engineId};
 
-    // Plugin engines are not in the static name registry, so ask the loaded table first.
-    result.engine = hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
-    for(const auto& engine : bundle::LoadedEngineTable::get().all())
+    // autotune() returns an error when no engine succeeds. The engine's own result
+    // explains why, so look for it first.
+    std::vector<hipdnn_frontend::AutotuneResult> results;
+    const auto status = graph.autotune(handle, variantPack, workspace->get(), config, {}, &results);
+    for(const auto& result : results)
     {
-        if(engine.id == engineId)
+        if(result.engineId == engineId && !result.excludedByCaller)
         {
-            result.engine = engine.name;
+            return result;
         }
     }
-    return result;
+    failed.errorMessage = status.is_good() ? "autotune returned no result for the engine under test"
+                                           : status.get_message();
+    return failed;
 }
 
 } // namespace hipdnn_integration_tests
