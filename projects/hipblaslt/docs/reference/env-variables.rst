@@ -201,6 +201,19 @@ even if its value is invalid; it does not fall back to the legacy value.
         | 1: Force dynamic work-queue assignment
         | Malformed or out-of-range values are ignored.
 
+.. _env-fp-emulation:
+
+FP32/FP64 fixed-point emulation
+===============================
+
+These variables control whether hipBLASLt emulates FP64 and FP32 matmuls on
+INT8 matrix cores, and with what precision. They apply to all GEMMs in an
+application. They do not allocate the workspace buffer that emulation
+requires; the caller is still responsible for that. For more information, see
+:doc:`FP32/FP64 fixed-point emulation <../how-to/fp-emulation>`.
+
+.. include:: ../shared/fp-emulation-env-vars.inc
+
 .. _env-type_overrides:
 
 Type overrides

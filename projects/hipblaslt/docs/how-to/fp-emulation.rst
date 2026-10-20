@@ -18,6 +18,12 @@ Currently supported hardware: **AMD Instinct MI350X** and **MI355X**.
 
 Supported types: **FP64** (``HIP_R_64F``) and **FP32** (``HIP_R_32F``).
 
+For background on the Ozaki scheme, how the substrate format affects the number
+of passes, and emulation support across ROCm, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+For how the types used here relate to the rest of the library, see
+:doc:`hipBLASLt precision support <../reference/data-type-support>`.
+
 Only non-batched (``batch_count=1``) GEMMs are supported.
 Only the default epilogue (``HIPBLASLT_EPILOGUE_DEFAULT``) is supported; other
 epilogues are not compatible with emulation.
@@ -183,6 +189,9 @@ across all emulated GEMM calls.
 Environment variables
 =====================
 
+These variables are also listed in the
+:ref:`hipBLASLt environment variables <env-fp-emulation>` reference.
+
 .. note::
 
    Environment variables control which GEMMs are emulated and with what
@@ -191,65 +200,18 @@ Environment variables
    the `Workspace`_ section above) and passing a suitably sized buffer to
    ``hipblasLtMatmul``.
 
-Enable / disable
-----------------
+.. include:: ../shared/fp-emulation-env-vars.inc
+
+A typical enable-and-tune sequence:
 
 .. code-block:: bash
 
-   # Enable FP64 emulation
+   # Enable FP64 emulation, and only take it when it is predicted to win.
    export HIPBLASLT_EMULATE_DOUBLE_PRECISION=1
+   export HIPBLASLT_EMULATION_STRATEGY=performant
 
-   # Enable FP32 emulation
-   export HIPBLASLT_EMULATE_SINGLE_PRECISION=1
-
-Strategy
---------
-
-.. code-block:: bash
-
-   # performant (default): emulate only when predicted to be faster than native GEMM.
-   # eager: always emulate regardless of problem size.
-   export HIPBLASLT_EMULATION_STRATEGY=performant|eager
-
-Precision targets (ADP)
------------------------
-
-.. code-block:: bash
-
-   # ADP precision target for FP64 in mantissa bits [1..52].
-   # Default 52 = full IEEE 754 FP64 precision.  Lower values → fewer moduli → faster.
-   export HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT=52
-
-   # ADP precision target for FP32 in mantissa bits [1..23].
-   # Default 23 = full IEEE 754 FP32 precision.  Lower values → fewer moduli → faster.
-   export HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT=23
-
-Moduli count
-------------
-
-.. code-block:: bash
-
-   # Force a fixed moduli count [2..20], bypassing ADP.
-   # WARNING: bypasses the adaptive precision check; accuracy not guaranteed.
-   # Recommended usage: do NOT set this; rely on the default ADP mode instead.
-   export HIPBLASLT_EMULATION_NUM_MODULI=16
-
-Special values
---------------
-
-.. code-block:: bash
-
-   # Bitmask controlling NaN/Inf detection: bit 0 = Inf, bit 1 = NaN.  Default 0x3.
-   # Set to 0 to skip special-value detection (faster, but unsupported inputs silently corrupt output).
-   export HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK=0x3
-
-Profiling
----------
-
-.. code-block:: bash
-
-   # Append per-call profiling CSV rows to the given file path.
-   export HIPBLASLT_EMULATION_PROFILE=/path/to/profile.csv
+   # Trade accuracy for speed: ~1e-8 instead of full FP64 precision.
+   export HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT=26
 
 Setting precedence
 ==================
