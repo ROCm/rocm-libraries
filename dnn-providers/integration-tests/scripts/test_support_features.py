@@ -38,6 +38,8 @@ from support_features import (
     convolution_fwd,
     convolution_wrw,
     custom_op,
+    gdn,
+    kda,
     layernorm,
     layernorm_backward,
     matmul,
@@ -669,6 +671,7 @@ class TestFeatureMatrixNames:
             "Block scale",
             "Convolution",
             "CustomOp",
+            "Linear attention",
             "Layernorm",
             "Matmul",
             "Pointwise",
@@ -856,7 +859,9 @@ class TestFeatureMatrixCli:
         output = tmp_path / "out.md"
         argv = ["--bundles-dir", str(tmp_path), "--output", str(output)]
         assert feature_matrix_main(argv) == 0
-        assert output.read_text().startswith("# Support matrix by API option")
+        assert output.read_text(encoding="utf-8").startswith(
+            "# Support matrix by API option"
+        )
         assert capsys.readouterr().out == f"wrote {output}\n"
 
     def test_defect_exits_one_and_writes_nothing(
@@ -6961,6 +6966,212 @@ class TestCustomOpExtract:
     def test_data_that_is_not_bytes_raises(self, byte: object) -> None:
         node, tensors = _custom_op(data=(0, byte))
         self._raises(node, tensors, "data .* is not a list of bytes")
+
+
+# --------------------------------------------------------------------------
+# GdnAttributes and KdaAttributes
+# --------------------------------------------------------------------------
+
+_LA_INPUTS = (
+    "q_tensor_uid",
+    "k_tensor_uid",
+    "v_tensor_uid",
+    "g_tensor_uid",
+    "beta_tensor_uid",
+    "cu_seqlens_tensor_uid",
+    "initial_state_tensor_uid",
+    "a_log_tensor_uid",
+    "dt_bias_tensor_uid",
+    "state_indices_tensor_uid",
+)
+_LA_OUTPUTS = ("o_tensor_uid", "final_state_tensor_uid", "state_checkpoints_tensor_uid")
+_LA_REQUIRED = {
+    "q_tensor_uid": 1,
+    "k_tensor_uid": 2,
+    "v_tensor_uid": 3,
+    "g_tensor_uid": 4,
+    "beta_tensor_uid": 5,
+    "cu_seqlens_tensor_uid": 6,
+    "o_tensor_uid": 7,
+}
+
+
+def _linear_attention(
+    node_type: str,
+    *,
+    dtype: str = "half",
+    ports: tuple[str, ...] = (),
+    **attributes,
+) -> tuple[dict, dict]:
+    """A GdnAttributes / KdaAttributes node as the serializers write it: every
+    port under ``inputs`` / ``outputs`` (``null`` unless required or in
+    ``ports``), every scalar under ``attributes``. Only ``q``'s dtype is read.
+    """
+    uids = {**_LA_REQUIRED, **{port: 10 + i for i, port in enumerate(ports)}}
+    scalars = {
+        "scale": None,
+        "output_final_state": False,
+        "use_qk_l2norm": False,
+        "checkpoint_every_n_tokens": 0,
+        "use_beta_sigmoid": False,
+        "allow_neg_eigval": False,
+        "safe_gate": False,
+        "gate_domain": "log",
+        "batch_invariant": False,
+        "overwrite_initial_state": False,
+    }
+    if node_type == "KdaAttributes":
+        scalars["gate_lower_bound"] = None
+    node = {
+        "type": node_type,
+        "inputs": {port: uids.get(port) for port in _LA_INPUTS},
+        "outputs": {port: uids.get(port) for port in _LA_OUTPUTS},
+        "attributes": {**scalars, **attributes},
+    }
+    tensors = {
+        uid: {"uid": uid, "dims": [1], "data_type": "half"} for uid in uids.values()
+    }
+    tensors[1]["data_type"] = dtype
+    return node, tensors
+
+
+@pytest.mark.parametrize("module", [gdn, kda], ids=["gdn", "kda"])
+class TestLinearAttentionExtract:
+    def _build(self, module, **kwargs) -> tuple[dict, dict]:
+        return _linear_attention(module.NODE_TYPE, **kwargs)
+
+    def _extract(self, module, **kwargs) -> set[str]:
+        return module.extract(*self._build(module, **kwargs))
+
+    def _raises(self, module, match: str, **kwargs) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(module, **kwargs)
+
+    def test_builder_names_every_schema_field(self, module) -> None:
+        node, _ = self._build(module)
+        written = set(node["inputs"]) | set(node["outputs"]) | set(node["attributes"])
+        assert written == table_fields(module.SCHEMA_FILE, module.SCHEMA_TABLE)
+
+    def test_plain_graph(self, module) -> None:
+        assert self._extract(module) == {
+            "dtype:fp16",
+            "gate:log",
+            "beta:direct",
+            "scale:default",
+        }
+
+    def test_every_feature_is_reachable(self, module) -> None:
+        lower_bound = {"gate_lower_bound": -3.0} if module is kda else {}
+        graphs = (
+            {"dtype": "float", "gate_domain": "linear", "scale": 0.5},
+            {"dtype": "bfloat16", "use_beta_sigmoid": True, "use_qk_l2norm": True},
+            {
+                "use_beta_sigmoid": True,
+                "allow_neg_eigval": True,
+                "batch_invariant": True,
+            },
+            {
+                "safe_gate": True,
+                "ports": ("a_log_tensor_uid", "dt_bias_tensor_uid"),
+                **lower_bound,
+            },
+            {
+                "ports": (
+                    "initial_state_tensor_uid",
+                    "final_state_tensor_uid",
+                    "state_checkpoints_tensor_uid",
+                ),
+                "output_final_state": True,
+                "checkpoint_every_n_tokens": 64,
+                "overwrite_initial_state": True,
+            },
+            {
+                "ports": ("initial_state_tensor_uid", "state_indices_tensor_uid"),
+            },
+        )
+        reached: set[str] = set()
+        for kwargs in graphs:
+            reached |= self._extract(module, **kwargs)
+        assert reached == {f.id for f in module.FEATURES}
+
+    def test_safe_gate_replaces_the_domain_feature(self, module) -> None:
+        features = self._extract(module, safe_gate=True)
+        assert "gate:safe" in features
+        assert not features & {"gate:log", "gate:linear"}
+
+    def test_state_modes_combine(self, module) -> None:
+        features = self._extract(
+            module,
+            ports=("initial_state_tensor_uid", "final_state_tensor_uid"),
+            output_final_state=True,
+            overwrite_initial_state=True,
+        )
+        assert {"state:initial", "state:final", "state:in_place"} <= features
+
+    @pytest.mark.parametrize("port", sorted(_LA_REQUIRED))
+    def test_unbound_required_port_raises(self, module, port: str) -> None:
+        node, tensors = self._build(module)
+        for section in ("inputs", "outputs"):
+            if port in node[section]:
+                node[section][port] = None
+        with pytest.raises(FeatureError, match=f"required port {port}"):
+            module.extract(node, tensors)
+
+    def test_uncatalogued_dtype_raises(self, module) -> None:
+        self._raises(module, "dtype", dtype="double")
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"gate_domain": "exp"}, "gate_domain"),
+            ({"safe_gate": True, "gate_domain": "linear"}, "invalid with safe_gate"),
+            ({"ports": ("a_log_tensor_uid",)}, "requires safe_gate"),
+            ({"ports": ("dt_bias_tensor_uid",)}, "requires safe_gate"),
+            ({"allow_neg_eigval": True}, "requires use_beta_sigmoid"),
+            ({"output_final_state": True}, "disagree"),
+            ({"ports": ("final_state_tensor_uid",)}, "disagree"),
+            ({"checkpoint_every_n_tokens": 8}, "disagree"),
+            ({"ports": ("state_checkpoints_tensor_uid",)}, "disagree"),
+            ({"checkpoint_every_n_tokens": -1}, "negative"),
+            ({"ports": ("state_indices_tensor_uid",)}, "requires initial_state"),
+            (
+                {
+                    "ports": (
+                        "initial_state_tensor_uid",
+                        "state_indices_tensor_uid",
+                        "state_checkpoints_tensor_uid",
+                    ),
+                    "checkpoint_every_n_tokens": 8,
+                },
+                "cannot combine",
+            ),
+            ({"overwrite_initial_state": True}, "requires an initial and a final"),
+            (
+                {
+                    "ports": ("initial_state_tensor_uid",),
+                    "overwrite_initial_state": True,
+                },
+                "requires an initial and a final",
+            ),
+        ],
+    )
+    def test_graph_the_api_would_reject_raises(
+        self, module, kwargs: dict, match: str
+    ) -> None:
+        self._raises(module, match, **kwargs)
+
+
+class TestKdaGateLowerBound:
+    def test_needs_safe_gate(self) -> None:
+        node, tensors = _linear_attention("KdaAttributes", gate_lower_bound=-2.0)
+        with pytest.raises(FeatureError, match="gate_lower_bound requires safe_gate"):
+            kda.extract(node, tensors)
+
+    def test_is_a_feature_with_safe_gate(self) -> None:
+        node, tensors = _linear_attention(
+            "KdaAttributes", safe_gate=True, gate_lower_bound=-2.0
+        )
+        assert "gate_lower_bound:set" in kda.extract(node, tensors)
 
 
 # --------------------------------------------------------------------------

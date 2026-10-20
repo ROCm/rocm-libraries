@@ -62,6 +62,7 @@ Target = tuple[str, str]  # (arch, platform)
 # First match wins, over the display name (node type without "Attributes").
 GROUP_RULES = (
     ("Attention", lambda op: op.startswith("Sdpa")),
+    ("Linear attention", lambda op: op in ("Gdn", "Kda")),
     ("RMSNorm", lambda op: op.startswith("RMSNorm")),
     ("Batchnorm", lambda op: op.startswith("Batchnorm")),
     ("Layernorm", lambda op: op.startswith("Layernorm")),
