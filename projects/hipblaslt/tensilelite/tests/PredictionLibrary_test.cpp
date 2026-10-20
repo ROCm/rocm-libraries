@@ -261,3 +261,27 @@ TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
         EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, c.cache) << "temporalHint " << c.hint;
     }
 }
+
+// The per-tile flags are written once while the library is loaded.
+// An NT-B solution at 128x256 must not mark the 256x256 solution.
+TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
+{
+    auto ntB                        = makeMappedSolution(42);
+    ntB->sizeMapping.macroTile      = TensileLite::dim3(128, 256, 1);
+    ntB->sizeMapping.nonTemporalB   = 4;
+    auto temporal                   = makeMappedSolution(7);
+    temporal->sizeMapping.macroTile = TensileLite::dim3(256, 256, 1);
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, ntB);
+    solutions.emplace(7, temporal);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42, 7}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 2u);
+
+    EXPECT_FALSE(lib.origami_config_list[0].non_temporal_a_available);
+    EXPECT_TRUE(lib.origami_config_list[0].non_temporal_b_available);
+    EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
+    EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
+}

@@ -567,8 +567,9 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
   }
 }
 
-// rank_configs scans the candidate list. A missing non-temporal variant must
-// not reject every temporal kernel that the direct latency shortcut would drop.
+// Availability is memoized onto the configs before ranking. A missing
+// non-temporal variant must not reject every temporal kernel that the direct
+// latency shortcut would drop.
 TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hints]") {
   const double rejected = std::numeric_limits<double>::max();
 
@@ -580,6 +581,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       std::vector<origami::config_t> configs;
       configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
       configs.push_back(make_config(64, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
       REQUIRE(results.size() == configs.size());
@@ -596,6 +598,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       std::vector<origami::config_t> configs;
       configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
       configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4));
+      origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
       REQUIRE(results.size() == 1);
@@ -609,6 +612,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
           make_problem(8192, 256, 4096, origami::transpose_t::T, origami::transpose_t::N);
       std::vector<origami::config_t> configs;
       configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
       REQUIRE(results.size() == 1);
@@ -623,6 +627,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       std::vector<origami::config_t> configs;
       configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0));
       configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 4, 0));
+      origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
       REQUIRE(results.size() == 1);
@@ -641,6 +646,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       std::vector<origami::config_t> configs;
       configs.push_back(make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
       configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4));
+      origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
       REQUIRE(results.size() == configs.size());
@@ -665,6 +671,7 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       std::vector<origami::config_t> configs;
       configs.push_back(make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
       configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 4, 0));
+      origami::memoize_non_temporal_availability(configs);
 
       auto results = origami::rank_configs(problem, hardware, configs);
       REQUIRE(results.size() == configs.size());

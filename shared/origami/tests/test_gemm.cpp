@@ -2101,9 +2101,10 @@ TEST_CASE("GEMM: non-temporal shortcut honors variant availability", "[gemm][cac
       auto temporal    = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0);
       auto nontemporal = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4);
 
+      temporal.non_temporal_b_available = true;
       REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) == rejected);
-      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal, true, false) <
-              rejected);
+      temporal.non_temporal_b_available = false;
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) < rejected);
       REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) < rejected);
     }
 
@@ -2115,9 +2116,10 @@ TEST_CASE("GEMM: non-temporal shortcut honors variant availability", "[gemm][cac
       auto temporal    = make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
       auto nontemporal = make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 4, 0);
 
+      temporal.non_temporal_a_available = true;
       REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) == rejected);
-      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal, false, true) <
-              rejected);
+      temporal.non_temporal_a_available = false;
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) < rejected);
       REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) < rejected);
     }
 

@@ -92,6 +92,10 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
             .occupancy     = 1,
             .cache_hints_a = 0,
             .cache_hints_b = 0,
+            // Every tile is emitted with both NT variants, so availability is
+            // known here. rank_configs reads the flags and does not rescan.
+            .non_temporal_a_available = true,
+            .non_temporal_b_available = true,
         };
         tileList.push_back(config_both_off);
 
@@ -104,6 +108,8 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
             .occupancy     = 1,
             .cache_hints_a = 4,
             .cache_hints_b = 0,
+            .non_temporal_a_available = true,
+            .non_temporal_b_available = true,
         };
         tileList.push_back(config_a_on);
 
@@ -116,6 +122,8 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
             .occupancy     = 1,
             .cache_hints_a = 0,
             .cache_hints_b = 4,
+            .non_temporal_a_available = true,
+            .non_temporal_b_available = true,
         };
         tileList.push_back(config_b_on);
     }
