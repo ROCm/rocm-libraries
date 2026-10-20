@@ -114,10 +114,10 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         return errorCode;
     }
 
-    float alphaF;
+    double alphaD;
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
 
     autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
@@ -129,7 +129,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
     else
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
-        solutions       = instances->query({alphaF},
+        solutions       = instances->query({alphaD},
                                      descA->mLengths,
                                            {descA->mType},
                                            {descB->mType},
@@ -142,7 +142,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
     bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaF},
+        canRun = pSolution->initArgs({alphaD},
                                      {descA->mLengths},
                                      {descA->mStrides},
                                      {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
