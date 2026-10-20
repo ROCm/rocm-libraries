@@ -236,17 +236,20 @@ def _pick_best(candidates, costFn):
       best = cand
   return best
 
-def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
+def _wave_costs(rawAddrs, B, P, wOffsets, instOffs, banksPerThread):
   """Cost of one (B, P) candidate, one entry per wave.
 
   A thread reads pad(natural + wOff) + pad(instOff), matching the code
   generator. Cost per instruction is the largest number of threads on one
   bank, summed over the instructions a wave issues.
 
-  Every address is 8-byte aligned -- bases, per-wave offsets, instruction
-  offsets and P are all multiples of 8 -- so the hardware takes each wave in
-  one batch. Returns None if a candidate breaks that.
+  A thread's load is banksPerThread dwords wide and has to be aligned to its
+  own width, 4 * banksPerThread bytes: the b64 reads (FP4, FP8) take 2 banks
+  and 8 bytes, b128 (FP16) 4 banks and 16 bytes, b32 (FP32) 1 bank and 4
+  bytes. Returns None if a candidate breaks that. Every address is then
+  aligned, which is what lets _max_threads_per_bank count start banks.
   """
+  align = 4 * banksPerThread
   def pad(x):
     return x + (x // B) * P if B else x
   perWave = []
@@ -256,11 +259,15 @@ def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
     for instOff in instOffs:
       delta = pad(instOff)
       addrs = [a + delta for a in base]
-      if any(a % 8 for a in addrs):
+      if any(a % align for a in addrs):
         return None
-      total += _max_threads_per_bank(addrs, 2, aligned=True)
+      total += _max_threads_per_bank(addrs, banksPerThread, aligned=True)
     perWave.append(total)
   return perWave
+
+def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
+  """_wave_costs for ds_load_tr4/tr8_b64: 8 bytes, 2 banks per thread."""
+  return _wave_costs(rawAddrs, B, P, wOffsets, instOffs, 2)
 
 # One operand's local read pattern, in bytes. _valid_blocks turns it into the
 # blocks the generator can address; Solution.py checks a hand-written block
@@ -428,28 +435,10 @@ def _b128_base_addrs_fp16(mt: int) -> list:
   return [k * 2 * mt for k in range(8)] + [16 + k * 2 * mt for k in range(8)]
 
 def _b128_wave_costs(half, B, P, wOffsets, instOffs=(0,)):
-  """Cost of one (B, P) candidate for ds_load_tr16_b128, one entry per wave.
+  """_wave_costs for ds_load_tr16_b128: 16 bytes, 4 banks per thread.
 
-  A thread reads pad(natural + wOff) + pad(instOff) and covers 4 banks.
-  Cost per instruction is the largest number of threads on one bank, summed
-  over the instructions a wave issues.
-
-  Returns None when an address is below 16-byte alignment.
-  """
-  def pad(x):
-    return x + (x // B) * P if B else x
-  offs = instOffs if instOffs else (0,)
-  perWave = []
-  for wOff in wOffsets:
-    base = [pad(a + wOff) for a in half]
-    total = 0
-    for instOff in offs:
-      addrs = [a + pad(instOff) for a in base]
-      if any(a % 16 for a in addrs):
-        return None
-      total += _max_threads_per_bank(addrs, 4, aligned=True)
-    perWave.append(total)
-  return perWave
+  An empty instOffs counts as the single offset 0."""
+  return _wave_costs(half, B, P, wOffsets, instOffs if instOffs else (0,), 4)
 
 def _build_fp16_instOffs(mt: int, miInputPerThUnroll: int, lrvw: int,
                          miWaveTile: int, miWaveGroup: int, vw: int,
@@ -534,28 +523,10 @@ def get_fp16_valid_blocks(mt: int, miWaveGroup: int, miInputPerThUnroll: int,
 # -- FP32 b32 padding ------------------------------------------------
 
 def _b32_wave_costs(rawAddrs, B, P, wOffsets, instOffs=(0,)):
-  """Cost of one (B, P) candidate for ds_load_b32, one entry per wave.
+  """_wave_costs for ds_load_b32: 4 bytes, 1 bank per thread.
 
-  A thread reads pad(natural + wOff) + pad(instOff) and occupies one bank.
-  Cost per instruction is the largest number of threads on one bank, summed
-  over the instructions a wave issues.
-
-  Returns None when an address is below dword alignment.
-  """
-  def pad(x):
-    return x + (x // B) * P if B else x
-  offs = instOffs if instOffs else (0,)
-  perWave = []
-  for wOff in wOffsets:
-    base = [pad(a + wOff) for a in rawAddrs]
-    total = 0
-    for instOff in offs:
-      addrs = [a + pad(instOff) for a in base]
-      if any(a % 4 for a in addrs):
-        return None
-      total += _max_threads_per_bank(addrs, 1, aligned=True)
-    perWave.append(total)
-  return perWave
+  An empty instOffs counts as the single offset 0."""
+  return _wave_costs(rawAddrs, B, P, wOffsets, instOffs if instOffs else (0,), 1)
 
 def _build_fp32_instOffs(mt: int, vw: int, lrvw: int,
                          miInputPerThread: int, miWaveTile: int,
