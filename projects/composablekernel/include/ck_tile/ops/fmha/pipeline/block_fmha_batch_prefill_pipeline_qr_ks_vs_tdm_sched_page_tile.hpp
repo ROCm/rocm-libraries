@@ -1,0 +1,64 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "ck_tile/ops/fmha/detail/fmha_batch_prefill_page_tile.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_paged.hpp"
+
+namespace ck_tile {
+
+// Owns its page-ID schedule and keeps the M128/N128 compute geometry of the scheduled TDM pipeline.
+// The physical allocation page may differ from the logical N128 tile: P>=128
+// uses a slice of one physical page, P16 assembles eight page-local fragments.
+template <typename Problem_>
+struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
+    : BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_, FmhaTdmSchedPolicyFor<Problem_>, false>
+{
+    using Base =
+        BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_, FmhaTdmSchedPolicyFor<Problem_>, false>;
+    using Problem = typename Base::Problem;
+    static_assert(Problem::kIsGroupMode);
+    // Physical page support. The supported set is P % N == 0 or N % P == 0:
+    // P256/P1024 slice one page, P128 maps one page to one tile, P16 bundles
+    // eight independently mapped fragments.
+    static_assert(Problem::kPageBlockSize == 16 || Problem::kPageBlockSize == 128 ||
+                      Problem::kPageBlockSize == 256 || Problem::kPageBlockSize == 1024,
+                  "unsupported physical page size for the batch-prefill page-tile core");
+    static_assert(Problem::kPageBlockSize % Problem::BlockFmhaShape::kN0 == 0 ||
+                      Problem::BlockFmhaShape::kN0 % Problem::kPageBlockSize == 0,
+                  "supported pages satisfy P % N == 0 or N % P == 0");
+    static_assert(Problem::kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT);
+    static_assert(Problem::kKVLookupTable ==
+                  BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
+    static_assert(Problem::kPadSeqLenQ && Problem::kPadSeqLenK);
+    static_assert(!Problem::kPadHeadDimQ && !Problem::kPadHeadDimV);
+    static_assert(std::is_same_v<typename Base::QDataType, bf16_t> &&
+                  std::is_same_v<typename Base::KDataType, bf16_t> &&
+                  std::is_same_v<typename Base::VDataType, bf16_t>);
+    static_assert(Base::kM0 == 128 && Base::kN0 == 128);
+    // D64/V64 and D128/V128 are the supported head dimensions; the physical WMMA
+    // shape stays 16x16x32 and is not the head width.
+    static_assert((Base::kQKHeaddim == 64 && Base::kN1 == 64) ||
+                      (Base::kQKHeaddim == 128 && Base::kN1 == 128),
+                  "the batch-prefill page tile supports D64/V64 or D128/V128");
+    static_assert(Base::kBlockPerCu == 1);
+    static_assert(!Base::kHasSink);
+    // Not supported: LSE output (not wired: the kernel passes a null LSE window), sinks, and
+    // dropout, bias and logits soft cap (rejected by the core).
+    static_assert(!Base::kStoreLSE, "the batch-prefill page tile does not store LSE");
+    static_assert(Base::Policy::AsyncCopy);
+
+    using PageTileTraits =
+        FmhaBatchPrefillPageTileTraits<Problem::kPageBlockSize, Base::kQKHeaddim>;
+
+    static constexpr index_t kPageBlockSize = Problem::kPageBlockSize;
+    static constexpr index_t kVectorSize    = Problem::kVectorSize;
+    static constexpr index_t kHeadDim       = Base::kQKHeaddim;
+    static constexpr auto kKVMemoryLayout   = Problem::kKVMemoryLayout;
+    static constexpr auto kKVLookupTable    = Problem::kKVLookupTable;
+    // The per-wave tensor issue budget has one definition: Base::PagedTransfer.
+    static constexpr const char* name = "qr_tdm_sched_page_tile";
+};
+
+} // namespace ck_tile
