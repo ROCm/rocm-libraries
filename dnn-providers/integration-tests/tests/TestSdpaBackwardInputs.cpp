@@ -187,8 +187,6 @@ std::vector<std::pair<const char*, SdpaBwdTestCase>> maskRegimes()
     };
 }
 
-} // namespace
-
 // The LSE normalizes the band's softmax and O is that softmax applied to V. The
 // masked positions contribute nothing, so a row that drops half its band still
 // sums to 1 rather than to the fraction it kept.
@@ -253,6 +251,8 @@ void verifyForwardOutputsNormalize(double outputTolerance)
         }
     }
 }
+
+} // namespace
 
 TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
 {
