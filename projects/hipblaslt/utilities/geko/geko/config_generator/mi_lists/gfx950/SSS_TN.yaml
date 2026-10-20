@@ -4,13 +4,16 @@
 #
 # An MI is listed when TensileLite code generation builds at least one kernel for it with every other
 # parameter inside this search space's fork ranges (geko's own tuning config for PROBE_SIZE in
-# geko/config_generator/buildability.py). MI Designer reads this list instead of enumerating MIs.
-# 918 of 946 candidate MIs are buildable; the others are listed at the end.
+# geko/config_generator/buildability.py), generated with StreamK off: it also holds the few
+# tiles that build only as non-StreamK kernels. MI Designer reads this list instead of
+# enumerating MIs.
+# 924 of 946 candidate MIs are buildable; the others are listed at the end.
 
 Architecture: gfx950
 GemmType: SSS_TN
 SearchSpace: generic
-Source: rocm-libraries fe374965dc, 2026-10-15
+StreamK: false
+Source: rocm-libraries d6393f28c3, 2026-10-20
 MatrixInstructions:
   - [16, 16, 4, 1, 1, 1, 1, 4, 1]  # MT64x16
   - [16, 16, 4, 1, 1, 1, 2, 4, 1]  # MT64x32
@@ -62,6 +65,9 @@ MatrixInstructions:
   - [16, 16, 4, 1, 1, 1, 48, 4, 1]  # MT64x768
   - [16, 16, 4, 1, 1, 1, 50, 4, 1]  # MT64x800
   - [16, 16, 4, 1, 1, 1, 52, 4, 1]  # MT64x832
+  - [16, 16, 4, 1, 1, 1, 54, 4, 1]  # MT64x864
+  - [16, 16, 4, 1, 1, 1, 56, 4, 1]  # MT64x896
+  - [16, 16, 4, 1, 1, 1, 58, 4, 1]  # MT64x928
   - [16, 16, 4, 1, 1, 2, 1, 4, 1]  # MT128x16
   - [16, 16, 4, 1, 1, 2, 2, 4, 1]  # MT128x32
   - [16, 16, 4, 1, 1, 2, 3, 4, 1]  # MT128x48
@@ -622,6 +628,9 @@ MatrixInstructions:
   - [16, 16, 4, 1, 1, 48, 1, 1, 4]  # MT768x64
   - [16, 16, 4, 1, 1, 50, 1, 1, 4]  # MT800x64
   - [16, 16, 4, 1, 1, 52, 1, 1, 4]  # MT832x64
+  - [16, 16, 4, 1, 1, 54, 1, 1, 4]  # MT864x64
+  - [16, 16, 4, 1, 1, 56, 1, 1, 4]  # MT896x64
+  - [16, 16, 4, 1, 1, 58, 1, 1, 4]  # MT928x64
   - [16, 16, 4, 1, 1, 1, 1, 1, 2]  # MT16x32
   - [16, 16, 4, 1, 1, 1, 2, 1, 2]  # MT16x64
   - [16, 16, 4, 1, 1, 1, 3, 1, 2]  # MT16x96
@@ -933,31 +942,25 @@ MatrixInstructions:
 
 # Not buildable within the search space (closest kernel: how far its most over-used resource
 # exceeds the cap, and TensileLite's reason):
-#   [16, 16, 4, 1, 1, 1, 49, 4, 1]  MT64x784  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 51, 4, 1]  MT64x816  +7.0%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=274, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 53, 4, 1]  MT64x848  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 54, 4, 1]  MT64x864  +2.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=262, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 55, 4, 1]  MT64x880  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 56, 4, 1]  MT64x896  +5.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=271, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 57, 4, 1]  MT64x912  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 58, 4, 1]  MT64x928  +9.4%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=280, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 59, 4, 1]  MT64x944  +22.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=314, sgprs=88
-#   [16, 16, 4, 1, 1, 1, 60, 4, 1]  MT64x960  +5.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=261, sgprs=108
+#   [16, 16, 4, 1, 1, 1, 49, 4, 1]  MT64x784  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=70
+#   [16, 16, 4, 1, 1, 1, 51, 4, 1]  MT64x816  +7.0%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=274, sgprs=70
+#   [16, 16, 4, 1, 1, 1, 53, 4, 1]  MT64x848  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=70
+#   [16, 16, 4, 1, 1, 1, 55, 4, 1]  MT64x880  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=70
+#   [16, 16, 4, 1, 1, 1, 57, 4, 1]  MT64x912  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=70
+#   [16, 16, 4, 1, 1, 1, 59, 4, 1]  MT64x944  +21.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=257, sgprs=124
+#   [16, 16, 4, 1, 1, 1, 60, 4, 1]  MT64x960  +1.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=259, sgprs=100
 #   [16, 16, 4, 1, 1, 1, 61, 4, 1]  MT64x976  +1.6%  Kernel Uses 166400 > 163840 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 62, 4, 1]  MT64x992  +5.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=269, sgprs=108
+#   [16, 16, 4, 1, 1, 1, 62, 4, 1]  MT64x992  +4.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=267, sgprs=102
 #   [16, 16, 4, 1, 1, 1, 63, 4, 1]  MT64x1008  +4.7%  Kernel Uses 171520 > 163840 bytes of LDS
-#   [16, 16, 4, 1, 1, 1, 64, 4, 1]  MT64x1024  +9.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=279, sgprs=110
-#   [16, 16, 4, 1, 1, 49, 1, 1, 4]  MT784x64  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=88
-#   [16, 16, 4, 1, 1, 51, 1, 1, 4]  MT816x64  +7.0%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=274, sgprs=88
-#   [16, 16, 4, 1, 1, 53, 1, 1, 4]  MT848x64  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=88
-#   [16, 16, 4, 1, 1, 54, 1, 1, 4]  MT864x64  +2.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=262, sgprs=88
-#   [16, 16, 4, 1, 1, 55, 1, 1, 4]  MT880x64  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=88
-#   [16, 16, 4, 1, 1, 56, 1, 1, 4]  MT896x64  +5.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=271, sgprs=88
-#   [16, 16, 4, 1, 1, 57, 1, 1, 4]  MT912x64  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=88
-#   [16, 16, 4, 1, 1, 58, 1, 1, 4]  MT928x64  +9.4%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=280, sgprs=88
-#   [16, 16, 4, 1, 1, 59, 1, 1, 4]  MT944x64  +22.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=314, sgprs=88
-#   [16, 16, 4, 1, 1, 60, 1, 1, 4]  MT960x64  +5.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=261, sgprs=108
+#   [16, 16, 4, 1, 1, 1, 64, 4, 1]  MT64x1024  +8.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=277, sgprs=102
+#   [16, 16, 4, 1, 1, 49, 1, 1, 4]  MT784x64  +3.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=264, sgprs=70
+#   [16, 16, 4, 1, 1, 51, 1, 1, 4]  MT816x64  +7.0%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=274, sgprs=70
+#   [16, 16, 4, 1, 1, 53, 1, 1, 4]  MT848x64  +10.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=284, sgprs=70
+#   [16, 16, 4, 1, 1, 55, 1, 1, 4]  MT880x64  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=70
+#   [16, 16, 4, 1, 1, 57, 1, 1, 4]  MT912x64  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=70
+#   [16, 16, 4, 1, 1, 59, 1, 1, 4]  MT944x64  +21.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=257, sgprs=124
+#   [16, 16, 4, 1, 1, 60, 1, 1, 4]  MT960x64  +1.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=259, sgprs=100
 #   [16, 16, 4, 1, 1, 61, 1, 1, 4]  MT976x64  +1.6%  Kernel Uses 166400 > 163840 bytes of LDS
-#   [16, 16, 4, 1, 1, 62, 1, 1, 4]  MT992x64  +5.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=269, sgprs=108
+#   [16, 16, 4, 1, 1, 62, 1, 1, 4]  MT992x64  +4.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=267, sgprs=102
 #   [16, 16, 4, 1, 1, 63, 1, 1, 4]  MT1008x64  +4.7%  Kernel Uses 171520 > 163840 bytes of LDS
-#   [16, 16, 4, 1, 1, 64, 1, 1, 4]  MT1024x64  +9.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=279, sgprs=110
+#   [16, 16, 4, 1, 1, 64, 1, 1, 4]  MT1024x64  +8.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=277, sgprs=102

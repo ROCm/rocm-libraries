@@ -4,13 +4,16 @@
 #
 # An MI is listed when TensileLite code generation builds at least one kernel for it with every other
 # parameter inside this search space's fork ranges (geko's own tuning config for PROBE_SIZE in
-# geko/config_generator/buildability.py). MI Designer reads this list instead of enumerating MIs.
+# geko/config_generator/buildability.py), generated with StreamK off: it also holds the few
+# tiles that build only as non-StreamK kernels. MI Designer reads this list instead of
+# enumerating MIs.
 # 1171 of 1407 candidate MIs are buildable; the others are listed at the end.
 
 Architecture: gfx950
 GemmType: BBS_TN
 SearchSpace: generic
-Source: rocm-libraries fe374965dc, 2026-10-15
+StreamK: false
+Source: rocm-libraries d6393f28c3, 2026-10-20
 MatrixInstructions:
   - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16
   - [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT64x32
@@ -1186,22 +1189,22 @@ MatrixInstructions:
 
 # Not buildable within the search space (closest kernel: how far its most over-used resource
 # exceeds the cap, and TensileLite's reason):
-#   [16, 16, 32, 1, 1, 1, 49, 4, 1]  MT64x784  +2.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=262, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 50, 4, 1]  MT64x800  +3.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=266, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 51, 4, 1]  MT64x816  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 53, 4, 1]  MT64x848  +10.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=282, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 54, 4, 1]  MT64x864  +12.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=287, sgprs=110
-#   [16, 16, 32, 1, 1, 1, 55, 4, 1]  MT64x880  +14.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=292, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 57, 4, 1]  MT64x912  +18.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=302, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 58, 4, 1]  MT64x928  +19.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=307, sgprs=112
-#   [16, 16, 32, 1, 1, 1, 59, 4, 1]  MT64x944  +21.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=312, sgprs=88
-#   [16, 16, 32, 1, 1, 1, 60, 4, 1]  MT64x960  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=88
+#   [16, 16, 32, 1, 1, 1, 49, 4, 1]  MT64x784  +2.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=262, sgprs=74
+#   [16, 16, 32, 1, 1, 1, 50, 4, 1]  MT64x800  +3.5%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=265, sgprs=94
+#   [16, 16, 32, 1, 1, 1, 51, 4, 1]  MT64x816  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=74
+#   [16, 16, 32, 1, 1, 1, 53, 4, 1]  MT64x848  +10.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=282, sgprs=74
+#   [16, 16, 32, 1, 1, 1, 54, 4, 1]  MT64x864  +12.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=287, sgprs=96
+#   [16, 16, 32, 1, 1, 1, 55, 4, 1]  MT64x880  +14.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=292, sgprs=74
+#   [16, 16, 32, 1, 1, 1, 57, 4, 1]  MT64x912  +18.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=302, sgprs=74
+#   [16, 16, 32, 1, 1, 1, 58, 4, 1]  MT64x928  +19.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=307, sgprs=98
+#   [16, 16, 32, 1, 1, 1, 59, 4, 1]  MT64x944  +20.7%  too many vgprs after _initKernel (body skipped)
+#   [16, 16, 32, 1, 1, 1, 60, 4, 1]  MT64x960  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=74
 #   [16, 16, 32, 1, 1, 1, 61, 4, 1]  MT64x976  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 1, 62, 4, 1]  MT64x992  +2.2%  Kernel Uses 167424 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 1, 63, 4, 1]  MT64x1008  +3.8%  Kernel Uses 169984 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 1, 64, 4, 1]  MT64x1024  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=88
-#   [16, 16, 32, 1, 1, 2, 38, 4, 1]  MT128x608  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=88
-#   [16, 16, 32, 1, 1, 2, 39, 4, 1]  MT128x624  +5.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=270, sgprs=88
+#   [16, 16, 32, 1, 1, 1, 64, 4, 1]  MT64x1024  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=74
+#   [16, 16, 32, 1, 1, 2, 38, 4, 1]  MT128x608  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=72
+#   [16, 16, 32, 1, 1, 2, 39, 4, 1]  MT128x624  +5.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=270, sgprs=72
 #   [16, 16, 32, 1, 1, 2, 41, 4, 1]  MT128x656  +12.0%  Kernel Uses 183552 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 42, 4, 1]  MT128x672  +14.4%  Kernel Uses 187392 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 43, 4, 1]  MT128x688  +16.7%  Kernel Uses 191232 > 163840 bytes of LDS
@@ -1213,25 +1216,25 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 2, 49, 4, 1]  MT128x784  +23.6%  Kernel Uses 202496 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 50, 4, 1]  MT128x800  +24.4%  Kernel Uses 203776 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 51, 4, 1]  MT128x816  +25.2%  Kernel Uses 205056 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 2, 52, 4, 1]  MT128x832  +20.8%  Kernel Uses 197888 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 2, 52, 4, 1]  MT128x832  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 53, 4, 1]  MT128x848  +26.7%  Kernel Uses 207616 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 54, 4, 1]  MT128x864  +27.5%  Kernel Uses 208896 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 55, 4, 1]  MT128x880  +28.3%  Kernel Uses 210176 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 56, 4, 1]  MT128x896  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 57, 4, 1]  MT128x912  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 2, 58, 4, 1]  MT128x928  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 29, 4, 1]  MT192x464  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=88
+#   [16, 16, 32, 1, 1, 3, 29, 4, 1]  MT192x464  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=74
 #   [16, 16, 32, 1, 1, 3, 30, 4, 1]  MT192x480  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 31, 4, 1]  MT192x496  +8.1%  Kernel Uses 177152 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 32, 4, 1]  MT192x512  +10.3%  Kernel Uses 180736 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 33, 4, 1]  MT192x528  +13.1%  Kernel Uses 185344 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 34, 4, 1]  MT192x544  +15.9%  Kernel Uses 189952 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 35, 4, 1]  MT192x560  +18.1%  Kernel Uses 193536 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 33, 4, 1]  MT192x528  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 34, 4, 1]  MT192x544  +3.6%  Kernel Uses 169728 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 35, 4, 1]  MT192x560  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 36, 4, 1]  MT192x576  +20.3%  Kernel Uses 197120 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 37, 4, 1]  MT192x592  +23.1%  Kernel Uses 201728 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +25.9%  Kernel Uses 206336 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 4, 23, 4, 1]  MT256x368  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=88
-#   [16, 16, 32, 1, 1, 4, 24, 4, 1]  MT256x384  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=88
+#   [16, 16, 32, 1, 1, 3, 37, 4, 1]  MT192x592  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 4, 23, 4, 1]  MT256x368  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=74
+#   [16, 16, 32, 1, 1, 4, 24, 4, 1]  MT256x384  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=74
 #   [16, 16, 32, 1, 1, 4, 25, 4, 1]  MT256x400  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 26, 4, 1]  MT256x416  +5.6%  Kernel Uses 173056 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 27, 4, 1]  MT256x432  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
@@ -1246,37 +1249,37 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 6, 19, 4, 1]  MT384x304  +8.4%  Kernel Uses 177664 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 15, 4, 1]  MT448x240  +8.1%  Kernel Uses 177152 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 16, 4, 1]  MT448x256  +10.3%  Kernel Uses 180736 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 8, 13, 4, 1]  MT512x208  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=88
+#   [16, 16, 32, 1, 1, 8, 13, 4, 1]  MT512x208  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=74
 #   [16, 16, 32, 1, 1, 8, 14, 4, 1]  MT512x224  +15.6%  Kernel Uses 189440 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 9, 12, 4, 1]  MT576x192  +10.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=284, sgprs=88
+#   [16, 16, 32, 1, 1, 9, 12, 4, 1]  MT576x192  +10.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=284, sgprs=74
 #   [16, 16, 32, 1, 1, 10, 11, 4, 1]  MT640x176  +5.5%  Kernel Uses 172800 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 11, 10, 4, 1]  MT704x160  +2.0%  Kernel Uses 167040 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 12, 9, 4, 1]  MT768x144  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=88
-#   [16, 16, 32, 1, 1, 13, 8, 4, 1]  MT832x128  +4.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=268, sgprs=88
+#   [16, 16, 32, 1, 1, 12, 9, 4, 1]  MT768x144  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=72
+#   [16, 16, 32, 1, 1, 13, 8, 4, 1]  MT832x128  +4.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=268, sgprs=72
 #   [16, 16, 32, 1, 1, 14, 8, 4, 1]  MT896x128  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 15, 7, 4, 1]  MT960x112  +4.7%  Kernel Uses 171520 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 16, 7, 4, 1]  MT1024x112  +0.9%  Kernel Uses 165376 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 27, 2, 2]  MT96x864  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=259, sgprs=88
-#   [16, 16, 32, 1, 1, 3, 29, 2, 2]  MT96x928  +14.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=293, sgprs=114
+#   [16, 16, 32, 1, 1, 3, 27, 2, 2]  MT96x864  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=259, sgprs=72
+#   [16, 16, 32, 1, 1, 3, 29, 2, 2]  MT96x928  +14.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=293, sgprs=100
 #   [16, 16, 32, 1, 1, 3, 30, 2, 2]  MT96x960  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 31, 2, 2]  MT96x992  +4.8%  Kernel Uses 171776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 32, 2, 2]  MT96x1024  +17.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=301, sgprs=88
-#   [16, 16, 32, 1, 1, 4, 23, 2, 2]  MT128x736  +9.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=280, sgprs=88
-#   [16, 16, 32, 1, 1, 4, 24, 2, 2]  MT128x768  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=88
-#   [16, 16, 32, 1, 1, 4, 25, 2, 2]  MT128x800  +24.4%  Kernel Uses 203776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 4, 26, 2, 2]  MT128x832  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=88
+#   [16, 16, 32, 1, 1, 3, 32, 2, 2]  MT96x1024  +17.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=301, sgprs=72
+#   [16, 16, 32, 1, 1, 4, 23, 2, 2]  MT128x736  +9.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=280, sgprs=74
+#   [16, 16, 32, 1, 1, 4, 24, 2, 2]  MT128x768  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
+#   [16, 16, 32, 1, 1, 4, 25, 2, 2]  MT128x800  +23.8%  too many vgprs after _initKernel (body skipped)
+#   [16, 16, 32, 1, 1, 4, 26, 2, 2]  MT128x832  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=72
 #   [16, 16, 32, 1, 1, 4, 27, 2, 2]  MT128x864  +27.5%  Kernel Uses 208896 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 28, 2, 2]  MT128x896  +22.5%  Kernel Uses 200704 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 29, 2, 2]  MT128x928  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 5, 19, 2, 2]  MT160x608  +7.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=275, sgprs=106
+#   [16, 16, 32, 1, 1, 5, 19, 2, 2]  MT160x608  +7.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=275, sgprs=92
 #   [16, 16, 32, 1, 1, 5, 20, 2, 2]  MT160x640  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 5, 21, 2, 2]  MT160x672  +20.6%  Kernel Uses 197632 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 5, 22, 2, 2]  MT160x704  +22.2%  Kernel Uses 200192 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 5, 22, 2, 2]  MT160x704  +2.0%  Kernel Uses 167040 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 5, 23, 2, 2]  MT160x736  +23.8%  Kernel Uses 202752 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 6, 17, 2, 2]  MT192x544  +3.6%  Kernel Uses 169728 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 6, 18, 2, 2]  MT192x576  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=88
-#   [16, 16, 32, 1, 1, 6, 19, 2, 2]  MT192x608  +25.9%  Kernel Uses 206336 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 7, 15, 2, 2]  MT224x480  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 6, 18, 2, 2]  MT192x576  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=74
+#   [16, 16, 32, 1, 1, 6, 19, 2, 2]  MT192x608  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 7, 15, 2, 2]  MT224x480  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 16, 2, 2]  MT224x512  +15.3%  Kernel Uses 188928 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 13, 2, 2]  MT256x416  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 14, 2, 2]  MT256x448  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
@@ -1288,37 +1291,37 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 12, 9, 2, 2]  MT384x288  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 13, 8, 2, 2]  MT416x256  +5.3%  Kernel Uses 172544 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 14, 8, 2, 2]  MT448x256  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 15, 7, 2, 2]  MT480x224  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 15, 7, 2, 2]  MT480x224  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 16, 7, 2, 2]  MT512x224  +15.3%  Kernel Uses 188928 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 17, 6, 2, 2]  MT544x192  +3.6%  Kernel Uses 169728 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 18, 6, 2, 2]  MT576x192  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=88
-#   [16, 16, 32, 1, 1, 19, 5, 2, 2]  MT608x160  +7.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=275, sgprs=106
-#   [16, 16, 32, 1, 1, 19, 6, 2, 2]  MT608x192  +25.9%  Kernel Uses 206336 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 18, 6, 2, 2]  MT576x192  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=74
+#   [16, 16, 32, 1, 1, 19, 5, 2, 2]  MT608x160  +7.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=275, sgprs=92
+#   [16, 16, 32, 1, 1, 19, 6, 2, 2]  MT608x192  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 20, 5, 2, 2]  MT640x160  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 21, 5, 2, 2]  MT672x160  +20.6%  Kernel Uses 197632 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 22, 5, 2, 2]  MT704x160  +22.2%  Kernel Uses 200192 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 23, 4, 2, 2]  MT736x128  +9.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=280, sgprs=88
+#   [16, 16, 32, 1, 1, 22, 5, 2, 2]  MT704x160  +2.0%  Kernel Uses 167040 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 23, 4, 2, 2]  MT736x128  +9.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=280, sgprs=74
 #   [16, 16, 32, 1, 1, 23, 5, 2, 2]  MT736x160  +23.8%  Kernel Uses 202752 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 24, 4, 2, 2]  MT768x128  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=88
-#   [16, 16, 32, 1, 1, 25, 4, 2, 2]  MT800x128  +24.4%  Kernel Uses 203776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 26, 4, 2, 2]  MT832x128  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=88
-#   [16, 16, 32, 1, 1, 27, 3, 2, 2]  MT864x96  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=259, sgprs=88
+#   [16, 16, 32, 1, 1, 24, 4, 2, 2]  MT768x128  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
+#   [16, 16, 32, 1, 1, 25, 4, 2, 2]  MT800x128  +23.8%  too many vgprs after _initKernel (body skipped)
+#   [16, 16, 32, 1, 1, 26, 4, 2, 2]  MT832x128  +18.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=304, sgprs=72
+#   [16, 16, 32, 1, 1, 27, 3, 2, 2]  MT864x96  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=259, sgprs=72
 #   [16, 16, 32, 1, 1, 27, 4, 2, 2]  MT864x128  +27.5%  Kernel Uses 208896 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 28, 4, 2, 2]  MT896x128  +22.5%  Kernel Uses 200704 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 29, 3, 2, 2]  MT928x96  +14.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=293, sgprs=114
+#   [16, 16, 32, 1, 1, 29, 3, 2, 2]  MT928x96  +14.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=293, sgprs=100
 #   [16, 16, 32, 1, 1, 29, 4, 2, 2]  MT928x128  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 30, 3, 2, 2]  MT960x96  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 31, 3, 2, 2]  MT992x96  +4.8%  Kernel Uses 171776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 32, 3, 2, 2]  MT1024x96  +17.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=301, sgprs=88
+#   [16, 16, 32, 1, 1, 32, 3, 2, 2]  MT1024x96  +17.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=301, sgprs=72
 #   [16, 16, 32, 1, 1, 7, 15, 1, 4]  MT112x960  +4.7%  Kernel Uses 171520 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 16, 1, 4]  MT112x1024  +0.9%  Kernel Uses 165376 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 8, 13, 1, 4]  MT128x832  +4.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=268, sgprs=88
+#   [16, 16, 32, 1, 1, 8, 13, 1, 4]  MT128x832  +4.7%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=268, sgprs=72
 #   [16, 16, 32, 1, 1, 8, 14, 1, 4]  MT128x896  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 9, 12, 1, 4]  MT144x768  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=88
+#   [16, 16, 32, 1, 1, 9, 12, 1, 4]  MT144x768  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=72
 #   [16, 16, 32, 1, 1, 10, 11, 1, 4]  MT160x704  +2.0%  Kernel Uses 167040 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 11, 10, 1, 4]  MT176x640  +5.5%  Kernel Uses 172800 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 12, 9, 1, 4]  MT192x576  +10.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=284, sgprs=88
-#   [16, 16, 32, 1, 1, 13, 8, 1, 4]  MT208x512  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=88
+#   [16, 16, 32, 1, 1, 12, 9, 1, 4]  MT192x576  +10.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=284, sgprs=74
+#   [16, 16, 32, 1, 1, 13, 8, 1, 4]  MT208x512  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=74
 #   [16, 16, 32, 1, 1, 14, 8, 1, 4]  MT224x512  +15.6%  Kernel Uses 189440 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 15, 7, 1, 4]  MT240x448  +8.1%  Kernel Uses 177152 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 16, 7, 1, 4]  MT256x448  +10.3%  Kernel Uses 180736 > 163840 bytes of LDS
@@ -1328,26 +1331,26 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 20, 5, 1, 4]  MT320x320  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 21, 5, 1, 4]  MT336x320  +3.1%  Kernel Uses 168960 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 22, 5, 1, 4]  MT352x320  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 23, 4, 1, 4]  MT368x256  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=88
+#   [16, 16, 32, 1, 1, 23, 4, 1, 4]  MT368x256  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=74
 #   [16, 16, 32, 1, 1, 23, 5, 1, 4]  MT368x320  +8.1%  Kernel Uses 177152 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 24, 4, 1, 4]  MT384x256  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=88
+#   [16, 16, 32, 1, 1, 24, 4, 1, 4]  MT384x256  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=74
 #   [16, 16, 32, 1, 1, 25, 4, 1, 4]  MT400x256  +2.8%  Kernel Uses 168448 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 26, 4, 1, 4]  MT416x256  +5.6%  Kernel Uses 173056 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 27, 4, 1, 4]  MT432x256  +7.8%  Kernel Uses 176640 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 28, 4, 1, 4]  MT448x256  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 29, 3, 1, 4]  MT464x192  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=88
+#   [16, 16, 32, 1, 1, 29, 3, 1, 4]  MT464x192  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=74
 #   [16, 16, 32, 1, 1, 29, 4, 1, 4]  MT464x256  +12.8%  Kernel Uses 184832 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 30, 3, 1, 4]  MT480x192  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 31, 3, 1, 4]  MT496x192  +8.1%  Kernel Uses 177152 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 32, 3, 1, 4]  MT512x192  +10.3%  Kernel Uses 180736 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 33, 3, 1, 4]  MT528x192  +13.1%  Kernel Uses 185344 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 34, 3, 1, 4]  MT544x192  +15.9%  Kernel Uses 189952 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 35, 3, 1, 4]  MT560x192  +18.1%  Kernel Uses 193536 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 33, 3, 1, 4]  MT528x192  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 34, 3, 1, 4]  MT544x192  +3.6%  Kernel Uses 169728 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 35, 3, 1, 4]  MT560x192  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 36, 3, 1, 4]  MT576x192  +20.3%  Kernel Uses 197120 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 37, 3, 1, 4]  MT592x192  +23.1%  Kernel Uses 201728 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 38, 2, 1, 4]  MT608x128  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=88
-#   [16, 16, 32, 1, 1, 38, 3, 1, 4]  MT608x192  +25.9%  Kernel Uses 206336 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 39, 2, 1, 4]  MT624x128  +5.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=270, sgprs=88
+#   [16, 16, 32, 1, 1, 37, 3, 1, 4]  MT592x192  +10.6%  Kernel Uses 181248 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 38, 2, 1, 4]  MT608x128  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=258, sgprs=72
+#   [16, 16, 32, 1, 1, 38, 3, 1, 4]  MT608x192  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 39, 2, 1, 4]  MT624x128  +5.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=270, sgprs=72
 #   [16, 16, 32, 1, 1, 41, 2, 1, 4]  MT656x128  +12.0%  Kernel Uses 183552 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 42, 2, 1, 4]  MT672x128  +14.4%  Kernel Uses 187392 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 43, 2, 1, 4]  MT688x128  +16.7%  Kernel Uses 191232 > 163840 bytes of LDS
@@ -1356,69 +1359,69 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 46, 2, 1, 4]  MT736x128  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 47, 2, 1, 4]  MT752x128  +22.0%  Kernel Uses 199936 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 48, 2, 1, 4]  MT768x128  +5.5%  Kernel Uses 172800 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 49, 1, 1, 4]  MT784x64  +2.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=262, sgprs=88
+#   [16, 16, 32, 1, 1, 49, 1, 1, 4]  MT784x64  +2.3%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=262, sgprs=74
 #   [16, 16, 32, 1, 1, 49, 2, 1, 4]  MT784x128  +23.6%  Kernel Uses 202496 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 50, 1, 1, 4]  MT800x64  +3.9%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=266, sgprs=88
+#   [16, 16, 32, 1, 1, 50, 1, 1, 4]  MT800x64  +3.5%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=265, sgprs=94
 #   [16, 16, 32, 1, 1, 50, 2, 1, 4]  MT800x128  +24.4%  Kernel Uses 203776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 51, 1, 1, 4]  MT816x64  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=88
+#   [16, 16, 32, 1, 1, 51, 1, 1, 4]  MT816x64  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=74
 #   [16, 16, 32, 1, 1, 51, 2, 1, 4]  MT816x128  +25.2%  Kernel Uses 205056 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 52, 2, 1, 4]  MT832x128  +20.8%  Kernel Uses 197888 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 53, 1, 1, 4]  MT848x64  +10.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=282, sgprs=88
+#   [16, 16, 32, 1, 1, 52, 2, 1, 4]  MT832x128  +13.0%  Kernel Uses 185088 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 53, 1, 1, 4]  MT848x64  +10.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=282, sgprs=74
 #   [16, 16, 32, 1, 1, 53, 2, 1, 4]  MT848x128  +26.7%  Kernel Uses 207616 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 54, 1, 1, 4]  MT864x64  +12.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=287, sgprs=110
+#   [16, 16, 32, 1, 1, 54, 1, 1, 4]  MT864x64  +12.1%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=287, sgprs=96
 #   [16, 16, 32, 1, 1, 54, 2, 1, 4]  MT864x128  +27.5%  Kernel Uses 208896 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 55, 1, 1, 4]  MT880x64  +14.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=292, sgprs=88
+#   [16, 16, 32, 1, 1, 55, 1, 1, 4]  MT880x64  +14.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=292, sgprs=74
 #   [16, 16, 32, 1, 1, 55, 2, 1, 4]  MT880x128  +28.3%  Kernel Uses 210176 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 56, 2, 1, 4]  MT896x128  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 57, 1, 1, 4]  MT912x64  +18.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=302, sgprs=88
+#   [16, 16, 32, 1, 1, 57, 1, 1, 4]  MT912x64  +18.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=302, sgprs=74
 #   [16, 16, 32, 1, 1, 57, 2, 1, 4]  MT912x128  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 58, 1, 1, 4]  MT928x64  +19.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=307, sgprs=112
+#   [16, 16, 32, 1, 1, 58, 1, 1, 4]  MT928x64  +19.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=307, sgprs=98
 #   [16, 16, 32, 1, 1, 58, 2, 1, 4]  MT928x128  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 59, 1, 1, 4]  MT944x64  +21.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=312, sgprs=88
-#   [16, 16, 32, 1, 1, 60, 1, 1, 4]  MT960x64  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=88
+#   [16, 16, 32, 1, 1, 59, 1, 1, 4]  MT944x64  +20.7%  too many vgprs after _initKernel (body skipped)
+#   [16, 16, 32, 1, 1, 60, 1, 1, 4]  MT960x64  +6.2%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=272, sgprs=74
 #   [16, 16, 32, 1, 1, 61, 1, 1, 4]  MT976x64  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 62, 1, 1, 4]  MT992x64  +2.2%  Kernel Uses 167424 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 63, 1, 1, 4]  MT1008x64  +3.8%  Kernel Uses 169984 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 64, 1, 1, 4]  MT1024x64  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=88
-#   [32, 32, 16, 1, 1, 1, 19, 4, 1]  MT128x608  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=260, sgprs=88
+#   [16, 16, 32, 1, 1, 64, 1, 1, 4]  MT1024x64  +13.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=290, sgprs=74
+#   [32, 32, 16, 1, 1, 1, 19, 4, 1]  MT128x608  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=260, sgprs=74
 #   [32, 32, 16, 1, 1, 1, 21, 4, 1]  MT128x672  +4.1%  Kernel Uses 170496 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 22, 4, 1]  MT128x704  +0.5%  Kernel Uses 164736 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 1, 23, 4, 1]  MT128x736  +35.0%  Kernel Uses 221184 > 163840 bytes of LDS
+#   [32, 32, 16, 1, 1, 1, 23, 4, 1]  MT128x736  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 24, 4, 1]  MT128x768  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 25, 4, 1]  MT128x800  +20.3%  Kernel Uses 197120 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 1, 26, 4, 1]  MT128x832  +21.7%  Kernel Uses 199424 > 163840 bytes of LDS
+#   [32, 32, 16, 1, 1, 1, 26, 4, 1]  MT128x832  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 27, 4, 1]  MT128x864  +23.1%  Kernel Uses 201728 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 28, 4, 1]  MT128x896  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 1, 29, 4, 1]  MT128x928  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 2, 12, 4, 1]  MT256x384  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=88
+#   [32, 32, 16, 1, 1, 2, 12, 4, 1]  MT256x384  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=74
 #   [32, 32, 16, 1, 1, 2, 13, 4, 1]  MT256x416  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 2, 14, 4, 1]  MT256x448  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 3, 9, 4, 1]  MT384x288  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 4, 7, 4, 1]  MT512x224  +15.0%  Kernel Uses 188416 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 7, 4, 4, 1]  MT896x128  +20.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=308, sgprs=88
-#   [32, 32, 16, 1, 1, 2, 12, 2, 2]  MT128x768  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=88
+#   [32, 32, 16, 1, 1, 7, 4, 4, 1]  MT896x128  +20.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=308, sgprs=74
+#   [32, 32, 16, 1, 1, 2, 12, 2, 2]  MT128x768  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
 #   [32, 32, 16, 1, 1, 2, 13, 2, 2]  MT128x832  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 2, 14, 2, 2]  MT128x896  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 3, 9, 2, 2]  MT192x576  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=88
+#   [32, 32, 16, 1, 1, 3, 9, 2, 2]  MT192x576  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=74
 #   [32, 32, 16, 1, 1, 4, 7, 2, 2]  MT256x448  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 7, 4, 2, 2]  MT448x256  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 9, 3, 2, 2]  MT576x192  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=88
-#   [32, 32, 16, 1, 1, 12, 2, 2, 2]  MT768x128  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=88
+#   [32, 32, 16, 1, 1, 9, 3, 2, 2]  MT576x192  +15.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=296, sgprs=74
+#   [32, 32, 16, 1, 1, 12, 2, 2, 2]  MT768x128  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
 #   [32, 32, 16, 1, 1, 13, 2, 2, 2]  MT832x128  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 14, 2, 2, 2]  MT896x128  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 4, 7, 1, 4]  MT128x896  +20.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=308, sgprs=88
+#   [32, 32, 16, 1, 1, 4, 7, 1, 4]  MT128x896  +20.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=308, sgprs=74
 #   [32, 32, 16, 1, 1, 7, 4, 1, 4]  MT224x512  +15.0%  Kernel Uses 188416 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 9, 3, 1, 4]  MT288x384  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 12, 2, 1, 4]  MT384x256  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=88
+#   [32, 32, 16, 1, 1, 12, 2, 1, 4]  MT384x256  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=74
 #   [32, 32, 16, 1, 1, 13, 2, 1, 4]  MT416x256  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 14, 2, 1, 4]  MT448x256  +10.0%  Kernel Uses 180224 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 19, 1, 1, 4]  MT608x128  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=260, sgprs=88
+#   [32, 32, 16, 1, 1, 19, 1, 1, 4]  MT608x128  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=260, sgprs=74
 #   [32, 32, 16, 1, 1, 21, 1, 1, 4]  MT672x128  +4.1%  Kernel Uses 170496 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 22, 1, 1, 4]  MT704x128  +0.5%  Kernel Uses 164736 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 23, 1, 1, 4]  MT736x128  +35.0%  Kernel Uses 221184 > 163840 bytes of LDS
+#   [32, 32, 16, 1, 1, 23, 1, 1, 4]  MT736x128  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 24, 1, 1, 4]  MT768x128  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 25, 1, 1, 4]  MT800x128  +20.3%  Kernel Uses 197120 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 26, 1, 1, 4]  MT832x128  +21.7%  Kernel Uses 199424 > 163840 bytes of LDS
+#   [32, 32, 16, 1, 1, 26, 1, 1, 4]  MT832x128  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 27, 1, 1, 4]  MT864x128  +23.1%  Kernel Uses 201728 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 28, 1, 1, 4]  MT896x128  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 29, 1, 1, 4]  MT928x128  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
