@@ -327,6 +327,9 @@ class EngineSpec:
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model.
     heuristic: str = "native"
+    #: Optional IngestorPacks.hpp engine-name constant used by the generated
+    #: census test; the descriptor still carries ``name`` above.
+    census_name_symbol: str | None = None
 
     @property
     def namespace(self) -> str:
