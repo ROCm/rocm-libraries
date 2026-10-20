@@ -42,6 +42,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import warnings
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
@@ -69,6 +70,7 @@ def _bootstrap_rocke() -> None:
 _bootstrap_rocke()
 
 from rocke.analysis.isa import parse_isa
+from rocke.core.lower_llvm import ArchDomainWarning
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
@@ -257,7 +259,11 @@ def probe_isa_inspect(
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            artifact = compile_kernel(kdef, arch=mcpu, capture_ir_text=False)
+            # A kernel that needs an intrinsic the target provably can't lower
+            # would otherwise abort the process inside LLVM; fail just this entry.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ArchDomainWarning)
+                artifact = compile_kernel(kdef, arch=mcpu, capture_ir_text=False)
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === BUILD-FAIL: {type(e).__name__}: {e}")
             continue

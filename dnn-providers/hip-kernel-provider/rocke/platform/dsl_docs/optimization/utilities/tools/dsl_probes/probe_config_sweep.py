@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -61,6 +62,7 @@ def _bootstrap_rocke() -> None:
 
 _bootstrap_rocke()
 
+from rocke.core.lower_llvm import ArchDomainWarning
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
@@ -125,7 +127,11 @@ def probe_config_sweep(
         row: dict = {"label": label, "override": dict(ov)}
         try:
             kdef = build_fn(spec)
-            artifact = compile_kernel(kdef, arch=arch)
+            # A kernel that needs an intrinsic the target provably can't lower
+            # would otherwise abort the process inside LLVM; fail just this entry.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ArchDomainWarning)
+                artifact = compile_kernel(kdef, arch=arch)
         except Exception as e:  # noqa: BLE001
             row["error"] = f"BUILD: {type(e).__name__}: {e}"
             rows.append(row)
