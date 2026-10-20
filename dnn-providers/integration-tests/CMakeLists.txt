@@ -206,11 +206,19 @@ if(Python3_FOUND)
 
     # Skips itself when PyTorch, which the generator needs, is not installed.
     add_test(
-        NAME hipdnn_golden_generator_python_tests
+        NAME hipdnn_golden_sdpa_fwd_generator_python_tests
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_golden.py
     )
-    set(HIPDNN_IT_GOLDEN_GENERATOR_TEST hipdnn_golden_generator_python_tests)
+    set(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST hipdnn_golden_sdpa_fwd_generator_python_tests)
+
+    # Skips itself when PyTorch, which the generator needs, is not installed.
+    add_test(
+        NAME hipdnn_golden_sdpa_bwd_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_bwd_golden.py
+    )
+    set(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST hipdnn_golden_sdpa_bwd_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -367,8 +375,11 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
     endif()
-    if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
+    if(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
