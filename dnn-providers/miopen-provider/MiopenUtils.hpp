@@ -22,24 +22,29 @@
 #include "MiopenApi.hpp"
 #include "MiopenTensor.hpp"
 
-#define LOG_ON_MIOPEN_FAILURE(status)                                                           \
-    do                                                                                          \
-    {                                                                                           \
-        if((status) != miopenStatusSuccess)                                                     \
-        {                                                                                       \
-            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: " << miopenGetErrorString(status)); \
-        }                                                                                       \
+// Both macros take a MIOpen call (or status) expression and evaluate it exactly once: the
+// status is captured before it is compared and reported, so a failing call is never re-issued.
+#define LOG_ON_MIOPEN_FAILURE(status)                                                 \
+    do                                                                                \
+    {                                                                                 \
+        const miopenStatus_t miopenCallStatus = (status);                             \
+        if(miopenCallStatus != miopenStatusSuccess)                                   \
+        {                                                                             \
+            HIPDNN_PLUGIN_LOG_ERROR(                                                  \
+                "MIOpen error occurred: " << miopenGetErrorString(miopenCallStatus)); \
+        }                                                                             \
     } while(0)
 
-#define THROW_ON_MIOPEN_FAILURE(status)                                                 \
-    do                                                                                  \
-    {                                                                                   \
-        if((status) != miopenStatusSuccess)                                             \
-        {                                                                               \
-            throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
-                "MIOpen error occurred: " + std::string(miopenGetErrorString(status))); \
-        }                                                                               \
+#define THROW_ON_MIOPEN_FAILURE(status)                                                           \
+    do                                                                                            \
+    {                                                                                             \
+        const miopenStatus_t miopenCallStatus = (status);                                         \
+        if(miopenCallStatus != miopenStatusSuccess)                                               \
+        {                                                                                         \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                                       \
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                              \
+                "MIOpen error occurred: " + std::string(miopenGetErrorString(miopenCallStatus))); \
+        }                                                                                         \
     } while(0)
 
 /// @brief RAII guard for setting MIOpen tuning policy on a handle.

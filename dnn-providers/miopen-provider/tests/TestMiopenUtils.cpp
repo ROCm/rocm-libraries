@@ -8,6 +8,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <string>
 
 using namespace miopen_plugin;
 using namespace miopen_utils;
@@ -569,6 +571,60 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
 
     ASSERT_THROW(miopen_utils::mapPointwiseModeToMiopenActivation(*attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// =============================================================================
+// THROW_ON_MIOPEN_FAILURE / LOG_ON_MIOPEN_FAILURE evaluate their argument once: re-evaluating it
+// on failure would issue the failing MIOpen call a second time (relaunching work, or leaking
+// what a create call made).
+// =============================================================================
+
+TEST(TestMiopenUtils, ThrowOnMiopenFailureEvaluatesFailingCallOnce)
+{
+    int calls = 0;
+    const auto failingCall = [&calls]() {
+        ++calls;
+        return miopenStatusBadParm;
+    };
+
+    try
+    {
+        THROW_ON_MIOPEN_FAILURE(failingCall());
+        FAIL() << "THROW_ON_MIOPEN_FAILURE did not throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(e.getMessage().find(miopenGetErrorString(miopenStatusBadParm)), std::string::npos)
+            << e.getMessage();
+    }
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestMiopenUtils, ThrowOnMiopenFailureEvaluatesSucceedingCallOnce)
+{
+    int calls = 0;
+    const auto succeedingCall = [&calls]() {
+        ++calls;
+        return miopenStatusSuccess;
+    };
+
+    EXPECT_NO_THROW(THROW_ON_MIOPEN_FAILURE(succeedingCall()));
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestMiopenUtils, LogOnMiopenFailureEvaluatesFailingCallOnce)
+{
+    int calls = 0;
+    const auto failingCall = [&calls]() {
+        ++calls;
+        return miopenStatusBadParm;
+    };
+
+    // Called bare: wrapping the logging macro in EXPECT_NO_THROW trips clang-tidy on the logger's
+    // internal variable name. An unexpected exception still fails the test.
+    LOG_ON_MIOPEN_FAILURE(failingCall());
+    EXPECT_EQ(calls, 1);
 }
 
 // =============================================================================
