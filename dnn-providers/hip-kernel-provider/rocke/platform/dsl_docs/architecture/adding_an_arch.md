@@ -167,6 +167,26 @@ explicit processor name with a row (`gfx1151`, `gfx1201`) still builds
 processor-specific code. Capability tables (`intrinsic_arch_domain.*.json`) need
 the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
 
+Every member of a generic target that rocKE supports gets a row of its own, so
+support for a processor is explicit rather than implied by `generic_targets`. A
+member whose recorded facts differ from the generic's holds them in full. A member
+whose every recorded field equals the generic's holds no facts and points at the
+generic instead, so each fact has one home:
+
+```json
+"gfx1151": { "_comment": "why the row exists", "facts_of": "gfx11-generic" }
+```
+
+The loader resolves every pointer before any reader sees it, so
+`ArchTarget.from_gfx("gfx1151")` is the generic's target under the name
+`gfx1151`. A pointer holds nothing but `facts_of` and an optional `_comment`, and
+must name the generic target that `generic_targets` lists the processor under,
+which itself holds facts; the loader refuses anything else. In C++ the processor's
+`rocke_arch_target_t` is the generic's `constexpr` target with only `gfx` replaced
+(`facts_of(k_target_gfx11_generic, "gfx1151")` in `data.cpp`), sharing its `mma`
+array. Grouping is decided by the recorded fields only: a member points at its
+generic exactly when every field this file records matches.
+
 ## 2 · ISA backend
 
 Add one row to `BACKEND_REGISTRY` in
