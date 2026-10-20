@@ -137,6 +137,31 @@ def test_negative_bounds_read_as_unbounded():
     assert req == replace(BASE, left_bound=-1, right_bound=-1)
 
 
+@pytest.mark.parametrize("arch", ["GFX950", " gfx950 ", "gfx950:sramecc+:xnack-"])
+def test_arch_is_canonical(arch):
+    """A target-ID spelling is the same arch, so Capability's exact match admits it."""
+    req = replace(BASE, arch=arch)
+    assert req.arch == "gfx950"
+    cap = Capability(arches=("gfx950",), supports_features=BASE.features())
+    assert cap.check(req) == (True, "ok")
+
+
+@pytest.mark.parametrize("name", ["padded", "ragged", "paged"])
+def test_bottom_right_on_per_sequence_lengths_moves(name):
+    """Equal max extents do not make a per-sequence bottom-right diagonal top-left.
+
+    The offset is ``s_kv[b] - s_q[b]``, so a top-left-only kernel would mask
+    batches whose lengths differ wrongly.
+    """
+    base = CASES[name]
+    assert base.s_q == base.s_kv
+    causal = replace(base, diagonal="bottom_right", left_bound=-1, right_bound=0)
+    assert "causal_br" in causal.features()
+    assert "causal_tl" not in causal.features()
+    window = replace(base, diagonal="bottom_right", left_bound=2, right_bound=0)
+    assert "window_br" in window.features()
+
+
 @pytest.mark.parametrize("source", ["default", "tensor"])
 def test_scale_is_one_unless_baked(source):
     extra = {"scale_tensor": packed((1,))} if source == "tensor" else {}

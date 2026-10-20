@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Literal, TypeAlias
 
+from rocke.core.arch import base_arch_from_target_id
 from rocke.dispatch.core import OperatorRequest
 
 __all__ = [
@@ -322,6 +323,16 @@ class SdpaRequest(OperatorRequest):
 
     See the module docstring for the normalization rules and
     ``SDPA_FEATURES`` for what :meth:`features` reports.
+
+    For candidates and for lowering to ``dispatch.attention.AttentionRequest``:
+
+    - :meth:`normalized` has no ``layout`` key (layout is the ``layout_*``
+      features), so a candidate's ``Capability.layouts`` must stay empty or it
+      declines every request.
+    - hipDNN ``left_bound = W`` keeps ``W + 1`` keys; ``AttentionBand`` /
+      ``sliding_window`` ``W`` sees ``W`` keys. Lower with ``left_bound + 1``.
+    - ``causal_tl`` / ``causal_br`` / ``window*`` here correspond to
+      ``ATTENTION_FEATURES`` ``causal`` / ``causal_bottom_right`` / ``band``.
     """
 
     arch: str
@@ -377,6 +388,11 @@ class SdpaRequest(OperatorRequest):
         self._validate()
 
     def _normalize(self) -> None:
+        # Same canonical form as AttentionRequest (dispatch.attention.common.canonical_arch),
+        # so "gfx950:sramecc+" passes Capability.check's exact arch match.
+        object.__setattr__(
+            self, "arch", base_arch_from_target_id(self.arch.strip().lower())
+        )
         left, right = int(self.left_bound), int(self.right_bound)
         object.__setattr__(self, "left_bound", -1 if left < 0 else left)
         object.__setattr__(self, "right_bound", -1 if right < 0 else right)
@@ -570,14 +586,28 @@ class SdpaRequest(OperatorRequest):
         """Classify the band. ``causal_br`` on a square problem is ``causal_tl``.
 
         Any other bounded band is a ``window``; ``window_br`` says its diagonal
-        actually moves (bottom-right on a non-square problem), and
-        ``window_right`` says it keeps keys right of the diagonal, which the
-        production ``dist < W`` windows never do.
+        actually moves, and ``window_right`` says it keeps keys right of the
+        diagonal, which the production ``dist < W`` windows never do.
+
+        A bottom-right diagonal moves when ``s_q != s_kv``, and also whenever the
+        lengths are per sequence (padded, ragged or paged): the offset is then
+        ``s_kv[b] - s_q[b]``, which differs between batches even when the
+        maximum extents are equal.
         """
         left, right = self.left_bound, self.right_bound
         if left == -1 and right == -1:
             return set()
-        moved = self.diagonal == "bottom_right" and self.s_q != self.s_kv
+        per_sequence = (
+            self.padding_mask
+            or self.seq_len_q is not None
+            or self.seq_len_kv is not None
+            or self.q.ragged
+            or self.k.ragged
+            or self.paged is not None
+        )
+        moved = self.diagonal == "bottom_right" and (
+            self.s_q != self.s_kv or per_sequence
+        )
         if left == -1 and right == 0:
             return {"causal_br" if moved else "causal_tl"}
         active = {"window"}
