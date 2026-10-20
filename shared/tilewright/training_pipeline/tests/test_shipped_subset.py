@@ -698,6 +698,21 @@ def test_bench_inputs_and_pinned_run(tmp_path):
     assert got["p50"] == 2.5 and got["p99"] == 4.25 and got["shapes"] == 2
 
 
+def test_the_bench_is_built_without_the_re_rank_memo(tmp_path, monkeypatch):
+    # The memo can answer every other one of the bench's repeated rankings of
+    # a shape; without it every timed call ranks afresh.
+    calls = []
+    monkeypatch.setattr(ss.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    src, out = tmp_path / "src", tmp_path / "build"
+    assert ss.build_bench(src, out, jobs=3) == out / ss.BENCH_TARGET
+    configure, build = calls
+    assert configure[:5] == ["cmake", "-S", str(src), "-B", str(out)]
+    assert "-DTILEWRIGHT_LEVER_MEMO=OFF" in configure
+    assert "-DCMAKE_BUILD_TYPE=Release" in configure
+    assert not [a for a in configure if a.startswith("-DTILEWRIGHT_LEVER_PREFETCH")]
+    assert build[-4:] == ["--target", ss.BENCH_TARGET, "-j", "3"]
+
+
 # ── the script and the report ───────────────────────────────────────────────
 
 

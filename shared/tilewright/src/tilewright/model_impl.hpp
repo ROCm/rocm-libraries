@@ -281,10 +281,20 @@ std::vector<CellBounds> cell_bounds(const Model& model);
 // reach its wrap-around.
 void set_rank_epoch(std::uint32_t epoch) noexcept;
 
+// The selection-time options (README.md, Building and testing): TW_LEVER_PREFETCH
+// and TW_LEVER_MEMO are on unless defined to 0, as the CMake options define them
+// when off, and the memo's plan check TW_LEVER_MEMO_CHECK is on wherever
+// assertions are unless defined to 0. The defaults are set here, in the header
+// the engine and its white-box tests both include, so that a test expects what
+// the engine compiled.
+#ifndef TW_LEVER_PREFETCH
+#define TW_LEVER_PREFETCH 1
+#endif
+#ifndef TW_LEVER_MEMO
+#define TW_LEVER_MEMO 1
+#endif
+
 #if TW_LEVER_MEMO
-// The memo's plan check TW_LEVER_MEMO_CHECK is on wherever assertions are
-// unless defined to 0; set here, in the header the engine and its white-box
-// tests both include, so that a test expects what the engine compiled.
 #if !defined(TW_LEVER_MEMO_CHECK) && !defined(NDEBUG)
 #define TW_LEVER_MEMO_CHECK 1
 #endif

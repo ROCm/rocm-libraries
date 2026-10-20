@@ -638,18 +638,28 @@ ctest --test-dir build --output-on-failure
 | `TILEWRIGHT_ENABLE_PYTHON` | OFF | Build the Python module |
 | `TILEWRIGHT_ENABLE_INSTALL` | ON standalone, OFF as a subproject | Install the library, headers and CMake package |
 | `TILEWRIGHT_ENABLE_FETCH` | ON | Fetch Catch2 (and nanobind for CMake builds of the bindings) when they are not installed |
-| `TILEWRIGHT_LEVER_PREFETCH` | OFF | Define `TW_LEVER_PREFETCH` for the engine and what links it (see below) |
-| `TILEWRIGHT_LEVER_MEMO` | OFF | Define `TW_LEVER_MEMO` for the engine and what links it (see below) |
+| `TILEWRIGHT_LEVER_PREFETCH` | ON | Define `TW_LEVER_PREFETCH` to 1, or to 0 when OFF, for the engine and what links it (see below) |
+| `TILEWRIGHT_LEVER_MEMO` | ON | Define `TW_LEVER_MEMO` to 1, or to 0 when OFF, for the engine and what links it (see below) |
 
 The tests use `find_package(Catch2 3)` and fetch Catch2 only when it is missing
 and fetching is enabled. They write their own synthetic models; the real-model
 tests additionally load every shipped model. The environment-variable tests run
 as separate ctest entries because the knobs are read once per process.
 
-Two compile-time options shorten a ranking call without changing any result:
-every ranking stays bit-identical, and without them the engine compiles
-exactly as before. Each is on when its macro is defined to a nonzero value,
-and off when it is undefined or 0.
+Two compile-time options, both on by default, shorten a ranking call without
+changing any result: every ranking, and so every pick, is bit-identical to the
+engine's without them, and with both off the engine compiles exactly as it did
+before they existed. Each is off when its macro is defined to 0 and on
+otherwise: `model_impl.hpp` defines a macro the build leaves undefined to 1,
+and the CMake options define both, to 1 or 0. To build without one, configure
+with `-DTILEWRIGHT_LEVER_PREFETCH=OFF` or `-DTILEWRIGHT_LEVER_MEMO=OFF` (a
+parent project may set the variable before `add_subdirectory`); a build
+without CMake defines `TW_LEVER_PREFETCH=0` or `TW_LEVER_MEMO=0` for the
+engine and for whatever includes its private headers. CMake keeps an
+option's cached value, so a build directory configured while the options
+were off by default, a hipBLASLt one included, stays without them when its
+sources update: configure it again with `-DTILEWRIGHT_LEVER_PREFETCH=ON
+-DTILEWRIGHT_LEVER_MEMO=ON`, or use a new build directory.
 
 - `TW_LEVER_PREFETCH`: a ranking whose first tier is a cell whitelist asks,
   as it starts, for the scattered per-key data it is about to read and for
@@ -657,6 +667,8 @@ and off when it is undefined or 0.
   keys' configs and kernel features and the scoring tensors, so that a call
   with cold caches waits less. As it changes no result, no test can see it:
   only timing ranking calls with cold caches shows whether it still helps.
+  It asks for data that a call with warm caches already holds, so it costs
+  such a call a little; turn it off where warm calls matter more.
 - `TW_LEVER_MEMO`: when the thread's last ranking scored a cell whitelist
   alone, a ranking of the same problem, hardware and context over the same
   candidate set and launch model that needs no more configs than that tier
@@ -673,19 +685,32 @@ and off when it is undefined or 0.
   on by default when `NDEBUG` is not defined and off when defined to 0, makes
   the memo ask the launch model again for every plan its scores read and rank
   afresh when one differs; without it, a ranking the memo answers asks the
-  launch model for no plan.
+  launch model for no plan. As a ranking that repeats the thread's last one
+  is answered from the memo, a loop that ranks one problem again and again
+  alternates fresh and remembered rankings. The selection-time benches
+  `bench_shipped_rank` and `bench_selection_time` time such loops, so where
+  the pipeline builds them (`training_pipeline/lib/shipped_subset.py`,
+  `bench_selection_time.sh`) it builds them without the memo; build them so
+  too to time fresh rankings.
 
-The ctest entries `tilewright-levers` and `tilewright-levers-nocheck` each run
-the whole suite in one process against a second build of the engine with both
-options, with the memo check and without it (as a release build compiles the
-memo). Under `training_pipeline/scripts/experiments`, `rerank_check` and
+The suite's ctest entries test the engine as the options build it and read
+the macros it was compiled with: the options define them for what links the
+engine as well, and `model_impl.hpp`, which the white-box tests include, sets
+their defaults and that of `TW_LEVER_MEMO_CHECK`. Whatever the options say,
+three more entries each run the whole suite in one process against another
+build of the engine: `tilewright-levers` with both options and the memo
+check, `tilewright-levers-nocheck` with both and without the check (as a
+release build compiles the memo), and `tilewright-levers-off` with neither.
+Under `training_pipeline/scripts/experiments`, `rerank_check` and
 `memo_check` hash TensileLite's re-rank and pairs of rankings the memo may or
-must not answer, for comparing two builds on shipped models.
-
-With the CMake options on, the other ctest entries test the engine with them
-too, and read the macros it was compiled with: the options define them for
-what links the engine as well, and `model_impl.hpp`, which the white-box tests
-include, sets the default of `TW_LEVER_MEMO_CHECK`.
+must not answer, for comparing builds on shipped models, and count the
+rankings the memo answered. The entry `tilewright-levers-parity`
+(`tests/levers_parity.cmake`) builds both against the engine with neither
+option, with each alone, and with both, with and without the check, and runs
+them on every shipped model with the sample kernel pool and the benches'
+default shapes: every build must print the hashes of the build with neither,
+and the memo must answer some re-rank in every build that has it. Without a
+materialized shipped model it is skipped.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static
 library `roc::tilewright`. An installed tilewright is found with

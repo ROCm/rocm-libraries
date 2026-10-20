@@ -10,6 +10,8 @@
 # inputs (the library's kernel pool and the shapes) and runs it. Everything
 # goes to <out-dir>. Environment: SHAPES_FILE, ITERS (200), WARMUP (50),
 # MIN_SCORED (1), DEVICE (0, for the KFD hardware values), PYTHON (python3).
+# The engine is built without its re-rank memo (TILEWRIGHT_LEVER_MEMO), which
+# can answer every other one of the bench's repeated rankings of a shape.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +21,8 @@ LIBDIR="${3:?missing library directory}"
 OUT="${4:?missing output directory}"
 
 mkdir -p "$OUT"
-cmake -S "$HERE" -B "$OUT/build" -DCMAKE_BUILD_TYPE=Release > "$OUT/configure.log"
+cmake -S "$HERE" -B "$OUT/build" -DCMAKE_BUILD_TYPE=Release -DTILEWRIGHT_LEVER_MEMO=OFF \
+  > "$OUT/configure.log"
 cmake --build "$OUT/build" --target bench_selection_time > "$OUT/build.log"
 
 shapes=()

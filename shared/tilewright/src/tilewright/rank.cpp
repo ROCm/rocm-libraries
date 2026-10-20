@@ -24,10 +24,10 @@
 #include <utility>
 #include <vector>
 
-// Selection-time options, off by default (README.md, Building and testing),
-// each on when defined to a nonzero value: TW_LEVER_PREFETCH, and
-// TW_LEVER_MEMO, whose plan check TW_LEVER_MEMO_CHECK is on wherever
-// assertions are unless it is defined to 0 (model_impl.hpp sets it).
+// Selection-time options, on by default (README.md, Building and testing),
+// each off when defined to 0: TW_LEVER_PREFETCH, and TW_LEVER_MEMO, whose
+// plan check TW_LEVER_MEMO_CHECK is on wherever assertions are unless it is
+// defined to 0 (model_impl.hpp sets their defaults).
 #if TW_LEVER_MEMO
 #include <atomic>
 #endif

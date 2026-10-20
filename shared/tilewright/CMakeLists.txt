@@ -16,8 +16,8 @@ option(TILEWRIGHT_ENABLE_PYTHON "Build the tilewright Python bindings." OFF)
 option(TILEWRIGHT_ENABLE_INSTALL "Install the library, headers and CMake package." ${_tilewright_standalone})
 option(TILEWRIGHT_ENABLE_FETCH "Fetch missing test/binding dependencies with FetchContent." ON)
 option(TILEWRIGHT_STAGE_TIMERS "Time the phases of each ranking call (tilewright/stage_timers.hpp)." OFF)
-option(TILEWRIGHT_LEVER_PREFETCH "Prefetch what a whitelist tier's ranking reads (TW_LEVER_PREFETCH)." OFF)
-option(TILEWRIGHT_LEVER_MEMO "Re-rank memo of whitelist-tier scores (TW_LEVER_MEMO)." OFF)
+option(TILEWRIGHT_LEVER_PREFETCH "Prefetch what a whitelist tier's ranking reads (TW_LEVER_PREFETCH)." ON)
+option(TILEWRIGHT_LEVER_MEMO "Re-rank memo of whitelist-tier scores (TW_LEVER_MEMO)." ON)
 
 include(GNUInstallDirs)
 find_package(Threads REQUIRED)
@@ -51,13 +51,18 @@ target_sources(
 if(TILEWRIGHT_STAGE_TIMERS)
     target_compile_definitions(tilewright PRIVATE TILEWRIGHT_STAGE_TIMERS=1)
 endif()
-# PUBLIC, so that what is built against the engine, its tests too, reads the
-# selection-time options the engine was compiled with.
+# The selection-time options, on unless turned off: each macro is defined, to
+# 1 or 0, and PUBLIC, so that what is built against the engine, its tests too,
+# reads the options the engine was compiled with.
 if(TILEWRIGHT_LEVER_PREFETCH)
     target_compile_definitions(tilewright PUBLIC TW_LEVER_PREFETCH=1)
+else()
+    target_compile_definitions(tilewright PUBLIC TW_LEVER_PREFETCH=0)
 endif()
 if(TILEWRIGHT_LEVER_MEMO)
     target_compile_definitions(tilewright PUBLIC TW_LEVER_MEMO=1)
+else()
+    target_compile_definitions(tilewright PUBLIC TW_LEVER_MEMO=0)
 endif()
 
 # Scores are part of the model contract and must not depend on the compiler or

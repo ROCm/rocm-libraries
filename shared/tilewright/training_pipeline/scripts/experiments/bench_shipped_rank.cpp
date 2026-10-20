@@ -30,6 +30,12 @@
 // with the phases' nanoseconds when --stages is on (without --cycle, one line
 // per shape with its median and pass 0).
 //
+// Without --cycle every shape is ranked again and again, and a build with
+// the engine's re-rank memo (TILEWRIGHT_LEVER_MEMO, on by default) can
+// answer every other one of those calls from the memo: build with
+// -DTILEWRIGHT_LEVER_MEMO=OFF to time fresh rankings, as
+// lib/shipped_subset.py does.
+//
 // --hash prints instead an FNV-1a 64 hash of every shape's ranking (config
 // index, scored flag and score bits of every result, rank or rank_top as
 // selected) and of each shape's alone with --hash-each, for checking that

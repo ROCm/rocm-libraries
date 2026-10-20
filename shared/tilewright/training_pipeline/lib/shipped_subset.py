@@ -1527,7 +1527,10 @@ def build_bench(
     source_dir: Path, build_dir: Path, jobs: int = 8, target: str = BENCH_TARGET
 ) -> Path:
     """Build `target` (Release) from `source_dir` (scripts/experiments);
-    returns the binary."""
+    returns the binary. The engine is built without its re-rank memo
+    (TILEWRIGHT_LEVER_MEMO), which can answer every other one of the
+    bench's repeated rankings of a shape, so that every timed call ranks
+    afresh; the prefetch stays as the engine ships it."""
     build_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
@@ -1537,6 +1540,7 @@ def build_bench(
             "-B",
             str(build_dir),
             "-DCMAKE_BUILD_TYPE=Release",
+            "-DTILEWRIGHT_LEVER_MEMO=OFF",
         ],
         check=True,
         stdout=subprocess.DEVNULL,

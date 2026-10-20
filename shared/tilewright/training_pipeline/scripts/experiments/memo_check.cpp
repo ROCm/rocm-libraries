@@ -8,7 +8,9 @@
 // hashes its second call's results (bench_shipped_rank --hash's form) and its
 // first call's; equal hashes in two builds mean equal results. It also prints
 // the median wall-clock of each scenario's second call over the shapes, in
-// microseconds, which shows whether a memo answered it.
+// microseconds, which shows whether a memo answered it, and a build with the
+// memo then prints how many second calls of each scenario it answered, from
+// the engine's own count.
 //
 //   S01  rank_top(1) alone             S02  rank_top(1); rank_top(1)
 //   S03  rank_top(1); rank_top(4)      S04  rank_top(1); rank_top(32)
@@ -29,6 +31,7 @@
 // usage: memo_check MODEL INPUTS
 
 #include "bench_inputs.hpp"
+#include "model_impl.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -74,6 +77,9 @@ int main(int argc, char** argv) {
   std::fill(first_hash, first_hash + kScenarios + 1, bench_inputs::kFnvBasis);
   std::uint64_t s13b_hash = bench_inputs::kFnvBasis;
   std::vector<double> second_us[kScenarios + 1];
+#if TW_LEVER_MEMO
+  std::uint64_t replays[kScenarios + 1] = {};
+#endif
   std::vector<tilewright::Result> first, second;
   for (std::size_t si = 0; si < ix.shapes.size(); ++si) {
     const bench_inputs::Shape& sh             = ix.shapes[si];
@@ -91,9 +97,15 @@ int main(int argc, char** argv) {
     other_pool.prepare(p, hw);
     const auto clear = [&] { set.rank_top(distinct, hw, c, 1, first); };
     const auto timed = [&](int sc, auto&& call) {
+#if TW_LEVER_MEMO
+      const std::uint64_t before = tilewright::detail::memo_counts().replays;
+#endif
       const auto t0 = std::chrono::steady_clock::now();
       call();
       second_us[sc].push_back(us_since(t0));
+#if TW_LEVER_MEMO
+      replays[sc] += tilewright::detail::memo_counts().replays - before;
+#endif
       bench_inputs::hash_results(second, &second_hash[sc]);
     };
     const auto top_then = [&](int sc, auto&& call) {
@@ -149,5 +161,11 @@ int main(int argc, char** argv) {
                 static_cast<unsigned long long>(first_hash[sc]));
   }
   std::printf("S13b %016llx\n", static_cast<unsigned long long>(s13b_hash));
+#if TW_LEVER_MEMO
+  std::printf("# memo replays");
+  for (int sc = 2; sc <= kScenarios; ++sc)
+    std::printf(" S%02d %llu", sc, static_cast<unsigned long long>(replays[sc]));
+  std::printf(" of %zu\n", ix.shapes.size());
+#endif
   return 0;
 }

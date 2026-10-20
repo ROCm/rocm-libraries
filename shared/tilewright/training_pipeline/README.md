@@ -5075,7 +5075,10 @@ forward selection on the training-side GEMMs of every round (never a gate
 slice) orders the bank; every size B is measured on the GEMMs the bundle
 never trained on, per execution context, with the perfect-scoring ceiling
 and, with `scripts/experiments/bench_shipped_rank`, the p50 / p99 time of
-one warm ranking call on one pinned core. That benchmark ranks with
+one warm ranking call on one pinned core (the script builds the benchmark
+without the engine's re-rank memo, which can answer every other one of its
+repeated rankings of a shape; build a `--bench-binary` so too). That
+benchmark ranks with
 hipBLASLt's launch model (`hipblaslt_launch_rule.hpp`, a C++ port of
 `lib/hipblaslt_launch.py`) when the bundle records one, as the engine
 requires, and the script checks its plans against the Python rule first;

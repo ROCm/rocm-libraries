@@ -8,6 +8,11 @@
 // the uncached rank_configs, then a summary over the shapes. A shape line may
 // carry a fifth field, the context's cu_budget.
 //
+// A build with the engine's re-rank memo (TILEWRIGHT_LEVER_MEMO, on by
+// default) can answer every other one of a shape's repeated CandidateSet::rank
+// calls from the memo: build with -DTILEWRIGHT_LEVER_MEMO=OFF to time fresh
+// rankings, as bench_selection_time.sh does.
+//
 // --launch-id ID gives the CandidateSet a launch model with that id, as an
 // MLREC_v3 model that records one requires. Its plans follow a fixed cheap
 // rule, not the integration's: the timings include asking for a plan per
