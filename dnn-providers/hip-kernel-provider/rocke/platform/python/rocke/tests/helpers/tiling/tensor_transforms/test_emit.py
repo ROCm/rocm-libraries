@@ -9,7 +9,8 @@ of per-wave values, and fails on any no-signed-wrap op whose result leaves its t
 proof). The op-count tests pin where work lands: the uniform side once per call, a per-lane
 division at most once per call, one compare and select per access. A golden string per case
 pins the emitted IR text, and every case compiles for gfx90a, gfx942 and gfx950. The GPU tests
-at the end run the same coordinates on a gfx90a and compare each lane's parts with the golden.
+at the end run the same coordinates on whatever GPU is present, compiled for it, and compare each
+lane's parts with the golden.
 
 Every block origin that feeds an unmerge goes through a range marker stating ``0 <= origin <
 length``: the marker the tiling layer's tile guard emits, which a kernel author reaches through
@@ -53,6 +54,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     UniformPart,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
+from rocke.tests.gpu import current_device_arch
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 WAVE = 64
@@ -964,18 +966,6 @@ def test_every_malformed_access_is_refused_before_anything_is_emitted():
 # --- GPU: each lane's parts against the golden ----------------------------------------------------
 
 
-def _require_gfx90a() -> None:
-    hip = pytest.importorskip(
-        "rocke.runtime.hip_module", reason="needs the rocke HIP runtime"
-    )
-    try:
-        arch = hip.get_device_arch(0)
-    except Exception as exc:  # noqa: BLE001 - any HIP failure means no usable GPU here
-        pytest.skip(f"no GPU available: {exc}")
-    if arch != "gfx90a":
-        pytest.skip(f"the GPU tests run on gfx90a, this device is {arch}")
-
-
 def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
     """Run a kernel whose lanes store each access's parts; return ``(addresses, sums)`` where
     ``sums[block][tid][i]`` is access ``i``'s address that lane computed (its parts summed on
@@ -998,7 +988,7 @@ def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
         b.param(name, I32)
     addresses = build(b)
     slots = _store_parts(b, addresses)
-    artifact = compile_kernel(b.kernel, arch="gfx90a")
+    artifact = compile_kernel(b.kernel, arch=current_device_arch())
     signature = SignatureBuilder()
     for name in params:
         signature = signature.scalar(name, "i32")
@@ -1036,7 +1026,7 @@ def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
 def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile():
     """Block 0 is the tile at the image corner (negative halo constants, origin 0); blocks 1
     and 2 are interior tiles."""
-    _require_gfx90a()
+    current_device_arch()
     graph, tensor = _conv(2, 6, 6, 3)
     constants = (0, 1, 26)
 
@@ -1056,7 +1046,7 @@ def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile():
 
 
 def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term():
-    _require_gfx90a()
+    current_device_arch()
     rows, cols = 1 << 20, 4096
     tensor = TensorDesc((rows, cols), (cols, 1), F16)
     graph = identity_graph((rows, cols))
@@ -1083,7 +1073,7 @@ def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_o
     """The input holds more than 2^31 elements but one image far fewer: only n's quotient
     reaches a uniform term, and the per-lane part stays below one image plus the carry.
     """
-    _require_gfx90a()
+    current_device_arch()
     n, h, w, c = 131080, 16, 16, 64
     y_len = x_len = 3
     graph, tensor = _conv(n, h, w, c, y=y_len, x=x_len)

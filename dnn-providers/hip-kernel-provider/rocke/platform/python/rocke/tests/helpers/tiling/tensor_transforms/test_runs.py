@@ -8,7 +8,7 @@ is checked against exhaustive enumeration at every start residue modulo ``width`
 says yes exactly when every start of that residue gives a contiguous address (or one validity
 answer for the whole run), across affine, halo, slice, unmerge and swizzle graphs. The access
 tests pin when a vector keeps one compare, when it takes its first and last element plus the
-span of its valid elements, and that the span is exact on a gfx90a.
+span of its valid elements, and that the span is exact on a GPU.
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ from rocke.helpers.tiling.tensor_transforms.runs import (
     checks_monotone_over_run,
     validity_uniform_over_run,
 )
+from rocke.tests.gpu import current_device_arch
 
 from ._harness import (
     WAVE,
@@ -55,7 +56,6 @@ from ._harness import (
     builder,
     count,
     raises,
-    require_gfx90a,
     run_lanes,
     runtime_length,
 )
@@ -295,7 +295,7 @@ def test_gpu_a_vector_straddling_a_runtime_length_has_an_exact_valid_span(lane_e
     included (the tail ends mid-dword): a vector wholly inside is valid with the full span, a
     straddling one is invalid with exactly its valid elements as its span, and one wholly
     outside has an empty span."""
-    require_gfx90a()
+    current_device_arch()
 
     def build(b):
         length = runtime_length(b, "L", at_most=4096)
@@ -324,7 +324,7 @@ def test_gpu_the_conv_k_vector_span_is_exact_against_the_k_tail():
     """An 8-wide vector along the conv K axis (C = 64, a multiple of the width): only the K tail
     and the halo decide it, and every element agrees with the graph evaluated in Python.
     """
-    require_gfx90a()
+    current_device_arch()
     graph, tensor = _conv(1, 3, 3, 64, y=1, x=1, pad=0)
     m_length, k_length = graph.inputs["m"], graph.inputs["k"]
 

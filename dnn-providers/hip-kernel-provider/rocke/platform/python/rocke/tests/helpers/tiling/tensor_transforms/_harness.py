@@ -7,9 +7,9 @@
   kernel parameter behind a range marker stating its facts, read back as a ``RuntimeValue``.
 - ``RuntimeTensor`` -- a tensor description with runtime lengths (the entries read only
   ``lengths``, ``strides`` and ``dtype``).
-- ``gfx90a_isa`` -- the disassembled gfx90a ISA of a kernel.
-- ``run_lanes`` -- build a test-local kernel, run it on a gfx90a, and return what every lane
-  stored.
+- ``gfx90a_isa`` -- the disassembled gfx90a ISA of a kernel (compiled offline; no GPU needed).
+- ``run_lanes`` -- build a test-local kernel, compile it for the GPU present, run it, and return
+  what every lane stored.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ import pytest
 from rocke.core.ir import I1, I32, I64, IRBuilder, PtrType, Value
 from rocke.helpers.tiling.tensor_transforms import RuntimeValue
 from rocke.helpers.tiling.tensor_transforms.walk import runtime_value_of
+from rocke.tests.gpu import current_device_arch
 
 WAVE = 64
 
@@ -130,18 +131,6 @@ def isa_count(isa: str, pattern: str) -> int:
     return len(re.findall(rf"^\s*({pattern})\b", isa, flags=re.MULTILINE))
 
 
-def require_gfx90a() -> None:
-    hip = pytest.importorskip(
-        "rocke.runtime.hip_module", reason="needs the rocke HIP runtime"
-    )
-    try:
-        arch = hip.get_device_arch(0)
-    except Exception as exc:  # noqa: BLE001 - any HIP failure means no usable GPU here
-        pytest.skip(f"no GPU available: {exc}")
-    if arch != "gfx90a":
-        pytest.skip(f"the GPU tests run on gfx90a, this device is {arch}")
-
-
 def run_lanes(
     build: Callable[[IRBuilder], Sequence[Value]],
     *,
@@ -150,8 +139,9 @@ def run_lanes(
     n_blocks: int = 1,
     per_block: bool = False,
 ):
-    """Run a kernel whose lanes store the values ``build`` returns; return them as an int64
-    array ``[block, lane, slot]`` (``[block, slot]`` with ``per_block``).
+    """Run a kernel whose lanes store the values ``build`` returns, compiled for the GPU
+    present; return them as an int64 array ``[block, lane, slot]`` (``[block, slot]`` with
+    ``per_block``). A block is ``WAVE`` (64) threads whatever the GPU's wave size.
 
     ``scalars`` are i32 kernel parameters (declared by the test with ``runtime_length`` or
     ``b.param``, in this order, before ``build`` returns); ``buffers`` are read-only i32 arrays,
@@ -187,7 +177,7 @@ def run_lanes(
         elif param.name != "out":
             signature = signature.scalar(param.name, "i32")
     signature = signature.ptr("out", "i64")
-    artifact = compile_kernel(b.kernel, arch="gfx90a")
+    artifact = compile_kernel(b.kernel, arch=current_device_arch())
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,

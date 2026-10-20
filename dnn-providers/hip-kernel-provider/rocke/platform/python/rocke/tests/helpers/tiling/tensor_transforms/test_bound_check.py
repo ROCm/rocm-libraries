@@ -8,7 +8,7 @@ host tests run the emitted IR with each op's integer width (``test_emit``'s inte
 fails on any no-signed-wrap op that overflows) and compare every answer with the Python
 ``lo <= value < hi``. The op-count tests pin which width each fold takes and where the work
 lands; the ISA tests pin what the gfx90a compiler makes of it (64-bit compares only where a
-per-wave value needs 64 bits). The GPU tests run the same checks on a gfx90a.
+per-wave value needs 64 bits). The GPU tests run the same checks on whatever GPU is present.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from rocke.helpers.tiling.tensor_transforms.walk import (
     runtime_value_of,
     split_coordinate,
 )
+from rocke.tests.gpu import current_device_arch
 
 from ._harness import (
     WAVE,
@@ -48,7 +49,6 @@ from ._harness import (
     isa_count,
     ops,
     raises,
-    require_gfx90a,
     run_lanes,
     runtime_length,
     store_values,
@@ -425,7 +425,7 @@ def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
     """One kernel computes, for one wave-uniform value per workgroup, both the single compare
     and the forced fold, for int upper ends 1, 2, 1024 and 2^31 - 1 and a runtime length; the
     two answers are equal and equal ``0 <= u < hi`` on every value."""
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     int_ends = (1, 2, 1024, I32_MAX)
@@ -456,7 +456,7 @@ def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
 
 
 def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values():
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     values = np.array(EDGE_VALUES, dtype=np.int64)
@@ -492,7 +492,7 @@ def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(extent, w
     """``lo <= s + lane`` with no upper end, ``s`` and ``lo`` at the extremes of their stated
     ranges (the full i32 range for the 64-bit fold, a narrower one for the 32-bit fold), every
     lane of ``[0, extent)``."""
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     limit = 1 << 31 if wide else 1 << 29
@@ -534,7 +534,7 @@ def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
     through ``_required_checks`` + ``_emit_bound_check`` with a two-sided ``AxisBound``: exact for
     every lane, and an empty (``hi == lo``) or inverted (``hi < lo``) window accepts nothing,
     including a window wider than 2^31."""
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     cases = []
@@ -585,7 +585,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
     constant in 32 bits, and ``lo - s`` / ``L - s`` reach -2^31, 2^31 - 1, 2^31 and beyond; with
     ``s`` and ``L`` stated inside 2^29 the fold is 32-bit, exact at the edges of those ranges.
     """
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     from rocke.helpers.tiling.tensor_transforms import emit_access_validity
@@ -620,7 +620,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
 
 
 def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     extremes = (I32_MIN, I32_MIN + 1, -1, 0, 1, 4096, I32_MAX)
@@ -649,7 +649,7 @@ def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
 
 
 def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_lane():
-    require_gfx90a()
+    current_device_arch()
     import numpy as np
 
     ends = ((-2, 12), (0, 12), (5, 40), (0, None))

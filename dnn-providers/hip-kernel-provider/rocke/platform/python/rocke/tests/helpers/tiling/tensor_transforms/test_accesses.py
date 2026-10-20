@@ -40,6 +40,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     Side,
     _required_checks,
 )
+from rocke.tests.gpu import current_device_arch
 
 from ._harness import (
     WAVE,
@@ -48,7 +49,6 @@ from ._harness import (
     count,
     ops,
     raises,
-    require_gfx90a,
     run_lanes,
     runtime_length,
 )
@@ -421,7 +421,7 @@ def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_whe
     """A 2 x 5 x 7 x 3 input, a 3 x 3 filter with pad 1: rows past ``N * Ho * Wo`` (the ragged M
     tile), columns past ``Y * X * C`` (the K tail) and halo taps outside ``H`` / ``W`` on both
     sides are invalid; every other access is valid."""
-    require_gfx90a()
+    current_device_arch()
     n, h, w, c = 2, 5, 7, 3
     graph, tensor = _conv(n, h, w, c)
     m_length, k_length = graph.inputs["m"], graph.inputs["k"]
