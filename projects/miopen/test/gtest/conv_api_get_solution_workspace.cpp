@@ -148,7 +148,7 @@ protected:
     void Check(const char* selected_solver,
                const char* algorithm,
                std::size_t db_workspace,
-               std::optional<std::size_t> expected_reported,
+               std::size_t expected_reported,
                bool verify_grouped_forward = false)
     {
         const miopen::TempFile find_db{"miopen.test.get_solution_workspace"};
@@ -159,15 +159,10 @@ protected:
         const auto solutions = GetSolutions();
         ASSERT_EQ(solutions.size(), 1) << "expected only the record from the temporary find-db";
         ASSERT_EQ(solutions[0].solution_id, solver_id);
-        if(expected_reported)
-        {
-            if(verify_grouped_forward)
-                ASSERT_GE(solutions[0].workspace_size, *expected_reported);
-            else
-                ASSERT_EQ(solutions[0].workspace_size, *expected_reported);
-        }
+        if(verify_grouped_forward)
+            ASSERT_GE(solutions[0].workspace_size, expected_reported);
         else
-            ASSERT_GT(solutions[0].workspace_size, db_workspace);
+            ASSERT_EQ(solutions[0].workspace_size, expected_reported);
 
         // What a framework does next: allocate exactly the reported size and run Immediate.
         DeviceBuffer x{x_bytes}, w{w_bytes}, y{y_bytes}, ws{solutions[0].workspace_size};
@@ -294,5 +289,5 @@ TEST_F(GPU_ConvApiGetSolutionWorkspace_FP16, GroupFwdNonzeroUndersizedWorkspaceE
     const auto selected_workspace = SelectedWorkspace(group_fwd_solver_name);
     ASSERT_TRUE(selected_workspace);
     ASSERT_GT(*selected_workspace, 1);
-    Check(group_fwd_solver_name, implicit_gemm_algo, 1, selected_workspace, true);
+    Check(group_fwd_solver_name, implicit_gemm_algo, 1, *selected_workspace, true);
 }
