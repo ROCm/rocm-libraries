@@ -4192,17 +4192,6 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
-    def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.32x32x16.f16")
-        self._current().emit(
-            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
-            f"<8 x half> {self._operand(a)}, "
-            f"<8 x half> {self._operand(b)}, "
-            f"<16 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
-        )
-
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
