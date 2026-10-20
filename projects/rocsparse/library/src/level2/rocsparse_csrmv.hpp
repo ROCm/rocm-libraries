@@ -61,7 +61,7 @@ namespace rocsparse
                                                                const I*              csr_row_ptr,
                                                                const J*              csr_col_ind,
                                                                rocsparse_csrmv_info* p_csrmv_info,
-                                                               bool*                 retarget_to_nnzsplit);
+                                                               bool* retarget_to_nnzsplit);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_lrb_template_dispatch(rocsparse_handle          handle,

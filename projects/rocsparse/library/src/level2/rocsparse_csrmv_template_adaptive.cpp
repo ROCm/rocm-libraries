@@ -358,7 +358,7 @@ rocsparse_status
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
                                                          rocsparse_csrmv_info*     p_csrmv_info,
-                                                         bool*                     retarget_to_nnzsplit)
+                                                         bool* retarget_to_nnzsplit)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
