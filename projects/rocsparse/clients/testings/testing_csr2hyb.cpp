@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,7 +120,7 @@ void testing_csr2hyb(const Arguments& arg)
         }
 
         // Test invalid user_ell_width
-        rocsparse_int max_allowed = (M == 0) ? 0 : ((2 * nnz - 1) / M + 1);
+        int64_t max_allowed = (M == 0) ? 0 : ((2 * static_cast<int64_t>(nnz) - 1) / M + 1);
 
         if(user_ell_width > max_allowed)
         {
@@ -151,7 +151,7 @@ void testing_csr2hyb(const Arguments& arg)
             ell_max_width = std::max(hcsr_row_ptr[i + 1] - hcsr_row_ptr[i], ell_max_width);
         }
 
-        rocsparse_int max_allowed = (M == 0) ? 0 : ((2 * nnz - 1) / M + 1);
+        int64_t max_allowed = (M == 0) ? 0 : ((2 * static_cast<int64_t>(nnz) - 1) / M + 1);
 
         if(ell_max_width > max_allowed)
         {

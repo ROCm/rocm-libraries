@@ -175,13 +175,13 @@ void testing_hybmv(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // ELL width limit
-    int width_limit = (m > 0) ? ((2 * nnz - 1) / m + 1) : 0;
+    int64_t width_limit = (m > 0) ? ((2 * static_cast<int64_t>(nnz) - 1) / m + 1) : 0;
 
     // Limit ELL user width
     if(part == HIPSPARSE_HYB_PARTITION_USER)
     {
-        user_ell_width = (m > 0) ? (user_ell_width * nnz / m) : 0;
-        user_ell_width = std::min(width_limit, user_ell_width);
+        const int64_t scaled_width = (m > 0) ? (static_cast<int64_t>(user_ell_width) * nnz / m) : 0;
+        user_ell_width             = static_cast<int>(std::min(width_limit, scaled_width));
     }
 
     // Convert CSR to HYB
