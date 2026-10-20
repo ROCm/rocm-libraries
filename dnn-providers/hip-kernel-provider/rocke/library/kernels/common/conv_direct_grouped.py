@@ -741,6 +741,22 @@ def _direct_conv_lane_head(b, c_wave):
     return c_half_bytes, oob_sentinel, tid, wave_id, lane
 
 
+def _direct_conv_h_loop_args(b, p, A_smem, p_Hi, params, q_subtiles, zero_acc,
+                             store_to_lds, issue_dram_load, c0):
+    """Shared H-loop preamble: prologue prefetch, unroll/trip counts, D descriptor,
+    accumulator arg names."""
+    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
+        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    )
+
+    d_desc = direct_d_descriptor_dynamic(b, params)
+
+    acc_args = [
+        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
+    ]
+    return UNROLL, c_unroll, n_iters_v, d_desc, acc_args
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -1110,18 +1126,9 @@ def build_direct_conv_16c(
     # offset=-PAD, lo=0, hi=H) flips the validity to false; the loader
     # then replaces the byte offset with the OOB sentinel + zero-fill
     # so the prologue effectively zero-fills A_smem for iter 0.
-    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
-        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    UNROLL, c_unroll, n_iters_v, d_desc, acc_args = _direct_conv_h_loop_args(
+        b, p, A_smem, p_Hi, params, q_subtiles, zero_acc, store_to_lds, issue_dram_load, c0
     )
-
-    # Output descriptor: D[N, Ho, Wo, total_k] in NHWK. Built ONCE outside
-    # the loop so each iteration only pays one ``d_desc.offset`` emission.
-    d_desc = direct_d_descriptor_dynamic(b, params)
-
-    # One accumulator per (q_subtile, KH slot), carried across the loop.
-    acc_args = [
-        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
-    ]
 
     def _acc_index(qt: int, pi: int) -> int:
         return qt * p.KH + pi
@@ -1912,15 +1919,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         vec = b.smem_load_vN(lds, c0, lds_idx, dtype=io_type, n=4)
         return b.select(lane_in_lo_half, vec, fp16x4_zero)
 
-    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
-        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    UNROLL, c_unroll, n_iters_v, d_desc, acc_args = _direct_conv_h_loop_args(
+        b, p, A_smem, p_Hi, params, q_subtiles, zero_acc, store_to_lds, issue_dram_load, c0
     )
-
-    d_desc = direct_d_descriptor_dynamic(b, params)
-
-    acc_args = [
-        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
-    ]
 
     def _acc_index(qt: int, pi: int) -> int:
         return qt * p.KH + pi
@@ -2306,15 +2307,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
 
     q_subtiles = BLOCK_Q // 32
 
-    UNROLL, c_unroll, n_iters_v = _direct_conv_h_loop_setup(
-        b, p, A_smem, p_Hi, store_to_lds, issue_dram_load, c0
+    UNROLL, c_unroll, n_iters_v, d_desc, acc_args = _direct_conv_h_loop_args(
+        b, p, A_smem, p_Hi, params, q_subtiles, zero_acc, store_to_lds, issue_dram_load, c0
     )
-
-    d_desc = direct_d_descriptor_dynamic(b, params)
-
-    acc_args = [
-        (f"acc_q{qt}_p{pi}", zero_acc) for qt in range(q_subtiles) for pi in range(p.KH)
-    ]
 
     def _acc_index(qt: int, pi: int) -> int:
         return qt * p.KH + pi
