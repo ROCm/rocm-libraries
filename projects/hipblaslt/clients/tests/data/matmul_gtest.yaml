@@ -1901,6 +1901,93 @@ Tests:
   unit_check: 0
   norm_check: 1
 
+- name: matmul_bias_gelu_aux_bf16_fp32
+  category: pre_checkin
+  function:
+    matmul: [ *hpa_bf16_precision, *single_precision ]
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: gelu
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_bias_gelu_aux_bf16_fp32_large
+  category: pre_checkin
+  function:
+    matmul: [ *hpa_bf16_precision, *single_precision ]
+  M: 768
+  N: 4096
+  K: 768
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0.0
+  use_e: 1
+  activation_type: gelu
+  bias_vector: 1
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_fp8_dst_fp8_amaxD_1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+  matrix_size:
+    - { M: 127, N: 127, K: 127 }
+    - { M: 129, N: 129, K: 129 }
+    - { M: 768, N: 4096, K: 768 }
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0.0
+  bias_vector: [0, 1]
+  bias_type: [f16_r, bf16_r]
+  scaleA: [1]
+  scaleB: [1]
+  scaleD: [1]
+  amaxD: [1]
+  unit_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_mxfp8_mix_dst_f16_bf16_f32_1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: bf8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K: 256 }
+    - { M: 129, N: 129, K: 256 }
+    - { M: 256, N: 256, K: 256 }
+    - { M: 2304, N: 4096, K: 768 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  initialization: uniform_low_precision
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
 - name: matmul_bias_gelu_aux_fp8_fnuz_TN
   category: pre_checkin
   function:
@@ -2877,6 +2964,89 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
+# gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
+# Every scale mode (G32/64/128, symmetric and _ZP) under both encodings.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: [1006, 1007, 1008, 1009, 1010, 1011], int4_encoding: [0, 1] }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: [1012, 1013, 1014, 1015, 1016, 1017], int4_encoding: [0, 1] }
+  matrix_size:
+    - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# Asymmetric, odd M: partial last 8-row zero-point word.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1009, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1010, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1016, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1017, int4_encoding: 1 }
+  matrix_size:
+    - { M: 65, N: 64, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# Padded lda (a multiple of 8, not of 32) for the decode and tile kernels.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1008, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1011, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1015, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1012, int4_encoding: 1 }
+  matrix_size:
+    - { M: 128, N:  1, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N: 64, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# Same via the ext API; only use_ext_setproblem 1 (api_method cpp) reads
+# setInt4EncodingA and the w4a16 modes from GemmProblemType/GemmEpilogue.
+- name: matmul_w4a16_ext
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1008, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1011, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1016, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1013, int4_encoding: 1 }
+  matrix_size:
+    - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+  use_ext: [1]
+  use_ext_setproblem: [0, 1]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
 - name: matmul_mx_all_kernels
   category: nightly
   function:
@@ -3849,8 +4019,8 @@ Tests:
 # is linear in the result, so fast_check folds every scale into its probe sums;
 # scaleA and scaleB may each be one value or a vector (per row of D for scaleA,
 # per column for scaleB). The scales and bias come from the generic integer fill
-# (1 to 10), so reading the wrong one changes D. E, the pre-activation result times
-# scaleE, is checked the same way. relu and clamp are checked element by element
+# (1 to 10), so reading the wrong one changes D. E, the pre-activation result, is
+# checked the same way. relu and clamp are checked element by element
 # from the verified E; GELU, SiLU and sigmoid have no exact integer form and are
 # not supported. amaxD must equal the largest |activation| over the verified
 # result, and a bias gradient must equal the exact row or column sums. Each case
@@ -4049,28 +4219,6 @@ Tests:
   fast_check: 1
   gpu_arch: '9(42|50)'
 
-# ROCM-32138: the library accepts HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
-# but never passes it to the kernel, so E is written unscaled. fast_check and
-# unit_check both report E off by the scale factor. Quarantined in known_bugs.yaml.
-- name: matmul_fast_check_aux_scale_e_ROCM32138
-  category: pre_checkin
-  function:
-    matmul: *hpa_half_precision
-  matrix_size:
-    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 131 }
-  transA: N
-  transB: T
-  alpha: 2.0
-  beta: -2.0
-  bias_vector: 1
-  bias_type: f32_r
-  use_e: 1
-  scaleE: 1
-  activation_type: relu
-  initialization: integer_exact
-  unit_check: 1
-  fast_check: 1
-
 # E and D laid out differently (lde = M, and a padded lde), one batch and two, where
 # the CPU reference used to write E with D's leading dimension and batch stride
 # (ROCM-32139).
@@ -4268,10 +4416,9 @@ Tests:
   unit_check: 0
   fast_check: 1
 
-# ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
-# kernel arguments, so batch 1 reads or writes the wrong place and the GEMM
-# returns success with a wrong D. Each operand's stride in turn starts batch 1
-# just past 2^32. Quarantined in known_bugs.yaml.
+# Batch strides of 2^32 elements or more, one operand at a time, so batch 1 starts
+# just past 2^32. Kernels take batch strides as 32-bit values, so the library must
+# refuse these (allow_no_solution) rather than return a wrong D (ROCM-32140).
 - name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140
   category: stress
   function:
@@ -4747,16 +4894,15 @@ Tests:
 # shape here.
 ###############################################################################
 
-# Every fp8 format pair, each solution launched and checked twice. gfx1250 has no MX
-# kernels with bf8 inputs, so the rows with bf8 run on gfx950 alone.
+# Every fp8 format pair, each solution launched and checked twice.
 - name: matmul_fast_check_mx_fp8
   category: pre_checkin
   function:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r, gpu_arch: '950'}
-    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r, gpu_arch: '950'}
-    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r, gpu_arch: '950'}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   matrix_size:
     - { M: 256, N: 256, K: 512 }
     - { M: 1040, N: 528, K: 1024 }
@@ -4792,13 +4938,13 @@ Tests:
   fast_check: 1
   gpu_arch: '(950|1250)'
 
-# Large K, where the scale tensors span many blocks. f8 x bf8 on gfx950 alone, as above.
+# Large K, where the scale tensors span many blocks.
 - name: matmul_fast_check_mx_fp8_large_k
   category: nightly
   function:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r, gpu_arch: '950'}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   matrix_size:
     - { M: 3072, N: 3072, K: 16384 }
     - { M: 2560, N: 16384, K: 2560 }

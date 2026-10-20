@@ -45,6 +45,7 @@ add_library(roc::hostnumerics ALIAS hostnumerics)
 target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 
 if(HOSTNUMERICS_BUILD_TESTING)
+    list(APPEND CMAKE_MODULE_PATH "${HostNumerics_SOURCE_DIR}/cmake")
     enable_testing()
     add_subdirectory(tests)
 endif()
