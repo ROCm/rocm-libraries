@@ -1,11 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Independent bit-stream fixtures for matrices and scales."""
+"""Independent bit-stream fixtures for matrices and scales, and register packing.
+
+The C++ engine's register packing answers through the ``rocke_storage`` test
+binary (``ROCKE_STORAGE_TEST``); the native tests require its answers and its
+refusal texts to equal ``core/storage.py``'s.
+"""
+
+import os
+import re
+import subprocess
 
 import pytest
-
 from rocke.core.arch.wmma_scale import ScalePacking, scaled_matrix_layout
-from rocke.core.storage import BitPacking, FragmentPacking
+from rocke.core.storage import (
+    BitPacking,
+    FragmentPacking,
+    packed_word_range,
+    register_packing,
+)
 
 
 @pytest.mark.parametrize("bits", [4, 6, 8, 16, 32, 64])
@@ -84,3 +97,165 @@ def test_invalid_packing_and_overflow():
         BitPacking(6).byte_size(1 << 63)
     with pytest.raises(ValueError, match="fit"):
         BitPacking(6).pack([64])
+
+
+_PACKED = [
+    ("fp4e2m1", 32, 4),
+    ("fp6e2m3", 32, 6),
+    ("fp6e3m2", 16, 3),
+    ("i4", 16, 2),
+    ("u4", 8, 1),
+]
+_NOT_PACKED = ["fp8e4m3", "i8", "fp16", "bf16", "fp32", "fp64"]
+_WORD_RANGES = [
+    ("fp4e2m1", 32, 32, range(4, 8)),
+    ("fp6e2m3", 32, 32, range(6, 12)),
+    ("fp6e2m3", 16, 16, range(3, 6)),
+    ("i4", 0, 8, range(1)),
+]
+_FRAGMENT_OVERRUNS = [
+    (-8, 8, "^start must be at least 0, got -8$"),
+    (8, 0, "^length must be at least 1, got 0$"),
+    (56, 16, "^elements \\[56, 72\\) run past the fragment's 64 elements$"),
+]
+
+
+@pytest.mark.parametrize(("dtype", "count", "registers"), _PACKED)
+def test_sub_byte_elements_pack_densely_into_whole_registers(dtype, count, registers):
+    packing = register_packing(dtype, count)
+    assert packing.carrier_bits == 32
+    assert packing.carrier_count == registers
+    assert packing.padding_bits == 0
+
+
+@pytest.mark.parametrize("dtype", _NOT_PACKED)
+def test_byte_or_wider_elements_are_not_packed(dtype):
+    assert register_packing(dtype, 8) is None
+
+
+def test_register_packing_lays_out_bits_like_a_hand_built_fragment():
+    patterns = [(3 * i + 1) % 64 for i in range(16)]
+    by_hand = FragmentPacking(BitPacking(6), 16, 32, 3)
+    assert register_packing("fp6e2m3", 16).pack(patterns) == by_hand.pack(patterns)
+
+
+def test_a_payload_that_leaves_a_register_partly_filled_raises():
+    message = (
+        "3 fp6e2m3 elements occupy 18 bits, not a whole number of 32-bit registers "
+        "-- packed operands must fill whole registers"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        register_packing("fp6e2m3", 3)
+
+
+@pytest.mark.parametrize("count", [2.0, True])
+def test_register_packing_needs_an_integer_count(count):
+    with pytest.raises(TypeError, match="^element count must be an integer"):
+        register_packing("fp4e2m1", count)
+
+
+@pytest.mark.parametrize("count", [0, -4])
+def test_register_packing_needs_a_positive_count(count):
+    with pytest.raises(ValueError, match="^element count must be at least 1"):
+        register_packing("fp4e2m1", count)
+
+
+def test_a_predicate_is_not_register_data():
+    with pytest.raises(ValueError, match="^i1 is a predicate, not register data$"):
+        register_packing("i1", 32)
+
+
+@pytest.mark.parametrize(("dtype", "start", "length", "words"), _WORD_RANGES)
+def test_an_element_range_maps_to_the_registers_that_hold_it(
+    dtype, start, length, words
+):
+    assert packed_word_range(register_packing(dtype, 64), start, length) == words
+
+
+def test_an_element_range_off_a_register_boundary_raises():
+    message = (
+        "elements [3, 35) of a fragment packed at 4 bits per element do not start "
+        "and end on a register boundary (32 bits) -- start and length must be "
+        "multiples of 8 elements"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        packed_word_range(register_packing("fp4e2m1", 64), 3, 32)
+
+
+@pytest.mark.parametrize(("start", "length", "message"), _FRAGMENT_OVERRUNS)
+def test_an_element_range_must_lie_inside_the_fragment(start, length, message):
+    with pytest.raises(ValueError, match=message):
+        packed_word_range(register_packing("fp4e2m1", 64), start, length)
+
+
+@pytest.mark.parametrize(("start", "length"), [(True, 8), (8.0, 8), (0, 8.0)])
+def test_an_element_range_needs_integer_ends(start, length):
+    with pytest.raises(TypeError, match="must be an integer"):
+        packed_word_range(register_packing("fp4e2m1", 64), start, length)
+
+
+def test_the_boundary_error_names_the_step_for_fp6():
+    with pytest.raises(ValueError, match="multiples of 16 elements$"):
+        packed_word_range(register_packing("fp6e2m3", 64), 8, 16)
+
+
+def _native(*arguments: str) -> str:
+    """One answer of the ``rocke_storage`` binary, or skip when it is not built."""
+    executable = os.environ.get("ROCKE_STORAGE_TEST")
+    if not executable:
+        pytest.skip("set ROCKE_STORAGE_TEST to the built native storage test")
+    return subprocess.run(
+        [executable, *arguments], check=True, capture_output=True, text=True
+    ).stdout.rstrip("\n")
+
+
+def _python_register_packing(dtype: str, count: int) -> str:
+    """The twin of ``rocke_storage --register-packing``."""
+    try:
+        packing = register_packing(dtype, count)
+    except ValueError as error:
+        return f"error: {error}"
+    if packing is None:
+        return "none"
+    return (
+        f"element_bits={packing.packing.element_bits} "
+        f"slot_bits={packing.packing.slot_bits} count={packing.count} "
+        f"carrier_bits={packing.carrier_bits} carrier_count={packing.carrier_count}"
+    )
+
+
+def _python_packed_word_range(dtype: str, count: int, start: int, length: int) -> str:
+    """The twin of ``rocke_storage --packed-word-range``."""
+    try:
+        words = packed_word_range(register_packing(dtype, count), start, length)
+    except ValueError as error:
+        return f"error: {error}"
+    return f"{words.start} {words.stop}"
+
+
+@pytest.mark.parametrize(
+    ("dtype", "count"),
+    [(dtype, count) for dtype, count, _ in _PACKED]
+    + [(dtype, 8) for dtype in _NOT_PACKED]
+    + [
+        ("fp6e2m3", 3),
+        ("fp4e2m1", 0),
+        ("fp4e2m1", -4),
+        ("i1", 32),
+        ("custom_format", 8),
+    ],
+)
+def test_native_register_packing_matches(dtype, count):
+    native = _native("--register-packing", dtype, str(count))
+    assert native == _python_register_packing(dtype, count)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "start", "length"),
+    [(dtype, start, length) for dtype, start, length, _ in _WORD_RANGES]
+    + [("fp4e2m1", start, length) for start, length, _ in _FRAGMENT_OVERRUNS]
+    + [("fp4e2m1", 3, 32), ("fp6e2m3", 8, 16)],
+)
+def test_native_packed_word_range_matches(dtype, start, length):
+    native = _native("--packed-word-range", dtype, "64", str(start), str(length))
+    assert native == _python_packed_word_range(dtype, 64, start, length)

@@ -45,7 +45,7 @@ from builders.common.conv_reference import wgrad_reference as _wgrad_reference_s
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
 # ---------------------------------------------------------------------------
 
-from benchmarks.common.direct_kernel_sweep import (
+from kernels.conv.direct_aot_jobs import (
     BLOCK_GROUPS as _BLOCK_GROUPS,
     BLOCK_Q as _BLOCK_Q,
     DGRAD_BLOCK_H as _DGRAD_BLOCK_H,
@@ -1788,11 +1788,13 @@ def _run_dgrad_sweep(
             direct_dgrad_coalesced_workspace_bytes,
         )
 
-        # Use the LARGEST possible workspace (max over all fold_k32 combinations).
+        # Use the LARGEST possible workspace (max over the fold_k32 settings the
+        # problem admits: fold_k32 needs kpg % 32 == 0).
         wt_dev = rt.alloc(direct_dgrad_workspace_bytes(p))
         _wt_coa_max = max(
-            direct_dgrad_coalesced_workspace_bytes(p, fold_k32=False),
-            direct_dgrad_coalesced_workspace_bytes(p, fold_k32=True),
+            direct_dgrad_coalesced_workspace_bytes(p, fold_k32=k32)
+            for k32 in (False, True)
+            if not k32 or p.kpg % 32 == 0
         )
         wt_coa = rt.alloc(_wt_coa_max)
 
@@ -2091,10 +2093,14 @@ def _run_dgrad_sweep(
 def _cache_directions(args) -> "tuple[str, ...] | None":
     if not args.directions:
         return None
+    from benchmarks.common.direct_kernel_sweep import DIRECT_DIRECTIONS
+
     directions = tuple(d.strip() for d in args.directions.split(",") if d.strip())
     for d in directions:
-        if d not in ("fwd", "dgrad"):
-            raise ValueError(f"direct conv has no {d!r} kernel; use fwd and/or dgrad")
+        if d not in DIRECT_DIRECTIONS:
+            raise ValueError(
+                f"direct conv has no {d!r} kernel; use {', '.join(DIRECT_DIRECTIONS)}"
+            )
     return directions
 
 
@@ -2122,13 +2128,6 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
 
     if args.compile_all:
         directions = directions or args.compile_directions
-        if "wgrad" in directions:
-            print(
-                "error: --compile-all: direct conv caches fwd and dgrad kernels "
-                "only (no wgrad)",
-                file=sys.stderr,
-            )
-            return 2
         cache_dir = Path(args.cache_dir) if args.cache_dir else Path("./kernel_cache")
         rc = 0
         for dtype in args.compile_dtypes:
@@ -2150,7 +2149,13 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
     # Only the direct kernels: the implicit-GEMM entries sharing the cache
     # are far more numerous and this run never launches them.
     rc = describe_cache(
-        cache, directions=("direct_fwd", "direct_dgrad", "direct_dgrad_helper")
+        cache,
+        directions=(
+            "direct_fwd",
+            "direct_dgrad",
+            "direct_dgrad_helper",
+            "direct_wgrad",
+        ),
     )
     if rc:
         return rc
@@ -2175,7 +2180,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
@@ -2210,34 +2215,48 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             torch.manual_seed(42)
             x_shape = (p.N, p.H, p.W, p.total_c)
             y_shape = (p.N, p.Ho, p.Wo, p.total_k)
-            W_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch_dt).uniform_(
-                -1, 1
-            )
-            if direction == "fwd":
-                in_name, out_name = "x", "y"
-                In_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
-                Out_t = torch.empty(*y_shape, dtype=torch_dt)
+            w_shape = (p.total_k, p.KH, p.KW, p.cpg)
+            # inputs: buffer name -> host tensor; Out_t is what the plan writes.
+            if direction == "wgrad":
+                # dW is fp32: the kernel accumulates it through fp32 atomics.
+                X_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
+                dY_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
+                inputs = {"dy": dY_t, "x": X_t}
+                out_name = "dw"
+                Out_t = torch.zeros(*w_shape, dtype=torch.float32)
             else:
-                in_name, out_name = "dy", "dx"
-                In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
-                Out_t = torch.empty(*x_shape, dtype=torch_dt)
+                W_t = torch.empty(*w_shape, dtype=torch_dt).uniform_(-1, 1)
+                if direction == "fwd":
+                    in_name, out_name = "x", "y"
+                    In_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
+                    Out_t = torch.empty(*y_shape, dtype=torch_dt)
+                else:
+                    in_name, out_name = "dy", "dx"
+                    In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
+                    Out_t = torch.empty(*x_shape, dtype=torch_dt)
+                inputs = {in_name: In_t, "w": W_t}
 
             ref_out = None
             if args.verify:
-                ref_fn = (
-                    _conv_reference if direction == "fwd" else _dgrad_reference_shared
-                )
-                ref_out = ref_fn(In_t, W_t, _DirectConvProblemAdapter(p))
+                adapter = _DirectConvProblemAdapter(p)
+                if direction == "wgrad":
+                    ref_out = _wgrad_reference_shared(X_t, dY_t, adapter)
+                elif direction == "fwd":
+                    ref_out = _conv_reference(In_t, W_t, adapter)
+                else:
+                    ref_out = _dgrad_reference_shared(In_t, W_t, adapter)
 
             rt = Runtime()
-            ptrs = {
-                in_name: rt.alloc(In_t.nbytes),
-                "w": rt.alloc(W_t.nbytes),
-                out_name: rt.alloc(Out_t.nbytes),
-            }
-            sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
-            rt.memcpy_h2d(ptrs[in_name], _u8(In_t), In_t.nbytes)
-            rt.memcpy_h2d(ptrs["w"], _u8(W_t), W_t.nbytes)
+            ptrs = {name: rt.alloc(t.nbytes) for name, t in inputs.items()}
+            ptrs[out_name] = rt.alloc(Out_t.nbytes)
+            sizes = {name: t.nbytes for name, t in inputs.items()}
+            sizes[out_name] = Out_t.nbytes
+            for name, t in inputs.items():
+                rt.memcpy_h2d(ptrs[name], _u8(t), t.nbytes)
+            if direction == "wgrad":
+                # Zeroed once, as the JIT sweep does: the timed launches keep
+                # accumulating into it, which costs the same as a zeroed target.
+                rt.memset(ptrs[out_name], 0, Out_t.nbytes)
             # Scratch buffers are sized for the largest plan and shared.
             for plan in plans:
                 for name, nbytes in plan.workspaces.items():
@@ -2246,7 +2265,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 ptrs[name] = rt.alloc(sizes[name])
 
             flop = float(p.flops)
-            bytes_xfer = float(In_t.nbytes + W_t.nbytes + Out_t.nbytes)
+            bytes_xfer = float(sum(t.nbytes for t in inputs.values()) + Out_t.nbytes)
             results = []
             _stop = EarlyStop.for_case(args, p, dtype, direction)
             for plan in plans:
@@ -2308,6 +2327,12 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     )
                 except (HipError, RuntimeError) as e:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
+                    # time_launches drained before raising, but it does not
+                    # raise a failed drain (the launch error is the one it
+                    # reports). Drain again so a failed drain ends the sweep
+                    # here, before the shared buffers below are freed with
+                    # launches possibly still using them.
+                    synchronize_and_release(0)
                     continue
                 if ms is None:
                     _stop.report(plan.label)
@@ -2374,7 +2399,7 @@ def main() -> int:
         default=None,
         choices=["fwd", "dgrad", "wgrad"],
         help="convolution direction to benchmark: fwd (default), dgrad, wgrad. "
-        "With --compile-all: build only this direction (default: fwd and dgrad).",
+        "With --compile-all: build only this direction (default: all three).",
     )
     parser.add_argument(
         "--top",
@@ -2513,8 +2538,8 @@ def main() -> int:
         "--directions",
         default=None,
         dest="directions",
-        help="comma-separated directions (fwd, dgrad) to build or run. "
-        "--compile-all defaults to --direction if given, else both; "
+        help="comma-separated directions (fwd, dgrad, wgrad) to build or run. "
+        "--compile-all defaults to --direction if given, else all three; "
         "--run-from-cache defaults to each case's own direction.",
     )
     cache_grp.add_argument(
@@ -2527,15 +2552,17 @@ def main() -> int:
 
     args = parser.parse_args()
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
     if args.dtype is None:
         args.dtype = "fp16"
-    # --direction likewise: fwd for shape flags, both cached directions for
+    # --direction likewise: fwd for shape flags, every cached direction for
     # --compile-all unless one is named.
+    from benchmarks.common.direct_kernel_sweep import DIRECT_DIRECTIONS
+
     args.compile_directions = (
-        (args.direction,) if args.direction is not None else ("fwd", "dgrad")
+        (args.direction,) if args.direction is not None else DIRECT_DIRECTIONS
     )
     if args.direction is None:
         args.direction = "fwd"

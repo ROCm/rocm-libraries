@@ -875,4 +875,71 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** TRTRI ********************/
+hipsolverStatus_t hipsolverDnXtrtri_bufferSize(hipsolverDnHandle_t handle,
+                                               hipsolverFillMode_t uplo,
+                                               hipsolverDiagType_t diag,
+                                               int64_t             n,
+                                               hipDataType         dataTypeA,
+                                               void*               A,
+                                               int64_t             lda,
+                                               size_t*             lworkOnDevice,
+                                               size_t*             lworkOnHost)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnXtrtri_bufferSize(dn->handle,
+                                                                  hipsolver::hip2cuda_fill(uplo),
+                                                                  hipsolver::hip2cuda_diag(diag),
+                                                                  n,
+                                                                  dataTypeA,
+                                                                  A,
+                                                                  lda,
+                                                                  lworkOnDevice,
+                                                                  lworkOnHost));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDnXtrtri(hipsolverDnHandle_t handle,
+                                    hipsolverFillMode_t uplo,
+                                    hipsolverDiagType_t diag,
+                                    int64_t             n,
+                                    hipDataType         dataTypeA,
+                                    void*               A,
+                                    int64_t             lda,
+                                    void*               workOnDevice,
+                                    size_t              lworkOnDevice,
+                                    void*               workOnHost,
+                                    size_t              lworkOnHost,
+                                    int*                devInfo)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cusolverDnXtrtri(dn->handle,
+                                                       hipsolver::hip2cuda_fill(uplo),
+                                                       hipsolver::hip2cuda_diag(diag),
+                                                       n,
+                                                       dataTypeA,
+                                                       A,
+                                                       lda,
+                                                       workOnDevice,
+                                                       lworkOnDevice,
+                                                       workOnHost,
+                                                       lworkOnHost,
+                                                       devInfo));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 } //extern C

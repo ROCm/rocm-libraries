@@ -77,6 +77,7 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
+  ../common/rocsparse_clients_dnmat_descr.cpp
   ../common/rocsparseio.cpp
 )
 
@@ -157,9 +158,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_csrsort.cpp
 ../testings/testing_cscsort.cpp
 ../testings/testing_coosort.cpp
-../testings/testing_spsort_coo.cpp
-../testings/testing_spsort_csr.cpp
-../testings/testing_spsort_csc.cpp
 ../testings/testing_csricsv.cpp
 ../testings/testing_csrilusv.cpp
 ../testings/testing_nnz.cpp
@@ -231,8 +229,21 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spildlt0.cpp
 )
 
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_sptrsm.cpp)
+endif()
+
 if(BUILD_WITH_ELL_TRSV)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spsv_ell.cpp)
+endif()
+
+if(BUILD_WITH_SPSORT)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES
+    ../testings/testing_spsort_coo.cpp
+    ../testings/testing_spsort_csr.cpp
+    ../testings/testing_spsort_csc.cpp)
 endif()
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})

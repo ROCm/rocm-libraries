@@ -10,7 +10,7 @@ Named scalar types are singletons exported from `core/ir.py`:
 
 ```text
 I1, I8, I32, I64
-F16, BF16, F32
+F16, BF16, F32, F64
 FP8E4M3      # e4m3 fp8 (cvt_fp8_to_f32 / cvt_f32_to_fp8)
 BF8E5M2      # e5m2 fp8 (cvt_bf8_to_f32 / cvt_f32_to_bf8)
 ```
@@ -88,18 +88,19 @@ Kernel attributes consumed by lowering:
 const_i32(value)
 const_i64(value)
 const_f32(value)
+const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
-zero_vec(elem, n)          # f32 / f16 / bf16
+zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i16 / i32
 ```
 
 ### Arithmetic / compare / cast
 
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
-fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
-fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16)
+fadd, fsub, fmul, fdiv, fneg               # f64/f32/f16/bf16 arithmetic
+fmax, fmin                                 # llvm.maxnum / llvm.minnum (f64/f32/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
 land, lor, lnot                            # bitwise + i1 logic
@@ -110,6 +111,8 @@ masked_select                              # alias for select
 sitofp_f32(v)                              # i32 -> f32 (LLVM sitofp)
 cast_to_f32(v)                             # f16/bf16 -> f32
 cast_f32_to(v, target)                     # f32 -> f16/bf16
+cvt_f32_to_f64(v)                          # f32 -> f64 (fpext, exact)
+cvt_f64_to_f32(v)                          # f64 -> f32 (fptrunc, round to nearest even)
 trunc_f32_to_f16(v)                        # f32 -> f16 (fptrunc with attrs)
 bitcast(v, target)                         # scalar bitcast of equal size
 vec_bitcast(v, target_vec_type)            # vector bitcast (e.g. <2xi32> <-> <4xf16>)
@@ -125,7 +128,7 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` is a plain `fdiv` and accepts f64.
 
 ```text
 exp2(v)        # llvm.exp2.f32
@@ -197,7 +200,7 @@ smem_ptr_add(lds_addr, byte_off)              # i64 LDS address arithmetic
 smem_load_f16(smem, indices)
 smem_load_vN_f16(smem, *indices, n in {1,2,4,8})
 smem_load_v4_f16(smem, row, col)
-smem_load_vN(smem, *indices, dtype, n)        # f16/bf16
+smem_load_vN(smem, *indices, dtype, n)        # 8/16/32/64-bit dtypes; see the docstring
 smem_store_f16(smem, indices, value)
 smem_store_vN_f16(smem, indices, value, n)    # ds_write_b{16,32,64,128}
 smem_store_vN(smem, indices, value, n)        # n in {1,2,4,8}
