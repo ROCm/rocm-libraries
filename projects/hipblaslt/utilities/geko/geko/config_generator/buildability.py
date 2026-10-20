@@ -10,6 +10,7 @@ which is where a tuning run's "Generating kernel source resulted in error N" fai
 (VGPR / AGPR / SGPR / LDS / occupancy overflow) are raised. Nothing is assembled or run.
 One list serves every search space but subtile: the heuristic space (exhaustive Tensile
 search, rarely used) is narrower than generic, so it can build no MI generic cannot.
+One list also serves both StreamK settings: lists are generated with StreamK off (LIST_STREAMK).
 
 The fork ranges are geko's own: the generic tuning config geko's config generator writes for
 PROBE_SIZE (MI Designer on every candidate), read back with TensileLite's own loader. So every
@@ -24,9 +25,12 @@ global-read widths move the same bytes whatever the element size:
      LDS buffering, local-read clustering, global-read widths, LDS transpose, MIArchVgpr) and
      every entry of every non-MI group (e.g. DirectToLds / UseSgprForGRO pairs), at their
      lowest-resource values the envelope allows. TransposeLDS 0 (vs auto) trades VGPRs for LDS;
-     with PrefetchGlobalRead 2 it is what builds large gfx950 FP32 NN tiles.
+     with PrefetchGlobalRead 2 it is what builds large gfx950 FP32 NN tiles. TransposeLDS 2 is
+     what builds most LDS-limited gfx950 BF16 / FP8 NN, NT and TT tiles.
   3. One parameter at a time: every value of every parameter and group in the envelope, and
-     every MI entry, starting from the kernel closest to fitting, for up to OFAT_PASSES passes.
+     every MI entry, for up to OFAT_PASSES passes from each of up to MULTI_STARTS of the
+     kernels closest to fitting (the closest per over-used resource first). A single start can
+     sit where no one change helps while a slightly worse kernel is two changes from building.
 An MI none of these build is reported unbuildable, with how far the closest kernel overflows.
 """
 
@@ -90,8 +94,11 @@ PRESETS = [
     },
 ]
 
-# Lowest-resource value of parameters outside the core factorial, where the envelope allows it
-# (gfx950 BF16 study: each alternative costs registers and rescued no MI).
+# Base value of parameters outside the core factorial, where the envelope allows it: usually the
+# lowest-resource one (gfx950 BF16 study: the alternatives cost registers). Not always: for tiles at the
+# VGPR cap, SourceSwap=True (gfx950 FP8 NN/NT) and TailloopInNll=True (FP32, StreamK off) save the last
+# few VGPRs. The one-at-a-time stage finds those; adding them to the factorial would quadruple it for no
+# further MI (checked on every VGPR-limited gfx950 rejection within 20% of fitting).
 LOW_RESOURCE = {
     "MIArchVgpr": False,
     "TransposeLDS": -1,
@@ -109,10 +116,24 @@ LOW_RESOURCE = {
 }
 
 OFAT_PASSES = 2
+MULTI_STARTS = 4
+
+# Stop after _initKernel when a register pool is already this far over its cap. The pools only grow
+# during body generation (rocisa RegisterPool) and checkResources fails a kernel whose pool exceeds the
+# cap, so such a kernel cannot build; skipping the body saves ~0.5 s. Kernels within the margin are
+# generated in full so the one-at-a-time stage still ranks near misses by their exact overflow.
+EARLY_EXIT_MARGIN = 1.2
 
 
 # The search space whose fork ranges define "buildable": the GA's.
 LIST_SEARCH_SPACE = "generic"
+
+# Lists are generated with StreamK off. StreamK changes the kernel kind (persistent StreamK kernels
+# vs one workgroup per tile), and the persistent kernels need slightly more VGPRs: on gfx950 the
+# StreamK-off lists hold every MI the StreamK-on ones do, plus 95 VGPR-edge tiles (FP8 TN, SSS). So
+# a StreamK-off list excludes no MI a run with either setting can build; StreamK-on runs carry the
+# few edge tiles that fail for them.
+LIST_STREAMK = False
 
 
 # ---------------------------------------------------------------------------- the search space
@@ -151,6 +172,7 @@ def write_probe_config(
         ONE_SIZE_PER_CONFIG=True,
         CLUSTER=0,
         BUILDABLE_MIS=False,
+        StreamK=LIST_STREAMK,
     )
     validate_input_config(cfg)
     apply_input_config_defaults(cfg)
@@ -185,22 +207,30 @@ class Measurement:
     lds_cap: Optional[int] = None
     reason: str = ""
 
+    def _usage(self) -> Dict[str, float]:
+        """Each resource's use as a fraction of its cap (VGPRs, SGPRs, LDS, VGPR + AGPR file of 512 per lane)."""
+        return {
+            "vgpr": self.vgpr / self.vgpr_cap,
+            "sgpr": self.sgpr / self.sgpr_cap,
+            "lds": self.lds / self.lds_cap,
+            "vgpr+agpr": (math.ceil(self.vgpr / 8) * 8 + self.agpr) / 512,
+        }
+
     def overflow(self) -> float:
-        """Fraction by which the most over-used resource exceeds its cap (VGPRs, SGPRs, LDS, or the VGPR + AGPR
-        file of 512 per lane); <= 0 fits, inf when no resource counts exist."""
+        """Fraction by which the most over-used resource exceeds its cap; <= 0 fits, inf when no
+        resource counts exist."""
         if self.vgpr is None:
             if self.lds is not None and self.lds_cap:  # LDS rejection before code generation
                 return self.lds / self.lds_cap - 1
             return math.inf
-        return (
-            max(
-                self.vgpr / self.vgpr_cap,
-                self.sgpr / self.sgpr_cap,
-                self.lds / self.lds_cap,
-                (math.ceil(self.vgpr / 8) * 8 + self.agpr) / 512,
-            )
-            - 1
-        )
+        return max(self._usage().values()) - 1
+
+    def resource(self) -> str:
+        """The most over-used resource ("" when no resource counts exist)."""
+        if self.vgpr is None:
+            return "lds" if self.lds is not None and self.lds_cap else ""
+        usage = self._usage()
+        return max(usage, key=usage.get)
 
 
 class CodegenChecker:
@@ -311,6 +341,21 @@ class CodegenChecker:
             except Exception as e:  # e.g. an internal assert: this setting yields no kernel
                 return Measurement(
                     err=-4, reason=f"TensileLite {type(e).__name__} in _initKernel: {e}"
+                )
+            vcap, scap = kw.states.regCaps["MaxVgpr"], kw.states.regCaps["MaxSgpr"]
+            over_v = kw.vgprPool.size() > EARLY_EXIT_MARGIN * vcap
+            if over_v or kw.sgprPool.size() > EARLY_EXIT_MARGIN * scap:
+                # Register counts are lower bounds: the body would only add to them.
+                return Measurement(
+                    err=1 if over_v else 2,
+                    vgpr=kw.vgprPool.size(),
+                    agpr=kw.agprPool.size(),
+                    sgpr=kw.sgprPool.size(),
+                    lds=sol["LdsNumBytes"],
+                    vgpr_cap=vcap,
+                    sgpr_cap=scap,
+                    lds_cap=kw.states.archCaps["DeviceLDS"],
+                    reason=f"too many {'vgprs' if over_v else 'sgprs'} after _initKernel (body skipped)",
                 )
             try:
                 kw._getKernelSource(sol)
@@ -459,7 +504,7 @@ class SettingSearch:
             "ClusterLocalRead": [1, 0],
             "GlobalReadVectorWidthA": width,
             "GlobalReadVectorWidthB": width,
-            "TransposeLDS": [-1, 0],
+            "TransposeLDS": [-1, 0, 2],
             "MIArchVgpr": [False],
         }
         values = {
@@ -502,12 +547,31 @@ class Verdict:
     reason: str = ""
 
 
+def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Up to MULTI_STARTS failed kernels to start the one-at-a-time stage from: the closest to fitting
+    for each over-used resource, then the next closest overall."""
+    ranked = sorted((f for f in failures if f[0] != math.inf), key=lambda f: f[0])
+    starts, resources = [], set()
+    for ov, res, s in ranked:
+        if res not in resources:
+            resources.add(res)
+            starts.append(s)
+    for ov, res, s in ranked:
+        if len(starts) >= MULTI_STARTS:
+            break
+        if not any(s is t for t in starts):
+            starts.append(s)
+    starts.sort(key=lambda s: next(f[0] for f in ranked if f[2] is s))
+    return starts[:MULTI_STARTS]
+
+
 def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
     """Try kernels for one MI until one builds."""
     entries = search.mi_entries(mi)
     if not entries:
         return Verdict(mi, False, "", 0, reason="MI Designer emits no entry for this MI")
     checks, best, best_m, seen = 0, None, None, set()
+    failures: List[Tuple[float, str, Dict[str, Any]]] = []  # (overflow, resource, setting)
 
     def attempt(perms: Iterable[Dict[str, Any]], stage: str) -> Optional[Verdict]:
         nonlocal checks, best, best_m
@@ -520,6 +584,7 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
             checks += 1
             if m.err == 0:
                 return Verdict(mi, True, stage, checks, s)
+            failures.append((m.overflow(), m.resource(), s))
             if best_m is None or m.overflow() < best_m.overflow():
                 best, best_m = s, m
         return None
@@ -532,13 +597,17 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
             v = attempt(perms(entry), stage)
             if v:
                 return v
-    for _ in range(OFAT_PASSES):
-        start = best
-        v = attempt(search.one_at_a_time(start, entries), "one-at-a-time")
-        if v:
-            return v
-        if best is start:
-            break
+    for start in _starts(failures):
+        for _ in range(OFAT_PASSES):
+            n = len(failures)
+            v = attempt(search.one_at_a_time(start, entries), "one-at-a-time")
+            if v:
+                return v
+            closer = min(failures[n:], key=lambda f: f[0], default=None)
+            start_ov = next(f[0] for f in failures if f[2] is start)
+            if closer is None or closer[0] >= start_ov:
+                break
+            start = closer[2]
     return Verdict(
         mi,
         False,
@@ -611,12 +680,15 @@ def write_buildable_list(
         "#\n",
         "# An MI is listed when TensileLite code generation builds at least one kernel for it with every other\n",
         "# parameter inside this search space's fork ranges (geko's own tuning config for PROBE_SIZE in\n",
-        "# geko/config_generator/buildability.py). MI Designer reads this list instead of enumerating MIs.\n",
+        "# geko/config_generator/buildability.py), generated with StreamK off: it also holds the few\n",
+        "# tiles that build only as non-StreamK kernels. MI Designer reads this list instead of\n",
+        "# enumerating MIs.\n",
         f"# {len(buildable)} of {len(verdicts)} candidate MIs are buildable; the others are listed at the end.\n",
         "\n",
         f"Architecture: {library_logic_architecture(arch)}\n",
         f"GemmType: {gemm_name}\n",
         f"SearchSpace: {LIST_SEARCH_SPACE}\n",
+        f"StreamK: {str(LIST_STREAMK).lower()}\n",
         f"Source: {source}\n",
         "MatrixInstructions:\n",
     ]
