@@ -96,6 +96,17 @@ try
     work3 = mem[2];
     work4 = mem[3];
 
+    {
+        // -------------------------------------------------------
+        // check for early termination suggested by copilot review
+        // -------------------------------------------------------
+        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count_arg >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
+
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
