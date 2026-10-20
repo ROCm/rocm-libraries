@@ -639,6 +639,40 @@ def _direct_conv_builder(spec, THREADS, io_type):
     return b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo
 
 
+def _direct_store_offset(b, d_desc, k_val, ho_row_v, out_q, n, c_half_bytes, store_ok, oob_sentinel):
+    """Shared dgrad store preamble: d_desc.offset, byte scale, OOB select."""
+    d_base, _ = d_desc.offset(
+        b,
+        n=n,
+        h=ho_row_v,
+        w=out_q,
+        k=k_val,
+    )
+    d_base_bytes = b.mul(d_base, c_half_bytes)
+    safe_d_off = b.select(store_ok, d_base_bytes, oob_sentinel)
+    return d_base, d_base_bytes, safe_d_off
+
+
+def _reorg_src_dst_off(
+    b, wt_desc, k_new_val, r_prime, s_prime, c_new, src_ok, c_half_bytes, oob_sentinel,
+    p_dtype, a_rsrc, c0, ELEMS_PER_LANE, bx, tid, WAVE,
+):
+    """Shared weight-reorg offsets: source W_T offset + load + destination offset."""
+    src_off, _ = wt_desc.offset(
+        b, k_new=k_new_val, r=r_prime, s=s_prime, c_new=c_new
+    )
+    safe_src = b.select(src_ok, b.mul(src_off, c_half_bytes), oob_sentinel)
+    # Load ELEMS_PER_LANE consecutive elements: n_dwords = ELEMS_PER_LANE // 2
+    val = _buf_load_vN(b, p_dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
+
+    # Destination: stride ELEMS_PER_LANE between consecutive lanes → coalesced.
+    dst_off = b.add(
+        b.mul(bx, b.const_i32(WAVE * ELEMS_PER_LANE)),
+        b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
+    )
+    return src_off, safe_src, val, dst_off
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -1183,15 +1217,9 @@ def build_direct_conv_16c(
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt * 16)), q_in_lane)
                 store_ok = b.land(row_ok, b.cmp_lt(out_q, c_W))
                 k_val = b.add(b.mul(g, c_kpg), b.mul(c4, b.const_i32(4)))
-                d_base, _ = d_desc.offset(
-                    b,
-                    n=n,
-                    h=ho_row_v,
-                    w=out_q,
-                    k=k_val,
+                d_base, d_base_bytes, safe_d_off = _direct_store_offset(
+                    b, d_desc, k_val, ho_row_v, out_q, n, c_half_bytes, store_ok, oob_sentinel
                 )
-                d_base_bytes = b.mul(d_base, c_half_bytes)
-                safe_d_off = b.select(store_ok, d_base_bytes, oob_sentinel)
                 # The 4 per-lane output elements are contiguous in NHWK:
                 # k_out = g*kpg + c4*4 + [0..3]. Store them as one 64-bit
                 # vector instead of four scalar buffer_store_short ops.
@@ -2378,15 +2406,17 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
                         slot1 = slot0 + 1
                         row_off = octant_row_base + half * 2
                         k_val = b.add(k_base, b.const_i32(row_off))
-                        d_base, _ = d_desc.offset(
+                        d_base, d_base_bytes, safe_d_off = _direct_store_offset(
                             b,
-                            n=n,
-                            h=ho_row_v,
-                            w=out_q,
-                            k=k_val,
+                            d_desc,
+                            k_val,
+                            ho_row_v,
+                            out_q,
+                            n,
+                            c_half_bytes,
+                            store_ok,
+                            oob_sentinel,
                         )
-                        d_base_bytes = b.mul(d_base, c_half_bytes)
-                        safe_d_off = b.select(store_ok, d_base_bytes, oob_sentinel)
                         e0 = b.vec_extract(acc_to_flush, slot0)
                         e1 = b.vec_extract(acc_to_flush, slot1)
                         pair_acc = b.vec_pack([e0, e1], F32)
@@ -4821,17 +4851,23 @@ def build_direct_reorganize_weights(
             b.mul(c4, b.const_i32(ELEMS_PER_LANE)),
         ),
     )
-    src_off, _ = wt_desc.offset(
-        b, k_new=k_new_val, r=r_prime, s=s_prime, c_new=c_new_base
-    )
-    safe_src = b.select(src_ok, b.mul(src_off, c_half_bytes), oob_sentinel)
-    # Load ELEMS_PER_LANE consecutive elements: n_dwords = ELEMS_PER_LANE // 2
-    val = _buf_load_vN(b, p.dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
-
-    # Destination: stride ELEMS_PER_LANE between consecutive lanes → coalesced.
-    dst_off = b.add(
-        b.mul(bx, b.const_i32(WAVE * ELEMS_PER_LANE)),
-        b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
+    src_off, safe_src, val, dst_off = _reorg_src_dst_off(
+        b,
+        wt_desc,
+        k_new_val,
+        r_prime,
+        s_prime,
+        c_new_base,
+        src_ok,
+        c_half_bytes,
+        oob_sentinel,
+        p.dtype,
+        a_rsrc,
+        c0,
+        ELEMS_PER_LANE,
+        bx,
+        tid,
+        WAVE,
     )
     safe_dst = b.select(src_ok, b.mul(dst_off, c_half_bytes), oob_sentinel)
     _buf_store_vN(b, p.dtype, d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE // 2)
@@ -4899,13 +4935,23 @@ def _reorganize_weights_rtc_body(
     # The group selects the W_T row; within a row the kpg channels of that
     # group start at 0, so the column is the K slice alone.
     k_new_val = b.add(b.mul(grp, c_cpg), m_row)
-    src_off, _ = wt_desc.offset(b, k_new=k_new_val, r=r_prime, s=s_prime, c_new=k_slice)
-    safe_src = b.select(src_ok, b.mul(src_off, c_half_bytes), oob_sentinel)
-    val = _buf_load_vN(b, p.dtype, a_rsrc, safe_src, c0, ELEMS_PER_LANE // 2)
-
-    dst_off = b.add(
-        b.mul(bx, b.const_i32(WAVE * ELEMS_PER_LANE)),
-        b.mul(tid, b.const_i32(ELEMS_PER_LANE)),
+    src_off, safe_src, val, dst_off = _reorg_src_dst_off(
+        b,
+        wt_desc,
+        k_new_val,
+        r_prime,
+        s_prime,
+        k_slice,
+        src_ok,
+        c_half_bytes,
+        oob_sentinel,
+        p.dtype,
+        a_rsrc,
+        c0,
+        ELEMS_PER_LANE,
+        bx,
+        tid,
+        WAVE,
     )
     _buf_store_vN(
         b, p.dtype, d_rsrc, b.mul(dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE // 2
