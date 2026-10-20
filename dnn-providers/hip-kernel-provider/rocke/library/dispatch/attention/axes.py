@@ -118,9 +118,14 @@ _GFX942_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_causal_mask_phase_split"),
 )
 
+# The K/V cache policy's base value follows the problem (``_kv_cache_policy_3d``).
+# Combinations the spec rejects (e.g. a K/V layout knob without paged fp16/bf16
+# K/V) are dropped.
 _3D_AXES: Tuple[KnobAxis, ...] = (
-    _flag("use_invariant_hoist"),
     _flag("use_wide_kv_load"),
+    _choices_axis("kv_cache_policy", ("stream", "all")),
+    _flag("use_kv_lds_swizzle"),
+    _flag("use_wave_page_id_load"),
 )
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
@@ -418,6 +423,7 @@ _R4_HLPV = {
 _VDBUF = {"use_v_double_buffer": True}
 _VDBUF_STGW = {**_VDBUF, "use_staggered_iter_wait": True}
 _PROD_SCHED_BARRIER_MASKS = (0x0, 0x008, 0x108)
+_SWZ_WPID = {"use_kv_lds_swizzle": True, "use_wave_page_id_load": True}
 
 _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = {
     ("gfx950", "narrow"): (
@@ -516,13 +522,19 @@ _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = 
         for depth, seq in ((2, False), (3, False), (3, True))
     )
     + (("kvcp_nt", {"kv_cache_policy": "nt"}),),
+    # 3D: the K/V layout combinations the dispatcher picks on some problem
+    # (``_dispatch_3d_knobs`` leads each problem's production walk).
     ("gfx942", "splitkv"): (
         ("baseline", {}),
-        ("hoist", {"use_invariant_hoist": True}),
         ("widekv", {"use_wide_kv_load": True}),
-        ("hoist_widekv", {"use_invariant_hoist": True, "use_wide_kv_load": True}),
+        ("widekv_swz_wpid", {"use_wide_kv_load": True, **_SWZ_WPID}),
+        ("swz_wpid", _SWZ_WPID),
     ),
-    ("gfx950", "splitkv"): (("baseline", {}),),
+    ("gfx950", "splitkv"): (
+        ("baseline", {}),
+        ("wpid", {"use_wave_page_id_load": True}),
+        ("swz_wpid", _SWZ_WPID),
+    ),
 }
 # Production micro-axes layered on some stacks: padded K for the single-K
 # unaliased-Q stack, the sched_group_barrier interleave on three transposed
