@@ -806,9 +806,14 @@ def build_attention_dense(
     RIGHT = spec.right_bound  # keys visible ahead of the diagonal (causal only)
     DIAG_TILES = (DIAG_OFF + RIGHT) // BN
     # A row whose band holds no key (top-left, Sq > Skv + W - 1, with a window) must
-    # output zeros. Emitted only then (emit_lse already zeroes them via row_has_key), so
-    # every other kernel's IR is unchanged.
-    EMPTY_ROWS = W > 0 and not spec.varlen and not spec.emit_lse and Sq > Skv + W - 1
+    # output zeros. WINDOW_EMPTY is the shape-INDEPENDENT part (a windowed non-LSE
+    # kernel can face empty rows at some shape); EMPTY_ROWS adds the baked Sq/Skv test.
+    # Under runtime_shape the cache key drops Sq/Skv, so one binary serves shapes with
+    # and without empty rows -- there the empty-row handling must key off WINDOW_EMPTY
+    # (always emit, runtime predicate) and the runtime KV extent, never baked EMPTY_ROWS.
+    # emit_lse already zeroes empty rows via its own row_has_key, so both exclude it.
+    WINDOW_EMPTY = W > 0 and not spec.varlen and not spec.emit_lse
+    EMPTY_ROWS = WINDOW_EMPTY and Sq > Skv + W - 1
     varlen = spec.varlen
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
@@ -931,6 +936,27 @@ def build_attention_dense(
     bt = b.block_id_z()
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+
+    # runtime_shape empty-row predicate, computed HERE (pre-loop) while seqlen_kv_p is
+    # the fresh kernarg value. seqlen_kv_p has no other post-loop use, so reading it in
+    # the epilogue returns a stale register; the per-row i1 carried across the loop does
+    # not. qtok is loop-invariant (q_tok0 + a lane constant), so it is valid pre-loop.
+    # Gated on WINDOW_EMPTY (not baked EMPTY_ROWS): one runtime_shape binary serves
+    # shapes with and without empty rows, and the predicate is a no-op (all rows keep
+    # has_key=True) when the runtime shape has none.
+    rt_empty_has_key = (
+        dense_row_has_key(
+            b,
+            b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0)),
+            seqlen_kv_p,
+            causal=causal,
+            diagonal=DIAG_OFF,
+            window=W,
+            right_bound=RIGHT,
+        )
+        if (WINDOW_EMPTY and spec.runtime_shape)
+        else None
+    )
 
     if varlen:
         # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
@@ -1394,13 +1420,21 @@ def build_attention_dense(
         start_tile = b.select(
             b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
         )
-        if EMPTY_ROWS:
-            # A q-block that starts at or past Skv + W has every key behind its window,
-            # so the unclamped start would point past the last KV tile and the prologue
-            # would load and score another batch's tokens (and for the last batch,
-            # whatever follows the buffer). Pin it to the last real tile: all of its
-            # keys fail the window compare, so the rows stay at the mask sentinel and
-            # the epilogue zeroes them. Blocks with any visible key keep their start.
+        # A q-block that starts at or past Skv + W has every key behind its window,
+        # so the unclamped start would point past the last KV tile and the prologue
+        # would load and score another batch's tokens (and for the last batch,
+        # whatever follows the buffer). Pin it to the last real tile: all of its
+        # keys fail the window compare, so the rows stay at the mask sentinel and
+        # the epilogue zeroes them. Blocks with any visible key keep their start.
+        # Under runtime_shape the last real tile is the runtime n_ktiles_val-1 (baked
+        # EMPTY_ROWS/n_ktiles belong to the compiling shape, not the run shape), and
+        # the clamp must always be emitted since any windowed run shape can be empty.
+        if spec.runtime_shape:
+            _last_tile = b.sub(n_ktiles_val, b.const_i32(1))
+            start_tile = b.select(
+                b.cmp_lt(start_tile, _last_tile), start_tile, _last_tile
+            )
+        elif EMPTY_ROWS:
             start_tile = b.select(
                 b.cmp_lt(start_tile, b.const_i32(n_ktiles - 1)),
                 start_tile,
@@ -1622,11 +1656,14 @@ def build_attention_dense(
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:
         rcp_l = b.rcp(l_i)
-    if EMPTY_ROWS:
+    if EMPTY_ROWS and not spec.runtime_shape:
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
         # (the mean of V), not zero. Real maxima are bounded far above the threshold
         # (see _MAX_SCALE), so a max at the threshold means "no visible key": store zeros.
+        # Under runtime_shape the runtime band can bump an empty row's max, so this
+        # heuristic is unreliable there -- those rows are zeroed in the O store instead
+        # via rt_empty_has_key (computed pre-loop), by the integer bit-mask the LSE path uses.
         rcp_l = b.select(
             b.fcmp("ogt", m_i, b.const_f32(_EMPTY_ROW_MAX_GRID)),
             rcp_l,
@@ -1644,6 +1681,9 @@ def build_attention_dense(
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
     d_half = b.mul(lane_h, b.const_i32(4))
+    # Under runtime_shape, zero keyless rows in the O store via the exact per-row
+    # predicate (against the runtime seqlen), the same integer bit-mask the LSE path
+    # uses. ``runtime_shape`` implies not varlen, so seqlen_kv_p is the right length.
     if spec.emit_lse:
         row_has_key = dense_row_has_key(
             b,
@@ -1696,7 +1736,7 @@ def build_attention_dense(
             dtype,
             D_TILES,
             spec.o_store_width,
-            row_has_key=row_has_key if spec.emit_lse else None,
+            row_has_key=row_has_key if spec.emit_lse else rt_empty_has_key,
         )
     b.ret()
     return b.kernel
