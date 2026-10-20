@@ -231,6 +231,8 @@ rocke_status_t
     /* A different K-loop body; only tagged when set (Python flag "ukd"). */
     if(s->uniform_k_decode)
         ROCKE_DGRAD_NAME_APPEND("_ukd");
+    if(s->patch)
+        ROCKE_DGRAD_NAME_APPEND("_patch");
 #undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
 }
@@ -282,11 +284,37 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         snprintf(reason, reason_cap, "max_sub_gemms must be at least 1");
         return false;
     }
+    /* Python: _patch_conflict, before the record count (a patch record exists
+     * for patch problems only). */
+    if(s->patch)
+    {
+        const char* why = NULL;
+        if(s->split_k != 1)
+            why = "patch requires split_k == 1 (the atomic epilogue has no patch store)";
+        else if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+            why = "patch is not supported with pipeline='wavelet'";
+        else if(p->groups != 1)
+            why = "patch serves ungrouped problems only";
+        else if(!rocke_dgrad_conv_spec_is_strided(s))
+            why = "patch runs on the tilde (strided) path";
+        else if(p->is_3d
+                || !(p->pH == 0 && p->pW == 0 && p->dH == 1 && p->dW == 1 && p->sH >= p->Y
+                     && p->sW >= p->X))
+            why = "patch serves patch embeddings only (no padding or dilation, "
+                  "stride >= filter)";
+        if(why)
+        {
+            snprintf(reason, reason_cap, "%s", why);
+            return false;
+        }
+    }
     {
         rocke_tilde_decomposition_t tl = rocke_compute_tilde(p);
         rocke_sub_gemm_params_t probe[256];
-        int n_sub = rocke_enumerate_sub_gemms(
-            p, &tl, s->tile_m, s->tile_n, s->tile_k, s->split_k, probe, 256);
+        /* A patch kernel runs one record (Python patch_sub_gemms). */
+        int n_sub = s->patch ? 1
+                             : rocke_enumerate_sub_gemms(
+                                   p, &tl, s->tile_m, s->tile_n, s->tile_k, s->split_k, probe, 256);
         if(n_sub > s->max_sub_gemms)
         {
             snprintf(reason,
@@ -1976,6 +2004,9 @@ struct tilde_dx_ctx_t
     rocke_value_t* c_Wi;
     rocke_value_t* c_C;
     rocke_value_t* c_group_base; /* g*cpg; NULL when ungrouped */
+    /* patch store (DgradConvSpec.patch): X*C and Wi*C; NULL otherwise. */
+    rocke_value_t* patch_xc;
+    rocke_value_t* patch_row;
     // c0 is NOT stored here: it is created locally inside _tilde_dx_addr_fn,
     // matching Python's closure which does c0 = b.const_i32(0) inside the fn.
 };
@@ -2002,6 +2033,8 @@ static tilde_dx_ctx_t _make_tilde_dx_ctx(const dgrad_magic_div_t* hw_tilde,
     ctx.c_Wi = c_Wi;
     ctx.c_C = c_C;
     ctx.c_group_base = c_group_base;
+    ctx.patch_xc = NULL;
+    ctx.patch_row = NULL;
     /* c0 not stored — created locally inside _tilde_dx_addr_fn */
     return ctx;
 }
@@ -2048,6 +2081,16 @@ static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
     rocke_value_t* _o4 = rocke_b_mul(b, _o3, ctx->c_C);
     rocke_value_t* c_abs
         = ctx->c_group_base ? rocke_b_add(b, n_global, ctx->c_group_base) : n_global;
+    if(ctx->patch_xc)
+    {
+        /* patch: n_global = (y, x*C + c) of the patch at (hi, wi), which lands
+         * y*Wi*C + x*C + c past it. */
+        rocke_value_t* patch_y = rocke_b_div(b, n_global, ctx->patch_xc);
+        rocke_value_t* patch_yxc = rocke_b_mul(b, patch_y, ctx->patch_xc);
+        rocke_value_t* patch_rem = rocke_b_sub(b, n_global, patch_yxc);
+        rocke_value_t* patch_yrow = rocke_b_mul(b, patch_y, ctx->patch_row);
+        c_abs = rocke_b_add(b, patch_yrow, patch_rem);
+    }
     rocke_value_t* offset = rocke_b_add(b, _o4, c_abs);
 
     // Return raw element offset (no sentinel select here).
@@ -2075,7 +2118,9 @@ static void _emit_dgrad_tilde_direct_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* c_Hi,
                                               rocke_value_t* c_Wi,
                                               rocke_value_t* c_C,
-                                              rocke_value_t* c_group_base)
+                                              rocke_value_t* c_group_base,
+                                              rocke_value_t* patch_xc,
+                                              rocke_value_t* patch_row)
 {
     tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(hw_tilde,
                                             w_tilde_slice,
@@ -2087,6 +2132,8 @@ static void _emit_dgrad_tilde_direct_epilogue(rocke_ir_builder_t* b,
                                             c_Wi,
                                             c_C,
                                             c_group_base);
+    ctx.patch_xc = patch_xc;
+    ctx.patch_row = patch_row;
     rocke_direct_epilogue_t epi;
     epi.atom = atom;
     epi.grid = *grid;
@@ -2116,7 +2163,9 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                 rocke_value_t* c_Hi,
                                                 rocke_value_t* c_Wi,
                                                 rocke_value_t* c_C,
-                                                rocke_value_t* c_group_base)
+                                                rocke_value_t* c_group_base,
+                                                rocke_value_t* patch_xc,
+                                                rocke_value_t* patch_row)
 {
     tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(hw_tilde,
                                             w_tilde_slice,
@@ -2128,6 +2177,8 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
                                             c_Wi,
                                             c_C,
                                             c_group_base);
+    ctx.patch_xc = patch_xc;
+    ctx.patch_row = patch_row;
     /* Same width rule as the stride-1 cshuffle (Python _dgrad_store_vec): the
      * per-group channel run, not a fixed 8 -- a store wider than cpg would
      * straddle two groups' dX slabs. */
@@ -2465,6 +2516,19 @@ static rocke_kernel_def_t*
     rocke_value_t* c_Y = ctx.p_Y;
     rocke_value_t* c_X = ctx.p_X;
     rocke_value_t* c_dg_N = ctx.p_cpg;
+    /* patch: the GEMM's N is the filter's (y, x, c) -- Y*X*C columns, a run of
+     * X*C contiguous in dX per filter row y, the rows Wi*C apart. Only the
+     * store reads these (Python DgradConvSpec.patch). */
+    rocke_value_t* patch_xc = NULL;
+    rocke_value_t* patch_row = NULL;
+    if(spec->patch)
+    {
+        if(is_wmma)
+            return NULL; /* Python: "patch dgrad is implemented for MFMA only" */
+        patch_xc = rocke_b_mul(b, ctx.p_X, ctx.p_C);
+        c_dg_N = rocke_b_mul(b, ctx.p_Y, patch_xc);
+        patch_row = rocke_b_mul(b, ctx.p_Wi, ctx.p_C);
+    }
 
     /* dY row count N*Ho*Wo, used by the pointwise fast path's bounds check. */
     rocke_value_t* c_dY_rows = rocke_b_mul(b, rocke_b_mul(b, ctx.p_N, ctx.p_Ho), ctx.p_Wo);
@@ -2939,7 +3003,9 @@ static rocke_kernel_def_t*
                                                     c_Hi,
                                                     c_Wi,
                                                     c_C,
-                                                    c_group_base);
+                                                    c_group_base,
+                                                    patch_xc,
+                                                    patch_row);
             else
                 _emit_dgrad_tilde_direct_epilogue(b,
                                                   spec,
@@ -2959,7 +3025,9 @@ static rocke_kernel_def_t*
                                                   c_Hi,
                                                   c_Wi,
                                                   c_C,
-                                                  c_group_base);
+                                                  c_group_base,
+                                                  patch_xc,
+                                                  patch_row);
         }
         else
         {

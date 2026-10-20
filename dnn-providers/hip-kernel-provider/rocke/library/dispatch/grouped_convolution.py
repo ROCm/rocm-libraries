@@ -86,6 +86,7 @@ from kernels.conv.direct_variants import (
     make_direct_spec,
 )
 from kernels.common.conv_implicit_gemm import ConvProblem
+from kernels.common.conv_implicit_gemm_dgrad import fold_width
 from kernels.conv.kernel_identity import (
     KernelIdentity,
     dgrad_sub_gemms,
@@ -279,6 +280,22 @@ def _conv_problem(req: ConvGroupedRequest) -> ConvProblem | None:
 
 
 @functools.lru_cache(maxsize=256)
+def _gemm_problem(req: ConvGroupedRequest) -> ConvProblem | None:
+    """The problem the implicit-GEMM instances run for ``req``.
+
+    A dgrad whose width folds into its channels
+    (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`: a patch
+    embedding, say) runs folded -- the same bytes in all three tensors, in
+    fewer and wider tilde sub-GEMMs. Admission, grid and kernargs all read
+    this problem, so an instance is admitted for the shape it actually runs.
+    """
+    p = _conv_problem(req)
+    if p is None or req.direction.lower() != "dgrad":
+        return p
+    return fold_width(p)
+
+
+@functools.lru_cache(maxsize=256)
 def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, str]:
     """The direct-conv view of ``req``: ``(problem, "ok")`` or ``(None, why)``.
 
@@ -439,7 +456,7 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
-        return identity_supports_problem(identity, _conv_problem(req), req.llvm_flavor)
+        return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
         # direct_kernel_sweep.direct_plans, applies the same rule).
@@ -529,7 +546,7 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
 
 @functools.lru_cache(maxsize=4096)
 def _sub_gemms(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple:
-    return tuple(dgrad_sub_gemms(identity, _conv_problem(req)))
+    return tuple(dgrad_sub_gemms(identity, _gemm_problem(req)))
 
 
 def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
@@ -556,7 +573,7 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
     from kernels.common.conv_args import ConvArgs
 
     return ConvArgs.from_problem(
-        _conv_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
+        _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
     ).grid()
 
 
@@ -643,7 +660,7 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
     )
     if not ident.is_direct:
         args = ConvArgs.from_problem(
-            _conv_problem(req),
+            _gemm_problem(req),
             direction=spec.direction,
             tile_m=ident.tile_m,
             tile_n=ident.tile_n,

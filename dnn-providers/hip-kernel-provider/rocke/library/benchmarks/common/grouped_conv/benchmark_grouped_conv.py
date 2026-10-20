@@ -521,8 +521,8 @@ def _build_jobs(specs):
 def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> int:
     """Bring ``cache`` up to date for ``specs``; compile only what changed."""
     from benchmarks.common.kernel_sweep import compile_jobs
-    from kernels.conv.aot_jobs import build_kernel
-    from kernels.conv.direct_aot_jobs import build_direct_job
+    from kernels.conv.aot_jobs import kernel_for_job
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
 
     try:
         groups = _build_jobs(specs)
@@ -538,7 +538,7 @@ def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> in
             compile_jobs(
                 cache=cache,
                 all_jobs=all_jobs,
-                build=build_direct_job if direct else build_kernel,
+                build=direct_kernel_for_job if direct else kernel_for_job,
                 arch=arch,
                 dtype=dtype,
                 directions=sorted({j.identity.direction for j in all_jobs}),

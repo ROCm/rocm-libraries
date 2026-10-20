@@ -174,6 +174,47 @@ def compute_tilde(p: ConvProblem) -> TildeDecomposition:
     )
 
 
+def width_fold(p: ConvProblem) -> int:
+    """The largest ``f`` :func:`fold_width` can fold ``p``'s width by (1: none).
+
+    ``f`` divides the filter width, the W stride, the input width and the W
+    padding; the W dilation is 1 and the problem 2-D and ungrouped.
+    """
+    if p.is_3d or p.groups != 1 or p.dW != 1:
+        return 1
+    return _gcd(_gcd(p.X, p.sW), _gcd(p.Wi, p.pW))
+
+
+def fold_width(p: ConvProblem, f: Optional[int] = None) -> ConvProblem:
+    """``p`` with ``f`` adjacent W positions folded into the channels.
+
+    Write ``w = w' * f + r`` and ``x = x' * f + r'``. With ``f`` dividing
+    ``sW`` and ``pW``, an input column pairs with a filter tap only when
+    ``r == r'``, so the convolution is the one over ``f * C`` channels
+    ``(r, c)`` with ``X / f`` taps, stride ``sW / f``, padding ``pW / f`` and
+    width ``Wi / f``. With ``f`` dividing ``X`` and ``Wi`` as well, ``dX``
+    (NHWC) and ``W`` (KYXC) hold exactly that convolution's tensors, and
+    ``dY`` is unchanged (``Wo`` is the same), so a kernel run on the folded
+    problem computes ``p``'s ``dX`` in place.
+
+    It is a dgrad of fewer, wider tilde sub-GEMMs: a patch embedding
+    (stride = filter, no padding) goes from ``Y * X`` sub-GEMMs of ``C``
+    channels to ``Y`` of ``X * C``, reading ``dY`` ``X`` times less and with
+    vector-wide channel runs. ``f`` defaults to :func:`width_fold`.
+    """
+    if f is None:
+        f = width_fold(p)
+    if f == 1:
+        return p
+    if p.Wi % f or p.X % f or p.sW % f or p.pW % f or p.dW != 1:
+        raise ValueError(f"cannot fold the width of {p} by {f}")
+    if p.is_3d or p.groups != 1:
+        raise ValueError(f"cannot fold the width of a 3-D or grouped problem {p}")
+    return dc_replace(
+        p, Wi=p.Wi // f, C=p.C * f, X=p.X // f, sW=p.sW // f, pW=p.pW // f
+    )
+
+
 @dataclass(frozen=True)
 class SubGemmParams:
     """Per-sub-GEMM parameters for the tilde decomposition."""
@@ -320,6 +361,47 @@ def enumerate_sub_gemms(
             sub_gemms.append(sg)
 
     return sub_gemms
+
+
+def is_patch_problem(p: ConvProblem) -> bool:
+    """Does every dX pixel of ``p`` take at most one filter tap?
+
+    True for a patch embedding: a 2-D ungrouped convolution with no padding
+    or dilation whose stride is at least its filter on both axes. Then the
+    dgrad is one GEMM (see ``DgradConvSpec.patch``).
+    """
+    return (
+        not p.is_3d
+        and p.groups == 1
+        and p.pH == 0
+        and p.pW == 0
+        and p.dH == 1
+        and p.dW == 1
+        and p.sH >= p.Y
+        and p.sW >= p.X
+    )
+
+
+def patch_sub_gemms(
+    p: ConvProblem, tile_m: int, tile_n: int, tile_k: int = 32
+) -> List[SubGemmParams]:
+    """The one sub-GEMM record a ``patch`` kernel runs ``p`` with.
+
+    The record of the pointwise problem over ``(N, Ho, Wo)`` with ``Y*X*C``
+    channels -- the GEMM ``dY[M, K] @ W[K, Y*X*C]`` -- with the dX strides
+    of ``p``: the record maps GEMM row ``(n, ho, wo)`` to dX pixel
+    ``(ho*sH, wo*sW)``, where the patch's first element is. Its tap strides
+    are the filter's, so the K tail past ``K`` (``ydot`` = 1 when ``K`` is
+    not a multiple of the K tile) lands on ``y = Y``, outside the filter,
+    and reads no W row -- with a tap stride of 1 it would read row ``y = 1``.
+    """
+    if not is_patch_problem(p):
+        raise ValueError(f"{p} is not a patch embedding")
+    v = ConvProblem(N=p.N, Hi=p.Ho, Wi=p.Wo, C=p.Y * p.X * p.C, K=p.K, Y=1, X=1)
+    (sg,) = enumerate_sub_gemms(v, compute_tilde(v), tile_m, tile_n, tile_k=tile_k)
+    return [
+        dc_replace(sg, b_y_stride=p.Y, b_x_stride=p.X, d_h_stride=p.sH, d_w_stride=p.sW)
+    ]
 
 
 def _magic_i32_pair(divisor: int) -> List[int]:
@@ -672,6 +754,23 @@ class DgradConvSpec:
     # ``default_uniform_k_decode`` for the selection policy.
     uniform_k_decode: bool = False
 
+    # Run a patch embedding (stride >= filter on both axes, no padding, no
+    # dilation, ungrouped: every dX pixel takes at most one filter tap) as ONE
+    # GEMM: M = N*Ho*Wo, N = Y*X*C (the filter's (y, x, c), contiguous in
+    # KYXC), K = K. The tilde decomposition would split it into Y*X sub-GEMMs
+    # of C columns each -- three for an RGB stem -- each re-reading all of dY.
+    #
+    # The sub-GEMM record is the pointwise problem's (patch_sub_gemms), so the
+    # K loop is untouched: the record's ydot = xdot = 0 makes the dY offset
+    # (n*Ho + ho)*Wo*K + wo*K + k and the W offset k*Y*X*C + n on the real
+    # kernargs. Only the dX store differs: column n = (y, x*C + c) lands
+    # y rows and x*C + c elements past the patch's first element
+    # (patch_sub_gemms sets d_h/w_stride to the strides). The caller zeroes
+    # the pixels no patch covers, as for any stride > filter.
+    #
+    # Default False: strictly additive.
+    patch: bool = False
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -801,6 +900,10 @@ class DgradConvSpec:
 
     def compute_sub_gemms(self) -> List[SubGemmParams]:
         """Return the list of sub-GEMMs for the tilde decomposition."""
+        if self.patch:
+            return patch_sub_gemms(
+                self.problem, self.tile_m, self.tile_n, tile_k=self.tile_k
+            )
         tilde = compute_tilde(self.problem)
         return enumerate_sub_gemms(
             self.problem,
@@ -849,6 +952,7 @@ class DgradConvSpec:
                 "spkauto": self.split_k == -1,
                 # A different K-loop body; only tagged when set.
                 "ukd": self.uniform_k_decode,
+                "patch": self.patch,
             },
         )
 
@@ -955,6 +1059,9 @@ class DgradConvSpec:
         _ukd_why = _uniform_k_decode_conflict(self)
         if _ukd_why:
             raise ValueError(_ukd_why)
+        _patch_why = _patch_conflict(self)
+        if _patch_why:
+            raise ValueError(_patch_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1029,6 +1136,31 @@ def _uniform_k_decode_conflict(spec: "DgradConvSpec") -> str:
     return ""
 
 
+def _patch_conflict(spec: "DgradConvSpec") -> str:
+    """Why ``spec.patch`` cannot be honoured, or ``""`` if it can.
+
+    The patch store is the tilde epilogue's, with one plain store per
+    element: split-K's atomic epilogue and the wavelet pipeline's own
+    epilogue do not carry it, and its column split has no group term.
+    """
+    if not spec.patch:
+        return ""
+    if spec.split_k != 1:
+        return "patch requires split_k == 1 (the atomic epilogue has no patch store)"
+    if spec.pipeline == "wavelet":
+        return "patch is not supported with pipeline='wavelet'"
+    if spec.problem.groups != 1:
+        return "patch serves ungrouped problems only"
+    if not spec.is_strided:
+        return "patch runs on the tilde (strided) path"
+    if not is_patch_problem(spec.problem):
+        return (
+            "patch serves patch embeddings only (no padding or dilation, "
+            "stride >= filter)"
+        )
+    return ""
+
+
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
 # ---------------------------------------------------------------------
@@ -1048,6 +1180,10 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, "dgrad only supports 2-D convolution currently"
     if spec.max_sub_gemms < 1:
         return False, "max_sub_gemms must be at least 1"
+    # Before the record count: a patch record exists for patch problems only.
+    _patch_why = _patch_conflict(spec)
+    if _patch_why:
+        return False, _patch_why
     _n_sub = len(spec.compute_sub_gemms())
     if _n_sub > spec.max_sub_gemms:
         return False, (
@@ -1659,6 +1795,16 @@ def _build_tilde_dgrad(
     c_Y = p_Y
     c_X = p_X
     c_dg_N = p_cpg
+    # patch: the GEMM's N is the filter's (y, x, c) -- Y*X*C columns, a run of
+    # X*C contiguous in dX per filter row y, the rows Wi*C apart. Only the
+    # store reads these (see DgradConvSpec.patch).
+    patch_cols: Optional[Tuple[Value, Value]] = None
+    if spec.patch:
+        if op.family != "mma":
+            raise ValueError("patch dgrad is implemented for MFMA only")
+        c_patch_xc = b.mul(p_X, p_C)
+        c_dg_N = b.mul(p_Y, c_patch_xc)
+        patch_cols = (c_patch_xc, b.mul(p_Wi, p_C))
     # dY row count N*Ho*Wo, used by the pointwise fast path's bounds check.
     c_dY_rows = b.mul(b.mul(p_N, p_Ho), p_Wo)
 
@@ -2153,6 +2299,8 @@ def _build_tilde_dgrad(
             c_C=c_C,
             c_group_base=c_group_base,
         )
+        if patch_cols is not None:
+            _tilde_kwargs["patch_cols"] = patch_cols
         use_cshuffle = spec.epilogue == "cshuffle"
         is_wmma = op.family == "wmma"
 
@@ -2874,6 +3022,7 @@ def _tilde_dx_addr_fn(
     c_Wi: Value,
     c_C: Value,
     c_group_base: Optional[Value] = None,
+    patch_cols: Optional[Tuple[Value, Value]] = None,
 ):
     """Compute NHWC element offset + hi/wi validity for the tilde epilogues.
 
@@ -2885,6 +3034,10 @@ def _tilde_dx_addr_fn(
 
     For fixed m_global the N dimension (channel) is contiguous in dX memory
     (stride 1 in C), enabling vector stores along N via the cshuffle epilogue.
+
+    With ``patch_cols = (X*C, Wi*C)`` (``DgradConvSpec.patch``) n_global is
+    a filter element ``(y, x*C + c)`` of the patch at (hi, wi), and lands
+    ``y*Wi*C + x*C + c`` past it: still contiguous over a run of X*C.
 
     Returns (offset, hw_valid) — bounds_m / bounds_n (m < gemm_m, n < C) are
     handled by the epilogue caller via its `bounds` argument.
@@ -2908,6 +3061,11 @@ def _tilde_dx_addr_fn(
     _o4 = b.mul(_o3, c_C)
     # Absolute NHWC channel = g*cpg + n_global (ungrouped: c_group_base is None).
     _n = b.add(n_global, c_group_base) if c_group_base is not None else n_global
+    if patch_cols is not None:
+        patch_xc, patch_row = patch_cols
+        patch_y = b.div(n_global, patch_xc)
+        patch_rem = b.sub(n_global, b.mul(patch_y, patch_xc))
+        _n = b.add(b.mul(patch_y, patch_row), patch_rem)
     offset = b.add(_o4, _n)
 
     # Return raw element offset (no sentinel select here).
@@ -2936,6 +3094,7 @@ def _emit_dgrad_tilde_direct_epilogue(
     c_Wi: Value,
     c_C: Value,
     c_group_base: Optional[Value] = None,
+    patch_cols: Optional[Tuple[Value, Value]] = None,
 ) -> None:
     """Scalar (per-element) direct store for the tilde non-atomic path.
 
@@ -2957,6 +3116,7 @@ def _emit_dgrad_tilde_direct_epilogue(
             c_Wi,
             c_C,
             c_group_base,
+            patch_cols,
         )
         return offset, hw_ok
 
@@ -2990,6 +3150,7 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     c_Wi: Value,
     c_C: Value,
     c_group_base: Optional[Value] = None,
+    patch_cols: Optional[Tuple[Value, Value]] = None,
 ) -> None:
     """LDS-staged wide store for the tilde non-atomic path.
 
@@ -3014,6 +3175,7 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
             c_Wi,
             c_C,
             c_group_base,
+            patch_cols,
         )
         return offset, hw_ok
 
