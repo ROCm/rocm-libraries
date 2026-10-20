@@ -449,6 +449,9 @@ class TestCli:
         self, tmp_path: Path
     ):
         """`uhd_gen export-benchmarks` hands every sweep flag to the rows it writes."""
+        # uhd_gen's command line imports its training stack; benchmark_log alone does not.
+        pytest.importorskip("numpy")
+        pytest.importorskip("pandas")
         from uhd_gen.__main__ import main as uhd_gen_main
 
         log = _write_log(tmp_path / "sweep.log", [_ok("g", "k1", 0.02)])

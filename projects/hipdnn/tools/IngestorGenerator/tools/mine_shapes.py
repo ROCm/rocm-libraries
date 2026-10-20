@@ -16,7 +16,7 @@ warning.
     mine_shapes.py --catalog ../hipdnn_torch/MODEL_CATALOG.md \
         --shape-dir <shape-dir> --out-query-csv model-shapes.csv
 
-Emits the request-field mappings `dispatch_parity.py --shapes` consumes and, with
+Emits the request-field mappings `registry_enumerator.py --shapes` reads and, with
 `--out-query-csv`, the `q.<parameter>` columns `hipdnn_corpus_gen --model-shapes`
 reads. Neither output filters by kernel support -- that would hide the gap this
 corpus measures. The CSV narrows only to what one operation declaration can express,
@@ -1007,7 +1007,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--out",
         help="Write the shape corpus here, as the request-field JSON "
-        "`dispatch_parity.py --shapes` consumes.",
+        "`registry_enumerator.py --shapes` reads.",
     )
     parser.add_argument(
         "--out-query-csv",

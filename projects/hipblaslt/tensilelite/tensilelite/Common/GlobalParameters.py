@@ -409,14 +409,8 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # slow kernel generation can be attributed to individual passes.
 globalParameters["StinkyTofuTimePasses"] = False
 
-# StinkyTofu ds_load issue cap (gfx1250 DAG scheduler): at most DsReadPerCap ds_loads per
-# DsIssueCapSpanCycles. Mode 0 = sliding (each ds_load frees its slot that many cycles after
-# its own issue), 1 = periodic (a period opens at its first ds_load; all slots free together).
-# Span 0 = one WMMA window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
-globalParameters["StinkyTofuDsIssueCapMode"] = 0
-globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
-# e.g. {WmmaQueueDepth: 8, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# e.g. {WmmaQueueDepth: 8, WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 
@@ -570,6 +564,7 @@ defaultBenchmarkCommonParameters = [
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
+    {"LDSSegmentBRotate": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},
@@ -668,6 +663,10 @@ defaultBenchmarkCommonParameters = [
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
+    # half of the cluster grid. -1 disables; 0-7 is the XCC that receives cluster 0;
+    # -2 reads each cluster's XCC from the hardware.
+    {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
 ]

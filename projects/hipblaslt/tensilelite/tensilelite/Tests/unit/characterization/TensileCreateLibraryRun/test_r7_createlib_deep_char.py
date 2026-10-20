@@ -397,16 +397,18 @@ class TestWriteSolutionsAndKernelsTCL:
         src_tc = MagicMock()
         kwa = MagicMock()
 
-        # Patch getKernelFileBase to return same name for both => k2 is duplicate
-        with patch.object(M, "getKernelFileBase", return_value="same_kernel"):
-            with patch.object(M, "ParallelMap2", return_value=[]):
-                with patch.object(M, "buildAssemblyCodeObjectFiles", return_value=[]):
-                    with patch.object(M, "buildSourceCodeObjectFiles"):
-                        with patch.object(M, "writeHelpers"):
-                            n, uq, results = M.writeSolutionsAndKernelsTCL(
-                                tmp_path / "output2",
-                                asm_tc, src_tc, [], [k1, k2], [], kwa, ["gfx942"],
-                            )
+        # Same compile key and artifact => compile one representative.
+        with patch.object(M, "getKernelCompileKey", return_value="same_key"):
+            with patch.object(M, "getKernelNameMin", return_value="same_kernel"):
+                with patch.object(M, "getKernelFileBase", return_value="same_kernel"):
+                    with patch.object(M, "ParallelMap2", return_value=[]):
+                        with patch.object(M, "buildAssemblyCodeObjectFiles", return_value=[]):
+                            with patch.object(M, "buildSourceCodeObjectFiles"):
+                                with patch.object(M, "writeHelpers"):
+                                    n, uq, results = M.writeSolutionsAndKernelsTCL(
+                                        tmp_path / "output2",
+                                        asm_tc, src_tc, [], [k1, k2], [], kwa, ["gfx942"],
+                                    )
         # n should be count of unique kernels, not total
         assert n == 1
         assert len(uq) == 1

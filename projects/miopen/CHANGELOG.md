@@ -31,6 +31,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   batch size below 4.
 * [Conv] Fixed invalid Composable Kernel (CK) perf-config entries in the gfx1201 and gfx1100
   system databases that MIOpen could not resolve, which caused a fallback to untuned defaults.
+* [Conv] Fixed incorrect gfx1200 backward-weights results from Composable Kernel
+  `DeviceGroupedConvBwdWeight_Xdl_CShuffleV3` wave32 instances by removing the gfx1200 system
+  database entries that the CK host-side support check now rejects. Affected problems use the
+  next recorded solver instead.
 * [BatchNorm] Fixed just-in-time compilation failures for the batch normalization kernels on
   non-GFX9 targets by restricting the Welford reduction's DPP inline assembly to GFX9 instead
   of a per-architecture denylist.
@@ -93,7 +97,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [LRN][LayerNorm] Fixed grid alignment and out-of-bounds thread access on gfx1250.
 * [Conv] Removed stale gfx950 grouped backward-weights SystemDB entries that caused suboptimal solver selection.
 * [Conv][Windows] Fixed system-database path resolution to use the MIOpen module location.
-* [Conv] Fixed system-database fallback so MI308X (gfx942) resolves to a usable tuned database.
+* [Conv] Fixed system-database fallback so certain gfx942 machines resolve to a usable tuned database.
 * Fixed JSON performance logs (`MIOPEN_PERFORMANCE_LOGS`) dropping the last solver evaluated during Find, so naive convolution solvers are no longer omitted.
 * Fixed a build failure when compiling against GCC 15's libstdc++ under C++20.
 

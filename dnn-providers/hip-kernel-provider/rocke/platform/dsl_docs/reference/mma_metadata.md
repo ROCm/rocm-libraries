@@ -203,6 +203,16 @@ C/D are FP32 with four or sixteen elements. FP32 queries retain the ordinary
 FP32 atoms. The logical type uses one I32 storage word per element and is
 bitcast to the intrinsic's float-vector ABI during lowering.
 
+On gfx950, `tf32` selects the emulated `mfma_f32_16x16x32_xf32` or
+`mfma_f32_32x32x16_xf32`: eight logical TF32 A/B elements per lane, C/D FP32 with
+four or sixteen elements, so the same `(tf32, tf32, fp32)` query returns an atom with
+the same operand ABI on either target. Such a row carries an `emulation` descriptor
+(`MmaOp.emulation`, `is_native` is `False`) naming the physical BF16 atom it expands
+into; its fragment lengths and layout maps are inherited from that atom, and
+the catalog refuses a row whose physical atom is not a native atom of the same arch.
+The lowering reinterprets the TF32 payload as FP32 and splits it, so no payload bit is
+dropped; see the [emulation description](../architecture/xf32_bf16x3_emulation.md).
+
 See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 for the distinction between raw FP32 payloads and explicit RNE preparation,
 and for a reproducible comparison through both engines.

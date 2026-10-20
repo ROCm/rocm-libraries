@@ -11,8 +11,6 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
-      - '.github/constraints-hipdnn-superbuild-ci.txt'
-      - '.github/requirements-hipdnn-superbuild-ci.txt'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
@@ -202,6 +200,15 @@ jobs:
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
 
+      # HIPKERNELPROVIDER_ENABLE_ROCKE=ON with the default production root: pull the
+      # DVC-stored rocKE descriptors (the KDPs). Each pointer names the `ingestor`
+      # remote, so a bare pull resolves it. Configure sets REQUIRE_DVC_DESCRIPTORS=ON,
+      # so a missing file fails it instead of silently dropping the bundle.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
@@ -219,10 +226,10 @@ jobs:
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
+            -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
-            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
@@ -483,7 +490,6 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
-            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \

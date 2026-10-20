@@ -41,6 +41,7 @@ EXPECTED_SCRIPTS = {
         "discover_test_targets.py",
         "windows_rocm_setup.py",
     ),
+    "hipdnn-trigger-ci": ("trigger_ci.py",),
     "hipdnn-uhd": (
         "candidate_tree.py",
         "decide.py",
@@ -357,9 +358,11 @@ def validate_skill(skill: Path) -> list[str]:
     # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
     claude_commands = {
         "hipdnn-ingestor-engine",
+        "hipdnn-integration-testing",
         "hipdnn-pr-quality",
         "hipdnn-superbuild",
         "hipdnn-superbuild-test",
+        "hipdnn-trigger-ci",
         "hipdnn-uhd",
         "rfc-backlog",
         "rfc-review",
