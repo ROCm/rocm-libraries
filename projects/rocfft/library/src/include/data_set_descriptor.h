@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef DATA_LAYOUT_H
-#define DATA_LAYOUT_H
+#ifndef DATA_SET_DESCRIPTOR_H
+#define DATA_SET_DESCRIPTOR_H
 
 #include "rocfft/rocfft.h"
 
@@ -78,10 +78,10 @@ constexpr bool is_hermitian_domain(rocfft_transform_type fft_type, io_data_label
  * of one another.
  * 
  */
-struct data_layout_t
+struct data_descriptor_t
 {
     /**
-     * @brief Constructs a new `data_layout_t` object with explicit member values.
+     * @brief Constructs a new `data_descriptor_t` object with explicit member values.
      * 
      * @param[in] lower lower bounds along all axes of the logical index range
      * (lower bounds are included).
@@ -106,13 +106,13 @@ struct data_layout_t
      *   element of `upper`.
      * 
      */
-    data_layout_t(const std::vector<size_t>& lower,
-                  const std::vector<size_t>& upper,
-                  const std::vector<size_t>& strides,
-                  size_t                     batch_rank = 1);
+    data_descriptor_t(const std::vector<size_t>& lower,
+                      const std::vector<size_t>& upper,
+                      const std::vector<size_t>& strides,
+                      size_t                     batch_rank = 1);
 
     /**
-     * @brief Constructs a new `data_layout_t` object capturing a full range of logical
+     * @brief Constructs a new `data_descriptor_t` object capturing a full range of logical
      * indices with one batch axis.
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
@@ -123,13 +123,13 @@ struct data_layout_t
      * @throw An `std::invalid_argument` is thrown if `lengths` or `strides`
      * are empty or have different sizes.
      */
-    static data_layout_t full_layout(const std::vector<size_t>& lengths,
-                                     const std::vector<size_t>& strides,
-                                     size_t                     batch,
-                                     size_t                     distance);
+    static data_descriptor_t full_layout(const std::vector<size_t>& lengths,
+                                         const std::vector<size_t>& strides,
+                                         size_t                     batch,
+                                         size_t                     distance);
 
     /**
-     * @brief Constructs a new `data_layout_t` object capturing a full range of logical
+     * @brief Constructs a new `data_descriptor_t` object capturing a full range of logical
      * indices with possibly many batch axes, and default in-buffer strides (enforcing
      * in-buffer contiguity for the innermost length axis).
      * 
@@ -141,14 +141,14 @@ struct data_layout_t
      * 
      * @throw An `std::invalid_argument` is thrown if `lengths` is empty.
      */
-    static data_layout_t default_full_layout(const std::vector<size_t>& lengths,
-                                             const std::vector<size_t>& batches,
-                                             bool real_case_with_padding = false);
+    static data_descriptor_t default_full_layout(const std::vector<size_t>& lengths,
+                                                 const std::vector<size_t>& batches,
+                                                 bool real_case_with_padding = false);
 
     // convenience overload for the common unidimensional batch case
-    inline static data_layout_t default_full_layout(const std::vector<size_t>& lengths,
-                                                    size_t                     batch,
-                                                    bool real_case_with_padding = false)
+    inline static data_descriptor_t default_full_layout(const std::vector<size_t>& lengths,
+                                                        size_t                     batch,
+                                                        bool real_case_with_padding = false)
     {
         return default_full_layout(lengths, std::vector<size_t>(1, batch), real_case_with_padding);
     }
@@ -226,7 +226,7 @@ struct data_layout_t
     std::vector<size_t> contiguous_strides_and_distances() const;
 
     /**
-     * @param[in] other data layout which must be dimensionally consistent with this one
+     * @param[in] other data descriptor which must be dimensionally consistent with this one
      * (same number of length and batch axes) and must logically contain this layout's
      * very first element.
      * 
@@ -236,10 +236,10 @@ struct data_layout_t
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
      * with this object or does not contain its very first element.
      */
-    size_t offset_in(const data_layout_t& other) const;
+    size_t offset_in(const data_descriptor_t& other) const;
 
     /**
-     * @param[in] other data layout which must be dimensionally consistent with this one
+     * @param[in] other data descriptor which must be dimensionally consistent with this one
      * (same number of length and batch axes).
      * 
      * @return `true` iff this layout represents a continuous chunk of `other`, i.e., iff
@@ -251,7 +251,7 @@ struct data_layout_t
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
      * with this object.
      */
-    bool is_continuous_in(const data_layout_t& other) const;
+    bool is_continuous_in(const data_descriptor_t& other) const;
 
     /**
      * @return A string reporting this object's state.
@@ -276,39 +276,39 @@ struct data_layout_t
     bool is_contiguous() const;
 
     /**
-     * @param[in] other data layout to be compared to this one.
+     * @param[in] other data descriptor to be compared to this one.
      * @return `true` iff this object and `other` are strictly identical.
      */
-    bool operator==(const data_layout_t& other) const;
+    bool operator==(const data_descriptor_t& other) const;
 
     /**
-     * @param[in] other data layout which must be dimensionally consistent with this one
+     * @param[in] other data descriptor which must be dimensionally consistent with this one
      * (same number of length and batch axes).
      * @return `true` iff all axes of either layout cover the same logical index range.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
      * with this object.
      */
-    bool has_same_logical_range_as(const data_layout_t& other) const;
+    bool has_same_logical_range_as(const data_descriptor_t& other) const;
 
     /**
-     * @param[in] first a data_layout_t object
-     * @param[in] second a data_layout_t object that's dimensionally consistent with `first`
-     * @return A data_layout_t object capturing the intersection of the logical ranges
+     * @param[in] first a data_descriptor_t object
+     * @param[in] second a data_descriptor_t object that's dimensionally consistent with `first`
+     * @return A data_descriptor_t object capturing the intersection of the logical ranges
      * between `first` and `second`. The in-buffer strides of the constructed intersection
      * are set to their default contiguous values.
      * 
      * @throw An `std::invalid_argument` is thrown if `first` and `second` are not
      * dimensionally consistent, or have different embeddings (if any).
      */
-    static data_layout_t make_contiguous_intersection_of(const data_layout_t& first,
-                                                         const data_layout_t& second);
+    static data_descriptor_t make_contiguous_intersection_of(const data_descriptor_t& first,
+                                                             const data_descriptor_t& second);
 
     /**
-     * @param[in] other data layout against which ranks are to be compared
-     * @return `true` if this data layout is dimensionally consistent with `other` 
+     * @param[in] other data descriptor against which ranks are to be compared
+     * @return `true` if this data descriptor is dimensionally consistent with `other` 
      */
-    bool is_dimensionally_consistent_with(const data_layout_t& other) const;
+    bool is_dimensionally_consistent_with(const data_descriptor_t& other) const;
 
     /**
      * @brief Reports the order of length axis indices if sorting them by increasing
@@ -330,7 +330,7 @@ struct data_layout_t
      * object must have full data range representation for all length axes (all
      * lower bounds equal to zero).
      * 
-     * @param[in] other_io I/O label for the data layout to be returned. Explicitly,
+     * @param[in] other_io I/O label for the data descriptor to be returned. Explicitly,
      * the calling object's layout is considered an input (resp. output) layout
      * if the argument value is `io_data_label::OUTPUT` (resp. `io_data_label::INPUT`)
      * @param[in] fft_type intended type of (in-place) Fourier Transform
@@ -341,11 +341,11 @@ struct data_layout_t
      * the input of a real forward transform or the output of a real inverse
      * transform.
      * 
-     * @return An `std::optional<data_layout_t>` object which has a value set
+     * @return An `std::optional<data_descriptor_t>` object which has a value set
      * iff a corresponding layout for in-place operation does actually exist.
      * 
      * @note This function does not verify if either layout is self-aliasing and
-     * ignores offsets as `data_layout_t` objects do not capture them.
+     * ignores offsets as `data_descriptor_t` objects do not capture them.
      * 
      * @warning Should not be used for distributed layouts, unless length axes are
      * all undistributed.
@@ -356,13 +356,13 @@ struct data_layout_t
      * or if `other_io` is not an expected value.
      * 
      */
-    std::optional<data_layout_t> get_other_inplace_layout_for(io_data_label         other_io,
-                                                              rocfft_transform_type fft_type,
-                                                              bool other_innermost_length_is_odd
-                                                              = false) const;
+    std::optional<data_descriptor_t> get_other_inplace_layout_for(io_data_label         other_io,
+                                                                  rocfft_transform_type fft_type,
+                                                                  bool other_innermost_length_is_odd
+                                                                  = false) const;
 
     /**
-     * @return The data layout corresponding to a (possibly) sub-dimensional data set
+     * @return The data descriptor corresponding to a (possibly) sub-dimensional data set
      * embedded in what the current object describes. 
      * 
      * @param[in] len_indices set of indices of the length axes of the current object
@@ -375,17 +375,17 @@ struct data_layout_t
      * @note If `len_indices = {0, 1, ..., get_len_rank() - 1}`, this function is
      * equivalent to a simple copy of the current object.
      */
-    data_layout_t get_layout_for_len_axes(const std::set<size_t>& len_indices) const;
+    data_descriptor_t get_layout_for_len_axes(const std::set<size_t>& len_indices) const;
 
     /**
-     * @return The data layout of the data set in which the data set described by the
+     * @return The data descriptor of the data set in which the data set described by the
      * current object is embedded.
      * @note If this object is not representing the data layout of an embedded data set,
      * this function is equivalent to a simple copy of the current object.
      * @throw An `std::logic_error` exception is thrown if the object's embedding map is
      * found inconsistent.
      */
-    data_layout_t get_embedding_layout() const;
+    data_descriptor_t get_embedding_layout() const;
 
     /**
      * @return An `std::vector<size_t>` of the length axis indices in the embedding data
@@ -398,7 +398,7 @@ struct data_layout_t
     std::vector<size_t> corresponding_axes_in_embedding() const;
 
     /**
-     * @return `true` iff the current object is registered as the data layout of a
+     * @return `true` iff the current object is registered as the data descriptor of a
      * data set embedded within another, higher-dimensional one.
      */
     bool is_embedded() const;
@@ -407,10 +407,10 @@ struct data_layout_t
     //                        DEFAULT COPIES AND MOVES
     //-------------------------------------------------------------------------
 
-    data_layout_t(const data_layout_t&) = default;
-    data_layout_t& operator=(const data_layout_t&) = default;
-    data_layout_t(data_layout_t&&)                 = default;
-    data_layout_t& operator=(data_layout_t&&) = default;
+    data_descriptor_t(const data_descriptor_t&) = default;
+    data_descriptor_t& operator=(const data_descriptor_t&) = default;
+    data_descriptor_t(data_descriptor_t&&)                 = default;
+    data_descriptor_t& operator=(data_descriptor_t&&) = default;
 
     // Prevent ill-defined objects as much as possible by privatizing
     // content-modifying members and default constructor.
@@ -450,7 +450,7 @@ private:
         }
     };
 
-    data_layout_t() = default;
+    data_descriptor_t() = default;
 
     // Storing length and batch axes in two vectors is an internal representation
     // detail (hidden behind semantic accessors). It's preferred over a single flat
@@ -560,8 +560,8 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
-    // rocfft-internal-test drives reorder_length_axes directly (defined in data_layout_test.cpp).
-    friend struct data_layout_test_access;
+    // rocfft-internal-test drives reorder_length_axes directly (defined in data_set_descriptor_test.cpp).
+    friend struct data_descriptor_test_access;
 };
 
-#endif // DATA_LAYOUT_H
+#endif // DATA_SET_DESCRIPTOR_H
