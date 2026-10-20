@@ -1184,8 +1184,9 @@ class MemoryCapabilities:
     # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
     # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
     async_lds_max_dwords: int
-    # gfx1250 feature flags. An arch sets one only after its feature passes a
-    # functional run on a device; the ops themselves are gated separately.
+    # Feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the lowerers admit the feature's operations
+    # only on a target that sets it.
     has_scalar_data_prefetch: bool = False
     has_global_prefetch: bool = False
     has_cluster_launch: bool = False

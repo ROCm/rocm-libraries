@@ -212,8 +212,9 @@ typedef struct rocke_memory_caps
      * width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
      * Mirrors MemoryCapabilities.async_lds_max_dwords. */
     int async_lds_max_dwords;
-    /* gfx1250 feature flags; an arch sets one only after its feature passes a
-     * functional run on a device. */
+    /* Feature flags; an arch sets one only after its feature passes a
+     * functional run on a device. The lowerers admit the feature's operations
+     * only on a target that sets it. */
     bool has_scalar_data_prefetch;
     bool has_global_prefetch;
     bool has_cluster_launch;

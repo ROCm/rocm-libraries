@@ -456,6 +456,29 @@ struct rocke_lower
  * sticky error -- a failure raises instead -- so this is just a null guard. */
 bool rocke_ll_live(const rocke_lower_t* L);
 
+/* The recorded target fact that admits an LLVM-23-only operation (Python
+ * _OpTargetFact). The memory.* flags name one hardware feature each;
+ * target_family gfx12_cdna covers the instructions no flag records: the split
+ * and named barriers, s_setreg (hardware-register field layouts differ between
+ * families), global_load_tr16_b128 and global_store_async_from_lds. */
+typedef enum rocke_ll_target_fact
+{
+    ROCKE_LL_FACT_TDM, /* memory.has_tdm */
+    ROCKE_LL_FACT_CLUSTER_LAUNCH, /* memory.has_cluster_launch */
+    ROCKE_LL_FACT_MULTICAST_LOAD, /* memory.has_multicast_load */
+    ROCKE_LL_FACT_SCALAR_DATA_PREFETCH, /* memory.has_scalar_data_prefetch */
+    ROCKE_LL_FACT_GLOBAL_PREFETCH, /* memory.has_global_prefetch */
+    ROCKE_LL_FACT_GFX12_CDNA_FAMILY /* target_family gfx12_cdna */
+} rocke_ll_target_fact_t;
+
+/* Fail unless the target records `fact` and the flavor is llvm23 (Python
+ * _Lowerer._require_llvm23_target_fact). The rule reads the target's facts,
+ * never its name, so a target whose row records the fact lowers `op` with no
+ * code change. */
+void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
+                                         const char* op,
+                                         rocke_ll_target_fact_t fact);
+
 /* ====================================================================== */
 /* Core plumbing (Python _Lowerer helpers) -- DEFINED IN BUCKET 0         */
 /* ====================================================================== */

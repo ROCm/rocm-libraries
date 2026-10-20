@@ -1450,26 +1450,6 @@ static const char* ll_lds_ptr_operand(rocke_lower_t* L, const char* op_name, con
     return name;
 }
 
-static void ll_require_gfx1250_llvm23(rocke_lower_t* L, const char* op)
-{
-    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s requires gfx1250, got %s",
-                      op,
-                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
-    }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s requires LLVM flavor llvm23, got %s",
-                      op,
-                      rocke_llvm_flavor_name(L->flavor));
-    }
-}
-
 static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1643,7 +1623,8 @@ static void op_tile_global_store_async_from_lds(rocke_lower_t* L, const rocke_op
     int64_t cachepolicy;
     const char* suffix;
     const char* key;
-    ll_require_gfx1250_llvm23(L, "global_store_async_from_lds");
+    rocke_ll_require_llvm23_target_fact(
+        L, "global_store_async_from_lds", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     if(op->num_operands != 2)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_store_async_from_lds expects two operands");
     dst = op->operands[0];
@@ -1692,7 +1673,8 @@ static void op_tile_global_load_tr16_b128(rocke_lower_t* L, const rocke_op_t* op
     const char* suffix;
     const char* key;
     const char* llvm_type;
-    ll_require_gfx1250_llvm23(L, "global_load_tr16_b128");
+    rocke_ll_require_llvm23_target_fact(
+        L, "global_load_tr16_b128", ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     if(op->num_operands != 1 || op->num_results != 1)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_load_tr16_b128 expects one operand and result");
     src = op->operands[0];
@@ -1745,7 +1727,7 @@ static void op_tile_cluster_load(rocke_lower_t* L, const rocke_op_t* op)
     int lanes;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "cluster_load");
+    rocke_ll_require_llvm23_target_fact(L, "cluster_load", ROCKE_LL_FACT_MULTICAST_LOAD);
     if(op->num_operands != 2 || op->num_results != 1)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load expects two operands and one result");
     ptr = op->operands[0];
@@ -1825,7 +1807,8 @@ static void op_tile_cluster_load_async_to_lds(rocke_lower_t* L, const rocke_op_t
     int64_t cachepolicy;
     if(!rocke_ll_live(L))
         return;
-    ll_require_gfx1250_llvm23(L, "cluster_load_async_to_lds");
+    rocke_ll_require_llvm23_target_fact(
+        L, "cluster_load_async_to_lds", ROCKE_LL_FACT_MULTICAST_LOAD);
     if(op->num_operands != 3)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_load_async_to_lds expects three operands");
     src = op->operands[0];
@@ -1884,7 +1867,7 @@ static void op_tile_tensor_lds_transfer(rocke_lower_t* L,
     static const int lanes[] = {4, 8, 4, 4, 8};
     int64_t cachepolicy;
     int i;
-    ll_require_gfx1250_llvm23(L, short_name);
+    rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_TDM);
     if(op->num_operands != 5)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects five descriptor groups", short_name);
     for(i = 0; i < 5; ++i)
