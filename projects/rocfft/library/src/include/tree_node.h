@@ -39,7 +39,7 @@
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "compute_scheme.h"
-#include "data_layout.h"
+#include "data_set_descriptor.h"
 #include "enum_printer.h"
 #include "exec_info.h"
 #include "function_map_key.h"
@@ -434,15 +434,15 @@ struct NodeMetaData
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
     // `outStride`, `iDist`, and `oDist` could (and should) be replaced
-    // by two data_layout_t member objects instead.
-    inline data_layout_t layout_for(io_data_label io) const
+    // by two data_descriptor_t member objects instead.
+    inline data_descriptor_t layout_for(io_data_label io) const
     {
         switch(io)
         {
         case io_data_label::INPUT:
-            return data_layout_t::full_layout(length, inStride, batch, iDist);
+            return data_descriptor_t::full_layout(length, inStride, batch, iDist);
         case io_data_label::OUTPUT:
-            return data_layout_t::full_layout(outputLength, outStride, batch, oDist);
+            return data_descriptor_t::full_layout(outputLength, outStride, batch, oDist);
         default:
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
@@ -452,7 +452,7 @@ struct NodeMetaData
     inline bool is_using_default_contiguous_layout_for(io_data_label io) const
     {
         return layout_for(io)
-               == data_layout_t::default_full_layout(
+               == data_descriptor_t::default_full_layout(
                    io == io_data_label::INPUT ? length : outputLength, batch);
     };
 

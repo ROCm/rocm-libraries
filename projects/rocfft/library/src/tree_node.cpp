@@ -450,9 +450,9 @@ void TreeNode::CollapseContiguousDims()
     collapsible_axes.push_back(length.size());
 
     // TODO: replace members TreeNode::length, TreeNode::outputLength, TreeNode::inStride,
-    // TreeNode::outStride, etc. by data_layout_t instances and introduce a (static)
-    //    data_layout_t::compress_batch_axes_consistently_in(data_layout_t& layout_0,
-    //                                                       data_layout_t& layout_1
+    // TreeNode::outStride, etc. by data_descriptor_t instances and introduce a (static)
+    //    data_descriptor_t::compress_batch_axes_consistently_in(data_descriptor_t& layout_0,
+    //                                                       data_descriptor_t& layout_1
     //                                                       [, ...]);
     // which handle compression of batch axes consistently across two (or more) data layouts.
 

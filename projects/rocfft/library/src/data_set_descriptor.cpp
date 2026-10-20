@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "data_layout.h"
+#include "data_set_descriptor.h"
 #include "../../shared/arithmetic.h"
 #include "../../shared/ptrdiff.h"
 #include "rocfft_current_function.h"
@@ -72,7 +72,7 @@ std::string to_str(io_data_label io)
     }
 }
 
-#define IO_DATA_LAYOUT_ACCESSOR_BODY(AXIS_IDX)                                      \
+#define IO_DATA_DESCRIPTOR_ACCESSOR_BODY(AXIS_IDX)                                  \
     do                                                                              \
     {                                                                               \
         if(AXIS_IDX >= get_full_rank())                                             \
@@ -82,20 +82,20 @@ std::string to_str(io_data_label io)
                                           : batch_axes[AXIS_IDX - len_axes.size()]; \
     } while(0)
 
-const data_layout_t::axis_t& data_layout_t::operator[](size_t axis_idx) const
+const data_descriptor_t::axis_t& data_descriptor_t::operator[](size_t axis_idx) const
 {
-    IO_DATA_LAYOUT_ACCESSOR_BODY(axis_idx);
+    IO_DATA_DESCRIPTOR_ACCESSOR_BODY(axis_idx);
 }
 
-data_layout_t::axis_t& data_layout_t::operator[](size_t axis_idx)
+data_descriptor_t::axis_t& data_descriptor_t::operator[](size_t axis_idx)
 {
-    IO_DATA_LAYOUT_ACCESSOR_BODY(axis_idx);
+    IO_DATA_DESCRIPTOR_ACCESSOR_BODY(axis_idx);
 }
 
-data_layout_t::data_layout_t(const std::vector<size_t>& lower,
-                             const std::vector<size_t>& upper,
-                             const std::vector<size_t>& strides,
-                             size_t                     batch_rank)
+data_descriptor_t::data_descriptor_t(const std::vector<size_t>& lower,
+                                     const std::vector<size_t>& upper,
+                                     const std::vector<size_t>& strides,
+                                     size_t                     batch_rank)
     : len_axes(batch_rank < lower.size() ? lower.size() - batch_rank : 0)
     , batch_axes(batch_rank)
 {
@@ -125,22 +125,22 @@ data_layout_t::data_layout_t(const std::vector<size_t>& lower,
     }
 }
 
-data_layout_t data_layout_t::full_layout(const std::vector<size_t>& lengths,
-                                         const std::vector<size_t>& strides,
-                                         size_t                     batch,
-                                         size_t                     distance)
+data_descriptor_t data_descriptor_t::full_layout(const std::vector<size_t>& lengths,
+                                                 const std::vector<size_t>& strides,
+                                                 size_t                     batch,
+                                                 size_t                     distance)
 {
-    return data_layout_t{std::vector<size_t>(lengths.size() + 1, 0),
-                         concatenate(lengths, batch),
-                         concatenate(strides, distance),
-                         1};
+    return data_descriptor_t{std::vector<size_t>(lengths.size() + 1, 0),
+                             concatenate(lengths, batch),
+                             concatenate(strides, distance),
+                             1};
 }
 
-data_layout_t data_layout_t::default_full_layout(const std::vector<size_t>& lengths,
-                                                 const std::vector<size_t>& batches,
-                                                 bool                       real_case_with_padding)
+data_descriptor_t data_descriptor_t::default_full_layout(const std::vector<size_t>& lengths,
+                                                         const std::vector<size_t>& batches,
+                                                         bool real_case_with_padding)
 {
-    data_layout_t             ret;
+    data_descriptor_t         ret;
     const std::vector<size_t> empty_for_default_strides_and_dist = {};
     ret.full_range_reset(lengths,
                          empty_for_default_strides_and_dist,
@@ -150,21 +150,21 @@ data_layout_t data_layout_t::default_full_layout(const std::vector<size_t>& leng
     return ret;
 }
 
-size_t data_layout_t::get_len_rank() const
+size_t data_descriptor_t::get_len_rank() const
 {
     return len_axes.size();
 }
 
-size_t data_layout_t::get_batch_rank() const
+size_t data_descriptor_t::get_batch_rank() const
 {
     return batch_axes.size();
 }
-size_t data_layout_t::get_full_rank() const
+size_t data_descriptor_t::get_full_rank() const
 {
     return len_axes.size() + batch_axes.size();
 }
 
-std::vector<size_t> data_layout_t::lengths_and_batches() const
+std::vector<size_t> data_descriptor_t::lengths_and_batches() const
 {
     std::vector<size_t> ret(get_full_rank());
     for(size_t dim = 0; dim < get_full_rank(); dim++)
@@ -173,7 +173,7 @@ std::vector<size_t> data_layout_t::lengths_and_batches() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::strides_and_distances() const
+std::vector<size_t> data_descriptor_t::strides_and_distances() const
 {
     std::vector<size_t> ret(get_full_rank());
     for(size_t dim = 0; dim < get_full_rank(); dim++)
@@ -182,7 +182,7 @@ std::vector<size_t> data_layout_t::strides_and_distances() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::contiguous_strides_and_distances() const
+std::vector<size_t> data_descriptor_t::contiguous_strides_and_distances() const
 {
     if(is_contiguous())
     {
@@ -198,7 +198,7 @@ std::vector<size_t> data_layout_t::contiguous_strides_and_distances() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::lengths() const
+std::vector<size_t> data_descriptor_t::lengths() const
 {
     std::vector<size_t> ret(len_axes.size());
     for(size_t dim = 0; dim < len_axes.size(); dim++)
@@ -207,7 +207,7 @@ std::vector<size_t> data_layout_t::lengths() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::strides() const
+std::vector<size_t> data_descriptor_t::strides() const
 {
     std::vector<size_t> ret(len_axes.size());
     for(size_t dim = 0; dim < len_axes.size(); dim++)
@@ -216,7 +216,7 @@ std::vector<size_t> data_layout_t::strides() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::batches() const
+std::vector<size_t> data_descriptor_t::batches() const
 {
     std::vector<size_t> ret(batch_axes.size());
     for(size_t dim = 0; dim < batch_axes.size(); dim++)
@@ -225,7 +225,7 @@ std::vector<size_t> data_layout_t::batches() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::distances() const
+std::vector<size_t> data_descriptor_t::distances() const
 {
     std::vector<size_t> ret(batch_axes.size());
     for(size_t dim = 0; dim < batch_axes.size(); dim++)
@@ -234,7 +234,7 @@ std::vector<size_t> data_layout_t::distances() const
     return ret;
 }
 
-size_t data_layout_t::batch() const
+size_t data_descriptor_t::batch() const
 {
     if(batch_axes.size() != 1)
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
@@ -242,7 +242,7 @@ size_t data_layout_t::batch() const
     return batch_axes[0].logical_span();
 }
 
-size_t data_layout_t::distance() const
+size_t data_descriptor_t::distance() const
 {
     if(batch_axes.size() != 1)
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
@@ -250,7 +250,7 @@ size_t data_layout_t::distance() const
     return batch_axes[0].inbuffer_stride;
 }
 
-std::vector<size_t> data_layout_t::upper() const
+std::vector<size_t> data_descriptor_t::upper() const
 {
     std::vector<size_t> ret(get_full_rank());
     for(size_t dim = 0; dim < get_full_rank(); dim++)
@@ -259,7 +259,7 @@ std::vector<size_t> data_layout_t::upper() const
     return ret;
 }
 
-std::vector<size_t> data_layout_t::lower() const
+std::vector<size_t> data_descriptor_t::lower() const
 {
     std::vector<size_t> ret(get_full_rank());
     for(size_t dim = 0; dim < get_full_rank(); dim++)
@@ -268,7 +268,7 @@ std::vector<size_t> data_layout_t::lower() const
     return ret;
 }
 
-bool data_layout_t::is_empty() const
+bool data_descriptor_t::is_empty() const
 {
     bool ret = len_axes.empty() || batch_axes.empty();
     for(size_t dim = 0; !ret && dim < get_full_rank(); dim++)
@@ -276,28 +276,28 @@ bool data_layout_t::is_empty() const
     return ret;
 }
 
-size_t data_layout_t::logical_count() const
+size_t data_descriptor_t::logical_count() const
 {
     auto len_and_batches = lengths_and_batches();
     return product(len_and_batches.begin(), len_and_batches.end());
 }
 
-size_t data_layout_t::buffer_element_count() const
+size_t data_descriptor_t::buffer_element_count() const
 {
     return compute_ptrdiff(lengths_and_batches(), strides_and_distances());
 }
 
-bool data_layout_t::is_contiguous() const
+bool data_descriptor_t::is_contiguous() const
 {
     return buffer_element_count() == logical_count();
 }
 
-bool data_layout_t::operator==(const data_layout_t& other) const
+bool data_descriptor_t::operator==(const data_descriptor_t& other) const
 {
     return len_axes == other.len_axes && batch_axes == other.batch_axes;
 }
 
-bool data_layout_t::has_same_logical_range_as(const data_layout_t& other) const
+bool data_descriptor_t::has_same_logical_range_as(const data_descriptor_t& other) const
 {
     if(!is_dimensionally_consistent_with(other))
         throw std::invalid_argument(
@@ -309,8 +309,9 @@ bool data_layout_t::has_same_logical_range_as(const data_layout_t& other) const
     return ret;
 }
 
-data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t& first,
-                                                             const data_layout_t& second)
+data_descriptor_t
+    data_descriptor_t::make_contiguous_intersection_of(const data_descriptor_t& first,
+                                                       const data_descriptor_t& second)
 {
     if(!first.is_dimensionally_consistent_with(second))
         throw std::invalid_argument("Dimensionally-inconsistent arguments for "
@@ -319,7 +320,7 @@ data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t
         throw std::invalid_argument("Different embeddings for arguments of "
                                     + ROCFFT_CURRENT_FUNCTION);
 
-    data_layout_t ret;
+    data_descriptor_t ret;
     ret.len_axes.resize(first.len_axes.size());
     ret.batch_axes.resize(first.batch_axes.size());
     for(size_t dim = 0; dim < first.get_full_rank(); dim++)
@@ -335,7 +336,8 @@ data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t
     return ret;
 }
 
-std::vector<size_t> data_layout_t::length_axes_by_increasing_strides(bool pin_innermost_axis) const
+std::vector<size_t>
+    data_descriptor_t::length_axes_by_increasing_strides(bool pin_innermost_axis) const
 {
     std::vector<size_t> ret(get_len_rank(), 0);
     if(ret.size() <= 1)
@@ -351,7 +353,7 @@ std::vector<size_t> data_layout_t::length_axes_by_increasing_strides(bool pin_in
     return ret;
 }
 
-void data_layout_t::reorder_length_axes(const std::vector<size_t>& len_axis_order)
+void data_descriptor_t::reorder_length_axes(const std::vector<size_t>& len_axis_order)
 {
     std::vector<size_t> current_order(get_len_rank(), 0);
     std::iota(current_order.begin(), current_order.end(), 0);
@@ -384,7 +386,7 @@ void data_layout_t::reorder_length_axes(const std::vector<size_t>& len_axis_orde
     }
 }
 
-size_t data_layout_t::slowest_varying_axis() const
+size_t data_descriptor_t::slowest_varying_axis() const
 {
     size_t ret = 0;
     for(size_t dim = 1; dim < get_full_rank(); dim++)
@@ -400,7 +402,7 @@ size_t data_layout_t::slowest_varying_axis() const
     return ret;
 }
 
-size_t data_layout_t::offset_in(const data_layout_t& other) const
+size_t data_descriptor_t::offset_in(const data_descriptor_t& other) const
 {
     if(!is_dimensionally_consistent_with(other))
         throw std::invalid_argument(
@@ -419,7 +421,7 @@ size_t data_layout_t::offset_in(const data_layout_t& other) const
     return offset;
 }
 
-bool data_layout_t::is_continuous_in(const data_layout_t& other) const
+bool data_descriptor_t::is_continuous_in(const data_descriptor_t& other) const
 {
     if(!is_dimensionally_consistent_with(other))
         throw std::invalid_argument(
@@ -441,7 +443,7 @@ bool data_layout_t::is_continuous_in(const data_layout_t& other) const
     return ret;
 }
 
-std::string data_layout_t::str() const
+std::string data_descriptor_t::str() const
 {
     std::string ret;
     ret += "lower";
@@ -472,18 +474,18 @@ std::string data_layout_t::str() const
     return ret;
 }
 
-void data_layout_t::clear()
+void data_descriptor_t::clear()
 {
     len_axes.clear();
     batch_axes.clear();
     embedding.reset();
 }
 
-void data_layout_t::full_range_reset(const std::vector<size_t>& lengths,
-                                     const std::vector<size_t>& strides,
-                                     const std::vector<size_t>& batches,
-                                     const std::vector<size_t>& distances,
-                                     bool                       real_case_with_padding)
+void data_descriptor_t::full_range_reset(const std::vector<size_t>& lengths,
+                                         const std::vector<size_t>& strides,
+                                         const std::vector<size_t>& batches,
+                                         const std::vector<size_t>& distances,
+                                         bool                       real_case_with_padding)
 {
     if(lengths.empty() || batches.empty())
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
@@ -531,15 +533,15 @@ void data_layout_t::full_range_reset(const std::vector<size_t>& lengths,
     }
 }
 
-bool data_layout_t::is_dimensionally_consistent_with(const data_layout_t& other) const
+bool data_descriptor_t::is_dimensionally_consistent_with(const data_descriptor_t& other) const
 {
     return get_batch_rank() == other.get_batch_rank() && get_len_rank() == other.get_len_rank();
 }
 
-std::optional<data_layout_t>
-    data_layout_t::get_other_inplace_layout_for(io_data_label         other_io,
-                                                rocfft_transform_type fft_type,
-                                                bool other_innermost_length_is_odd) const
+std::optional<data_descriptor_t>
+    data_descriptor_t::get_other_inplace_layout_for(io_data_label         other_io,
+                                                    rocfft_transform_type fft_type,
+                                                    bool other_innermost_length_is_odd) const
 {
     if(other_io != io_data_label::INPUT && other_io != io_data_label::OUTPUT)
         throw std::invalid_argument("Unknown I/O data label given to " + ROCFFT_CURRENT_FUNCTION);
@@ -559,7 +561,7 @@ std::optional<data_layout_t>
        || fft_type == rocfft_transform_type_complex_inverse)
     {
         // simple copy
-        return std::make_optional<data_layout_t>(*this);
+        return std::make_optional<data_descriptor_t>(*this);
     }
     else if(fft_type != rocfft_transform_type_real_forward
             && fft_type != rocfft_transform_type_real_inverse)
@@ -586,7 +588,7 @@ std::optional<data_layout_t>
             return std::nullopt;
     }
     // copy layout and modify what needs be
-    auto ret = std::make_optional<data_layout_t>(*this);
+    auto ret = std::make_optional<data_descriptor_t>(*this);
     (*ret)[0].upper
         = is_real_domain(fft_type, other_io)
               ? 2 * ((*this)[0].logical_span() - 1) + (other_innermost_length_is_odd ? 1 : 0)
@@ -600,7 +602,8 @@ std::optional<data_layout_t>
     return ret;
 }
 
-data_layout_t data_layout_t::get_layout_for_len_axes(const std::set<size_t>& len_indices) const
+data_descriptor_t
+    data_descriptor_t::get_layout_for_len_axes(const std::set<size_t>& len_indices) const
 {
     const auto len_rank = get_len_rank();
     if(len_indices.empty() || len_indices.size() > len_rank
@@ -614,7 +617,7 @@ data_layout_t data_layout_t::get_layout_for_len_axes(const std::set<size_t>& len
     if(len_indices.size() == len_rank)
         return *this;
 
-    data_layout_t ret;
+    data_descriptor_t ret;
     // map of current object's to returned object's axis indices
     std::vector<size_t> current_to_ret(get_full_rank());
     // Turn non-desired length axes into additional batch axes
@@ -644,7 +647,7 @@ data_layout_t data_layout_t::get_layout_for_len_axes(const std::set<size_t>& len
     return ret;
 }
 
-bool data_layout_t::has_consistent_embedding() const
+bool data_descriptor_t::has_consistent_embedding() const
 {
     if(!embedding)
         return true;
@@ -664,14 +667,14 @@ bool data_layout_t::has_consistent_embedding() const
     return ret;
 }
 
-data_layout_t data_layout_t::get_embedding_layout() const
+data_descriptor_t data_descriptor_t::get_embedding_layout() const
 {
     if(!embedding)
         return *this;
     if(!has_consistent_embedding())
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " detected an inconsistent embedding map");
 
-    data_layout_t ret;
+    data_descriptor_t ret;
     for(const auto& axis_idx : *embedding)
         ret.len_axes.push_back((*this)[axis_idx]);
     // all other batch axes that aren't part of the embedding remain batch axes
@@ -685,12 +688,12 @@ data_layout_t data_layout_t::get_embedding_layout() const
     return ret;
 }
 
-bool data_layout_t::is_embedded() const
+bool data_descriptor_t::is_embedded() const
 {
     return embedding.has_value() && embedding->size() > get_len_rank();
 }
 
-std::vector<size_t> data_layout_t::corresponding_axes_in_embedding() const
+std::vector<size_t> data_descriptor_t::corresponding_axes_in_embedding() const
 {
     std::vector<size_t> ret;
     if(!embedding)

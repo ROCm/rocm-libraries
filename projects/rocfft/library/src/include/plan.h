@@ -33,7 +33,7 @@
 #include <vector>
 
 #include "../../../shared/array_predicate.h"
-#include "data_layout.h"
+#include "data_set_descriptor.h"
 #include "exec_info.h"
 #include "function_pool.h"
 #include "load_store_ops.h"
@@ -94,14 +94,14 @@ struct rocfft_brick_t
         , location(location)
     {
     }
-    rocfft_brick_t(const data_layout_t& brick_layout, const rocfft_location_t& location)
+    rocfft_brick_t(const data_descriptor_t& brick_layout, const rocfft_location_t& location)
         : layout(brick_layout)
         , location(location)
     {
     }
 
-    // Data layout of the brick
-    data_layout_t layout;
+    // Data descriptor of the brick
+    data_descriptor_t layout;
     // Location of the brick
     rocfft_location_t location;
 
@@ -120,7 +120,7 @@ struct rocfft_field_t
      * the minimal full layout that logically includes all bricks' partial layouts.
      * @note In-buffer strides are meaningless in this object.
     */
-    const data_layout_t& get_global_data_range() const
+    const data_descriptor_t& get_global_data_range() const
     {
         return global_data_range;
     }
@@ -263,7 +263,7 @@ private:
 
     std::vector<rocfft_brick_t> bricks;
     std::set<size_t>            undistributed_length_dimensions;
-    data_layout_t               global_data_range;
+    data_descriptor_t           global_data_range;
 
     // Internal brick-adding API used by the public C API and MPI allgather
     static void add_brick_internal(rocfft_field_t& field, const rocfft_brick_t& brick);
@@ -286,8 +286,8 @@ struct rocfft_plan_description_t
     rocfft_array_type inArrayType  = rocfft_array_type_unset;
     rocfft_array_type outArrayType = rocfft_array_type_unset;
 
-    data_layout_t input_layout;
-    data_layout_t output_layout;
+    data_descriptor_t input_layout;
+    data_descriptor_t output_layout;
 
     std::array<size_t, 2> inOffset  = {0, 0};
     std::array<size_t, 2> outOffset = {0, 0};
@@ -409,7 +409,7 @@ struct rocfft_plan_description_t
     bool has_undistributed_io_on_current_location() const;
 
     /**
-     * @brief Returns a read accessor for the input (resp. output) data layout that must take
+     * @brief Returns a read accessor for the input (resp. output) data descriptor that must take
      * precedence. If a lone-brick input (resp. output) field is used, this returns a (const)
      * reference to that brick's layout. Otherwise, a (const) reference to `input_layout`
      * (resp. `output_layout`) is returned.
@@ -422,7 +422,7 @@ struct rocfft_plan_description_t
      * layout on input (resp. output). An `std::invalid_argument` exception is thrown if `io`
      * is not an expected value.
      */
-    const data_layout_t& undistributed_layout_for(io_data_label io) const;
+    const data_descriptor_t& undistributed_layout_for(io_data_label io) const;
 
     // Count the number of pointers required for either input or output
     // - planar data requires two pointers, real + complex require one.
