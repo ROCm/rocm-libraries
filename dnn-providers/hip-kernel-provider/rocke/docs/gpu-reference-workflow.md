@@ -145,7 +145,14 @@ not an automatically approved replacement for the committed lock.
 For convolution, optionally add `--torch-reference` to the qualification command
 in a separate offline environment with Torch installed. This checks CPU Torch
 float64 and float32 answers as well as NumPy and includes their bounds in the
-certificate. A CPU Torch build suffices. SDPA has no equivalent flag. The
+certificate. A CPU Torch build suffices. SDPA also accepts `--torch-reference`
+for CPU Torch float64/float32 SDPA, or `--torch-reference cuda` for the matching
+ROCm GPU. Both operations set B to the largest measured baseline error bound
+against all enabled references. No fixed percentage margin is reserved; the
+comparison limit C is rounded strictly below T-B, so D<=C implies D+B<T.
+The NumPy–Torch gap remains diagnostic. Existing published bundles retain
+their old authenticated limits until replaced through this workflow. See the [SDPA contract](sdpa-test-reference.md#optional-torch-reference-agreement-during-qualification)
+for scope and reference-only auditing. The
 convolution oracle-only audit is:
 
 ```bash

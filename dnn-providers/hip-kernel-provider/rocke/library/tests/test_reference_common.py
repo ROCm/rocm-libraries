@@ -709,8 +709,9 @@ def test_shapes_and_empty_outputs_cannot_broadcast_or_pass():
             max_abs_upper(left, right)
 
 
-def test_budget_is_strict_even_at_the_float_boundary():
-    budget = ErrorBudget(0.02, 0.002, 0.001)
+@pytest.mark.parametrize("margin", [0.0, 0.001])
+def test_budget_is_strict_even_at_the_float_boundary(margin):
+    budget = ErrorBudget(0.02, 0.002, margin)
     limit = budget.comparison_limit
     assert Fraction(limit) + Fraction(budget.baseline_error_bound) + Fraction(
         budget.margin
@@ -726,7 +727,8 @@ def test_budget_is_strict_even_at_the_float_boundary():
     [
         (0.02, 0.019, 0.002),
         (0.02, -0.001, 0.001),
-        (0.02, 0.0, 0.0),
+        (0.02, 0.02, 0.0),
+        (0.02, 0.0, -0.001),
         (math.inf, 0.0, 0.001),
         (0.02, math.nan, 0.001),
     ],
@@ -824,3 +826,44 @@ def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
         assert not session.workers
     finally:
         session.close()
+
+
+def test_removing_reserve_accepts_more_drift_without_widening_tolerance():
+    budget = ErrorBudget(0.02, 0.002)
+    budget.check(0.0175)
+    assert Fraction(0.002) + Fraction(0.0175) < Fraction(0.02)
+    with pytest.raises(AssertionError):
+        ErrorBudget(0.02, 0.002, 0.001).check(0.0175)
+    with pytest.raises(AssertionError):
+        budget.check(0.0185)
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
+    tmp_path, operation
+):
+    from dataclasses import asdict
+    from importlib import import_module
+
+    cli = import_module(f"{operation}_reference.cli")
+    fixtures = import_module(f"test_{operation}_reference_contract")
+    manifest = (
+        fixtures._bundle(tmp_path) if operation == "sdpa" else fixtures._manifest()
+    )
+    cli._validate_cases(manifest, "gfx942")
+    manifest.pop("budget_policy")
+    for entry in manifest["cases"].values():
+        budget = ErrorBudget(
+            entry["budget"]["tolerance"],
+            entry["budget"]["baseline_error_bound"],
+            entry["budget"]["tolerance"] / 20,
+        )
+        entry["budget"] = asdict(budget)
+        entry["comparison_limit"] = budget.comparison_limit
+    cli._validate_cases(manifest, "gfx942")
+    manifest["budget_policy"] = "max-reference-bound-v1"
+    with pytest.raises(ValueError, match="budget changed"):
+        cli._validate_cases(manifest, "gfx942")
+    manifest["budget_policy"] = "unknown"
+    with pytest.raises(ValueError, match="unsupported reference budget policy"):
+        cli._validate_cases(manifest, "gfx942")

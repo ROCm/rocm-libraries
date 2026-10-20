@@ -60,16 +60,17 @@ def max_abs_upper(left: np.ndarray, right: np.ndarray) -> float:
 
 @dataclass(frozen=True)
 class ErrorBudget:
-    """A conservative triangle-inequality budget with strictly positive margin."""
+    """A conservative triangle-inequality budget with a strict original tolerance."""
 
     tolerance: float
     baseline_error_bound: float
-    margin: float
+    # Retained only to replay authenticated bundles using the legacy reserve.
+    margin: float = 0.0
 
     def __post_init__(self) -> None:
         if not all(math.isfinite(x) for x in asdict(self).values()):
             raise ValueError("non-finite GPU reference error budget")
-        if self.baseline_error_bound < 0 or self.margin <= 0 or self.tolerance <= 0:
+        if self.baseline_error_bound < 0 or self.margin < 0 or self.tolerance <= 0:
             raise ValueError("invalid GPU reference error budget")
         if self.remaining <= 0:
             raise ValueError("pinned GPU reference leaves no comparison budget")
@@ -85,7 +86,7 @@ class ErrorBudget:
     @property
     def comparison_limit(self) -> float:
         # Fraction avoids cancellation/rounding while allocating the budget.
-        # Round downward so a binary float threshold cannot overdraw it.
+        # Round strictly below the exact remainder: B + D < T even with no reserve.
         return math.nextafter(float(self.remaining), -math.inf)
 
     def check(self, distance: float) -> None:

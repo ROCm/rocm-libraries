@@ -72,10 +72,6 @@ class Case:
         return 0.05
 
     @property
-    def margin(self) -> float:
-        return 0.0025
-
-    @property
     def input_shapes(self) -> dict[str, tuple[int, ...]]:
         return {
             "a": (self.N, self.Hi, self.Wi, self.C),

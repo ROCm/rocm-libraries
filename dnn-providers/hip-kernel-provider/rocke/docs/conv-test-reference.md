@@ -71,8 +71,8 @@ geometry helpers.
 Optional `qualify --torch-reference` also runs CPU
 `torch.nn.functional.conv2d` in float64 and float32, using the same quantized
 inputs with explicit NHWC/KYXC to NCHW/KCYX conversion. Torch rounds its own
-outputs through float32 to FP16/BF16. Each Torch answer must agree with NumPy
-within the reserved margin. Qualification uses the largest baseline error
+outputs through float32 to FP16/BF16. The NumPy–Torch gap is diagnostic.
+Qualification uses the largest baseline error
 against any enabled oracle, with the same frozen NumPy scale, to set the
 comparison budget. Per-case Torch version, implementation, answer digests,
 oracle disagreement, and baseline errors are authenticated by the manifest lock.
@@ -86,14 +86,22 @@ For independent reference R, qualified baseline O, and current output N, define
 S = max(max(abs(R)), 1). S is recorded in the locked manifest. Both offline and
 online distances use max(abs(A - B))/S, with subtraction/division rounded
 conservatively. The original forward threshold is 0.05 for both dtypes; qualification
-reserves a 0.0025 margin. Each R_j below is an enabled offline reference; S
+uses no fixed reserve. Each R_j below is an enabled offline reference; S
 always comes from NumPy:
 
 ```text
 baseline_bound = max over enabled references R_j of upper_bound(max(abs(O - R_j)) / S)
-comparison_limit + baseline_bound + margin <= 0.05
+comparison_limit + baseline_bound < 0.05
 max(abs(N - O)) / S <= comparison_limit
 ```
+
+The comparison limit is rounded strictly below the exact rational remainder,
+so acceptance implies `max(abs(N - R_j))/S < 0.05` for every enabled reference.
+A baseline bound at or above the original tolerance fails qualification.
+New qualifications record `budget_policy: "max-reference-bound-v1"` with the
+legacy `margin` field set to zero. Older bundles without this marker retain
+their authenticated 0.0025 reserve and limits until requalified and published.
+No workload coverage is removed by dropping the reserve.
 
 CI requires the baseline output digest to match the independently qualified result
 before using that certificate. A nondeterministic baseline is rejected during

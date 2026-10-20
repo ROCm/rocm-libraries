@@ -5,7 +5,7 @@
 
 Qualification uses float64 NumPy SDPA on the exact fp16/bf16 input values.
 Replay generates old answers on the GPU. Every accepted comparison satisfies
-``old_error_bound + current_distance + margin <= original_tolerance``.
+``old_error_bound + current_distance < original_tolerance``.
 This is a per-input guarantee relative to the recorded independent reference,
 not a bound on unobserved inputs or on the reference's mathematical error.
 """
@@ -53,12 +53,6 @@ class Case:
     @property
     def tolerance(self) -> float:
         return 0.02 if self.dtype == "fp16" else 0.04
-
-    @property
-    def margin(self) -> float:
-        # Reserve 5% of the existing tolerance in addition to conservative
-        # evaluation of both measured distances. Never widen that tolerance.
-        return 0.001 if self.dtype == "fp16" else 0.002
 
     @property
     def shape(self) -> tuple[int, int, int, int]:

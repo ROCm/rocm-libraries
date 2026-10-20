@@ -138,7 +138,7 @@ def _manifest():
     entries = {}
     for case in get_architecture("gfx942").CASES:
         arrays = make_inputs(case)
-        budget = ErrorBudget(case.tolerance, 0.001, case.margin)
+        budget = ErrorBudget(case.tolerance, 0.001)
         output = encode(np.ones(case.output_shape), case.dtype)
         entries[case.id] = {
             "case": asdict(case),
@@ -154,6 +154,7 @@ def _manifest():
         }
     return {
         "schema": 2,
+        "budget_policy": "max-reference-bound-v1",
         "operation": "conv-fwd",
         "baseline_revision": "a" * 40,
         "input_generation": INPUT_GENERATOR,

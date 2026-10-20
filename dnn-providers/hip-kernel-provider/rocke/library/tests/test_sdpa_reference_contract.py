@@ -133,6 +133,7 @@ def _bundle(tmp_path, architecture="gfx942"):
     (payload / "fixture").write_bytes(b"artifact fixture")
     manifest = {
         "schema": SCHEMA_VERSION,
+        "budget_policy": "max-reference-bound-v1",
         "baseline_revision": "a" * 40,
         "files": payload_digests(payload),
         "input_generation": INPUT_GENERATOR,
@@ -140,10 +141,8 @@ def _bundle(tmp_path, architecture="gfx942"):
             case.id: {
                 "case": asdict(case),
                 "device_target": f"{architecture}:sramecc+:xnack-",
-                "budget": asdict(ErrorBudget(case.tolerance, 0.001, case.margin)),
-                "comparison_limit": ErrorBudget(
-                    case.tolerance, 0.001, case.margin
-                ).comparison_limit,
+                "budget": asdict(ErrorBudget(case.tolerance, 0.001)),
+                "comparison_limit": ErrorBudget(case.tolerance, 0.001).comparison_limit,
                 "input_digests": {},
                 "output_digest": "not-a-qualified-output",
                 "kernel": {
@@ -191,7 +190,7 @@ def test_even_a_new_lock_cannot_silently_change_the_test_contract(tmp_path, chan
     elif change == "changed_shape":
         entry["case"]["sequence_length"] = 128
     else:
-        budget = ErrorBudget(0.2, 0.001, CASES[0].margin)
+        budget = ErrorBudget(0.2, 0.001)
         entry["budget"] = asdict(budget)
         entry["comparison_limit"] = budget.comparison_limit
     _lock(tmp_path, manifest)

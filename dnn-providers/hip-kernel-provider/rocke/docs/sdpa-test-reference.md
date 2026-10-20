@@ -62,7 +62,7 @@ The adapter uses named production tuning candidates, matching the original
 numeric tests. It selects wide DMA only for persistent, causal D128 cases.
 Grid kernels take runtime shape scalars; persistent kernels bake
 the shape. The existing replay worker supports both ABIs for this cohort.
-The input recipe, independent oracle, absolute tolerances, and margins below
+The input recipe, independent oracle, absolute tolerances, and budget policy below
 apply to both architectures. Error bounds and output identities are qualified
 separately on each architecture.
 
@@ -147,7 +147,8 @@ Qualification used Python 3.12.3, NumPy 2.5.4, and COMGR LLVM 23 on gfx1201,
 without Torch. Three baseline executions per case reproduced identical output
 digests. Independent maximum absolute error bounds ranged from 0.000332024 to
 0.001056340 (rounded upward); the FP16 tolerance remains `0.02`, with the
-existing `0.001` reserved margin. All eight archived code objects were inspected
+then-current `0.001` reserved margin (retained in that published bundle).
+All eight archived code objects were inspected
 and target `amdgcn-amd-amdhsa--gfx12-generic`.
 
 Source and installed verification each passed all eight comparisons and three
@@ -213,17 +214,18 @@ live, and `N` is the current result:
 
 ```text
 norm(N - R) <= norm(N - O) + norm(O - R) <= comparison_limit + baseline_bound
-comparison_limit + baseline_bound + margin <= original_tolerance
-margin > 0
+comparison_limit + baseline_bound < original_tolerance
 ```
 
 The norm is the maximum absolute error across every output element. Qualification
 measures a conservative bound on `norm(O - R)`. Both subtractions promote values
 to float64 first, and the maximum difference is rounded upward. Budget allocation
 uses exact rational arithmetic and rounds the comparison limit downward. The
-reserved margin is `0.001` for fp16 and `0.002` for bf16. A baseline without
-positive remaining headroom fails qualification; the original tolerance cannot
-be increased by its manifest.
+comparison limit is strictly below the exact remainder `T - B`; this preserves
+the original strict threshold without a fixed percentage reserve. A baseline
+with `B >= T` fails qualification; the original tolerance cannot be increased
+by its manifest. When Torch is enabled, B is the maximum baseline error bound
+against NumPy and both recorded Torch answers.
 
 Qualification records input and old-output digests. CI executes the old kernels
 and requires those same digests before using the offline bounds. An unknown old
@@ -240,10 +242,69 @@ lane. Every current repetition must pass. Baseline and current workers are reuse
 across cases but remain separate processes with isolated imports and caches.
 
 This is a sufficient accuracy gate within the existing Torch-derived limits,
-not a tight no-regression threshold. Accepted current-to-independent error is at
-most `0.019` for fp16 and `0.038` for bf16 after reserving the margins. A result
+not a tight no-regression threshold. Accepted current-to-independent error is
+strictly below `0.02` for fp16 and `0.04` for bf16. A result
 can change within that budget and still pass; an improvement can also fail the
 comparison to the baseline and require independent diagnosis.
+
+New qualifications record `budget_policy: "max-reference-bound-v1"` and a zero
+legacy `margin` field. Storage remains tensor-free schema 2. Existing bundles
+without this policy marker keep their authenticated 5% reserve and comparison
+limits; loading them does not silently widen their gate. Requalify and publish
+through the normal workflow to adopt the new policy. The reserve did not add
+input, shape, dtype, or architecture coverage.
+
+## Optional Torch reference agreement during qualification
+
+The original gfx942/gfx950 dense numeric tests use Torch FP32 SDPA. The default
+pinned qualification instead measures B against NumPy float64 on a portable,
+quantized input corpus. These references and input samples are not interchangeable.
+Existing published certificates do not acquire Torch evidence retroactively.
+
+To measure their agreement on exactly the qualified inputs, add
+`--torch-reference` (CPU) or `--torch-reference cuda` (ROCm GPU) to the offline
+`qualify` command. Both Torch float64 and float32 SDPA answers are checked, using
+explicit GQA expansion and the original tests' Python `1/sqrt(D)` scale. NumPy
+retains the float32 ABI scale. The measured gap therefore includes that scale
+representation difference. Torch outputs retain their computation dtype; they
+are not rounded to FP16/BF16 output storage. The default Torch SDPA backend
+selection is used, and its device, version, precision settings, checker digest,
+answer digests, and conservative disagreement bounds are recorded in the locked
+manifest. Requesting unavailable Torch or a missing/wrong ROCm GPU fails.
+
+For each enabled reference R_j, measure the pinned output directly:
+
+```text
+B = max_j upper_bound(norm(O - R_j))
+C < T - B
+D <= C implies norm(N - R_j) <= D + B < T for every enabled R_j
+```
+
+The measured NumPy–Torch gap is retained as diagnostic evidence, not compared
+against an arbitrary margin. A large baseline-to-reference error reduces the
+comparison budget; `B >= T` fails qualification. This preserves the same
+reference coverage without a fixed 5% reserve. Conservative arithmetic and
+authenticated replay are still required.
+
+CPU evidence applies only to the recorded CPU Torch answers. It does not qualify
+the original GPU Torch backend, a different Torch version, different inputs, or
+arbitrary future Torch outputs. Use `cuda` on the corresponding ROCm processor
+for GPU reference evidence. This comparison also does not prove exact-real
+arithmetic accuracy or accuracy no-regression. Existing Torch tests remain useful.
+
+A reference-only audit can run without compiling or executing rocKE:
+
+```bash
+PYTHONPATH=library/tests:platform/python python -m sdpa_reference.torch_reference \
+  --arch gfx942 --device cpu --output oracle-agreement.json
+python -m pytest library/tests/sdpa_reference/check_torch_reference.py -q
+```
+
+This audit is not baseline qualification and cannot replace a published bundle.
+To include the evidence in a certificate, rerun complete-cohort qualification
+with the option, then follow the shared candidate verification and publication
+workflow. Ordinary replay does not import Torch or run the independent references;
+the optional checker is not copied into the frozen replay payload.
 
 ## Developer verification
 

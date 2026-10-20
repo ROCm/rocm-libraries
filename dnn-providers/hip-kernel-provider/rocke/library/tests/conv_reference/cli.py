@@ -146,7 +146,7 @@ def qualify(
                 bound,
                 *(r["baseline_error_bound"] for r in torch_report["results"].values()),
             )
-        budget = ErrorBudget(case.tolerance, bound, case.margin)
+        budget = ErrorBudget(case.tolerance, bound)
         entries[case.id] = {
             "case": asdict(case),
             "input_digests": input_digests,
@@ -165,11 +165,12 @@ def qualify(
         print(
             f"QUALIFIED {case.id}: old_bound={bound:.9g}, "
             f"comparison_limit={budget.comparison_limit:.9g}, "
-            f"margin={case.margin:.9g}, tolerance={case.tolerance:.9g}",
+            f"tolerance={case.tolerance:.9g}",
             flush=True,
         )
     manifest = {
         "schema": SCHEMA_VERSION,
+        "budget_policy": "max-reference-bound-v1",
         "operation": "conv-fwd",
         "input_generation": INPUT_GENERATOR,
         "baseline_revision": metadata["revision"],
@@ -231,6 +232,9 @@ def load_bundle(
 
 def _validate_cases(manifest: dict, architecture: str) -> None:
     """Preserve the cohort and budgets across qualification and verification."""
+    policy = manifest.get("budget_policy")
+    if policy not in (None, "max-reference-bound-v1"):
+        raise ValueError("unsupported reference budget policy")
     target = get_architecture(architecture)
     if set(manifest["cases"]) != {case.id for case in target.CASES}:
         raise ValueError(
@@ -248,7 +252,7 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
         budget = ErrorBudget(**entry["budget"])
         if (
             budget.tolerance != case.tolerance
-            or budget.margin != case.margin
+            or budget.margin != (case.tolerance / 20 if policy is None else 0.0)
             or entry["comparison_limit"] != budget.comparison_limit
         ):
             raise ValueError(f"convolution tolerance or budget changed: {case.id}")

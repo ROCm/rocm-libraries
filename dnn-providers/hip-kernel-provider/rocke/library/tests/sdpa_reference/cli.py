@@ -81,10 +81,19 @@ def _freeze_runner(destination: Path) -> None:
 
 
 def qualify(
-    baseline: Path, output: Path, repetitions: int, architecture: str = "gfx942"
+    baseline: Path,
+    output: Path,
+    repetitions: int,
+    architecture: str = "gfx942",
+    *,
+    torch_reference: str | None = None,
 ) -> None:
     """Measure the old version's bounds and require deterministic old outputs."""
     target = get_architecture(architecture)
+    if torch_reference is not None:
+        from .torch_reference import cross_check, validate_device
+
+        validate_device(torch_reference, architecture)
     if repetitions < 2:
         raise ValueError("qualification requires at least two old executions")
     metadata = json.loads((baseline / "snapshot.json").read_text())
@@ -129,7 +138,21 @@ def qualify(
             raise ValueError(f"old SDPA output is not deterministic for {case.id}")
         reference = independent_reference(case, inputs)
         bound = max_abs_upper(decode(outputs[0], case.dtype), reference)
-        budget = ErrorBudget(case.tolerance, bound, case.margin)
+        torch_report = None
+        if torch_reference is not None:
+            torch_report = cross_check(
+                case,
+                inputs,
+                reference,
+                decode(outputs[0], case.dtype),
+                device=torch_reference,
+            )
+            bound = max(
+                bound,
+                *(r["baseline_error_bound"] for r in torch_report["results"].values()),
+            )
+        # B covers every enabled independent reference on the same inputs.
+        budget = ErrorBudget(case.tolerance, bound)
         entries[case.id] = {
             "case": asdict(case),
             "input_digests": input_digests,
@@ -142,14 +165,17 @@ def qualify(
             "qualification_repetitions": repetitions,
             "compiler": report["compiler"],
         }
+        if torch_report is not None:
+            entries[case.id]["torch_reference"] = torch_report
         print(
             f"QUALIFIED {case.id}: old_bound={bound:.9g}, "
             f"comparison_limit={budget.comparison_limit:.9g}, "
-            f"margin={case.margin:.9g}, tolerance={case.tolerance:.9g}",
+            f"tolerance={case.tolerance:.9g}",
             flush=True,
         )
     manifest = {
         "schema": SCHEMA_VERSION,
+        "budget_policy": "max-reference-bound-v1",
         "input_generation": INPUT_GENERATOR,
         "baseline_revision": metadata["revision"],
         "baseline_snapshot_sha256": file_digest(baseline / "snapshot.json"),
@@ -204,6 +230,9 @@ def load_bundle(
 
 def _validate_cases(manifest: dict, architecture: str) -> None:
     """Preserve the cohort and budgets across qualification and verification."""
+    policy = manifest.get("budget_policy")
+    if policy not in (None, "max-reference-bound-v1"):
+        raise ValueError("unsupported reference budget policy")
     target = get_architecture(architecture)
     if set(manifest["cases"]) != {case.id for case in target.CASES}:
         raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
@@ -222,7 +251,7 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
         budget = ErrorBudget(**entry["budget"])
         if (
             budget.tolerance != case.tolerance
-            or budget.margin != case.margin
+            or budget.margin != (case.tolerance / 20 if policy is None else 0.0)
             or entry["comparison_limit"] != budget.comparison_limit
         ):
             raise ValueError(f"SDPA tolerance or budget changed: {case.id}")
@@ -334,6 +363,13 @@ def main() -> None:
     qualification.add_argument("--baseline", required=True, type=Path)
     qualification.add_argument("--output", required=True, type=Path)
     qualification.add_argument("--repetitions", type=int, default=3)
+    qualification.add_argument(
+        "--torch-reference",
+        nargs="?",
+        const="cpu",
+        choices=("cpu", "cuda"),
+        help="also qualify Torch float64/float32 answers on cpu (default) or ROCm cuda",
+    )
     verification = commands.add_parser(
         "verify", help="run every required GPU comparison"
     )
@@ -347,7 +383,11 @@ def main() -> None:
         snapshot(args.repository.resolve(), args.revision, args.output.resolve())
     elif args.command == "qualify":
         qualify(
-            args.baseline.resolve(), args.output.resolve(), args.repetitions, args.arch
+            args.baseline.resolve(),
+            args.output.resolve(),
+            args.repetitions,
+            args.arch,
+            torch_reference=args.torch_reference,
         )
     else:
         bundle = args.bundle.resolve()

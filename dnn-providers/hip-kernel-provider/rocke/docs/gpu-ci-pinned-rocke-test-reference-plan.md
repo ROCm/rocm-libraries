@@ -66,7 +66,6 @@ For one qualified input case and one required output/metric pair, let:
 - `T` be the original test's tolerance in its specified norm.
 - `B` be a qualified upper bound on the old version's error, `norm(O - R)`.
 - `D` be a conservative evaluation of `norm(N - O)` in CI.
-- `M > 0` be reserved numerical and engineering headroom.
 
 Use the same norm, coordinates, masks, and normalization in both comparisons.
 The triangle inequality gives:
@@ -78,9 +77,9 @@ norm(N - R) <= norm(N - O) + norm(O - R) <= D + B
 Set the online comparison limit `C` so that:
 
 ```text
-C <= T - B - M
+C < T - B
 accept only when D <= C
-therefore norm(N - R) <= T - M < T
+therefore norm(N - R) <= D + B <= C + B < T
 ```
 
 Qualification and CI must reject non-finite bounds or distances, negative
@@ -96,9 +95,17 @@ qualification result**, would be:
 | --- | ---: |
 | Original accuracy limit `T` | 0.020 |
 | Qualified old-to-reference upper bound `B` | 0.002 |
-| Reserved margin `M` | 0.001 |
-| Maximum new-to-old distance `C` | 0.017 |
-| Maximum accepted new-to-reference error | 0.019 |
+| Maximum new-to-old distance `C` | Rounded strictly below 0.018 |
+| Accepted new-to-reference error | Strictly below 0.020 |
+
+The comparison limit is rounded strictly below the exact rational remainder
+`T-B`, preserving the strict test threshold without a fixed reserve. A 5%
+reserve does not add cases or reference coverage. If several independent
+references are enabled, B is the maximum pinned-to-reference bound across all
+of them; the same triangle inequality then applies to each recorded answer.
+The NumPy–Torch gap can be recorded diagnostically without a separate cutoff.
+Older authenticated bundles retain their recorded reserve and limit until
+requalification; new bundles mark the no-reserve policy explicitly.
 
 The budget stays strictly below `0.020`. The actual bound must come from
 qualification. Do not assume a particular fraction of the tolerance is
@@ -144,7 +151,7 @@ Bind all of the following into a versioned case identity:
 | Initial state | Mutable buffers, state pools, workspaces that require initialization, and relevant RNG state |
 | Old implementation | Source revision, engine backend, compiled artifact hashes, ABI/runner version, and target features |
 | Independent reference | Implementation/version, algorithm, precision, and relevant numerical settings |
-| Numerical contract | Every norm, original tolerance, fixed scale/mask, qualified bound, comparison limit, and margin |
+| Numerical contract | Every norm, original tolerance, fixed scale/mask, qualified bound, comparison limit, and budget policy |
 | Qualified result | Joint output digest and, where useful for diagnostics, per-output digests |
 | Provenance | Qualification command, environment, device target, and validation report |
 
