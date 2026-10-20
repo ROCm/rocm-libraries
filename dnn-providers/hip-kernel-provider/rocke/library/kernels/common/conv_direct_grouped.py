@@ -714,6 +714,23 @@ def _direct_dgrad_params(b, io_type):
     return params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wi, p_Ho, p_Wo, c0, c1
 
 
+def _direct_conv_q_constants(spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q, p):
+    """Shared direct-conv preamble: builder, constants, c_BG_cpg."""
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
+        spec, THREADS, io_type
+    )
+
+    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
+        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
+    )
+
+    c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
+    return (
+        b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo,
+        c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W, c_BG_cpg,
+    )
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -747,21 +764,9 @@ def build_direct_conv_16c(
     PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
     c_stride = p.stride  # Python int, used in emit-time guards below
 
-    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
-        spec, THREADS, io_type
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo, c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W, c_BG_cpg = _direct_conv_q_constants(
+        spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q, p
     )
-
-    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
-        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
-    )
-
-    # The address constants previously hand-rolled here
-    # (``c_W_totalC``, ``c_H_W_totalC``, …) are now folded into the
-    # per-axis ``TensorDescriptor`` lookups below. Keep the LDS
-    # geometry constant (``c_BG_cpg``) because that one names a
-    # workgroup-shaped LDS stride and isn't part of any DRAM
-    # descriptor.
-    c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
 
     tid = b.thread_id_x()
     wave_id = b.div(tid, c_wave)
@@ -1704,14 +1709,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     BLOCK_GROUPS = spec.block_groups
     WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES = _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS)
 
-    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
-        spec, THREADS, io_type
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo, c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W, c_BG_cpg = _direct_conv_q_constants(
+        spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q, p
     )
-
-    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
-        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
-    )
-    c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
@@ -2147,14 +2147,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES = _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS)
     N_CH_BLOCKS = p.cpg // LOAD_VEC  # = 8 for cpg=32
 
-    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
-        spec, THREADS, io_type
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo, c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W, c_BG_cpg = _direct_conv_q_constants(
+        spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q, p
     )
-
-    c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W = _direct_conv_constants(
-        b, WAVE, BLOCK_GROUPS, BLOCK_Q, p, p_Wo
-    )
-    c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
