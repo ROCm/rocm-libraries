@@ -896,6 +896,28 @@ class TestShapeDirectory:
         assert rc == 0, log
         assert len(shapes) == 1
 
+    def test_a_narrower_v_head_and_a_window_are_carried_not_guessed(
+        self, published, tmp_path
+    ):
+        """An MLA row keeps its 192/128 heads, and a windowed row its width."""
+        (published / "mla.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,hdim_v,mask,window_size\n"
+            "1,128,4096,4096,192,128,causal,\n"
+            "2,32,4096,4096,128,,swin,1024\n"
+        )
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        by_batch = {s["batch"]: s for s in shapes}
+        assert (by_batch[1]["hdim_q"], by_batch[1]["hdim_v"]) == (192, 128)
+        assert by_batch[2]["sliding_window"] == 1024
+
+    def test_a_windowed_row_without_a_width_is_refused(self, published, tmp_path):
+        (published / "swin.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n1,32,4096,4096,128,swin\n"
+        )
+        rc, log, _ = self._mine(tmp_path)
+        assert rc != 0 and "positive window_size" in log
+
     def test_a_graph_document_is_left_to_the_graph_reader(self, published, tmp_path):
         """A graph is mined once, as a graph, not again as a record."""
         (published / "g.json").write_text(
@@ -1047,9 +1069,9 @@ class TestQueryCsv:
         """`sdpa_fwd` declares no window parameter."""
         rc, log, lines = self._mine(
             tmp_path,
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
-            "1,32,4096,4096,128,swin\n"
-            "2,32,4096,4096,128,causal\n",
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask,window_size\n"
+            "1,32,4096,4096,128,swin,1024\n"
+            "2,32,4096,4096,128,causal,\n",
         )
         assert rc == 0, log
         assert len(lines) == 2
@@ -1060,7 +1082,8 @@ class TestQueryCsv:
     ):
         rc, log, lines = self._mine(
             tmp_path,
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n1,32,4096,4096,128,swin\n",
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask,window_size\n"
+            "1,32,4096,4096,128,swin,1024\n",
         )
         assert rc != 0
         assert len(lines) == 1

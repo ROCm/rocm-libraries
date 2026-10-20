@@ -512,6 +512,16 @@ SHAPE_COLUMNS = {
     "hdim": "head_dim",
     "head_size": "head_dim",
     "d": "head_dim",
+    # Multi-head latent attention publishes V narrower than Q/K (192/128).
+    "hdim_v": "head_dim_v",
+    "head_dim_v": "head_dim_v",
+    "v_head_dim": "head_dim_v",
+    "d_v": "head_dim_v",
+    "window_size": "window",
+    "sliding_window": "window",
+    "window": "window",
+    "use_sinks": "sinks",
+    "sinks": "sinks",
     "dtype": "dtype",
     "data_type": "dtype",
     "q_dtype": "dtype",
@@ -597,17 +607,33 @@ def _shape_row(row: dict, path: Path) -> dict | None:
             f"problem in the corpus under the row's name."
         )
 
+    # As from_published_csv: a windowed row names its width, never a guessed one.
+    window = 0
+    if mask_type == MASK_TYPE["swin"]:
+        raw_window = str(fields.get("window", "")).strip()
+        if not raw_window.isdigit() or int(raw_window) <= 0:
+            raise SystemExit(
+                f"FAIL: {path}: windowed row requires a positive window_size width"
+            )
+        window = int(raw_window)
+    raw_sinks = str(fields.get("sinks", "")).strip().lower()
+    if raw_sinks not in ("", "true", "1", "yes", "false", "0", "no"):
+        raise SystemExit(f"FAIL: {path}: unknown use_sinks value {raw_sinks!r}")
+
     heads_q = int(fields["heads_q"])
+    head_dim = int(fields["head_dim"])
     return {
         "batch": int(fields["batch"]),
         "nhead_q": heads_q,
         "nhead_k": int(fields.get("heads_kv", heads_q)),
         "seqlen_q": int(fields["seqlen_q"]),
         "seqlen_k": int(fields["seqlen_kv"]),
-        "hdim_q": int(fields["head_dim"]),
-        "hdim_v": int(fields["head_dim"]),
+        "hdim_q": head_dim,
+        "hdim_v": int(fields.get("head_dim_v", head_dim)),
         "dtype": normalise_dtype(fields.get("dtype"), path, "bf16"),
         "mask_type": mask_type,
+        "sliding_window": window,
+        "use_sinks": raw_sinks in ("true", "1", "yes"),
         "_provenance": {
             "source": "shape_dir",
             "file": path.name,
