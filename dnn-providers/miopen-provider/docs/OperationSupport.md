@@ -24,6 +24,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
+| Reduction (standalone) | FP16, FP32 | Any, rank 1-6 | Single-node graph<sup>9</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -33,6 +34,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁶ 3D tensors are internally padded to 4D for MIOpen compatibility. For convolution, the padding also extends the padding, stride and dilation vectors with a trailing spatial dimension of length 1.
 ⁷ See Standalone Activation note below
 ⁸ See Standalone Binary Elementwise note below
+⁹ See Standalone Reduction note below
 
 ## Detailed Requirements
 
@@ -87,6 +89,18 @@ The following table lists all operations currently supported in hipDNN:
 > execution is not supported.
 
 > [!NOTE]
+> **Standalone Reduction:** A single-node reduction graph supports ADD, MUL, MIN, MAX, AMAX, AVG,
+> NORM1 and NORM2 through MIOpen's `miopenReduceTensor`, with an FP32 compute type. Input and
+> output share one datatype (FP16 or FP32) and one rank (1-6); each output dimension is either 1
+> (reduced) or equal to the input dimension, and at least one dimension must be reduced. Any set
+> of dimensions may be reduced, including the innermost, and any positive strides are accepted
+> as long as distinct output elements do not overlap in memory. Not supported: MUL_NO_ZEROS
+> (MIOpen has no equivalent), BFP16 (MIOpen's legacy reduce kernels have no bf16 support),
+> deterministic reduction (`is_deterministic`), in-place execution, and tensors whose lengths,
+> strides, element count or memory extent in bytes exceed INT32_MAX. A reduction to a single
+> output element is further limited to 1,073,741,568 (about 2^30) input elements.
+
+> [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
 
 > [!NOTE]
@@ -106,6 +120,9 @@ graph.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
 
 > [!NOTE]
 > **Batchnorm Operations:** Batchnorm operations do not support deterministic execution in MIOpen and are only available through the default (non-deterministic) engine.
+
+> [!NOTE]
+> **Reduction:** Reduction is only available through the default (non-deterministic) engine. A reduction node that sets `is_deterministic` is not supported.
 
 ## Legend
 
