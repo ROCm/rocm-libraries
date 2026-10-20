@@ -30,6 +30,7 @@ from .common import (
     _selector_matches,
 )
 from .candidate import make_tuning_candidate
+from .tuning_specs import NUM_SEGMENTS
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -71,17 +72,20 @@ def _variants():
                         block_m_per_warp=32,
                         compile_backend=backend,
                     )
-    # gfx950 3D has fixed BLOCK_M=16 and T=block_size; segment count is the
-    # load-balancing geometry exposed by the kernel.
-    for segments in (8, 16, 32, 64, 128):
-        yield AttentionGeometryVariant(
-            arch="gfx950",
-            path="3d",
-            codepath="splitkv",
-            builder_kind="tiled_3d",
-            tile_policy="1x",
-            num_segments=segments,
-        )
+    # gfx950 3D has fixed BLOCK_M=16; the KV tile spans 1, 2, 4 or 8 pages
+    # (multi-page tiles), and the segment count is the load-balancing
+    # geometry exposed by the kernel: a fixed count, or 0 for the
+    # dispatcher's split-rule count.
+    for tile in _TILES:
+        for segments in NUM_SEGMENTS + (0,):
+            yield AttentionGeometryVariant(
+                arch="gfx950",
+                path="3d",
+                codepath="splitkv",
+                builder_kind="tiled_3d",
+                tile_policy=tile,
+                num_segments=segments,
+            )
 
 
 GFX950_TUNING_VARIANTS = tuple(_variants())
