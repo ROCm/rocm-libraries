@@ -135,13 +135,35 @@ def additive_mask(keep_mask):
     return additive
 
 
-def compute_forward(Q, K, V, scale, H_q, H_kv, keep_mask=None):
+def combined_attn_mask(keep_mask, attn_bias=None):
+    """The single additive mask that carries both the band and an explicit bias.
+
+    The CPU reference adds the graph's attention-mask tensor to the scores first
+    and only then forces the out-of-band entries to -inf
+    (CpuFpReferenceSdpa.hpp, steps 2 and 3), so a finite bias can never rescue a
+    masked position. Summing a finite bias with a -inf band gives -inf, which
+    reproduces that ordering exactly.
+
+    Returns None when there is neither a band nor a bias.
+    """
+    if keep_mask is None and attn_bias is None:
+        return None
+    if attn_bias is None:
+        return additive_mask(keep_mask)
+    combined = attn_bias.float()
+    if keep_mask is not None:
+        combined = combined + additive_mask(keep_mask)
+    return combined
+
+
+def compute_forward(Q, K, V, scale, H_q, H_kv, keep_mask=None, attn_bias=None):
     """SDPA forward via PyTorch Math backend (half->FP32->half).
 
     keep_mask is an optional boolean [S_q, S_kv] (True = attend); applied as an
-    additive mask so causal/window compose uniformly with GQA.
+    additive mask so causal/window compose uniformly with GQA. attn_bias is an
+    optional additive score bias broadcastable to [B, H_q, S_q, S_kv].
     """
-    attn_mask = additive_mask(keep_mask) if keep_mask is not None else None
+    attn_mask = combined_attn_mask(keep_mask, attn_bias)
     with sdpa_kernel(SDPBackend.MATH):
         O = F.scaled_dot_product_attention(
             Q,
@@ -154,7 +176,7 @@ def compute_forward(Q, K, V, scale, H_q, H_kv, keep_mask=None):
     return O
 
 
-def compute_lse(Q, K, scale, H_q, H_kv, keep_mask=None):
+def compute_lse(Q, K, scale, H_q, H_kv, keep_mask=None, attn_bias=None):
     """Compute Log-Sum-Exp reference: logsumexp(Q @ K^T * scale, dim=-1).
 
     Returns shape [B, H_q, S_q, 1] in FP32. For fully-masked rows the LSE is
@@ -168,8 +190,9 @@ def compute_lse(Q, K, scale, H_q, H_kv, keep_mask=None):
         K_f = K_f.repeat_interleave(gqa_ratio, dim=1)
 
     scores = torch.matmul(Q_f, K_f.transpose(-2, -1)) * scale
-    if keep_mask is not None:
-        scores = scores + additive_mask(keep_mask)
+    attn_mask = combined_attn_mask(keep_mask, attn_bias)
+    if attn_mask is not None:
+        scores = scores + attn_mask
     lse = torch.logsumexp(scores, dim=-1, keepdim=True)  # [B, H_q, S_q, 1]
     return lse
 

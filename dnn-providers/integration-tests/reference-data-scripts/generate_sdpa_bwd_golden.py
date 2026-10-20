@@ -75,6 +75,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 
 # Find files in utilities folder without requiring a package to be created
@@ -115,6 +116,13 @@ UID_DV = 5
 UID_V = 6
 UID_DO = 7
 UID_STATS = 8
+# The additive attention-mask tensor, present only with --additive-mask. It
+# takes the first free UID so the mask-free topology keeps the UIDs above.
+UID_ATTN_MASK = 9
+# The same tensor in the paired forward bundle. The forward generator owns a
+# different UID map (UIDs 0-11 are already taken there), so the mask gets the
+# first UID free in *that* map rather than reusing UID_ATTN_MASK.
+FWD_UID_ATTN_MASK = 12
 
 # Forward tensor UID assignment -- the contract generate_sdpa_fwd_golden.py uses.
 FWD_UID_Q = 0
@@ -133,7 +141,7 @@ REFERENCE_STRATEGY = "matched_precision"
 LAYOUT = "bhsd"
 
 
-def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None):
+def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None, attn_bias=None):
     """SDPA backward reference: dQ, dK, dV from the saved forward O and LSE.
 
     Matched-precision (RFC 0011): inputs arrive in the bundle's IO dtype, every
@@ -144,7 +152,7 @@ def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None):
     re-softmaxed, so the backward is anchored to the saved forward statistics the
     way a real flash-attention kernel is:
 
-        P  = exp(scale * Q @ K^T + mask - LSE)
+        P  = exp(scale * Q @ K^T + bias + mask - LSE)
         D  = rowsum(dO * O)
         dP = dO @ V^T
         dS = P * (dP - D)
@@ -164,6 +172,11 @@ def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None):
     dO_f = dO.float()
 
     scores = torch.matmul(Q_f, K_f.transpose(-2, -1)) * scale
+    if attn_bias is not None:
+        # The graph's attention-mask tensor is added to the scores before the
+        # diagonal band is applied, as the CPU reference does. dBias is not an
+        # output here, so the bias affects the gradients only through P.
+        scores = scores + attn_bias.float()
     if keep_mask is not None:
         # Masked positions contribute nothing; set P to exactly zero rather than
         # relying on exp(-inf - LSE), which is NaN for a fully-masked row.
@@ -186,19 +199,21 @@ def compute_backward(Q, K, V, O, lse, dO, scale, keep_mask=None):
     return dQ, dK, dV
 
 
-def validate_against_autograd(Q, K, V, dO, scale, keep_mask, dQ, dK, dV):
+def validate_against_autograd(
+    Q, K, V, dO, scale, keep_mask, dQ, dK, dV, attn_bias=None
+):
     """Cross-check the explicit backward against PyTorch autograd (FP32).
 
     Autograd differentiates its own FP32 softmax rather than reusing the forward
     LSE, so small differences are expected and are the matched-precision gap. A
     large difference means the explicit backward above is wrong.
     """
-    from sdpa_common import additive_mask
+    from sdpa_common import combined_attn_mask
 
     Q_g = Q.float().detach().requires_grad_(True)
     K_g = K.float().detach().requires_grad_(True)
     V_g = V.float().detach().requires_grad_(True)
-    attn_mask = additive_mask(keep_mask) if keep_mask is not None else None
+    attn_mask = combined_attn_mask(keep_mask, attn_bias)
     O_g = torch.nn.functional.scaled_dot_product_attention(
         Q_g, K_g, V_g, attn_mask=attn_mask, scale=scale
     )
@@ -242,6 +257,7 @@ def build_backward_graph_json(
     left_bound,
     right_bound,
     diagonal_alignment,
+    attn_mask_dims=None,
 ):
     """Graph JSON for a single SdpaBackwardAttributes node.
 
@@ -270,6 +286,10 @@ def build_backward_graph_json(
             "virtual": False,
         },
     ]
+    if attn_mask_dims is not None:
+        tensors.append(
+            _tensor_entry(UID_ATTN_MASK, "attn_mask", attn_mask_dims, dtype_str)
+        )
 
     return {
         "nodes": [
@@ -285,7 +305,9 @@ def build_backward_graph_json(
                     "do_tensor_uid": UID_DO,
                     "stats_tensor_uid": UID_STATS,
                     "scale_tensor_uid": None,
-                    "attn_mask_tensor_uid": None,
+                    "attn_mask_tensor_uid": (
+                        None if attn_mask_dims is None else UID_ATTN_MASK
+                    ),
                     "seq_len_q_tensor_uid": None,
                     "seq_len_kv_tensor_uid": None,
                     "seed_tensor_uid": None,
@@ -333,6 +355,7 @@ def build_forward_graph_json(
     left_bound,
     right_bound,
     diagonal_alignment,
+    attn_mask_dims=None,
 ):
     """Graph JSON for the paired forward bundle (always with the LSE output).
 
@@ -358,6 +381,18 @@ def build_forward_graph_json(
     attributes["left_bound"] = left_bound
     attributes["right_bound"] = right_bound
     attributes["diagonal_alignment"] = diagonal_alignment
+    if attn_mask_dims is not None:
+        graph["tensors"].append(
+            {
+                "uid": FWD_UID_ATTN_MASK,
+                "name": "attn_mask",
+                "dims": attn_mask_dims,
+                "strides": compute_contiguous_strides(attn_mask_dims),
+                "data_type": dtype_str,
+                "virtual": False,
+            }
+        )
+        graph["nodes"][0]["inputs"]["attn_mask_tensor_uid"] = FWD_UID_ATTN_MASK
     return graph
 
 
@@ -400,6 +435,7 @@ def _base_meta_json(config, direction, reference_backend):
             "left_bound": config["left_bound"],
             "right_bound": config["right_bound"],
             "diagonal_alignment": config["diagonal_alignment"],
+            "additive_mask": config["additive_mask"],
         },
     }
 
@@ -465,6 +501,93 @@ def _write_bundle(base_filename, graph_json, meta_json, tensors):
     print(f"  Meta JSON: {base_filename}.meta.json")
 
 
+def build_sweep_case(case_id, graph_json, meta_json, golden_path):
+    """A template-sweep case entry describing the bundle just generated.
+
+    The per-tensor dims, strides and data types are read back out of the graph
+    JSON this run produced rather than restated, so a case can never disagree
+    with the tensors sitting next to it in its golden directory. The topology
+    itself stays in the checked-in graph.template.json; a case only supplies the
+    values its ${case.*} placeholders ask for.
+    """
+    node = graph_json["nodes"][0]
+    parameters = node["parameters"]
+    return {
+        "id": case_id,
+        "values": {
+            "io_data_type": graph_json["io_data_type"],
+            "tensors": [
+                {
+                    "uid": t["uid"],
+                    "dims": t["dims"],
+                    "strides": t["strides"],
+                    "data_type": t["data_type"],
+                }
+                for t in graph_json["tensors"]
+            ],
+            "attributes": {
+                "parameters__diagonal_alignment": parameters["diagonal_alignment"],
+                "parameters__left_bound": parameters["left_bound"],
+                "parameters__right_bound": parameters["right_bound"],
+            },
+        },
+        "golden": {"path": golden_path},
+        "metadata": meta_json,
+    }
+
+
+def upsert_sweep_case(sweep_path, case):
+    """Add or replace one case in a sweep.json, leaving every other case alone.
+
+    Regenerating a single case must not disturb the rest of the sweep, and the
+    graph-only cases captured from the C++ suite must survive untouched.
+    """
+    if os.path.isfile(sweep_path):
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+    else:
+        sweep = {"version": 1, "cases": []}
+
+    cases = sweep.setdefault("cases", [])
+    for i, existing in enumerate(cases):
+        if existing.get("id") == case["id"]:
+            cases[i] = case
+            break
+    else:
+        cases.append(case)
+
+    _write_json(sweep_path, sweep)
+    return sweep_path
+
+
+def write_sweep_golden(sweep_bundle_dir, case_id, graph_json, meta_json, tensors):
+    """Write a sweep case's golden tensors and register the case.
+
+    The harness resolves a sweep case's golden directory as the parent of its
+    golden.path and looks for `tensor{uid}.bin` inside it
+    (IntegrationTestBundle.hpp, resolveSweepGoldenDirectory), so the layout here
+    is golden/<case id>/tensor<uid>.bin -- unqualified names, unlike the
+    `<Name>.tensor<uid>.bin` a single-graph bundle uses.
+    """
+    golden_dir = os.path.join(sweep_bundle_dir, "golden", case_id)
+    os.makedirs(golden_dir, exist_ok=True)
+    for name, tensor, uid in tensors:
+        bin_path = os.path.join(golden_dir, f"tensor{uid}.bin")
+        save_tensor_bin(tensor, bin_path)
+        size_kb = os.path.getsize(bin_path) / 1024
+        print(
+            f"  {name} (uid={uid}): {list(tensor.shape)} {tensor.dtype} "
+            f"-> {size_kb:.1f} KB"
+        )
+
+    case = build_sweep_case(
+        case_id, graph_json, meta_json, f"golden/{case_id}/tensors.dvc"
+    )
+    sweep_path = upsert_sweep_case(os.path.join(sweep_bundle_dir, "sweep.json"), case)
+    print(f"  Sweep case '{case_id}' registered in {sweep_path}")
+    return golden_dir
+
+
 def generate_bundles(
     base_filename,
     forward_base_filename,
@@ -479,7 +602,23 @@ def generate_bundles(
     max_val=1.0,
     attn_scale=None,
     validate=False,
+    additive_mask=False,
+    sweep_bundle_dir=None,
+    case_id=None,
 ):
+    if sweep_bundle_dir is not None and case_id is not None:
+        # In sweep mode the backward tensors live in the case's golden directory
+        # instead of under a base filename; point the paired forward bundle's
+        # recorded path at that directory so forward_source stays resolvable.
+        base_filename = os.path.join(sweep_bundle_dir, "golden", case_id, case_id)
+    elif base_filename is None:
+        print(
+            "ERROR: --base-filename is required unless --sweep-bundle-dir and "
+            "--case-id are given",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
     k_dims = [B, H_kv, S_kv, D_qk]
@@ -506,6 +645,14 @@ def generate_bundles(
     for name, bound in [("--left-bound", left_bound), ("--right-bound", right_bound)]:
         if bound is not None and bound < 0:
             errors.append(f"{name} must be >= 0 when given (omit it for unbounded)")
+    if (sweep_bundle_dir is None) != (case_id is None):
+        errors.append(
+            "--sweep-bundle-dir and --case-id must be given together (sweep mode) "
+            "or both omitted (single-graph mode)"
+        )
+    if case_id is not None and not re.fullmatch(r"[a-z0-9]+(_[a-z0-9]+)*", case_id):
+        # verify_golden_bundles.py requires lowercase_snake_case case ids.
+        errors.append(f"--case-id must be lowercase_snake_case (got {case_id!r})")
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -550,20 +697,36 @@ def generate_bundles(
     dO = torch.empty(o_dims, dtype=torch_dtype).uniform_(
         min_val, max_val, generator=rng
     )
+    attn_mask_dims = None
+    attn_mask_tensor = None
+    if additive_mask:
+        # A per-(query, key) bias shared across batch and heads. The leading unit
+        # dims exercise the reference's right-aligned broadcast while keeping the
+        # payload independent of B and H.
+        attn_mask_dims = [1, 1, S_q, S_kv]
+        attn_mask_tensor = torch.empty(attn_mask_dims, dtype=torch_dtype).uniform_(
+            min_val, max_val, generator=rng
+        )
+
+    # The bundles store the mask in the IO dtype, so the reference must see the
+    # rounded values the executors will read back, not the FP32 draw.
+    attn_bias = None if attn_mask_tensor is None else attn_mask_tensor.float()
 
     # Step 1: forward reference -> O, LSE.
-    O = compute_forward(Q, K, V, attn_scale, H_q, H_kv, keep_mask).to(torch_dtype)
-    lse = compute_lse(Q, K, attn_scale, H_q, H_kv, keep_mask)
+    O = compute_forward(Q, K, V, attn_scale, H_q, H_kv, keep_mask, attn_bias).to(
+        torch_dtype
+    )
+    lse = compute_lse(Q, K, attn_scale, H_q, H_kv, keep_mask, attn_bias)
     _check_finite("O", O)
     _check_finite("LSE", lse)
 
     # Step 2: backward reference on the O and LSE just computed -- specifically on
     # the IO-dtype O that is written to the bundles, so the gradients are the
     # gradients of the bundle's own inputs.
-    dQ, dK, dV = compute_backward(Q, K, V, O, lse, dO, attn_scale, keep_mask)
+    dQ, dK, dV = compute_backward(Q, K, V, O, lse, dO, attn_scale, keep_mask, attn_bias)
     if validate:
         worst = validate_against_autograd(
-            Q, K, V, dO, attn_scale, keep_mask, dQ, dK, dV
+            Q, K, V, dO, attn_scale, keep_mask, dQ, dK, dV, attn_bias
         )
         print(f"  autograd cross-check worst relative deviation: {worst:.3e}")
 
@@ -587,6 +750,7 @@ def generate_bundles(
         "left_bound": left_bound,
         "right_bound": right_bound,
         "diagonal_alignment": diagonal_alignment,
+        "additive_mask": additive_mask,
         "generated_at": generated_at,
         "forward_bundle": os.path.relpath(
             f"{forward_base_filename}.json",
@@ -608,6 +772,7 @@ def generate_bundles(
             left_bound,
             right_bound,
             diagonal_alignment.upper(),
+            attn_mask_dims,
         ),
         forward_meta,
         [
@@ -616,36 +781,51 @@ def generate_bundles(
             ("V", V, FWD_UID_V),
             ("O", O, FWD_UID_O),
             ("LSE", lse, FWD_UID_LSE),
-        ],
+        ]
+        + (
+            []
+            if attn_mask_tensor is None
+            else [("attn_mask", attn_mask_tensor, FWD_UID_ATTN_MASK)]
+        ),
     )
 
-    print(f"Backward bundle: {base_filename}")
-    _write_bundle(
-        base_filename,
-        build_backward_graph_json(
-            q_dims,
-            k_dims,
-            v_dims,
-            o_dims,
-            attn_scale,
-            json_dtype,
-            left_bound,
-            right_bound,
-            diagonal_alignment.upper(),
-        ),
-        build_backward_meta_json(config, forward_meta),
-        [
-            ("K", K, UID_K),
-            ("O", O, UID_O),
-            ("Q", Q, UID_Q),
-            ("dK", dK, UID_DK),
-            ("dQ", dQ, UID_DQ),
-            ("dV", dV, UID_DV),
-            ("V", V, UID_V),
-            ("dO", dO, UID_DO),
-            ("stats", lse, UID_STATS),
-        ],
+    backward_graph = build_backward_graph_json(
+        q_dims,
+        k_dims,
+        v_dims,
+        o_dims,
+        attn_scale,
+        json_dtype,
+        left_bound,
+        right_bound,
+        diagonal_alignment.upper(),
+        attn_mask_dims,
     )
+    backward_meta = build_backward_meta_json(config, forward_meta)
+    backward_tensors = [
+        ("K", K, UID_K),
+        ("O", O, UID_O),
+        ("Q", Q, UID_Q),
+        ("dK", dK, UID_DK),
+        ("dQ", dQ, UID_DQ),
+        ("dV", dV, UID_DV),
+        ("V", V, UID_V),
+        ("dO", dO, UID_DO),
+        ("stats", lse, UID_STATS),
+    ] + (
+        []
+        if attn_mask_tensor is None
+        else [("attn_mask", attn_mask_tensor, UID_ATTN_MASK)]
+    )
+
+    if sweep_bundle_dir is None:
+        print(f"Backward bundle: {base_filename}")
+        _write_bundle(base_filename, backward_graph, backward_meta, backward_tensors)
+    else:
+        print(f"Backward sweep case: {sweep_bundle_dir} [{case_id}]")
+        write_sweep_golden(
+            sweep_bundle_dir, case_id, backward_graph, backward_meta, backward_tensors
+        )
 
 
 def main():
@@ -655,8 +835,8 @@ def main():
     )
     parser.add_argument(
         "--base-filename",
-        required=True,
-        help="Path prefix for the backward bundle's files (no extension)",
+        help="Path prefix for the backward bundle's files (no extension). "
+        "Required unless --sweep-bundle-dir and --case-id select sweep mode.",
     )
     parser.add_argument(
         "--forward-base-filename",
@@ -721,6 +901,23 @@ def main():
         action="store_true",
         help="Cross-check the backward reference against PyTorch autograd (CPU)",
     )
+    parser.add_argument(
+        "--additive-mask",
+        action="store_true",
+        help="Add an explicit additive attention-mask tensor of shape "
+        "[1, 1, S_q, S_kv] in the IO data type. It is added to the scores before "
+        "the diagonal band, matching the CPU reference. dBias is not produced.",
+    )
+    parser.add_argument(
+        "--sweep-bundle-dir",
+        help="Write the backward tensors as a template-sweep case of this bundle "
+        "directory (the one holding graph.template.json and sweep.json) instead "
+        "of as a standalone single-graph bundle. Requires --case-id.",
+    )
+    parser.add_argument(
+        "--case-id",
+        help="Sweep case id, lowercase_snake_case. Requires --sweep-bundle-dir.",
+    )
     args = parser.parse_args()
 
     generate_bundles(
@@ -737,6 +934,9 @@ def main():
         max_val=args.max_val,
         attn_scale=args.attn_scale,
         validate=args.validate,
+        additive_mask=args.additive_mask,
+        sweep_bundle_dir=args.sweep_bundle_dir,
+        case_id=args.case_id,
     )
     print("\nDone.")
 
