@@ -501,7 +501,9 @@ else()
     message(STATUS "clang-offload-bundler not found")
 endif()
 
-option(MIOPEN_USE_MLIR "Use MLIR compilation backend" OFF)
+set_var_to_condition(MIOPEN_USE_MLIR_DEFAULT
+    NOT (NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR}))
+option(MIOPEN_USE_MLIR "Use MLIR compilation backend" ${MIOPEN_USE_MLIR_DEFAULT})
 
 if(MIOPEN_USE_MLIR)
     if(NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR})
