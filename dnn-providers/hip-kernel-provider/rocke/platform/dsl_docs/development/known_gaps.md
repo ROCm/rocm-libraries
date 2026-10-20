@@ -220,7 +220,7 @@ This entry covers `emit_lse` only, not other changes to the reduce kernel.
 | `emit_lse` field (default 0) and the `lse` kernel-name suffix | `rocke_unified_attention_reduce_tiled_spec_t` and `*_reduce_tiled_spec_kernel_name()`, both arches |
 | Trailing `lse_ptr` param and the `tid == 0` LSE store | both C reduce builders |
 | A C twin of `_lse_store.py` | `helpers/`; none exists (its dense-attention users have no C twin either) |
-| Gate coverage of an LSE-on reduce | `library/tests/parity/gfx9{42,50}_attention_tiled_3d_emit.{py,c}` take no `emit_lse`; the gfx942 emitter does not emit the reduce kernel at all |
+| Gate coverage of an LSE-on reduce | `library/tests/parity/gfx9{42,50}_attention_tiled_3d_emit.{py,c}` emit the LSE-off reduce only; neither takes `emit_lse` |
 
 **Why deferred:** owner decision for ROCm/rocm-libraries#13955 (time-sensitive;
 the C engine is expected to be deprecated). Python is the only engine that
