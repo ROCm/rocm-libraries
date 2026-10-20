@@ -111,12 +111,15 @@ _GENERIC_CFG_BASE = 75
 
 
 # ---------------------------------------------------------------------------
-# The direct wgrad kernels, indices 95..116: DirectWgradTiledSpec (wave tiles,
+# The direct wgrad kernels, indices 95..128: DirectWgradTiledSpec (wave tiles,
 # unfold_n, row_unroll, q_groups with and without pingpong, 1x1 and 5x5), the
 # DwWgradFoldSpec partial-slot fold, DwWgradColsSpec (small C), DwWgradLdsSpec
 # (row rings, strided, cols_per_lane, a partial channel tile), WgradGatherSpec
 # (gathered and transpose-read X, with and without a phase), then two specs
-# both engines must reject.
+# both engines must reject; a small-C depthwise spec with more outputs than
+# threads; then eight more rejections (LDS footprints over budget, targets
+# without 16-byte LDS DMA, a negative row_unroll, no blocks, no dtype); then
+# WgradGatherSpec at valid padding over three k-waves.
 # ---------------------------------------------------------------------------
 _WGRAD_DIRECT_CFG_BASE = 95
 
@@ -289,6 +292,52 @@ def _wgrad_direct_spec(idx: int):
         20: ("wgrad_tiled", ts(problem=_wp(stride=2))),
         # Must reject: no ds_read_b64_tr_b16 on gfx942.
         21: ("wgrad_gather", gs(problem=_wp(cpg=3, kpg=24, stride=2, W=64)), "gfx942"),
+        # KW * C = 72 outputs over 64 threads: a second epilogue pass.
+        22: ("dw_wgrad_cols", cs(problem=_dwp(8, KH=9, KW=9, PAD=4))),
+        # Must reject: a 512 x 88 fp32 reduction buffer is 176 KiB of LDS.
+        23: (
+            "dw_wgrad_cols",
+            cs(problem=_dwp(8, KH=11, KW=11, PAD=5), threads=512),
+        ),
+        # Must reject: the padded rings are 200,704 B (logical rows 145,152).
+        24: ("dw_wgrad_lds", ls(problem=_dwp(64, stride=2), prefetch=5)),
+        # Must reject: gfx942 DMAs one dword per lane into LDS, gfx1250 is wave32.
+        25: ("dw_wgrad_lds", ls(problem=_dwp(64)), "gfx942"),
+        26: ("dw_wgrad_lds", ls(problem=_dwp(64)), "gfx1250"),
+        # Must reject: sixteen waves pad each X slot to 16 KiB (196,864 B).
+        27: (
+            "wgrad_gather",
+            gs(problem=_wp(cpg=3, kpg=64, stride=2), wave_k16=1, waves_k=16),
+        ),
+        # Must reject: six 32 KiB ring buffers.
+        28: (
+            "wgrad_tiled",
+            ts(
+                problem=_wp(cpg=256, kpg=256),
+                waves_k=8,
+                waves_c=2,
+                prefetch=5,
+                row_unroll=6,
+            ),
+        ),
+        # Must reject: row_unroll -3 divides by 3 but runs no rows.
+        29: ("wgrad_tiled", ts(problem=_wp(), row_unroll=-3)),
+        30: ("wgrad_tiled", ts(problem=_wp(), target_blocks=0)),
+        31: ("wgrad_tiled", ts(problem=_wp(dtype=None))),
+        # Valid padding, three k-waves of one atom (two k tiles).
+        32: (
+            "wgrad_gather",
+            gs(problem=_wp(cpg=8, kpg=96, PAD=0), wave_k16=1, waves_k=3),
+        ),
+        # Valid padding at stride 2, three k-waves of two atoms (a partial tile).
+        33: (
+            "wgrad_gather",
+            gs(
+                problem=_wp(cpg=3, kpg=104, PAD=0, stride=2, W=64),
+                waves_k=3,
+                prefetch=1,
+            ),
+        ),
     }
     sel = table.get(idx)
     if sel is None:

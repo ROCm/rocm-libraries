@@ -71,6 +71,29 @@ int n_k_tiles(const rocke_direct_wgrad_gather_spec_t* s)
     return cdiv(s->problem.kpg, block_k(s));
 }
 
+/* WgradGatherSpec.dma_instrs(): 16-byte DMA instructions per wave and row. */
+int dma_instrs_x(const rocke_direct_wgrad_gather_spec_t* s)
+{
+    return cdiv(cdiv(cdiv(x_elems(s), kVec), kWave), s->waves_k);
+}
+
+int dma_instrs_dy(const rocke_direct_wgrad_gather_spec_t* s)
+{
+    return cdiv(cdiv(kWo * block_k(s) / kVec, kWave), s->waves_k);
+}
+
+/* Elements of one X ring slot: whole DMA instructions of every wave, +16
+ * because a transpose read of the last column atom runs past it. */
+int x_slot_elems(const rocke_direct_wgrad_gather_spec_t* s)
+{
+    return s->waves_k * kWave * dma_instrs_x(s) * kVec + 16;
+}
+
+int dy_slot_elems(const rocke_direct_wgrad_gather_spec_t* s)
+{
+    return s->waves_k * kWave * dma_instrs_dy(s) * kVec;
+}
+
 } // namespace
 
 extern "C" rocke_direct_wgrad_gather_spec_t rocke_direct_wgrad_gather_spec_default(void)
@@ -94,10 +117,9 @@ extern "C" int rocke_direct_wgrad_gather_threads(const rocke_direct_wgrad_gather
 
 extern "C" long rocke_direct_wgrad_gather_lds_bytes(const rocke_direct_wgrad_gather_spec_t* s)
 {
+    /* The X and dY rings as the builder allocates them. */
     long U = unroll(s);
-    long x = (long)s->problem.stride * U * cdiv(x_elems(s), kVec) * 16;
-    long dy = U * kWo * block_k(s) * 2;
-    return x + dy;
+    return ((long)s->problem.stride * U * x_slot_elems(s) + U * dy_slot_elems(s)) * 2;
 }
 
 extern "C" int rocke_direct_wgrad_gather_n_partitions(const rocke_direct_wgrad_gather_spec_t* s)
@@ -193,6 +215,12 @@ extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad
         ROCKE_ERR_SNPRINTF(msg, sizeof msg, "needs ds_read_b64_tr_b16 (absent on %s)", arch);
         why = msg;
     }
+    else if(target->wave_size != 64 || rocke_archtarget_async_lds_max_dwords(target) < 4)
+    {
+        ROCKE_ERR_SNPRINTF(
+            msg, sizeof msg, "needs wave64 + 16-byte buffer_load_lds (absent on %s)", arch);
+        why = msg;
+    }
     else if(p->kpg % kVec)
     {
         why = "K must be a multiple of 8";
@@ -211,17 +239,27 @@ extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad
         ROCKE_ERR_SNPRINTF(msg, sizeof msg, "%d accumulator VGPRs (> 192)", acc);
         why = msg;
     }
-    else if(rocke_direct_wgrad_gather_lds_bytes(s) > 160 * 1024)
+    else if(s->wave_k16 < 1 || s->waves_k < 1 || rocke_direct_wgrad_gather_threads(s) > 1024)
     {
-        why = "LDS budget";
+        why = "wave_k16 >= 1 and waves_k in 1..16";
     }
     else if(s->prefetch < 1)
     {
         why = "prefetch >= 1";
     }
+    else if(rocke_direct_wgrad_gather_lds_bytes(s) > 160 * 1024)
+    {
+        ROCKE_ERR_SNPRINTF(
+            msg, sizeof msg, "LDS %ld B > 160 KiB", rocke_direct_wgrad_gather_lds_bytes(s));
+        why = msg;
+    }
     else if(s->rows_per_seg < 1)
     {
         why = "rows_per_seg >= 1";
+    }
+    else if(s->target_blocks < 1)
+    {
+        why = "target_blocks >= 1";
     }
     if(why != NULL)
     {
@@ -260,7 +298,6 @@ rocke_kernel_def_t*
     const int KH = p.KH, KW = p.KW, PAD = p.PAD, S = p.stride, C = p.cpg;
     const bool bf16 = problem_is_bf16(&p);
     const rocke_type_t* io_type = bf16 ? rocke_bf16() : rocke_f16();
-    const int NW = spec->waves_k;
     const int WK16 = spec->wave_k16;
     const int NA = n_atoms(spec);
     const int BK = block_k(spec);
@@ -276,14 +313,13 @@ rocke_kernel_def_t*
     const int TAPS = KH * KW * C;
     const int THREADS = rocke_direct_wgrad_gather_threads(spec);
 
-    const int IX = cdiv(cdiv(XCH, kWave), NW);
-    const int IY = cdiv(cdiv(kWo * CHK, kWave), NW);
-    /* +16: a transpose read of the last column atom runs past the strip. */
-    const int X_ELEMS = NW * IX * kWave * kVec + 16;
+    const int IX = dma_instrs_x(spec);
+    const int IY = dma_instrs_dy(spec);
+    const int X_ELEMS = x_slot_elems(spec);
     /* When a pixel row of the strip (S * C elements) and the phase keep every
      * lane's 8-byte read aligned, the X operand is a transpose read too. */
     const bool X_TR = (S * C) % 4 == 0 && PH % 4 == 0;
-    const int Y_ELEMS = NW * IY * kWave * kVec;
+    const int Y_ELEMS = dy_slot_elems(spec);
     const int PER_STEP = S * IX + IY;
 
     std::vector<int> k_origins;

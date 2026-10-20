@@ -1588,6 +1588,75 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
         gs->problem.W = 64;
         *arch = "gfx942";
         return 0;
+    case 22: /* KW * C = 72 outputs over 64 threads: a second epilogue pass */
+        *kind = KIND_DW_WGRAD_COLS;
+        cs->problem = mk_dwp(8);
+        mk_filter(&cs->problem, 9, 9, 4, 1);
+        return 0;
+    case 23: /* must reject: a 512 x 88 fp32 reduction buffer is 176 KiB of LDS */
+        *kind = KIND_DW_WGRAD_COLS;
+        cs->problem = mk_dwp(8);
+        mk_filter(&cs->problem, 11, 11, 5, 1);
+        cs->threads = 512;
+        return 0;
+    case 24: /* must reject: the padded rings are 200,704 B (logical rows 145,152) */
+        *kind = KIND_DW_WGRAD_LDS;
+        ls->problem = mk_dwp(64);
+        ls->problem.stride = 2;
+        ls->prefetch = 5;
+        return 0;
+    case 25: /* must reject: gfx942 DMAs one dword per lane into LDS */
+    case 26: /* must reject: gfx1250 is wave32 */
+        *kind = KIND_DW_WGRAD_LDS;
+        ls->problem = mk_dwp(64);
+        *arch = idx == 25 ? "gfx942" : "gfx1250";
+        return 0;
+    case 27: /* must reject: sixteen waves pad each X slot to 16 KiB (196,864 B) */
+        *kind = KIND_WGRAD_GATHER;
+        gs->problem.cpg = 3;
+        gs->problem.stride = 2;
+        gs->wave_k16 = 1;
+        gs->waves_k = 16;
+        return 0;
+    case 28: /* must reject: six 32 KiB ring buffers */
+        *kind = KIND_WGRAD_TILED;
+        ts->problem.cpg = 256;
+        ts->problem.kpg = 256;
+        ts->waves_k = 8;
+        ts->waves_c = 2;
+        ts->prefetch = 5;
+        ts->row_unroll = 6;
+        return 0;
+    case 29: /* must reject: row_unroll -3 divides by 3 but runs no rows */
+        *kind = KIND_WGRAD_TILED;
+        ts->row_unroll = -3;
+        return 0;
+    case 30:
+        *kind = KIND_WGRAD_TILED;
+        ts->target_blocks = 0;
+        return 0;
+    case 31:
+        *kind = KIND_WGRAD_TILED;
+        ts->problem.dtype = NULL;
+        return 0;
+    case 32: /* valid padding, three k-waves of one atom (two k tiles) */
+        *kind = KIND_WGRAD_GATHER;
+        gs->problem.cpg = 8;
+        gs->problem.kpg = 96;
+        gs->problem.PAD = 0;
+        gs->wave_k16 = 1;
+        gs->waves_k = 3;
+        return 0;
+    case 33: /* valid padding at stride 2, three k-waves of two atoms (a partial tile) */
+        *kind = KIND_WGRAD_GATHER;
+        gs->problem.cpg = 3;
+        gs->problem.kpg = 104;
+        gs->problem.PAD = 0;
+        gs->problem.stride = 2;
+        gs->problem.W = 64;
+        gs->waves_k = 3;
+        gs->prefetch = 1;
+        return 0;
     default:
         return -1;
     }

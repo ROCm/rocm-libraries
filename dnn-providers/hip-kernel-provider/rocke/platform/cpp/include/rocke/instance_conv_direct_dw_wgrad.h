@@ -103,6 +103,8 @@ long rocke_dw_wgrad_cols_workspace_bytes(const rocke_dw_wgrad_cols_spec_t* spec)
 void rocke_dw_wgrad_cols_launch_geometry(const rocke_dw_wgrad_cols_spec_t* spec,
                                          int grid[3],
                                          int block[3]);
+/* DwWgradColsSpec.lds_bytes(): the block reduction buffer. */
+long rocke_dw_wgrad_cols_lds_bytes(const rocke_dw_wgrad_cols_spec_t* spec);
 /* kernel_name_join(name, f{KH}x{KW}p{PAD}s{stride}c{groups}, st{strip},
  * t{threads}, tb{n}, flags [bf16]). */
 rocke_status_t rocke_dw_wgrad_cols_kernel_name(const rocke_dw_wgrad_cols_spec_t* spec,
@@ -153,6 +155,7 @@ typedef struct rocke_dw_wgrad_lds_spec
 
 rocke_dw_wgrad_lds_spec_t rocke_dw_wgrad_lds_spec_default(void);
 int rocke_dw_wgrad_lds_threads(const rocke_dw_wgrad_lds_spec_t* spec);
+/* DwWgradLdsSpec.lds_bytes(): the padded X / dY rings plus the reduction. */
 long rocke_dw_wgrad_lds_lds_bytes(const rocke_dw_wgrad_lds_spec_t* spec);
 int rocke_dw_wgrad_lds_n_partitions(const rocke_dw_wgrad_lds_spec_t* spec);
 long rocke_dw_wgrad_lds_workspace_bytes(const rocke_dw_wgrad_lds_spec_t* spec);

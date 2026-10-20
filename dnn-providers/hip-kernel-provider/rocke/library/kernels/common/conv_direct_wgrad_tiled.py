@@ -132,6 +132,24 @@ class DirectWgradTiledSpec:
         p = self.problem
         return p.KH * p.KW * self.wave_k16 * self.wave_c16 * 4
 
+    def dma_instrs(self) -> Tuple[int, int]:
+        """1 KiB DMA instructions per wave and row: (dY, X)."""
+        seg = self.strip_w + self.problem.KW - 1
+        ik = ceil_div(ceil_div(_WO * self.block_k // _VEC, _WAVE), self.n_waves)
+        ic = ceil_div(
+            ceil_div(self.unfold_n * seg * self.block_c // _VEC, _WAVE), self.n_waves
+        )
+        return ik, ic
+
+    def lds_bytes(self) -> int:
+        """The padded dY / X ring buffers, plus the q-group reduction buffers."""
+        ik, ic = self.dma_instrs()
+        slot = self.q_groups * self.n_waves * (ik + ic) * _WAVE * _VEC * 2
+        red = 0
+        if self.q_groups > 1:
+            red = 2 * self.n_waves * self.wave_k16 * self.wave_c16 * _WAVE * 4 * 4
+        return self.n_buffers * slot + red
+
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -200,6 +218,8 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, f"stride-1 algorithm (got stride={p.stride})"
     if target.wave_size != 64 or not target.memory.has_ds_read_tr:
         return False, f"needs wave64 + ds_read_b64_tr_b16 (absent on {arch})"
+    if target.async_lds_max_dwords < 4:
+        return False, f"needs 16-byte buffer_load_lds (absent on {arch})"
     ab = "bf16" if p.dtype == "bf16" else "f16"
     if not target.mma.has_shape(
         a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
@@ -224,6 +244,10 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, "wave tile wider than the group's channels"
     if spec.acc_vgprs() > 192:
         return False, f"accumulators need {spec.acc_vgprs()} VGPRs (> 192)"
+    if spec.row_unroll < 0:
+        return False, "row_unroll must be >= 0"
+    if spec.target_blocks < 1:
+        return False, "target_blocks must be >= 1"
     if spec.row_unroll % spec.n_buffers:
         return False, "row_unroll must be a multiple of prefetch + 1"
     if spec.prefetch < 1:
@@ -232,6 +256,8 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, f"rows_per_seg must be a positive multiple of {spec.unroll}"
     if p.KH > 8 or p.KW > 8:
         return False, "filter extent above 8"
+    if spec.lds_bytes() > 160 * 1024:
+        return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     return True, "ok"
 
 
@@ -348,8 +374,7 @@ def build_direct_wgrad_tiled(
 
     # 1 KiB DMA instructions per wave and row, per operand. Slots past the
     # tile load zero (OOB sentinel) into the buffer's pad.
-    IK = ceil_div(ceil_div(_WO * CHK, _WAVE), NW)
-    IC = ceil_div(ceil_div(STRIP * CHC, _WAVE), NW)
+    IK, IC = spec.dma_instrs()
     N_INSTR = IK + IC
     QG = spec.q_groups
     # A ring buffer holds one slice per wave group, group g's at g * G*_ELEMS.

@@ -2904,6 +2904,50 @@ _AOT_WGRAD_CASES = [
         dict(N=1, H=16, W=32, groups=1, cpg=4, kpg=40, stride=1),
         dict(wave_k16=2, waves_k=1, prefetch=1, rows_per_seg=16, target_blocks=1024),
     ),
+    # Valid padding, three k-waves of one atom each over two k tiles.
+    (
+        "gather_c8_pad0_w1x3",
+        "direct_wgrad_gather",
+        dict(N=2, H=20, W=32, groups=1, cpg=8, kpg=96, PAD=0, stride=1),
+        dict(wave_k16=1, waves_k=3, prefetch=2, rows_per_seg=8, target_blocks=256),
+    ),
+    # Valid padding at stride 2, three k-waves of two atoms, a partial k tile.
+    (
+        "gather_c3_pad0_w2x3_s2",
+        "direct_wgrad_gather",
+        dict(N=2, H=21, W=64, groups=1, cpg=3, kpg=104, PAD=0, stride=2),
+        dict(wave_k16=2, waves_k=3, prefetch=1, rows_per_seg=16, target_blocks=1024),
+    ),
+    # The cases above give every block one segment. Two blocks walking several
+    # segments each (ten, two): accumulation across segments and ring reuse
+    # after the end-of-segment barrier.
+    (
+        "dw_c64_tb2",
+        "direct_wgrad_dw",
+        dict(N=2, H=40, W=40, groups=64, cpg=1, kpg=1),
+        dict(lanes_c=8, lanes_w=8, prefetch=2, rows_per_seg=16, target_blocks=2),
+    ),
+    (
+        "gather_c3_s2_tb2",
+        "direct_wgrad_gather",
+        dict(N=2, H=24, W=64, groups=1, cpg=3, kpg=24, stride=2),
+        dict(wave_k16=2, waves_k=1, prefetch=2, rows_per_seg=8, target_blocks=2),
+    ),
+    # 128 partitions: the fold loops over its 64-partition stride twice.
+    (
+        "dw_c64_parts128",
+        "direct_wgrad_dw",
+        dict(N=4, H=64, W=64, groups=64, cpg=1, kpg=1),
+        dict(lanes_c=8, lanes_w=8, prefetch=2, rows_per_seg=16, target_blocks=1024),
+    ),
+    # KW * C = 72 outputs over 64 threads (a second epilogue pass), one block
+    # per filter row walking two units.
+    (
+        "dw_cols_c8_9x9_t64",
+        "direct_wgrad_dw_cols",
+        dict(N=2, H=16, W=32, groups=8, cpg=1, kpg=1, KH=9, KW=9, PAD=4),
+        dict(channels=8, strip=8, threads=64, target_blocks=9),
+    ),
 ]
 
 

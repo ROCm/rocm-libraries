@@ -14,7 +14,7 @@
  *   -----------------------------------   ------------------------------------
  *   @dataclass(frozen) DirectWgradTiledSpec rocke_direct_wgrad_tiled_spec_t
  *     derived @property geometry          rocke_direct_wgrad_tiled_{threads_per_block,
- *                                           unroll,acc_vgprs,n_channel_tiles,
+ *                                           unroll,acc_vgprs,lds_bytes,n_channel_tiles,
  *                                           n_segments,n_splits,launch_geometry}
  *     .kernel_name()                      rocke_direct_wgrad_tiled_kernel_name
  *   is_valid_wgrad_tiled_spec(spec, arch) rocke_direct_wgrad_tiled_is_valid_spec
@@ -84,6 +84,8 @@ rocke_direct_wgrad_tiled_spec_t rocke_direct_wgrad_tiled_spec_default(void);
 int rocke_direct_wgrad_tiled_threads_per_block(const rocke_direct_wgrad_tiled_spec_t* spec);
 int rocke_direct_wgrad_tiled_unroll(const rocke_direct_wgrad_tiled_spec_t* spec);
 int rocke_direct_wgrad_tiled_acc_vgprs(const rocke_direct_wgrad_tiled_spec_t* spec);
+/* lds_bytes(): the padded dY / X rings plus the q-group reduction buffers. */
+long rocke_direct_wgrad_tiled_lds_bytes(const rocke_direct_wgrad_tiled_spec_t* spec);
 int rocke_direct_wgrad_tiled_n_channel_tiles(const rocke_direct_wgrad_tiled_spec_t* spec);
 int rocke_direct_wgrad_tiled_n_segments(const rocke_direct_wgrad_tiled_spec_t* spec);
 int rocke_direct_wgrad_tiled_n_splits(const rocke_direct_wgrad_tiled_spec_t* spec);

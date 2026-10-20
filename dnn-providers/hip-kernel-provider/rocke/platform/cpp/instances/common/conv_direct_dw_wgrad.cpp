@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+#include "rocke/arch_target.h" /* rocke_set_unknown_arch_reason */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp"
@@ -271,6 +273,12 @@ extern "C" void rocke_dw_wgrad_cols_launch_geometry(const rocke_dw_wgrad_cols_sp
     block[2] = 1;
 }
 
+extern "C" long rocke_dw_wgrad_cols_lds_bytes(const rocke_dw_wgrad_cols_spec_t* s)
+{
+    /* The block reduction buffer: KW x C fp32 accumulators per thread. */
+    return (long)s->threads * s->problem.KW * s->problem.groups * 4;
+}
+
 extern "C" rocke_status_t
     rocke_dw_wgrad_cols_kernel_name(const rocke_dw_wgrad_cols_spec_t* s, char* out, size_t out_cap)
 {
@@ -325,7 +333,7 @@ extern "C" bool rocke_dw_wgrad_cols_is_valid_spec(const rocke_dw_wgrad_cols_spec
     {
         why = "too many accumulators";
     }
-    else if(s->threads % kWave || s->threads > 1024)
+    else if(s->threads < kWave || s->threads % kWave || s->threads > 1024)
     {
         why = "threads must be a multiple of 64";
     }
@@ -338,6 +346,16 @@ extern "C" bool rocke_dw_wgrad_cols_is_valid_spec(const rocke_dw_wgrad_cols_spec
     else if((p->W * C) % 8 || (problem_wo(p) * C) % 8 || s->strip <= 0 || problem_wo(p) % s->strip)
     {
         why = "W*C and Wo*C must be multiples of 8 and Wo of the strip";
+    }
+    else if(s->target_blocks < 1)
+    {
+        why = "target_blocks >= 1";
+    }
+    else if(rocke_dw_wgrad_cols_lds_bytes(s) > 160 * 1024)
+    {
+        ROCKE_ERR_SNPRINTF(
+            msg, sizeof msg, "LDS %ld B > 160 KiB", rocke_dw_wgrad_cols_lds_bytes(s));
+        why = msg;
     }
     if(why != NULL)
     {
@@ -491,22 +509,27 @@ rocke_kernel_def_t*
         e.smem_store_f32(red, c0, idx, accs[i], 1);
     }
     rocke_b_sync(b);
-    e.if_(e.lti(tid, n_acc), [&]() {
-        V tot = NULL;
-        for(int q = 0; q < T; ++q)
-        {
-            V idx = e.addi(e.muli(tid, T), q);
-            V v = rocke_b_vec_extract(b, e.smem_load_f32(red, c0, idx, 1), 0);
-            tot = (tot == NULL) ? v : rocke_b_fadd(b, tot, v);
-        }
-        /* ws[part][tap][c], tap = r*KW + s; this lane is (s, c) = divmod(tid, C). */
-        V s_i = e.divi(tid, C);
-        V c_i = e.modi(tid, C);
-        V tap = e.add(e.muli(r_tap, KW), s_i);
-        V off = e.add(e.muli(part, KH * KW), tap);
-        off = e.add(e.muli(off, C), c_i);
-        rocke_b_global_store(b, P.D, off, tot, 4);
-    });
+    /* Thread tid sums outputs tid, tid + T, ... (KW * C may exceed T). */
+    for(int k = 0; k < cdiv(n_acc, T); ++k)
+    {
+        V o = k == 0 ? tid : e.addi(tid, k * T);
+        e.if_(e.lti(o, n_acc), [&]() {
+            V tot = NULL;
+            for(int q = 0; q < T; ++q)
+            {
+                V idx = e.addi(e.muli(o, T), q);
+                V v = rocke_b_vec_extract(b, e.smem_load_f32(red, c0, idx, 1), 0);
+                tot = (tot == NULL) ? v : rocke_b_fadd(b, tot, v);
+            }
+            /* ws[part][tap][c], tap = r*KW + s; output o is (s, c) = divmod(o, C). */
+            V s_i = e.divi(o, C);
+            V c_i = e.modi(o, C);
+            V tap = e.add(e.muli(r_tap, KW), s_i);
+            V off = e.add(e.muli(part, KH * KW), tap);
+            off = e.add(e.muli(off, C), c_i);
+            rocke_b_global_store(b, P.D, off, tot, 4);
+        });
+    }
     return rocke_ir_builder_ok(b) ? b->kernel : NULL;
 }
 
@@ -615,6 +638,24 @@ int lds_n_channel_tiles(const rocke_dw_wgrad_lds_spec_t* s)
     return cdiv(s->problem.groups, lds_block_c(s));
 }
 
+/* 16-byte DMA instructions per wave for one LDS row of `cols` pixels. */
+int lds_dma_instrs(const rocke_dw_wgrad_lds_spec_t* s, int cols)
+{
+    int n_waves = s->lanes_c * s->lanes_w / kWave;
+    return cdiv(cdiv(cols * (lds_block_c(s) / 8), kWave), n_waves);
+}
+
+/* Elements of one X / dY ring slot: whole DMA instructions of every wave. */
+int lds_x_row_elems(const rocke_dw_wgrad_lds_spec_t* s)
+{
+    return s->lanes_c * s->lanes_w * lds_dma_instrs(s, lds_x_cols(s)) * 8;
+}
+
+int lds_dy_row_elems(const rocke_dw_wgrad_lds_spec_t* s)
+{
+    return s->lanes_c * s->lanes_w * lds_dma_instrs(s, lds_block_wo(s)) * 8;
+}
+
 } // namespace
 
 extern "C" int rocke_dw_wgrad_lds_threads(const rocke_dw_wgrad_lds_spec_t* s)
@@ -624,11 +665,12 @@ extern "C" int rocke_dw_wgrad_lds_threads(const rocke_dw_wgrad_lds_spec_t* s)
 
 extern "C" long rocke_dw_wgrad_lds_lds_bytes(const rocke_dw_wgrad_lds_spec_t* s)
 {
-    const rocke_direct_conv_problem_t* p = &s->problem;
+    /* The X and dY rings as the builder allocates them, plus the reduction. */
     long U = lds_unroll(s);
-    long x = (long)p->stride * U * lds_x_cols(s) * lds_block_c(s) * 2;
-    long dy = U * lds_block_wo(s) * lds_block_c(s) * 2;
-    return x + dy;
+    long x = (long)s->problem.stride * U * lds_x_row_elems(s) * 2;
+    long dy = U * lds_dy_row_elems(s) * 2;
+    long red = (long)s->lanes_w * lds_block_c(s) * 4;
+    return x + dy + red;
 }
 
 extern "C" int rocke_dw_wgrad_lds_n_partitions(const rocke_dw_wgrad_lds_spec_t* s)
@@ -683,11 +725,20 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
                                                  char* reason,
                                                  size_t reason_cap)
 {
-    (void)arch;
     char msg[ROCKE_ERR_MSG_CAP];
     if(s == NULL)
     {
         set_reason(reason, reason_cap, "null spec");
+        return false;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        rocke_set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
@@ -698,7 +749,13 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
     }
     int threads = rocke_dw_wgrad_lds_threads(s);
     const char* why = NULL;
-    if(p->cpg != 1 || p->kpg != 1)
+    if(target->wave_size != 64 || rocke_archtarget_async_lds_max_dwords(target) < 4)
+    {
+        ROCKE_ERR_SNPRINTF(
+            msg, sizeof msg, "needs wave64 + 16-byte buffer_load_lds (absent on %s)", arch);
+        why = msg;
+    }
+    else if(p->cpg != 1 || p->kpg != 1)
     {
         why = "depthwise only";
     }
@@ -710,7 +767,7 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
     {
         why = "C must be a multiple of 8";
     }
-    else if(threads % kWave || threads > 1024)
+    else if(threads < kWave || threads % kWave || threads > 1024)
     {
         why = "threads must be a multiple of 64, at most 1024";
     }
@@ -718,18 +775,22 @@ extern "C" bool rocke_dw_wgrad_lds_is_valid_spec(const rocke_dw_wgrad_lds_spec_t
     {
         why = "too many accumulators";
     }
+    else if(s->prefetch < 1)
+    {
+        why = "prefetch >= 1";
+    }
     else if(rocke_dw_wgrad_lds_lds_bytes(s) > 160 * 1024)
     {
         ROCKE_ERR_SNPRINTF(msg, sizeof msg, "LDS %ld B > 160 KiB", rocke_dw_wgrad_lds_lds_bytes(s));
         why = msg;
     }
-    else if(s->prefetch < 1)
-    {
-        why = "prefetch >= 1";
-    }
     else if(s->rows_per_seg < 1)
     {
         why = "rows_per_seg >= 1";
+    }
+    else if(s->target_blocks < 1)
+    {
+        why = "target_blocks >= 1";
     }
     if(why != NULL)
     {
@@ -771,7 +832,6 @@ rocke_kernel_def_t*
     const int CH = BC / 8; /* 16-byte chunks per pixel */
     const int XC = lds_x_cols(spec);
     const int T = rocke_dw_wgrad_lds_threads(spec);
-    const int NW = T / kWave;
     const int D = spec->prefetch;
     const int U = lds_unroll(spec);
     const int NX = S * U, NY = U;
@@ -816,10 +876,10 @@ rocke_kernel_def_t*
     V b_rsrc = rocke_b_buffer_rsrc(b, P.Bp, P.B_bytes); /* X */
 
     /* ---- LDS rings: one allocation per slot so the waitcnt pass can tell them apart */
-    const int IX = cdiv(cdiv(XC * CH, kWave), NW); /* DMA instrs per wave per X row */
-    const int IY = cdiv(cdiv(BWO * CH, kWave), NW);
-    const int X_ELEMS = NW * IX * kWave * 8;
-    const int Y_ELEMS = NW * IY * kWave * 8;
+    const int IX = lds_dma_instrs(spec, XC); /* DMA instrs per wave per X row */
+    const int IY = lds_dma_instrs(spec, BWO);
+    const int X_ELEMS = lds_x_row_elems(spec);
+    const int Y_ELEMS = lds_dy_row_elems(spec);
     std::vector<V> x_bufs, y_bufs, x_addr, y_addr;
     for(int i = 0; i < NX; ++i)
     {

@@ -209,6 +209,11 @@ class DwWgradColsSpec:
     def launch_geometry(self):
         return (self.problem.KH, self.n_partitions(), 1), (self.threads, 1, 1)
 
+    def lds_bytes(self) -> int:
+        """The block reduction buffer: KW x C fp32 accumulators per thread."""
+        p = self.problem
+        return self.threads * p.KW * p.groups * 4
+
 
 def is_valid_dw_wgrad_cols_spec(spec: DwWgradColsSpec, arch: str = "gfx950"):
     p = spec.problem
@@ -223,15 +228,19 @@ def is_valid_dw_wgrad_cols_spec(spec: DwWgradColsSpec, arch: str = "gfx950"):
         return False, "small-C kernel: C <= 8"
     if p.KW * p.groups > 96:
         return False, "too many accumulators"
-    if spec.threads % _WAVE or spec.threads > 1024:
+    if spec.threads < _WAVE or spec.threads % _WAVE or spec.threads > 1024:
         return False, "threads must be a multiple of 64"
     C = p.groups
     # Whole 16-byte vectors at a build-time phase: the strip and the rows
     # must keep every vector start on an 8-element boundary.
     if (spec.strip * C) % 8 or (spec.strip * p.stride * C) % 8:
         return False, "strip * C (and strip * stride * C) must be multiples of 8"
-    if (p.W * C) % 8 or (p.Wo * C) % 8 or p.Wo % spec.strip:
+    if (p.W * C) % 8 or (p.Wo * C) % 8 or spec.strip < 1 or p.Wo % spec.strip:
         return False, "W*C and Wo*C must be multiples of 8 and Wo of the strip"
+    if spec.target_blocks < 1:
+        return False, "target_blocks >= 1"
+    if spec.lds_bytes() > 160 * 1024:
+        return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     return True, "ok"
 
 
@@ -345,19 +354,22 @@ def build_dw_wgrad_cols(spec: DwWgradColsSpec, arch: str = "gfx950") -> KernelDe
     for i in range(n_acc):
         b.smem_store_vN_f32(red, [c0, b.add(b.mul(ci(i), ci(T)), tid)], accs[i], 1)
     b.sync()
-    with b.scf_if(b.cmp_lt(tid, ci(n_acc))):
-        tot = None
-        for q in range(T):
-            v = b.vec_extract(
-                b.smem_load_vN_f32(red, c0, b.add(b.mul(tid, ci(T)), ci(q)), n=1), 0
-            )
-            tot = v if tot is None else b.fadd(tot, v)
-        # ws[part][tap][c], tap = r*KW + s; this lane is (s, c) = divmod(tid, C).
-        s_i = b.div(tid, ci(C))
-        c_i = b.mod(tid, ci(C))
-        tap = b.add(b.mul(r_tap, ci(KW)), s_i)
-        off = b.add(b.mul(b.add(b.mul(part, ci(KH * KW)), tap), ci(C)), c_i)
-        b.global_store(params["D"], off, tot, align=4)
+    # Thread tid sums outputs tid, tid + T, ... (KW * C may exceed T).
+    for k in range(ceil_div(n_acc, T)):
+        o = tid if k == 0 else b.add(tid, ci(k * T))
+        with b.scf_if(b.cmp_lt(o, ci(n_acc))):
+            tot = None
+            for q in range(T):
+                v = b.vec_extract(
+                    b.smem_load_vN_f32(red, c0, b.add(b.mul(o, ci(T)), ci(q)), n=1), 0
+                )
+                tot = v if tot is None else b.fadd(tot, v)
+            # ws[part][tap][c], tap = r*KW + s; output o is (s, c) = divmod(o, C).
+            s_i = b.div(o, ci(C))
+            c_i = b.mod(o, ci(C))
+            tap = b.add(b.mul(r_tap, ci(KW)), s_i)
+            off = b.add(b.mul(b.add(b.mul(part, ci(KH * KW)), tap), ci(C)), c_i)
+            b.global_store(params["D"], off, tot, align=4)
     return b.kernel
 
 
@@ -444,35 +456,58 @@ class DwWgradLdsSpec:
     def launch_geometry(self):
         return (self.n_channel_tiles(), self.n_partitions(), 1), (self.threads, 1, 1)
 
+    def dma_instrs(self, cols: int) -> int:
+        """16-byte DMA instructions per wave for one LDS row of ``cols`` pixels."""
+        n_waves = self.threads // _WAVE
+        return ceil_div(ceil_div(cols * (self.block_c // 8), _WAVE), n_waves)
+
+    def x_row_elems(self) -> int:
+        """Elements of one X ring slot: whole DMA instructions of every wave."""
+        return self.threads * self.dma_instrs(self.x_cols()) * 8
+
+    def dy_row_elems(self) -> int:
+        return self.threads * self.dma_instrs(self.block_wo) * 8
+
     def lds_bytes(self) -> int:
-        p = self.problem
+        """The X and dY rings as the builder allocates them, plus the reduction."""
         U = self.unroll
-        x = p.stride * U * self.x_cols() * self.block_c * 2
-        dy = U * self.block_wo * self.block_c * 2
-        return x + dy
+        x = self.problem.stride * U * self.x_row_elems() * 2
+        dy = U * self.dy_row_elems() * 2
+        red = self.lanes_w * self.block_c * 4
+        return x + dy + red
 
 
 def is_valid_dw_wgrad_lds_spec(spec: DwWgradLdsSpec, arch: str = "gfx950"):
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
     p = spec.problem
     why = dilation_reason(p)
     if why is not None:
         return False, why
+    if target.wave_size != 64 or target.async_lds_max_dwords < 4:
+        return False, f"needs wave64 + 16-byte buffer_load_lds (absent on {arch})"
     if p.cpg != 1 or p.kpg != 1:
         return False, "depthwise only"
     if p.dtype not in ("fp16", "bf16"):
         return False, "fp16/bf16 only"
     if p.groups % 8:
         return False, "C must be a multiple of 8"
-    if spec.threads % _WAVE or spec.threads > 1024:
+    if spec.threads < _WAVE or spec.threads % _WAVE or spec.threads > 1024:
         return False, "threads must be a multiple of 64, at most 1024"
     if p.KH * p.KW * 8 > 128:
         return False, "too many accumulators"
-    if spec.lds_bytes() > 160 * 1024:
-        return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     if spec.prefetch < 1:
         return False, "prefetch >= 1"
+    if spec.lds_bytes() > 160 * 1024:
+        return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     if spec.rows_per_seg < 1:
         return False, "rows_per_seg >= 1"
+    if spec.target_blocks < 1:
+        return False, "target_blocks >= 1"
     return True, "ok"
 
 
@@ -490,7 +525,6 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     CH = BC // 8  # 16-byte chunks per pixel
     XC = spec.x_cols()
     T = spec.threads
-    NW = T // _WAVE
     D = spec.prefetch
     U = spec.unroll
     NX, NY = S * U, U
@@ -540,10 +574,10 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     )
 
     # ---- LDS rings: one allocation per slot so the waitcnt pass can tell them apart
-    IX = ceil_div(ceil_div(XC * CH, _WAVE), NW)  # DMA instrs per wave per X row
-    IY = ceil_div(ceil_div(BWO * CH, _WAVE), NW)
-    X_ELEMS = NW * IX * _WAVE * 8
-    Y_ELEMS = NW * IY * _WAVE * 8
+    IX = spec.dma_instrs(XC)  # DMA instrs per wave per X row
+    IY = spec.dma_instrs(BWO)
+    X_ELEMS = spec.x_row_elems()
+    Y_ELEMS = spec.dy_row_elems()
     x_bufs = [
         b.smem_alloc(io_type, [1, X_ELEMS], name_hint=f"xr{i}") for i in range(NX)
     ]

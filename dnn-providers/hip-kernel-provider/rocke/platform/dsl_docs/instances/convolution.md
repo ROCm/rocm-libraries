@@ -802,6 +802,11 @@ in fp32.
 - All four row-streaming kernels set the kernel attr `lds_alias_scopes`: every
   smem allocation gets its own alias scope, so the waitcnt pass does not drain
   the in-flight LDS DMA before each `ds_read`.
+- The validators gate on `lds_bytes()`, which counts what the builder
+  allocates: ring slots rounded up to whole DMA instructions of every wave
+  (plus the gather's 16-element transpose tail) and the reduction buffers.
+  The LDS-DMA kernels (tiled, `DwWgradLdsSpec`, gather) also require a wave64
+  target with 16-byte `buffer_load ... lds` (`async_lds_max_dwords >= 4`).
 
 C++ engine twins: `rocke_build_direct_wgrad_tiled` (`cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
 also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`

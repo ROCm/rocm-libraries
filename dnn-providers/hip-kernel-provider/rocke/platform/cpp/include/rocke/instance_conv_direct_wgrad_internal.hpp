@@ -55,20 +55,17 @@ inline int pyfloordiv(int a, int m)
     return (a % m != 0 && (a < 0) != (m < 0)) ? q - 1 : q;
 }
 
-inline const char* problem_dtype(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype ? p->dtype : "fp16";
-}
-
+/* A NULL dtype is not defaulted here: the spec-default constructors set
+ * "fp16", and the validators reject NULL like Python rejects dtype=None. */
 inline bool problem_is_bf16(const rocke_direct_conv_problem_t* p)
 {
-    return strcmp(problem_dtype(p), "bf16") == 0;
+    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
 }
 
 inline bool problem_dtype_ok(const rocke_direct_conv_problem_t* p)
 {
-    const char* d = problem_dtype(p);
-    return strcmp(d, "fp16") == 0 || strcmp(d, "bf16") == 0;
+    const char* d = p->dtype;
+    return d != NULL && (strcmp(d, "fp16") == 0 || strcmp(d, "bf16") == 0);
 }
 
 /* DirectConvProblem.Ho / .Wo. */

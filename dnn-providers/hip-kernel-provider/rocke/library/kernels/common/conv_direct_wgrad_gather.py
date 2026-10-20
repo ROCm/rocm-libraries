@@ -129,12 +129,26 @@ class WgradGatherSpec:
     def launch_geometry(self):
         return (self.n_k_tiles(), self.n_partitions(), 1), (self.threads, 1, 1)
 
+    def dma_instrs(self) -> Tuple[int, int]:
+        """16-byte DMA instructions per wave and row: (X, dY)."""
+        ix = ceil_div(ceil_div(ceil_div(self.x_elems(), _VEC), _WAVE), self.waves_k)
+        iy = ceil_div(ceil_div(_WO * self.block_k // _VEC, _WAVE), self.waves_k)
+        return ix, iy
+
+    def x_slot_elems(self) -> int:
+        """Elements of one X ring slot: whole DMA instructions of every wave,
+        +16 because a transpose read of the last column atom runs past it."""
+        return self.threads * self.dma_instrs()[0] * _VEC + 16
+
+    def dy_slot_elems(self) -> int:
+        return self.threads * self.dma_instrs()[1] * _VEC
+
     def lds_bytes(self) -> int:
-        p = self.problem
+        """The X and dY rings as the builder allocates them."""
         U = self.unroll
-        x = p.stride * U * ceil_div(self.x_elems(), _VEC) * 16
-        dy = U * _WO * self.block_k * 2
-        return x + dy
+        return (
+            self.problem.stride * U * self.x_slot_elems() + U * self.dy_slot_elems()
+        ) * 2
 
 
 def is_valid_wgrad_gather_spec(
@@ -156,6 +170,8 @@ def is_valid_wgrad_gather_spec(
         return False, "fp16/bf16 only"
     if not target.memory.has_ds_read_tr:
         return False, f"needs ds_read_b64_tr_b16 (absent on {arch})"
+    if target.wave_size != 64 or target.async_lds_max_dwords < 4:
+        return False, f"needs wave64 + 16-byte buffer_load_lds (absent on {arch})"
     if p.kpg % _VEC:
         return False, "K must be a multiple of 8"
     if p.KW * p.cpg > 96:
@@ -166,12 +182,16 @@ def is_valid_wgrad_gather_spec(
     acc = p.KH * spec.wave_k16 * spec.n_atoms * 4
     if acc > 192:
         return False, f"{acc} accumulator VGPRs (> 192)"
-    if spec.lds_bytes() > 160 * 1024:
-        return False, "LDS budget"
+    if spec.wave_k16 < 1 or spec.waves_k < 1 or spec.threads > 1024:
+        return False, "wave_k16 >= 1 and waves_k in 1..16"
     if spec.prefetch < 1:
         return False, "prefetch >= 1"
+    if spec.lds_bytes() > 160 * 1024:
+        return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     if spec.rows_per_seg < 1:
         return False, "rows_per_seg >= 1"
+    if spec.target_blocks < 1:
+        return False, "target_blocks >= 1"
     return True, "ok"
 
 
@@ -183,7 +203,6 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
     KH, KW, PAD, S, C = p.KH, p.KW, p.PAD, p.stride, p.cpg
     io_dtype = p.dtype
     io_type = _io_type(io_dtype)
-    NW = spec.waves_k
     WK16 = spec.wave_k16
     NA = spec.n_atoms
     BK = spec.block_k
@@ -197,15 +216,13 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
     PRE = max(KH - S, 0)
     TAPS = KH * KW * C
 
-    IX = ceil_div(ceil_div(XCH, _WAVE), NW)
-    IY = ceil_div(ceil_div(_WO * CHK, _WAVE), NW)
-    # +16: a transpose read of the last column atom runs past the strip.
-    X_ELEMS = NW * IX * _WAVE * _VEC + 16
+    IX, IY = spec.dma_instrs()
+    X_ELEMS = spec.x_slot_elems()
     # When a pixel row of the strip (S * C elements) and the phase keep every
     # lane's 8-byte read aligned, the raw row is itself a [pixel][(s, c)]
     # tile with contiguous columns, so the X operand is a transpose read too.
     X_TR = (S * C) % 4 == 0 and PH % 4 == 0
-    Y_ELEMS = NW * IY * _WAVE * _VEC
+    Y_ELEMS = spec.dy_slot_elems()
     PER_STEP = S * IX + IY
 
     swz_k = pick_swizzle(CHK, (0,), _WO, _WO, tuple(range(0, BK, _ATOM)))

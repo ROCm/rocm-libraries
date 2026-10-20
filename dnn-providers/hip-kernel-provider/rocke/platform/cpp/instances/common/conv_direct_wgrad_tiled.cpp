@@ -62,6 +62,18 @@ int strip_w(const rocke_direct_wgrad_tiled_spec_t* s)
     return kWo / s->unfold_n;
 }
 
+/* DirectWgradTiledSpec.dma_instrs(): 1 KiB DMA instructions per wave and row. */
+int dma_instrs_dy(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    return cdiv(cdiv(kWo * wave_k(s) * s->waves_k / kVec, kWave), n_waves(s));
+}
+
+int dma_instrs_x(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    int seg = strip_w(s) + s->problem.KW - 1;
+    return cdiv(cdiv(s->unfold_n * seg * wave_c(s) * s->waves_c / kVec, kWave), n_waves(s));
+}
+
 /* ---- pick_swizzle ------------------------------------------------------ */
 
 /* _frag_row: LDS row a ds_read_b64_tr_b16 lane reads for reduction block rd. */
@@ -252,6 +264,19 @@ extern "C" int rocke_direct_wgrad_tiled_acc_vgprs(const rocke_direct_wgrad_tiled
     return s->problem.KH * s->problem.KW * s->wave_k16 * s->wave_c16 * 4;
 }
 
+extern "C" long rocke_direct_wgrad_tiled_lds_bytes(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    /* The padded dY / X ring buffers, plus the q-group reduction buffers. */
+    long slot
+        = (long)s->q_groups * n_waves(s) * (dma_instrs_dy(s) + dma_instrs_x(s)) * kWave * kVec * 2;
+    long red = 0;
+    if(s->q_groups > 1)
+    {
+        red = 2L * n_waves(s) * s->wave_k16 * s->wave_c16 * kWave * 4 * 4;
+    }
+    return (s->prefetch + 1) * slot + red;
+}
+
 extern "C" int rocke_direct_wgrad_tiled_n_channel_tiles(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
@@ -351,7 +376,11 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     }
     if(!problem_dtype_ok(p))
     {
-        TILED_REJECT("unsupported dtype '%s'", problem_dtype(p));
+        if(p->dtype == NULL)
+        {
+            TILED_REJECT("unsupported dtype None");
+        }
+        TILED_REJECT("unsupported dtype '%s'", p->dtype);
     }
     if(p->stride != 1)
     {
@@ -360,6 +389,10 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     if(target->wave_size != 64 || !target->memory.has_ds_read_tr)
     {
         TILED_REJECT("needs wave64 + ds_read_b64_tr_b16 (absent on %s)", arch);
+    }
+    if(rocke_archtarget_async_lds_max_dwords(target) < 4)
+    {
+        TILED_REJECT("needs 16-byte buffer_load_lds (absent on %s)", arch);
     }
     const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
     if(!rocke_mma_catalog_has_shape(
@@ -409,6 +442,14 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         TILED_REJECT("accumulators need %d VGPRs (> 192)", rocke_direct_wgrad_tiled_acc_vgprs(s));
     }
+    if(s->row_unroll < 0)
+    {
+        TILED_REJECT("row_unroll must be >= 0");
+    }
+    if(s->target_blocks < 1)
+    {
+        TILED_REJECT("target_blocks must be >= 1");
+    }
     /* (Python divides by prefetch + 1 here; a negative prefetch, which raises
      * there, falls through to the prefetch check.) */
     if(s->prefetch >= 0 && s->row_unroll % (s->prefetch + 1))
@@ -429,6 +470,10 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     if(p->KH > 8 || p->KW > 8)
     {
         TILED_REJECT("filter extent above 8");
+    }
+    if(rocke_direct_wgrad_tiled_lds_bytes(s) > 160 * 1024)
+    {
+        TILED_REJECT("LDS %ld B > 160 KiB", rocke_direct_wgrad_tiled_lds_bytes(s));
     }
 #undef TILED_REJECT
     set_reason(reason, reason_cap, "ok");
@@ -791,8 +836,8 @@ rocke_kernel_def_t*
     c.HPB = spec->rows_per_seg;
     c.U = rocke_direct_wgrad_tiled_unroll(spec);
     c.T_PRO = c.KH - 1;
-    c.IK = cdiv(cdiv(kWo * c.CHK, kWave), c.NW);
-    c.IC = cdiv(cdiv(c.STRIP * c.CHC, kWave), c.NW);
+    c.IK = dma_instrs_dy(spec);
+    c.IC = dma_instrs_x(spec);
     c.N_INSTR = c.IK + c.IC;
     c.QG = spec->q_groups;
     c.GDY_ELEMS = c.NW * c.IK * kWave * kVec;
