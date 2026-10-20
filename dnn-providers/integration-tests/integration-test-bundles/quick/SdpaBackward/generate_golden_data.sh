@@ -13,7 +13,9 @@
 # backward pass runs on exactly that O and LSE. The backward bundle records the
 # forward bundle it came from in its `forward_source` metadata, so the pairing
 # stays checkable after the fact. That is why each case below writes two
-# bundles, and why the forward half must not be regenerated on its own.
+# bundles, both under SdpaBackward: the backward bundle, and its forward half in
+# a sibling `<topology>_fwd_pair` directory. Keeping the pair together is what
+# stops the SdpaFwd driver from regenerating the forward half out from under it.
 #
 # Requires PyTorch. A GPU is not needed: the reference runs on the CPU.
 #
@@ -78,11 +80,14 @@ write_dvc_pointer() {
     } > "$bundle_dir/$name.tensors.dvc"
 }
 
-# Generate one forward/backward bundle pair. The forward half is written under
-# the matching SdpaFwd tier directory with a `_bwd_pair` suffix, which keeps it
-# clearly owned by this script: the SdpaFwd driver must never regenerate it on
-# its own, or the backward bundle's O and LSE would stop matching the data its
-# gradients were computed from.
+# Generate one forward/backward bundle pair. The forward half is written beside
+# the backward bundle under SdpaBackward, in a sibling directory with a
+# `_fwd_pair` suffix, which keeps it
+# clearly owned by this script, and keeps it out of SdpaFwd, whose own driver
+# must never regenerate it: were the forward half regenerated on its own, the
+# backward bundle's O and LSE would stop matching the data its gradients were
+# computed from, and the pairing its forward_source metadata records would be a
+# lie that nothing would catch.
 generate_pair() {
     local tier="$1"
     local topology="$2"
@@ -90,7 +95,7 @@ generate_pair() {
     shift 3
 
     local bwd_dir="$GOLDEN_ROOT/$tier/SdpaBackward/$topology/$name"
-    local fwd_dir="$GOLDEN_ROOT/$tier/SdpaFwd/${topology}_bwd_pair/$name"
+    local fwd_dir="$GOLDEN_ROOT/$tier/SdpaBackward/${topology}_fwd_pair/$name"
     mkdir -p "$bwd_dir" "$fwd_dir"
 
     python3 "$GENERATOR" \
@@ -148,8 +153,7 @@ fi
 
 echo "=== Done ==="
 echo "Generated bundles:"
-find "$GOLDEN_ROOT" \
-    \( -path "*/SdpaBackward/*" -o -path "*_bwd_pair/*" \) \
+find "$GOLDEN_ROOT" -path "*/SdpaBackward/*" \
     -name "*.json" ! -name "*.meta.json" ! -name "*.support.json" \
     ! -name "graph.template.json" ! -name "sweep.json" 2>/dev/null | sort
 echo ""
