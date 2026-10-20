@@ -2132,6 +2132,20 @@ namespace TensileLite
                       bool                    isMatrixA,
                       MXScaleLayout           swizzleLayout,
                       bool*                   preswizzledFlag) {
+                  // Per-solution calls report whether this side reused its cached inputs
+                  // (cache_hit) or really regenerated data + scales (regenerate). The
+                  // problem-level calls (no solution yet) are covered by cpu_data_init.
+                  struct SideOutcome
+                  {
+                      const char*                          name = nullptr;
+                      TimingClock::time_point              start;
+                      bool                                 enabled;
+                      ~SideOutcome()
+                      {
+                          if(name && enabled)
+                              recordTimingSince(name, start);
+                      }
+                  } sideOutcome{nullptr, TimingClock::now(), m_currentSolution != nullptr};
                   auto         rows       = dataDesc.sizes()[0];
                   auto         cols       = dataDesc.sizes()[1];
                   auto         stride     = dataDesc.strides()[1];
@@ -2158,6 +2172,7 @@ namespace TensileLite
                   // preswizzle choice also depends on the current solution's MI shape.
                   if(m_mxScaleLayout == MXScaleLayout::GFX1250 && descriptorsUnchanged)
                   {
+                      sideOutcome.name = "pre_solution_mx_side_cache_hit";
                       return;
                   }
 
@@ -2182,8 +2197,13 @@ namespace TensileLite
                   {
                       if(hasMatchingSwizzledScale)
                           *preswizzledFlag = true;
+                      sideOutcome.name = "pre_solution_mx_side_cache_hit";
                       return;
                   }
+
+                  // Past the cache checks: A/B data and scales are really regenerated below.
+                  sideOutcome.name = "pre_solution_mx_side_regenerate";
+                  ++m_mxInputGeneration;
 
                   if(pristineData.initDescriptor.size() == 1)
                       pristineData.initDescriptor[0] = dataDesc;
