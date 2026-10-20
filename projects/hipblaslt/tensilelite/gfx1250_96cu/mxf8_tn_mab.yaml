@@ -1,4 +1,11 @@
 GlobalParameters:
+  # All-GPU single-process benchmarking (same workload on every visible GPU, released
+  # simultaneously; reports median/mean per-GPU time and per-GPU + total-node FLOPS).
+  # Uncomment to enable (do NOT combine with the per-process gfx1250_96cu AGT harness,
+  # which drives one device per client process):
+  #AllDevices: True
+  #LaunchSyncMode: gate     # 'gate' (device-side spin gate) or 'barrier' (host thread barrier)
+  #TimeAggregation: median  # 'median' or 'mean' (both are always reported)
   NumElementsToValidate: -1
   NumElementsToValidateWinner: 0
   KernelTime: False

@@ -725,6 +725,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
             param('streamk-hybrid-mode', int(v))
 
         param("device-idx",               deviceId)
+        # All-GPU single-process benchmarking (same workload on every visible device,
+        # simultaneous release, median/mean-of-GPUs timing).
+        param("all-devices",              globalParameters.get("AllDevices", False))
+        param("launch-sync-mode",         globalParameters.get("LaunchSyncMode", "gate"))
+        param("time-aggregation",         globalParameters.get("TimeAggregation", "median"))
 
         param("init-seed",                globalParameters["DataInitSeed"])
 

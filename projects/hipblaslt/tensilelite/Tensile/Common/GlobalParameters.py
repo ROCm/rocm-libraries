@@ -140,6 +140,13 @@ globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output
 globalParameters["ParallelGpuExecution"] = 1  # Number of GPUs for parallel client execution (0=auto-detect, 1=serial, N=use N GPUs)
+# All-GPU single-process benchmarking (distinct from ParallelGpuExecution, which shards
+# different problems across GPUs). When True the tensilelite-client runs the SAME
+# problem(s)/solution(s) on every HIP-visible device at once, releases their timed kernels
+# simultaneously, and reports the median/mean per-GPU time plus per-GPU and total-node FLOPS.
+globalParameters["AllDevices"] = False
+globalParameters["LaunchSyncMode"] = "gate"   # how AllDevices releases kernels together: "gate" or "barrier"
+globalParameters["TimeAggregation"] = "median"  # headline aggregation for AllDevices: "median" or "mean"
 
 globalParameters["PythonProfile"] = False  # Enable python profiling
 

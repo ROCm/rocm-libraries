@@ -33,6 +33,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include "AllDevicesClient.hpp"
 #include "BenchmarkTimer.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
@@ -284,6 +285,9 @@ namespace TensileLite
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
+                ("all-devices",              po::value<bool>()->default_value(false), "Run the problem(s)/solution(s) on every HIP-visible device at once, release their timed kernels simultaneously, and report the median/mean per-GPU time (and derived per-GPU and total-node FLOPS). Validation is disabled in this mode.")
+                ("launch-sync-mode",         po::value<std::string>()->default_value("gate"), "How --all-devices releases the timed kernels together: 'gate' (device-side spin-gate kernel + single host release flag; starts within ~ns of each other) or 'barrier' (host thread barrier right before the enqueue loop; simpler, leaves host enqueue skew).")
+                ("time-aggregation",         po::value<std::string>()->default_value("median"), "Headline time aggregation for --all-devices ('median' or 'mean'); both are always reported.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
                 ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
@@ -1116,6 +1120,17 @@ int main(int argc, const char* argv[])
             std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
             std::runtime_error(str.c_str());
         }
+    }
+
+    // All-GPU mode: a self-contained orchestrator that runs the selected
+    // problem(s)/solution(s) on every HIP-visible device at once (see
+    // AllDevicesClient.cpp). It builds its own per-device adapters, so the
+    // single-GPU listener pipeline below is skipped entirely.
+    if(args["all-devices"].as<bool>())
+    {
+        int rc = runAllDevices(args, library, hardware, problemFactory);
+        flushTimingBuffer();
+        return std::min(rc, 255);
     }
 
     auto problems        = problemFactory.problems();
