@@ -98,6 +98,20 @@ from rocke.helpers.transforms import (
 # ---------------------------------------------------------------------
 
 
+def _emit_direct_params_tuple(
+    b: IRBuilder, io_type
+) -> tuple[Dict[str, Value], Value, Value, Value, Value, Value, Value]:
+    """Declare the direct-conv kernarg block and unpack its common values."""
+    params = emit_direct_params(b, io_type=io_type)
+    A = params["A"]
+    Bp = params["B"]
+    D = params["D"]
+    A_bytes = params["A_bytes"]
+    B_bytes = params["B_bytes"]
+    D_bytes = params["D_bytes"]
+    return params, A, Bp, D, A_bytes, B_bytes, D_bytes
+
+
 def emit_direct_params(
     b: IRBuilder, *, direction: str = "fwd", io_type=F16
 ) -> Dict[str, Value]:
@@ -576,13 +590,7 @@ def build_direct_conv_16c(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
     p_Wo = params["p_Wo"]
 
@@ -1231,13 +1239,7 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
 
     c0 = b.const_i32(0)
@@ -1589,13 +1591,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
     p_Wo = params["p_Wo"]
 
@@ -2062,13 +2058,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
     p_Wo = params["p_Wo"]
 
@@ -2720,13 +2710,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
     p_Wo = params["p_Wo"]
 
@@ -6333,13 +6317,7 @@ def build_direct_depthwise(
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
     p_Ho = params["p_Ho"]
 
@@ -7321,13 +7299,7 @@ def build_direct_depthwise_col(
     DT = dtype_to_ir(spec.dtype)
     ELEM_BYTES = 2
 
-    params = emit_direct_params(b, io_type=DT)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, DT)
     p_Ho = params["p_Ho"]
 
     c0 = b.const_i32(0)
@@ -7621,13 +7593,7 @@ def build_direct_depthwise_spatial(
 
     io_type = _io_type(p.dtype)
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_Hi = params["p_Hi"]
 
     c0 = b.const_i32(0)

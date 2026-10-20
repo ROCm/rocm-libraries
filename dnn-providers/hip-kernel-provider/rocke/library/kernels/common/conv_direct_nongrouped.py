@@ -86,7 +86,7 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     _mfma,
     _trunc_f32,
-    emit_direct_params,
+    _emit_direct_params_tuple,
 )
 
 # Global load width for the activation staging path, in halves (dwordx4).
@@ -708,13 +708,7 @@ def build_direct_conv_nongrouped(
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
-    params = emit_direct_params(b, io_type=io_type)
-    A = params["A"]
-    Bp = params["B"]
-    D = params["D"]
-    A_bytes = params["A_bytes"]
-    B_bytes = params["B_bytes"]
-    D_bytes = params["D_bytes"]
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
     p_N = params["p_N"]
     p_Hi = params["p_Hi"]
     p_Wi = params["p_Wi"]
