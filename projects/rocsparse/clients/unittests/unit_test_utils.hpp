@@ -131,7 +131,7 @@ namespace rocsparse_ut
         {
             rocsparse_clients_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
         }
-        device_vector(const device_vector&)            = delete;
+        device_vector(const device_vector&) = delete;
         device_vector& operator=(const device_vector&) = delete;
         ~device_vector()
         {
