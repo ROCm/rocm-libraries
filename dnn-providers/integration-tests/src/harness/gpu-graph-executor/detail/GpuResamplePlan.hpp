@@ -241,6 +241,23 @@ public:
             return false;
         }
 
+        const auto resampleMode = nodeAttributes->resample_mode();
+        if(resampleMode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
+           && resampleMode
+                  != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
+           && resampleMode
+                  != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
+        {
+            return false;
+        }
+
+        const auto paddingMode = nodeAttributes->padding_mode();
+        if(paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::NEG_INF_PAD
+           && paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD)
+        {
+            return false;
+        }
+
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
 
@@ -349,6 +366,23 @@ public:
             return false;
         }
 
+        const auto resampleMode = nodeAttributes->resample_mode();
+        if(resampleMode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
+           && resampleMode
+                  != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
+           && resampleMode
+                  != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
+        {
+            return false;
+        }
+
+        const auto paddingMode = nodeAttributes->padding_mode();
+        if(paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::NEG_INF_PAD
+           && paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD)
+        {
+            return false;
+        }
+
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dx_tensor_uid());
 
@@ -362,8 +396,7 @@ public:
                 return false;
             }
 
-            if(nodeAttributes->resample_mode()
-               == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+            if(resampleMode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
             {
                 return false;
             }
