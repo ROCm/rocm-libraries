@@ -2459,22 +2459,6 @@ def _build_tilde_dgrad(
     return b.kernel
 
 
-def _dgrad_tilde_decomp(
-    b, m_rem, w_tilde_slice, c_m, c_n, gemm_m, gemm_n, d_h_stride, d_h_offset,
-    d_w_stride, d_w_offset, c0, c_Hi, c_Wi,
-):
-    """Compute hi/wi/ok for a dgrad tilde sub-GEMM."""
-    htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
-    hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
-    wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
-    m_ok = b.cmp_lt(c_m, gemm_m)
-    n_ok = b.cmp_lt(c_n, gemm_n)
-    hi_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, c_Hi))
-    wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_Wi))
-    ok = b.land(b.land(m_ok, n_ok), b.land(hi_ok, wi_ok))
-    return hi, wi, ok
-
-
 def _emit_dgrad_tilde_atomic_epilogue(
     b: IRBuilder,
     spec: DgradConvSpec,
@@ -2541,10 +2525,18 @@ def _emit_dgrad_tilde_atomic_epilogue(
 
                 # Decompose c_m (the M index) into (n, htl, wtl) at runtime
                 n_val, m_rem = _magic_divmod(b, c_m, hw_tilde)
-                hi, wi, ok = _dgrad_tilde_decomp(
-                    b, m_rem, w_tilde_slice, c_m, c_n, gemm_m, gemm_n,
-                    d_h_stride, d_h_offset, d_w_stride, d_w_offset, c0, c_Hi, c_Wi,
-                )
+                htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
+
+                # Compute hi = htl * d_h_stride + d_h_offset
+                hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
+                wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
+
+                # Bounds: 0 <= hi < Hi, 0 <= wi < Wi, c_m < gemm_m, c_n < gemm_n
+                m_ok = b.cmp_lt(c_m, gemm_m)
+                n_ok = b.cmp_lt(c_n, gemm_n)
+                hi_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, c_Hi))
+                wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_Wi))
+                ok = b.land(b.land(m_ok, n_ok), b.land(hi_ok, wi_ok))
 
                 # NHWC offset: ((n * Hi + hi) * Wi + wi) * C + c
                 dx_offset = b.add(
@@ -2733,10 +2725,15 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
 
                 # Tilde M decomposition: m_val → (n_batch, htl, wtl)
                 n_batch, m_rem = _magic_divmod(b, m_val, hw_tilde)
-                hi, wi, ok = _dgrad_tilde_decomp(
-                    b, m_rem, w_tilde_slice, m_val, n_val, bounds_m, bounds_n,
-                    d_h_stride, d_h_offset, d_w_stride, d_w_offset, c0, c_Hi, c_Wi,
-                )
+                htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
+                hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
+                wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
+
+                m_ok = b.cmp_lt(m_val, bounds_m)
+                n_ok = b.cmp_lt(n_val, bounds_n)
+                hi_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, c_Hi))
+                wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_Wi))
+                ok = b.land(b.land(m_ok, n_ok), b.land(hi_ok, wi_ok))
 
                 # NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c_abs
                 _c = b.add(n_val, c_group_base) if c_group_base is not None else n_val
