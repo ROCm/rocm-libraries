@@ -578,3 +578,61 @@ def test_a_pad_below_the_load_alignment_is_illegal():
     sh = _L._fp16_shape(128, 2, 16, 8, 4, 1, _K_B128, True)
     assert _L._b128_wave_costs(sh.rawAddrs, 256, 8, sh.wOffsets, sh.instOffs) is None
     assert _L._b128_wave_costs(sh.rawAddrs, 256, 16, sh.wOffsets, sh.instOffs) is not None
+
+
+def _reference_wave_costs(rawAddrs, B, P, wOffsets, instOffs, banksPerThread):
+    """_wave_costs by the definition: count every instruction, check every address."""
+    align = 4 * banksPerThread
+
+    def pad(x):
+        return x + (x // B) * P if B else x
+
+    perWave = []
+    for wOff in wOffsets:
+        base = [pad(a + wOff) for a in rawAddrs]
+        total = 0
+        for instOff in instOffs:
+            addrs = [a + pad(instOff) for a in base]
+            if any(a % align for a in addrs):
+                return None
+            total += _L._max_threads_per_bank(addrs, banksPerThread)
+        perWave.append(total)
+    return perWave
+
+
+@pytest.mark.parametrize("banksPerThread", [1, 2, 4])
+def test_wave_costs_match_counting_every_instruction(banksPerThread):
+    # Aligned, cancelling, arbitrary and offset-only inputs, with empty lists.
+    import random
+    rng = random.Random(banksPerThread)
+    align = 4 * banksPerThread
+    for case in range(800):
+        mode = ("aligned", "cancelling", "arbitrary", "offset only")[case % 4]
+        B = rng.choice((0, 16, 32, 64, 256, 1024))
+        P = rng.choice((0, 8, 16, 32, 64))
+        rawAddrs = [align * rng.randrange(0, 256) for _ in range(rng.choice((4, 16, 32)))]
+        wOffsets = tuple(align * rng.randrange(0, 16) for _ in range(rng.choice((0, 1, 3))))
+        instOffs = tuple(align * rng.randrange(0, 256) for _ in range(rng.choice((0, 1, 4))))
+        if mode == "cancelling":
+            # Misaligned base + misaligned offset = aligned address.
+            B, P = 0, 0
+            shift = rng.randrange(1, align) if align > 1 else 0
+            rawAddrs = [a + shift for a in rawAddrs]
+            instOffs = tuple(i + align - shift for i in instOffs)
+        elif mode == "arbitrary":
+            rawAddrs = [a + rng.randrange(0, align) for a in rawAddrs]
+            instOffs = tuple(i + rng.randrange(0, align) for i in instOffs)
+            P = rng.choice((0, 4, 8, 16, 32))
+        elif mode == "offset only":
+            # Aligned bases, misaligned offset.
+            instOffs = tuple(i + rng.randrange(1, align) for i in instOffs)
+        assert (_L._wave_costs(rawAddrs, B, P, wOffsets, instOffs, banksPerThread)
+                == _reference_wave_costs(rawAddrs, B, P, wOffsets, instOffs,
+                                         banksPerThread)), \
+            (mode, banksPerThread, B, P, wOffsets, instOffs)
+
+
+def test_wave_costs_misaligned_base_and_offset_that_cancel_are_accepted():
+    # Base 4 and offset 4 are misaligned alone but add up to 8.
+    assert _L._wave_costs([4] * 8, 0, 0, (0,), (4,), 2) == [8]
+    assert _reference_wave_costs([4] * 8, 0, 0, (0,), (4,), 2) == [8]

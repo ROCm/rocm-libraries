@@ -238,6 +238,16 @@ def _pick_best(candidates, costFn):
 def _is_aligned(addrs, align: int) -> bool:
   return all(a % align == 0 for a in addrs)
 
+def _aligned_wave_cost(base, numInsts: int, banksPerThread: int) -> int:
+  """Wave cost for aligned bases and offsets: one count times numInsts.
+
+  An instruction offset moves every thread by the same amount, which only
+  rotates them around the banks, so each instruction has the same busiest bank.
+  """
+  if not numInsts:
+    return 0
+  return numInsts * _max_threads_per_bank(base, banksPerThread, aligned=True)
+
 def _general_wave_cost(base, deltas, banksPerThread: int):
   """Wave cost counting each instruction, or None if base + delta is misaligned.
 
@@ -261,15 +271,21 @@ def _wave_costs(rawAddrs, B, P, wOffsets, instOffs, banksPerThread):
   banksPerThread dwords wide and must be aligned to 4 * banksPerThread bytes
   (b64: 2 banks, 8 bytes; b128: 4, 16; b32: 1, 4).
   """
+  align = 4 * banksPerThread
+
   def pad(x):
     return x + (x // B) * P if B else x
 
   deltas = [pad(instOff) for instOff in instOffs]
+  deltasAligned = _is_aligned(deltas, align)
 
   perWave = []
   for wOff in wOffsets:
     base = [pad(a + wOff) for a in rawAddrs]
-    cost = _general_wave_cost(base, deltas, banksPerThread)
+    if deltasAligned and _is_aligned(base, align):
+      cost = _aligned_wave_cost(base, len(deltas), banksPerThread)
+    else:
+      cost = _general_wave_cost(base, deltas, banksPerThread)
     if cost is None:
       return None
     perWave.append(cost)
