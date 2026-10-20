@@ -620,6 +620,17 @@ def _fma_tap_load(b, tap_valid, x_byte, rsrc, oob_sentinel, c0, dtype, zero_f32)
     return safe_x, x_h, x_f32
 
 
+def _direct_conv_builder(spec, THREADS, io_type):
+    """Shared direct-conv builder preamble: IRBuilder, kernel attrs, params tuple."""
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+
+    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
+    p_Hi = params["p_Hi"]
+    p_Wo = params["p_Wo"]
+    return b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -658,12 +669,9 @@ def build_direct_conv_16c(
     PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
     c_stride = p.stride  # Python int, used in emit-time guards below
 
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
-
-    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
-    p_Hi = params["p_Hi"]
-    p_Wo = params["p_Wo"]
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
+        spec, THREADS, io_type
+    )
 
     c0 = b.const_i32(0)
     c_wave = b.const_i32(WAVE)
@@ -1650,12 +1658,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     BLOCK_GROUPS = spec.block_groups
     WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES = _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS)
 
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
-
-    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
-    p_Hi = params["p_Hi"]
-    p_Wo = params["p_Wo"]
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
+        spec, THREADS, io_type
+    )
 
     c0 = b.const_i32(0)
     c_wave = b.const_i32(WAVE)
@@ -2109,12 +2114,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES = _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS)
     N_CH_BLOCKS = p.cpg // LOAD_VEC  # = 8 for cpg=32
 
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
-
-    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
-    p_Hi = params["p_Hi"]
-    p_Wo = params["p_Wo"]
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
+        spec, THREADS, io_type
+    )
 
     c0 = b.const_i32(0)
     c_wave = b.const_i32(WAVE)
@@ -2761,12 +2763,9 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     PASSES = (NUM_CHUNKS + THREADS - 1) // THREADS
     lds_total_fp16 = PASSES * THREADS * LOAD_VEC
 
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = THREADS
-
-    params, A, Bp, D, A_bytes, B_bytes, D_bytes = _emit_direct_params_tuple(b, io_type)
-    p_Hi = params["p_Hi"]
-    p_Wo = params["p_Wo"]
+    b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo = _direct_conv_builder(
+        spec, THREADS, io_type
+    )
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
