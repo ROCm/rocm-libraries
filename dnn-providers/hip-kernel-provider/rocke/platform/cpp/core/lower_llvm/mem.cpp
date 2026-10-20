@@ -898,6 +898,7 @@ static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
     const char* gname = rocke_ll_smem_global_name(L, smem, NULL);
     const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
+    rocke_ll_lds_prov_add(L, ll_res(op), gname);
 }
 
 static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
@@ -909,6 +910,7 @@ static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
                    ll_res(op),
                    rocke_ll_operand(L, base),
                    rocke_ll_operand(L, off));
+    rocke_ll_lds_prov_add(L, ll_res(op), rocke_ll_lds_prov_get(L, base->name));
 }
 
 static void op_tile_global_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
@@ -1487,13 +1489,14 @@ static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)",
+                   "i32 0, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    ptr_name,
                    (long long)size_bytes,
                    rocke_ll_operand(L, voff),
                    rocke_ll_operand(L, soff),
-                   (long long)aux);
+                   (long long)aux,
+                   rocke_ll_lds_alias_suffix(L, rocke_ll_lds_prov_get(L, lds_addr->name)));
 }
 
 static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op)
@@ -1511,13 +1514,14 @@ static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)",
+                   "i32 0, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    lds,
                    (long long)bytes_per_lane,
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset),
-                   (long long)aux);
+                   (long long)aux,
+                   rocke_ll_lds_alias_suffix(L, rocke_ll_lds_prov_get(L, lds_ptr->name)));
 }
 
 static void op_tile_buffer_load_lds_async(rocke_lower_t* L, const rocke_op_t* op)

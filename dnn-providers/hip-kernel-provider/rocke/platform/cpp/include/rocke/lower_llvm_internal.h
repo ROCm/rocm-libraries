@@ -404,6 +404,13 @@ struct rocke_lower
     bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
     bool needs_nontemporal_md; /* _needs_nontemporal_md: "!5 = !{i32 1}" */
 
+    /* Kernel attr lds_alias_scopes (Python _lds_alias): tag LDS DMA writes and
+     * transpose reads with a per-allocation alias scope. lds_prov maps an i64
+     * LDS address value name to the allocation it points into. */
+    bool lds_alias;
+    bool lds_alias_used;
+    ROCKE_VEC(rocke_ll_smem_name_t) lds_prov;
+
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
      * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */
     ROCKE_VEC(rocke_ll_decl_t) dyn_decls;
@@ -415,6 +422,7 @@ struct rocke_lower
     /* smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
      * Populated by rocke_ll_compute_smem_layout() after _collect_smem. */
     ROCKE_VEC(int) smem_offsets; /* parallel to smem_globals: byte offset per alloc */
+    ROCKE_VEC(int) smem_sizes; /* parallel to smem_globals: bytes placed (0 if dead) */
     int smem_pool_size; /* total pool size in bytes (rounded to 16) */
     const char* smem_pool_name; /* "@smem_pool.<kernel>" */
     ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
@@ -606,6 +614,12 @@ const char* rocke_ll_smem_global_name(rocke_lower_t* L,
  * and before rocke_ll_lower_region. Populates L->smem_offsets,
  * L->smem_pool_size, and L->smem_pool_name. */
 void rocke_ll_compute_smem_layout(rocke_lower_t* L);
+
+/* LDS alias scopes (kernel attr lds_alias_scopes; Python _lds_alias_suffix /
+ * _lds_prov). The suffix is "" unless the kernel opted in and gname != NULL. */
+const char* rocke_ll_lds_alias_suffix(rocke_lower_t* L, const char* gname);
+const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const char* value_name);
+void rocke_ll_lds_prov_add(rocke_lower_t* L, const char* value_name, const char* gname);
 
 /* Emit a byte-level GEP to the start of the smem segment for `gname` inside
  * the unified pool. Returns the pool name directly when offset == 0;
