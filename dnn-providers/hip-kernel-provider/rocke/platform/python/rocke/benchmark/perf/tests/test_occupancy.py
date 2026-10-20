@@ -175,8 +175,10 @@ class TestEstimateOccupancyDetail(unittest.TestCase):
     def test_gfx950_combined_reg_pool(self):
         # gfx950 (CDNA4): VGPR+AGPR share one file, so the SUM sets the wave count.
         # Calibrated vs gfx950 hardware MeanOccupancyPerCU: an AGPR-heavy kernel (44 VGPR +
-        # 132 AGPR) measured ~7 waves/CU. 512 // align_up(176,16)=176 -> 2/SIMD
+        # 132 AGPR) measured ~7 waves/CU. 512 // align_up(176,8)=176 -> 2/SIMD
         # (8/CU); a separate 256-AGPR pool would wrongly give 1/SIMD (4/CU).
+        # The notes here carry the architectural VGPR count (44); a real code
+        # object's .vgpr_count (176) already includes the AGPRs.
         self._patch(vgpr=44, agpr=132, lds_bytes=24576, max_flat_workgroup_size=256)
         det = occupancy.estimate_occupancy_detail(b"x", "gfx950")
         self.assertEqual(det["waves_per_simd"], 2)
@@ -237,16 +239,19 @@ def _find_llvm_tool(name):
     return None
 
 
-def _vgpr_kernel_ir(vgprs, wave_size=32):
-    """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs (it clobbers the top one).
+def _vgpr_kernel_ir(vgprs, wave_size=32, agprs=0):
+    """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs and ``agprs`` AGPRs
+    (it clobbers the top register of each).
 
     The workgroup is capped at 64 lanes so the workgroup size never limits the
-    occupancy the compiler reports; only the VGPR count does.
+    occupancy the compiler reports; only the register count does. ``wave_size``
+    only matters on RDNA: CDNA processors always build wave64 code.
     """
     features = ' "target-features"="+wavefrontsize64"' if wave_size == 64 else ""
+    clobbers = f"~{{v{vgprs - 1}}}" + (f",~{{a{agprs - 1}}}" if agprs else "")
     return (
         "define amdgpu_kernel void @k() #0 {\n"
-        f'  call void asm sideeffect "", "~{{v{vgprs - 1}}}"()\n'
+        f'  call void asm sideeffect "", "{clobbers}"()\n'
         "  ret void\n"
         "}\n"
         f'attributes #0 = {{ "amdgpu-flat-work-group-size"="1,64"{features} }}\n'
@@ -267,20 +272,21 @@ def _run_llc(llc, processor, ir, *extra_args):
     return out.stdout
 
 
-def _llc_occupancy(llc, processor, vgprs):
-    """The waves per SIMD llc reports for a kernel using ``vgprs`` VGPRs."""
-    asm = _run_llc(llc, processor, _vgpr_kernel_ir(vgprs), "-o", "-")
+def _llc_occupancy(llc, processor, vgprs, agprs=0):
+    """The waves per SIMD llc reports for a kernel using ``vgprs`` VGPRs and
+    ``agprs`` AGPRs."""
+    asm = _run_llc(llc, processor, _vgpr_kernel_ir(vgprs, agprs=agprs), "-o", "-")
     if asm is None:
         return None
     return int(re.search(rb"; Occupancy: (\d+)", asm).group(1))
 
 
-def _llc_code_object(llc, processor, vgprs, wave_size=32):
+def _llc_code_object(llc, processor, vgprs, wave_size=32, agprs=0):
     """A real relocatable code object (ELF with AMDGPU notes) built by llc."""
     obj = _run_llc(
         llc,
         processor,
-        _vgpr_kernel_ir(vgprs, wave_size),
+        _vgpr_kernel_ir(vgprs, wave_size, agprs),
         "-filetype=obj",
         "-o",
         "-",
@@ -373,6 +379,95 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
                 self.assertEqual(res["target_arch"], processor)
                 self.assertEqual(res["vgpr"], 128)
                 self.assertEqual(res["occupancy"], _llc_occupancy(llc, processor, 128))
+
+
+# Register counts, as a code object's ``.vgpr_count`` records them, at which an
+# allocation step of 8 and one of 16 give different wave counts (65..72 and
+# 161..168), and at the edges of each wave count. Above 256 the count includes AGPRs.
+_CDNA_VGPR_SWEEP = (8, 64, 65, 72, 73, 128, 129, 161, 168, 169, 256, 257, 512)
+_CDNA_WAVES = (8, 8, 7, 7, 6, 4, 3, 3, 3, 2, 2, 1, 1)
+_MEASURED_CDNA_PROCESSORS = ("gfx90a", "gfx942", "gfx950")
+# (VGPRs, AGPRs) used by a kernel: VGPRs only, AGPRs only, and mixed. On these
+# processors both share one file of 512 per SIMD; ``.vgpr_count`` is the VGPRs
+# rounded up to 4 plus the AGPRs.
+_CDNA_REGISTER_USES = (
+    (64, 0),
+    (65, 0),
+    (72, 0),
+    (73, 0),
+    (168, 0),
+    (169, 0),
+    (256, 0),
+    (1, 64),
+    (1, 200),
+    (10, 20),
+    (61, 4),
+    (100, 156),
+    (256, 256),
+)
+
+
+class TestCdnaVgprFile(unittest.TestCase):
+    """The VGPR-limited estimate on gfx90a, gfx942 and gfx950 matches the compiler.
+
+    All three have 512 VGPRs per SIMD, allocated in steps of 8, at most 8 waves,
+    and the AGPRs share that file. Measured with the compiler's own occupancy
+    report for every VGPR count 1..256, every AGPR count 1..256 and a grid of
+    mixed uses; identical at clang 20, 22, 23 and 24:
+
+        llc -mtriple=amdgcn-amd-amdhsa -mcpu=<processor> -o - kernel.ll | grep Occupancy
+
+    where kernel.ll is ``_vgpr_kernel_ir(v, agprs=a)``.
+    """
+
+    def test_model_matches_the_measured_wave_counts(self):
+        for processor in _MEASURED_CDNA_PROCESSORS:
+            for vgprs, waves in zip(_CDNA_VGPR_SWEEP, _CDNA_WAVES):
+                with self.subTest(processor=processor, vgprs=vgprs):
+                    self.assertEqual(
+                        occupancy._occupancy_estimate(vgprs, processor, 64), waves
+                    )
+
+    def test_every_modelled_cdna_processor_is_measured(self):
+        cdna = {
+            processor
+            for processor, vgpr_file in occupancy._VGPR_FILES.items()
+            if vgpr_file.wave_size == 64
+        }
+        self.assertEqual(cdna, set(_MEASURED_CDNA_PROCESSORS))
+
+    def test_code_objects_match_the_local_compiler(self):
+        # Real code objects, with and without AGPRs: the estimate read from the
+        # notes equals the wave count llc reports for the same kernel.
+        llc = _find_llvm_tool("llc")
+        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+            self.skipTest("llc or llvm-readelf not found")
+        for processor in _MEASURED_CDNA_PROCESSORS:
+            for vgprs, agprs in _CDNA_REGISTER_USES:
+                with self.subTest(processor=processor, vgprs=vgprs, agprs=agprs):
+                    code_object = _llc_code_object(
+                        llc, processor, vgprs, wave_size=64, agprs=agprs
+                    )
+                    res = occupancy.resources(code_object, "gfx1100")
+                    self.assertEqual(res["target_arch"], processor)
+                    self.assertEqual(
+                        res["occupancy"],
+                        _llc_occupancy(llc, processor, vgprs, agprs),
+                    )
+
+    def test_multi_limiter_model_uses_the_same_allocation_step(self):
+        # A 72-VGPR kernel with no LDS: the register limiter binds at 7 waves.
+        llc = _find_llvm_tool("llc")
+        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+            self.skipTest("llc or llvm-readelf not found")
+        for processor in _MEASURED_CDNA_PROCESSORS:
+            with self.subTest(processor=processor):
+                code_object = _llc_code_object(llc, processor, 72, wave_size=64)
+                # The stale gfx1100 argument has no caps; the processor the code
+                # object records selects them.
+                detail = occupancy.estimate_occupancy_detail(code_object, "gfx1100")
+                self.assertEqual(detail["waves_per_simd"], 7)
+                self.assertEqual(detail["limited_by"], "VGPR")
 
 
 class TestUnmodelledCodeIsRefused(unittest.TestCase):
