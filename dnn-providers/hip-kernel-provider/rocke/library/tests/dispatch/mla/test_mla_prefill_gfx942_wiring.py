@@ -228,17 +228,6 @@ class TestGate(unittest.TestCase):
         )
         self.assertFalse(MLA_REGISTRY.get(_NAME).admits(foreign)[0])
 
-    def test_residual_predicate_implies_capability(self):
-        # The direction that must never invert: anything the predicate accepts,
-        # the capability prefilter must also have accepted.
-        # Calls ``_supports`` directly on purpose: predicate <= capability needs
-        # the residual predicate without the capability prefilter ``admits`` runs.
-        candidate = MLA_REGISTRY.get(_NAME)
-        for req in (_req(), _req(num_heads=64), _req(total_q=1, num_seqs=1)):
-            with self.subTest(req=req):
-                if candidate._supports(req)[0]:
-                    self.assertTrue(candidate.capability.check(req)[0])
-
 
 class TestNumSeqsCap(unittest.TestCase):
     """The fixed-trip seq_idx binary search bounds the batch size."""

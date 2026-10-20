@@ -373,9 +373,7 @@ def _import_aiter_mla():
         ) from exc
 
 
-def _run_aiter_live(
-    shape: MLAShape, data: dict, *, warmup: int, iters: int
-) -> tuple[Any, Any, float]:
+def _run_aiter_live(data: dict, *, warmup: int, iters: int) -> tuple[Any, float]:
     """Time aiter ``mla_prefill_fwd``; return ``(latent_out [total_q, H, r_kv], ms)``."""
     from rocke.runtime import synchronize_and_release, time_launches
 
@@ -1108,7 +1106,7 @@ def main(argv=None) -> int:
                     raise RuntimeError("no rocke inputs/oracle to derive from")
                 aiter_data = _make_aiter_inputs(shape, rocke_data)
                 a_latent, aiter_ms = _run_aiter_live(
-                    shape, aiter_data, warmup=args.warmup, iters=args.iterations
+                    aiter_data, warmup=args.warmup, iters=args.iterations
                 )
                 del aiter_data
                 n_aiter_ran += 1

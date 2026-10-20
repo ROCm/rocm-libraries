@@ -206,8 +206,8 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 
 The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
 spec, or dispatch selector; it is built and selected in Python only. This
-follows the gfx942/gfx950 `attention_dense` precedent (#10337), where the
-builder mirrors were retired.
+follows the gfx942/gfx950 `attention_dense` family, which also ships without a
+C++ builder mirror.
 
 **What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
 against the Python lowerer is checked on every MLA golden case at every

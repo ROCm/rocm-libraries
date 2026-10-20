@@ -521,7 +521,7 @@ def _launch_geometry(spec: MlaPrefillSpec, p: Problem) -> dict:
     }
 
 
-def _load(spec: MlaPrefillSpec, kernel, *, arch: str):
+def _load(kernel, *, arch: str):
     art = compile_kernel(kernel, arch=arch)
     rt = Runtime()
     blob = getattr(art, "hsaco", None) or art.hsaco_bytes
@@ -543,7 +543,7 @@ def _shared_inputs(p: Problem, q: np.ndarray) -> tuple:
 
 def run_on_device(spec: MlaPrefillSpec, p: Problem, q: np.ndarray, *, arch: str):
     """Launch the probe and return the raw ``[total_q, H, max_k]`` fp32 buffer."""
-    rt, fn = _load(spec, build_mla_prefill_score_probe(spec, arch=arch), arch=arch)
+    rt, fn = _load(build_mla_prefill_score_probe(spec, arch=arch), arch=arch)
     g = _launch_geometry(spec, p)
 
     # The store predicate skips every out-of-range (query, key) pair, so those
@@ -664,7 +664,7 @@ def run_full_on_device(spec: MlaPrefillSpec, p: Problem, q: np.ndarray, *, arch:
     if spec.absorbed_query:
         return _run_unfused_on_device(spec, p, q, arch=arch)
     build = _resolve_fwd_entry()
-    rt, fn = _load(spec, build(spec, arch=arch), arch=arch)
+    rt, fn = _load(build(spec, arch=arch), arch=arch)
     g = _launch_geometry(spec, p)
 
     # Both outputs are NaN-seeded for the score probe's reason, but it matters
@@ -719,7 +719,7 @@ def _run_unfused_on_device(
     comparison against the oracle applies to the composed path.
     """
     build = _resolve_fwd_entry()
-    rt, fn = _load(spec, build(spec, arch=arch), arch=arch)
+    rt, fn = _load(build(spec, arch=arch), arch=arch)
     g = _launch_geometry(spec, p)
     d_nope, r_kv = spec.d_nope, spec.r_kv
 

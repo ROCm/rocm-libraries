@@ -109,6 +109,7 @@ from rocke.helpers.schedule import DS_READ as _SGB_DS_READ
 from rocke.helpers.schedule import MFMA as _SGB_MFMA
 from rocke.helpers.spec import SignatureBuilder
 
+from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
@@ -177,9 +178,6 @@ V8_PAD = 8
 # the same 2-way pattern as the read, while at width 4 it is ``2a`` and goes
 # conflict-free as well.
 C_STAGE_W = 4
-
-# LDS available to one workgroup on gfx942, in bytes.
-LDS_BYTES_PER_WORKGROUP = 64 * 1024
 
 # k-steps per scheduler-ordered block in the score GEMM.
 #
@@ -654,7 +652,7 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     # MFMA_K == MFMA_N == 16 here, so the checks above already cover every
     # K-dimension requirement; there is nothing extra to demand for the K axis.
     if _one_wave_per_head(spec):
-        return _supports_heads_per_wg(spec)
+        return _supports_heads_per_wg(spec, arch=arch)
     if spec.absorbed_query:
         return False, (
             "absorbed_query is implemented for the one-wave-per-head layout "
@@ -739,7 +737,7 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     # The prologue and epilogue buffers hold a column window of every M tile,
     # so block_q reaches LDS mostly through s_part; kv_lds scales with block_k.
     # Both still have to fit the layout's per-CU share of LDS.
-    return _fits_lds(spec)
+    return _fits_lds(spec, arch=arch)
 
 
 def _fwd_workgroups_per_cu(spec: MlaPrefillSpec) -> int:
@@ -753,15 +751,16 @@ def _fwd_workgroups_per_cu(spec: MlaPrefillSpec) -> int:
     return 1 if spec.agpr_acc or spec.num_warps >= 8 else 2
 
 
-def _fits_lds(spec: MlaPrefillSpec) -> tuple[bool, str]:
+def _fits_lds(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
     """LDS admission against the occupancy the layout intends.
 
-    Checking only the 64 KB per-workgroup limit would admit a two-per-CU
-    layout whose pool is over 32 KB, which then silently runs one per CU.
+    The capacity is the arch catalog's per-workgroup LDS. Checking only that
+    limit would admit a two-per-CU layout whose pool is over half of it, which
+    then silently runs one per CU.
     """
     lds = _fwd_lds_bytes(spec)
     wgs = _fwd_workgroups_per_cu(spec)
-    budget = LDS_BYTES_PER_WORKGROUP // wgs
+    budget = attention_lds_capacity_bytes(arch) // wgs
     if lds > budget:
         return False, (
             f"the forward kernel needs about {lds} B of LDS at "
@@ -778,7 +777,7 @@ def _one_wave_per_head(spec: MlaPrefillSpec) -> bool:
     return spec.heads_per_wg > 1 or spec.q_tiles_per_wg > 1 or spec.agpr_acc
 
 
-def _supports_heads_per_wg(spec: MlaPrefillSpec) -> tuple[bool, str]:
+def _supports_heads_per_wg(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
     """Admission for the one-wave-per-head layout (:func:`_one_wave_per_head`).
 
     No GEMM axis is split across waves -- each wave owns one head end to end --
@@ -843,7 +842,7 @@ def _supports_heads_per_wg(spec: MlaPrefillSpec) -> tuple[bool, str]:
                 f"a {name} row is {cols // width} chunks of {width}, which "
                 f"must divide the {threads} threads"
             )
-    return _fits_lds(spec)
+    return _fits_lds(spec, arch=arch)
 
 
 def require_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> None:
