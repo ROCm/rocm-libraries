@@ -819,9 +819,11 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
  * boundary tiles on-chip; this catalog ships none, and one arriving from elsewhere is
  * declined even at its authored shape rather than matched on metadata equality.
  *
- * A served candidate receives batch/seqlen_q/seqlen_kv as runtime kernel arguments, so
- * one binary serves any valid shape for the same head/dtype/mask configuration; the
- * metadata's shape fields are canonical build inputs and are not compared.
+ * A served candidate receives batch/seqlen_q/seqlen_kv and num_query_heads/num_kv_heads
+ * as runtime kernel arguments, so one binary serves any valid shape; the metadata's
+ * shape fields are canonical build inputs and are not compared. The head counts are
+ * still compared below because the catalog lists each head configuration as its own
+ * entry.
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
@@ -952,7 +954,7 @@ double scoreKernel(const MatchContext& /*context*/,
 /// divergence here fails every dispatch rather than silently weakening the check.
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one instead of eight
+/// mismatch diagnostic prints the real layout beside the recorded one instead of ten
 /// zeroes that read as data.
 std::vector<KernelArgument> attentionDenseKernelSignature()
 {
@@ -967,7 +969,9 @@ std::vector<KernelArgument> attentionDenseKernelSignature()
             KernelArgument{"by_value", F32, 32, "scale"},
             KernelArgument{"by_value", I32, 36, "batch"},
             KernelArgument{"by_value", I32, 40, "seqlen_q"},
-            KernelArgument{"by_value", I32, 44, "seqlen_kv"}};
+            KernelArgument{"by_value", I32, 44, "seqlen_kv"},
+            KernelArgument{"by_value", I32, 48, "num_query_heads"},
+            KernelArgument{"by_value", I32, 52, "num_kv_heads"}};
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
@@ -1163,7 +1167,9 @@ public:
                     binding.scale,
                     static_cast<int32_t>(p.batch),
                     static_cast<int32_t>(p.seqLenQ),
-                    static_cast<int32_t>(p.seqLenKv));
+                    static_cast<int32_t>(p.seqLenKv),
+                    static_cast<int32_t>(p.numQueryHeads),
+                    static_cast<int32_t>(p.numKvHeads));
     }
 
 private:
