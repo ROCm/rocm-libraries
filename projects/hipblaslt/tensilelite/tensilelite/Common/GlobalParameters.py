@@ -115,6 +115,18 @@ globalParameters["ShowProgressBar"] = (
 globalParameters["SolutionSelectionAlg"] = (
     1  # algorithm to determine which solutions to keep. 0=removeLeastImportantSolutions, 1=keepWinnerSolutions (faster)
 )
+globalParameters["SolutionsPerProcess"] = (
+    -1  # Number of solutions benchmarked per subprocess.
+        # -1 = all in one process (legacy).  1 = max isolation.  N = batch of N.
+        # When > 0, each batch runs in a separate subprocess with a timeout;
+        # a batch that hangs or crashes is killed and retried individually.
+)
+globalParameters["SolutionBatchTimeout"] = (
+    0   # Per-batch timeout in seconds for subprocess-isolated benchmarking.
+        #  0 = auto-estimate from kernel launch counts: 3x * batchSize * 0.2s * (warmups + enqueues).
+        # -1 = no timeout (wait forever; matches legacy behavior).
+        # >0 = explicit timeout in seconds (e.g. 300 for 5 minutes).
+)
 globalParameters["GenerateSourcesAndExit"] = False  # Exit after kernel source generation.
 globalParameters["ExitOnFails"] = (
     1  # 1: Exit after benchmark run if failures detected.  2: Exit during benchmark run.

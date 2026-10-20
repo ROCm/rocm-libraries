@@ -831,7 +831,21 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
 
                 if enableTileSelection:
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
-                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
+
+                solutionsPerProcess = globalParameters.get("SolutionsPerProcess", -1)
+                if solutionsPerProcess != -1 and forBenchmark:
+                    from .BatchedBenchmark import runClientBatched
+                    numSols = len(solutions) if solutions else -1
+                    benchmarkProblemsDir = str(groupNamePath)
+                    returncode = runClientBatched(
+                        configPath=configPaths[0],
+                        resultsFile=resultsFileName,
+                        totalSolutions=numSols,
+                        batchSize=solutionsPerProcess,
+                        benchmarkProblemsDir=benchmarkProblemsDir,
+                    )
+                else:
+                    returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
                 # --cpu-only plumbing: runClient covered the config/run-script writing then
                 # stubbed the device launch (returncode 0). The device never produced a perf
