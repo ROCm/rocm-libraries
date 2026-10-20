@@ -3223,6 +3223,42 @@ namespace TensileLite
         bool         sparseB = problemType.sparse == 2;
         auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
         auto const&  descriptorB = sparseB ? problem.compressed() : problem.b();
+
+        // MX scale strides for external custom kernels.
+        //
+        // problem.mxsa()/mxsb() carry the gfx950 padding applied by
+        // ContractionProblemGemm::setMXScaleA/B: the K-block dim is rounded up to a
+        // multiple of 8 and the free dim to a multiple of 32.  That padded descriptor
+        // is what the Tensile-*generated* kernels are built against (singleCallArgs),
+        // but externally captured kernels -- rocRoller, aiter, triton -- index the
+        // caller's scale buffer with the compact ceil(K/mxBlock) leading dimension.
+        // Handing them the padded value makes every scale row past the first resolve
+        // to the wrong bytes (and overruns the buffer) whenever
+        // ceil(K/mxBlock) % 8 != 0.  Rebuild packed strides from the unpadded shape.
+        //
+        // The generated kernels are unaffected either way: on gfx950 they are all
+        // UseSubtileImpl + HostPreSwizzle and overwrite this pitch in their prologue
+        // with roundUp(ceil(K/mxBlock),8)*32 recomputed from SizesSum, so they never
+        // read the value the host puts here.  They do still use StrideScale{A,B}1
+        // (the batch stride), which is left on the padded descriptor on purpose.
+        //
+        // Deliberately NOT gated on the pre-swizzled scale format.  The only
+        // pre-swizzled custom kernel that declares these slots is the aiter
+        // BpreShuffle family, which is not referenced by any shipped logic, and
+        // hipBLASLt's other launcher for it already passes k/32
+        // (rocblaslt/src/rocroller/custom_kernels.cpp) -- so compact makes the two
+        // launchers agree rather than diverge.  Open for PR review: if a
+        // pre-swizzled custom kernel ever ships through this path, revisit.
+        auto compactScaleStride
+            = [&](TensorDescriptor const& dataDesc, size_t boundIdx, size_t mxBlock, size_t idx) {
+                  std::vector<size_t> sizes = dataDesc.sizes();
+                  if(mxBlock && boundIdx < sizes.size())
+                      sizes[boundIdx] = CeilDivide(sizes[boundIdx], mxBlock);
+                  size_t stride = 1;
+                  for(size_t i = 0; i < idx && i < sizes.size(); i++)
+                      stride *= sizes[i];
+                  return stride;
+              };
         void const*  aAddress = sparseA ? inputs.compressed : inputs.a;
         void const*  bAddress = sparseB ? inputs.compressed : inputs.b;
 
@@ -3365,7 +3401,10 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideScaleA0:
                 {
-                    size_t scaleStride = problem.mxsa().strides()[descriptorStrideAB];
+                    size_t scaleStride = compactScaleStride(problem.a(),
+                                                            problem.boundIndices()[0].a,
+                                                            problem.mxBlockA(),
+                                                            descriptorStrideAB);
                     rv.args.appendCustomType("StrideScaleA0", scaleStride, arg.type);
                     break;
                 }
@@ -3378,7 +3417,10 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB0:
                 {
-                    size_t scaleStride = problem.mxsb().strides()[descriptorStrideAB];
+                    size_t scaleStride = compactScaleStride(problem.b(),
+                                                            problem.boundIndices()[0].b,
+                                                            problem.mxBlockB(),
+                                                            descriptorStrideAB);
                     rv.args.appendCustomType("StrideScaleB0", scaleStride, arg.type);
                     break;
                 }
