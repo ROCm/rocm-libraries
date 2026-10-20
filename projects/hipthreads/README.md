@@ -48,6 +48,11 @@ If hipThreads is not installed under `$ROCM_PATH`, add `-DCMAKE_PREFIX_PATH=/pat
 
 Sample code demonstrating hipThreads usage can be found in the `examples/` directory.
 
+The example test runner builds the samples with CMake's Ninja generator.
+Install its Python-packaged build tool in your test virtual environment with `python -m pip install -r examples/requirements-test.txt`.
+This supplies Ninja on both Linux and Windows; the ROCm libraries, compiler, and CMake must also be available.
+The requirements file is included with the example sources in TheRock's hipThreads test artifact.
+
 ### SAXPY — Incremental GPU Porting
 
 The SAXPY example shows how to incrementally port CPU-parallel algorithms to GPU using `hip::wthread`, demonstrating the natural progression from `std::thread` to optimized GPU execution.
