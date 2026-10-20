@@ -568,6 +568,15 @@ def _direct_dgrad_params_read(params):
 
 def _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS):
     """Shared direct-conv tiling setup: WAVE/Ho/Wo/LDS_W/LDS_ROW_FP16/LOAD_VEC/PASSES."""
+    WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4 = _conv_lds_base(
+        p, spec, BLOCK_Q, BLOCK_GROUPS
+    )
+    PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
+    return WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES
+
+
+def _conv_lds_base(p, spec, BLOCK_Q, BLOCK_GROUPS):
+    """Shared direct-conv tiling base: WAVE/THREADS/Ho/Wo/LDS_W/LDS_ROW_FP16/LOAD_VEC/NUM_VEC4."""
     WAVE = spec.wave_size
     THREADS = spec.threads_per_block
     Ho = p.Ho
@@ -576,8 +585,7 @@ def _conv_lds_dims(p, spec, BLOCK_Q, BLOCK_GROUPS):
     LDS_ROW_FP16 = LDS_W * BLOCK_GROUPS * p.cpg
     LOAD_VEC = 4
     NUM_VEC4 = LDS_ROW_FP16 // LOAD_VEC
-    PASSES = (NUM_VEC4 + THREADS - 1) // THREADS
-    return WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4, PASSES
+    return WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4
 
 
 def _direct_conv_lane_setup(b, c_wave):
@@ -655,14 +663,9 @@ def build_direct_conv_16c(
     io_type = _io_type(p.dtype)
     BLOCK_Q = spec.block_q
     BLOCK_GROUPS = spec.block_groups
-    WAVE = spec.wave_size
-    THREADS = spec.threads_per_block
-    Ho = p.Ho
-    Wo = p.Wo
-    LDS_W = (BLOCK_Q - 1) * p.stride + p.KW
-    LDS_ROW_FP16 = LDS_W * BLOCK_GROUPS * p.cpg
-    LOAD_VEC = 4
-    NUM_VEC4 = LDS_ROW_FP16 // LOAD_VEC
+    WAVE, THREADS, Ho, Wo, LDS_W, LDS_ROW_FP16, LOAD_VEC, NUM_VEC4 = _conv_lds_base(
+        p, spec, BLOCK_Q, BLOCK_GROUPS
+    )
 
     if NUM_VEC4 == 0:
         raise ValueError("LDS row too small for one vec4 per thread")
