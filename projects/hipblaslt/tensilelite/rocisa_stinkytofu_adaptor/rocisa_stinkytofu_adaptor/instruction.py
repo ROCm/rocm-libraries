@@ -1941,6 +1941,8 @@ SGetRegB32 = _make_scalar_unary_class("SGetRegB32", "s_getreg_b32", InstType.INS
 SSetRegB32 = _make_scalar_unary_class("SSetRegB32", "s_setreg_b32", InstType.INST_B32)
 # logicalIR: SSetRegIMM32B32
 SSetRegIMM32B32 = _make_scalar_unary_class("SSetRegIMM32B32", "s_setreg_IMM32_b32", InstType.INST_B32)
+# logicalIR: SSendMsgRtnB32 (dst, src, comment) -> s_sendmsg_rtn_b32; mirrors rocisa common.hpp
+SSendMsgRtnB32 = _make_scalar_unary_class("SSendMsgRtnB32", "s_sendmsg_rtn_b32", InstType.INST_B32)
 
 
 # ==========================================================================

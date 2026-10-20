@@ -3081,6 +3081,16 @@
              false,
              "IF_HasSideEffect"},
 
+                                    {"SSendMsgRtnB32",
+             "SSendMsgRtnB32",
+             1,
+             true,
+             "Scalar Control",
+             false,
+             false,
+             false,
+             "IF_HasSideEffect"},
+
             // ========================================================================
             // Composite Instructions
             // ========================================================================
