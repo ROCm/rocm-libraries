@@ -48,6 +48,89 @@ HIPDNN_DTYPES: dict[str, str | None] = {
 }
 
 
+# Every key hipDNN's JSON helpers write. A key outside these sets raises rather
+# than being dropped, so a new or misspelt hipDNN field cannot leave the
+# request unchanged.
+_NODE_KEYS = frozenset(
+    {"name", "type", "compute_data_type", "inputs", "outputs", "attributes"}
+)
+_INPUT_KEYS = frozenset(
+    {
+        "q_tensor_uid",
+        "k_tensor_uid",
+        "v_tensor_uid",
+        "attn_mask_tensor_uid",
+        "scale_tensor_uid",
+        "seq_len_q_tensor_uid",
+        "seq_len_kv_tensor_uid",
+        "seed_tensor_uid",
+        "offset_tensor_uid",
+        "dropout_mask_tensor_uid",
+        "dropout_scale_tensor_uid",
+        "page_table_k_tensor_uid",
+        "page_table_v_tensor_uid",
+        "block_mask_tensor_uid",
+        "sink_token_tensor_uid",
+        "descale_q_tensor_uid",
+        "descale_k_tensor_uid",
+        "descale_v_tensor_uid",
+        "descale_s_tensor_uid",
+        "scale_s_tensor_uid",
+        "scale_o_tensor_uid",
+    }
+)
+_OUTPUT_KEYS = frozenset(
+    {
+        "o_tensor_uid",
+        "stats_tensor_uid",
+        "max_tensor_uid",
+        "sum_exp_tensor_uid",
+        "rng_dump_tensor_uid",
+        "amax_s_tensor_uid",
+        "amax_o_tensor_uid",
+    }
+)
+_ATTRIBUTE_KEYS = frozenset(
+    {
+        "generate_stats",
+        "alibi_mask",
+        "padding_mask",
+        "causal_mask",
+        "causal_mask_bottom_right",
+        "dropout_probability",
+        "attn_scale_value",
+        "left_bound",
+        "right_bound",
+        "max_seq_len_kv",
+        "diagonal_alignment",
+        "mma_core_mode",
+        "implementation",
+    }
+)
+_TENSOR_KEYS = frozenset(
+    {
+        "uid",
+        "name",
+        "data_type",
+        "dims",
+        "strides",
+        "virtual",
+        "is_runtime_pass_by_value",
+        "value",
+        "value_type",
+        "ragged_offset_tensor_uid",
+        "ragged_offset_multiplier",
+        "alignment",
+    }
+)
+
+
+def _reject_unknown_keys(where: str, group: Mapping, allowed: frozenset[str]) -> None:
+    unknown = sorted(set(group) - allowed)
+    if unknown:
+        raise ValueError(f"{where} has keys hipDNN does not write: {unknown}")
+
+
 def _dtype(name: object) -> str | None:
     key = str(name).lower()
     if key not in HIPDNN_DTYPES:
@@ -62,6 +145,7 @@ def _tensor_table(tensors_json: Iterable[Mapping] | Mapping) -> dict[int, Mappin
 
 
 def _sdpa_tensor(entry: Mapping) -> SdpaTensor:
+    _reject_unknown_keys(f"tensor uid {entry.get('uid')}", entry, _TENSOR_KEYS)
     dtype = _dtype(entry["data_type"])
     if dtype is None:
         raise ValueError(f"tensor uid {entry.get('uid')} has data_type unset")
@@ -110,7 +194,8 @@ def from_hipdnn(
 
     ``tensors_json`` is the graph's ``tensors`` list, or a mapping from uid to
     tensor entry. Raises ``ValueError`` for anything the hipDNN frontend or
-    mask resolver would also reject.
+    mask resolver would also reject, and for any key hipDNN does not write.
+    An absent key reads as hipDNN's null.
     """
     node_type = node_json.get("type", "SdpaAttributes")
     if node_type != "SdpaAttributes":
@@ -118,6 +203,10 @@ def from_hipdnn(
     inputs = node_json.get("inputs", {})
     outputs = node_json.get("outputs", {})
     attrs = node_json.get("attributes", {})
+    _reject_unknown_keys("SDPA node", node_json, _NODE_KEYS)
+    _reject_unknown_keys("SDPA node inputs", inputs, _INPUT_KEYS)
+    _reject_unknown_keys("SDPA node outputs", outputs, _OUTPUT_KEYS)
+    _reject_unknown_keys("SDPA node attributes", attrs, _ATTRIBUTE_KEYS)
     table = _tensor_table(tensors_json)
 
     def entry(uid: object) -> Mapping | None:
@@ -207,8 +296,12 @@ def from_hipdnn(
     if fp8 != SdpaFp8():
         kwargs["fp8"] = fp8
 
+    stats = tensor(outputs, "stats_tensor_uid")
     if attrs.get("generate_stats"):
-        kwargs["stats"] = tensor(outputs, "stats_tensor_uid")
+        kwargs["stats"] = stats
+    elif stats is not None:
+        # The hipDNN frontend only creates a stats output when generate_stats is true.
+        raise ValueError("stats_tensor_uid is set but generate_stats is not true")
     kwargs["max"] = tensor(outputs, "max_tensor_uid")
     kwargs["sum_exp"] = tensor(outputs, "sum_exp_tensor_uid")
 

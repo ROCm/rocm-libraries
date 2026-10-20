@@ -200,7 +200,9 @@ def test_scale_tensor_and_value_are_exclusive():
 
 def test_stats_needs_generate_stats_and_a_tensor():
     lse = [_tensor(10, (B, H, S, 1), "float")]
-    assert _request(outputs={"stats_tensor_uid": 10}, tensors=lse).stats is None
+    # The hipDNN frontend never writes a stats uid without generate_stats.
+    with pytest.raises(ValueError, match="generate_stats"):
+        _request(outputs={"stats_tensor_uid": 10}, tensors=lse)
     req = _request(
         attributes={"generate_stats": True},
         outputs={"stats_tensor_uid": 10},
@@ -267,6 +269,55 @@ def test_malformed_graphs_are_rejected(graph_edit, match):
     graph_edit(graph)
     with pytest.raises(ValueError, match=match):
         from_hipdnn_graph(graph, "gfx950")
+
+
+@pytest.mark.parametrize(
+    "graph_edit",
+    [
+        pytest.param(lambda g: g["nodes"][0].update(sdpa_version=2), id="node"),
+        pytest.param(
+            lambda g: g["nodes"][0]["inputs"].update(rope_tensor_uid=None), id="input"
+        ),
+        pytest.param(
+            lambda g: g["nodes"][0]["outputs"].update(lse_tensor_uid=None), id="output"
+        ),
+        pytest.param(
+            lambda g: g["nodes"][0]["attributes"].update(softcap=30.0), id="attribute"
+        ),
+        pytest.param(
+            lambda g: g["nodes"][0]["attributes"].update(causal_mask_botom_right=True),
+            id="misspelt_attribute",
+        ),
+        pytest.param(lambda g: g["tensors"][0].update(stride_order=[0]), id="tensor"),
+    ],
+)
+def test_unknown_keys_are_rejected_not_dropped(graph_edit):
+    """A key from_hipdnn does not read must fail, not leave the request unchanged."""
+    graph = _graph()
+    graph_edit(graph)
+    with pytest.raises(ValueError, match="hipDNN does not write"):
+        from_hipdnn_graph(graph, "gfx950")
+
+
+_SDPA_GRAPH_TEMPLATE = (
+    Path(__file__).resolve().parents[6]
+    / "projects/hipdnn/tools/IngestorGenerator/configs/templates"
+    / "attention_sdpa_fwd.graph.json"
+)
+
+
+@pytest.mark.skipif(
+    not _SDPA_GRAPH_TEMPLATE.is_file(), reason="IngestorGenerator not in this tree"
+)
+def test_key_sets_match_the_ingestor_sdpa_graph_template():
+    """The ingestor's SDPA graph template carries every key hipDNN writes."""
+    from dispatch.sdpa import hipdnn
+
+    node = json.loads(_SDPA_GRAPH_TEMPLATE.read_text())["nodes"][0]
+    assert set(node) == hipdnn._NODE_KEYS
+    assert set(node["inputs"]) == hipdnn._INPUT_KEYS
+    assert set(node["outputs"]) == hipdnn._OUTPUT_KEYS
+    assert set(node["attributes"]) == hipdnn._ATTRIBUTE_KEYS
 
 
 # --- the checked-in hipDNN golden bundles ------------------------------------------
