@@ -119,9 +119,11 @@ auto create_args(int argc, char* argv[])
                 "args allow), fwd, splitkv, pagedkv or batch_prefill; no fallback when named")
         .insert("pipeline",
                 "",
-                "run only this pipeline of the API, by the tag in the kernel name (e.g. qr, "
-                "qr_async, qr_tdm, qr_tdm_sched, qr_tdm_pingpong), skipping the dispatch "
-                "heuristics that choose between pipelines; empty: let the dispatch choose")
+                "within the API (-api picks the entry point), run only this pipeline, by the "
+                "tag in the kernel name (e.g. qr, qr_async, qr_tdm, qr_tdm_sched, "
+                "qr_tdm_pingpong), skipping the dispatch heuristics that choose between "
+                "pipelines; the same tag can exist in several APIs. Not needed for an API with "
+                "one pipeline. Empty: let the dispatch choose")
         .insert("min_seqlen_q",
                 "0",
                 "group mode, fwd/pagedkv: skip the sequences of at most this many query rows "
