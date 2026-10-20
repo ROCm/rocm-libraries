@@ -1349,8 +1349,6 @@ class UnifiedAttentionReduceTiledSpec:
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
-
-    def __post_init__(self):
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
