@@ -1833,8 +1833,8 @@ class _Lowerer:
         # Saturating f32 -> i8 round-to-nearest-even. ``rintf`` honours
         # the current rounding mode (RNE by default), the explicit
         # clamp into [-128, 127] makes the trunc-to-i8 fully defined,
-        # and the resulting sequence folds into a ``v_med3_i32`` plus a
-        # ``v_cvt_pk_i16_i32`` byte select on the AMDGPU backend.
+        # and the clamp folds into a single ``v_med3_i32`` on the
+        # AMDGPU backend.
         (v,) = op.operands
         rounded = f"{_name(op.result)}_r"
         as_i32 = f"{_name(op.result)}_i"
