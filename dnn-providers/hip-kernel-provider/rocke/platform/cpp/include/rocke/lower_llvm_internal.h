@@ -114,11 +114,18 @@ const rocke_ll_decl_t* rocke_ll_flavor_own_overrides(rocke_llvm_flavor_t flavor,
 
 /* The resolved declaration table of one flavor (Python _decls_for_flavor):
  * rocke_ll_decl_text gives one key's text -- the newest override at or below
- * `flavor`, else the base text; NULL for an unknown key or a flavor off the
- * ladder. rocke_ll_decl_at gives entry `index` in emit order, which is the
- * base table's order, index in [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+ * `flavor`, else the base text, else a matrix call's derived declaration; NULL
+ * for an unknown key or a flavor off the ladder. rocke_ll_decl_at gives entry
+ * `index` in emit order, which is the base table's order, index in
+ * [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
 const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key);
 rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index);
+
+/* The keys the matrix-call table adds after the base table, in emit order
+ * (Python _decls_for_flavor's last rung): the first call per key, in table
+ * order, skipping keys the base table holds. NULL past the end;
+ * rocke_ll_decl_text resolves each key's text. */
+const char* rocke_ll_matrix_decl_key_at(int index);
 
 /* ---------------------------------------------------------- anyptr overloads */
 

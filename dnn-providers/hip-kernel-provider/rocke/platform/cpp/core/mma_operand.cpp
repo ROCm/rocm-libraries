@@ -10,18 +10,25 @@
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 
-/* The multiplicand roles: A and B. The operand rule applies to no other. */
-static bool is_multiplicand(rocke_mma_role_t role)
+/* The operand roles: A, B and the accumulator C (ROCKE_MMA_ROLE_ACC). The
+ * operand rule applies to no other. */
+static bool is_operand_role(rocke_mma_role_t role)
 {
-    return role == ROCKE_MMA_ROLE_A || role == ROCKE_MMA_ROLE_B;
+    return role == ROCKE_MMA_ROLE_A || role == ROCKE_MMA_ROLE_B || role == ROCKE_MMA_ROLE_ACC;
+}
+
+/* Python spells the roles "a", "b" and "c". */
+static const char* role_name(rocke_mma_role_t role)
+{
+    return role == ROCKE_MMA_ROLE_A ? "a" : role == ROCKE_MMA_ROLE_B ? "b" : "c";
 }
 
 const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_role_t role)
 {
-    if(!is_multiplicand(role))
-        throw ckc::ValueError("an MMA operand role is A or B");
-    /* A is operand 0 and B operand 1; C, the accumulator, follows them. */
-    const int index = role == ROCKE_MMA_ROLE_A ? 0 : 1;
+    if(!is_operand_role(role))
+        throw ckc::ValueError("an MMA operand role is A, B or C");
+    /* A is operand 0, B operand 1 and C, the accumulator, operand 2. */
+    const int index = role == ROCKE_MMA_ROLE_A ? 0 : role == ROCKE_MMA_ROLE_B ? 1 : 2;
     if(op->num_operands <= index)
         throw ckc::ValueError(ckc::format_error("%s has %d operands; an MMA op takes A, B and C",
                                                 op->name ? op->name : "(unnamed op)",
@@ -50,8 +57,10 @@ static int admitted_elements(const char* op_id,
     const rocke_mma_op_t* catalog_op = rocke_mma_catalog_by_op_id(&arch->mma, op_id);
     if(!catalog_op)
         return count;
-    const rocke_type_t* catalog_element = rocke_require_ir_type(
-        role == ROCKE_MMA_ROLE_A ? catalog_op->a_dtype : catalog_op->b_dtype);
+    const rocke_type_t* catalog_element
+        = rocke_require_ir_type(role == ROCKE_MMA_ROLE_A   ? catalog_op->a_dtype
+                                : role == ROCKE_MMA_ROLE_B ? catalog_op->b_dtype
+                                                           : catalog_op->c_dtype);
     /* A packed-only catalog element (i4 for the iu4 instructions) is never a
      * value's element type, so those operands arrive in the register type. */
     if(rocke_i_is_packed_only(catalog_element))
@@ -69,12 +78,10 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
                                          const rocke_type_t* register_type,
                                          const char* gfx)
 {
-    if(!is_multiplicand(role))
-        throw ckc::ValueError("an MMA operand role is A or B");
+    if(!is_operand_role(role))
+        throw ckc::ValueError("an MMA operand role is A, B or C");
     if(rocke_type_eq(operand_type, register_type))
         return false;
-    /* Python spells the roles "a" and "b". */
-    const char* role_name = role == ROCKE_MMA_ROLE_A ? "a" : "b";
     const rocke_type_t* element = rocke_i_elem_of(operand_type);
     const rocke_type_t* admitted[2];
     const int num_admitted = admitted_elements(op_id, role, register_type, gfx, admitted);
@@ -85,7 +92,7 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
         throw ckc::ValueError(ckc::format_error(
             "MMA operand %s of '%s' holds %s values; the instruction takes %s%s%s -- convert "
             "the values first",
-            role_name,
+            role_name(role),
             op_id,
             element->name,
             admitted[0]->name,
@@ -97,7 +104,7 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
         throw ckc::ValueError(ckc::format_error(
             "MMA operand %s of '%s' is %s (%d bits); the instruction takes %s (%d bits) -- "
             "pass a %d-bit value",
-            role_name,
+            role_name(role),
             op_id,
             operand_type->name,
             operand_bits,

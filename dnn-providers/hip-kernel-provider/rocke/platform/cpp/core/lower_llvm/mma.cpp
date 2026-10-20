@@ -29,6 +29,7 @@
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/matrix_calls_internal.h"
 #include "rocke/mma_operand_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -458,6 +459,22 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
 /* tile.mma routing (Python _op_tile_mma -> ISABackend.emit_mma)          */
 /* ====================================================================== */
 
+/* Refuse op_id unless the target's MMA catalog lists it (Python
+ * ISABackend._require_catalog_lists, same text). */
+static void _require_catalog_lists(rocke_lower_t* L, const char* op_id)
+{
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
+    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
+    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, op_id))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "tile.%s is not available on %s: its MMA catalog does not list it",
+                      op_id,
+                      gfx ? gfx : "(unknown)");
+    }
+}
+
 /* op_id -> handler. Mirrors the Python CDNA emit_mma which rebuilds the legacy
  * ``tile.<op_id>`` op and re-dispatches it to the matching _op_tile_<op_id>
  * method. We dispatch directly to the file-static handler to keep the emitted
@@ -509,6 +526,16 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
      * unchanged. */
     if(_expand_emulated_mma(L, op, op_id))
     {
+        return;
+    }
+
+    /* The backend's first step (Python ISABackend.emit_mma): an op_id described
+     * as data is lowered from its matrix call; every other op_id keeps its
+     * hand-written handler below. */
+    if(const rocke_matrix_call_t* call = rocke_matrix_call_for(op_id))
+    {
+        _require_catalog_lists(L, op_id);
+        rocke_ll_emit_matrix_call(L, op, op_id, call);
         return;
     }
 
@@ -615,16 +642,7 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     op_name = concrete_name;
     /* Admitted on any target whose MMA catalog lists the atom (Python
      * ISABackend.emit_scaled_wmma), never by the target's name. */
-    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
-    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
-    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, spec->op_id))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_NOTIMPL,
-                      "%s is not available on %s: its MMA catalog does not list it",
-                      op_name,
-                      gfx ? gfx : "(unknown)");
-    }
+    _require_catalog_lists(L, spec->op_id);
     if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
     {
         rocke_ll_fail(L,

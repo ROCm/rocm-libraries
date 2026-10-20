@@ -832,16 +832,20 @@ def _decl_table(flavor: str) -> dict[str, str]:
 
     Mirrors `_decls_for_flavor` exactly -- base table, then the own overrides of
     every flavor up to and including this one, oldest first in `LLVM_FLAVORS`
-    order. Duplicating the merge here rather than importing a private helper
-    keeps the tool honest about what it measured, but it is a mirror and must be
-    updated if the resolution rule gains a rung;
+    order, then the declaration of every `MATRIX_CALLS` entry whose key is not
+    already present. Duplicating the merge here rather than importing a private
+    helper keeps the tool honest about what it measured, but it is a mirror and
+    must be updated if the resolution rule gains a rung;
     `tests/core/test_arch_domain_artifact.py` fails until it is.
     """
     from rocke.core import lower_llvm as L
+    from rocke.core.isa.matrix_calls import MATRIX_CALLS
 
     decls = dict(L._INTRINSIC_DECLS)
     for inherited in L.LLVM_FLAVORS[: L.LLVM_FLAVORS.index(flavor) + 1]:
         decls.update(L._INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
+    for call in MATRIX_CALLS.values():
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 
 

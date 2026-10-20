@@ -1202,9 +1202,11 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     """The declaration table a lowering at ``flavor`` resolves against.
 
     The rule, in one place: the base table, then the overrides of every flavor
-    up to and including ``flavor``, oldest first in :data:`LLVM_FLAVORS` order.
-    A newer flavor's entry replaces an older one's text; a key keeps the
-    position it first appeared at.
+    up to and including ``flavor``, oldest first in :data:`LLVM_FLAVORS` order,
+    then the declaration of every :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS`
+    entry whose key is not already present (``MatrixCall.declaration`` derives
+    it for ``flavor``). A newer flavor's entry replaces an older one's text; a
+    key keeps the position it first appeared at.
 
     Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
     order in ``finalize``, so the result is byte-significant.
@@ -1218,9 +1220,13 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
         raise ValueError(
             f"unknown LLVM flavor {flavor!r}; expected one of {LLVM_FLAVORS}"
         )
+    from .isa.matrix_calls import MATRIX_CALLS
+
     decls = dict(_INTRINSIC_DECLS)
     for inherited in LLVM_FLAVORS[: LLVM_FLAVORS.index(flavor) + 1]:
         decls.update(_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
+    for call in MATRIX_CALLS.values():
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 
 

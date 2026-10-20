@@ -101,6 +101,8 @@ def _decls_for_flavor(flavor):
     decls = dict(_INTRINSIC_DECLS)                      # LLVM 20 shapes
     for inherited in LLVM_FLAVORS[: LLVM_FLAVORS.index(flavor) + 1]:
         decls.update(_INTRINSIC_DECL_OVERRIDES_BY_FLAVOR[inherited])
+    for call in MATRIX_CALLS.values():                  # MMA calls described as data
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 ```
 
@@ -108,9 +110,11 @@ The **key is stable across flavors**, so all ~151 `_need(...)` call sites are
 flavor-agnostic. Only the text differs. Each override dict holds only the
 entries whose text changed at its own flavor: llvm22 has five (4 fp8/bf8 MFMA
 operand-width changes + `make.buffer.rsrc.p1`'s `i32`→`i64`), and llvm23 inherits
-them and adds its own (the `mfma.scale` f8f6f4 signature). The C++ engine walks
-the same chain along its flavor ladder (`rocke_ll_decl_text` /
-`rocke_ll_decl_at`), and `tools/gen_arch_domain._decl_table` keeps an
+them and adds its own (the `mfma.scale` f8f6f4 signature). A `MatrixCall`
+derives its declaration for each flavor from its operand forms, so its
+per-flavor register types need no override entry. The C++ engine walks the same
+chain along its flavor ladder (`rocke_ll_decl_text` / `rocke_ll_decl_at` /
+`rocke_ll_matrix_decl_key_at`), and `tools/gen_arch_domain._decl_table` keeps an
 independent copy that a test pins equal, items and order, for every flavor.
 
 Why it has to be emitted correctly up front rather than left to auto-upgrade:

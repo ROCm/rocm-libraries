@@ -12,6 +12,7 @@
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM23_OVERRIDES)
  *   - rocke_ll_decl_text / rocke_ll_decl_at        (Python _decls_for_flavor)
+ *   - rocke_ll_matrix_decl_key_at                  (its matrix-call rung)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -21,6 +22,7 @@
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/matrix_calls_internal.h"
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
@@ -604,7 +606,8 @@ static rocke_llvm_flavor_t ll_ladder_flavor(int rung)
 
 /* Python _decls_for_flavor, one key at a time: the text of the newest flavor
  * at or below `flavor` (flavor-ladder order) that overrides `key`, else the
- * base text. NULL for an unknown key or a flavor that is not on the ladder. */
+ * base text, else the declaration the first matrix call with that key derives
+ * for `flavor`. NULL for an unknown key or a flavor that is not on the ladder. */
 const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key)
 {
     int rung = -1;
@@ -626,7 +629,39 @@ const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key)
         }
     }
     int base = ll_base_decl_index(key);
-    return base < 0 ? NULL : ROCKE_LL_INTRINSIC_DECLS[base].decl;
+    if(base >= 0)
+        return ROCKE_LL_INTRINSIC_DECLS[base].decl;
+    int num_calls = 0;
+    const rocke_matrix_call_entry_t* calls = rocke_matrix_calls(&num_calls);
+    for(int i = 0; i < num_calls; i++)
+    {
+        if(strcmp(rocke_matrix_call_key(&calls[i].call), key) == 0)
+            return rocke_matrix_call_declaration(&calls[i].call, flavor);
+    }
+    return NULL;
+}
+
+/* The keys the matrix-call table adds to the base table, in the order Python
+ * _decls_for_flavor appends them: table order, first call per key, keys the
+ * base table already holds skipped. */
+const char* rocke_ll_matrix_decl_key_at(int index)
+{
+    int num_calls = 0;
+    const rocke_matrix_call_entry_t* calls = rocke_matrix_calls(&num_calls);
+    int seen = 0;
+    for(int i = 0; i < num_calls; i++)
+    {
+        const char* key = rocke_matrix_call_key(&calls[i].call);
+        bool earlier = ll_base_decl_index(key) >= 0;
+        for(int j = 0; j < i && !earlier; j++)
+            earlier = strcmp(rocke_matrix_call_key(&calls[j].call), key) == 0;
+        if(earlier)
+            continue;
+        if(seen == index)
+            return key;
+        seen++;
+    }
+    return NULL;
 }
 
 /* Python _decls_for_flavor(flavor).items()[index]: overrides only change the
