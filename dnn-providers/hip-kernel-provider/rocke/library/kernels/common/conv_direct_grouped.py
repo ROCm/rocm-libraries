@@ -731,6 +731,16 @@ def _direct_conv_q_constants(spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q
     )
 
 
+def _direct_conv_lane_head(b, c_wave):
+    """Shared direct-conv lane head: c_half, OOB sentinel, tid, wave_id, lane."""
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    lane = b.mod(tid, c_wave)
+    return c_half_bytes, oob_sentinel, tid, wave_id, lane
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -1712,12 +1722,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo, c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W, c_BG_cpg = _direct_conv_q_constants(
         spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q, p
     )
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
-    lane = b.mod(tid, c_wave)
+    c_half_bytes, oob_sentinel, tid, wave_id, lane = _direct_conv_lane_head(b, c_wave)
     # Lane decomposition: identical to 16c kernel.
     # c4: K-block index (0..3); selects s-position and channel block.
     # q_in_lane: M row (k_out within group) and N column (output W position).
@@ -2150,12 +2155,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     b, params, A, Bp, D, A_bytes, B_bytes, D_bytes, p_Hi, p_Wo, c0, c_wave, c_BG, c_BQ, c_cpg, c_kpg, c_W, c_BG_cpg = _direct_conv_q_constants(
         spec, THREADS, io_type, WAVE, BLOCK_GROUPS, BLOCK_Q, p
     )
-    c_half_bytes = b.const_i32(2)
-    oob_sentinel = b.const_i32((1 << 31) - 1)
-
-    tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)
-    lane = b.mod(tid, c_wave)
+    c_half_bytes, oob_sentinel, tid, wave_id, lane = _direct_conv_lane_head(b, c_wave)
     # Lane decomposition for mfma_f32_32x32x8_{f16,bf16} (wave64):
     #   q_in_lane = lane % 32 → M row (k_out within group) and N col (output W)
     #   k_blk     = lane // 32 → K-block (0 → ch=0..3, 1 → ch=4..7 within each atom)
