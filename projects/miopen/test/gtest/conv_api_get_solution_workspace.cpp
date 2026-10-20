@@ -205,7 +205,7 @@ protected:
         }
     }
 
-    // Live requirement, or 0 with a skip reason when the solver is not available here.
+    // GetSolutionWorkspaceSize result, or false when the solver is not applicable.
     bool LiveWorkspace(std::size_t& live, const char* selected_solver = solver_name)
     {
         const auto solver_id = miopen::solver::Id{selected_solver}.Value();
