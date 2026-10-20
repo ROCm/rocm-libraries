@@ -63,15 +63,17 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
 
 # Patterns most often surface the difference between matrix-core-tiled
 # and warp-scalar variants. Add to this list freely; counts are cheap.
+# The older MFMA intrinsics have no dot before the type (``16x16x16f16``,
+# ``16x16x16bf16.1k``); the gfx950 ones do (``16x16x32.f16``).
 DEFAULT_INTRINSIC_PATTERNS = {
-    "mfma.f32.16x16x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.f16",
+    "mfma.f32.16x16x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.?f16",
     "mfma.f32.16x16x32.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x32\.f16",
-    "mfma.f32.16x16x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.bf16",
+    "mfma.f32.16x16x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.?bf16",
     "mfma.f32.16x16x32.bf16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x32\.bf16",
-    "mfma.f32.32x32x8.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x8\.f16",
+    "mfma.f32.32x32x8.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x8\.?f16",
     "mfma.f32.32x32x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x16\.f16",
     "mfma.f32.32x32x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x16\.bf16",
-    "mfma.f32.4x4x4.f16": r"@llvm\.amdgcn\.mfma\.f32\.4x4x4\.f16",
+    "mfma.f32.4x4x4.f16": r"@llvm\.amdgcn\.mfma\.f32\.4x4x4\.?f16",
     # RDNA / gfx12: one entry per family, any shape and type.
     "wmma (any)": r"@llvm\.amdgcn\.wmma\.",
     "swmmac (any)": r"@llvm\.amdgcn\.swmmac\.",
