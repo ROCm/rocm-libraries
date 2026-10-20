@@ -99,6 +99,25 @@ assert ks.evaluate((70,)) == (2, 6)
 A read past the product is not wrapped: it drives the outer piece past its length, and that is exactly the read
 domain a check is derived for (the K tail of the convolution graph).
 
+## How do I map query heads onto KV heads (grouped-query attention)?
+
+Query head `h` reads KV head `h // (Hq / Hkv)`. `unmerge` the query head into `(kv_head, group)` and leave the
+group unread; only the KV head reaches the K / V tensor:
+
+```python
+Hq, Hkv, S, D = 40, 8, 256, 128
+gqa = make_transform_graph(
+    inputs(q_head=Hq, token=S, d=D),
+    unmerge("q_head", into=("kv_head", "group"), lengths=(Hkv, Hq // Hkv)),
+    outputs("token", "kv_head", "d"),
+)
+k_td = make_tensor_desc((S, Hkv, D), (Hkv * D, D, 1), F16)
+assert gqa.evaluate((13, 7, 5)) == (7, 2, 5)          # query head 13 reads KV head 13 // 5 = 2
+assert transform_address_of(gqa, k_td, (13, 7, 5)) == 7 * Hkv * D + 2 * D + 5
+```
+
+When the query head comes from a block id, its division is emitted once per wave, never per lane.
+
 ## How do I build a swizzle?
 
 `unmerge -> xor -> merge`: split the column into groups, xor the group with the row, combine back. `xor` needs

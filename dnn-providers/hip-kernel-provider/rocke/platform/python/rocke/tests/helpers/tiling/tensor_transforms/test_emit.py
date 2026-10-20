@@ -656,6 +656,52 @@ def test_out_of_domain_tile_rounded_coordinates_never_overflow_an_emitted_op():
     )
 
 
+# --- attention: the grouped-query head fold -------------------------------------------------------
+
+
+def test_a_grouped_query_head_fold_divides_the_head_once_per_wave():
+    """Grouped-query attention reads K by KV head: query head ``h`` of 40 reads KV head
+    ``h // 5`` of 8. The fold unmerges the query head into (KV head, group) and leaves the group
+    unread. The head is the block id, so its division by 5 (a magic division, 5 not being a
+    power of two) is emitted once, on the per-wave side, and no lane divides.
+    """
+    q_heads, kv_heads, tokens, head_size = 40, 8, 256, 128
+    graph = make_transform_graph(
+        inputs(q_head=q_heads, token=tokens, d=head_size),
+        unmerge(
+            "q_head", into=("kv_head", "group"), lengths=(kv_heads, q_heads // kv_heads)
+        ),
+        outputs("token", "kv_head", "d"),
+    )
+    k_cache = TensorDesc(
+        (tokens, kv_heads, head_size), (kv_heads * head_size, head_size, 1), F16
+    )
+    b = _builder()
+    tid = b.thread_id_x()
+    head = _guarded(b, b.block_id_y(), q_heads)
+    token0 = _guarded(b, b.mul(b.block_id_x(), _c(b, 4)), tokens)
+    token = b.add(token0, b.div(tid, _c(b, 16)))
+    d = b.mul(b.mod(tid, _c(b, 16)), _c(b, 8))
+    (address,) = emit_addresses(b, graph, k_cache, [(head, token, d)])
+    assert _count(b, "arith.umul_hi_i32", per_lane=False) == 1
+    assert _count(b, "arith.umul_hi_i32", per_lane=True) == 0
+    assert _count(b, "arith.add", wrap="nuw") == 1
+
+    tid, bx, by = (_leaf(b, name) for name in ("thread_id", "bx", "by"))
+    _check_against_golden(
+        graph,
+        k_cache,
+        (address,),
+        lambda ctx, _: (ctx[2], ctx[1] * 4 + ctx[0] // 16, (ctx[0] % 16) * 8),
+        (
+            ({id(tid): t, id(bx): x, id(by): y}, (t, x, y))
+            for t, x, y in itertools.product(
+                range(WAVE), (0, 1, tokens // 4 - 1), range(q_heads)
+            )
+        ),
+    )
+
+
 # --- xor and shared sub-expressions ---------------------------------------------------------------
 
 
