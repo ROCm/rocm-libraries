@@ -221,7 +221,7 @@ DefaultSolution:
   WavefrontSize: -1
   WorkGroup: [16, 16, 1]
   WorkGroupMapping: 8
-  WorkGroupMappingXCC: 1
+  WorkGroupMappingXCC: 8
   WorkGroupMappingXCCGroup: -1
   WorkGroupReduction: false
 Solutions:
