@@ -86,6 +86,7 @@ from rocke.helpers.transforms import (
 )
 from kernels.common.conv_abi import conv_fwd_problem_block
 from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for callers
+    _conv_io_buffer_rsrcs,
     ConvAccumulatorEpilogue,
     ConvDataSpec,
     ConvProblem,
@@ -1410,12 +1411,7 @@ def _build_implicit_gemm_conv_impl(
     # stores -- the canonical AMDGPU tail-safe load idiom used for
     # both the conv padding-zone reads and the tail-of-grid epilogue
     # stores.
-    a_buf_rsrc = make_buffer_resource(b, A, num_bytes=A_bytes)
-    b_buf_rsrc = make_buffer_resource(b, Bp, num_bytes=B_bytes)
-    d_buf_rsrc = make_buffer_resource(b, D, num_bytes=D_bytes)
-    a_rsrc = a_buf_rsrc.rsrc
-    b_rsrc = b_buf_rsrc.rsrc
-    d_rsrc = d_buf_rsrc.rsrc
+    a_rsrc, b_rsrc, d_rsrc = _conv_io_buffer_rsrcs(b, A, A_bytes, Bp, B_bytes, D, D_bytes)
     input_cache_context = (
         input_cache_setup(b, spec, grid, a_rsrc)
         if input_cache_setup is not None

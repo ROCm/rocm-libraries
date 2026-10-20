@@ -117,6 +117,7 @@ from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
     _c_lane_rows_cols,
     _implicit_gemm_output_config,
+    _conv_io_buffer_rsrcs,
     ConvAccumulatorEpilogue,
     ConvDataSpec,
     ConvProblem,
@@ -2518,12 +2519,9 @@ def build_implicit_gemm_conv_wgrad(
         )
         _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 
-    dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
-    x_buf_rsrc = make_buffer_resource(b, X, num_bytes=X_bytes)
-    dw_buf_rsrc = make_buffer_resource(b, dW, num_bytes=dW_bytes)
-    dy_rsrc = dy_buf_rsrc.rsrc
-    x_rsrc = x_buf_rsrc.rsrc
-    dw_rsrc = dw_buf_rsrc.rsrc
+    dy_rsrc, x_rsrc, dw_rsrc = _conv_io_buffer_rsrcs(
+        b, dY, dY_bytes, X, X_bytes, dW, dW_bytes
+    )
 
     k_off_capture: List[Optional[Value]] = [None]
 

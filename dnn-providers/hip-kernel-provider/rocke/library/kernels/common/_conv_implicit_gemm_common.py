@@ -40,6 +40,7 @@ from rocke.core.ir import (
     Value,
 )
 from rocke.helpers.spec import choose_load_vec
+from rocke.helpers.tensor_view import make_buffer_resource
 from rocke.helpers.transforms import (
     TensorDescriptor,
     DynamicTensorDescriptor,
@@ -1402,3 +1403,16 @@ def emit_direct_epilogue_wmma(
                     )
                 else:
                     b.buffer_store_f16(d_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))
+
+
+def _conv_io_buffer_rsrcs(b, a, a_bytes, b_ptr, b_bytes, d, d_bytes):
+    """Buffer-resource views over the conv IO tensors.  Returns
+    ``(a_rsrc, b_rsrc, d_rsrc)`` — the raw :class:`BufferResource` handles.
+    """
+    a_buf_rsrc = make_buffer_resource(b, a, num_bytes=a_bytes)
+    b_buf_rsrc = make_buffer_resource(b, b_ptr, num_bytes=b_bytes)
+    d_buf_rsrc = make_buffer_resource(b, d, num_bytes=d_bytes)
+    a_rsrc = a_buf_rsrc.rsrc
+    b_rsrc = b_buf_rsrc.rsrc
+    d_rsrc = d_buf_rsrc.rsrc
+    return a_rsrc, b_rsrc, d_rsrc
