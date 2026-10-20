@@ -87,7 +87,12 @@ _METADATA_NAME_TO_SEMANTIC = {
     "TotalIters":             "TotalIters",
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
+    "SKGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
+    "TotalItems":             "TotalItems",
+    "SKTiles":                "SKTiles",
+    "SKSplit":                "SKSplit",
+    "SKItersPerWI":           "SKItersPerWI",
     "batchOffsetD":           "BatchOffsetD",
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
@@ -341,7 +346,11 @@ def validateCustomPersistentArgs(kernelConfig):
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
         return
     legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
-              "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
+              "SKItersPerWG", "SKGrid", "SKTilesAndSplit",
+              "HybridMagicNumberItersPerTileOrTotalItems",
+              "HybridMagicShiftItersPerTileOrSKTiles", "HybridSKItersPerWGOrSKSplit",
+              "HybridSKGridOrSKItersPerWI", "HybridSKTilesAndSplitOrSKGrid",
+              "AddressWorkspace", "AddressFlags",
               "AddressSynchronizer", "Synchronizer", "GSUSync"}
     scheduling = [(i, arg) for i, arg in enumerate(args)
                   if arg.get("semantic") in legacy | {"ItersPerTile", "PersistentGrid"}]

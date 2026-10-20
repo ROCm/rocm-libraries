@@ -285,8 +285,7 @@ TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicPartialTiles)
 
     // No fallback fires here, so selected == pre-fallback == final launch grid.
     EXPECT_EQ(d.selectedGrid, d.skGridPreFallback);
-    EXPECT_EQ(d.finalGrid, d.skGridPreFallback);
-    EXPECT_EQ(d.skGrid, d.finalGrid);
+    EXPECT_EQ(d.grid(), d.skGridPreFallback);
     EXPECT_FALSE(d.workspaceDPFallbackFired);
     EXPECT_FALSE(d.treeBoundsFallbackFired);
     EXPECT_FALSE(d.fixedGridUsed);
@@ -351,13 +350,13 @@ TEST(StreamKLaunchSummaryTest, Sk5OffResolvesStaticSk3)
     EXPECT_EQ(d.numQueues, 8u); // baked count still reported (informational)
     // The grid must stay below the tile count, otherwise there are no partials and
     // the workspace sizing check below would silently assert nothing.
-    ASSERT_NE(d.tiles % d.skGrid, 0u)
+    ASSERT_NE(d.tiles % d.grid(), 0u)
         << "geometry must produce partial tiles (grid < tiles) for this scenario";
     // SK3-static: no per-XCD work-queue region in the workspace it reserves.
     ASSERT_TRUE(d.workspaceAllocated)
         << "scenario must actually reserve a workspace, otherwise the sizing check below "
            "would silently assert nothing";
-    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.skGrid))
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.grid()))
         << "static SK3 workspace = partialTileSize(grid), no work-queue region";
 }
 
@@ -381,9 +380,9 @@ TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
 
     EXPECT_FALSE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
-    ASSERT_NE(d.tiles % d.skGrid, 0u) << "test needs partial tiles";
+    ASSERT_NE(d.tiles % d.grid(), 0u) << "test needs partial tiles";
     EXPECT_TRUE(d.partialsPresent);
-    EXPECT_GT(d.skTiles, 0u);
+    EXPECT_GT(d.skTiles(), 0u);
     EXPECT_TRUE(d.workspaceAllocated);
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
     EXPECT_FALSE(d.dpOnly);
@@ -649,9 +648,9 @@ TEST(StreamKLaunchSummaryTest, WorkspaceDpFallbackFires)
     EXPECT_FALSE(d.forceDPOnly);
     // selected vs final: the fallback resets the grid to tiles.
     EXPECT_EQ(d.selectedGrid, d.skGridPreFallback) << "no tree-bounds fallback here";
-    EXPECT_NE(d.selectedGrid, d.finalGrid) << "workspace-DP fallback changed the grid";
-    EXPECT_EQ(d.finalGrid, d.tiles) << "DP fallback sets grid = tiles";
-    EXPECT_EQ(d.skGrid, d.tiles);
+    EXPECT_NE(d.selectedGrid, d.grid()) << "workspace-DP fallback changed the grid";
+    EXPECT_EQ(d.grid(), d.tiles) << "DP fallback sets grid = tiles";
+    EXPECT_EQ(d.grid(), d.tiles);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
     EXPECT_FALSE(d.workspaceAllocated);
@@ -679,8 +678,8 @@ TEST(StreamKLaunchSummaryTest, SelectedVsFinalGridAttribution)
 
     // "selected" = what StreamK wanted (CU/config), "final" = what launched.
     EXPECT_GT(d.selectedGrid, 0u);
-    EXPECT_EQ(d.finalGrid, d.tiles);
-    EXPECT_NE(d.selectedGrid, d.finalGrid);
+    EXPECT_EQ(d.grid(), d.tiles);
+    EXPECT_NE(d.selectedGrid, d.grid());
     // The workspace-DP fallback is the flag responsible for the change here, and
     // the fixed-grid override did not fire.
     EXPECT_TRUE(d.workspaceDPFallbackFired);
@@ -721,7 +720,7 @@ TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspac
     auto fallback = streamK.computeStreamKDecisions(problem, env.device);
     EXPECT_TRUE(fallback.dpOnly);
     EXPECT_TRUE(fallback.workspaceDPFallbackFired);
-    EXPECT_EQ(fallback.finalGrid, fallback.tiles);
+    EXPECT_EQ(fallback.grid(), fallback.tiles);
     EXPECT_TRUE(streamK.sizeMapping.isStreamK());
     EXPECT_FALSE(streamK.sizeMapping.isPersistentDataParallel());
 }
@@ -763,8 +762,8 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace)
     auto d = solution.computeStreamKDecisions(problem, device);
 
     ASSERT_TRUE(d.isDynamic);
-    ASSERT_NE(d.tiles % d.skGrid, 0u) << "case needs tiles % grid != 0";
-    EXPECT_EQ(d.skTiles, 0u) << "no override -> dynamic packing produces no split tiles";
+    ASSERT_NE(d.tiles % d.grid(), 0u) << "case needs tiles % grid != 0";
+    EXPECT_EQ(d.skTiles(), 0u) << "no override -> dynamic packing produces no split tiles";
     EXPECT_EQ(d.dynamicPartialsSlots, 0u) << "skTiles*skSplit == 0";
 
     // Workspace is reserved because tiles%grid != 0, independent of the zero
@@ -791,7 +790,7 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsAndDivisible_NoWorkspace)
     auto d = solution.computeStreamKDecisions(problem, device);
 
     ASSERT_TRUE(d.isDynamic);
-    ASSERT_EQ(d.tiles % d.skGrid, 0u) << "case needs tiles % grid == 0";
+    ASSERT_EQ(d.tiles % d.grid(), 0u) << "case needs tiles % grid == 0";
     EXPECT_EQ(d.dynamicPartialsSlots, 0u);
     EXPECT_FALSE(d.workspaceAllocated);
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
@@ -819,15 +818,19 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
     auto d = solution.computeStreamKDecisions(problem, device);
 
     ASSERT_TRUE(d.isDynamic);
-    ASSERT_EQ(d.tiles % d.skGrid, 0u) << "case needs tiles % grid == 0";
-    EXPECT_EQ(d.skTiles, 256u);
-    EXPECT_GE(d.skSplit, 1u);
+    ASSERT_EQ(d.tiles % d.grid(), 0u) << "case needs tiles % grid == 0";
+    EXPECT_EQ(d.skTiles(), 256u);
     EXPECT_TRUE(d.partialsPresent) << "override produced split stream-k tiles";
     EXPECT_GT(d.dynamicPartialsSlots, 0u) << "skTiles*skSplit > 0";
+
+    // skSplit and totalItems are StreamK4-only words.
+    auto const* sk4 = std::get_if<TensileLite::StreamK::StreamK4>(&d.slots.words);
+    ASSERT_NE(sk4, nullptr) << "the dynamic path packs the StreamK4 ABI";
+    EXPECT_GE(sk4->skSplit, 1u);
     // totalItems = (tiles - skTiles) + skTiles*skSplit
     //            = (1024 - 256) + 256*4 = 1792.
-    EXPECT_EQ(d.skSplit, 4u) << "itersPerTile=8, skSplit override 4 -> 4 work items per tile";
-    EXPECT_EQ(d.totalItems, 1792u);
+    EXPECT_EQ(sk4->skSplit, 4u) << "itersPerTile=8, skSplit override 4 -> 4 work items per tile";
+    EXPECT_EQ(sk4->totalItems, 1792u);
 
     // No workspace reserved despite dynamicSlots>0, because tiles%grid==0 gates
     // the partials reservation. requiredWorkspaceSize agrees (also 0).
@@ -848,8 +851,8 @@ TEST(StreamKLaunchSummaryTest, NonStreamKProducesInertSnapshot)
     auto d = solution.computeStreamKDecisions(problem, device);
     EXPECT_FALSE(d.isDynamic);
     EXPECT_FALSE(d.dpOnly);
-    EXPECT_EQ(d.skGrid, 0u);
-    EXPECT_EQ(d.finalGrid, 0u);
+    EXPECT_EQ(d.grid(), 0u);
+    EXPECT_EQ(d.grid(), 0u);
     EXPECT_EQ(d.selectedGrid, 0u);
 }
 
@@ -923,7 +926,7 @@ TEST(StreamKLaunchSummaryTest, SummaryReportsNamedPolicyAndEffectiveAssignment)
         initStreamKSolution(solution, 3);
         solution.sizeMapping.tileProcessingStrategy = test.strategy;
         solution.sizeMapping.workAssignment = test.assignment;
-        StreamKDecisions decisions;
+        StreamK::StreamKDecisions decisions;
         decisions.isDynamic = test.dynamic;
         std::ostringstream os;
         solution.printStreamKLaunchSummary(os, problem, decisions);
@@ -1189,7 +1192,7 @@ TEST(PersistentLaunchSummaryTest, ClusterClampRequiresWholeTilesAndSpatialPeers)
     streamK.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
     auto partial = streamK.computeStreamKDecisions(problem, device);
     EXPECT_FALSE(partial.clusterDPGridClamped);
-    EXPECT_EQ(partial.finalGrid, partial.selectedGrid);
+    EXPECT_EQ(partial.grid(), partial.selectedGrid);
 
     ContractionSolution dataParallel;
     initStreamKSolution(dataParallel, 3);
@@ -1271,7 +1274,7 @@ TEST(PersistentLaunchSummaryTest, SpatialClusterKeepsWholeClusterFixedGrid)
 // (the tree path only reserves when tiles % grid != 0). The snapshot and the
 // caller-facing requiredWorkspaceSize() both size that reservation with
 // partialTileSize(finalGrid); see the comment on
-// StreamKDecisions::requiredWorkspaceBytes.
+// StreamK::StreamKDecisions::requiredWorkspaceBytes.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
 {
@@ -1307,18 +1310,19 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     // No clamp fires: selected == preFallback == final.
     EXPECT_EQ(d.selectedGrid, 256u);
     EXPECT_EQ(d.skGridPreFallback, 256u);
-    EXPECT_EQ(d.finalGrid, 256u);
-    EXPECT_EQ(d.skGrid, d.finalGrid);
-    EXPECT_EQ(solution.getSKGrid(problem, env.device, d.tiles, d.reduction), d.finalGrid);
+    EXPECT_EQ(d.grid(), 256u);
+    EXPECT_EQ(solution.getSKGrid(problem, env.device, d.tiles, d.reduction), d.grid());
     EXPECT_FALSE(d.fixedGridUsed);
     EXPECT_FALSE(d.treeBoundsFallbackFired) << "tree-bounds fixup is tree-reduction only";
     EXPECT_FALSE(d.clusterDPGridClamped);
     EXPECT_FALSE(d.workspaceDPFallbackFired);
 
-    // Parallel packing: skSplit = grid/tiles, and skTiles mirrors skSplit.
-    EXPECT_EQ(d.skSplit, 4u) << "grid/tiles = 256/64";
-    EXPECT_EQ(d.skTiles, d.skSplit) << "the parallel path packs skTiles = skSplit";
-    EXPECT_EQ(d.totalItems, d.tiles);
+    // Parallel packing is StreamK3 (no skSplit/totalItems words): skTiles holds the
+    // split factor grid/tiles.
+    EXPECT_TRUE(std::holds_alternative<TensileLite::StreamK::StreamK3>(d.slots.words));
+    const size_t splitFactor = d.grid() / d.tiles;
+    EXPECT_EQ(splitFactor, 4u) << "grid/tiles = 256/64";
+    EXPECT_EQ(d.skTiles(), splitFactor) << "the parallel path packs skTiles = grid/tiles";
     EXPECT_TRUE(d.partialsPresent);
     EXPECT_FALSE(d.dpOnly);
     EXPECT_FALSE(d.forceDPOnly);
@@ -1328,12 +1332,12 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     ASSERT_TRUE(d.workspaceAllocated)
         << "parallel reduction must reserve a partials region, otherwise the sizing "
            "checks below assert nothing";
-    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.finalGrid));
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.grid()));
     EXPECT_EQ(d.requiredWorkspaceBytes, 16777216u) << "128*128*4 bytes * 256 work-groups";
     EXPECT_EQ(d.idealWorkspaceBytes, d.requiredWorkspaceBytes) << "it fits, so nothing was trimmed";
 
     // The two independent sizings land on the same byte count.
-    EXPECT_EQ(d.finalGrid, d.tiles * d.skSplit);
+    EXPECT_EQ(d.grid(), d.tiles * splitFactor);
     EXPECT_GT(solution.requiredWorkspaceSize(problem, env.device), 0u);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), d.requiredWorkspaceBytes);
 
@@ -1407,7 +1411,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
     ASSERT_TRUE(d.workspaceAllocated);
 
     // Both sizings are partialTileSize(finalGrid); neither re-applies the batch.
-    const size_t expected = solution.partialTileSize(d.finalGrid);
+    const size_t expected = solution.partialTileSize(d.grid());
     EXPECT_EQ(d.requiredWorkspaceBytes, expected);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), expected)
         << "the query must not scale the partials region by the batch count";
@@ -1421,13 +1425,13 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
     problem.setWorkspaceSize(allocated);
     const auto launch = solution.computeStreamKDecisions(problem, env.device);
     EXPECT_EQ(launch.reduction, origami::reduction_t::parallel);
-    EXPECT_EQ(launch.finalGrid, d.finalGrid);
+    EXPECT_EQ(launch.grid(), d.grid());
     EXPECT_EQ(launch.requiredWorkspaceBytes, allocated);
     EXPECT_FALSE(launch.workspaceDPFallbackFired);
 
     // Hold the grid fixed to test the fit boundary itself: without this
     // override the grid selector can choose a smaller split that still fits.
-    env.device.persistentFixedGrid = d.finalGrid;
+    env.device.persistentFixedGrid = d.grid();
     problem.setWorkspaceSize(expected - 1);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
     const auto starved = solution.computeStreamKDecisions(problem, env.device);
@@ -1435,7 +1439,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
     EXPECT_EQ(starved.idealWorkspaceBytes, expected);
     EXPECT_TRUE(starved.workspaceDPFallbackFired);
     EXPECT_EQ(starved.reduction, origami::reduction_t::tree);
-    EXPECT_EQ(starved.finalGrid, starved.tiles);
+    EXPECT_EQ(starved.grid(), starved.tiles);
     EXPECT_EQ(starved.requiredWorkspaceBytes, 0u);
 }
 
@@ -1491,7 +1495,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspacePreservesAuxiliaryAllocations
             env.device.persistentFixedGrid = tiles * 4;
             const auto decisions = solution.computeStreamKDecisions(problem, env.device);
             ASSERT_EQ(decisions.reduction, origami::reduction_t::parallel);
-            ASSERT_EQ(decisions.finalGrid, tiles * 4);
+            ASSERT_EQ(decisions.grid(), tiles * 4);
 
             const size_t partials = 128 * 128 * 4 * tiles * 4;
             const size_t expected = partials + test.biasBytes + (test.amax ? tiles * 4 : 0);
@@ -1618,10 +1622,10 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
     EXPECT_FALSE(d.streamKDP);
 
     EXPECT_EQ(d.tiles, 64u);
-    EXPECT_EQ(d.finalGrid, d.tiles) << "grid selection, not a clamp, produced grid = tiles";
+    EXPECT_EQ(d.grid(), d.tiles) << "grid selection, not a clamp, produced grid = tiles";
     // Nothing moved the grid: selection already landed on tiles.
     EXPECT_EQ(d.selectedGrid, d.tiles);
-    EXPECT_EQ(d.selectedGrid, d.finalGrid);
+    EXPECT_EQ(d.selectedGrid, d.grid());
 
     EXPECT_EQ(d.idealWorkspaceBytes, 0u)
         << "the partials guard never ran, so no ideal size was ever computed";
@@ -1690,10 +1694,10 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
     EXPECT_FALSE(d.forceDPOnly);
 
     EXPECT_EQ(d.tiles, 64u);
-    EXPECT_EQ(d.finalGrid, d.tiles) << "grid selection, not a clamp, produced grid = tiles";
+    EXPECT_EQ(d.grid(), d.tiles) << "grid selection, not a clamp, produced grid = tiles";
     // Nothing moved the grid: selection already landed on tiles.
     EXPECT_EQ(d.selectedGrid, d.tiles);
-    EXPECT_EQ(d.selectedGrid, d.finalGrid);
+    EXPECT_EQ(d.selectedGrid, d.grid());
 
     EXPECT_EQ(d.idealWorkspaceBytes, 0u)
         << "the partials guard never ran, so no ideal size was ever computed";
@@ -1764,7 +1768,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelFixedGridWorkspaceDpFallbackFires)
     EXPECT_FALSE(d.treeBoundsFallbackFired) << "tree-bounds fixup is tree-reduction only";
     EXPECT_FALSE(d.clusterDPGridClamped);
 
-    EXPECT_EQ(d.finalGrid, d.tiles) << "the DP fallback sets grid = tiles";
+    EXPECT_EQ(d.grid(), d.tiles) << "the DP fallback sets grid = tiles";
     EXPECT_EQ(d.skGridPreFallback, d.selectedGrid) << "nothing inside getSKGridImpl moved it";
 
     // Sized by the PARALLEL grid the launch wanted, not by the grid it settled for.
@@ -1930,7 +1934,7 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
     EXPECT_FALSE(d.clusterDPGridClamped);
     // The clamp sets grid = tiles, which makes tiles % grid == 0, which is exactly
     // why the later workspace-DP fallback cannot fire and take the attribution.
-    ASSERT_EQ(d.tiles % d.finalGrid, 0u) << "clamped grid must divide tiles";
+    ASSERT_EQ(d.tiles % d.grid(), 0u) << "clamped grid must divide tiles";
     EXPECT_FALSE(d.workspaceDPFallbackFired)
         << "grid == tiles leaves no partial tiles, so nothing to reserve";
 
@@ -1939,10 +1943,9 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
     EXPECT_EQ(d.selectedGrid, static_cast<size_t>(_CPX_CU))
         << "selection picks the CU-count grid before the fixup";
     EXPECT_EQ(d.skGridPreFallback, d.tiles);
-    EXPECT_EQ(d.finalGrid, d.tiles);
-    EXPECT_NE(d.selectedGrid, d.finalGrid);
-    EXPECT_EQ(d.skGrid, d.finalGrid);
-    EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), d.finalGrid);
+    EXPECT_EQ(d.grid(), d.tiles);
+    EXPECT_NE(d.selectedGrid, d.grid());
+    EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), d.grid());
 
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
     EXPECT_EQ(d.idealWorkspaceBytes, 0u);
@@ -1974,8 +1977,8 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
     auto ds = small.computeStreamKDecisions(smallProblem, device);
     EXPECT_LT(ds.tiles * smallProblem.getItersPerTile(small.sizeMapping), 16777216u);
     EXPECT_FALSE(ds.treeBoundsFallbackFired);
-    EXPECT_EQ(ds.finalGrid, static_cast<size_t>(_CPX_CU));
-    EXPECT_EQ(ds.selectedGrid, ds.finalGrid);
+    EXPECT_EQ(ds.grid(), static_cast<size_t>(_CPX_CU));
+    EXPECT_EQ(ds.selectedGrid, ds.grid());
 }
 
 // ---------------------------------------------------------------------------
@@ -2024,7 +2027,7 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     // No later clamp supersedes it -- this is what makes fixedGrid the winner.
     EXPECT_FALSE(d.treeBoundsFallbackFired);
     EXPECT_FALSE(d.clusterDPGridClamped);
-    ASSERT_EQ(d.tiles % d.finalGrid, 0u)
+    ASSERT_EQ(d.tiles % d.grid(), 0u)
         << "the fixed grid must divide tiles, otherwise the workspace-DP fallback "
            "would reserve partials and could steal the attribution";
     EXPECT_FALSE(d.workspaceDPFallbackFired);
@@ -2038,10 +2041,9 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     // already the overridden value: changedBy is attribution, not a diff.
     EXPECT_EQ(d.selectedGrid, 32u) << "selection reports the overridden grid";
     EXPECT_EQ(d.skGridPreFallback, 32u);
-    EXPECT_EQ(d.finalGrid, 32u);
-    EXPECT_EQ(d.selectedGrid, d.finalGrid)
+    EXPECT_EQ(d.grid(), 32u);
+    EXPECT_EQ(d.selectedGrid, d.grid())
         << "the fixed-grid override cannot make selected differ from final";
-    EXPECT_EQ(d.skGrid, d.finalGrid);
     EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), 32u);
 
     std::ostringstream os;
@@ -2070,8 +2072,8 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     auto db = baseline.computeStreamKDecisions(problem, baseDevice);
     EXPECT_FALSE(db.fixedGridUsed);
     EXPECT_EQ(db.selectedGrid, static_cast<size_t>(_CPX_CU));
-    EXPECT_EQ(db.finalGrid, static_cast<size_t>(_CPX_CU));
-    EXPECT_NE(db.finalGrid, d.finalGrid) << "the override is what produced grid 32";
+    EXPECT_EQ(db.grid(), static_cast<size_t>(_CPX_CU));
+    EXPECT_NE(db.grid(), d.grid()) << "the override is what produced grid 32";
 
     std::ostringstream osb;
     baseline.printStreamKLaunchSummary(osb, problem, db);
