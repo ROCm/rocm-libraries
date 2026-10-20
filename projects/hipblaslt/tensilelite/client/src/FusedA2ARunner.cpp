@@ -295,11 +295,8 @@ namespace TensileLite
                     (size_t(1u << 14) << kElemShift),
                     "*W)."));
 
-            // recv is feature-contiguous [W, token, feature_shard]. Token is padded to
-            // a whole MacroTile1 tile: the PUSH store writes the full macro-tile edge
-            // with no edge clamp.
-            const size_t nTokenPad = (size_t)tokenTiles * macroTileN;
-            m_recvBytes            = (size_t)W * nTokenPad * nShard * sizeof(uint16_t);
+            // recv is feature-contiguous [W, token, feature_shard].
+            m_recvBytes = (size_t)W * N * nShard * sizeof(uint16_t);
 
             const size_t counterBytes = kCounter1Offset + (size_t)W * tokenTiles * sizeof(uint32_t);
             const size_t synchronizerBytes
@@ -330,6 +327,12 @@ namespace TensileLite
                                                              " rotating buffers, device 0 has ",
                                                              R));
                     ScopedDevice device(devices[d]->deviceId);
+                    HIP_CHECK_EXC(hipMemset(devices[d]->commFlags, 0, devices[d]->commFlagsBytes));
+                    for(auto const& slot : devices[d]->inputArr)
+                        HIP_CHECK_EXC(
+                            hipMemset(dynamic_cast<ContractionInputs const&>(*slot).Synchronizer,
+                                      0,
+                                      synchronizerBytes));
                     HIP_CHECK_EXC(hipExtMallocWithFlags(
                         &m_recvBase[d], R * m_recvBytes, hipDeviceMallocFinegrained));
                     HIP_CHECK_EXC(hipMemset(m_recvBase[d], 0, R * m_recvBytes));
