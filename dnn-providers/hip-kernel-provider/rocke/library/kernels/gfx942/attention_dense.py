@@ -2075,12 +2075,11 @@ def _build_attention_dense_single_buffer(
                 b.s_barrier_bare()
 
             s = do_qk()
-            # Every visited tile gets the causal upper bound; W > 0 additionally
-            # applies the window lower bound (redundant no-op compares on tiles
-            # fully inside the window). W == 0 -> lower=False, byte-identical.
-            # do_mask early-returns when non-causal, so upper is only read on the
-            # causal path (where it is the causal bound); the arg is kept for
-            # signature parity with the gfx950 do_mask, which does use upper=False.
+            # Causal tiles get the upper bound k <= q + RIGHT; W > 0 adds the window
+            # lower bound on causal and non-causal bodies alike (redundant no-op
+            # compares on tiles fully inside the window). W == 0 -> lower=False,
+            # byte-identical. do_mask returns early only when neither bound applies
+            # (not causal and not lower), and upper=True is only read under causal.
             # masked=False only for below-diagonal tiles of the diagonal split.
             if masked:
                 do_mask(s, j, lower=(SW > 0), upper=True)

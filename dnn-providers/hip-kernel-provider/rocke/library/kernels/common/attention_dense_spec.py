@@ -472,6 +472,13 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
             f"limit ({INT32_LIMIT})"
         )
+    # The ragged bodies address Q/O through a buffer resource with an i32 *byte*
+    # voffset (``addr * 2``, a ``mul nsw``), so the byte extent must fit too.
+    if spec.ragged and qo_elems * 2 >= INT32_LIMIT:
+        return False, (
+            f"ragged Q/O extent is {qo_elems * 2} B, at or past the 32-bit "
+            f"buffer-resource byte limit ({INT32_LIMIT} B)"
+        )
     return True, ""
 
 

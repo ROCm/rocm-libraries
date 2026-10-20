@@ -1060,6 +1060,7 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 {
+    reject_right_bound(d, "t3d_build");
     rocke_unified_attention_3d_tiled_spec_t s = rocke_unified_attention_3d_tiled_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);

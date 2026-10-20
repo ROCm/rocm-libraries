@@ -306,12 +306,14 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
     }
     if(s->causal_top_left)
     {
-        /* gfx942-only knob on the shared 3D spec POD; the gfx950 Python spec has
-         * no such field, so reject rather than emit a bottom-right causal kernel. */
-        rocke_i_set_err(b,
-                        ROCKE_ERR_NOTIMPL,
-                        "causal_top_left is only implemented for gfx942 tiled 2D/3D "
-                        "unified attention");
+        /* The gfx950 C++ twin does not implement causal_top_left (gfx950 has it
+         * in the Python engine only); reject rather than emit a bottom-right
+         * causal kernel. */
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_NOTIMPL,
+            "causal_top_left is not implemented by the gfx950 C++ twin (gfx950 implements it "
+            "in the Python engine only)");
         return false;
     }
     return true;

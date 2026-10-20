@@ -1477,6 +1477,42 @@ def test_extents_just_under_the_32_bit_limit_are_accepted():
     assert ok, why
 
 
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_ragged_byte_extent_past_32_bit_voffset_is_rejected(arch):
+    """The ragged bodies address Q/O with an i32 *byte* voffset (``addr * 2``,
+    ``mul nsw``), so qo_elems in [2**30, 2**31) passes the element bound but
+    overflows. B8 S8200 Hq128 D128: qo = 1_074_790_400 elems, 2_149_580_800 B."""
+    from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+    from kernels.gfx950.attention_dense import (
+        supports_attention_dense as supports_gfx950,
+    )
+
+    if arch == "gfx942":
+        supports, AttentionDenseSpec = (
+            supports_attention_dense,
+            Gfx942AttentionDenseSpec,
+        )
+    else:
+        supports, AttentionDenseSpec = supports_gfx950, Gfx950AttentionDenseSpec
+    shape = dict(
+        batch=8,
+        seqlen_q=8200,
+        seqlen_kv=8200,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+    ok, why = supports(AttentionDenseSpec(**shape, ragged=True), arch=arch)
+    assert not ok
+    assert "ragged Q/O extent" in why
+    # The aligned path indexes Q/O by element, so the same element count is fine.
+    aligned = dict(shape, seqlen_q=8192, seqlen_kv=8192)
+    ok, why = supports(AttentionDenseSpec(**aligned), arch=arch)
+    assert ok, why
+
+
 @pytest.mark.parametrize(
     "kw,marker",
     [
