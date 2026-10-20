@@ -609,6 +609,17 @@ def _direct_wgrad_params(b, io_type, RTC):
     return A, D, A_bytes, D_bytes, rtc_cpg, rtc_kpg, c0, c_half_bytes, oob_sentinel, tid
 
 
+def _fma_tap_load(b, tap_valid, x_byte, rsrc, oob_sentinel, c0, dtype, zero_f32):
+    """Shared tap-load: safe select, dtype-conditional buffer load, f32 cast select."""
+    safe_x = b.select(tap_valid, x_byte, oob_sentinel)
+    if dtype == "bf16":
+        x_h = b.buffer_load_bf16(rsrc, safe_x, c0)
+    else:
+        x_h = b.buffer_load_f16(rsrc, safe_x, c0)
+    x_f32 = b.select(tap_valid, b.cast_to_f32(x_h), zero_f32)
+    return safe_x, x_h, x_f32
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -5427,21 +5438,15 @@ def build_direct_conv_dgrad(
                         # W[k_base + k_iv, r, s, c_in_in_grp]: strided k_out access.
                         k_byte_off = b.mul(k_iv, k_stride_bytes)
                         w_byte = b.add(w_off0_bytes, k_byte_off)
-                        safe_w = b.select(tap_valid, w_byte, oob_sentinel)
-                        if p.dtype == "bf16":
-                            w_h = b.buffer_load_bf16(b_rsrc, safe_w, c0)
-                        else:
-                            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
-                        w_f32 = b.select(tap_valid, b.cast_to_f32(w_h), zero_f32)
+                        safe_w, w_h, w_f32 = _fma_tap_load(
+                            b, tap_valid, w_byte, b_rsrc, oob_sentinel, c0, p.dtype, zero_f32
+                        )
 
                         # dY[n, ho, wo, k_base + k_iv]: k is contiguous in NHWK.
                         dy_byte = b.add(dy_off0_bytes, b.mul(k_iv, c_half_bytes))
-                        safe_dy = b.select(tap_valid, dy_byte, oob_sentinel)
-                        if p.dtype == "bf16":
-                            dy_h = b.buffer_load_bf16(a_rsrc, safe_dy, c0)
-                        else:
-                            dy_h = b.buffer_load_f16(a_rsrc, safe_dy, c0)
-                        dy_f32 = b.select(tap_valid, b.cast_to_f32(dy_h), zero_f32)
+                        safe_dy, dy_h, dy_f32 = _fma_tap_load(
+                            b, tap_valid, dy_byte, a_rsrc, oob_sentinel, c0, p.dtype, zero_f32
+                        )
 
                         new_acc = b.fma(w_f32, dy_f32, acc_k)
                         b.scf_yield(new_acc)
