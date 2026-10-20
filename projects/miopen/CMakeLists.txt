@@ -52,18 +52,6 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
-# Default to a ROCm Clang toolchain when the user hasn't supplied one.
-#
-# CMake limitation: the toolchain file is processed *before* this CMakeLists.txt
-# is evaluated, so this assignment only takes effect on subsequent `cmake`
-# invocations (the cache value is then picked up). On the very first configure
-# run the toolchain file is not applied. Re-running `cmake` from the same build
-# directory (or passing -DCMAKE_TOOLCHAIN_FILE=... explicitly) activates it.
-if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
-        CACHE FILEPATH "Toolchain file")
-endif()
-
 # Fetching third-party dependencies over the network at configure time must be an
 # explicit opt-in: packaging builds (ROCm component build scripts, distro builds)
 # are hermetic and pre-stage every dependency on CMAKE_PREFIX_PATH. Deriving this
