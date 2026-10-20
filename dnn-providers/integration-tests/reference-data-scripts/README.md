@@ -156,6 +156,30 @@ for a causal mask, `--left-bound N` for a sliding window, and
 `--diagonal-alignment bottom_right` to anchor the diagonal to the bottom-right
 corner. `--validate` cross-checks the gradients against PyTorch autograd.
 
+Add `--additive-mask` for an explicit attention-mask tensor of shape
+`[1, 1, S_q, S_kv]` in the IO dtype, carried by both halves of the pair. It is
+added to the scores *before* the diagonal band, which is the order the CPU
+reference uses, so a finite bias can never resurrect a position the band drops.
+`dBias` is not produced.
+
+### Template-sweep output
+
+`--sweep-bundle-dir <bundle dir> --case-id <lowercase_snake_case id>` attaches
+the backward tensors to a checked-in template sweep instead of writing a
+standalone single-graph bundle. The tensors go to
+`<bundle dir>/golden/<case id>/tensor<uid>.bin` — the layout the harness
+resolves from a case's `golden.path` — and the case is added to, or replaced in,
+`<bundle dir>/sweep.json` with its per-tensor dims, strides and data types read
+back out of the graph this run produced. Other cases in the sweep are left
+untouched, so the graph-only cases captured from the C++ suite survive
+regeneration.
+
+The graph topology itself is **not** written: it already exists as the
+topology's `graph.template.json`. That is the point — the golden data runs
+through exactly the graph the sweep's existing cases run through. The paired
+forward bundle is still written, as an ordinary single-graph bundle at
+`--forward-base-filename`.
+
 ### Precision and reproducibility
 
 `reference_strategy` is `matched_precision`, RFC 0011's strategy for SDPA
@@ -175,8 +199,8 @@ tensors. The RNG draw order (`Q`, `K`, `V`, `dO`) is part of that contract.
 Deliberately narrow; each unsupported feature fails loudly rather than emitting
 a wrong golden. Supported: BHSD layout, FP16/BF16, equal query and key/value
 head counts, independent `D_qk`/`D_v`, and the causal/sliding-window diagonal
-band with either alignment. Not supported yet: GQA, FP8, BSHD and ragged
-layouts, GROUP mode, dropout, bias/dBias, and ALiBi. Configurations that leave a
+band with either alignment, and an additive attention mask. Not supported yet:
+GQA, FP8, BSHD and ragged layouts, GROUP mode, dropout, dBias, and ALiBi. Configurations that leave a
 query row fully masked are rejected, because the resulting `-inf` LSE makes
 every dependent gradient NaN.
 

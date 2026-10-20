@@ -63,10 +63,26 @@ DVC_REMOTE="golden-data"
 SHAPE_HD128=(--q-dims 1 1 256 128 --v-dims 1 1 256 128 --attn-scale "$SCALE_D128")
 SHAPE_HD192=(--q-dims 1 1 256 192 --v-dims 1 1 256 128 --attn-scale "$SCALE_D192")
 
-# Author the per-bundle DVC pointer with the golden-data remote pinned per
-# output. DVC fills in md5/size on `dvc commit`; the `remote:` key persists
-# across regenerations. This is what routes the bundle to the golden-data
-# remote -- do not drop it, or CI will fail to pull the data.
+# Emit one `outs:` entry for a tensor payload. DVC's hash for a file output is
+# the plain MD5 of its contents, so the pointer can be written complete here
+# rather than left for `dvc commit` to fill in -- which matters because the
+# pointer is what gets committed to git, and every pointer already in the tree
+# carries its md5 and size. `dvc commit` then only confirms what is written.
+#
+# The `remote:` key is what routes the payload to the golden-data remote, so a
+# bare `dvc pull` (and CI) fetches it without any `-r` flag or workflow change.
+# Do not drop it, or CI will fail to pull the data.
+write_dvc_out() {
+    local bin="$1"
+    echo "- path: $(basename "$bin")"
+    echo "  remote: $DVC_REMOTE"
+    echo "  md5: $(md5sum "$bin" | cut -d' ' -f1)"
+    echo "  size: $(stat -c %s "$bin")"
+    echo "  hash: md5"
+}
+
+# Author the DVC pointer for a single-graph bundle, whose payloads are named
+# <BundleName>.tensor<uid>.bin.
 write_dvc_pointer() {
     local bundle_dir="$1"
     local name="$2"
@@ -74,8 +90,7 @@ write_dvc_pointer() {
     {
         echo "outs:"
         for bin in "$bundle_dir/$name".tensor*.bin; do
-            echo "- path: $(basename "$bin")"
-            echo "  remote: $DVC_REMOTE"
+            write_dvc_out "$bin"
         done
     } > "$bundle_dir/$name.tensors.dvc"
 }
@@ -106,6 +121,58 @@ generate_pair() {
 
     write_dvc_pointer "$bwd_dir" "$name"
     write_dvc_pointer "$fwd_dir" "$name"
+}
+
+# The sweep equivalent of write_dvc_pointer. A sweep case's golden directory is
+# resolved as the parent of its golden.path, and the tensors inside it are named
+# tensor<uid>.bin without a bundle-name prefix, so the pointer lists those names.
+write_sweep_dvc_pointer() {
+    local golden_dir="$1"
+    local bin
+    {
+        echo "outs:"
+        for bin in "$golden_dir"/tensor*.bin; do
+            write_dvc_out "$bin"
+        done
+    } > "$golden_dir/tensors.dvc"
+}
+
+# Attach golden data to one case of a checked-in template sweep. Unlike
+# generate_pair, the graph topology is not written here: it already exists as the
+# topology's graph.template.json, and the generator only contributes the case's
+# tensor values and the case entry that points at them. That is the whole point
+# of the template sweep -- the same topology the graph-only cases exercise is
+# re-run against data from an independent source.
+#
+# The forward half still has to go somewhere, since RFC 0011 requires it to be
+# saved; it is written as an ordinary single-graph bundle under
+# <topology>_fwd_pair/<case id>/Small, for the same reasons generate_pair does.
+# The trailing Small level is what makes the directory name match the graph file
+# name, which is how a single-graph bundle is recognised.
+generate_sweep_case() {
+    local tier="$1"
+    local topology="$2"
+    local case_id="$3"
+    shift 3
+
+    local sweep_dir="$GOLDEN_ROOT/$tier/SdpaBackward/$topology"
+    local fwd_dir="$GOLDEN_ROOT/$tier/SdpaBackward/${topology}_fwd_pair/$case_id/Small"
+
+    if [[ ! -f "$sweep_dir/graph.template.json" ]]; then
+        echo "ERROR: no graph.template.json in $sweep_dir"
+        exit 1
+    fi
+    mkdir -p "$fwd_dir"
+
+    python3 "$GENERATOR" \
+        --sweep-bundle-dir "$sweep_dir" \
+        --case-id "$case_id" \
+        --forward-base-filename "$fwd_dir/Small" \
+        --seed 42 \
+        "$@"
+
+    write_sweep_dvc_pointer "$sweep_dir/golden/$case_id"
+    write_dvc_pointer "$fwd_dir" Small
 }
 
 # --- quick tier ---
@@ -146,6 +213,46 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
         generate_pair quick "bhsd/$DTYPE/hd192_causal_batch" Small \
             --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
             "${SHAPE_HD192[@]}"
+    done
+
+    echo ""
+fi
+
+# --- quick tier: template-sweep cases ---
+#
+# These reuse the graph-only topologies under quick/SdpaBackward/ rather than
+# adding new ones, so the golden data runs through exactly the graph the sweep's
+# captured cases run through. The captured cases are left untouched: they declare
+# rank-3 stats, which the CPU backward reference rejects (it requires
+# [B, H_q, S_q, 1]), so golden data could not be attached to them as they stand.
+#
+# Both templates hard-code attn_scale_value = 1/sqrt(128), so every case here is
+# D_qk = 128 and passes the matching --attn-scale. S = 128 keeps a case near
+# 300 KiB, comfortably inside the RFC 0011 per-case budget even with the mask.
+if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
+    echo "=== Generating quick tier template-sweep cases ==="
+
+    SWEEP_SHAPE=(--q-dims 1 1 128 128 --v-dims 1 1 128 128 --attn-scale "$SCALE_D128")
+
+    for DTYPE in bf16 fp16; do
+        generate_sweep_case quick Default "golden_1_1_128_128_${DTYPE}_nomask" \
+            --dtype "$DTYPE" "${SWEEP_SHAPE[@]}"
+
+        generate_sweep_case quick Default "golden_1_1_128_128_${DTYPE}_causal" \
+            --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
+            "${SWEEP_SHAPE[@]}"
+
+        generate_sweep_case quick AdditiveMask \
+            "golden_1_1_128_128_${DTYPE}_nomask" \
+            --dtype "$DTYPE" --additive-mask "${SWEEP_SHAPE[@]}"
+
+        # An additive bias under a causal band: the bias must not resurrect a
+        # position the band drops, which is the ordering the CPU reference fixes
+        # and the easiest thing for a backward implementation to invert.
+        generate_sweep_case quick AdditiveMask \
+            "golden_1_1_128_128_${DTYPE}_causal" \
+            --dtype "$DTYPE" --additive-mask --right-bound 0 \
+            --diagonal-alignment bottom_right "${SWEEP_SHAPE[@]}"
     done
 
     echo ""

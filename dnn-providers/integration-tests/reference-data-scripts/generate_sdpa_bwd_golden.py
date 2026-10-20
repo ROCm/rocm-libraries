@@ -84,6 +84,7 @@ import torch
 from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
     DTYPE_MAP,
     build_bound_mask,
+    combined_attn_mask,
     compute_contiguous_strides,
     compute_forward,
     compute_lse,
@@ -101,7 +102,12 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         RNG draw order is Q, K, V, dO from a single seeded generator; changing
 #         that order changes every tensor, so it is part of the reproducibility
 #         contract.
-GENERATOR_VERSION = "1.0.0"
+# 1.1.0 — Added --additive-mask (an explicit attention-mask tensor, added to the
+#         scores before the diagonal band) and template-sweep output
+#         (--sweep-bundle-dir/--case-id). Bundles without --additive-mask are
+#         byte-identical to 1.0.0; the mask is drawn after dO, so it extends the
+#         RNG draw order rather than disturbing it.
+GENERATOR_VERSION = "1.1.0"
 
 # Backward tensor UID assignment. These match the checked-in graph-only
 # SdpaBackward template topology (integration-test-bundles/*/SdpaBackward/), so
@@ -208,8 +214,6 @@ def validate_against_autograd(
     LSE, so small differences are expected and are the matched-precision gap. A
     large difference means the explicit backward above is wrong.
     """
-    from sdpa_common import combined_attn_mask
-
     Q_g = Q.float().detach().requires_grad_(True)
     K_g = K.float().detach().requires_grad_(True)
     V_g = V.float().detach().requires_grad_(True)
@@ -606,6 +610,22 @@ def generate_bundles(
     sweep_bundle_dir=None,
     case_id=None,
 ):
+    # Validated before anything else: the remaining arguments mean different
+    # things in sweep mode and in single-graph mode.
+    sweep_errors = []
+    if (sweep_bundle_dir is None) != (case_id is None):
+        sweep_errors.append(
+            "--sweep-bundle-dir and --case-id must be given together (sweep mode) "
+            "or both omitted (single-graph mode)"
+        )
+    if case_id is not None and not re.fullmatch(r"[a-z0-9]+(_[a-z0-9]+)*", case_id):
+        # verify_golden_bundles.py requires lowercase_snake_case case ids.
+        sweep_errors.append(f"--case-id must be lowercase_snake_case (got {case_id!r})")
+    if sweep_errors:
+        for e in sweep_errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
     if sweep_bundle_dir is not None and case_id is not None:
         # In sweep mode the backward tensors live in the case's golden directory
         # instead of under a base filename; point the paired forward bundle's
@@ -645,14 +665,6 @@ def generate_bundles(
     for name, bound in [("--left-bound", left_bound), ("--right-bound", right_bound)]:
         if bound is not None and bound < 0:
             errors.append(f"{name} must be >= 0 when given (omit it for unbounded)")
-    if (sweep_bundle_dir is None) != (case_id is None):
-        errors.append(
-            "--sweep-bundle-dir and --case-id must be given together (sweep mode) "
-            "or both omitted (single-graph mode)"
-        )
-    if case_id is not None and not re.fullmatch(r"[a-z0-9]+(_[a-z0-9]+)*", case_id):
-        # verify_golden_bundles.py requires lowercase_snake_case case ids.
-        errors.append(f"--case-id must be lowercase_snake_case (got {case_id!r})")
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)

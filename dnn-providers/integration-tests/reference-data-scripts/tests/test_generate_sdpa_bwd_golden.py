@@ -285,7 +285,7 @@ class TestGenerateSdpaBwdGoldenMath(unittest.TestCase):
         spec.loader.exec_module(cls.gen)
         cls.torch = cls.gen.torch
 
-    def _gradients(self, keep_mask=None):
+    def _gradients(self, keep_mask=None, attn_bias=None):
         torch = self.torch
         rng = torch.Generator().manual_seed(3)
         shape = (1, 2, 8, 4)
@@ -296,10 +296,12 @@ class TestGenerateSdpaBwdGoldenMath(unittest.TestCase):
         Q, K, V, dO = tensors
         scale = 0.5
         heads = shape[1]
-        O = self.gen.compute_forward(Q, K, V, scale, heads, heads, keep_mask)
-        lse = self.gen.compute_lse(Q, K, scale, heads, heads, keep_mask)
-        dQ, dK, dV = self.gen.compute_backward(Q, K, V, O, lse, dO, scale, keep_mask)
-        return Q, K, V, dO, scale, keep_mask, dQ, dK, dV
+        O = self.gen.compute_forward(Q, K, V, scale, heads, heads, keep_mask, attn_bias)
+        lse = self.gen.compute_lse(Q, K, scale, heads, heads, keep_mask, attn_bias)
+        dQ, dK, dV = self.gen.compute_backward(
+            Q, K, V, O, lse, dO, scale, keep_mask, attn_bias
+        )
+        return Q, K, V, dO, scale, keep_mask, dQ, dK, dV, attn_bias
 
     def test_unmasked_gradients_match_autograd(self):
         deviation = self.gen.validate_against_autograd(*self._gradients())
@@ -309,6 +311,229 @@ class TestGenerateSdpaBwdGoldenMath(unittest.TestCase):
         keep_mask = self.gen.build_bound_mask(8, 8, None, 0, True)
         deviation = self.gen.validate_against_autograd(*self._gradients(keep_mask))
         self.assertLess(deviation, 1e-5)
+
+    def test_additive_mask_gradients_match_autograd(self):
+        torch = self.torch
+        bias = torch.empty((1, 1, 8, 8), dtype=torch.float32).uniform_(
+            -1, 1, generator=torch.Generator().manual_seed(11)
+        )
+        deviation = self.gen.validate_against_autograd(*self._gradients(attn_bias=bias))
+        self.assertLess(deviation, 1e-5)
+
+    def test_additive_mask_under_a_causal_band_matches_autograd(self):
+        torch = self.torch
+        keep_mask = self.gen.build_bound_mask(8, 8, None, 0, True)
+        bias = torch.empty((1, 1, 8, 8), dtype=torch.float32).uniform_(
+            -1, 1, generator=torch.Generator().manual_seed(12)
+        )
+        deviation = self.gen.validate_against_autograd(
+            *self._gradients(keep_mask, bias)
+        )
+        self.assertLess(deviation, 1e-5)
+
+    def test_a_finite_bias_cannot_resurrect_a_masked_position(self):
+        """The band is applied after the bias, so -inf must survive any bias."""
+        torch = self.torch
+        keep_mask = self.gen.build_bound_mask(8, 8, None, 0, True)
+        bias = torch.full((1, 1, 8, 8), 1e4, dtype=torch.float32)
+        combined = self.gen.combined_attn_mask(keep_mask, bias)
+        self.assertTrue(torch.isinf(combined[~keep_mask.expand_as(combined)]).all())
+        self.assertTrue((combined[keep_mask.expand_as(combined)] == 1e4).all())
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdAdditiveMaskBundles(unittest.TestCase):
+    """--additive-mask must add the mask tensor to both halves of the pair."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = TemporaryDirectory()
+        root = Path(cls._tmp.name)
+        cls.backward_base = root / "Bwd/Bwd"
+        cls.forward_base = root / "Fwd/Fwd"
+        cls.result = run_generator(
+            cls.backward_base, cls.forward_base, "--additive-mask"
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _graph(self, base):
+        return json.loads(Path(f"{base}.json").read_text())
+
+    def test_generation_succeeds(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+
+    def test_backward_graph_wires_the_mask_tensor(self):
+        graph = self._graph(self.backward_base)
+        uid = graph["nodes"][0]["inputs"]["attn_mask_tensor_uid"]
+        self.assertIsNotNone(uid)
+        tensor = next(t for t in graph["tensors"] if t["uid"] == uid)
+        self.assertEqual(tensor["dims"], [B, 1, S_Q, S_KV][:1] + [1, S_Q, S_KV])
+        self.assertEqual(tensor["data_type"], "bfloat16")
+
+    def test_forward_half_carries_the_same_mask_values(self):
+        bwd = self._graph(self.backward_base)
+        fwd = self._graph(self.forward_base)
+        bwd_uid = bwd["nodes"][0]["inputs"]["attn_mask_tensor_uid"]
+        fwd_uid = fwd["nodes"][0]["inputs"]["attn_mask_tensor_uid"]
+        self.assertIsNotNone(fwd_uid)
+        # The forward generator owns a different UID map, so the UIDs differ;
+        # the bytes behind them must not.
+        self.assertEqual(
+            Path(f"{self.backward_base}.tensor{bwd_uid}.bin").read_bytes(),
+            Path(f"{self.forward_base}.tensor{fwd_uid}.bin").read_bytes(),
+        )
+
+    def test_mask_is_absent_without_the_flag(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_generator(root / "B/B", root / "F/F")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            graph = json.loads((root / "B/B.json").read_text())
+            self.assertIsNone(graph["nodes"][0]["inputs"]["attn_mask_tensor_uid"])
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdSweepMode(unittest.TestCase):
+    """Sweep mode must attach golden data to a checked-in template sweep."""
+
+    CASE_ID = "golden_1_2_32_16_bf16_nomask"
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = TemporaryDirectory()
+        root = Path(cls._tmp.name)
+        cls.sweep_dir = root / "Default"
+        cls.sweep_dir.mkdir(parents=True)
+        # A pre-existing graph-only case that regeneration must not disturb.
+        cls.existing = {"id": "captured_case", "values": {"tensors": []}}
+        (cls.sweep_dir / "sweep.json").write_text(
+            json.dumps({"version": 1, "cases": [cls.existing]})
+        )
+        cls.result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--sweep-bundle-dir",
+                str(cls.sweep_dir),
+                "--case-id",
+                cls.CASE_ID,
+                "--forward-base-filename",
+                str(root / "Fwd/Fwd"),
+                "--q-dims",
+                str(B),
+                str(H),
+                str(S_Q),
+                str(D_QK),
+                "--v-dims",
+                str(B),
+                str(H),
+                str(S_KV),
+                str(D_V),
+                "--attn-scale",
+                "0.25",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        cls.sweep = json.loads((cls.sweep_dir / "sweep.json").read_text())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _case(self):
+        return next(c for c in self.sweep["cases"] if c["id"] == self.CASE_ID)
+
+    def test_generation_succeeds(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
+
+    def test_tensors_land_in_the_case_golden_directory(self):
+        golden = self.sweep_dir / "golden" / self.CASE_ID
+        written = sorted(p.name for p in golden.glob("*.bin"))
+        self.assertEqual(written, sorted(f"tensor{uid}.bin" for uid in range(9)))
+
+    def test_case_points_at_its_tensors_dvc(self):
+        self.assertEqual(
+            self._case()["golden"]["path"], f"golden/{self.CASE_ID}/tensors.dvc"
+        )
+
+    def test_case_values_match_the_tensors_written(self):
+        tensors = {t["uid"]: t for t in self._case()["values"]["tensors"]}
+        self.assertEqual(tensors[8]["dims"], [B, H, S_Q, 1])
+        self.assertEqual(tensors[8]["data_type"], "float")
+        self.assertEqual(tensors[0]["dims"], [B, H, S_KV, D_QK])
+        self.assertEqual(self._case()["values"]["io_data_type"], "bfloat16")
+
+    def test_case_metadata_records_rfc_0011_provenance(self):
+        metadata = self._case()["metadata"]
+        self.assertEqual(metadata["reference_strategy"], "matched_precision")
+        self.assertEqual(metadata["direction"], "backward")
+        self.assertIn("forward_source", metadata)
+
+    def test_existing_cases_are_left_alone(self):
+        self.assertEqual(self.sweep["cases"][0], self.existing)
+        self.assertEqual(len(self.sweep["cases"]), 2)
+
+    def test_case_id_must_be_snake_case(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    "--sweep-bundle-dir",
+                    str(root),
+                    "--case-id",
+                    "NotSnakeCase",
+                    "--forward-base-filename",
+                    str(root / "Fwd/Fwd"),
+                    "--q-dims",
+                    str(B),
+                    str(H),
+                    str(S_Q),
+                    str(D_QK),
+                    "--v-dims",
+                    str(B),
+                    str(H),
+                    str(S_KV),
+                    str(D_V),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("lowercase_snake_case", result.stderr)
+
+    def test_sweep_bundle_dir_and_case_id_must_be_given_together(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    "--sweep-bundle-dir",
+                    str(root),
+                    "--forward-base-filename",
+                    str(root / "Fwd/Fwd"),
+                    "--q-dims",
+                    str(B),
+                    str(H),
+                    str(S_Q),
+                    str(D_QK),
+                    "--v-dims",
+                    str(B),
+                    str(H),
+                    str(S_KV),
+                    str(D_V),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must be given together", result.stderr)
 
 
 if __name__ == "__main__":
