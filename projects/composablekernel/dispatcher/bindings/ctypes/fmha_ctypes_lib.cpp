@@ -9,6 +9,7 @@
 // foreign calls, so single-threaded usage must be enforced by the caller.
 
 #include <hip/hip_runtime.h>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -1557,6 +1558,8 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
             static_cast<int64_t>(total_pages) * nhead_k * page_block_size * hdim_q * in_bytes;
         const int64_t v_src_bytes =
             static_cast<int64_t>(total_pages) * nhead_k * page_block_size * hdim_v * in_bytes;
+        assert(k_src_bytes <= kv_page_bytes);
+        assert(v_src_bytes <= kv_page_bytes);
         HIP_CHECK(hipMemset(k_dev, 0, kv_page_bytes));
         HIP_CHECK(hipMemset(v_dev, 0, kv_page_bytes));
         HIP_CHECK(hipMemcpy(k_dev, k_host, k_src_bytes, hipMemcpyHostToDevice));

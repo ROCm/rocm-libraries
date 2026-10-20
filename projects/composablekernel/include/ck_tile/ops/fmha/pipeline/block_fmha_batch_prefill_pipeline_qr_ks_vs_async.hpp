@@ -1519,6 +1519,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             }();
             PermuteWarpGemmCToA(p_for_gemm1, p);
 #else
+#if defined(__gfx11__)
+            // Device-only for the same reason as the kUseSyncKLoad assertion above.
+            static_assert(!Policy::template UseIndependentVBuffer<Problem>(),
+                          "independent-V gemm1 needs the gfx11 C->A permute; "
+                          "do not disable P_PERMUTE while UseIndependentVBuffer holds");
+#endif
             const auto& p_for_gemm1 = p;
 #endif
 
