@@ -354,9 +354,10 @@ class TestBandInputRules(unittest.TestCase):
                 self.assertEqual(len(set(kernel.values())), 3, kernel)
                 self.assertIn("sw256", kernel["w256"].split("_"))
 
-    def test_ragged_window_is_declined_not_served(self):
+    def test_partial_tile_window_is_declined_not_served(self):
         # The dense window loops do not mask a partial last KV tile; the spec rejects
-        # ragged + window so they never see one.
+        # a partial-tile length plus a window so they never see one. The graph is not
+        # ragged, so the reason names the lengths, the tiles and the window.
         from dispatch.attention import attention_candidates
         from rocke.dispatch.core import opt_in_probe
 
@@ -373,7 +374,14 @@ class TestBandInputRules(unittest.TestCase):
                     with self.subTest(kw=kw, candidate=c.name):
                         ok, why = c.admits(opt_in_probe(req, c))
                         self.assertFalse(ok)
-                        self.assertIn("ragged", why)
+                        self.assertIn(
+                            "seqlen_q 1000 is not a multiple of block_m 256", why
+                        )
+                        self.assertIn(
+                            "seqlen_kv 1050 is not a multiple of block_n 64", why
+                        )
+                        self.assertIn("sliding_window", why)
+                        self.assertNotIn("ragged", why)
 
 
 class TestBandNormalization(unittest.TestCase):
