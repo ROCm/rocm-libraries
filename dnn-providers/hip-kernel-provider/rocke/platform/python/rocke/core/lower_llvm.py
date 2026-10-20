@@ -4587,20 +4587,20 @@ class _Lowerer:
         self._emit_wave_ballot(pred, op.result.name)
 
     def _op_tile_wave_all(self, op: Op) -> None:
-        # wave_all(p) = (ballot(p) == -1).
-        # On wave64 with all lanes active, ``ballot.i64`` returns
-        # ``-1 == 0xffffffffffffffff`` iff every lane voted true.
-        # Matches HIP's ``__all(p)`` which uses the same shorthand.
-        # This form is robust under wave64 with full EXEC (our standard
-        # workgroup launch profile); under a partially-predicated EXEC
-        # mask the result counts only the active lanes (still the
-        # semantics we want for "did every *active* lane vote true").
+        # wave_all(p) = (ballot(p) == full-wave mask). ``ballot.i64`` sets
+        # only the low ``wave_size`` bits, so the full mask is -1 on wave64
+        # but 0xffffffff on wave32 (comparing against -1 there is never
+        # true). Unlike HIP's ``__all(p)``, which counts only active lanes,
+        # this requires full EXEC: under partial EXEC (a divergent region or
+        # a sub-wave workgroup) it returns 0. Every rocKE kernel launches
+        # with full EXEC.
         (pred,) = op.operands
         self._need("ballot.i64")
         b_name = self._fresh("ballot")
         self._emit_wave_ballot(pred, b_name)
+        full = -1 if self._backend.arch.wave_size == 64 else (1 << 32) - 1
         eq_name = self._fresh("all_eq")
-        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, -1")
+        self._current().emit(f"  {eq_name} = icmp eq i64 {b_name}, {full}")
         self._current().emit(f"  {op.result.name} = zext i1 {eq_name} to i32")
 
     def _op_tile_wave_any(self, op: Op) -> None:
