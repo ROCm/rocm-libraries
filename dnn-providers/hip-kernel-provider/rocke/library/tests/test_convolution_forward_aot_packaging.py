@@ -73,12 +73,14 @@ def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
         async_chunk_b=identity.async_chunk_b,
         grouped=int(identity.grouped),
         instance_id=identity.stable_hash(),
+        group_merge=identity.group_merge,
     )
 
 
 @pytest.fixture(scope="module")
 def sweep_jobs():
-    """A seeded sample of the AOT sweep's valid gfx950 forward jobs, per dtype and K loop."""
+    """A seeded sample of the AOT sweep's valid gfx950 forward jobs, per dtype, K loop
+    and whether the job is group-merged."""
     target = ArchTarget.from_gfx("gfx950")
     rng = random.Random(_SEED)
     sample = []
@@ -86,7 +88,11 @@ def sweep_jobs():
         jobs = kernel_sweep._direction_jobs("fwd", "gfx950", dtype, target, (2,), 64)
         by_loop: dict = {}
         for job in jobs:
-            key = (job.identity.unroll_k, job.identity.async_dma)
+            key = (
+                job.identity.unroll_k,
+                job.identity.async_dma,
+                job.identity.group_merge > 1,
+            )
             by_loop.setdefault(key, []).append(job)
         for key in sorted(by_loop):
             candidates = by_loop[key]
@@ -109,7 +115,8 @@ def sweep_jobs():
 
 def _knob_class(identity: KernelIdentity) -> tuple:
     """The compile-time knob class of an implicit-GEMM identity: everything but the
-    tile and warp geometry."""
+    tile and warp geometry. The merge degree is a knob: a group-merged identity
+    records the widths its builder derives as 0."""
     k_loop = (
         "async_dma"
         if identity.async_dma
@@ -124,6 +131,7 @@ def _knob_class(identity: KernelIdentity) -> tuple:
         identity.vector_size_c,
         identity.async_chunk_a,
         identity.async_chunk_b,
+        identity.group_merge,
     )
 
 
@@ -131,7 +139,8 @@ def _knob_class(identity: KernelIdentity) -> tuple:
 def knob_class_jobs():
     """One valid job of every knob class of the AOT sweep's gfx950 forward grid, per
     dtype, drawn by a seeded shuffle: every pipeline, epilogue, K loop (with each
-    async chunk pair) and load/store width combination the shipped catalog holds."""
+    async chunk pair), load/store width combination and merge degree the sweep
+    builds."""
     target = ArchTarget.from_gfx("gfx950")
     rng = random.Random(_SEED + 2)
     sample = []
@@ -152,10 +161,18 @@ def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs):
     assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
     assert {c[1] for c in classes} == {"default", "cshuffle"}
     assert {c[2] for c in classes} == {"plain", "unroll", "async_dma"}
+    unmerged = {c for c in classes if c[8] == 1}
     for position in (3, 4, 5):
-        assert {c[position] for c in classes} == {1, 2, 4, 8}
+        assert {c[position] for c in unmerged} == {1, 2, 4, 8}
     assert {(c[1], c[5]) for c in classes} >= {("default", 1), ("cshuffle", 8)}
-    assert len({c[6:] for c in classes if c[2] == "async_dma"}) > 1
+    assert len({c[6:8] for c in classes if c[2] == "async_dma"}) > 1
+    # Group-merged classes: builder-derived widths (recorded 0), the cshuffle
+    # epilogue, and no async K loop (its chunked predicate cannot mask the merge).
+    merged = classes - unmerged
+    assert {c[8] for c in merged} == set(kernel_sweep._FWD_GROUP_MERGES)
+    assert {c[3:6] for c in merged} == {(0, 0, 0)}
+    assert {c[1] for c in merged} == {"cshuffle"}
+    assert {c[2] for c in merged} == {"plain", "unroll"}
 
 
 def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs):
@@ -234,11 +251,21 @@ def test_served_problems_agree_with_kernel_cache_supports_problem(sweep_jobs):
     problems are excluded rather than compared.
     """
     cache = KernelCache.__new__(KernelCache)
-    compared = served = 0
+    compared = served = merged_served = 0
     for dtype, job in sweep_jobs:
         identity = replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor())
         spec = _spec(job.identity)
-        for problem in _random_problems(60, dtype):
+        problems = _random_problems(60, dtype)
+        if spec.is_merged:
+            # Depthwise variants, with group counts the merge degree divides and
+            # one it does not.
+            gm = spec.group_merge
+            problems += [
+                replace(p, C=g, K=g, groups=g)
+                for p in problems[:15]
+                for g in (gm, 2 * gm, 3 * gm, gm + 1)
+            ]
+        for problem in problems:
             ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
             if not ours and ("2**23" in reason or "32-bit" in reason):
                 continue
@@ -246,8 +273,11 @@ def test_served_problems_agree_with_kernel_cache_supports_problem(sweep_jobs):
             assert ours == theirs, (job.identity.label(), problem, reason, why)
             compared += 1
             served += ours
-    # Both verdicts occur, so the agreement is not vacuous.
+            merged_served += ours and spec.is_merged
+    # Both verdicts occur, so the agreement is not vacuous, and the sampled
+    # group-merged instances serve some (depthwise) problems.
     assert compared > 1000 and 0 < served < compared
+    assert merged_served > 0
 
 
 def test_launch_values_and_grid_are_conv_args_for_the_runtime_problem(sweep_jobs):
@@ -370,7 +400,16 @@ _SELECTION_GRID = (
 
 @pytest.fixture(scope="module")
 def full_sweep():
-    """Every valid gfx950 forward identity of the AOT sweep, per dtype, in rocKE's order."""
+    """Every valid unmerged gfx950 forward identity of the AOT sweep, per dtype, in
+    rocKE's order.
+
+    The sweep also builds group-merged identities, but the gfx950 catalog does not
+    package them (make_conv_aot_config.py's gfx950 target has no group_merge), and
+    hipkernel:Gfx950ConvFwdAot's selection is the whole-catalog widest-width policy
+    of a catalog without them. They are left out here; the packaging, IR and serving
+    tests above still take them. Per-kind selection with merged instances is the
+    gfx942 engine's, tested in test_convolution_forward_aot_packaging_gfx942.py.
+    """
     target = ArchTarget.from_gfx("gfx950")
     jobs = max(1, min(os.cpu_count() or 1, 32))
     return {
@@ -383,6 +422,7 @@ def full_sweep():
                 directions=("fwd",),
                 jobs=jobs,
             )
+            if job.identity.group_merge == 1
         ]
         for dtype in ("fp16", "bf16")
     }
@@ -457,10 +497,10 @@ def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
 
 #: Direct identities per (dtype, algorithm) in the sweep's forward grid.
 _DIRECT_COUNTS = {
-    "direct_depthwise": 54,
-    "direct_depthwise_spatial": 30,
+    "direct_depthwise": 57,
+    "direct_depthwise_spatial": 36,
     "direct_depthwise_tiled": 1536,
-    "direct_depthwise_col": 540,
+    "direct_depthwise_col": 594,
     "direct_grouped": 80,
     "direct_nongrouped": 3058,
 }
