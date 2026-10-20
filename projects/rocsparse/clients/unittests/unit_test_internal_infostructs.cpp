@@ -262,14 +262,14 @@ TEST(internal_infostructs, csrmv_nnzsplit_info_clear_releases_device_buffer)
     // Small 4x4 CSR, 6 nonzeros -- just enough for the nnzsplit analysis to
     // allocate its starting_ids buffer; the exact block count is an
     // implementation detail (nnzsplit_block_size / nnzsplit_nnz_per_thread).
-    const int64_t          m         = 4;
-    const int64_t          n         = 4;
-    const int64_t          nnz       = 6;
-    const std::vector<int> h_row_ptr = {0, 2, 3, 5, 6};
-    const std::vector<int> h_col_ind = {0, 1, 1, 0, 2, 3};
-    const std::vector<float> h_val   = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
-    const std::vector<float> h_x     = {1.f, 1.f, 1.f, 1.f};
-    const std::vector<float> h_y     = {0.f, 0.f, 0.f, 0.f};
+    const int64_t            m         = 4;
+    const int64_t            n         = 4;
+    const int64_t            nnz       = 6;
+    const std::vector<int>   h_row_ptr = {0, 2, 3, 5, 6};
+    const std::vector<int>   h_col_ind = {0, 1, 1, 0, 2, 3};
+    const std::vector<float> h_val     = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
+    const std::vector<float> h_x       = {1.f, 1.f, 1.f, 1.f};
+    const std::vector<float> h_y       = {0.f, 0.f, 0.f, 0.f};
 
     device_vector<int>   d_row_ptr(h_row_ptr);
     device_vector<int>   d_col_ind(h_col_ind);
@@ -297,14 +297,14 @@ TEST(internal_infostructs, csrmv_nnzsplit_info_clear_releases_device_buffer)
                                          rocsparse_indextype_i32,
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
-             rocsparse_status_success);
+              rocsparse_status_success);
 
     rocsparse_dnvec_descr x = nullptr;
     rocsparse_dnvec_descr y = nullptr;
     ASSERT_EQ(rocsparse_create_dnvec_descr(&x, n, d_x.ptr, rocsparse_datatype_f32_r),
-             rocsparse_status_success);
+              rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_dnvec_descr(&y, m, d_y.ptr, rocsparse_datatype_f32_r),
-             rocsparse_status_success);
+              rocsparse_status_success);
 
     const float alpha = 1.0f;
     const float beta  = 0.0f;
@@ -322,7 +322,7 @@ TEST(internal_infostructs, csrmv_nnzsplit_info_clear_releases_device_buffer)
                              rocsparse_spmv_stage_buffer_size,
                              &buffer_size,
                              nullptr),
-             rocsparse_status_success);
+              rocsparse_status_success);
 
     device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t(1));
     ASSERT_NE(buffer.ptr, nullptr);
@@ -339,7 +339,7 @@ TEST(internal_infostructs, csrmv_nnzsplit_info_clear_releases_device_buffer)
                              rocsparse_spmv_stage_preprocess,
                              &buffer_size,
                              buffer.ptr),
-             rocsparse_status_success);
+              rocsparse_status_success);
 
     // mat->info is the real _rocsparse_mat_info behind the opaque
     // rocsparse_mat_info handle; get_csrmv_info() is its public accessor for
