@@ -549,6 +549,48 @@ def is_valid_spec_16c(
     return True, "ok"
 
 
+def _issue_dram_load(
+    b,
+    y_iter_val,
+    n,
+    chunk_meta,
+    c_cpg,
+    q_tile_start,
+    a_desc,
+    c_half_bytes,
+    oob_sentinel,
+    p,
+    a_rsrc,
+    c0,
+    fp16x4_zero,
+):
+    """Per-thread DRAM read of one vec4 of A for the direct grouped conv."""
+    out = []
+    for cm in chunk_meta:
+        c_val = b.add(
+            b.mul(cm["abs_group"], c_cpg),
+            b.mul(cm["ch_block"], b.const_i32(4)),
+        )
+        a_off_elems, addr_valid = a_desc.offset(
+            b,
+            n=n,
+            y_iter=y_iter_val,
+            q_pos=q_tile_start,
+            W_lds_pos=cm["W_lds"],
+            c=c_val,
+        )
+        valid = b.land(addr_valid, cm["in_bounds"])
+        a_off_bytes = b.mul(a_off_elems, c_half_bytes)
+        safe_off = b.select(valid, a_off_bytes, oob_sentinel)
+        a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
+        a_vec = b.select(valid, a_vec, fp16x4_zero)
+        # LDS index in halves: chunk_idx * 4. Allocation is 2D
+        # `[1, ROW]` so we pass (row=0, col=lds_idx).
+        lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4))
+        out.append((a_vec, lds_idx))
+    return out
+
+
 def build_direct_conv_16c(
     spec: DirectConv16cSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -838,30 +880,21 @@ def build_direct_conv_16c(
         with statically-known range) is computed inline to keep the
         descriptor from emitting a redundant bounds AND.
         """
-        out = []
-        for cm in chunk_meta:
-            c_val = b.add(
-                b.mul(cm["abs_group"], c_cpg),
-                b.mul(cm["ch_block"], b.const_i32(4)),
-            )
-            a_off_elems, addr_valid = a_desc.offset(
-                b,
-                n=n,
-                y_iter=y_iter_val,
-                q_pos=q_tile_start,
-                W_lds_pos=cm["W_lds"],
-                c=c_val,
-            )
-            valid = b.land(addr_valid, cm["in_bounds"])
-            a_off_bytes = b.mul(a_off_elems, c_half_bytes)
-            safe_off = b.select(valid, a_off_bytes, oob_sentinel)
-            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
-            a_vec = b.select(valid, a_vec, fp16x4_zero)
-            # LDS index in halves: chunk_idx * 4. Allocation is 2D
-            # `[1, ROW]` so we pass (row=0, col=lds_idx).
-            lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4))
-            out.append((a_vec, lds_idx))
-        return out
+        return _issue_dram_load(
+            b,
+            y_iter_val,
+            n,
+            chunk_meta,
+            c_cpg,
+            q_tile_start,
+            a_desc,
+            c_half_bytes,
+            oob_sentinel,
+            p,
+            a_rsrc,
+            c0,
+            fp16x4_zero,
+        )
 
     def store_to_lds(loads, lds: Value) -> None:
         for a_vec, lds_idx in loads:
@@ -1723,28 +1756,21 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
     c_stride_8c = p.stride
 
     def issue_dram_load(y_iter_val):
-        out = []
-        for cm in chunk_meta:
-            c_val = b.add(
-                b.mul(cm["abs_group"], c_cpg),
-                b.mul(cm["ch_block"], b.const_i32(4)),
-            )
-            a_off_elems, addr_valid = a_desc.offset(
-                b,
-                n=n,
-                y_iter=y_iter_val,
-                q_pos=q_tile_start,
-                W_lds_pos=cm["W_lds"],
-                c=c_val,
-            )
-            valid = b.land(addr_valid, cm["in_bounds"])
-            a_off_bytes = b.mul(a_off_elems, c_half_bytes)
-            safe_off = b.select(valid, a_off_bytes, oob_sentinel)
-            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
-            a_vec = b.select(valid, a_vec, fp16x4_zero)
-            lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4))
-            out.append((a_vec, lds_idx))
-        return out
+        return _issue_dram_load(
+            b,
+            y_iter_val,
+            n,
+            chunk_meta,
+            c_cpg,
+            q_tile_start,
+            a_desc,
+            c_half_bytes,
+            oob_sentinel,
+            p,
+            a_rsrc,
+            c0,
+            fp16x4_zero,
+        )
 
     def store_to_lds(loads, lds):
         for a_vec, lds_idx in loads:
@@ -2173,28 +2199,21 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
     c_stride_32c = p.stride
 
     def issue_dram_load(y_iter_val):
-        out = []
-        for cm in chunk_meta:
-            c_val = b.add(
-                b.mul(cm["abs_group"], c_cpg),
-                b.mul(cm["ch_block"], b.const_i32(4)),
-            )
-            a_off_elems, addr_valid = a_desc.offset(
-                b,
-                n=n,
-                y_iter=y_iter_val,
-                q_pos=q_tile_start,
-                W_lds_pos=cm["W_lds"],
-                c=c_val,
-            )
-            valid = b.land(addr_valid, cm["in_bounds"])
-            a_off_bytes = b.mul(a_off_elems, c_half_bytes)
-            safe_off = b.select(valid, a_off_bytes, oob_sentinel)
-            a_vec = _buf_load_vN(b, p.dtype, a_rsrc, safe_off, c0, 2)
-            a_vec = b.select(valid, a_vec, fp16x4_zero)
-            lds_idx = b.mul(cm["chunk_idx"], b.const_i32(4))
-            out.append((a_vec, lds_idx))
-        return out
+        return _issue_dram_load(
+            b,
+            y_iter_val,
+            n,
+            chunk_meta,
+            c_cpg,
+            q_tile_start,
+            a_desc,
+            c_half_bytes,
+            oob_sentinel,
+            p,
+            a_rsrc,
+            c0,
+            fp16x4_zero,
+        )
 
     def store_to_lds(loads, lds):
         for a_vec, lds_idx in loads:
