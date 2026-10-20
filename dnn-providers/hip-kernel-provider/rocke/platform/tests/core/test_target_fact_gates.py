@@ -18,7 +18,12 @@ from __future__ import annotations
 import pytest
 from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.ir import F32, I16, I32, I64, IRBuilder, PtrType
-from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
+from rocke.tests.engines import (
+    assert_both_engines_reject,
+    assert_both_engines_reject_hip,
+    lower_hip_with_both_engines,
+    lower_with_both_engines,
+)
 
 # How each fact named in a refusal reads off a target's row.
 _FACTS = {
@@ -242,4 +247,24 @@ def test_scaled_wmma_follows_the_target_catalog(scale16, arch):
             f"tile.{atom.op_id} is not available on {arch}: "
             "its MMA catalog does not list it",
             "llvm23",
+        )
+
+
+@pytest.mark.parametrize("arch", known_arches())
+@pytest.mark.parametrize("scale16", [False, True])
+def test_scaled_wmma_hip_follows_the_target_catalog(scale16, arch):
+    atom = _scaled_atom(scale16)
+    kernel = _scaled_kernel(atom, scale16)
+    target = ArchTarget.from_gfx(arch)
+    if target.mma.by_op_id(atom.op_id) is not None:
+        lower_hip_with_both_engines(kernel, arch)
+    else:
+        assert_both_engines_reject_hip(
+            kernel,
+            arch,
+            NotImplementedError,
+            f"WMMA op {atom.op_id!r} is not available on {arch} "
+            "(WMMA is an RDNA/gfx11 instruction; this is a "
+            f"{target.family.upper()} target). The MFMA atoms are the "
+            "matrix path on CDNA.",
         )
