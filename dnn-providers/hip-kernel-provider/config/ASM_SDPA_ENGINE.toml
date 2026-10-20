@@ -29,8 +29,12 @@ version = 1
 # than the forward pass and need the provider-local backward tolerance instead,
 # taken from asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp (bf16: 5e-1,
 # fp16: 2.5e-1).
-# The quick/SdpaBackward bundles were captured from those same graph tests, so
-# they take the same tolerances; their names carry the dtype as _bfp16_ / _fp16_.
+# The graph tests are IntegrationGpuSdpaBwdBfp16 and IntegrationGpuSdpaBwdFp16.
+# Their initializeBundle() derives O and LSE from the forward only when built
+# with -DBUILD_CPP_GRAPH_TESTS=ON, which is off by default and in CI.
+# CI runs the captured bundles, which fill O and LSE randomly from the sweep's
+# ranges. The tolerances therefore are not calibrated for CI's bundle inputs;
+# moving the derivation into the bundle fill path is tracked in #14008.
 [[tolerance_overrides]]
 filters = ["*IntegrationGpuSdpaBwdBfp16*", "*_SdpaBackward_*_bfp16_*"]
 atol = 5e-1

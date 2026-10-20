@@ -32,13 +32,14 @@ namespace
 {
 
 using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 using hipdnn_data_sdk::utilities::generateStrides;
 using hipdnn_data_sdk::utilities::ShallowTensor;
 using test_sdpa_common::SdpaBwdTestCase;
 
 // Written into O and the stats before the helper runs. Any element that still
 // holds it afterwards was never produced by the forward.
-constexpr float K_SENTINEL = 1.0e9F;
+constexpr float K_SENTINEL = 123.5F;
 
 int64_t elementCount(const std::vector<int64_t>& dims)
 {
@@ -191,12 +192,13 @@ std::vector<std::pair<const char*, SdpaBwdTestCase>> maskRegimes()
 // The LSE normalizes the band's softmax and O is that softmax applied to V. The
 // masked positions contribute nothing, so a row that drops half its band still
 // sums to 1 rather than to the fraction it kept.
-TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
+template <class DataType>
+void verifyForwardOutputsNormalize(double outputTolerance)
 {
     for(const auto& [name, tc] : maskRegimes())
     {
         SCOPED_TRACE(name);
-        const ForwardOutputs<float> outputs(tc);
+        const ForwardOutputs<DataType> outputs(tc);
 
         const int64_t batch = tc.qDims[0];
         const int64_t numHeads = tc.qDims[1];
@@ -231,7 +233,7 @@ TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
                             = std::exp(scores[static_cast<size_t>(skv)] - lse);
                         sum += probs[static_cast<size_t>(skv)];
                     }
-                    EXPECT_NEAR(sum, 1.0, 1e-5) << "lse is not the band's log-sum-exp";
+                    EXPECT_NEAR(sum, 1.0, 1e-4) << "lse is not the band's log-sum-exp";
 
                     const int64_t kvHead = h / (numHeads / kvHeads);
                     for(int64_t dv = 0; dv < headDimV; ++dv)
@@ -244,7 +246,7 @@ TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
                         }
                         const double actual = outputs.outputAt(b, h, sq, dv);
                         ASSERT_NE(actual, static_cast<double>(K_SENTINEL)) << "O left unwritten";
-                        EXPECT_NEAR(actual, expected, 1e-5) << "dv=" << dv;
+                        EXPECT_NEAR(actual, expected, outputTolerance) << "dv=" << dv;
                     }
                 }
             }
@@ -252,32 +254,11 @@ TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
     }
 }
 
-// The same invariant through the bf16 instantiation the shared fixture uses for
-// IntegrationGpuSdpaBwdBfp16. Q and K are bf16, so the recomputed scores carry
-// their rounding; the LSE stays float and still normalizes them.
-TEST(TestSdpaBackwardInputs, Bfloat16InputsStillNormalize)
+TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
 {
-    const SdpaBwdTestCase tc({1, 2, 16, 8}, {1, 2, 16, 8}, std::nullopt, -1, 0, true);
-    const ForwardOutputs<bfloat16> outputs(tc);
-
-    for(int64_t h = 0; h < tc.qDims[1]; ++h)
-    {
-        for(int64_t sq = 0; sq < tc.qDims[2]; ++sq)
-        {
-            SCOPED_TRACE("h=" + std::to_string(h) + " sq=" + std::to_string(sq));
-            const auto scores = outputs.scoresAt(0, h, sq, 1.0);
-            const double lse = outputs.lseAt(0, h, sq);
-            double sum = 0.0;
-            for(int64_t skv = 0; skv < tc.kDims[2]; ++skv)
-            {
-                if(!isOutsideBand(sq, skv, tc.qDims[2], tc.kDims[2], tc))
-                {
-                    sum += std::exp(scores[static_cast<size_t>(skv)] - lse);
-                }
-            }
-            EXPECT_NEAR(sum, 1.0, 1e-4);
-        }
-    }
+    verifyForwardOutputsNormalize<float>(1e-5);
+    verifyForwardOutputsNormalize<bfloat16>(1e-2);
+    verifyForwardOutputsNormalize<half>(1e-3);
 }
 
 // Liveness control for the test above. The LSE belongs to one scale; evaluating

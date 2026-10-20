@@ -54,8 +54,8 @@ public:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        // O has the same dims/strides as Q (with V's head dim for the last dimension).
-        const auto& oDims = tc.qDims;
+        // O has Q's batch, head and sequence dimensions, and V's head dimension.
+        const std::vector<int64_t> oDims{tc.qDims[0], tc.qDims[1], tc.qDims[2], tc.vDims[3]};
         const auto oStrides = generateStrides(oDims);
 
         // dO has the same dims/strides as O.
