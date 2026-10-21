@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.ProgressBar.update``.
+``tensilelite.Common.Utilities.ProgressBar.update``.
 
 These pin the exact arithmetic of the fraction computation and the strict
 ``>`` tick-advance comparison, so each test passes on clean source and fails
@@ -14,7 +14,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

@@ -68,7 +68,54 @@ def _cases():
         "kda_default": build(gate_kind="kda"),
         "kda_simple": build(gate_kind="kda", simple=True),
         "kda_raw_gate": build(gate_kind="kda", fuse_gate=False),
+        # f32 recurrent state, on both emitters and both gate kinds. Only the
+        # state loads and stores differ from the 16-bit twins above.
+        "default_stf32": build(state_dtype="f32"),
+        "simple_stf32": build(simple=True, state_dtype="f32"),
+        "kda_default_stf32": build(gate_kind="kda", state_dtype="f32"),
+        "kda_simple_stf32": build(gate_kind="kda", simple=True, state_dtype="f32"),
     }
+    # Fused conv1d / gated-RMSNorm modes, each flag alone and both, per gate
+    # kind and state width, at one explicit BPV=1 tile.
+    fused_tile = dict(
+        num_k_heads=16,
+        num_v_heads=16,
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+    )
+    for gate in ("gdn", "kda"):
+        for state_dtype in ("bf16", "f32"):
+            for conv, norm in ((True, False), (False, True), (True, True)):
+                tag = ("_cv" if conv else "") + ("_rn" if norm else "")
+                cases[f"fused_{gate}_st{state_dtype}{tag}"] = build(
+                    **fused_tile,
+                    gate_kind=gate,
+                    state_dtype=state_dtype,
+                    fuse_conv=conv,
+                    fuse_out_norm=norm,
+                )
+        # The conv state, the packed row and the out gate carry the I/O dtype,
+        # so f16 I/O is its own load/store path; f16 state is the third state
+        # width. Both flags on covers every fused access.
+        for dtype, state_dtype in (("bf16", "f16"), ("f16", "f16"), ("f16", "f32")):
+            io = "" if dtype == "bf16" else f"_io{dtype}"
+            cases[f"fused_{gate}{io}_st{state_dtype}_cv_rn"] = build(
+                **fused_tile,
+                gate_kind=gate,
+                dtype=dtype,
+                state_dtype=state_dtype,
+                fuse_conv=True,
+                fuse_out_norm=True,
+            )
+    # One wave: no cross-wave LDS reduction and no barrier before the tap shift.
+    cases["fused_kda_stf32_cv_rn_w1"] = build(
+        **{**fused_tile, "num_warps": 1},
+        gate_kind="kda",
+        state_dtype="f32",
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
     request = GdnDecodeRequest(batch=16, arch=_ARCH)
     for result in dispatch_gdn_decode_all(request):
         cases[f"registered_{result.candidate.spec_id}"] = (

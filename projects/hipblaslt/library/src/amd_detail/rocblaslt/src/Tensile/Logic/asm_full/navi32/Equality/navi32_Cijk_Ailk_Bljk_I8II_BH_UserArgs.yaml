@@ -250,6 +250,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2wOoghIuN
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWA4_GRVWB4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWA4_GRVWB4_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -379,6 +380,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 1
+  SolutionUID: 0uR2wOohfs3E
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWA4_GRVWB4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWA4_GRVWB4_GSU4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -509,6 +511,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 2
+  SolutionUID: 0uR2wOohLi13
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x64x32_MI16x16x1_SN_GRVWA4_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x64x32_MI16x16x1_SN_GRVWA4_GRVWB16_GSU1_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -638,6 +641,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 3
+  SolutionUID: 0uR2wOoh1nzF
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA4_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA4_GRVWB8_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -767,6 +771,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 4
+  SolutionUID: 0uR2wOohaM3X
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA4_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA4_GRVWB8_GSU4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -897,6 +902,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 5
+  SolutionUID: 0uR2wOohKXIW
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA4_GRVWB16_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA4_GRVWB16_GSU1_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS0_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -1026,6 +1032,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 6
+  SolutionUID: 0uR2wOoh2baa
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -1156,6 +1163,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 7
+  SolutionUID: 0uR2wOoheYZe
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT128x16x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA2048_LBSPPB128_LPB32_MIWT2_1_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT128x16x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU1_LBSPPA2048_LBSPPB128_LPB32_MIWT2_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -1286,6 +1294,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 8
+  SolutionUID: 0uR2wOoh9QN2
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT192x16x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA3072_LBSPPB128_LPB32_MIWT3_1_NLCA3_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT192x16x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU4_LBSPPA3072_LBSPPB128_LPB32_MIWT3_1_NLCA3_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -1418,6 +1427,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 9
+  SolutionUID: 0uR2wOohEGzc
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x32_MI16x16x1_SN_GRVWA8_GRVWB8_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x32_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -1548,6 +1558,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 10
+  SolutionUID: 0uR2wOoh7cIh
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT96x32x32_MI16x16x1_SN_GRVWA8_GRVWB8_LBSPPA1536_LBSPPB128_LPB32_MIWT3_1_NLCA3_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT96x32x32_MI16x16x1_SN_GRVWA8_GRVWB8_GSU4_LBSPPA1536_LBSPPB128_LPB32_MIWT3_1_NLCA3_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -1680,6 +1691,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 11
+  SolutionUID: 0uR2wOohc8Oc
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -1810,6 +1822,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 12
+  SolutionUID: 0uR2wOoh0CZK
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT128x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA2048_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT128x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU1_LBSPPA2048_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -1940,6 +1953,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 13
+  SolutionUID: 0uR2wOohZjeD
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT192x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA3072_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT192x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU1_LBSPPA3072_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -2071,6 +2085,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 14
+  SolutionUID: 0uR2wOoh6baG
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x64x32_MI16x16x1_SN_GRVWA4_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x64x32_MI16x16x1_SN_GRVWA4_GRVWB16_GSU1_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -2201,6 +2216,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 15
+  SolutionUID: 0uR2wOogz6L1
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x64x32_MI16x16x1_SN_GRVWA8_GRVWB16_LBSPPA512_LBSPPB128_LPB32_MIWT2_1_NLCA1_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x64x32_MI16x16x1_SN_GRVWA8_GRVWB16_GSU1_LBSPPA512_LBSPPB128_LPB32_MIWT2_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -2331,6 +2347,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 16
+  SolutionUID: 0uR2wOogu9kp
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT48x64x32_MI16x16x1_SN_GRVWA4_GRVWB16_LBSPPA768_LBSPPB128_LPB32_MIWT3_1_NLCA3_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT48x64x32_MI16x16x1_SN_GRVWA4_GRVWB16_GSU4_LBSPPA768_LBSPPB128_LPB32_MIWT3_1_NLCA3_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -2463,6 +2480,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 17
+  SolutionUID: 0uR2wOogsnaG
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x80x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_5_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x80x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_5_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -2593,6 +2611,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 18
+  SolutionUID: 0uR2wOoheZGx
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x80x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_5_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x80x32_MI16x16x1_SN_GRVWA16_GRVWB4_GSU4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_5_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -2724,6 +2743,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 19
+  SolutionUID: 0uR2wOohVlni
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWA16_GRVWB8_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -2854,6 +2874,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 20
+  SolutionUID: 0uR2wOohhrvr
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWA16_GRVWB8_GSU4_LBSPPA1024_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -2985,6 +3006,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 21
+  SolutionUID: 0uR2wOogdT4f
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT96x96x32_MI16x16x1_SN_GRVWA8_GRVWB8_LBSPPA1536_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT96x96x32_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_LBSPPA1536_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -3116,6 +3138,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 22
+  SolutionUID: 0uR2wOohDbtg
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT96x96x32_MI16x16x1_SN_GRVWA8_GRVWB8_LBSPPA1536_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT96x96x32_MI16x16x1_SN_GRVWA8_GRVWB8_GSU2_LBSPPA1536_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -3248,6 +3271,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 23
+  SolutionUID: 0uR2wOoh9rxU
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x160x32_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT2_5_NLCA1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x160x32_MI16x16x1_SN_GRVWA16_GRVWB8_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT2_5_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -3378,6 +3402,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 24
+  SolutionUID: 0uR2wOohSxZO
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x256x32_MI16x16x1_SN_GRVWA4_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_4_NLCA1_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x256x32_MI16x16x1_SN_GRVWA4_GRVWB16_GSU1_LBSPPA256_LBSPPB128_LPB32_MIWT1_4_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -3508,6 +3533,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 25
+  SolutionUID: 0uR2wOogsmo4
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA16_GRVWB8_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -3638,6 +3664,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 26
+  SolutionUID: 0uR2wOohJnn1
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x16x64_MI16x16x1_SN_GRVWA16_GRVWB8_GSU4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -3769,6 +3796,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 27
+  SolutionUID: 0uR2wOohhFUT
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA16_GRVWB16_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -3899,6 +3927,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 28
+  SolutionUID: 0uR2wOohQrFP
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA16_GRVWB16_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA16_GRVWB16_GSU4_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG32_4_1_WGM18
   ActivationFuncCall: false
@@ -4030,6 +4059,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 29
+  SolutionUID: 0uR2wOohPOfq
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x48x64_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x48x64_MI16x16x1_SN_GRVWA16_GRVWB8_GSU1_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -4160,6 +4190,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 30
+  SolutionUID: 0uR2wOohcZsN
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x48x64_MI16x16x1_SN_GRVWA16_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT64x48x64_MI16x16x1_SN_GRVWA16_GRVWB8_GSU4_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG64_2_1_WGM18
   ActivationFuncCall: false
@@ -4291,6 +4322,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 31
+  SolutionUID: 0uR2wOogpzhb
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x64x64_MI16x16x1_SN_GRVWA8_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x64x64_MI16x16x1_SN_GRVWA8_GRVWB16_GSU1_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -4421,6 +4453,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 32
+  SolutionUID: 0uR2wOoh5Ysl
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x128x64_MI16x16x1_SN_GRVWA8_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_2_NLCA1_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x128x64_MI16x16x1_SN_GRVWA8_GRVWB16_GSU1_LBSPPA256_LBSPPB128_LPB32_MIWT1_2_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false
@@ -4551,6 +4584,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 0
 - SolutionIndex: 33
+  SolutionUID: 0uR2wOohitKD
   KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x192x64_MI16x16x1_SN_GRVWA8_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_TLDS1_WG16_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_UserArgs_MT16x192x64_MI16x16x1_SN_GRVWA8_GRVWB16_GSU1_LBSPPA256_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_SU0_SUM1_SUS0_TLDS1_WG16_8_1_WGM18
   ActivationFuncCall: false

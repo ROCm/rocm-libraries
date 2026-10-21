@@ -52,10 +52,6 @@ def complete_metadata(metadata, kmd):
     return result
 
 
-def overlap(left, right):
-    return not left or not right or bool(set(left) & set(right))
-
-
 def validate_consumer(consumer, kmd):
     required = {
         "engine_id",
@@ -420,6 +416,11 @@ def verify(ukd, records, payload):
         raise HkpPackError("effective_spec symbol binding mismatch")
     if [observations.get("arch")] != ukd.get("arch"):
         raise HkpPackError("effective_spec architecture binding mismatch")
+    # The processor the object was compiled for (the shard arch, or its generic
+    # family) is what provenance tells a reader; the compiler's own record of it
+    # must agree, so a generic object cannot be relabelled native or vice versa.
+    if observations.get("compile_target") != ukd["provenance"].get("compile_target"):
+        raise HkpPackError("effective_spec compile-target binding mismatch")
     producer = observations.get("producer", {})
     for role in ("builder", "spec"):
         identity = producer.get(role, {})
