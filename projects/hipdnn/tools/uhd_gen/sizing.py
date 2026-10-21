@@ -347,12 +347,15 @@ def _write_subset(
 
 
 def _score(report_path: Path, tolerance: float) -> dict:
+    """The held-out rows' errors, keyed by what each was measured on: (benchmark, device,
+    engine). One shape measured on two kinds of device, or by two engines, is not one row.
+    """
     report = json.loads(report_path.read_text(encoding="utf-8"))
     errors = {}
     for row in report.get("per_row") or []:
         value = row.get("signed_relative_error")
         if isinstance(value, (int, float)) and math.isfinite(value):
-            errors[row["key"][0]] = abs(value)
+            errors[(*row["key"], row.get("engine"))] = abs(value)
     if not errors:
         raise ValueError(f"{report_path} scored no test row")
     values = list(errors.values())
@@ -668,7 +671,7 @@ def run_size(args: argparse.Namespace) -> int:
             regimes[regime] = {"train": 0, "test": 0, "misses": 0, "errors": []}
         for shape in pool:
             regimes[regime_of.get(shape, "unlabelled")]["train"] += 1
-        for benchmark, error in (full_errors or {}).items():
+        for (benchmark, *_), error in (full_errors or {}).items():
             info = regimes[regime_of.get(benchmark, "unlabelled")]
             info["test"] += 1
             info["misses"] += error > args.tolerance

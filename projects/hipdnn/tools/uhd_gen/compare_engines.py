@@ -3,7 +3,8 @@
 """Cross-engine comparison of L1 collections over one corpus, per ranking metric.
 
 Joins each engine's `predict_engine` corpus CSVs on `benchmark` (stable across engines)
-to show which engine is best per problem, per manifest regime (RFC 0019.13 §11.2). A row
+and `device` (a kind of GPU: engines are compared on the same hardware only) to show which
+engine is best per problem, per manifest regime (RFC 0019.13 §11.2). A row
 counts only toward the metric its `binding.metric` was collected under: the engine picks
 its kernel for the requested metric, so a `time` collection's throughput is not the
 engine's `tflops` answer. One label may name several corpora of one engine.
@@ -29,10 +30,11 @@ from .ranking_metrics import RANKING_METRICS, is_valid_metric_value
 
 
 def measure(specs: list[str], names: dict[str, str], metrics: list[str]):
-    """(labels in the order named, metric -> benchmark -> label -> best valid value).
+    """(labels in the order named, metric -> (benchmark, device) -> label -> best valid value).
 
-    An engine's number for a problem is its best valid measurement in that metric, in the
-    metric's direction. A label whose corpora disagree on the engine or its selector
+    An engine's number for a problem is its best valid measurement of that graph on that
+    device in that metric, in the metric's direction; a measurement on another device is
+    another problem, never a candidate for the best. A label whose corpora disagree on the engine or its selector
     contract within one metric is refused: its numbers would not describe one engine.
     """
     labels: list[str] = []
@@ -56,6 +58,8 @@ def measure(specs: list[str], names: dict[str, str], metrics: list[str]):
             benchmark = str(record["benchmark"])
             if metric_name not in best or benchmark not in names:
                 continue
+            device = record.get("device")
+            problem = (benchmark, "" if pd.isna(device) else str(device))
             contract = (
                 binding.get("engine"),
                 json.dumps(binding.get("trained_against"), sort_keys=True),
@@ -70,7 +74,7 @@ def measure(specs: list[str], names: dict[str, str], metrics: list[str]):
             if pd.isna(value) or not is_valid_metric_value(metric_name, float(value)):
                 continue
             value = float(value)
-            scores = best[metric_name][benchmark]
+            scores = best[metric_name][problem]
             if label in scores:
                 choose = max if metric.objective == "max" else min
                 value = choose(value, scores[label])
@@ -78,19 +82,33 @@ def measure(specs: list[str], names: dict[str, str], metrics: list[str]):
     return labels, best
 
 
+def _problem_name(problem: tuple[str, str], names: dict[str, str], devices: int) -> str:
+    """A problem's graph name, qualified by its device when the corpora hold several."""
+    benchmark, device = problem
+    name = names.get(benchmark, benchmark)
+    return f"{name} @ {device}" if devices > 1 and device else name
+
+
 def compare(metric_name, measurements, labels, regime, names, total) -> dict:
-    """Print one metric's comparison and return its report section."""
+    """Print one metric's comparison and return its report section.
+
+    `measurements` maps each (benchmark, device) problem to its engines' values; `total` is
+    the corpus's graph count, so coverage is of every graph on every device measured.
+    """
     metric = RANKING_METRICS[metric_name]
     choose = max if metric.objective == "max" else min
+    devices = len({device for _, device in measurements}) or 1
+    total *= devices
     # Sorted, so an exact tie goes to the same label whatever order corpora were named in.
     winners = {
-        benchmark: choose(sorted(scores), key=scores.get)
-        for benchmark, scores in measurements.items()
+        problem: choose(sorted(scores), key=scores.get)
+        for problem, scores in measurements.items()
     }
     wins = collections.Counter(winners.values())
     print(f"\n=== {metric_name} ({metric.units}, {metric.objective}) ===")
     print(
-        f"corpus {total} graphs; {len(measurements)} carry at least one measurement\n"
+        f"corpus {total} graph/device problems; {len(measurements)} carry at least one "
+        "measurement\n"
     )
     print(f"{'engine':<12} {'measured':>9} {'coverage':>9} {'wins':>6} {'win rate':>9}")
     measured = {
@@ -105,40 +123,41 @@ def compare(metric_name, measurements, labels, regime, names, total) -> dict:
             f"{wins[label]:>6} {rate:>8.1f}%"
         )
 
-    contested = {b: s for b, s in measurements.items() if len(s) > 1}
-    print(f"\ncontested: {len(contested)} graphs have two or more engines measured")
+    contested = {p: s for p, s in measurements.items() if len(s) > 1}
+    print(f"\ncontested: {len(contested)} problems have two or more engines measured")
     if contested:
         print(f"\n{'regime':<26} {'graphs':>7}  winners")
         by_regime: dict[str, collections.Counter] = collections.defaultdict(
             collections.Counter
         )
-        for benchmark in contested:
-            by_regime[regime.get(benchmark, "?")][winners[benchmark]] += 1
+        for problem in contested:
+            by_regime[regime.get(problem[0], "?")][winners[problem]] += 1
         for label, counter in sorted(by_regime.items()):
             spread = ", ".join(f"{k} {v}" for k, v in counter.most_common())
             print(f"{label:<26} {sum(counter.values()):>7}  {spread}")
 
-        # How far the winner beats the runner-up, relative to the slower of the two.
+        # How far the winner beats the runner-up, relative to the slower of the two: the
+        # runner-up, whichever way the metric points (less throughput, or more time).
         margins = []
-        for benchmark, scores in contested.items():
+        for problem, scores in contested.items():
             ranked = sorted(
                 scores.items(),
                 key=lambda kv: kv[1],
                 reverse=metric.objective == "max",
             )
             winner, runner_up = ranked[0][1], ranked[1][1]
-            slower = runner_up if metric.objective == "max" else winner
-            if slower:
-                margin = abs(winner - runner_up) / slower
+            if runner_up:
+                margin = abs(winner - runner_up) / runner_up
             else:
                 margin = 0.0 if winner == runner_up else float("inf")
-            margins.append((margin, benchmark, ranked))
+            margins.append((margin, problem, ranked))
         margins.sort(reverse=True)
         print("\nwidest margins (winner over runner-up):")
-        for margin, benchmark, ranked in margins[:8]:
+        for margin, problem, ranked in margins[:8]:
             spread = "  ".join(f"{label} {value:.4g}" for label, value in ranked)
             print(
-                f"  {margin * 100:6.1f}%  {names.get(benchmark, benchmark)[:58]:<58} {spread}"
+                f"  {margin * 100:6.1f}%  "
+                f"{_problem_name(problem, names, devices)[:58]:<58} {spread}"
             )
         close = [m for m, _, _ in margins if m < 0.05]
         print(
@@ -151,7 +170,10 @@ def compare(metric_name, measurements, labels, regime, names, total) -> dict:
         "measured": measured,
         "wins": dict(wins),
         "contested": len(contested),
-        "per_graph": {names.get(b, b): s for b, s in measurements.items()},
+        "per_graph": {
+            _problem_name(problem, names, devices): scores
+            for problem, scores in measurements.items()
+        },
     }
 
 

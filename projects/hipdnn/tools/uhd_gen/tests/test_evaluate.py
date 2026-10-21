@@ -428,9 +428,21 @@ def test_split_is_reproducible_and_seed_dependent():
     assert (
         first.eval_problems == again.eval_problems
     ), "row order must not move the slice"
-    assert len(first.eval_problems) == 10
+    assert 0 < len(first.eval_problems) < 40
     assert set(first.eval_problems) & set(first.train_problems) == set()
     assert first.eval_problems != other.eval_problems
+
+
+def test_growing_the_corpus_never_moves_a_shape_across_the_split():
+    """A shape is held out by its own hash and the seed alone: shapes trained on stay
+    trained on, and held-out shapes stay held out, as more shapes arrive."""
+    small = [("g%03d" % i,) for i in range(60)]
+    grown = [("g%03d" % i,) for i in range(300)]
+    before = split_problems(small, 0.25, seed=5)
+    after = split_problems(grown, 0.25, seed=5)
+
+    assert set(before.eval_problems) <= set(after.eval_problems)
+    assert set(before.train_problems) <= set(after.train_problems)
 
 
 def test_split_never_returns_an_empty_slice():
@@ -446,8 +458,8 @@ def test_split_keeps_every_device_of_a_shape_on_one_side():
     held = {shape for shape, _ in split.eval_problems}
     trained = {shape for shape, _ in split.train_problems}
     assert held & trained == set()
-    assert len(held) == 10
-    assert len(split.eval_problems) == 20, "both devices of each held shape"
+    assert held
+    assert len(split.eval_problems) == 2 * len(held), "both devices of each held shape"
 
 
 def test_split_moves_whole_problems_not_rows():
@@ -478,8 +490,9 @@ def test_split_moves_whole_problems_not_rows():
     )
 
     assert result.report["split"]["unit"] == "problem"
-    assert result.report["split"]["eval_problems"] == 3
-    assert result.report["metrics"]["problems_scored"] == 3
+    held = result.report["split"]["eval_problems"]
+    assert held >= 1
+    assert result.report["metrics"]["problems_scored"] == held
     for problem in result.problems:
         assert problem.candidates == 4
         assert problem.oracle_value == pytest.approx(1.0)
@@ -488,7 +501,7 @@ def test_split_moves_whole_problems_not_rows():
 
     # Recorded, so the figure is reproducible from the report alone.
     assert result.report["split"]["seed"] == 3
-    assert len(result.report["split"]["eval_problem_keys"]) == 3
+    assert len(result.report["split"]["eval_problem_keys"]) == held
 
 
 def test_a_row_wise_split_would_report_a_materially_better_number():

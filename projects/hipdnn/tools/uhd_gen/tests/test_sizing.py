@@ -101,6 +101,35 @@ def test_the_ceiling_scores_repeats_against_the_label_never_the_label_itself():
     )
 
 
+def test_one_shape_on_two_devices_or_engines_is_scored_as_separate_rows(tmp_path):
+    from uhd_gen.sizing import _score
+
+    def row(device, engine, error):
+        return {
+            "key": ["g", device],
+            "engine": engine,
+            "signed_relative_error": error,
+        }
+
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "per_row": [
+                    row("mi300", 7, 0.01),
+                    row("mi325", 7, 0.30),
+                    row("mi300", 9, -0.20),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    scored = _score(report, 0.1)
+    assert scored["rows"] == 3
+    assert scored["within"] == pytest.approx(1 / 3)
+    assert scored["errors"][("g", "mi325", 7)] == pytest.approx(0.30)
+
+
 def test_every_regime_reaches_the_floor_before_the_rest_follows_the_misses():
     regimes = {
         "common": {"train": 500, "test": 100, "misses": 40},
@@ -188,7 +217,7 @@ def store(tmp_path, monkeypatch):
     # device's properties) does not.
     engine = {"board": "board-a", "kind": "kind-1"}
 
-    def bench(command, environment, log_dir, ordinal, commands):
+    def bench(command, environment, log_dir, ordinal, commands, timeout=None):
         commands.append({"argv": command})
         metric = command[command.index("--ranking-metric") + 1]
         graph = json.loads(

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_corpus_gen/DeterministicRandom.hpp>
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 
 #include <algorithm>
@@ -141,8 +142,8 @@ inline std::optional<ProblemPoint> drawFromArchetype(const OperationMetadata& me
             continue;
         }
 
-        std::uniform_int_distribution<size_t> pick(0, declared->second.size() - 1);
-        auto value = archetypeValue(declared->second.at(pick(rng)), point);
+        auto value = archetypeValue(declared->second.at(uniformIndex(rng, declared->second.size())),
+                                    point);
         if(!value.has_value())
         {
             return std::nullopt;
@@ -175,10 +176,7 @@ inline int64_t perturbOne(const Parameter& parameter,
                           const ProblemPoint& drawnSoFar,
                           std::mt19937_64& rng)
 {
-    const auto choose = [&rng](size_t count) {
-        std::uniform_int_distribution<size_t> pick(0, count - 1);
-        return pick(rng);
-    };
+    const auto choose = [&rng](size_t count) { return uniformIndex(rng, count); };
 
     switch(hood.kind)
     {

@@ -382,3 +382,13 @@ TEST(TestCorpusManifest, AnExcludedCorpusMissingAGraphFileIsAnErrorNotAnEmptySet
               {{"graphs", {{{"benchmark", "an-id"}, {"file", "graphs/gone.fb"}}}}});
     EXPECT_THROW(excludedGraphKeys({corpus.path / "manifest.json"}), std::runtime_error);
 }
+
+TEST(TestCorpusManifest, AManifestThatCannotBeWrittenIsAnErrorNotASmallerCorpus)
+{
+    // A directory in the manifest's place makes the write fail; a run that went on would leave
+    // graphs and commands that no manifest lists.
+    const ScratchDirectory corpus("manifest-unwritable");
+    std::filesystem::create_directory(corpus.path / "manifest.json");
+
+    EXPECT_THROW(writeCorpusManifest(corpus.path, {}, ManifestContext{}), std::runtime_error);
+}

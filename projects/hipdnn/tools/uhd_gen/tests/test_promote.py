@@ -877,6 +877,29 @@ def test_a_score_must_name_a_registered_metric_in_its_own_direction(
         build_plan(model, tree)
 
 
+@pytest.mark.parametrize("transform", ["", "identity", "log1p", "log", "exp", "sqrt"])
+def test_every_transform_the_runtime_inverts_is_installable(tmp_path, transform):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    doc["score"] = {"calibrated": False, "transform": transform}
+    _write(model / "heuristic.uhd.json", doc)
+    build_plan(model, tree)
+
+
+@pytest.mark.parametrize("transform", ["cubic", "LOG", 1, None, ["log"]])
+def test_a_transform_the_runtime_refuses_is_refused_before_installation(
+    tmp_path, transform
+):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    doc["score"] = {"calibrated": False, "transform": transform}
+    _write(model / "heuristic.uhd.json", doc)
+    with pytest.raises(PromoteError, match="score.transform must be one of"):
+        build_plan(model, tree)
+
+
 def test_a_static_order_declaring_criteria_is_refused_before_any_write(tmp_path):
     """static_order takes no parameters; the runtime refuses a body with `order`."""
     tree = _tree(tmp_path / "tree")

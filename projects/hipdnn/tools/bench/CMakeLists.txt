@@ -39,7 +39,17 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             "warmup_negative|--warmup,-1,--help|1|--warmup needs a number of at least 0"
             "iterations_past_int|--max-iterations,4294967296,--help|1|--max-iterations needs a number of at most 2147483647"
             "stability_negative|--stability,-0.1,--help|1|--stability needs a number of at least 0"
-            "engine_id_unsigned|--engine-id,18446744073709551615,--help|0|Usage:")
+            "engine_id_unsigned|--engine-id,18446744073709551615,--help|0|Usage:"
+            # A workspace limit is a query constraint, which engine-level queries do not take.
+            "workspace_limit_collect|--graph,g.fb,--collect-immediate,--workspace-limit,64|1|--workspace-limit"
+            "workspace_limit_predict|--graph,g.fb,--predict-engine,--workspace-limit,64|1|--workspace-limit"
+            "workspace_limit_describe|--graph,g.fb,--describe-engine-prediction,--knob,global.workspace_size_limit=64|1|--workspace-limit")
+        # The tests run a CMake driver script, so their one run-time prerequisite (the tool
+        # binary) is appended to CHECK_DEPENDS_GLOBAL by hand, as for hipdnn_list_engines_smoke.
+        # Build-tree only.
+        set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_bench_tool
+            CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
+        )
     endif()
 endif()
 

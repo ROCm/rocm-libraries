@@ -280,6 +280,10 @@ def problem_keys(df: pd.DataFrame, grouping: Grouping) -> pd.Series:
 # --------------------------------------------------------------------------------------
 
 
+#: The size of the range `_problem_digest` draws from (SHA-256).
+_DIGEST_RANGE = 2**256
+
+
 def _problem_digest(key: Sequence[str], seed: int) -> str:
     payload = "\x1f".join(str(part) for part in key) + f"|seed={seed}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -320,11 +324,13 @@ def split_problems(
     """Hold out `fraction` of the shapes, reproducibly, with every problem on them.
 
     A problem key starts with its shape (`benchmark`); all its devices land on one side,
-    so a shape trained on one GPU is never scored as unseen on another. The shapes with the
-    lowest seeded hashes are held out, `round(fraction * shapes)` of them, so the split
-    depends on the set of shapes and the seed, never on row order (§5.6.3). A corpus that
-    grows can move a shape across, as the count grows: to keep a slice fixed while a corpus
-    grows, hold it out by graph id (corpus_gen's evaluation slice, `--eval-benchmarks`).
+    so a shape trained on one GPU is never scored as unseen on another. A shape is held out
+    when its seeded hash, read as a fraction of the hash range, is below `fraction`: it
+    depends on the shape and the seed alone, never on row order (§5.6.3) or on which other
+    shapes the corpus holds, so a corpus that grows never moves a shape across. The held
+    count is `fraction` of the shapes only in expectation. Only a corpus too small for any
+    shape to fall below `fraction` holds out its lowest-hash shape anyway, so the slice is
+    imprecise rather than empty; that shape can change as such a corpus grows.
 
     With `values` (`finite_values`), every value of every finite field stays in training: a
     held shape carrying a value no training shape has goes back to training, highest hash
@@ -344,8 +350,13 @@ def split_problems(
     if fraction >= 1.0:
         count = len(shapes)
     else:
+        count = sum(
+            1
+            for shape in shapes
+            if int(_problem_digest((shape,), seed), 16) < fraction * _DIGEST_RANGE
+        )
         # At least one shape, so a small corpus gets an imprecise slice, not an empty one.
-        count = max(1, round(fraction * len(shapes)))
+        count = max(1, count)
     held_shapes = set(shapes[:count])
     if values and count < len(shapes):
         covered = set().union(

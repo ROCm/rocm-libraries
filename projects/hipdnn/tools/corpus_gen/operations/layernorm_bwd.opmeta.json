@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "operation": "layernorm_bwd",
   "display_name": "Layer Normalization, Backward",
-  "description": "Gradients of layer normalization over the trailing hidden dimension: dx from dy, and dscale and dbias.",
+  "description": "Gradients of layer normalization over the trailing hidden dimension: dx from dy and the forward pass's saved mean and inverse variance, and dscale and dbias.",
   "parameters": {
     "batch": {
       "type": "int64"
@@ -154,6 +154,34 @@
         "of": "dbiasDims"
       },
       {
+        "name": "meanDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          1
+        ]
+      },
+      {
+        "name": "meanStrides",
+        "kind": "strides_of",
+        "of": "meanDims"
+      },
+      {
+        "name": "invVarianceDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          1
+        ]
+      },
+      {
+        "name": "invVarianceStrides",
+        "kind": "strides_of",
+        "of": "invVarianceDims"
+      },
+      {
         "name": "dataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
@@ -177,6 +205,16 @@
         "name": "normalizedDimCount",
         "kind": "constant",
         "constant": 1
+      },
+      {
+        "name": "meanDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "invVarianceDataType",
+        "kind": "constant",
+        "constant": "float"
       }
     ],
     "// types": "Operands carry the declared dtype; statistics accumulate in fp32. Left to default, compute follows io, and hip-kernel-provider's Layernorm plan builder refuses any node whose compute_data_type is not fp32."

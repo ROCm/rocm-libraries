@@ -1094,4 +1094,127 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
     EXPECT_TRUE(found) << "the node names a stats tensor the graph does not carry";
 }
 
+namespace
+{
+
+OperationMetadata shipped(const std::string& operation)
+{
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation + ".opmeta.json");
+    EXPECT_TRUE(file.good()) << operation;
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    EXPECT_TRUE(parsed.ok()) << operation;
+    return parsed.metadata.value_or(OperationMetadata{});
+}
+
+/// The tensor with @p uid, or null.
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorWith(const GraphBytes& bytes,
+                                                                         int64_t uid)
+{
+    for(const auto* tensor : *asGraph(bytes)->tensors())
+    {
+        if(tensor->uid() == uid)
+        {
+            return tensor;
+        }
+    }
+    return nullptr;
+}
+
+/// Expects the statistics tensor @p uid to exist, in fp32, with @p dims.
+void expectStatistics(const GraphBytes& bytes,
+                      flatbuffers::Optional<int64_t> uid,
+                      const std::vector<int64_t>& dims,
+                      const std::string& what)
+{
+    ASSERT_TRUE(uid.has_value()) << what << " is not named by the node";
+    const auto* tensor = tensorWith(bytes, uid.value());
+    ASSERT_NE(tensor, nullptr) << what << " names a tensor the graph does not carry";
+    EXPECT_EQ(tensor->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT) << what;
+    EXPECT_EQ(std::vector<int64_t>(tensor->dims()->begin(), tensor->dims()->end()), dims) << what;
+}
+
+ProblemPoint layerNormPoint(const std::string& rank)
+{
+    return ProblemPoint{{"batch", int64_t{2}},
+                        {"seq_len", int64_t{16}},
+                        {"hidden_dim", int64_t{64}},
+                        {"dtype", std::string("bf16")},
+                        {"rank", rank}};
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::Node* firstNode(const GraphBytes& bytes)
+{
+    return asGraph(bytes)->nodes()->Get(0);
+}
+
+} // namespace
+
+TEST(TestGraphBuilderRegistry, TheTrainingNormForwardsWriteTheStatisticsTheirBackwardsRead)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto layer = buildGraphFor(shipped("layernorm_fwd_training"), layerNormPoint("4"));
+    ASSERT_TRUE(layer.ok()) << layer.error;
+    const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormAttributes();
+    ASSERT_NE(layerNode, nullptr);
+    EXPECT_EQ(layerNode->forward_phase(), fb::NormFwdPhase::TRAINING);
+    expectStatistics(layer.bytes, layerNode->mean_tensor_uid(), {2, 16, 1, 1}, "layernorm mean");
+    expectStatistics(
+        layer.bytes, layerNode->inv_variance_tensor_uid(), {2, 16, 1, 1}, "layernorm inv_variance");
+
+    const auto rms = buildGraphFor(shipped("rmsnorm_fwd_training"), layerNormPoint("3"));
+    ASSERT_TRUE(rms.ok()) << rms.error;
+    const auto* rmsNode = firstNode(rms.bytes)->attributes_as_RMSNormAttributes();
+    ASSERT_NE(rmsNode, nullptr);
+    EXPECT_EQ(rmsNode->forward_phase(), fb::NormFwdPhase::TRAINING);
+    expectStatistics(rms.bytes, rmsNode->inv_rms_tensor_uid(), {2, 16, 1}, "rmsnorm inv_rms");
+}
+
+TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStatistics)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto layer = buildGraphFor(shipped("layernorm_fwd"), layerNormPoint("3"));
+    ASSERT_TRUE(layer.ok()) << layer.error;
+    const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormAttributes();
+    ASSERT_NE(layerNode, nullptr);
+    EXPECT_EQ(layerNode->forward_phase(), fb::NormFwdPhase::INFERENCE);
+    EXPECT_FALSE(layerNode->mean_tensor_uid().has_value());
+    EXPECT_FALSE(layerNode->inv_variance_tensor_uid().has_value());
+
+    const auto rms = buildGraphFor(shipped("rmsnorm_fwd"), layerNormPoint("3"));
+    ASSERT_TRUE(rms.ok()) << rms.error;
+    const auto* rmsNode = firstNode(rms.bytes)->attributes_as_RMSNormAttributes();
+    ASSERT_NE(rmsNode, nullptr);
+    EXPECT_EQ(rmsNode->forward_phase(), fb::NormFwdPhase::INFERENCE);
+    EXPECT_FALSE(rmsNode->inv_rms_tensor_uid().has_value());
+}
+
+TEST(TestGraphBuilderRegistry, TheNormBackwardsReadTheStatisticsTheTrainingForwardWrote)
+{
+    const auto layer = buildGraphFor(shipped("layernorm_bwd"), layerNormPoint("3"));
+    ASSERT_TRUE(layer.ok()) << layer.error;
+    const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormBackwardAttributes();
+    ASSERT_NE(layerNode, nullptr);
+    expectStatistics(layer.bytes, layerNode->mean_tensor_uid(), {2, 16, 1}, "layernorm mean");
+    expectStatistics(
+        layer.bytes, layerNode->inv_variance_tensor_uid(), {2, 16, 1}, "layernorm inv_variance");
+
+    const ProblemPoint batchnorm{{"N", int64_t{2}},
+                                 {"C", int64_t{8}},
+                                 {"H", int64_t{4}},
+                                 {"W", int64_t{4}},
+                                 {"spatial", std::string("2d")},
+                                 {"D", int64_t{1}},
+                                 {"layout", std::string("channels_first")},
+                                 {"dtype", std::string("fp16")}};
+    const auto batch = buildGraphFor(shipped("batchnorm_bwd"), batchnorm);
+    ASSERT_TRUE(batch.ok()) << batch.error;
+    const auto* batchNode = firstNode(batch.bytes)->attributes_as_BatchnormBackwardAttributes();
+    ASSERT_NE(batchNode, nullptr);
+    expectStatistics(batch.bytes, batchNode->mean_tensor_uid(), {1, 8, 1, 1}, "batchnorm mean");
+    expectStatistics(
+        batch.bytes, batchNode->inv_variance_tensor_uid(), {1, 8, 1, 1}, "batchnorm inv_variance");
+}
+
 } // namespace hipdnn_corpus_gen

@@ -17,6 +17,10 @@ TRAINED = "log"
 #: Transforms uhd_gen can invert, so older `log1p`/`identity` models still score.
 INVERTIBLE = ("identity", "log1p", "log")
 
+#: Every `score.transform` the runtime accepts (`SUPPORTED_TRANSFORMS`, ScoreTransform.hpp);
+#: empty means the raw target. A UHD declaring another name is refused when it is loaded.
+SUPPORTED_TRANSFORMS = ("", "identity", "log1p", "log", "exp", "sqrt")
+
 
 def forward(target: np.ndarray) -> np.ndarray:
     """Target -> the space the model is fitted in. Targets must be strictly positive."""

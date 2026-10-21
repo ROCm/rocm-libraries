@@ -72,6 +72,8 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
                 # With quotas and no --count, the corpus is the quotas alone.
                 "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3|0|3"
+                # A sweep with no share still delivers the regimes the quotas name.
+                "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"
                 # The engine path, host-only: every problem is offered to the test plugin's
                 # engine, which serves matmul without a device.
@@ -96,6 +98,11 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             _apply_hipdnn_test_category_labels(${_test})
         endforeach()
 
+        # The engine run needs no device: the engine's applicability is asked of the plugin, not
+        # of a device-ranked list, so it must pass where none is visible.
+        set_property(TEST hipdnn_corpus_gen_cli_run_engine APPEND PROPERTY
+            ENVIRONMENT_MODIFICATION "HIP_VISIBLE_DEVICES=set:-1")
+
         # Corpora compared by content key: an excluded corpus shares no graph with the one
         # excluding it, and a seed reproduces its corpus.
         foreach(_mode IN ITEMS exclude seed)
@@ -113,6 +120,14 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             endif()
             _apply_hipdnn_test_category_labels(${_test})
         endforeach()
+
+        # These tests run CMake driver scripts, not a gtest executable, so add_hipdnn_test()
+        # does not track their run-time prerequisites: the tool and, for the engine run, the
+        # test plugin whose engine it is offered. Build-tree only, as hipdnn_list_engines_smoke.
+        set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_corpus_gen_tool
+            ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
+            CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
+        )
     endif()
 endif()
 

@@ -95,7 +95,7 @@ def _sweep(page, *results):
 def _collect(monkeypatch, tmp_path, responses, calls=None):
     iterator = iter(responses)
 
-    def _record(command, *args):
+    def _record(command, *args, **kwargs):
         if calls is not None:
             calls.append(command)
         return next(iterator)
@@ -432,7 +432,7 @@ def _immediate_bench(
     """
     requested = []
 
-    def bench(command, environment, log_dir, ordinal, commands):
+    def bench(command, environment, log_dir, ordinal, commands, timeout=None):
         commands.append({"argv": command})
         metric = command[command.index("--ranking-metric") + 1]
         requested.append(metric)
@@ -708,7 +708,7 @@ def test_graph_failures_over_the_budget_fail_the_run_and_keep_what_measured(
         "4.json",
     ]
 
-    def bench(*args):
+    def bench(*args, **kwargs):
         pytest.fail("training a kept collection ran the bench")
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
@@ -749,7 +749,7 @@ def test_an_l1_measurement_cannot_inherit_a_benchmarking_override(
     monkeypatch.setenv("HIPDNN_LOG_FILE", str(tmp_path / "caller.log"))
     seen = []
 
-    def bench(command, environment, *args):
+    def bench(command, environment, *args, **kwargs):
         seen.append(environment.get("HIPDNN_FORCE_BENCHMARKING"))
         cache = environment.get("HIPDNN_CACHE_DIR")
         assert cache and cache != str(tmp_path / "caller_cache")
@@ -871,7 +871,7 @@ def test_the_measured_tree_is_the_only_descriptor_root_the_bench_sees(
     monkeypatch.setenv("HIPDNN_DESCRIPTOR_PATH", str(tmp_path / "additive"))
     seen = []
 
-    def bench(command, environment, *args):
+    def bench(command, environment, *args, **kwargs):
         seen.append(dict(environment))
         raise ValueError("stop after observing the child environment")
 
@@ -1060,6 +1060,93 @@ def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
         )
     with pytest.raises(ValueError, match="one JSON response"):
         _run_json(bench("print('not json')"), {}, tmp_path / "logs", 2, commands)
+
+
+def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
+    import sys
+
+    from uhd_gen.generate import _run_json
+
+    script = tmp_path / "hang.py"
+    script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+    commands: list = []
+    with pytest.raises(ValueError, match="timed out after 0.5 s"):
+        _run_json(
+            [sys.executable, str(script)],
+            {},
+            tmp_path / "logs",
+            0,
+            commands,
+            timeout=0.5,
+        )
+    assert commands[0]["returncode"] is None
+    assert (tmp_path / "logs" / "000000.stderr.txt").is_file()
+
+
+def test_a_timed_out_graph_is_a_failed_graph_not_a_hang(monkeypatch, tmp_path, caplog):
+    """The budget reaches every bench run, and a run past it fails its graph like any other
+    failing run: the generate run reports the failure instead of waiting on the bench.
+    """
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    seen = []
+
+    def bench(command, environment, log_dir, ordinal, commands, timeout=None):
+        seen.append(timeout)
+        raise ValueError(f"hipdnn_bench timed out after {timeout:g} s")
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    find_any_bench(monkeypatch)
+    arguments = [
+        "generate",
+        "--graphs",
+        str(_graphs(tmp_path / "graphs", 1)),
+        "--descriptor-tree",
+        str(tree),
+        "--engine-id",
+        "7",
+        "--role",
+        "predict_engine",
+        "--arch",
+        "gfx942",
+        "--bench-timeout",
+        "12.5",
+        "--output-dir",
+        str(tmp_path / "out"),
+    ]
+    assert main(arguments) == 1
+    assert seen and set(seen) == {12.5}
+    assert "timed out after 12.5 s" in caplog.text
+
+
+def test_each_bench_run_starts_from_an_empty_cache_of_its_own(tmp_path):
+    """A run may leave a winner record; the next run, of the same graph or another, must not
+    find it."""
+    import os
+    import sys
+
+    from uhd_gen.generate import _run_json
+
+    script = tmp_path / "bench.py"
+    script.write_text(
+        "import os, pathlib\n"
+        "cache = pathlib.Path(os.environ['HIPDNN_CACHE_DIR'])\n"
+        "assert not any(cache.iterdir()), 'cache not empty'\n"
+        "(cache / 'winner').write_text('x')\n"
+        "print('{}')\n",
+        encoding="utf-8",
+    )
+    root = tmp_path / "cache"
+    commands: list = []
+    for ordinal in range(2):
+        _run_json(
+            [sys.executable, str(script)],
+            {**os.environ, "HIPDNN_CACHE_DIR": str(root)},
+            tmp_path / "logs",
+            ordinal,
+            commands,
+        )
+    assert not any(root.iterdir())
 
 
 def test_the_bench_sweep_entry_is_read_as_the_bench_writes_it(monkeypatch, tmp_path):

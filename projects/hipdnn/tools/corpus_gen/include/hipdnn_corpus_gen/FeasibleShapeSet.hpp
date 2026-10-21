@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <hipdnn_corpus_gen/DeterministicRandom.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -135,9 +137,8 @@ inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::
     shape.reserve(dimensions.size());
     for(const auto& dimension : dimensions)
     {
-        std::uniform_real_distribution<double> distribution(
-            toLog(1), toLogFrom(dimension.high, dimension.low));
-        shape.push_back(fromLogFrom(distribution(rng), dimension.low, dimension.high));
+        const double along = uniformReal(rng, toLog(1), toLogFrom(dimension.high, dimension.low));
+        shape.push_back(fromLogFrom(along, dimension.low, dimension.high));
     }
     return shape;
 }
@@ -314,20 +315,19 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
     // Half axis-aligned, half random: random directions rarely stay inside per-coordinate
     // constraints (e.g. multiples of 8); axis steps cannot cross a diagonal ridge.
     std::vector<double> direction(dimensions.size(), 0.0);
-    std::bernoulli_distribution axisAligned(0.5);
-    if(axisAligned(rng))
+    if(bernoulli(rng, 0.5))
     {
-        std::uniform_int_distribution<size_t> pick(0, dimensions.size() - 1);
-        std::bernoulli_distribution sign(0.5);
-        direction[pick(rng)] = sign(rng) ? 1.0 : -1.0;
+        const size_t axis = uniformIndex(rng, dimensions.size());
+        const bool positive = bernoulli(rng, 0.5);
+        direction[axis] = positive ? 1.0 : -1.0;
     }
     else
     {
-        std::normal_distribution<double> gaussian(0.0, 1.0);
+        // Not std::normal_distribution & co: their output differs between standard libraries.
         double norm = 0.0;
         for(auto& component : direction)
         {
-            component = gaussian(rng);
+            component = standardNormal(rng);
             norm += component * component;
         }
         norm = std::sqrt(norm);
@@ -365,8 +365,7 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
 
     for(int64_t shrink = 0; shrink < maxShrinks && calls < budget; ++shrink)
     {
-        std::uniform_real_distribution<double> along(low, high);
-        const double t = along(rng);
+        const double t = uniformReal(rng, low, high);
 
         Shape candidate(current.size());
         for(size_t d = 0; d < dimensions.size(); ++d)

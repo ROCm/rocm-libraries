@@ -13,7 +13,8 @@ from uhd_gen.compare_engines import main  # noqa: E402
 
 
 def _spec(path, engine, metric, rows, label=None):
-    """`LABEL=corpus.csv` for rows of (graph, tflops, avgTimeMs) collected under `metric`."""
+    """`LABEL=corpus.csv` for rows of (graph, tflops, avgTimeMs[, device]) collected under
+    `metric`."""
     binding = json.dumps(
         {
             "engine": engine,
@@ -23,8 +24,15 @@ def _spec(path, engine, metric, rows, label=None):
     )
     pd.DataFrame(
         [
-            {"benchmark": graph, "binding": binding, "tflops": tflops, "avgTimeMs": ms}
-            for graph, tflops, ms in rows
+            {
+                "benchmark": graph,
+                "device": device,
+                "binding": binding,
+                "tflops": tflops,
+                "avgTimeMs": ms,
+            }
+            for graph, tflops, ms, *device in rows
+            for device in (device[0] if device else "board",)
         ]
     ).to_csv(path, index=False)
     return f"{label or engine}={path}"
@@ -76,3 +84,46 @@ def test_a_label_naming_two_engines_in_one_metric_is_refused(monkeypatch, tmp_pa
     ]
     with pytest.raises(SystemExit, match="mixes engines"):
         _run(monkeypatch, tmp_path, specs)
+
+
+def test_an_engines_measurements_on_two_devices_are_not_merged(monkeypatch, tmp_path):
+    """B is slower than A on each device, but its MI325 number beats A's MI300 one: merged
+    across devices, B would win g1 on throughput."""
+    specs = [
+        _spec(
+            tmp_path / "a.csv",
+            "A",
+            "tflops",
+            [("g1", 100, 1.0, "mi300"), ("g1", 300, 0.3, "mi325")],
+        ),
+        _spec(
+            tmp_path / "b.csv",
+            "B",
+            "tflops",
+            [("g1", 90, 1.1, "mi300"), ("g1", 250, 0.4, "mi325")],
+        ),
+    ]
+    code, report = _run(monkeypatch, tmp_path, specs)
+    assert code == 0
+    tflops = json.loads(report.read_text(encoding="utf-8"))["metrics"]["tflops"]
+    assert tflops["per_graph"] == {
+        "g1 @ mi300": {"A": 100.0, "B": 90.0},
+        "g1 @ mi325": {"A": 300.0, "B": 250.0},
+    }
+    assert tflops["wins"] == {"A": 2}
+
+
+def test_a_margin_is_relative_to_the_slower_engine(monkeypatch, tmp_path, capsys):
+    """Time: 1.0 ms beats 1.5 ms by 0.5 ms, which is 33.3% of the slower engine's time."""
+    specs = [
+        _spec(tmp_path / "a.csv", "A", "time", [("g1", 1, 1.0)]),
+        _spec(tmp_path / "b.csv", "B", "time", [("g1", 1, 1.5)]),
+    ]
+    code, _ = _run(monkeypatch, tmp_path, specs)
+    assert code == 0
+    margin = next(
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if "A 1" in line and "B 1.5" in line
+    )
+    assert margin.split("%")[0].strip() == "33.3"

@@ -347,3 +347,50 @@ TEST(TestPoolAssembly, ReservedPointsAreTakenFirstAndCountAgainstTheTotal)
     EXPECT_EQ(regimeCounts(selected), (std::map<std::string, int64_t>{{"common", 7}, {"rare", 3}}));
     EXPECT_EQ(allocation.at("sweep"), 10);
 }
+
+TEST(TestPoolAssembly, AQuotaIsFilledFromASourceWithNoShare)
+{
+    // A focused search and the served edges add to the sweep pool; with `--sweep-share 0` the
+    // sweep draws nothing of its own, but what a quota or an edge asked for is still owed.
+    const std::map<std::string, double> noSweep{{"model", 0.15}, {"kernel", 0.6}, {"sweep", 0.0}};
+    auto focused = entryAt("sweep", 1, "rare");
+    focused.owed = true;
+    auto edge = entryAt("sweep", 2, "common");
+    edge.owed = true;
+    SourcePools pools;
+    pools["sweep"] = {focused, edge, entryAt("sweep", 3, "rare")};
+
+    std::map<std::string, int64_t> dropped;
+    const auto unique = deduplicate(pools, noSweep, dropped);
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    const auto selected = select(
+        unique, 0, noSweep, allocation, {{"rare", 1}}, outcome, {detail::describe(edge.point)});
+
+    EXPECT_EQ(outcome.at("rare").taken, 1);
+    std::set<int64_t> batches;
+    for(const auto& entry : selected)
+    {
+        batches.insert(std::get<int64_t>(entry.point.at("batch")));
+    }
+    EXPECT_EQ(batches, (std::set<int64_t>{1, 2})) << "the unowed sample stays out";
+    EXPECT_EQ(allocation.at("sweep"), 2);
+}
+
+TEST(TestPoolAssembly, AnOwedPointStillLosesToAnEarlierSourceHoldingIt)
+{
+    // One problem is measured once, whichever pool names it first.
+    const std::map<std::string, double> noSweep{{"model", 0.15}, {"kernel", 0.6}, {"sweep", 0.0}};
+    auto owed = entryAt("sweep", 2, "r");
+    owed.owed = true;
+    SourcePools pools;
+    pools["kernel"] = {entryAt("kernel", 2, "r")};
+    pools["sweep"] = {owed};
+
+    std::map<std::string, int64_t> dropped;
+    const auto unique = deduplicate(pools, noSweep, dropped);
+
+    EXPECT_EQ(unique.at("kernel").size(), 1U);
+    EXPECT_TRUE(unique.at("sweep").empty());
+    EXPECT_EQ(dropped.at("sweep"), 1);
+}

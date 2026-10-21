@@ -62,6 +62,19 @@ logger = logging.getLogger(__name__)
 MANIFEST = "manifest.json"
 
 
+def _positive_seconds(text: str) -> float:
+    """A `--bench-timeout`: a finite number of seconds above zero."""
+    try:
+        seconds = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not a number of seconds"
+        ) from None
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("the timeout must be above zero seconds")
+    return seconds
+
+
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument(
@@ -108,6 +121,15 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--bench", default="hipdnn_bench", help="Public hipdnn_bench executable"
     )
+    parser.add_argument(
+        "--bench-timeout",
+        type=_positive_seconds,
+        default=3600.0,
+        metavar="SECONDS",
+        help="Longest one hipdnn_bench run (one graph on one device; one metric for L1) may "
+        "take. A run that outlasts it is killed and its graph is recorded as failed, "
+        "counting against --max-graph-failures (default: 3600)",
+    )
     parser.add_argument("--plugin-dir")
     parser.add_argument(
         "--device",
@@ -121,7 +143,9 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         help="Explicit NAME=INTEGER collection pin (repeatable)",
     )
     parser.add_argument(
-        "--workspace-limit", type=int, help="L1 immediate workspace constraint in bytes"
+        "--workspace-limit",
+        type=int,
+        help="Not supported: engine-level (L1) measurements take no workspace constraint",
     )
     parser.add_argument(
         "--output-dir",
@@ -577,20 +601,30 @@ def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
     return matches[0]
 
 
+def _text(output) -> str:
+    """A captured stream as text: what a timed-out child leaves may be bytes or absent."""
+    if output is None:
+        return ""
+    return output.decode("utf-8", "replace") if isinstance(output, bytes) else output
+
+
 def _run_json(
-    command: list[str], environment: dict, log_dir: Path, ordinal: int, commands: list
+    command: list[str],
+    environment: dict,
+    log_dir: Path,
+    ordinal: int,
+    commands: list,
+    timeout: float | None = None,
 ) -> dict:
-    result = subprocess.run(
-        command,
-        env=environment,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+    """Run one bench command and return its one JSON response.
+
+    A run gets an empty `HIPDNN_CACHE_DIR` of its own, inside the one `environment` names: a
+    benchmark winner record outranks the engine's own pick, and a run can write one, so a
+    record one run left must not decide the next run's kernel. A run that outlasts `timeout`
+    seconds is killed and refused like any other failed run.
+    """
     entry = {
         "argv": command,
-        "returncode": result.returncode,
         "environment": {
             key: environment.get(key)
             for key in (
@@ -601,16 +635,53 @@ def _run_json(
             )
         },
     }
+    cache_root = environment.get("HIPDNN_CACHE_DIR")
+    scratch = None
+    run_environment = environment
+    if cache_root is not None:
+        Path(cache_root).mkdir(parents=True, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(prefix="run-", dir=cache_root)
+        run_environment = {**environment, "HIPDNN_CACHE_DIR": scratch.name}
+    timed_out = False
+    try:
+        try:
+            result = subprocess.run(
+                command,
+                env=run_environment,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=timeout,
+            )
+            returncode, stdout, stderr = (
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+        except subprocess.TimeoutExpired as expired:
+            timed_out = True
+            returncode = None
+            stdout, stderr = _text(expired.stdout), _text(expired.stderr)
+    finally:
+        if scratch is not None:
+            scratch.cleanup()
+    entry["returncode"] = returncode
+    if timed_out:
+        entry["timed_out_after_seconds"] = timeout
     commands.append(entry)
     log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / f"{ordinal:06d}.stdout.json").write_text(result.stdout, encoding="utf-8")
-    (log_dir / f"{ordinal:06d}.stderr.txt").write_text(result.stderr, encoding="utf-8")
-    if result.returncode:
+    (log_dir / f"{ordinal:06d}.stdout.json").write_text(stdout, encoding="utf-8")
+    (log_dir / f"{ordinal:06d}.stderr.txt").write_text(stderr, encoding="utf-8")
+    if timed_out:
         raise ValueError(
-            f"hipdnn_bench failed ({result.returncode}): {result.stderr.strip()}"
+            f"hipdnn_bench timed out after {timeout:g} s (see --bench-timeout): "
+            f"{stderr.strip()}"
         )
+    if returncode:
+        raise ValueError(f"hipdnn_bench failed ({returncode}): {stderr.strip()}")
     try:
-        response = json.loads(result.stdout)
+        response = json.loads(stdout)
     except ValueError as error:
         raise ValueError(
             "hipdnn_bench did not emit one JSON response; see captured command output"
@@ -677,6 +748,7 @@ def collect_graph(
     *,
     engine_descriptor_id: str,
     addressing_table: dict | None = None,
+    timeout: float | None = None,
 ) -> tuple[list[dict], set[str]]:
     """One bench `--sweep --json` run per graph: enumerate and time in one process.
 
@@ -686,7 +758,12 @@ def collect_graph(
     seen_ids: set[str] = set()
     seen_tuples: set[tuple] = set()
     measured = _run_json(
-        [*command, "--sweep", "--json"], environment, log_dir, len(commands), commands
+        [*command, "--sweep", "--json"],
+        environment,
+        log_dir,
+        len(commands),
+        commands,
+        timeout=timeout,
     )
     first = measured
     identity = _identity(measured)
@@ -826,7 +903,13 @@ def collect_graph(
 
 
 def collect_immediate_graph(
-    command: list[str], environment: dict, log_dir: Path, commands: list, *, metric: str
+    command: list[str],
+    environment: dict,
+    log_dir: Path,
+    commands: list,
+    *,
+    metric: str,
+    timeout: float | None = None,
 ) -> tuple[list[dict], set[str]]:
     """Measure one engine's ordinary no-search selection without inspecting its catalog.
 
@@ -841,6 +924,7 @@ def collect_immediate_graph(
         log_dir,
         len(commands),
         commands,
+        timeout=timeout,
     )
     if response.get("metric") != metric:
         raise ValueError(
@@ -1029,8 +1113,6 @@ def _measure(
             ]
             if args.plugin_dir:
                 command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
-            if args.workspace_limit is not None:
-                command.extend(["--workspace-limit", str(args.workspace_limit)])
             for knob in args.knob:
                 command.extend(["--knob", knob])
             for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
@@ -1045,6 +1127,7 @@ def _measure(
                             stage / "commands",
                             commands,
                             metric=source,
+                            timeout=args.bench_timeout,
                         )
                     else:
                         collected, names = collect_graph(
@@ -1054,6 +1137,7 @@ def _measure(
                             commands,
                             addressing_table=ordinals,
                             engine_descriptor_id=ued["id"],
+                            timeout=args.bench_timeout,
                         )
                     graph_rows[source].extend(collected)
                     graph_names.update(names)
@@ -1763,8 +1847,19 @@ def run_generate(args: argparse.Namespace) -> int:
 
     stage = None
     immediate = args.role == ROLE
-    if args.workspace_limit is not None and (not immediate or args.workspace_limit < 0):
-        logger.error("--workspace-limit requires %s and a nonnegative byte count", ROLE)
+    # A workspace limit is a query constraint: engine-level (L1) measurements take none, so
+    # `hipdnn_bench` refuses it, and a configuration-level row is not an L1 row.
+    if args.workspace_limit is not None or (
+        immediate
+        and any(
+            knob.split("=", 1)[0] == "global.workspace_size_limit" for knob in args.knob
+        )
+    ):
+        logger.error(
+            "--workspace-limit and --knob global.workspace_size_limit are not supported: "
+            "engine-level (%s) measurements take no workspace constraint",
+            ROLE,
+        )
         return 1
     # One UHD per metric (RFC 0019 §13.4); the first metric named proposes the shared
     # feature recipe.

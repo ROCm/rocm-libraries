@@ -64,6 +64,11 @@ struct PoolEntry
     /// What a cut is spread over: the categorical combination plus regime; empty means regime
     /// alone. Without the combination, a cut can drop whole dtypes.
     std::string stratum;
+
+    /// Found for a regime quota, or reserved as a served edge: the run owes it by name. Kept
+    /// even when its source's share is 0, because a share sizes a source's proportional cut,
+    /// not what a quota or `--include-extremes` asks for.
+    bool owed = false;
 };
 
 /// The pools, keyed by source name.
@@ -135,9 +140,9 @@ inline std::map<std::string, int64_t> allocate(int64_t count,
 /// @brief One entry per distinct problem, earlier sources winning.
 ///
 /// Two entries are one problem when @p identity gives them the same value; by default, when
-/// every declared parameter agrees. Sources @p shares disables are dropped first, so they
-/// cannot claim an enabled source's point. @p dropped receives the per-source duplicate
-/// count, for the manifest.
+/// every declared parameter agrees. Entries of a source @p shares disables are dropped first,
+/// so they cannot claim an enabled source's point, except entries marked @ref PoolEntry::owed,
+/// which are kept. @p dropped receives the per-source duplicate count, for the manifest.
 inline SourcePools deduplicate(
     const SourcePools& pools,
     const std::map<std::string, double>& shares,
@@ -154,10 +159,15 @@ inline SourcePools deduplicate(
         std::vector<PoolEntry> kept;
         int64_t duplicates = 0;
         const auto found = pools.find(source);
-        if(found != pools.end() && sourceEnabled(shares, source))
+        if(found != pools.end())
         {
+            const bool enabled = sourceEnabled(shares, source);
             for(const auto& entry : found->second)
             {
+                if(!enabled && !entry.owed)
+                {
+                    continue;
+                }
                 if(!seen.insert(identity(entry)).second)
                 {
                     ++duplicates;

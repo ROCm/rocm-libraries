@@ -566,7 +566,17 @@ inline GraphBytes reduction(const TensorSpec& in,
     return detail::finish(builder, "reduction", types, tensors, nodes);
 }
 
-/// @brief LayerNorm forward.
+/// The per-row (batchnorm: per-channel) statistics a norm saves for its backward pass: written
+/// by a training forward, read by the backward. Both or neither (the frontend refuses one
+/// without the other).
+struct NormSavedStats
+{
+    TensorSpec mean;
+    TensorSpec invVariance;
+};
+
+/// @brief LayerNorm forward. Under the TRAINING phase @p stats are the saved mean and inverse
+///        variance it writes; without them the training graph computes them and returns none.
 inline GraphBytes layernormForward(const TensorSpec& x,
                                    const TensorSpec& scale,
                                    const TensorSpec& bias,
@@ -574,7 +584,8 @@ inline GraphBytes layernormForward(const TensorSpec& x,
                                    const TensorSpec& y,
                                    int64_t normalizedDimCount,
                                    fb::NormFwdPhase phase,
-                                   const GraphTypes& types)
+                                   const GraphTypes& types,
+                                   const std::optional<NormSavedStats>& stats = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
@@ -583,6 +594,15 @@ inline GraphBytes layernormForward(const TensorSpec& x,
         detail::addTensor(builder, bias),
         detail::addTensor(builder, epsilon),
         detail::addTensor(builder, y)};
+    flatbuffers::Optional<int64_t> meanUid;
+    flatbuffers::Optional<int64_t> invVarianceUid;
+    if(stats)
+    {
+        tensors.push_back(detail::addTensor(builder, stats->mean));
+        tensors.push_back(detail::addTensor(builder, stats->invVariance));
+        meanUid = stats->mean.uid;
+        invVarianceUid = stats->invVariance.uid;
+    }
 
     const auto attributes = fb::CreateLayernormAttributes(builder,
                                                           x.uid,
@@ -591,8 +611,8 @@ inline GraphBytes layernormForward(const TensorSpec& x,
                                                           epsilon.uid,
                                                           y.uid,
                                                           normalizedDimCount,
-                                                          flatbuffers::nullopt, // mean
-                                                          flatbuffers::nullopt, // inv_variance
+                                                          meanUid,
+                                                          invVarianceUid,
                                                           phase);
     std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -604,13 +624,15 @@ inline GraphBytes layernormForward(const TensorSpec& x,
 }
 
 /// @brief RMSNorm forward, without the schema's optional bias (it changes the tensor set, so
-///        it belongs in a separate entry).
+///        it belongs in a separate entry). Under the TRAINING phase @p invRms is the inverse
+///        RMS it writes for the backward pass.
 inline GraphBytes rmsNormForward(const TensorSpec& x,
                                  const TensorSpec& scale,
                                  const TensorSpec& epsilon,
                                  const TensorSpec& y,
                                  fb::NormFwdPhase phase,
-                                 const GraphTypes& types)
+                                 const GraphTypes& types,
+                                 const std::optional<TensorSpec>& invRms = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
@@ -618,6 +640,12 @@ inline GraphBytes rmsNormForward(const TensorSpec& x,
         detail::addTensor(builder, scale),
         detail::addTensor(builder, epsilon),
         detail::addTensor(builder, y)};
+    flatbuffers::Optional<int64_t> invRmsUid;
+    if(invRms)
+    {
+        tensors.push_back(detail::addTensor(builder, *invRms));
+        invRmsUid = invRms->uid;
+    }
 
     const auto attributes = fb::CreateRMSNormAttributes(builder,
                                                         x.uid,
@@ -625,7 +653,7 @@ inline GraphBytes rmsNormForward(const TensorSpec& x,
                                                         epsilon.uid,
                                                         y.uid,
                                                         flatbuffers::nullopt, // bias
-                                                        flatbuffers::nullopt, // inv_rms
+                                                        invRmsUid,
                                                         phase);
     std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -808,7 +836,8 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
 // Normalization, backward
 // ---------------------------------------------------------------------------
 
-/// @brief LayerNorm backward.
+/// @brief LayerNorm backward. With @p saved, the mean and inverse variance the training forward
+///        wrote are inputs and the backward reuses them; without, it recomputes them from x.
 inline GraphBytes layernormBackward(const TensorSpec& dy,
                                     const TensorSpec& x,
                                     const TensorSpec& scale,
@@ -816,7 +845,8 @@ inline GraphBytes layernormBackward(const TensorSpec& dy,
                                     const TensorSpec& dscale,
                                     const TensorSpec& dbias,
                                     int64_t normalizedDimCount,
-                                    const GraphTypes& types)
+                                    const GraphTypes& types,
+                                    const std::optional<NormSavedStats>& saved = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
@@ -826,11 +856,21 @@ inline GraphBytes layernormBackward(const TensorSpec& dy,
         detail::addTensor(builder, dx),
         detail::addTensor(builder, dscale),
         detail::addTensor(builder, dbias)};
+    if(saved)
+    {
+        tensors.push_back(detail::addTensor(builder, saved->mean));
+        tensors.push_back(detail::addTensor(builder, saved->invVariance));
+    }
 
     fb::LayernormBackwardAttributesBuilder attributes(builder);
     attributes.add_dy_tensor_uid(dy.uid);
     attributes.add_x_tensor_uid(x.uid);
     attributes.add_scale_tensor_uid(scale.uid);
+    if(saved)
+    {
+        attributes.add_mean_tensor_uid(saved->mean.uid);
+        attributes.add_inv_variance_tensor_uid(saved->invVariance.uid);
+    }
     attributes.add_dx_tensor_uid(dx.uid);
     attributes.add_dscale_tensor_uid(dscale.uid);
     attributes.add_dbias_tensor_uid(dbias.uid);
@@ -1060,14 +1100,16 @@ inline GraphBytes batchnormInference(const TensorSpec& x,
     return detail::finish(builder, "batchnorm_inference", types, tensors, nodes);
 }
 
-/// @brief BatchNorm backward.
+/// @brief BatchNorm backward. With @p saved, the per-channel mean and inverse variance the
+///        training forward wrote are inputs; without, the backward recomputes them from x.
 inline GraphBytes batchnormBackward(const TensorSpec& dy,
                                     const TensorSpec& x,
                                     const TensorSpec& scale,
                                     const TensorSpec& dx,
                                     const TensorSpec& dscale,
                                     const TensorSpec& dbias,
-                                    const GraphTypes& types)
+                                    const GraphTypes& types,
+                                    const std::optional<NormSavedStats>& saved = std::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
@@ -1077,6 +1119,11 @@ inline GraphBytes batchnormBackward(const TensorSpec& dy,
         detail::addTensor(builder, dx),
         detail::addTensor(builder, dscale),
         detail::addTensor(builder, dbias)};
+    if(saved)
+    {
+        tensors.push_back(detail::addTensor(builder, saved->mean));
+        tensors.push_back(detail::addTensor(builder, saved->invVariance));
+    }
 
     const std::vector<int64_t> noPeers;
     const auto peers = builder.CreateVector(noPeers);
@@ -1085,6 +1132,11 @@ inline GraphBytes batchnormBackward(const TensorSpec& dy,
     attributes.add_dy_tensor_uid(dy.uid);
     attributes.add_x_tensor_uid(x.uid);
     attributes.add_scale_tensor_uid(scale.uid);
+    if(saved)
+    {
+        attributes.add_mean_tensor_uid(saved->mean.uid);
+        attributes.add_inv_variance_tensor_uid(saved->invVariance.uid);
+    }
     attributes.add_peer_stats_tensor_uid(peers);
     attributes.add_dx_tensor_uid(dx.uid);
     attributes.add_dscale_tensor_uid(dscale.uid);

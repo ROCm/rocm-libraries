@@ -481,6 +481,7 @@ nlohmann::json
         entry.source = "sweep";
         entry.origin = metadata.operation + " extreme " + edge.end + " " + edge.parameter;
         entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
+        entry.owed = true;
         // Pooled or not, the key comes from the same stamp emission uses.
         const auto id = admit(entry);
         if(id.empty())
@@ -1395,6 +1396,7 @@ int runGenerator(const std::vector<std::string>& args)
                     entry.origin
                         = result.operation + " focus " + regime + " draw " + std::to_string(draw++);
                     entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
+                    entry.owed = true;
                     if(admit(entry, true))
                     {
                         everything.insert(hipdnn_corpus_gen::detail::describe(entry.point));

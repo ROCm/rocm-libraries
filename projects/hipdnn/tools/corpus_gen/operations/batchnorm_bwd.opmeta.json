@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "operation": "batchnorm_bwd",
   "display_name": "Batch Normalization, Backward",
-  "description": "Gradients of batch normalization: dx from dy, and the per-channel dscale and dbias.",
+  "description": "Gradients of batch normalization: dx from dy and the forward pass's saved per-channel mean and inverse variance, and the per-channel dscale and dbias.",
   "parameters": {
     "N": {
       "type": "int64"
@@ -637,6 +637,54 @@
         "name": "dbiasStrides",
         "kind": "strides_of",
         "of": "dbiasDims"
+      },
+      {
+        "name": "meanDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "meanStrides",
+        "kind": "strides_of",
+        "of": "meanDims"
+      },
+      {
+        "name": "invVarianceDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "invVarianceStrides",
+        "kind": "strides_of",
+        "of": "invVarianceDims"
       },
       {
         "name": "dataType",

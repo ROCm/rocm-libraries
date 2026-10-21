@@ -265,6 +265,72 @@ inline int64_t paddedNormalizedDimCount(const ArgumentResolution& resolved,
     return declaredCount + static_cast<int64_t>(padded.size() - declaredRank);
 }
 
+/// The forward phase a norm declares in its `phase` argument: absent or "inference" is the
+/// inference graph, "training" the one that also writes the statistics its backward reads.
+/// Anything else is nullopt.
+inline std::optional<hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase>
+    normPhase(const ArgumentResolution& resolved)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
+
+    const auto declared = enumName(resolved, "phase");
+    if(declared.empty() || declared == "inference")
+    {
+        return NormFwdPhase::INFERENCE;
+    }
+    if(declared == "training")
+    {
+        return NormFwdPhase::TRAINING;
+    }
+    return std::nullopt;
+}
+
+/// A statistics tensor a training forward writes for @p x, always fp32: x's extent where
+/// @p affine (the scale shape) is 1 -- the batch dimensions -- and 1 where it spans the
+/// normalized dimensions.
+inline builders::TensorSpec normStatsFor(int64_t uid,
+                                         const char* name,
+                                         const std::vector<int64_t>& x,
+                                         const std::vector<int64_t>& affine)
+{
+    std::vector<int64_t> shape(x.size(), 1);
+    for(size_t i = 0; i < x.size() && i < affine.size(); ++i)
+    {
+        if(affine[i] == 1)
+        {
+            shape[i] = x[i];
+        }
+    }
+    return tensorFrom(uid,
+                      name,
+                      shape,
+                      hipdnn_data_sdk::utilities::generateStrides(shape),
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
+/// The saved statistics a norm backward reads, when the declaration gives them as
+/// `meanDims`/`meanStrides` and `invVarianceDims`/`invVarianceStrides` (uids @p firstUid and
+/// the next). Neither declared is a backward that recomputes them; one alone sets @p error.
+inline std::optional<builders::NormSavedStats>
+    savedStats(const ArgumentResolution& resolved,
+               int64_t firstUid,
+               hipdnn_flatbuffers_sdk::data_objects::DataType type,
+               std::string& error)
+{
+    if(dims(resolved, "meanDims") == nullptr && dims(resolved, "invVarianceDims") == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto mean = tensorRole(resolved, firstUid, "mean", type);
+    const auto invVariance = tensorRole(resolved, firstUid + 1, "invVariance", type);
+    if(!mean.has_value() || !invVariance.has_value())
+    {
+        error = "saved statistics need meanDims/Strides and invVarianceDims/Strides together";
+        return std::nullopt;
+    }
+    return builders::NormSavedStats{*mean, *invVariance};
+}
+
 /// Reads a resolved argument as a floating-point scalar; absent reads as @p fallback.
 inline double scalar(const ArgumentResolution& resolved, const char* name, double fallback = 0.0)
 {
@@ -737,6 +803,13 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  t.push_back(*one);
              }
+             std::string error;
+             const auto saved = detail::savedStats(
+                 resolved, static_cast<int64_t>(roles.size()) + 1, *type, error);
+             if(!error.empty())
+             {
+                 return {{}, "layernormBackward: " + error};
+             }
              return {builders::layernormBackward(
                          t[0],
                          t[1],
@@ -748,7 +821,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                              resolved,
                              detail::dims(resolved, "xDims")->size(),
                              detail::integer(resolved, "normalizedDimCount", 1)),
-                         detail::graphTypesFrom(resolved, *type)),
+                         detail::graphTypesFrom(resolved, *type),
+                         saved),
                      ""};
          }},
 
@@ -943,10 +1017,25 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  }
                  t.push_back(*one);
              }
-             return {
-                 builders::batchnormBackward(
-                     t[0], t[1], t[2], t[3], t[4], t[5], detail::graphTypesFrom(resolved, *type)),
-                 ""};
+             std::string error;
+             const auto saved
+                 = detail::savedStats(resolved,
+                                      static_cast<int64_t>(roles.size()) + 1,
+                                      detail::dtype(resolved, "statsDataType").value_or(*type),
+                                      error);
+             if(!error.empty())
+             {
+                 return {{}, "batchnormBackward: " + error};
+             }
+             return {builders::batchnormBackward(t[0],
+                                                 t[1],
+                                                 t[2],
+                                                 t[3],
+                                                 t[4],
+                                                 t[5],
+                                                 detail::graphTypesFrom(resolved, *type),
+                                                 saved),
+                     ""};
          }},
 
         {"resampleBackward",
@@ -1271,11 +1360,24 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "layernormForward needs dims, strides, dataType"};
              }
+             const auto phase = detail::normPhase(resolved);
+             if(!phase.has_value())
+             {
+                 return {{}, "layernormForward phase must be inference or training"};
+             }
              // Scale and bias: x's rank, 1 except the normalized trailing dim (normAffineDims).
              const auto x = detail::padToDeclaredRank(resolved, *d);
              const auto xStrides
                  = x.size() == d->size() ? *st : hipdnn_data_sdk::utilities::generateStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
+             // A training forward writes the mean and inverse variance its backward reads.
+             std::optional<builders::NormSavedStats> stats;
+             if(*phase == hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::TRAINING)
+             {
+                 stats
+                     = builders::NormSavedStats{detail::normStatsFor(6, "mean", x, affine),
+                                                detail::normStatsFor(7, "invVariance", x, affine)};
+             }
              return {builders::layernormForward(
                          detail::tensorFrom(1, "x", x, xStrides, *type),
                          detail::tensorFrom(2,
@@ -1291,8 +1393,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                          detail::normEpsilon(4),
                          detail::tensorFrom(5, "y", x, xStrides, *type),
                          detail::paddedNormalizedDimCount(resolved, d->size(), 1),
-                         hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
-                         detail::graphTypesFrom(resolved, *type)),
+                         *phase,
+                         detail::graphTypesFrom(resolved, *type),
+                         stats),
                      ""};
          }},
 
@@ -1305,10 +1408,21 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "rmsNormForward needs dims, strides, dataType"};
              }
+             const auto phase = detail::normPhase(resolved);
+             if(!phase.has_value())
+             {
+                 return {{}, "rmsNormForward phase must be inference or training"};
+             }
              const auto x = detail::padToDeclaredRank(resolved, *d);
              const auto xStrides
                  = x.size() == d->size() ? *st : hipdnn_data_sdk::utilities::generateStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
+             // A training forward writes the inverse RMS its backward reads.
+             std::optional<builders::TensorSpec> invRms;
+             if(*phase == hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::TRAINING)
+             {
+                 invRms = detail::normStatsFor(5, "invRms", x, affine);
+             }
              return {builders::rmsNormForward(
                          detail::tensorFrom(1, "x", x, xStrides, *type),
                          detail::tensorFrom(2,
@@ -1318,8 +1432,9 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                                             *type),
                          detail::normEpsilon(3),
                          detail::tensorFrom(4, "y", x, xStrides, *type),
-                         hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
-                         detail::graphTypesFrom(resolved, *type)),
+                         *phase,
+                         detail::graphTypesFrom(resolved, *type),
+                         invRms),
                      ""};
          }},
 

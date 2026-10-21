@@ -11,7 +11,6 @@
 
 #include <hipdnn_frontend.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -41,13 +40,23 @@ struct MetadataOperationCorpus
     std::string firstBuildError;
 };
 
+namespace detail
+{
+/// Exposes the protected finalized backend descriptor, which the engine descriptor binds to.
+class OracleGraph : public hipdnn_frontend::graph::Graph
+{
+public:
+    using Graph::get_raw_graph_descriptor;
+};
+} // namespace detail
+
 /// Where an engine query's time goes.
 struct OracleTiming
 {
     int64_t queries = 0;
     double buildSeconds = 0.0; ///< declaration -> graph bytes
     double loadSeconds = 0.0; ///< frontend deserialize + build_operation_graph
-    double askSeconds = 0.0; ///< get_ranked_engine_ids
+    double askSeconds = 0.0; ///< engine descriptor finalize (the engine's applicability check)
 };
 
 /// @brief An oracle that asks @p engineId about the graph @p metadata builds for a point.
@@ -64,70 +73,71 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
                                         OracleTiming* timing = nullptr)
 {
     const BuildTally tally{buildFailures, firstBuildError};
-    return [handle, engineId, &metadata, tally, maxBytes, timing](
-               const ProblemPoint& point) -> bool {
-        using Clock = std::chrono::steady_clock;
-        auto mark = Clock::now();
-        const auto lap = [&mark](double OracleTiming::*stage, OracleTiming* into) {
-            const auto now = Clock::now();
-            if(into != nullptr)
+    return
+        [handle, engineId, &metadata, tally, maxBytes, timing](const ProblemPoint& point) -> bool {
+            using Clock = std::chrono::steady_clock;
+            auto mark = Clock::now();
+            const auto lap = [&mark](double OracleTiming::*stage, OracleTiming* into) {
+                const auto now = Clock::now();
+                if(into != nullptr)
+                {
+                    into->*stage += std::chrono::duration<double>(now - mark).count();
+                }
+                mark = now;
+            };
+            if(timing != nullptr)
             {
-                into->*stage += std::chrono::duration<double>(now - mark).count();
+                ++timing->queries;
             }
-            mark = now;
+            const auto built = buildAdmissible(metadata, point, maxBytes, tally);
+            lap(&OracleTiming::buildSeconds, timing);
+            if(!built.has_value())
+            {
+                return false;
+            }
+
+            try
+            {
+                detail::OracleGraph graph;
+                const auto restored = graph.deserialize(handle, *built);
+                if(!restored.is_good())
+                {
+                    // Counted as a build failure, not an engine refusal: an unreadable graph is
+                    // broken for every point.
+                    tally.note("deserialize: " + restored.get_message());
+                    return false;
+                }
+
+                const auto finalized = graph.build_operation_graph(handle);
+                lap(&OracleTiming::loadSeconds, timing);
+                if(!finalized.is_good())
+                {
+                    tally.note("build_operation_graph: " + finalized.get_message());
+                    return false;
+                }
+
+                // Whether this engine serves the graph is the engine descriptor's own question: it
+                // finalizes only for an engine the plugins report applicable. Ranking the graph
+                // would add what a corpus does not need -- running every heuristic policy per
+                // query, and a device query that fails where no device is visible.
+                hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor engine;
+                const auto asked = hipdnn_frontend::detail::createEngineDescriptorForGraph(
+                    engine, graph.get_raw_graph_descriptor(), engineId);
+                lap(&OracleTiming::askSeconds, timing);
+                return asked.is_good();
+            }
+            catch(const std::exception& error)
+            {
+                // A builder or frontend exception is a failure to build, not the engine declining.
+                tally.note(std::string("exception: ") + error.what());
+                return false;
+            }
+            catch(...)
+            {
+                tally.note("exception: unknown");
+                return false;
+            }
         };
-        if(timing != nullptr)
-        {
-            ++timing->queries;
-        }
-        const auto built = buildAdmissible(metadata, point, maxBytes, tally);
-        lap(&OracleTiming::buildSeconds, timing);
-        if(!built.has_value())
-        {
-            return false;
-        }
-
-        try
-        {
-            hipdnn_frontend::graph::Graph graph;
-            const auto restored = graph.deserialize(handle, *built);
-            if(!restored.is_good())
-            {
-                // Counted as a build failure, not an engine refusal: an unreadable graph is
-                // broken for every point.
-                tally.note("deserialize: " + restored.get_message());
-                return false;
-            }
-
-            const auto finalized = graph.build_operation_graph(handle);
-            lap(&OracleTiming::loadSeconds, timing);
-            if(!finalized.is_good())
-            {
-                tally.note("build_operation_graph: " + finalized.get_message());
-                return false;
-            }
-
-            std::vector<int64_t> applicable;
-            const auto asked = graph.get_ranked_engine_ids(applicable);
-            lap(&OracleTiming::askSeconds, timing);
-            if(!asked.is_good())
-            {
-                return false;
-            }
-            return std::find(applicable.begin(), applicable.end(), engineId) != applicable.end();
-        }
-        catch(const std::exception& error)
-        {
-            // A builder or frontend exception is a failure to build, not the engine declining.
-            tally.note(std::string("exception: ") + error.what());
-            return false;
-        }
-        catch(...)
-        {
-            tally.note("exception: unknown");
-            return false;
-        }
-    };
 }
 
 /// @brief The oracle for a run, which may or may not have named an engine.

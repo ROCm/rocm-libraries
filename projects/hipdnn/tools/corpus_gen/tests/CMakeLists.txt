@@ -6,7 +6,7 @@ find_package(Threads REQUIRED)
 # Pure logic, no backend or HIP: plain gtest_main instead of the shared test main.cpp.
 add_executable(hipdnn_corpus_gen_tests
     TestFeasibleShapeSet.cpp TestOperationMetadata.cpp
-    TestProblemSpace.cpp TestGraphBuilderRegistry.cpp TestWorkloadSampling.cpp TestCorpusRealism.cpp TestGraphSize.cpp TestEveryGraphBuilder.cpp TestCorpusOutput.cpp TestOperationDirectory.cpp TestPoolAssembly.cpp TestRegimeLabel.cpp TestCorpusManifest.cpp TestGraphIdentity.cpp TestDeclaredOracle.cpp TestKernelCatalogSource.cpp TestPointFilter.cpp TestModelShapeSource.cpp TestEngineCoverage.cpp TestServedExtent.cpp)
+    TestProblemSpace.cpp TestGraphBuilderRegistry.cpp TestWorkloadSampling.cpp TestCorpusRealism.cpp TestGraphSize.cpp TestEveryGraphBuilder.cpp TestCorpusOutput.cpp TestOperationDirectory.cpp TestPoolAssembly.cpp TestRegimeLabel.cpp TestCorpusManifest.cpp TestGraphIdentity.cpp TestDeclaredOracle.cpp TestKernelCatalogSource.cpp TestPointFilter.cpp TestModelShapeSource.cpp TestEngineCoverage.cpp TestServedExtent.cpp TestDeterministicRandom.cpp)
 
 target_compile_options(hipdnn_corpus_gen_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
@@ -37,14 +37,16 @@ add_hipdnn_test(hipdnn_corpus_gen_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 # Reads the built graphs back through the frontend, so it links the backend the pure-logic
 # suite above stays free of.
-add_executable(hipdnn_corpus_gen_frontend_tests TestShippedGraphsValidate.cpp)
-target_compile_options(hipdnn_corpus_gen_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_link_libraries(hipdnn_corpus_gen_frontend_tests
-    GTest::gtest GTest::gtest_main Threads::Threads hipdnn_corpus_gen
-    hipdnn_frontend hipdnn_backend hipdnn_data_sdk)
-add_dependencies(hipdnn_corpus_gen_frontend_tests hipdnn_corpus_gen_test_operations)
-target_compile_definitions(hipdnn_corpus_gen_frontend_tests PRIVATE
-    HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
-    HIPDNN_CORPUS_GEN_OPERATIONS_SUBDIR="${_operations_subdir}")
-clang_tidy_check(hipdnn_corpus_gen_frontend_tests)
-add_hipdnn_test(hipdnn_corpus_gen_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
+    add_executable(hipdnn_corpus_gen_frontend_tests TestShippedGraphsValidate.cpp)
+    target_compile_options(hipdnn_corpus_gen_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    target_link_libraries(hipdnn_corpus_gen_frontend_tests
+        GTest::gtest GTest::gtest_main Threads::Threads hipdnn_corpus_gen
+        hipdnn_frontend hipdnn_backend hipdnn_data_sdk)
+    add_dependencies(hipdnn_corpus_gen_frontend_tests hipdnn_corpus_gen_test_operations)
+    target_compile_definitions(hipdnn_corpus_gen_frontend_tests PRIVATE
+        HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
+        HIPDNN_CORPUS_GEN_OPERATIONS_SUBDIR="${_operations_subdir}")
+    clang_tidy_check(hipdnn_corpus_gen_frontend_tests)
+    add_hipdnn_test(hipdnn_corpus_gen_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+endif()

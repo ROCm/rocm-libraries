@@ -45,6 +45,7 @@ from .provenance import (
 )
 from .immediate import ROLE, validate_model
 from .ranking_metrics import RANKING_METRICS
+from .score_transform import SUPPORTED_TRANSFORMS
 
 logger = logging.getLogger(__name__)
 UHD_SUFFIX = ".uhd.json"
@@ -1124,10 +1125,12 @@ def _validate_descriptor(document: dict, path: Path) -> None:
             "transform",
         }:
             raise PromoteError(f"{path}: invalid score header")
-        if "transform" in score and (
-            not isinstance(score["transform"], str) or not score["transform"]
-        ):
-            raise PromoteError(f"{path}: score.transform must be a nonempty string")
+        if "transform" in score and score["transform"] not in SUPPORTED_TRANSFORMS:
+            raise PromoteError(
+                f"{path}: score.transform must be one of "
+                f"{', '.join(repr(name) for name in SUPPORTED_TRANSFORMS)}; the runtime "
+                "refuses a model declaring any other"
+            )
         if "calibrated" in score and not isinstance(score["calibrated"], bool):
             raise PromoteError(f"{path}: score.calibrated must be a boolean")
         # RFC 0019 §4.1: a registered metric fixes the objective direction.

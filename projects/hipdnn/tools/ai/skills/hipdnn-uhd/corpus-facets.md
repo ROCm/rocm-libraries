@@ -15,7 +15,7 @@ One `*.opmeta.json` per operation under `projects/hipdnn/tools/corpus_gen/operat
 | attention | `sdpa_fwd`, `sdpa_bwd` |
 | matmul | `matmul`, `matmul_epilogue`, `mx_matmul` |
 | convolution | `conv_fwd`, `conv_bwd_data`, `conv_bwd_weights`, `conv_bias_activation` |
-| normalization | `batchnorm_inference`, `batchnorm_fwd_training`, `batchnorm_bwd`, `batchnorm_activation_bwd`, `layernorm_fwd`, `layernorm_bwd`, `rmsnorm_fwd`, `rmsnorm_bwd` |
+| normalization | `batchnorm_inference`, `batchnorm_fwd_training`, `batchnorm_bwd`, `batchnorm_activation_bwd`, `layernorm_fwd`, `layernorm_fwd_training`, `layernorm_bwd`, `rmsnorm_fwd`, `rmsnorm_fwd_training`, `rmsnorm_bwd` |
 | elementwise / other | `pointwise`, `pointwise_unary`, `reduction`, `resample_fwd`, `resample_bwd` |
 
 Pick the operation whose graph the engine accepts: for a descriptor engine, its UED's graph

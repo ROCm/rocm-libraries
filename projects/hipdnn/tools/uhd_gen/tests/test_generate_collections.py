@@ -53,7 +53,7 @@ def world(tmp_path, monkeypatch):
         "calls": 0,
     }
 
-    def bench(command, environment, log_dir, ordinal, commands):
+    def bench(command, environment, log_dir, ordinal, commands, timeout=None):
         engine["calls"] += 1
         engine.setdefault("argv", []).append(command)
         commands.append({"argv": command})

@@ -109,6 +109,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
                          uhd_skill_scripts_tests APPEND PROPERTY
                          ENVIRONMENT "OMP_NUM_THREADS=4" "PYTHONDONTWRITEBYTECODE=1")
 
+            # The two suites that run hipdnn_uhd_features load the sanitizer, ROCm and build
+            # DLL directories the C++ tests do (PATH prepends on Windows, via
+            # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced).
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(uhd_gen_tests uhd_skill_scripts_tests PROPERTIES
+                                     ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+            endif()
+
             # Build tree only: none of the four is installed.
             _apply_hipdnn_test_category_labels(uhd_gen_tests)
             _apply_hipdnn_test_category_labels(uhd_gen_dataset_tests)

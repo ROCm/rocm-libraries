@@ -16,6 +16,7 @@
 #include <hipdnn_bench/CandidatePageJson.hpp>
 #include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/DeviceIdentity.hpp>
+#include <hipdnn_bench/GraphFormat.hpp>
 #include <hipdnn_bench/InputDomain.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
@@ -133,7 +134,8 @@ void printHelp(const char* program)
         << "  --collect-immediate    Time the requested engine without tuning; emit JSON\n"
         << "  --ranking-metric <m>   Metric to predict in and select the immediate kernel by:\n"
         << "                         tflops (default) or time\n"
-        << "  --workspace-limit <n>  Set global.workspace_size_limit in bytes\n"
+        << "  --workspace-limit <n>  Set global.workspace_size_limit in bytes (not valid with\n"
+        << "                         the engine-level modes above)\n"
         << "  --offset <n>           Enumeration page offset (default 0)\n"
         << "  --limit <n>            Enumeration page size (1..10000, default 10000)\n"
         << "  --json                 Emit measured candidate identity/features as JSON\n"
@@ -331,6 +333,20 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         {
             throw std::invalid_argument("Engine prediction/description/collection modes cannot "
                                         "be combined with sweep or candidate enumeration");
+        }
+        // A workspace limit is a query constraint: it turns the engine-level prediction into a
+        // configuration-level one, which the frontend rejects on engine queries and which binds
+        // a different role than an engine-level (L1) model.
+        const auto workspaceLimit
+            = std::find_if(options.knobs.begin(), options.knobs.end(), [](const auto& setting) {
+                  return setting.first == "global.workspace_size_limit";
+              });
+        if(workspaceLimit != options.knobs.end())
+        {
+            throw std::invalid_argument("--workspace-limit (global.workspace_size_limit) cannot "
+                                        "be combined with --predict-engine, "
+                                        "--describe-engine-prediction or --collect-immediate: "
+                                        "engine-level measurements take no workspace constraint");
         }
         const auto benchmarking
             = std::find_if(options.knobs.begin(), options.knobs.end(), [](const auto& setting) {
@@ -752,8 +768,17 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     }
     HIPDNN_CHECK_ERROR(hipError(hipStreamSynchronize(stream), "Warmup synchronization failed"));
 
-    // Unstalled HIP events: run with stalled=false, so the loop never asks for a restart.
-    const auto timeOnce = [&](hipdnn_frontend::ExecutionTiming& timing) -> hipdnn_frontend::Error {
+    // The runtime ranks kernels with the stream held until host submission has finished, so
+    // the span holds device work and no host dispatch time. execute_timed_ext() takes the same
+    // measurement; a label here is then the quantity the runtime's own selection ranks.
+    const auto timeDeviceOnly
+        = [&](hipdnn_frontend::ExecutionTiming& timing) -> hipdnn_frontend::Error {
+        return graph.execute_timed_ext(handle, variantPack, workspace, timing);
+    };
+    // Events around execute(), for a device that cannot hold the stream. The span then includes
+    // host dispatch time, as the runtime's own unstalled re-measurement does.
+    const auto timeUnstalled
+        = [&](hipdnn_frontend::ExecutionTiming& timing) -> hipdnn_frontend::Error {
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(start.get(), stream), "Could not start timing"));
         HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(stop.get(), stream), "Could not stop timing"));
@@ -776,13 +801,28 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
         }
         return {};
     };
-    const auto outcome
-        = hipdnn_frontend::autotune::detail::runUntilStable(options.maxIterations,
-                                                            AutotuneConfig{}.windowSize,
-                                                            options.stability,
-                                                            /*stalled=*/false,
-                                                            timeOnce,
-                                                            [](int, float, float, bool) {});
+    const auto onIteration = [](int, float, float, bool) {};
+    auto quality = hipdnn_frontend::TimingQuality::DEVICE_ONLY;
+    auto outcome = hipdnn_frontend::autotune::detail::runUntilStable(options.maxIterations,
+                                                                     AutotuneConfig{}.windowSize,
+                                                                     options.stability,
+                                                                     /*stalled=*/true,
+                                                                     timeDeviceOnly,
+                                                                     onIteration);
+    if(outcome.restartUnstalled)
+    {
+        // The stall could not hold (a watchdog timeout, or a device without stalling): discard
+        // the pass and measure again unstalled, as the runtime does.
+        quality = hipdnn_frontend::TimingQuality::UNSTALLED;
+        outcome = hipdnn_frontend::autotune::detail::runUntilStable(options.maxIterations,
+                                                                    AutotuneConfig{}.windowSize,
+                                                                    options.stability,
+                                                                    /*stalled=*/false,
+                                                                    timeUnstalled,
+                                                                    onIteration);
+    }
+    output["timing_quality"]
+        = quality == hipdnn_frontend::TimingQuality::DEVICE_ONLY ? "device_only" : "unstalled";
     output["iterations"] = outcome.timings.size();
     output["converged"] = outcome.converged;
     if(outcome.benchmarkFailed)
@@ -989,7 +1029,7 @@ int runBench(const std::vector<std::string>& args)
 
     // Detect JSON vs FlatBuffer by content, not extension.
     BenchGraph graph;
-    const bool looksLikeJson = graphBytes.front() == static_cast<uint8_t>('{');
+    const bool looksLikeJson = hipdnn_bench::isJsonGraph(graphBytes);
     const auto restored = [&]() -> Error {
         if(looksLikeJson)
         {

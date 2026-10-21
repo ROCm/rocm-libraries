@@ -160,6 +160,10 @@ class TestPublishedCsv:
             "the window WIDTH must reach the request; a swin shape with width 0 is "
             "dispatched as plain causal"
         )
+        assert shapes[0]["right_bound"] == 0, (
+            "a request's right bound defaults to unbounded, which makes the same width "
+            "a non-causal band"
+        )
 
     def test_a_windowed_csv_row_without_a_width_is_refused(self, tmp_path):
         """Absent a width there is no windowed shape to mine, and defaulting one invents
@@ -344,6 +348,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             {"causal_mask": False, "left_bound": 128, "right_bound": 0},
         )
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [3]
+        assert [s["right_bound"] for s in self._mine(tmp_path)] == [0]
 
     def test_the_deprecated_boolean_still_takes_precedence_when_set(self, tmp_path):
         self._graph(
@@ -476,6 +481,7 @@ class TestRocKeBenchTree:
             "the window WIDTH must reach the request; 127 is the left bound and the "
             "band includes the current token"
         )
+        assert shapes[0]["right_bound"] == 0
 
     def test_sinks_are_carried_rather_than_filtered(self, tmp_path):
         """Shipping a sink variant is a scope decision made downstream; filtering the
@@ -1052,18 +1058,43 @@ class TestShapeDirectory:
             "1,128,4096,4096,192,128,causal,\n"
             "2,32,4096,4096,128,,swin,1024\n"
         )
-        rc, log, shapes = self._mine(tmp_path)
+        rc, log, shapes = self._mine(tmp_path, "--include-windowed")
         assert rc == 0, log
         by_batch = {s["batch"]: s for s in shapes}
         assert (by_batch[1]["hdim_q"], by_batch[1]["hdim_v"]) == (192, 128)
         assert by_batch[2]["sliding_window"] == 1024
+        assert by_batch[2]["right_bound"] == 0
+        assert "right_bound" not in by_batch[1]
 
     def test_a_windowed_row_without_a_width_is_refused(self, published, tmp_path):
         (published / "swin.csv").write_text(
             "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n1,32,4096,4096,128,swin\n"
         )
-        rc, log, _ = self._mine(tmp_path)
+        rc, log, _ = self._mine(tmp_path, "--include-windowed")
         assert rc != 0 and "positive window_size" in log
+
+    def test_a_windowed_row_needs_include_windowed_like_the_published_csv(
+        self, published, tmp_path
+    ):
+        """Without the flag a windowed row is excluded loudly -- recorded with its
+        reason, never folded onto causal -- and the causal rows are unaffected."""
+        (published / "mix.csv").write_text(
+            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask,window_size\n"
+            "1,32,4096,4096,128,causal,\n"
+            "2,32,4096,4096,128,swin,1024\n"
+            "3,32,4096,4096,128,swin,\n"
+        )
+        rc, log, shapes = self._mine(tmp_path)
+        assert rc == 0, log
+        assert [s["batch"] for s in shapes] == [1], "windowed rows must be dropped"
+        excluded = json.loads((tmp_path / "shapes.excluded.json").read_text())
+        assert [record["row"] for record in excluded] == [1, 2]
+        assert all("--include-windowed" in record["reason"] for record in excluded)
+
+        rc, log, shapes = self._mine(tmp_path, "--include-windowed")
+        assert (
+            rc != 0 and "positive window_size" in log
+        ), "with the flag a widthless windowed row is still refused"
 
     def test_a_graph_document_is_left_to_the_graph_reader(self, published, tmp_path):
         """A graph is mined once, as a graph, not again as a record."""
@@ -1161,6 +1192,7 @@ class TestQueryCsv:
                 str(published),
                 "--arch",
                 "gfx942",
+                "--include-windowed",
                 "--out-query-csv",
                 str(query),
             ],
@@ -1477,18 +1509,24 @@ class TestTheOutputIsWhatTheRequestClassAccepts:
             features.setdefault(label, set()).add(request.features())
             if label == "swa":
                 windows.append(request)
-        # A sliding window is a band; its causal edge is its right bound, not a
-        # `causal` feature.
+        # A causal sliding window is `causal` + `sliding_window`; a missing right bound
+        # would read as unbounded and make it a non-causal `band`.
         assert features == {
             "br": {frozenset({"causal", "causal_bottom_right"})},
             "tl": {frozenset({"causal"})},
-            "swa": {frozenset({"sliding_window", "band"})},
+            "swa": {frozenset({"causal", "sliding_window"})},
             "prefill": {frozenset({"causal"})},
             "decode": {frozenset({"causal", "causal_bottom_right"})},
         }
-        # left_bound 127, right_bound 0, in the width form rocKE resolves to those bounds:
-        # sliding_window - 1 to the left and, with no explicit right bound, 0 to the right.
+        # left_bound 127, right_bound 0: the request states the width and a right bound
+        # of 0, which rocKE normalizes to a band 128 keys wide ending on the diagonal.
         assert [
-            (int(r.mask_type), int(r.sliding_window), r.window_left, r.window_right)
+            (
+                int(r.mask_type),
+                int(r.sliding_window),
+                int(r.right_bound),
+                r.window_left,
+                r.window_right,
+            )
             for r in windows
-        ] == [(3, 128, None, None)]
+        ] == [(3, 128, 0, None, None)]

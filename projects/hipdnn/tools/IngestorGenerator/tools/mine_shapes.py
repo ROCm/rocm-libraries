@@ -50,6 +50,22 @@ MASK_TYPE = {
     "swin": SLIDING_WINDOW,
 }
 
+#: The right bound a mined window carries. Every window source here records a causal
+#: band (right bound 0). A request's `right_bound` defaults to -1 (unbounded), which
+#: turns the same `sliding_window` width into a non-causal left-only band that the
+#: kernels classify as a different feature.
+WINDOW_RIGHT_BOUND = 0
+
+
+def _mask_fields(mask_type: int, window: int) -> dict:
+    """The request's mask fields. A sliding window also states its right bound, which
+    the request otherwise reads as unbounded."""
+    fields = {"mask_type": mask_type, "sliding_window": window}
+    if mask_type == SLIDING_WINDOW:
+        fields["right_bound"] = WINDOW_RIGHT_BOUND
+    return fields
+
+
 #: Tensor names marking a graph as backward, in both gradient spellings a
 #: corpus uses: `d_query`-style names alone would let `dq`/`dk`/`dv`/`do`
 #: through. Module-level so a consumer outside this file (e.g. a config's
@@ -111,8 +127,7 @@ def from_published_csv(
                     "hdim_q": head_dim,
                     "hdim_v": head_dim,
                     "dtype": dtype,
-                    "mask_type": mask_type,
-                    "sliding_window": window,
+                    **_mask_fields(mask_type, window),
                     "use_sinks": False,
                     # Provenance, carried not computed. `_provenance` is stripped
                     # before the request is constructed and kept for reporting.
@@ -179,7 +194,7 @@ def _mask_from_attributes(
             "mask_type": _causal_mask_type(bottom_right, seqlen_q, seqlen_k),
             "sliding_window": 0,
         }
-    return {"mask_type": SLIDING_WINDOW, "sliding_window": left + 1}
+    return _mask_fields(SLIDING_WINDOW, left + 1)
 
 
 #: Every source spelling of a dtype -> the rocKE spec's spelling. An unmapped dtype
@@ -504,8 +519,7 @@ def from_rocke_bench(
                     "hdim_q": int(head_size),
                     "hdim_v": int(head_size),
                     "dtype": dtype,
-                    "mask_type": mask_type,
-                    "sliding_window": sliding_window,
+                    **_mask_fields(mask_type, sliding_window),
                     # A recorded request attribute, not a tuning choice: the
                     # dispatcher resolves the shape the trace asked for.
                     # Whether this integration ships a sink variant is decided
@@ -637,11 +651,16 @@ def _shape_rows_from_text(path: Path) -> list[dict]:
     return rows
 
 
-def _shape_row(row: dict, path: Path) -> dict | None:
+class WindowedRowExcluded(Exception):
+    """A sliding-window row read without `--include-windowed`."""
+
+
+def _shape_row(row: dict, path: Path, include_windowed: bool) -> dict | None:
     """A published row as a record, or None if it is not a shape row at all.
 
     An unrecognised dtype or mask spelling is refused, never guessed; a recognised
-    dtype outside the request family raises `OutOfFamilyDtype` for the caller to record.
+    dtype outside the request family raises `OutOfFamilyDtype`, and a windowed row
+    without `include_windowed` raises `WindowedRowExcluded`, for the caller to record.
     """
     fields: dict = {}
     for key, value in row.items():
@@ -670,6 +689,9 @@ def _shape_row(row: dict, path: Path) -> dict | None:
             f"problem in the corpus under the row's name."
         )
 
+    if mask_type == SLIDING_WINDOW and not include_windowed:
+        raise WindowedRowExcluded()
+
     # As from_published_csv: a windowed row names its width, never a guessed one.
     window = 0
     if mask_type == MASK_TYPE["swin"]:
@@ -694,8 +716,7 @@ def _shape_row(row: dict, path: Path) -> dict | None:
         "hdim_q": head_dim,
         "hdim_v": int(fields.get("head_dim_v", head_dim)),
         "dtype": normalise_dtype(fields.get("dtype"), path, "bf16"),
-        "mask_type": mask_type,
-        "sliding_window": window,
+        **_mask_fields(mask_type, window),
         "use_sinks": raw_sinks in ("true", "1", "yes"),
         "_provenance": {
             "source": "shape_dir",
@@ -707,7 +728,10 @@ def _shape_row(row: dict, path: Path) -> dict | None:
 
 
 def from_shape_dir(
-    root: Path, arch: str | None = None, excluded: list | None = None
+    root: Path,
+    arch: str | None = None,
+    excluded: list | None = None,
+    include_windowed: bool = False,
 ) -> list[dict]:
     """Shapes from a published shape directory.
 
@@ -716,7 +740,8 @@ def from_shape_dir(
 
     `arch`, when given, drops rows naming a different arch; rows naming none are kept.
     A row or graph in a recognised dtype outside the request family is recorded in
-    `excluded` and skipped.
+    `excluded` and skipped, as is a tabular sliding-window row unless
+    `include_windowed` is set.
     """
     shapes = list(from_graph_corpus(root, excluded))
     wrong_arch = 0
@@ -732,9 +757,17 @@ def from_shape_dir(
             continue
         for index, row in enumerate(rows):
             try:
-                record = _shape_row(row, path)
+                record = _shape_row(row, path, include_windowed)
             except OutOfFamilyDtype as exc:
                 _exclude(excluded, path, str(exc), row=index)
+                continue
+            except WindowedRowExcluded:
+                _exclude(
+                    excluded,
+                    path,
+                    "sliding-window row (pass --include-windowed to keep it)",
+                    row=index,
+                )
                 continue
             if record is None:
                 continue
@@ -1071,9 +1104,11 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--include-windowed",
         action="store_true",
-        help="Keep sliding-window rows. Off by default: they are a different mask "
-        "kind, and a kernel that clamps top-left only will decline them anyway -- "
-        "but they are excluded LOUDLY here rather than folded onto causal.",
+        help="Keep sliding-window rows of the published CSV and of --shape-dir "
+        "tabular files. Off by default: they are a different mask kind, and a kernel "
+        "that clamps top-left only will decline them anyway -- but they are excluded "
+        "LOUDLY here rather than folded onto causal. A kept window is a causal band "
+        "(right_bound 0).",
     )
     parser.add_argument(
         "--out",
@@ -1088,9 +1123,9 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--excluded-out",
-        help="Write the excluded inputs (out-of-family dtypes), one record each "
-        "with its path and reason. Default: <stem>.excluded.json next to --out, or "
-        "next to --out-query-csv when --out is not given.",
+        help="Write the excluded inputs (out-of-family dtypes, sliding-window shape-dir "
+        "rows), one record each with its path and reason. Default: <stem>.excluded.json "
+        "next to --out, or next to --out-query-csv when --out is not given.",
     )
     args = parser.parse_args(argv)
 
@@ -1134,7 +1169,9 @@ def main(argv=None) -> int:
         print(f"  model catalog : {len(found):5d} recorded geometries")
         shapes += found
     for directory in args.shape_dirs:
-        found = from_shape_dir(Path(directory), args.arch, excluded)
+        found = from_shape_dir(
+            Path(directory), args.arch, excluded, args.include_windowed
+        )
         print(f"  shape dir     : {len(found):5d} published shapes in {directory}")
         shapes += found
 

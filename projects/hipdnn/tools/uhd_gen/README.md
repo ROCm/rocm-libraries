@@ -357,9 +357,13 @@ column.
 
 Regret belongs to the evaluation slice (§5.6.4); on training data it is optimistic and
 is not the number anyone wants. `evaluate` holds out `--eval-fraction` of the
-**problems**, assigned by a seeded SHA-256 of the problem key — reproducible from
-`(corpus, --seed)` alone, and independent of row order, so concatenating a log
-differently does not move the slice.
+**problems**, assigned by a seeded SHA-256 of the problem key: a shape is held out when its
+hash, read as a fraction of the hash range, is below `--eval-fraction`. That is
+reproducible from `(shape, --seed)` alone, independent of row order, and independent of
+which other shapes the corpus holds, so neither concatenating a log differently nor
+growing the corpus moves a shape across the split. The held-out count is `--eval-fraction`
+of the shapes in expectation, not exactly; a corpus too small for any shape to fall below it
+holds out its lowest-hash shape.
 
 Splitting *rows* would put some of a problem's candidates in training and the rest in
 evaluation. The evaluation-side oracle would then be the best of a subset, and a
@@ -696,7 +700,8 @@ content; a serialized graph already carries its own id and the bench preserves i
 nothing is injected there.
 
 **One bad graph costs that graph, not the run.** A graph whose collection fails (the
-bench crashes, or its response fails validation) is skipped for every device and metric
+bench crashes, runs past `--bench-timeout` seconds (default 3600; the run is killed), or its
+response fails validation) is skipped for every device and metric
 and recorded with its error under `failed_graphs` in `generation_manifest.json`. Up to
 `--max-graph-failures` of the graphs (a fraction, default `0.05`) may fail; more fails
 the run and lists them, since failures that common are systematic, not incidental. The
@@ -789,7 +794,8 @@ into `--descriptor-tree`; `promote` installs a kept model (`out/l1/model_<metric
 the source tree, run with `--dry-run` first. `python -m uhd_gen.compare_engines` joins
 several engines' L1 `corpus*.csv` on the corpus manifest's `benchmark` ids and reports,
 per ranking metric, coverage and per-regime winners over the graphs more than one engine
-serves. A row counts only toward the metric its `binding.metric` was collected under, so a
+serves on the same device: an engine's measurements of one graph on two kinds of GPU are two
+problems, never merged into one best. A row counts only toward the metric its `binding.metric` was collected under, so a
 label may name both of an engine's corpora (`MIOpen=corpus_tflops.csv`,
 `MIOpen=corpus_time.csv`).
 
@@ -800,8 +806,10 @@ configuration found by a sweep. Collection builds only that engine's plan with
 `global.benchmarking=0`, and `generate` runs the bench with `HIPDNN_FORCE_BENCHMARKING=0` so
 an inherited override cannot turn the search back on; it warms the plan up and measures
 ordinary execution with HIP events.
-It does not enumerate configurations or invoke autotune; normal engine cache behavior is
-unchanged. Full-graph work and elapsed time determine the TFLOPS label; unsupported work
+It does not enumerate configurations or invoke autotune. Every bench run, of either role,
+starts from an empty `HIPDNN_CACHE_DIR` of its own: a benchmark winner record outranks the
+engine's own pick, and neither the caller's nor one an earlier run left may decide a label.
+Full-graph work and elapsed time determine the TFLOPS label; unsupported work
 accounting is not replaced with a guessed label. Only a `tflops` collection needs
 `graph.flops`: a `time` collection over graphs whose provider publishes no FLOP count is
 complete, and its rows carry no `tflops`.
@@ -839,26 +847,27 @@ kpack-backed provider, the arch root that owns `kpack`), exactly as for L2.
 
 ```bash
 hipdnn_bench --graph graph.json --engine-name vendor:gemm \
-    --describe-engine-prediction --workspace-limit 67108864
+    --describe-engine-prediction
 hipdnn_bench --graph graph.json --engine-name vendor:gemm \
-    --collect-immediate --ranking-metric tflops --workspace-limit 67108864
+    --collect-immediate --ranking-metric tflops
 
 python -m uhd_gen generate \
     --graphs ./graphs --descriptor-tree ./descriptors \
     --engine vendor:gemm --engine-id <ENGINE-ID> \
     --role predict_engine --metric tflops time --arch gfx942 \
-    --workspace-limit 67108864 \
     --features graph.flops device.cu_count \
     --output-dir ./immediate-model
 
 HIPDNN_DESCRIPTOR_PATH=./descriptors hipdnn_bench \
     --graph graph.json --engine-name vendor:gemm --predict-engine \
-    --ranking-metric time --workspace-limit 67108864
+    --ranking-metric time
 ```
 
-Choose features from the description's published graph, device, and constraint
-fields. L1 signatures cannot consume candidate metadata. A workspace bound must
-be identical during collection and prediction when the model depends on it.
+Choose features from the description's published graph and device fields. L1 signatures
+cannot consume candidate metadata. An engine-level query takes no constraint, so
+`--workspace-limit` (and `--knob global.workspace_size_limit`) is refused by both
+`hipdnn_bench` and `uhd_gen generate` for this role: a limited run would be a
+configuration-level query, not an L1 one.
 The example feature set demonstrates the workflow, not an accuracy recommendation.
 
 Generation preserves supplied graph UUIDs and assigns reproducible IDs to ID-less
