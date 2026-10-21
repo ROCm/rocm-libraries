@@ -60,12 +60,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="also write <arch>/<GEMM>.csv with every MI's verdict, witness setting and checks",
     )
-    p.add_argument(
-        "--depthu",
-        action="store_true",
-        help="also record in each buildable MI's comment every DepthU it builds at "
-        "(about 2.5x the generation time)",
-    )
     return p.parse_args()
 
 
@@ -117,9 +111,7 @@ def main() -> None:
                         flush=True,
                     )
 
-            verdicts, space, name = B.classify_candidates(
-                config, hipblaslt, args.workers, progress, depthu=args.depthu
-            )
+            verdicts, space, name = B.classify_candidates(config, hipblaslt, args.workers, progress)
             path = buildable_list_path(args.arch, name)
             B.write_buildable_list(path, verdicts, arch=args.arch, gemm_name=name, source=source)
             stages = {}
