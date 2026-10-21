@@ -20,11 +20,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import reviewlib as rl  # noqa: E402
+
 PIN_VARS = "SKILL|EVIDENCE|SCRATCH|CLONE|KEY|TARGET|HEAD|HEAD_SHORT|BASE|REPO|REPO_BASE|KNOWLEDGE"
 
 # Loads PIN.md values as quoted exports; eval-based, so it works in a persistent shell.
 ENV_SH = (
-    r"""eval "$(awk '/^(""" + PIN_VARS + r"""):/{v=$0; sub(/^[A-Z_]+: */,"",v); k=$1; sub(/:$/,"",k); gsub(/\047/,"\047\\\047\047",v); print "export " k "=\047" v "\047"}' "$(dirname "${BASH_SOURCE[0]}")/PIN.md")"
+    r"""eval "$(awk '/^("""
+    + PIN_VARS
+    + r"""):/{v=$0; sub(/^[A-Z_]+: */,"",v); k=$1; sub(/:$/,"",k); gsub(/\047/,"\047\\\047\047",v); print "export " k "=\047" v "\047"}' "$(dirname "${BASH_SOURCE[0]}")/PIN.md")"
 : "${EVIDENCE:?}" "${SCRATCH:?}" "${CLONE:?}" "${KEY:?}"; cd "$(dirname "${BASH_SOURCE[0]}")"
 """
 )
@@ -38,21 +43,20 @@ def die(msg):
 
 def git(clone, *args, cwd=None, stdin=None, check=True):
     """Run git (-C clone); return stdout without the trailing newline."""
-    cmd = ["git"] + (["-C", str(clone)] if clone else []) + list(args)
-    r = subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, text=True)
-    if check and r.returncode != 0:
-        lines = r.stderr.strip().splitlines()
-        die(f"git {args[0]} failed: {lines[-1] if lines else r.returncode}")
-    return r.stdout.rstrip("\n")
+    code, out, err = rl.git(clone, *args, cwd=cwd, stdin=stdin)
+    if check and code != 0:
+        lines = err.strip().splitlines()
+        die(f"git {args[0]} failed: {lines[-1] if lines else code}")
+    return out.rstrip("\n")
 
 
 def gh(*args):
     """Run gh and return stdout; the only place the GitHub CLI is invoked."""
-    r = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if r.returncode != 0:
-        lines = r.stderr.strip().splitlines()
-        die(f"gh {args[0]} failed: {lines[-1] if lines else r.returncode}")
-    return r.stdout
+    code, out, err = rl.run(["gh", *args])
+    if code != 0:
+        lines = err.strip().splitlines()
+        die(f"gh {args[0]} failed: {lines[-1] if lines else code}")
+    return out
 
 
 def gh_paginated_list(endpoint):
@@ -108,6 +112,10 @@ def pin_lines(values):
     return "".join(f"{k}: {v}\n" for k, v in values)
 
 
+def append_pin(rdir, text):
+    rl.write(rdir / "PIN.md", (rdir / "PIN.md").read_text(encoding="utf-8") + text)
+
+
 def is_sha(text):
     return re.fullmatch(r"[0-9a-f]{7,40}", text) is not None
 
@@ -122,7 +130,11 @@ def cmd_init(args):
     scratch_dir.mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     evidence, scratch = evidence_dir.resolve(), scratch_dir.resolve()
-    skill = Path(args.skill).resolve() if args.skill else Path(__file__).resolve().parent.parent
+    skill = (
+        Path(args.skill).resolve()
+        if args.skill
+        else Path(__file__).resolve().parent.parent
+    )
 
     if args.pr:
         key = f"pr{args.pr}"
@@ -132,25 +144,46 @@ def cmd_init(args):
     repo, repo_base = scratch / f"r{n}" / "head", scratch / f"r{n}" / "base"
     rdir = evidence / f"r{n}"
     rdir.mkdir(parents=True, exist_ok=True)
-    (rdir / "PIN.md").write_text(
+    rl.write(
+        rdir / "PIN.md",
         pin_lines(
-            [("SKILL", skill), ("EVIDENCE", evidence), ("SCRATCH", scratch),
-             ("CLONE", clone), ("KEY", key), ("REPO", repo), ("REPO_BASE", repo_base)],
-        )
+            [
+                ("SKILL", skill),
+                ("EVIDENCE", evidence),
+                ("SCRATCH", scratch),
+                ("CLONE", clone),
+                ("KEY", key),
+                ("REPO", repo),
+                ("REPO_BASE", repo_base),
+            ],
+        ),
     )
-    (rdir / "env.sh").write_text(ENV_SH)
+    rl.write(rdir / "env.sh", ENV_SH)
 
     url = args.remote_url or f"https://github.com/{args.owner_repo}.git"
-    if subprocess.run(["git", "-C", str(clone), "rev-parse", "--git-dir"],
-                      capture_output=True).returncode != 0:
+    if (
+        subprocess.run(
+            ["git", "-C", str(clone), "rev-parse", "--git-dir"], capture_output=True
+        ).returncode
+        != 0
+    ):
         git(None, "clone", "--filter=blob:none", "--no-checkout", url, str(clone))
     git(clone, "config", "gc.auto", "0")
 
     ref_t, ref_h = f"refs/review/{key}/target", f"refs/review/{key}/r{n}"
     specs, shas = [], []
     if args.pr:
-        target = gh("pr", "view", args.pr, "-R", args.owner_repo,
-                    "--json", "baseRefName", "--jq", ".baseRefName").strip()
+        target = gh(
+            "pr",
+            "view",
+            args.pr,
+            "-R",
+            args.owner_repo,
+            "--json",
+            "baseRefName",
+            "--jq",
+            ".baseRefName",
+        ).strip()
         specs = [f"+refs/heads/{target}:{ref_t}", f"+refs/pull/{args.pr}/head:{ref_h}"]
     elif args.branch:
         target = args.target or "develop"
@@ -169,26 +202,44 @@ def cmd_init(args):
     if specs:
         git(clone, "fetch", "origin", *specs)
     for ref, sha in shas:
-        git(clone, "update-ref", ref, git(clone, "rev-parse", "--verify", f"{sha}^{{commit}}"))
+        git(
+            clone,
+            "update-ref",
+            ref,
+            git(clone, "rev-parse", "--verify", f"{sha}^{{commit}}"),
+        )
 
     head = git(clone, "rev-parse", f"{ref_h}^{{commit}}")
     if args.range:
         base = git(clone, "rev-parse", f"{ref_t}^{{commit}}")
     else:
         base = git(clone, "merge-base", ref_t, head)
-    with open(rdir / "PIN.md", "a") as f:
-        f.write(pin_lines([("TARGET", target), ("HEAD", head),
-                                 ("HEAD_SHORT", head[:12]), ("BASE", base)]))
+    append_pin(
+        rdir,
+        pin_lines(
+            [
+                ("TARGET", target),
+                ("HEAD", head),
+                ("HEAD_SHORT", head[:12]),
+                ("BASE", base),
+            ]
+        ),
+    )
     if base == head:
         print("empty diff: PR already merged by merge commit?", file=sys.stderr)
 
     files = git(clone, "diff", "--name-only", "--no-renames", base, head).splitlines()
-    (rdir / "files.txt").write_text("".join(f + "\n" for f in files))
-    (rdir / "sparse.txt").write_text("".join(d + "\n" for d in sparse_set(files)))
-    (rdir / "numstat.txt").write_text(
-        git(clone, "diff", "--numstat", "--no-renames", base, head) + "\n")
-    (rdir / "commits.txt").write_text(git(clone, "log", "--format=%H %s", f"{base}..{head}") + "\n")
-    sparse_text = (rdir / "sparse.txt").read_text()
+    rl.write(rdir / "files.txt", "".join(f + "\n" for f in files))
+    rl.write(rdir / "sparse.txt", "".join(d + "\n" for d in sparse_set(files)))
+    rl.write(
+        rdir / "numstat.txt",
+        git(clone, "diff", "--numstat", "--no-renames", base, head) + "\n",
+    )
+    rl.write(
+        rdir / "commits.txt",
+        git(clone, "log", "--format=%H %s", f"{base}..{head}") + "\n",
+    )
+    sparse_text = (rdir / "sparse.txt").read_text(encoding="utf-8")
     for w, sha in ((repo, head), (repo_base, base)):
         git(clone, "worktree", "add", "--no-checkout", "--detach", str(w), sha)
         git(w, "sparse-checkout", "set", "--cone", "--stdin", stdin=sparse_text)
@@ -199,7 +250,9 @@ def cmd_init(args):
             die(f"worktree {w} is not at {sha}")
     if args.pr:
         pr_gate(args, rdir, clone, base, head)
-    print(f"KEY={key} TARGET={target} HEAD={head[:12]} BASE={base[:12]} files={len(files)}")
+    print(
+        f"KEY={key} TARGET={target} HEAD={head[:12]} BASE={base[:12]} files={len(files)}"
+    )
 
 
 def pr_gate(args, rdir, clone, base, head):
@@ -209,62 +262,102 @@ def pr_gate(args, rdir, clone, base, head):
     pr_dir.mkdir(exist_ok=True)
     fields = "title,body,baseRefName,headRefName,headRefOid,files,comments,reviews"
     meta = gh("pr", "view", pr, "-R", o, "--json", fields)
-    (pr_dir / "pr.json").write_text(meta)
+    rl.write(pr_dir / "pr.json", meta)
     info = json.loads(meta)
-    (pr_dir / "body.md").write_text(info.get("body") or "")
+    rl.write(pr_dir / "body.md", info.get("body") or "")
     inline = gh_paginated_list(f"repos/{o}/pulls/{pr}/comments")
-    (pr_dir / "inline.json").write_text(json.dumps(inline))
+    rl.write(pr_dir / "inline.json", json.dumps(inline))
+    # Plain text the LEAK sweep reads, one file per source; no jq needed on the reviewer's host.
+    rl.write(pr_dir / "branch.txt", (info.get("headRefName") or "") + "\n")
+    rl.write(
+        pr_dir / "pr-text.txt", f"{info.get('title') or ''}\n{info.get('body') or ''}\n"
+    )
+    rl.write(
+        pr_dir / "pr-comment.txt",
+        "".join(
+            f"{x.get('body') or ''}\n"
+            for k in ("reviews", "comments")
+            for x in info.get(k) or []
+        ),
+    )
+    rl.write(
+        pr_dir / "pr-inline.txt", "".join(f"{x.get('body') or ''}\n" for x in inline)
+    )
     pr_files = gh_paginated_list(f"repos/{o}/pulls/{pr}/files")
-    (pr_dir / "files.json").write_text(json.dumps(pr_files))
-    (pr_dir / "checks.tsv").write_text(
-        gh("api", "--paginate", f"repos/{o}/commits/{head}/check-runs",
-           "--jq", r'.check_runs[] | [.name,.conclusion,.html_url] | @tsv'))
+    rl.write(pr_dir / "files.json", json.dumps(pr_files))
+    rl.write(
+        pr_dir / "checks.tsv",
+        gh(
+            "api",
+            "--paginate",
+            f"repos/{o}/commits/{head}/check-runs",
+            "--jq",
+            r".check_runs[] | [.name,.conclusion,.html_url] | @tsv",
+        ),
+    )
 
     if info.get("headRefOid") != head:
         die(f"PR head moved since pin: {info.get('headRefOid')} != {head}")
     if len(pr_files) >= MAX_GH_FILES:
-        with open(rdir / "PIN.md", "a") as f:
-            f.write(f"Files: unverifiable (>{MAX_GH_FILES})\n")
+        append_pin(rdir, f"Files: unverifiable (>{MAX_GH_FILES})\n")
         return
     local = git(clone, "diff", "--name-only", "-M", base, head).splitlines()
     if len(local) == len(pr_files):
         return
-    both = set(git(clone, "diff", "--name-only", "--no-renames", base, head).splitlines())
+    both = set(
+        git(clone, "diff", "--name-only", "--no-renames", base, head).splitlines()
+    )
     theirs = {x["filename"] for x in pr_files}
     theirs |= {x["previous_filename"] for x in pr_files if x.get("previous_filename")}
     if both != theirs:
-        die(f"file lists differ: git {len(local)} files, GitHub {len(pr_files)} files; "
-            f"only git: {sorted(both - theirs)[:5]}, only GitHub: {sorted(theirs - both)[:5]}")
+        die(
+            f"file lists differ: git {len(local)} files, GitHub {len(pr_files)} files; "
+            f"only git: {sorted(both - theirs)[:5]}, only GitHub: {sorted(theirs - both)[:5]}"
+        )
 
 
 def read_pin(rdir):
     pin = {}
-    for line in (rdir / "PIN.md").read_text().splitlines():
+    for line in (rdir / "PIN.md").read_text(encoding="utf-8").splitlines():
         m = re.match(r"([A-Z_]+): ?(.*)", line)
         if m:
             pin[m.group(1)] = m.group(2)
     return pin
 
 
+def same_path(text):
+    """Comparable form of a path: git prints `C:/x` where PIN.md holds `C:\\x`, and Windows
+    paths ignore case."""
+    return Path(os.path.normcase(os.path.realpath(text)))
+
+
 def cmd_cleanup(args):
     """Remove review worktrees under $SCRATCH (except $CLONE) and delete refs/review/$KEY/*."""
     pin = read_pin(Path(args.evidence) / f"r{args.round}")
-    clone, scratch, key = pin["CLONE"], pin["SCRATCH"].rstrip("/") + "/", pin["KEY"]
+    clone, key = pin["CLONE"], pin["KEY"]
+    clone_path, scratch_path = same_path(clone), same_path(pin["SCRATCH"])
     n = 0
     for line in git(clone, "worktree", "list", "--porcelain").splitlines():
         if line.startswith("worktree "):
-            w = line[len("worktree "):]
-            if w != clone and w.startswith(scratch):
+            w = line[len("worktree ") :]
+            wp = same_path(w)
+            if wp != clone_path and wp.is_relative_to(scratch_path):
                 git(clone, "worktree", "remove", "--force", w)
                 n += 1
-    refs = git(clone, "for-each-ref", "--format=%(refname)", f"refs/review/{key}/").splitlines()
+    refs = git(
+        clone, "for-each-ref", "--format=%(refname)", f"refs/review/{key}/"
+    ).splitlines()
     if refs:
-        git(clone, "update-ref", "--stdin", stdin="".join(f"delete {r}\n" for r in refs))
+        git(
+            clone, "update-ref", "--stdin", stdin="".join(f"delete {r}\n" for r in refs)
+        )
     print(f"removed {n} worktrees, {len(refs)} refs")
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("key", help=cmd_key.__doc__)
     s.add_argument("text")
@@ -273,7 +366,15 @@ def main(argv=None):
     for a in ("--evidence", "--scratch", "--owner-repo"):
         s.add_argument(a, required=True)
     s.add_argument("--round", type=int, required=True)
-    for a in ("--pr", "--branch", "--range", "--target", "--clone", "--remote-url", "--skill"):
+    for a in (
+        "--pr",
+        "--branch",
+        "--range",
+        "--target",
+        "--clone",
+        "--remote-url",
+        "--skill",
+    ):
         s.add_argument(a)
     s.set_defaults(fn=cmd_init)
     s = sub.add_parser("cleanup", help=cmd_cleanup.__doc__)

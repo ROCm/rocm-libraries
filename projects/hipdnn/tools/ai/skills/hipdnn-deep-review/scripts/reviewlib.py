@@ -6,19 +6,79 @@ The formats are the ones in findings.md (finding block, lane report, verifier
 file) and report.md (PIN.md, LEDGER.md, ID-MAP.md).
 """
 
+import os
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 TIERS = ("BLOCKING", "IMPORTANT", "SUGGESTION", "FUTURE WORK")
 FINDING_LABELS = ("ID", "Kind", "Tier", "Where", "Expected", "Actual", "Proof", "Fix")
-VERIFIER_LABELS = ("ID", "Verdict", "Tier", "Claim", "Reason", "Proof", "Class", "Not established")
+VERIFIER_LABELS = (
+    "ID",
+    "Verdict",
+    "Tier",
+    "Claim",
+    "Reason",
+    "Proof",
+    "Class",
+    "Not established",
+)
 VERDICTS = ("CONFIRMED", "PARTIAL", "DOWNGRADED", "UPGRADED", "REFUTED", "UNVERIFIED")
-SECTIONS = ("Findings", "Coverage", "Checked, no finding", "Handoffs", "Approval requests", "Needs human decision")
+SECTIONS = (
+    "Findings",
+    "Coverage",
+    "Checked, no finding",
+    "Handoffs",
+    "Approval requests",
+    "Needs human decision",
+)
 READ_DEPTHS = ("full", "diff-only", "sampled")
 
 
 class Fail(Exception):
     """A user-facing failure; the CLI prints it as one line and exits 1."""
+
+
+def write(path, text):
+    """Write text as UTF-8 with LF newlines. The bytes go to a temp file that then replaces
+    `path`, so a failed encode or write never truncates an existing file."""
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def run(cmd, *, cwd=None, stdin=None):
+    """Run a command with UTF-8 bytes on stdin and stdout (never the locale codec, never CRLF
+    translation). Returns (returncode, stdout, stderr) as str; undecodable bytes become U+FFFD.
+    """
+    r = subprocess.run(
+        cmd,
+        cwd=cwd,
+        input=None if stdin is None else stdin.encode("utf-8"),
+        capture_output=True,
+    )
+    return (
+        r.returncode,
+        r.stdout.decode("utf-8", errors="replace"),
+        r.stderr.decode("utf-8", errors="replace"),
+    )
+
+
+def git(clone, *args, cwd=None, stdin=None):
+    """Run `git [-C clone] -c core.quotepath=off args`; returns (returncode, stdout, stderr)."""
+    cmd = (
+        ["git", "-c", "core.quotepath=off"]
+        + (["-C", str(clone)] if clone else [])
+        + list(args)
+    )
+    return run(cmd, cwd=cwd, stdin=stdin)
 
 
 def round_dir(evidence, rnd):
@@ -28,12 +88,22 @@ def round_dir(evidence, rnd):
     return path
 
 
+def round_dirs(evidence):
+    """Existing `r<N>` directories of the evidence dir in numeric order."""
+    found = [
+        p
+        for p in Path(evidence).iterdir()
+        if re.fullmatch(r"r\d+", p.name) and p.is_dir()
+    ]
+    return sorted(found, key=lambda p: int(p.name[1:]))
+
+
 def pin_value(round_path, key):
     """Value of the first `<key>: <value>` line of PIN.md, or None."""
     pin = Path(round_path) / "PIN.md"
     if not pin.is_file():
         raise Fail(f"missing {pin}")
-    for line in pin.read_text().splitlines():
+    for line in pin.read_text(encoding="utf-8").splitlines():
         if line.startswith(key + ":"):
             return line[len(key) + 1 :].strip()
     return None
@@ -47,7 +117,9 @@ def parse_fields(text, labels, first="ID"):
     """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
     starts the next field; any other line (blank lines and fenced code included)
     continues the current field. Returns a list of {label: value} dicts."""
-    label_re = re.compile(r"^(" + "|".join(re.escape(x) for x in labels) + r"):[ \t]*(.*)$")
+    label_re = re.compile(
+        r"^(" + "|".join(re.escape(x) for x in labels) + r"):[ \t]*(.*)$"
+    )
     blocks, cur, field, fenced = [], None, None, False
     for line in text.splitlines():
         m = None if fenced else label_re.match(line)
@@ -99,7 +171,11 @@ def report_kind(text):
 
 
 def parse_findings(text):
-    return [b for b in parse_fields(split_sections(text).get("Findings", ""), FINDING_LABELS) if "ID" in b]
+    return [
+        b
+        for b in parse_fields(split_sections(text).get("Findings", ""), FINDING_LABELS)
+        if "ID" in b
+    ]
 
 
 def parse_coverage(text):
@@ -107,13 +183,18 @@ def parse_coverage(text):
     depth is not a read depth (the header, the separator) are skipped."""
     rows = []
     for line in split_sections(text).get("Coverage", "").splitlines():
-        cells = [c.strip().strip("`") for c in re.sub(r"^\s*(?:[-*]\s+)?\|?", "", line).rstrip("|").split("|")]
+        cells = [
+            c.strip().strip("`")
+            for c in re.sub(r"^\s*(?:[-*]\s+)?\|?", "", line).rstrip("|").split("|")
+        ]
         if len(cells) >= 2 and cells[1] in READ_DEPTHS:
             rows.append((cells[0], cells[1], " | ".join(cells[2:]).strip() or "-"))
     return rows
 
 
-M_LINE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?M([1-5]):(?:\*\*)?\s*(PASS|FAIL|WAIVED\([^)]*\)|N/A|UNVERIFIED)(?=\s|$)\s*(.*)$")
+M_LINE = re.compile(
+    r"^\s*(?:[-*]\s+)?(?:\*\*)?M([1-5]):(?:\*\*)?\s*(PASS|FAIL|WAIVED\([^)]*\)|N/A|UNVERIFIED)(?=\s|$)\s*(.*)$"
+)
 
 
 def parse_mlines(text):
@@ -177,8 +258,15 @@ def render_tables(tables):
 
     out = []
     for t in tables:
-        out += [f"## {t.title}", "", "| " + " | ".join(t.cols) + " |", "|" + "---|" * len(t.cols)]
-        out += ["| " + " | ".join(esc(r.get(c, "")) for c in t.cols) + " |" for r in t.rows]
+        out += [
+            f"## {t.title}",
+            "",
+            "| " + " | ".join(t.cols) + " |",
+            "|" + "---|" * len(t.cols),
+        ]
+        out += [
+            "| " + " | ".join(esc(r.get(c, "")) for c in t.cols) + " |" for r in t.rows
+        ]
         out.append("")
     return "\n".join(out)
 

@@ -15,11 +15,15 @@ what each agent reads, and `lanes/` holds the briefs. Install
 this skill with [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) and
 [hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); `RUN` builds with them.
 
-Prerequisites: network access, an authenticated `gh` with read access, `git`, `python3`
+Prerequisites: network access, an authenticated `gh` with read access, `git`, Python 3
 (it runs the scripts under `$SKILL/scripts/`; with `pre-commit` and `pytest` for lanes that run validators). `RUN` and verifiers also need
-a ROCm install, CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
+a ROCm install (Linux: `/opt/rocm` or `ROCM_PATH`; Windows: the wheel SDK that [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) provisions), CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
 `test-gap` findings stay `UNVERIFIED` and the review closes only through human
 `ACCEPTED-RISK` decisions (`PIN.md` records `Build host`).
+
+Platforms: Linux, macOS and Windows. On Windows run the skill from Git Bash (Git for Windows): the runbook's shell blocks need
+`bash`, `awk`, `sed`, `grep` and `comm`. Blocks write the interpreter as `python3`; on Windows that name is the Microsoft Store
+stub, so use `python` or `py -3` instead. Scripts read and write UTF-8 and LF whatever the host's locale.
 
 ## Entry contract
 

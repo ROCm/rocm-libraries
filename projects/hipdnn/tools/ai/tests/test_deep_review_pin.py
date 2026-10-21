@@ -5,6 +5,7 @@
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,12 @@ SCRIPT = (
     / "hipdnn-deep-review"
     / "scripts"
     / "pin.py"
+)
+
+
+needs_posix_bash = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a bare `bash` on Windows is WSL's, which cannot read C:\\ paths; env.sh is POSIX-shell only",
 )
 
 
@@ -68,8 +75,20 @@ def origin(tmp_path):
 
 def init_args(origin, *target, n=1):
     t = origin["tmp"]
-    return ["init", "--evidence", str(t / "ev"), "--scratch", str(t / "scratch"),
-            "--round", str(n), "--owner-repo", "o/r", "--remote-url", origin["url"], *target]
+    return [
+        "init",
+        "--evidence",
+        str(t / "ev"),
+        "--scratch",
+        str(t / "scratch"),
+        "--round",
+        str(n),
+        "--owner-repo",
+        "o/r",
+        "--remote-url",
+        origin["url"],
+        *target,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -103,8 +122,16 @@ def test_init_branch(pin, origin):
     assert f"BASE: {origin['base']}\n" in pin_md
     assert "KEY: feat-one\n" in pin_md and "TARGET: develop\n" in pin_md
     assert sorted((r1 / "files.txt").read_text().split()) == [
-        "README.md", "docs/guide.md", "projects/hipdnn/src/a.cpp", "projects/hipdnn/tools/x.sh"]
-    assert (r1 / "sparse.txt").read_text().split() == ["docs", "projects/hipdnn", "tools"]
+        "README.md",
+        "docs/guide.md",
+        "projects/hipdnn/src/a.cpp",
+        "projects/hipdnn/tools/x.sh",
+    ]
+    assert (r1 / "sparse.txt").read_text().split() == [
+        "docs",
+        "projects/hipdnn",
+        "tools",
+    ]
     assert "1\t0\tprojects/hipdnn/src/a.cpp" in (r1 / "numstat.txt").read_text()
     assert (r1 / "commits.txt").read_text().strip() == f"{origin['head']} change"
     head_wt, base_wt = t / "scratch/r1/head", t / "scratch/r1/base"
@@ -116,7 +143,9 @@ def test_init_branch(pin, origin):
 def test_init_range_with_sha_side(pin, origin):
     pin.main(init_args(origin, "--range", f"{origin['base']}..feat/one"))
     pin_md = (origin["tmp"] / "ev/r1/PIN.md").read_text()
-    assert f"BASE: {origin['base']}\n" in pin_md and f"HEAD: {origin['head']}\n" in pin_md
+    assert (
+        f"BASE: {origin['base']}\n" in pin_md and f"HEAD: {origin['head']}\n" in pin_md
+    )
     assert f"TARGET: {origin['base']}\n" in pin_md
     assert "KEY: " + pin.derive_key(f"{origin['base']}..feat/one") + "\n" in pin_md
 
@@ -128,6 +157,7 @@ def test_init_range_branches(pin, origin):
     assert f"BASE: {origin['base']}\n" in pin_md
 
 
+@needs_posix_bash
 def test_env_sh_fresh_and_persistent_shell(pin, origin):
     pin.main(init_args(origin, "--branch", "feat/one"))
     env = origin["tmp"] / "ev/r1/env.sh"
@@ -138,18 +168,26 @@ def test_env_sh_fresh_and_persistent_shell(pin, origin):
     # A persistent shell sources it twice from different directories; quotes in values survive.
     pin_md = env.parent / "PIN.md"
     pin_md.write_text(pin_md.read_text() + "KNOWLEDGE: /tmp/it's here\n")
-    script = f'cd /\n. "{env}"\necho "$KNOWLEDGE"\ncd /tmp\n. "{env}"\necho "$KEY"\npwd\n'
+    script = (
+        f'cd /\n. "{env}"\necho "$KNOWLEDGE"\ncd /tmp\n. "{env}"\necho "$KEY"\npwd\n'
+    )
     out = run("bash", stdin=script).splitlines()
     assert out == ["/tmp/it's here", "feat-one", str(env.parent.resolve())]
 
 
+@needs_posix_bash
 def test_env_sh_stops_when_unset(pin, origin, tmp_path):
     pin.main(init_args(origin, "--branch", "feat/one"))
     env = origin["tmp"] / "ev/r1/env.sh"
     pin_md = env.parent / "PIN.md"
-    pin_md.write_text("".join(
-        l for l in pin_md.read_text().splitlines(True) if not l.startswith("KEY:")))
-    r = subprocess.run(["bash", "-c", f'. "{env}"; echo reached'], capture_output=True, text=True)
+    pin_md.write_text(
+        "".join(
+            l for l in pin_md.read_text().splitlines(True) if not l.startswith("KEY:")
+        )
+    )
+    r = subprocess.run(
+        ["bash", "-c", f'. "{env}"; echo reached'], capture_output=True, text=True
+    )
     assert r.returncode != 0 and "reached" not in r.stdout
 
 
@@ -158,7 +196,14 @@ def test_cleanup_removes_worktrees_and_refs(pin, origin):
     t = origin["tmp"]
     clone = t / "scratch/clone"
     assert run("git", "-C", str(clone), "for-each-ref", "refs/review/feat-one/")
-    run("git", "-C", str(clone), "update-ref", "refs/review/other/target", origin["base"])
+    run(
+        "git",
+        "-C",
+        str(clone),
+        "update-ref",
+        "refs/review/other/target",
+        origin["base"],
+    )
     pin.main(["cleanup", "--evidence", str(t / "ev"), "--round", "1"])
     assert not (t / "scratch/r1/head").exists() and not (t / "scratch/r1/base").exists()
     assert run("git", "-C", str(clone), "for-each-ref", "refs/review/feat-one/") == ""
@@ -180,17 +225,26 @@ class FakeGh:
         if "baseRefName" in args and "--jq" in args:
             return self.base + "\n"
         if args[:2] == ("pr", "view"):
-            return json.dumps({"title": "t", "body": "desc", "headRefOid": self.head_oid})
+            return json.dumps(
+                {"title": "t", "body": "desc", "headRefOid": self.head_oid}
+            )
         if args[0] == "api" and args[-1].endswith("/files"):
             half = len(self.files) // 2
-            return "".join(json.dumps([{"filename": f} for f in part])
-                           for part in (self.files[:half], self.files[half:]))
+            return "".join(
+                json.dumps([{"filename": f} for f in part])
+                for part in (self.files[:half], self.files[half:])
+            )
         if args[0] == "api" and "--jq" in args:
             return "ci\tsuccess\thttp://x\n"
         return "[]"
 
 
-PR_FILES = ["README.md", "docs/guide.md", "projects/hipdnn/src/a.cpp", "projects/hipdnn/tools/x.sh"]
+PR_FILES = [
+    "README.md",
+    "docs/guide.md",
+    "projects/hipdnn/src/a.cpp",
+    "projects/hipdnn/tools/x.sh",
+]
 
 
 def test_pr_saves_artifacts(pin, origin, monkeypatch):
@@ -199,7 +253,9 @@ def test_pr_saves_artifacts(pin, origin, monkeypatch):
     r1 = origin["tmp"] / "ev/r1"
     assert "KEY: pr7\n" in (r1 / "PIN.md").read_text()
     assert (r1 / "pr/body.md").read_text() == "desc"
-    assert [f["filename"] for f in json.loads((r1 / "pr/files.json").read_text())] == PR_FILES
+    assert [
+        f["filename"] for f in json.loads((r1 / "pr/files.json").read_text())
+    ] == PR_FILES
     assert (r1 / "pr/checks.tsv").read_text() == "ci\tsuccess\thttp://x\n"
 
 

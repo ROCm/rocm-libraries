@@ -9,7 +9,7 @@ needs subagents; without them, stop and tell the user to run `hipdnn-pr-quality`
 `<pr>` is the PR number, `<N>` the round. `<owner>/<repo>` comes from the PR URL, else
 `origin` of `$CLONE`, else `ROCm/rocm-libraries`; pass `-R <owner>/<repo>` to every `gh pr` and
 `gh issue` call. `pin.py`, `partition.py`, `ledger.py` and `comments.py` are in `$SKILL/scripts/`;
-a script name below stands for `python3 "$SKILL/scripts/<name>"`. Each prints terse results and
+a script name below stands for `python3 "$SKILL/scripts/<name>"` (`python` or `py -3` on Windows, as in SKILL.md *Platforms*). Each prints terse results and
 exits non-zero with a one-line reason. After pinning, commands run from `$EVIDENCE/r<N>/`
 (sourcing `env.sh` changes to it); GNU coreutils, grep and sed are assumed.
 
@@ -41,7 +41,7 @@ python3 <skill dir>/scripts/pin.py init --evidence <evidence dir> --scratch <scr
   `projects/*/tools/` changes;
 - adds the sparse worktrees `$REPO` (at `$HEAD`) and `$REPO_BASE` (at `$BASE`) and checks
   both are at their SHAs;
-- for a PR saves `pr/pr.json`, `body.md`, `inline.json`, `files.json` and `checks.tsv`, and
+- for a PR saves `pr/pr.json`, `body.md`, `inline.json`, `files.json`, `checks.tsv` and the plain-text `branch.txt`, `pr-text.txt`, `pr-comment.txt` and `pr-inline.txt`, and
   checks `$HEAD` against `headRefOid` and the file counts (below).
 
 `. <evidence dir>/r<N>/env.sh` exports every `PIN.md` variable among `SKILL EVIDENCE SCRATCH
@@ -58,7 +58,7 @@ With no PR, save the intent document as `intent.md`. An empty description is an 
 Complete `PIN.md` by appending the `report.md` fields `init` does not write: `Change`,
 `Round`, `Repo`, `Stack parent`, `Description`, `Lines`, `Checks`, `PR bot`, `Build host`,
 `Leak terms`. `Build host: yes` needs `cmake`, `ninja`, a C++ compiler, a ROCm install
-(`${ROCM_PATH:-/opt/rocm}`) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
+(Linux: `${ROCM_PATH:-/opt/rocm}`; Windows: the wheel SDK, which `windows_rocm_setup.py --provision auto --venv-path $SCRATCH/rocm-venv` from [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) finds or installs, with Clang present per that skill) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
 the `therock-pr-bot` check. Round N > 1 also records the previous head and base, saves `git
 -C "$CLONE" range-diff <old-base>..<old-head> <new-base>..<new-head>` to `range-diff.txt` and
 writes `affected.txt` (*Iterate*); `partition.py packets` lists them when `range-diff.txt` exists.
@@ -76,7 +76,7 @@ stop and tell the user; nothing was fetched.
 
 Export `$KNOWLEDGE` and append it to `PIN.md` as `KNOWLEDGE: <path>`, outside `$CLONE`, `$REPO` and `$REPO_BASE`, as the first writable of
 `knowledge:<dir>`; a durable-knowledge directory the host's agent instructions name;
-`${TMPDIR:-/tmp}/hipdnn-review-knowledge-$USER/`; `$EVIDENCE/knowledge/`. Record the choice
+`${TMPDIR:-/tmp}/hipdnn-review-knowledge-${USER:-$USERNAME}/`; `$EVIDENCE/knowledge/`. Record the choice
 and why an earlier one failed in `PIN.md`.
 
 `partition.py areas` assigns each path of `files.txt` to one area and writes `areas.tsv`

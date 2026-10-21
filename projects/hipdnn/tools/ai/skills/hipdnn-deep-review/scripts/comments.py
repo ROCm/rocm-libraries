@@ -10,7 +10,6 @@ Exits 1 with a one-line reason on failure.
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -24,12 +23,13 @@ ANCHOR = re.compile(r"^\s*`?([^\s:`,$]+):(\d+)")
 def new_side_ranges(clone, base, head, path):
     """Inclusive (first, last) new-side line ranges of the changed hunks of path between
     base and head; a hunk with count 0 (pure deletion) is an empty range."""
-    r = subprocess.run(["git", "-C", clone, "diff", "-U0", "--no-renames", base, head, "--", path],
-                       capture_output=True, text=True)
-    if r.returncode:
-        raise rl.Fail(f"git diff failed for {path}: {r.stderr.strip()}")
+    code, out, err = rl.git(
+        clone, "diff", "-U0", "--no-renames", base, head, "--", path
+    )
+    if code:
+        raise rl.Fail(f"git diff failed for {path}: {err.strip()}")
     ranges = []
-    for m in HUNK.finditer(r.stdout):
+    for m in HUNK.finditer(out):
         start, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
         if count:
             ranges.append((start, start + count - 1))
@@ -44,12 +44,18 @@ def strip_fences(text):
 def finding_blocks(evidence):
     """{final ID: finding block} from every round's ID-MAP.md and lane reports."""
     out = {}
-    for rp in sorted(Path(evidence).glob("r[0-9]*")):
+    for rp in rl.round_dirs(evidence):
         map_path = rp / "ID-MAP.md"
         if not map_path.is_file():
             continue
-        blocks = {f["ID"]: f for p in rl.lane_files(rp) for f in rl.parse_findings(p.read_text())}
-        for row in rl.parse_tables(map_path.read_text(), "ID-MAP.md")[0].rows:
+        blocks = {
+            f["ID"]: f
+            for p in rl.lane_files(rp)
+            for f in rl.parse_findings(p.read_text(encoding="utf-8"))
+        }
+        for row in rl.parse_tables(map_path.read_text(encoding="utf-8"), "ID-MAP.md")[
+            0
+        ].rows:
             block = blocks.get(row["Lane / provisional"].rsplit("/", 1)[-1])
             if block:
                 out[row["Final ID"]] = block
@@ -67,7 +73,9 @@ def cmd_draft(a):
     pins = {k: rl.pin_value(rp, k) for k in ("CLONE", "BASE", "HEAD")}
     if not all(pins.values()):
         raise rl.Fail("PIN.md lacks CLONE, BASE or HEAD")
-    tables = rl.parse_tables((Path(a.evidence) / "LEDGER.md").read_text(), "LEDGER.md")
+    tables = rl.parse_tables(
+        (Path(a.evidence) / "LEDGER.md").read_text(encoding="utf-8"), "LEDGER.md"
+    )
     blocks = finding_blocks(a.evidence)
     ranges = {}
     inline, general, themes = [], [], {}
@@ -84,28 +92,51 @@ def cmd_draft(a):
             if m:
                 path, line = m.group(1), int(m.group(2))
                 if path not in ranges:
-                    ranges[path] = new_side_ranges(pins["CLONE"], pins["BASE"], pins["HEAD"], path)
+                    ranges[path] = new_side_ranges(
+                        pins["CLONE"], pins["BASE"], pins["HEAD"], path
+                    )
                 inside = any(lo <= line <= hi for lo, hi in ranges[path])
             fix = strip_fences(block.get("Fix", ""))
             if inside:
                 narrowed = row["Verdict"] == "PARTIAL" or "Actual" not in block
-                body = [f"Actual: {claim if narrowed else strip_fences(block['Actual'])}"]
+                body = [
+                    f"Actual: {claim if narrowed else strip_fences(block['Actual'])}"
+                ]
                 if block.get("Expected"):
                     body.append(f"Expected: {strip_fences(block['Expected'])}")
                 if fix:
                     body.append(f"Fix: {fix}")
-                inline.append((rl.TIERS.index(tier), path, line, f"### {path}:{line} ({fid}, {tier})\n\n" + "\n\n".join(body)))
+                inline.append(
+                    (
+                        rl.TIERS.index(tier),
+                        path,
+                        line,
+                        f"### {path}:{line} ({fid}, {tier})\n\n" + "\n\n".join(body),
+                    )
+                )
             else:
-                general.append(f"- {where or fid} ({fid}, {tier}; not in a changed hunk): {claim}" + (f" Fix: {fix}" if fix else ""))
+                general.append(
+                    f"- {where or fid} ({fid}, {tier}; not in a changed hunk): {claim}"
+                    + (f" Fix: {fix}" if fix else "")
+                )
         else:
-            themes.setdefault((tier, row["Kind"]), []).append(f"{claim} (`{where}`, {fid})")
+            themes.setdefault((tier, row["Kind"]), []).append(
+                f"{claim} (`{where}`, {fid})"
+            )
     out = ["# Draft comments (nothing posted)", ""]
     for entry in sorted(inline, key=lambda e: e[:3]):
         out += [entry[3], ""]
     out += ["## General", ""] + general
-    out += [f"- **{tier} {kind}**: " + "; ".join(items) for (tier, kind), items in sorted(themes.items(), key=lambda kv: (rl.TIERS.index(kv[0][0]), kv[0][1]))]
-    (rp / "COMMENTS.md").write_text("\n".join(out) + "\n")
-    print(f"comments: {len(inline)} inline, {len(general)} general findings, {len(themes)} themes")
+    out += [
+        f"- **{tier} {kind}**: " + "; ".join(items)
+        for (tier, kind), items in sorted(
+            themes.items(), key=lambda kv: (rl.TIERS.index(kv[0][0]), kv[0][1])
+        )
+    ]
+    rl.write(rp / "COMMENTS.md", "\n".join(out) + "\n")
+    print(
+        f"comments: {len(inline)} inline, {len(general)} general findings, {len(themes)} themes"
+    )
 
 
 def main(argv=None):

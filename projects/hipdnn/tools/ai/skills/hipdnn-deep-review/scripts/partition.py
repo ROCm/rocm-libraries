@@ -21,6 +21,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import reviewlib as rl  # noqa: E402
+
 TARGET_LINES = 2000
 
 # First matching row wins; a prefix ending in "/" matches a directory, else the exact path.
@@ -49,7 +52,19 @@ AREA_ROWS = [
 
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
-CONCERN_LANES = {"TESTQ", "TESTB", "AUTH", "BUILD", "DEPS", "API", "ROCK", "LEAK", "DUP", "DOCS", "RUN"}
+CONCERN_LANES = {
+    "TESTQ",
+    "TESTB",
+    "AUTH",
+    "BUILD",
+    "DEPS",
+    "API",
+    "ROCK",
+    "LEAK",
+    "DUP",
+    "DOCS",
+    "RUN",
+}
 
 
 def fail(msg: str):
@@ -75,7 +90,7 @@ def _matches(path: str, prefix: str) -> str | None:
     if "*" in prefix:
         head, _ = prefix.split("*")
         if path.startswith(head):
-            rest = path[len(head):]
+            rest = path[len(head) :]
             seg, slash, _ = rest.partition("/")
             if seg and slash:
                 return seg
@@ -105,7 +120,7 @@ def area_of(path: str) -> str:
 def read_lines(path: Path, what: str) -> list[str]:
     if not path.is_file():
         fail(f"{what} not found: {path}")
-    return [ln for ln in path.read_text().splitlines() if ln]
+    return [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln]
 
 
 def read_numstat(round_dir: Path) -> list[tuple[str, int, str]]:
@@ -130,7 +145,10 @@ def read_areas(round_dir: Path) -> dict[str, str]:
 
 
 def read_owners(round_dir: Path) -> list[tuple[str, str]]:
-    return [tuple(ln.split("\t", 1)) for ln in read_lines(round_dir / "owners.tsv", "owners.tsv")]
+    return [
+        tuple(ln.split("\t", 1))
+        for ln in read_lines(round_dir / "owners.tsv", "owners.tsv")
+    ]
 
 
 def read_sampled(sampled: str | None) -> dict[str, tuple[str, bool]]:
@@ -149,11 +167,13 @@ def cmd_areas(args) -> None:
     """Assign each path of files.txt to an area slug; write areas.tsv."""
     rd = Path(args.round_dir)
     files = read_lines(rd / "files.txt", "files.txt")
-    (rd / "areas.tsv").write_text("".join(f"{p}\t{area_of(p)}\n" for p in files))
+    rl.write(rd / "areas.tsv", "".join(f"{p}\t{area_of(p)}\n" for p in files))
     print(f"areas.tsv: {len(files)} files, {len({area_of(p) for p in files})} areas")
 
 
-def plan_lanes(files: list[tuple[str, int, str]], areas: dict[str, str]) -> list[list[tuple[str, int, str]]]:
+def plan_lanes(
+    files: list[tuple[str, int, str]], areas: dict[str, str]
+) -> list[list[tuple[str, int, str]]]:
     """Pack area groups (first-appearance order) into lanes of ~TARGET_LINES lines.
 
     A total within target is one lane; an area over target splits by file; a file over
@@ -220,11 +240,16 @@ def cmd_plan(args) -> None:
     if not owners:
         fail("numstat.txt has no rows")
 
-    (rd / "owners.tsv").write_text("".join(f"{o}\t{p}\n" for o, lane in owners for p, _, _ in lane))
+    rl.write(
+        rd / "owners.tsv",
+        "".join(f"{o}\t{p}\n" for o, lane in owners for p, _, _ in lane),
+    )
     for o, lane in owners:
         slugs = sorted({areas[p] for p, _, _ in lane})
         tag = " (sampled)" if all(p in sampled for p, _, _ in lane) else ""
-        print(f"{o}: {len(lane)} files, {sum(n for _, n, _ in lane)} lines, areas {','.join(slugs)}{tag}")
+        print(
+            f"{o}: {len(lane)} files, {sum(n for _, n, _ in lane)} lines, areas {','.join(slugs)}{tag}"
+        )
 
 
 def orient_paths(slugs, rd: Path) -> list[str]:
@@ -233,28 +258,49 @@ def orient_paths(slugs, rd: Path) -> list[str]:
         if slug == "docs":
             continue
         rel = f"orient/{slug}.md"
-        out.append(rel if (rd / rel).is_file() else f"{rel} (absent: scout failed or none)")
+        out.append(
+            rel if (rd / rel).is_file() else f"{rel} (absent: scout failed or none)"
+        )
     return out
 
 
 def concern_scope(lane: str, rows):
-    cmake = lambda p: p.rsplit("/", 1)[-1] == "CMakeLists.txt" or p.endswith(".cmake") or p == "CMakePresets.json" or p.startswith(".github/")
+    cmake = (
+        lambda p: p.rsplit("/", 1)[-1] == "CMakeLists.txt"
+        or p.endswith(".cmake")
+        or p == "CMakePresets.json"
+        or p.startswith(".github/")
+    )
     if lane == "BUILD":
-        return [r for r in rows if cmake(r[0]) or r[0].rsplit("/", 1)[-1] == "version.json"]
+        return [
+            r for r in rows if cmake(r[0]) or r[0].rsplit("/", 1)[-1] == "version.json"
+        ]
     if lane == "DEPS":
-        return [r for r in rows if cmake(r[0]) or r[0].rsplit("/", 1)[-1] == "pyproject.toml" or re.fullmatch(r"requirements.*\.txt", r[0].rsplit("/", 1)[-1])]
+        return [
+            r
+            for r in rows
+            if cmake(r[0])
+            or r[0].rsplit("/", 1)[-1] == "pyproject.toml"
+            or re.fullmatch(r"requirements.*\.txt", r[0].rsplit("/", 1)[-1])
+        ]
     return rows
 
 
 def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -> None:
     out = [f"# Packet: {lane}", "", f"Lane: {lane} ({kind})", ""]
-    out += ["## Files" if kind == "correctness" else "## Changed files in scope", "",
-            "| path | added | deleted | area |", "|---|---|---|---|"]
+    out += [
+        "## Files" if kind == "correctness" else "## Changed files in scope",
+        "",
+        "| path | added | deleted | area |",
+        "|---|---|---|---|",
+    ]
     for path, _, raw in rows:
         added, deleted, _ = raw.split("\t", 2)
         out.append(f"| `{path}` | {added} | {deleted} | {areas[path]} |")
     out += ["", "## Orient files", ""]
-    out += [f"- {p}" for p in orient_paths({areas[r[0]] for r in rows}, rd)] or ["- none"]
+    out += [f"- {p}" for p in orient_paths({areas[r[0]] for r in rows}, rd)] or [
+        "- none"
+    ]
     if kind == "concern":
         out += ["", f"Stack parent: {parent or 'none'}"]
     marked = [r[0] for r in rows if r[0] in sampled]
@@ -265,10 +311,17 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
             fail(f"{lane} owns sampled files but --sampled marks no sample file for it")
         out += ["", f"Sampled: {', '.join(gens)}; sample {', '.join(sample)}"]
     if (rd / "range-diff.txt").is_file():
-        out += ["", "## Round delta", "", "- range-diff.txt", "- affected.txt", "- ledger rows: ../LEDGER.md rows in scope"]
+        out += [
+            "",
+            "## Round delta",
+            "",
+            "- range-diff.txt",
+            "- affected.txt",
+            "- ledger rows: ../LEDGER.md rows in scope",
+        ]
     packets = rd / "packets"
     packets.mkdir(exist_ok=True)
-    (packets / f"{lane}.md").write_text("\n".join(out) + "\n")
+    rl.write(packets / f"{lane}.md", "\n".join(out) + "\n")
 
 
 def cmd_packets(args) -> None:
@@ -340,16 +393,34 @@ def cmd_gate(args) -> None:
 
 
 def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("areas", cmd_areas), ("plan", cmd_plan), ("packets", cmd_packets), ("gate", cmd_gate)):
-        p = sub.add_parser(name, help=fn.__doc__.splitlines()[0], description=fn.__doc__)
-        p.add_argument("--round-dir", default=".", help="$EVIDENCE/r<N> (default: current directory)")
+    for name, fn in (
+        ("areas", cmd_areas),
+        ("plan", cmd_plan),
+        ("packets", cmd_packets),
+        ("gate", cmd_gate),
+    ):
+        p = sub.add_parser(
+            name, help=fn.__doc__.splitlines()[0], description=fn.__doc__
+        )
+        p.add_argument(
+            "--round-dir",
+            default=".",
+            help="$EVIDENCE/r<N> (default: current directory)",
+        )
         p.set_defaults(fn=fn)
         if name in ("plan", "packets"):
-            p.add_argument("--sampled", help="file of generated/golden paths (see module docs)")
+            p.add_argument(
+                "--sampled", help="file of generated/golden paths (see module docs)"
+            )
         if name == "packets":
-            p.add_argument("--lanes", help="comma-separated concern lanes to write, e.g. TESTQ,BUILD")
+            p.add_argument(
+                "--lanes",
+                help="comma-separated concern lanes to write, e.g. TESTQ,BUILD",
+            )
             p.add_argument("--parent", help="stack parent for concern-lane packets")
     args = parser.parse_args(argv)
     args.fn(args)

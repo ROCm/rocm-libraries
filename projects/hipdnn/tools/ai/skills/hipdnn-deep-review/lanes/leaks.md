@@ -8,7 +8,7 @@ Find anything the push or PR publishes that should not be public (this is a publ
 | Item | Source |
 |---|---|
 | Every commit (message, author, committer, added lines); the final diff (added lines with line numbers at `$HEAD`, changed paths) | `history` and `git diff -U0`, below |
-| PR title, description, reviews, comments, inline threads | `$EVIDENCE/r<N>/pr/pr.json` and `pr/inline.json`. No PR: the commit messages are the future description, and `intent.md` stands in for it |
+| PR title, description, reviews, comments, inline threads | `$EVIDENCE/r<N>/pr/`: `branch.txt`, `pr-text.txt`, `pr-comment.txt`, `pr-inline.txt`. No PR: the commit messages are the future description, and `intent.md` stands in for it |
 | Earlier heads | Round N > 1: `history "$BASE..<previous head>"` too, the head in the previous round's `PIN.md` |
 
 `history` covers every commit: a leak removed later is still published. `--diff-merges=remerge` (git 2.36+; older `--cc`) includes
@@ -43,10 +43,7 @@ git -C "$REPO" diff -U0 --no-color --src-prefix=a/ --dst-prefix=b/ "$BASE" "$HEA
 git -C "$REPO" diff --name-only "$BASE" "$HEAD" | meta path
 # PR targets only (branch target: the branch name; range target: no branch): branch name, then PR text from the saved intake files
 P="$EVIDENCE/r<N>/pr"
-jq -r .headRefName "$P/pr.json" | meta branch
-jq -r '.title, .body' "$P/pr.json" | meta pr-text
-jq -r '.reviews[].body, .comments[].body' "$P/pr.json" | meta pr-comment
-jq -r '.[].body' "$P/inline.json" | meta pr-inline
+for k in branch pr-text pr-comment pr-inline; do meta "$k" < "$P/$k.txt"; done
 ```
 
 ## 2. Search
@@ -67,7 +64,8 @@ xox[abprs]-[A-Za-z0-9-]+
 (^|[[:space:]"'`(=:])(/home|/Users|/var/tmp|/scratch|/nfs|/mnt|/tmp|/cluster|/lustre|/data)/[^[:space:]"'`)>]+
 (^|[[:space:]"'`(=:])~/[^[:space:]"'`)>]+
 \$HOME/[^[:space:]"'`)>]+
-[A-Za-z]:\\Users\\[^[:space:]"'`]+
+(^|[^A-Za-z0-9])[A-Za-z]:[\\/][^[:space:]"'`)>]+
+(^|[[:space:]"'`(=:])/[a-z]/[^[:space:]"'`)>]+
 [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}
 https?://[^[:space:])>"'`]+
 [^[:space:]"'`()<>]*([Cc]onfluence|[Ss]harepoint|[Aa]tlassian|[Jj]ira|teams\.microsoft|slack\.com|wiki\.)[^[:space:]"'`()<>]*
@@ -80,7 +78,7 @@ Build the two term files. **Your own identifiers** are the likeliest leaks when 
 Coverage. Strip CR, surrounding whitespace and blank lines first; a `STOP` here stops the lane.
 
 ```bash
-printf '%s\n' "$HOME" "$USER" "$(hostname)" "$(hostname -f)" "$(git config user.email)" "$(git config user.name)" \
+printf '%s\n' "$HOME" "${USERPROFILE:-}" "${USER:-}" "${USERNAME:-}" "${COMPUTERNAME:-}" "$(hostname)" "$(hostname -f 2>/dev/null)" "$(git config user.email)" "$(git config user.name)" \
   "$CLONE" "$REPO" "$REPO_BASE" "$EVIDENCE" "$SCRATCH" | awk 'length >= 3 && !/^[[:space:]]*$/' | sort -u > "$L/local-terms.txt"
 [ "$TERMS" = absent ] && TERMS=; if [ -n "$TERMS" ]; then [ -r "$TERMS" ] || echo "STOP: terms file unreadable: $TERMS" >&2
   tr -d '\r' < "$TERMS" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF' | sort -u; fi > "$L/terms.txt"
@@ -103,7 +101,7 @@ scan > "$L/hits.tsv"; wc -l < "$L/hits.tsv"; head -n 200 "$L/hits.tsv"
 `hits.tsv` rows are `<anchor><TAB><base path><TAB><token>`; page with `sed -n`. Then check what patterns cannot match: committed
 build output, virtual environments, caches, agent or planning notes, unpublished benchmark numbers, customer or partner names,
 screenshots, and binaries (`git diff --numstat "$BASE" "$HEAD"` rows with `-` counts; `--summary` for mode changes and symlinks):
-view images, list archives, run `strings` on code objects.
+view images, list archives, list printable runs of code objects (`strings`, else `python -c` over the file's bytes).
 
 ## 3. Classify each hit
 

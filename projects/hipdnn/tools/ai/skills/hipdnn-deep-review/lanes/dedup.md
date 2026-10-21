@@ -4,13 +4,18 @@ Find code the change could reuse instead of writing, and code it repeats within 
 
 ## Against existing code
 
-For each new helper, utility, fixture, CMake function or script, search the repository for an equivalent before reporting none:
+For each new or changed function, helper, fixture, CMake function or script, look for an existing equivalent in the code units
+the change already belongs to or consumes, before reporting none. Search by name, signature and body, not by file listing. Scope is
+bounded: the translation unit and its target first, then the same project, then the SDKs that target links (`test_sdk`,
+`data_sdk`, `plugin_sdk`). Do not search other projects or units the change does not consume, and do not propose a new
+dependency to reach a helper.
 
-- `projects/hipdnn/test_sdk/`, `data_sdk/` and `plugin_sdk/` utilities, and provider counterparts.
-- CMake functions (`add_hipdnn_test`, `hipdnn_add_dependency`, the helpers in
+- The same translation unit: nearly identical blocks, functions or test bodies; merge them there when possible (a shared helper,
+  a template, a parameterized test) before looking further out.
+- The target's own sources and the linked SDKs' utilities (`test_sdk/`, `data_sdk/`, `plugin_sdk/`), and provider counterparts.
+- CMake functions the project already uses (`add_hipdnn_test`, `hipdnn_add_dependency`, the helpers in
   `dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake`).
 - Integration-test harness and bundle mechanisms that would replace hand-written C++ graph tests.
-- Shared descriptor, tensor, layout and dtype helpers.
 - Descriptor, packer and unpacker boilerplate written by hand where the descriptor generator produces it
   (`projects/hipdnn/tools/DescriptorGenerator/`; `projects/hipdnn/docs/AddingNewOperations.md`).
 

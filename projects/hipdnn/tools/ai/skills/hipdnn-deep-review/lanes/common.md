@@ -15,7 +15,7 @@ and inputs. Scouts and `SYNTH` read this file and [orient.md](orient.md) only.
 ```markdown
 $EVIDENCE/LEDGER.md   $EVIDENCE/r<N>/: PIN.md env.sh CONTEXT.md ID-MAP.md REPORT.md COMMENTS.md
   dispatch-context.md files.txt numstat.txt commits.txt sparse.txt areas.tsv owners.tsv   (round > 1: range-diff.txt affected.txt)
-  pr/ (pr.json body.md inline.json files.json checks.tsv) | intent.md   orient/<slug>.md
+  pr/ (pr.json body.md inline.json files.json checks.tsv branch.txt pr-text.txt pr-comment.txt pr-inline.txt) | intent.md   orient/<slug>.md
   packets/<LANE>.md  lanes/<LANE>.md  verify/<ID>.md
   evidence subdirectories: verify/<ID>-evidence/  lanes/*-evidence/  lanes/<ID>/
 ```
