@@ -647,7 +647,7 @@
           "bytes": 216430,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp",
-          "sha256": "4fdab469451dbd0c1c18e40843db83bbfe6ee4ec70be23bfa06f00c2d7b853e1",
+          "sha256": "3a8aa91124047362e54656b15be37340289cf371755ef9700ddff9744f1251a9",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/dense_d128_gqa4_causal": {
@@ -655,7 +655,7 @@
           "bytes": 221585,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_causal_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp",
-          "sha256": "18f007ef6272b5e64662e5f63633bda53353a817281c9214db7a74463e63ae0a",
+          "sha256": "77f838ca1449f7e7edec0b63f0c6ea8ce5ec7bcb71aee14bceb97578415b5bc8",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/dense_d128_gqa4_klds": {
@@ -663,7 +663,7 @@
           "bytes": 310303,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp_klds",
-          "sha256": "ce65ae031cb69296c12a0fe199412930c64e802c3866df3125dc5da84712cb59",
+          "sha256": "79cf2182d0667456608cb13fd92bf582e27e461a96495767e08f3c33b084ffb6",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/paged_d128_gqa4": {
@@ -671,7 +671,7 @@
           "bytes": 218405,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp_vpg16",
-          "sha256": "ca9ff9ea82cafa4ce351e5d4951ebff9edbc1c263dccad6c08fcdf4d113a72cb",
+          "sha256": "7a2af8447b594f0eccdb40de9d85b4caa0f6b499db15d4829290d1bdedf4e020",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
@@ -2620,7 +2620,7 @@
           "bytes": 216483,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp",
-          "sha256": "5788f06ccfe5a890a7a1ef16244d31eed6cf1ae4a23af2f22889b2ad905f70ff",
+          "sha256": "c7d894d3019cfc7c960fd8478b75f09f7b4d26df41f6b724bb16ceb751519e9f",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/dense_d128_gqa4_causal": {
@@ -2628,7 +2628,7 @@
           "bytes": 221638,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_causal_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp",
-          "sha256": "4458be0d649693e55936d917fc1cf575ec46f91e4c58bcd2a34f4aea4d685632",
+          "sha256": "e519888f9559e3978f5d0c24b43182638761080fc696fa90d93f27883b32f91c",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/dense_d128_gqa4_klds": {
@@ -2636,7 +2636,7 @@
           "bytes": 310358,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp_klds",
-          "sha256": "084e7bc1fbcb8d7d0dabbebb794fec584668b8249cb83a1cdc5a77968eb49046",
+          "sha256": "72aafb85dec208b40430a2f3a0b0fd06a2bb8f6a2ff1e2aab6500241487ba1ee",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/paged_d128_gqa4": {
@@ -2644,7 +2644,7 @@
           "bytes": 218458,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp_vpg16",
-          "sha256": "cdcb09d7cc9992a601fd2543ba26e0db30dc0ab2490c55a1558d24a9eaa43020",
+          "sha256": "59fa47650bf23bf792990ef5ed2504177b54c13ceaf493a8f9c577aabd79f510",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
@@ -4593,7 +4593,7 @@
           "bytes": 216547,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp",
-          "sha256": "761015723dc49f62f4a536d57e601bab4d3cdbe975fcef4e94b8c584c71fe792",
+          "sha256": "6919e28d2cdd2071eadc7769d460184bef043452e2e108ba861dfefacf1473b0",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/dense_d128_gqa4_causal": {
@@ -4601,7 +4601,7 @@
           "bytes": 221702,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_causal_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp",
-          "sha256": "0aa5f028895f5c55b938a51b10b98f5ec351b98a6517b138c5f888f1c16d9d03",
+          "sha256": "5697cf9b82e82413b46aa1546c32a71a4cc61e333a0464695c91e384bc20df04",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/dense_d128_gqa4_klds": {
@@ -4609,7 +4609,7 @@
           "bytes": 310422,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp_klds",
-          "sha256": "d3bfc24f563b62cce8d396cdf3b2f836f13de2a0b4f7765329e8540fd5ec4c2d",
+          "sha256": "8f687eb2f83b1304de326285345cb63e7acd2383bae110f7481aff199ce7de50",
           "status": "ok"
         },
         "attention_swapqk/gfx1151/paged_d128_gqa4": {
@@ -4617,7 +4617,7 @@
           "bytes": 218522,
           "family": "attention_swapqk",
           "kernel_name": "wmma_fmha_swapqk_H128_HQ8_HK2_none_w2_vpedef_pingpong_ilp2_bn64_npf_dyn_buf_dual_lazy_fexp_nopipe_noqh_qglob_kvglob_qb1_of32_oct_qct_vt_novpf_qkno_bgoff_ksingle_oneshot_noiglp_vpg16",
-          "sha256": "dde4d2f440f7dadb3c1fa307e91237bef8484deab70f4b21e37362324be828c4",
+          "sha256": "325da24e004f68ba4cb9b8ec3cb688e183172bd80ebd5b14943d5598a7bb9860",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
