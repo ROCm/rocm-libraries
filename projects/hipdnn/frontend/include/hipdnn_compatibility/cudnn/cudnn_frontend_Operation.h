@@ -217,7 +217,7 @@ private:
 
     // The record behind a slot, null when the slot is unset. A set descriptor
     // without a record of the expected kind (not built, or another descriptor)
-    // is BAD_PARAM, as the C API's SET of such a referent was.
+    // is BAD_PARAM.
     template <typename RecordT>
     static std::shared_ptr<const RecordT> slot_record(const ManagedOpaqueDescriptor& desc,
                                                       std::string_view label)

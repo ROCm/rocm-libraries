@@ -20,7 +20,7 @@
 // convert_to_cudnn_type / convert_from_cudnn_type do. std::nullopt means the
 // value is valid on one side but has no counterpart on the other; callers
 // report NOT_SUPPORTED. Raw C values outside the declared range never reach
-// these functions: SET and the v8 factories reject them with BAD_PARAM.
+// these functions: the builders and the v8 factories reject them with BAD_PARAM.
 // FE -> hipDNN C lowering reuses the Types.hpp converters (toHipdnnDataType,
 // toBackendPointwiseMode, toBackendConvMode, ...).
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail

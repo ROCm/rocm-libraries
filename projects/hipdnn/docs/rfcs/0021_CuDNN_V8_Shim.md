@@ -418,7 +418,7 @@ records the decisions.
 | R6 | `cudnnBackendDescriptorType_t` stays whole: PyTorch's plan-cache key, Paddle's template argument and `OperationBuilder`'s constructor argument |
 | R7 | `cudnnGetLastErrorString` is hipDNN's; see §3.6 |
 | R8 | Unchanged: plan JSON format, tags (including `_k<type>=<value>`), dense engine index, knob projection, `-1` unset knob, ReLU-clip rule, default elision, UID merge, stable sort, disconnected graphs, every status code except R2's |
-| R9 | Per-call overhead is re-measured on the new implementation against the §2 budgets |
+| R9 | Per-call overhead re-measured on the new implementation: `VariantPackBuilder::build()` + `cudnnBackendExecute` p50 0.76–0.97 µs on an idle host, p90 about 1.4 µs. The gate stays at 5 µs (not 1 µs) so a shared CI runner does not flake; see §2 |
 
 Also amended by this section: §3.7's "every identifier is declared" now excludes R4's removals, and
 §3.8's "port upstream headers unchanged in behavior" is now "unchanged public API and verbatim
