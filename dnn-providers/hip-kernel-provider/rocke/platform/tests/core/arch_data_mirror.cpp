@@ -6,6 +6,8 @@
 // them, so an edited or regenerated file can never leave the C++ copy stale:
 //
 //   arch_specs.json "generic_targets"  <->  rocke_ati_generic_targets
+//   "processors" of every intrinsic_arch_domain.<flavor>.json column
+//                                      <->  rocke_ati_rejected_processors
 //
 // argv[1] is the data directory (python/rocke/core/arch/data); the test reads
 // the source tree, so it runs from the build tree and is not installed.
@@ -16,6 +18,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -107,6 +110,84 @@ static void check_generic_targets(const jd_val_t* specs)
     }
 }
 
+// rocke_ati_rejected_processors holds exactly the (flavor, processor) pairs
+// that some committed arch-domain column records as not accepted, for every
+// column in the directory.
+static void check_rejected_processors(const fs::path& data_dir, rocke_arena_t* arena)
+{
+    const std::string prefix = "intrinsic_arch_domain.";
+    const std::string suffix = ".json";
+    std::set<std::pair<std::string, std::string>> in_columns;
+    int columns = 0;
+    for(const fs::directory_entry& entry : fs::directory_iterator(data_dir))
+    {
+        const std::string name = entry.path().filename().string();
+        if(name.size() <= prefix.size() + suffix.size() || name.rfind(prefix, 0) != 0
+           || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+            continue;
+        const std::string flavor
+            = name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        ++columns;
+        const jd_val_t* column = load_json(entry.path(), arena);
+        const jd_val_t* processors = rocke_jget(column, "processors");
+        if(processors == NULL || processors->kind != JD_OBJ)
+        {
+            fprintf(stderr, "FAIL: %s has no processors object\n", name.c_str());
+            ++failures;
+            continue;
+        }
+        for(int i = 0; i < processors->obj_len; ++i)
+        {
+            const jd_val_t* accepted = rocke_jget(processors->obj[i].val, "accepted");
+            if(accepted == NULL || accepted->kind != JD_BOOL)
+            {
+                fprintf(stderr,
+                        "FAIL: %s processor %s has no boolean 'accepted'\n",
+                        name.c_str(),
+                        processors->obj[i].key);
+                ++failures;
+            }
+            else if(!accepted->b)
+                in_columns.emplace(flavor, processors->obj[i].key);
+        }
+    }
+    if(columns == 0)
+    {
+        fprintf(stderr,
+                "FAIL: no %s<flavor>%s column in %s\n",
+                prefix.c_str(),
+                suffix.c_str(),
+                data_dir.string().c_str());
+        ++failures;
+    }
+    std::set<std::pair<std::string, std::string>> in_cpp;
+    for(const rocke_ati_rejected_processor_t* row = rocke_ati_rejected_processors;
+        row->llvm_flavor != NULL;
+        ++row)
+        in_cpp.emplace(row->llvm_flavor, row->gfx);
+    for(const auto& [flavor, gfx] : in_columns)
+        if(in_cpp.count({flavor, gfx}) == 0)
+        {
+            fprintf(stderr,
+                    "FAIL: the %s column records %s as not accepted, but "
+                    "rocke_ati_rejected_processors (cpp/core/arch/data.cpp) does not list it\n",
+                    flavor.c_str(),
+                    gfx.c_str());
+            ++failures;
+        }
+    for(const auto& [flavor, gfx] : in_cpp)
+        if(in_columns.count({flavor, gfx}) == 0)
+        {
+            fprintf(stderr,
+                    "FAIL: rocke_ati_rejected_processors (cpp/core/arch/data.cpp) lists %s at "
+                    "%s, but no committed %s column records it as not accepted\n",
+                    gfx.c_str(),
+                    flavor.c_str(),
+                    flavor.c_str());
+            ++failures;
+        }
+}
+
 int main(int argc, char** argv)
 {
     if(argc != 2)
@@ -123,6 +204,7 @@ int main(int argc, char** argv)
     }
     if(const jd_val_t* specs = load_json(data_dir / "arch_specs.json", &arena))
         check_generic_targets(specs);
+    check_rejected_processors(data_dir, &arena);
     rocke_arena_destroy(&arena);
     return failures == 0 ? 0 : 1;
 }
