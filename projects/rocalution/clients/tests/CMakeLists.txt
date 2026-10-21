@@ -81,6 +81,7 @@ endif()
 # MPI tests
 if(SUPPORT_MPI)
   list(APPEND ROCALUTION_TEST_SOURCES
+    test_global_amg.cpp
     test_global_matrix.cpp
 # test_global_stencil.cpp
     test_global_vector.cpp
@@ -208,6 +209,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
 else()
   message(STATUS "rocALUTION: No test_categories.yaml (CTest categories not used)")
   add_test(rocalution-test rocalution-test)
+endif()
+
+# Multi-rank tests skip themselves unless they are started on exactly 2 ranks
+if(SUPPORT_MPI AND MPIEXEC_EXECUTABLE)
+  add_test(NAME rocalution-test-mpi-np2
+           COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+                   $<TARGET_FILE:rocalution-test> --gtest_filter=global_amg/*:global_matrix/*
+                   ${MPIEXEC_POSTFLAGS})
 endif()
 
 # Install CTestTestfile.cmake to bin/rocalution/ for TheRock

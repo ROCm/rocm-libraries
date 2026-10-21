@@ -477,6 +477,8 @@ namespace rocalution
                                              this->pm_->GetLocalNrow(),
                                              this->pm_->GetLocalNcol());
 
+        this->InitEmptyGhost_();
+
         // Initialize communication pattern
         this->InitCommPattern_();
     }
@@ -509,6 +511,8 @@ namespace rocalution
                                              nnz,
                                              this->pm_->GetLocalNrow(),
                                              this->pm_->GetLocalNcol());
+
+        this->InitEmptyGhost_();
 
         // Initialize communication pattern
         this->InitCommPattern_();
@@ -4602,6 +4606,22 @@ namespace rocalution
         }
 
         this->pm_ = this->pm_self_;
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::InitEmptyGhost_(void)
+    {
+        // A rank without ghost entries can still have boundary rows that its neighbors need.
+        // The setup of the parallel AMG reads the ghost row of every local row, so the ghost
+        // part needs one (empty) row per local row, as SetGhostDataPtrCSR() with nnz = 0 gives.
+        if(this->matrix_ghost_.GetM() == 0)
+        {
+            this->matrix_ghost_.AllocateCSR("Ghost of " + this->object_name_,
+                                            0,
+                                            this->pm_->GetLocalNrow(),
+                                            this->pm_->GetNumReceivers());
+            this->matrix_ghost_.ConvertTo(COO);
+        }
     }
 
     template <typename ValueType>

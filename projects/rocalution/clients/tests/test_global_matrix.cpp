@@ -69,6 +69,20 @@ TEST(global_matrix_bad_args, global_matrix)
 
     testing_global_matrix_bad_args<float>();
 }
+
+class parameterized_global_matrix_local_data_only
+    : public testing::TestWithParam<std::tuple<bool, bool>>
+{
+};
+
+TEST_P(parameterized_global_matrix_local_data_only, local_data_only_double)
+{
+    testing_global_matrix_local_data_only<double>(std::get<0>(GetParam()), std::get<1>(GetParam()));
+}
+
+INSTANTIATE_TEST_CASE_P(global_matrix,
+                        parameterized_global_matrix_local_data_only,
+                        testing::Combine(testing::Bool(), testing::Bool()));
 /*
 TEST_P(parameterized_backend, backend)
 {
