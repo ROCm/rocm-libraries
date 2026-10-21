@@ -95,7 +95,7 @@ jobs:
           persist-credentials: false
       - name: Test sampling and failure handling
         run: |
-          if ! git diff --quiet HEAD^ HEAD -- .github/scripts/run_random_hipblaslt_gemms.py .github/scripts/sample_hipblaslt_gemms.py .github/scripts/tests/test_random_hipblaslt_gemms.py '.github/workflows/therock*'; then
+          if ! git diff --quiet HEAD^ HEAD -- .github/scripts/run_random_hipblaslt_gemms.py .github/scripts/sample_hipblaslt_gemms.py .github/scripts/hipblaslt_explicit_gemms.json .github/scripts/tests/test_random_hipblaslt_gemms.py '.github/workflows/therock*'; then
             python3 -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
           fi
 
