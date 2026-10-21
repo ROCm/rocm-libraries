@@ -91,8 +91,9 @@ const vector<vector<int>> large_opt_range
     = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
 // for weekly_lapack tests (large batch_count)
-const vector<vector<int>> large_batch_size_range = {{1, 1}};
-const vector<vector<int>> large_batch_opt_range = {{0, 0, 0, 0, 0}};
+const vector<vector<int>> large_batch_size_range = {{7, 7},{17,17}};
+const vector<vector<int>> large_batch_opt_range = 
+    {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
 Arguments gesvdj_setup_arguments(gesvdj_tuple tup, bool notransv)
 {
@@ -307,3 +308,110 @@ TEST_P(GESVDJ_NOTRANSV, strided_batched__float_complex)
 }
 
 TEST_P(GESVDJ_NOTRANSV, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+// large batch_count tests
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GESVDJ,
+                         Combine(ValuesIn(large_size_range), ValuesIn(large_opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GESVDJ, Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GESVDJ_NOTRANSV,
+                         Combine(ValuesIn(large_size_range), ValuesIn(large_opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         GESVDJ_NOTRANSV,
+                         Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVDJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVDJ_NOTRANSV_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
