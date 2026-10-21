@@ -197,6 +197,21 @@ TEST_F(LoopRegionRemarkPassTest, SnopDetection) {
     EXPECT_NE(output.find("4 wasted cycles"), std::string::npos);
 }
 
+// Loop with bank switches: the summary counts each s_set_vgpr_msb once per iteration
+TEST_F(LoopRegionRemarkPassTest, VgprMsbCountInSummary) {
+    BasicBlock* body = buildLoopBB("loop_body");
+
+    for (int msb : {0x41, 0x00}) {
+        AsmIRBuilder builder(*body, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_set_vgpr_msb, arch));
+        inst->addSrcReg(litInt(msb));
+        createVAddInBlock(body, arch, 3, 4, 5);
+    }
+
+    std::string output = runPassWithRemarks();
+    EXPECT_NE(output.find("4 insts, 2 s_set_vgpr_msb"), std::string::npos) << output;
+}
+
 // Loop with multiple boundaries: should report correct count
 TEST_F(LoopRegionRemarkPassTest, MultipleBoundaries) {
     BasicBlock* body = buildLoopBB("loop_body");

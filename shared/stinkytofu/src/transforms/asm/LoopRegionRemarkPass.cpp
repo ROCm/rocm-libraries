@@ -85,6 +85,7 @@ struct BBAnalysis {
     std::string label;
     unsigned regionCount = 1;
     unsigned instCount = 0;
+    unsigned vgprMsbCount = 0;
     unsigned snopCount = 0;
     unsigned snopWastedCycles = 0;
     unsigned branchCount = 0;
@@ -107,6 +108,9 @@ static BBAnalysis analyzeBB(BasicBlock& bb) {
         StinkyInstruction& inst = *instPtr;
         if (!inst.getHwInstDesc()) STINKY_UNREACHABLE("StinkyInstruction without HwInstDesc");
         result.instCount++;
+
+        // s_set_vgpr_msb detection
+        if (inst.getHwInstDesc()->unifiedOpcode == GFX::s_set_vgpr_msb) result.vgprMsbCount++;
 
         // s_nop detection
         if (inst.getHwInstDesc()->unifiedOpcode == GFX::s_nop) {
@@ -161,6 +165,7 @@ class LoopRegionRemarkPassImpl : public Pass {
             if (!loop.headerBB) continue;
 
             unsigned totalInsts = 0;
+            unsigned totalVgprMsb = 0;
             unsigned totalRegions = 0;
             unsigned totalSnop = 0;
             unsigned totalSnopCycles = 0;
@@ -170,6 +175,7 @@ class LoopRegionRemarkPassImpl : public Pass {
             for (BasicBlock* bb : loop.bodyBBs) {
                 BBAnalysis ba = analyzeBB(*bb);
                 totalInsts += ba.instCount;
+                totalVgprMsb += ba.vgprMsbCount;
                 totalRegions += ba.regionCount;
                 totalSnop += ba.snopCount;
                 totalSnopCycles += ba.snopWastedCycles;
@@ -208,9 +214,10 @@ class LoopRegionRemarkPassImpl : public Pass {
             {
                 std::ostringstream oss;
                 oss << "loop '" << loop.headerBB->getLabel() << "' summary: " << totalInsts
-                    << " insts, " << totalRegions << " regions, " << totalSnop << " s_nop ("
-                    << totalSnopCycles << " wasted cycles), " << totalBranches << " branches, "
-                    << totalCalls << " calls";
+                    << " insts, " << totalVgprMsb << " s_set_vgpr_msb, " << totalRegions
+                    << " regions, " << totalSnop << " s_nop (" << totalSnopCycles
+                    << " wasted cycles), " << totalBranches << " branches, " << totalCalls
+                    << " calls";
                 emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, kPassName, "LoopSummary",
                                      oss.str()});
             }

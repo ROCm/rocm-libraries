@@ -1,0 +1,23 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb8 --InsertVgprMsbPass --LoopRegionRemarkPass --remarks --print-output 2>&1
+#
+# The loop summary counts the s_set_vgpr_msb InsertVgprMsbPass leaves in the
+# loop body, which is what every iteration pays. The first instruction of the
+# body needs bank 1 in src0, src1 and dst, the second bank 0 everywhere, and the
+# third bank 1 again, so the body needs three. The one before the loop is paid
+# once and is not counted.
+
+# CHECK: loop 'label_loop' summary: {{[0-9]+}} insts, 3 s_set_vgpr_msb,
+
+st.func @loop_vgpr_msb_count() {
+^entry:
+  v300 = "st.v_add_f32"(v301, v302) { issueCycles = 1, latencyCycles = 5 }
+  Successors: ^label_loop
+^label_loop:
+  v256 = "st.v_add_f32"(v257, v258) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v259 = "st.v_add_f32"(v260, v261) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc0"(label_loop, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop, ^label_end
+^label_end:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
