@@ -3,7 +3,8 @@
 
 # Builds hipBLASLt with the experimental HIPBLASLT_ENABLE_LOCAL_KERNELS option,
 # which no other lane turns on, and runs the local kernel tests on gfx942 and
-# gfx950. The host library is built without a device kernel library.
+# gfx950. The device library is built from the bf16 TN logic only, which the
+# registration tests load as payloads.
 name: hipBLASLt Local Kernels CI
 
 on:
@@ -16,11 +17,20 @@ on:
       - "projects/hipblaslt/tensilelite/include/Tensile/SolutionLibrary.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/ContractionSolution.hpp"
       - "projects/hipblaslt/tensilelite/src/ContractionSolution.cpp"
+      - "projects/hipblaslt/tensilelite/include/Tensile/hip/HipSolutionAdapter.hpp"
+      - "projects/hipblaslt/tensilelite/src/hip/HipSolutionAdapter.cpp"
+      - "projects/hipblaslt/library/include/hipblaslt/hipblaslt-local-kernel.h"
+      - "projects/hipblaslt/library/src/amd_detail/hipblaslt-local-kernel.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/tensile_host.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/tensile_host.hpp"
       - "projects/hipblaslt/clients/tests/src/local_kernel*"
+      - "projects/hipblaslt/clients/tests/src/hip_solution_adapter_gtest.cpp"
       - "projects/hipblaslt/CMakeLists.txt"
       - "projects/hipblaslt/tensilelite/CMakeLists.txt"
       - "projects/hipblaslt/tensilelite/include/CMakeLists.txt"
       - "projects/hipblaslt/tensilelite/src/CMakeLists.txt"
+      - "projects/hipblaslt/library/include/CMakeLists.txt"
+      - "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt"
       - "projects/hipblaslt/clients/CMakeLists.txt"
       - "projects/hipblaslt/clients/tests/src/CMakeLists.txt"
       - "projects/hipblaslt/scripts/local-kernels/**"
