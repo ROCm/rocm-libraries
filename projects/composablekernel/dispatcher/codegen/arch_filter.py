@@ -44,6 +44,8 @@ import logging
 from codegen_common import (
     CommonTypeMappings,
     gfx1250_fp32_tile_reject_reason,
+    gfx1250_lds_operand_bytes,
+    gfx1250_lds_operand_transposed,
     gfx1250_pipeline_reject_reason,
 )
 
@@ -850,6 +852,7 @@ class ArchFilter:
             variant_name=f"operator={config.operator.value}",
             pads=None if None in pads else tuple(bool(p) for p in pads),
             tile_mn=(config.tile_m, config.tile_n),
+            warp_k=config.warp_k,
         )
         if reason:
             result.add_error(reason)
@@ -876,14 +879,21 @@ class ArchFilter:
             and config.operator == OperatorType.GEMM
         )
         if uses_gfx1250_base_lds:
-            # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
-            # descriptors: each group of rows spanning at least 256 bytes is
-            # followed by 16 padding bytes (same accounting as the Tile Engine
-            # validate_lds_capacity).
-            a_lds_layer = max(1, 256 // (config.tile_k * elem_size_a))
-            b_lds_layer = max(1, 256 // (config.tile_k * elem_size_b))
-            matrix_a_size += max(0, config.tile_m // a_lds_layer - 1) * 16
-            matrix_b_size += max(0, config.tile_n // b_lds_layer - 1) * 16
+            # TDM and non-MX comp_async use the gfx1250 base LDS descriptors,
+            # whose padding depends on whether the operand is transpose-loaded
+            # (same accounting as the Tile Engine validate_lds_capacity).
+            matrix_a_size = gfx1250_lds_operand_bytes(
+                config.tile_m,
+                config.tile_k,
+                elem_size_a,
+                gfx1250_lds_operand_transposed("a", config.datatype_a, config.layout),
+            )
+            matrix_b_size = gfx1250_lds_operand_bytes(
+                config.tile_n,
+                config.tile_k,
+                elem_size_b_staged,
+                gfx1250_lds_operand_transposed("b", config.datatype_b, config.layout),
+            )
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that

@@ -1355,6 +1355,12 @@ COMP_TDM_PC_BATCHED_REJECT_REASON = (
     "comp_tdm_pc is not supported for batched GEMM: BatchedGemmKernel does not "
     "arm the producer/consumer named barriers"
 )
+# BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
+# with no K-wave reduction, so a K wave would be a consumer whose work is lost.
+# Mirrors the static_assert in GemmPipelineAgBgCrCompTDMProducerConsumer.
+COMP_TDM_PC_WARP_K_REJECT_REASON = (
+    "comp_tdm_pc requires warp_k=1: the consumer waves have no K-wave reduction"
+)
 
 
 def comp_tdm_pc_acc_reject_reason(tile_m: int, tile_n: int, num_waves: int) -> str:
@@ -1380,6 +1386,59 @@ def gfx1250_fp32_tile_reject_reason(
     if tile_m * tile_n >= GFX1250_FP32_MAX_ACC_PER_LANE * num_waves * 32:
         return GFX1250_FP32_ACC_REJECT_REASON
     return ""
+
+
+# gfx1250 LDS geometry the C++ LDS descriptors are built from.
+GFX1250_LDS_BANKS = 64
+# supports_transpose_load in gemm_universal_pipeline_ag_bg_cr_policy.hpp (fp32 has
+# no transpose load).
+GFX1250_TR_LOAD_DTYPES = ("fp16", "bf16", "fp8", "bf8", "int8")
+
+
+def gfx1250_lds_operand_transposed(operand: str, dtype: str, layout: str) -> bool:
+    """is_a_load_tr / is_b_load_tr: column-major A or row-major B of a
+    transpose-load dtype is staged MN-contiguous in LDS."""
+    if dtype not in GFX1250_TR_LOAD_DTYPES or len(layout) < 2:
+        return False
+    return layout[0] == "c" if operand == "a" else layout[1] == "r"
+
+
+def gfx1250_lds_operand_bytes(
+    mn: int, tile_k: int, elem_bytes: int, transposed: bool
+) -> int:
+    """GetSmemSizeA/B of the gfx1250 TDM / comp_async LDS descriptors for one
+    operand of an mn x tile_k block.
+
+    Mirrors MakeA/BLdsBlockDescriptor (K-contiguous rows, 16 bytes of padding
+    after every group of rows spanning 256 bytes) and
+    MakeA/BLdsBlockDescriptorForTrLoad (MN-contiguous rows padded as
+    GetLdsPaddingConfig proposes), rounded up to 16 bytes. The TDM policy may
+    drop that padding but never adds any, so this never under-counts.
+    """
+    if not transposed:
+        layer = max(1, 256 // (tile_k * elem_bytes))
+        size = mn * tile_k * elem_bytes + max(0, mn // layer - 1) * 16
+        return -(-size // 16) * 16
+    banks_per_mn = mn * elem_bytes // 4
+    if banks_per_mn * 8 <= GFX1250_LDS_BANKS:
+        elems = tile_k * mn
+    else:
+        pad_elems = 16  # (pad_amount + 1) dwords of padding, in elements
+        interval = (
+            GFX1250_LDS_BANKS.bit_length() - 2
+            if banks_per_mn < GFX1250_LDS_BANKS
+            else banks_per_mn.bit_length() - 2
+        )
+        stride = (1 << (interval + 1)) * 4 // elem_bytes
+        if stride > mn:
+            k_layer = max(1, GFX1250_LDS_BANKS * 4 // mn // elem_bytes)
+            row = mn * k_layer
+            elems = (tile_k // k_layer - 1) * (row + pad_elems) + row
+        else:
+            m_layer = mn // stride
+            row = mn // m_layer
+            elems = (tile_k * m_layer - 1) * (row + pad_elems) + row
+    return -(-(elems * elem_bytes) // 16) * 16
 
 
 # The grouped quant GEMM kernels have no async (comp_async) or TDM (comp_tdm,
@@ -1420,6 +1479,7 @@ def gfx1250_pipeline_reject_reason(
     pads: Optional[Tuple[bool, bool, bool]] = None,
     batched: bool = False,
     tile_mn: Optional[Tuple[int, int]] = None,
+    warp_k: Optional[int] = None,
 ) -> str:
     """Why a comp_async / comp_tdm* / tdm-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
@@ -1433,6 +1493,7 @@ def gfx1250_pipeline_reject_reason(
     ``pads`` is (pad_m, pad_n, pad_k); None means unknown and skips the pad
     rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
+    ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it).
     An empty ``layout`` skips the comp_async layout rule and empty dtypes skip the 8-bit
     warp_tile_k rule.
     """
@@ -1461,6 +1522,8 @@ def gfx1250_pipeline_reject_reason(
         if pipeline == "comp_tdm_pc":
             if batched:
                 return COMP_TDM_PC_BATCHED_REJECT_REASON
+            if warp_k is not None and warp_k != 1:
+                return COMP_TDM_PC_WARP_K_REJECT_REASON
             if tile_mn is not None:
                 reason = comp_tdm_pc_acc_reject_reason(*tile_mn, num_waves)
                 if reason:

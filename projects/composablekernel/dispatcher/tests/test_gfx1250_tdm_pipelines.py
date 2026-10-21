@@ -37,6 +37,7 @@ from arch_filter import (  # noqa: E402
 from arch_specs_generated import get_lds_limit  # noqa: E402
 from codegen_common import (  # noqa: E402
     COMP_TDM_PC_BATCHED_REJECT_REASON,
+    COMP_TDM_PC_WARP_K_REJECT_REASON,
     CommonTypeMappings,
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
     comp_tdm_pc_acc_reject_reason,
@@ -129,6 +130,53 @@ class TestArchFilter(unittest.TestCase):
         self.assertFalse(
             self._valid("gfx1250", pipeline="comp_tdm_pc", epilogue="tdm", **tile)
         )
+
+    def test_tdm_pc_rejects_k_waves(self):
+        # 1x2x2 makes four consumer waves, but BlockGemm and the epilogue spread
+        # C over warp_m x warp_n only, with no K-wave reduction.
+        pc = dict(pipeline="comp_tdm_pc", epilogue="tdm")
+        self.assertFalse(self._valid("gfx1250", warp_m=1, warp_k=2, **pc))
+        self.assertTrue(self._valid("gfx1250", **pc))
+        self.assertEqual(
+            gfx1250_pipeline_reject_reason(
+                "gfx1250",
+                "comp_tdm_pc",
+                "tdm",
+                "intrawave",
+                4,
+                32,
+                "fp16",
+                "fp16",
+                "rcr",
+                warp_k=2,
+            ),
+            COMP_TDM_PC_WARP_K_REJECT_REASON,
+        )
+        if te is None:
+            self.skipTest("tile_engine gemm_validation_utils not importable")
+        te_pc = ("fp16", "comp_tdm_pc", "gfx1250", "rcr")
+        self.assertFalse(
+            te.validate_gemm_gfx1250_pipeline(128, 128, 1, 2, 2, *te_pc)[0]
+        )
+        self.assertTrue(te.validate_gemm_gfx1250_pipeline(128, 128, 2, 2, 1, *te_pc)[0])
+
+    def test_tdm_pc_transposed_lds_boundary(self):
+        # fp16 192-deep tiles: the K-contiguous (rcr) descriptors need 76768B per
+        # slot, under the 81920B four-slot budget. With crr both operands are
+        # transpose-loaded; their MN-contiguous descriptors need 55264B (MN=128)
+        # plus 27616B (MN=64) = 82880B per slot, 331520B for the ring, which
+        # exceeds the 327680B LDS and does not compile.
+        for tile_m, tile_n in ((64, 128), (128, 64)):
+            tile = dict(tile_m=tile_m, tile_n=tile_n, tile_k=192)
+            pc = dict(pipeline="comp_tdm_pc", epilogue="tdm", **tile)
+            self.assertTrue(self._valid("gfx1250", layout="rcr", **pc), tile)
+            self.assertFalse(self._valid("gfx1250", layout="crr", **pc), tile)
+            if te is None:
+                continue
+            lds = dict(a_datatype="fp16", b_datatype="fp16", pipeline="comp_tdm_pc")
+            lds.update(tile, gpu_target="gfx1250", gfx1250_gemm_pipeline=True)
+            self.assertTrue(te.validate_lds_capacity(**lds, layout="rcr")[0], tile)
+            self.assertFalse(te.validate_lds_capacity(**lds, layout="crr")[0], tile)
 
     def test_comp_async_not_gated_by_shared_filter(self):
         # grouped_conv uses comp_async on gfx950, so the shared arch filter must
@@ -790,6 +838,7 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", arch="gfx950"))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", persist=True))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", sched="interwave"))
+        self.assertFalse(self._ok("comp_tdm_pc", "tdm", waves=(1, 2, 2)))
         self.assertTrue(self._ok("comp_tdm_pc", "tdm", tile_mn=(256, 128)))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", tile_mn=(256, 256)))
         self.assertTrue(
@@ -885,6 +934,43 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertFalse(any(c.pipeline == "comp_async" for c in rrr))
         self.assertTrue(any(c.pipeline == "comp_tdm" for c in rrr))
         self.assertTrue(any(c.pipeline == "comp_tdm_pc" for c in rcr))
+
+    def test_expand_sweep_applies_codegen_lds_limit(self):
+        # fp16 rcr 256x128x128 on 4x2x1 waves needs 104416B per LDS slot: it fits
+        # comp_tdm's two slots but not comp_tdm_pc's four (81920B each), which
+        # the codegen's ArchFilter rejects. expand_sweep must drop it too, or it
+        # requests a header the codegen never emits.
+        import gemm_utils
+
+        tile = dict(
+            tile_m=[256],
+            tile_n=[128],
+            tile_k=[128],
+            warp_m=[4],
+            warp_n=[2],
+            warp_k=[1],
+            warp_tile_m=[16],
+            warp_tile_n=[16],
+            warp_tile_k=[32],
+        )
+        trait = dict(
+            pipeline=["comp_tdm", "comp_tdm_pc"],
+            epilogue=["tdm"],
+            scheduler=["intrawave"],
+            pad_m=[False],
+            pad_n=[False],
+            pad_k=[False],
+            persistent=[False],
+        )
+        cfg = {
+            "tile_config": {k: {"values": v} for k, v in tile.items()},
+            "trait_config": {k: {"values": v} for k, v in trait.items()},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "cfg.json"
+            path.write_text(json.dumps(cfg))
+            got = gemm_utils.expand_sweep(str(path), "gfx1250", "fp16", "rcr")
+        self.assertEqual({c.pipeline for c in got}, {"comp_tdm"})
 
 
 class TestExpandSweepGfx1250Waves(unittest.TestCase):

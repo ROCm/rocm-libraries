@@ -2612,8 +2612,70 @@ def _gfx1250_pipeline_supported(
         pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
         batched=variant == "batched",
         tile_mn=tile_mn,
+        warp_k=wave_k,
     )
     return not reason
+
+
+@functools.lru_cache(maxsize=None)
+def _arch_filter(arch: str):
+    """The codegen's ArchFilter for ``arch`` (strict_mode=False, as the codegen)."""
+    _codegen_common()  # puts the codegen dir on sys.path
+    import arch_filter  # noqa: WPS433
+
+    return arch_filter.ArchFilter(arch, strict_mode=False)
+
+
+def _arch_filter_accepts(
+    arch: str,
+    dtype: str,
+    layout: str,
+    variant: str,
+    tile: Tuple[int, int, int],
+    waves: Tuple[int, int, int],
+    warp_tile: Tuple[int, int, int],
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+) -> bool:
+    """Mirror of unified_gemm_codegen's _is_tile_arch_valid ArchFilter call
+    (LDS capacity, warp and trait rules), so expand_sweep drops every config
+    whose header the codegen would never emit."""
+    import arch_filter  # noqa: WPS433 (on sys.path via _arch_filter)
+
+    filt = _arch_filter(arch)
+    op = arch_filter.OperatorType
+    operator = {
+        "preshuffle": op.GEMM_PRESHUFFLE,
+        "multi_d": op.GEMM_MULTI_D,
+        "multi_abd": op.GEMM_MULTI_D,
+        "grouped": op.GEMM_GROUPED,
+        "stream_k": op.GEMM_STREAMK,
+    }.get(variant, op.GEMM)
+    if variant == "preshuffle":
+        pipeline, scheduler = "preshufflev2", "default"
+    dtype_a, dtype_b, dtype_c = (
+        _codegen_common().CommonTypeMappings.get_arch_dtype_triple(dtype)
+    )
+    return filt.is_kernel_valid(
+        datatype_a=dtype_a,
+        datatype_b=dtype_b,
+        datatype_c=dtype_c,
+        tile_m=tile[0],
+        tile_n=tile[1],
+        tile_k=tile[2],
+        warp_m=waves[0],
+        warp_n=waves[1],
+        warp_k=waves[2],
+        warp_tile_m=warp_tile[0],
+        warp_tile_n=warp_tile[1],
+        warp_tile_k=warp_tile[2],
+        pipeline=pipeline,
+        epilogue=epilogue,
+        scheduler=scheduler,
+        layout=layout[:3],
+        operator=operator,
+    )
 
 
 def expand_sweep(
@@ -2952,9 +3014,24 @@ def expand_sweep(
                     if cv.name in seen:
                         continue
                     if val is None:
-                        val = _cu.validate_kernel_config(c.to_ctypes_config())
-                    if not val.is_valid:
-                        break
+                        # After the vector-width rejects, as in the codegen.
+                        val = _cu.validate_kernel_config(
+                            c.to_ctypes_config()
+                        ).is_valid and _arch_filter_accepts(
+                            arch,
+                            dtype,
+                            layout,
+                            variant,
+                            (tm, tn, tk),
+                            (wm, wn, wk),
+                            (wtm, wtn, wtk),
+                            pipe,
+                            epi,
+                            sched,
+                        )
+                    if not val:
+                        # Keep counting the later widths' rejects, as the codegen does.
+                        continue
                     seen.add(cv.name)
                     configs.append(cv)
 
