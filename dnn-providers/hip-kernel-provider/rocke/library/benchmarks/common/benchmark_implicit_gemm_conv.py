@@ -82,6 +82,11 @@ from benchmarks.common.early_stop import (  # noqa: E402
 )
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
 from kernels.conv.aot_jobs import (  # noqa: E402
+    conv_data_spec,
+    dtype_triple,
+    storage_dtype,
+)
+from kernels.conv.aot_jobs import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
     CACHE_TILE_K as _TILE_K,
@@ -121,8 +126,11 @@ def _conv_split_k_override() -> int | None:
 
 
 # Data types the benchmark accepts (--dtype) ...
-_DTYPES = ("fp16", "bf16", "fp32")
-# ... and the ones --compile-all builds when --dtype names none.
+# tf32 = fp32 tensors with TF32 matrix-core math (identity triple
+# tf32/tf32/fp32; see kernels.conv.aot_jobs.conv_data_spec).
+_DTYPES = ("fp16", "bf16", "fp32", "tf32")
+# ... and the ones --compile-all builds when --dtype names none (tf32 only
+# by explicit --dtype tf32).
 _COMPILE_DTYPES = ("fp16", "bf16")
 
 # Group-merge degrees swept for depthwise wgrad and fwd. Powers of two only:
@@ -532,6 +540,76 @@ def _wgrad_exact_tile_combos(
     return out[:cap]
 
 
+# Verify bounds on the peak-normalised error max|out-ref| / max(max|ref|, 1).
+# TF32 has two rows because the two arches run it differently: gfx942 encodes
+# XF32 natively (A/B truncated to a 10-bit mantissa, ~7e-4 expected), gfx950
+# emulates it with three bf16 MFMAs over the full fp32 payload (~4e-6
+# expected). 1e-4 on the emulated path still fails a dropped cross term or a
+# single bf16 pass (~2e-3); 1e-3 is the tightest bound truncation clears.
+VERIFY_TOL = {
+    "fp16": 5e-2,
+    "bf16": 5e-2,
+    "fp32": 1e-3,
+    "tf32_emulated": 1e-4,
+    "tf32_native": 1e-3,
+}
+
+
+def _tf32_is_emulated(arch: str, op_id: "str | None" = None) -> bool:
+    """Whether ``arch`` (or the atom ``op_id``) runs TF32 as bf16x3 emulation.
+
+    ``op_id`` (the kernel's MMA atom) is authoritative; without it the
+    catalog's 16x16 TF32 atom for ``arch`` decides. An arch with no TF32 atom
+    counts as native, so it gets the looser bound.
+    """
+    from rocke.core.arch.target import emulated_tf32_operand_lens
+
+    if op_id is not None:
+        return emulated_tf32_operand_lens(op_id) is not None
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except Exception:  # noqa: BLE001 - unknown arch: no catalog to ask
+        return False
+    family = "wmma" if target.wave_size == 32 else "mma"
+    op = target.mma.select_largest_k(
+        family=family, a_dtype="tf32", b_dtype="tf32", c_dtype="fp32", m=16, n=16
+    )
+    return op is not None and not op.is_native
+
+
+def _verify_tol(compute_dtype: str, arch: str, op_id: "str | None" = None) -> float:
+    """``--verify`` bound for a kernel whose A/B MMA inputs are ``compute_dtype``.
+
+    Keyed on the compute dtype, not the storage dtype: an fp32 output of bf16
+    MFMAs is only as accurate as bf16 math.
+    """
+    if compute_dtype == "tf32":
+        key = "tf32_emulated" if _tf32_is_emulated(arch, op_id) else "tf32_native"
+        return VERIFY_TOL[key]
+    return VERIFY_TOL.get(compute_dtype, VERIFY_TOL["fp32"])
+
+
+def _rank_results(results: list, what: str = "") -> "tuple[list, list]":
+    """``(ranked, failed)``: results by TFLOPS, verify failures split off.
+
+    A kernel that failed ``--verify`` is reported, never ranked: it must not
+    become the sweep's ``Best:`` (a fast kernel that silently computes in a
+    lower precision would otherwise win). ``passed is None`` (verify not run)
+    ranks as before.
+    """
+    ordered = sorted(results, key=lambda r: r.tflops, reverse=True)
+    ranked = [r for r in ordered if r.passed is not False]
+    failed = [r for r in ordered if r.passed is False]
+    if failed:
+        print(
+            f"\n{len(failed)} {what}kernel(s) failed verify and are not ranked.",
+            flush=True,
+        )
+    return ranked, failed
+
+
 def _verify_kernel(
     *,
     rt,
@@ -550,6 +628,7 @@ def _verify_kernel(
     u8,
     arch: str,
     compute_dtype: "str | None" = None,
+    op_id: "str | None" = None,
 ) -> bool:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
@@ -614,11 +693,11 @@ def _verify_kernel(
     # keying off out_t.dtype would apply the 1e-3 fp32 bound to a 16-bit result
     # and fail every kernel. compute_dtype is the A/B dtype when the caller
     # separates them; without it, fall back to the output dtype.
-    if compute_dtype is not None:
-        _lowp = compute_dtype in ("fp16", "bf16")
-    else:
-        _lowp = out_t.dtype in (torch.float16, torch.bfloat16)
-    tol = 5e-2 if _lowp else 1e-3
+    if compute_dtype is None:
+        compute_dtype = (
+            "fp16" if out_t.dtype in (torch.float16, torch.bfloat16) else "fp32"
+        )
+    tol = _verify_tol(compute_dtype, arch, op_id)
     err = rel_err
     status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
@@ -688,8 +767,14 @@ def parse_json_case(entry: dict):
         raise ValueError(f"op={op!r} is not supported")
 
     dtype = entry.get("dtype", "fp16")
-    if dtype not in ("fp16", "bf16", "fp32"):
-        raise ValueError(f"dtype={dtype!r} is not supported (only fp16, bf16, fp32)")
+    # TF32 is fp32 storage with a math mode: spelled "tf32", or "fp32" with
+    # "math": "tf32".
+    if dtype == "fp32" and str(entry.get("math", "")).lower() == "tf32":
+        dtype = "tf32"
+    if dtype not in ("fp16", "bf16", "fp32", "tf32"):
+        raise ValueError(
+            f"dtype={dtype!r} is not supported (only fp16, bf16, fp32, tf32)"
+        )
 
     from kernels.common.conv_implicit_gemm import ConvProblem
 
@@ -832,8 +917,8 @@ def parse_json_case(entry: dict):
     return problem, dtype
 
 
-def parse_miopen_cmd(cmd: str):
-    """Parse a MIOpenDriver command string into a ``(ConvProblem, dtype)`` tuple.
+def parse_miopen_cmd(cmd: str, *, require_layout: bool = False):
+    """Parse a MIOpenDriver command string into a ``(ConvProblem, dtype, forw)`` tuple.
 
     Accepts the full command line (including the binary path and driver name),
     e.g.::
@@ -842,11 +927,20 @@ def parse_miopen_cmd(cmd: str):
             -y 11 -x 11 -p 2 -q 2 -u 4 -v 4 -l 1 -j 1 -m conv -g 1 -F 1 \\
             -t 1 -in_layout=NHWC
 
-    Only 2-D NHWC convolutions are supported; the function raises
-    ``ValueError`` for unsupported cases (3-D, NCHW).
-    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
-    ``"bf16"``, or ``"fp32"`` and ``forw`` is the raw MIOpenDriver ``-F``
-    value (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
+    2-D (``-_ 2``, the default) NHWC/NWC and 3-D (``-_ 3``: ``-!`` depth,
+    ``-@`` filter depth, ``-#`` depth stride, ``-$`` depth pad, ``-^`` depth
+    dilation) NDHWC convolutions are supported; anything else raises
+    ``ValueError``.
+
+    ``dtype`` is ``"fp16"``, ``"bf16"``, ``"fp32"`` or ``"tf32"``: the plain
+    fp32 driver (``conv``/``convfp32``) with ``-M 0`` (MIOpen's "use TF32 if possible" math
+    type) is ``"tf32"``. ``-M`` has no effect on the 16-bit drivers, which
+    MIOpen never runs as TF32. ``forw`` is the raw MIOpenDriver ``-F`` value
+    (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
+
+    MIOpen's default layout is NCHW/NCDHW, which this benchmark does not run.
+    A command without ``-I``/``--in_layout`` is read as channels-last with a
+    warning, or rejected with ``require_layout=True``.
     """
     import shlex
 
@@ -877,42 +971,94 @@ def parse_miopen_cmd(cmd: str):
             file=sys.stderr,
         )
 
-    # Re-parse the tokens after the driver keyword using argparse.
-    sub = argparse.ArgumentParser(add_help=False)
-    sub.add_argument("-n", "--n", dest="N", type=int, default=1)
-    sub.add_argument("-c", "--c", dest="C", type=int, default=1)
-    sub.add_argument("-H", "--H", dest="Hi", type=int, default=1)
-    sub.add_argument("-W", "--W", dest="Wi", type=int, default=1)
-    sub.add_argument("-k", "--k", dest="K", type=int, default=1)
-    sub.add_argument("-y", "--y", dest="Y", type=int, default=1)
-    sub.add_argument("-x", "--x", dest="X", type=int, default=1)
-    sub.add_argument("-p", "--p", dest="pH", type=int, default=0)
-    sub.add_argument("-q", "--q", dest="pW", type=int, default=0)
-    sub.add_argument("-u", "--u", dest="sH", type=int, default=1)
-    sub.add_argument("-v", "--v", dest="sW", type=int, default=1)
-    sub.add_argument("-l", "--l", dest="dH", type=int, default=1)
-    sub.add_argument("-j", "--j", dest="dW", type=int, default=1)
-    sub.add_argument("-g", "--g", dest="groups", type=int, default=1)
-    sub.add_argument("-F", "--F", dest="forw", type=int, default=1)
+    # Re-parse the tokens after the driver keyword using argparse. Each flag
+    # takes its short form, the legacy ``--<short>`` spelling and MIOpenDriver's
+    # own long name.
+    # No abbreviations: ``-i 10`` (iterations) would otherwise match
+    # ``-in_layout``.
+    sub = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    sub.add_argument("-n", "--n", "--batchsize", dest="N", type=int, default=1)
+    sub.add_argument("-c", "--c", "--in_channels", dest="C", type=int, default=1)
+    sub.add_argument("-H", "--H", "--in_h", dest="Hi", type=int, default=1)
+    sub.add_argument("-W", "--W", "--in_w", dest="Wi", type=int, default=1)
+    sub.add_argument("-k", "--k", "--out_channels", dest="K", type=int, default=1)
+    sub.add_argument("-y", "--y", "--fil_h", dest="Y", type=int, default=1)
+    sub.add_argument("-x", "--x", "--fil_w", dest="X", type=int, default=1)
+    sub.add_argument("-p", "--p", "--pad_h", dest="pH", type=int, default=0)
+    sub.add_argument("-q", "--q", "--pad_w", dest="pW", type=int, default=0)
+    sub.add_argument("-u", "--u", "--conv_stride_h", dest="sH", type=int, default=1)
+    sub.add_argument("-v", "--v", "--conv_stride_w", dest="sW", type=int, default=1)
+    sub.add_argument("-l", "--l", "--dilation_h", dest="dH", type=int, default=1)
+    sub.add_argument("-j", "--j", "--dilation_w", dest="dW", type=int, default=1)
+    sub.add_argument("-g", "--g", "--group_count", dest="groups", type=int, default=1)
+    sub.add_argument("-F", "--F", "--forw", dest="forw", type=int, default=1)
+    # 3-D (-_ 3); defaults are MIOpenDriver's.
+    sub.add_argument("-!", "--in_d", dest="Di", type=int, default=32)
+    sub.add_argument("-@", "--fil_d", dest="Z", type=int, default=3)
+    sub.add_argument("-#", "--conv_stride_d", dest="sD", type=int, default=1)
+    sub.add_argument("-$", "--pad_d", dest="pD", type=int, default=0)
+    sub.add_argument("-^", "--dilation_d", dest="dD", type=int, default=1)
     sub.add_argument(
-        "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
+        "-I", "-in_layout", "--in_layout", dest="in_layout", type=str, default=None
     )
+    sub.add_argument(
+        "-f", "-fil_layout", "--fil_layout", dest="fil_layout", type=str, default=None
+    )
+    sub.add_argument(
+        "-O", "-out_layout", "--out_layout", dest="out_layout", type=str, default=None
+    )
+    # 0 = TF32 if possible, 1 = IEEE (MIOpenDriver's default).
+    sub.add_argument("-M", "--math_type", dest="math_type", type=int, default=1)
     # Ignored flags — consumed to avoid parse errors.
-    sub.add_argument("-m", "--m", dest="_mode", type=str, default="conv")
-    sub.add_argument("-t", "--t", dest="_time", type=int, default=0)
-    sub.add_argument("-V", "--V", dest="_verify", type=int, default=1)
-    sub.add_argument("-_", "--_", dest="_spatial_dim", type=int, default=2)
+    sub.add_argument("-m", "--m", "--mode", dest="_mode", type=str, default="conv")
+    sub.add_argument("-t", "--t", "--time", dest="_time", type=int, default=0)
+    sub.add_argument("-V", "--V", "--verify", dest="_verify", type=int, default=1)
+    sub.add_argument("-i", "--iter", dest="_iter", type=int, default=10)
+    sub.add_argument(
+        "-_", "--_", "--spatial_dim", dest="spatial_dim", type=int, default=2
+    )
 
     miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
 
-    layout = miopen_args.in_layout.upper()
-    if layout not in ("NHWC", "NWC"):
-        raise ValueError(
-            f"Layout {layout!r} is not supported; only NHWC/NWC inputs are accepted"
+    if _MIOPEN_DTYPE_MAP[driver_kw] == "fp32" and miopen_args.math_type == 0:
+        dtype = "tf32"
+
+    spatial = miopen_args.spatial_dim
+    if spatial not in (2, 3):
+        raise ValueError(f"-_ {spatial}: only 2-D and 3-D convolutions are supported")
+    is_3d = spatial == 3
+    accepted = ("NDHWC",) if is_3d else ("NHWC", "NWC")
+    if miopen_args.in_layout is None:
+        msg = (
+            "no -I/--in_layout given: MIOpenDriver defaults to "
+            f"{'NCDHW' if is_3d else 'NCHW'}, this benchmark runs "
+            f"{accepted[0]}"
         )
+        if require_layout:
+            raise ValueError(msg)
+        print(f"[warn] {msg}; reading the shape as {accepted[0]}", file=sys.stderr)
+    for name in ("in_layout", "fil_layout", "out_layout"):
+        layout = getattr(miopen_args, name)
+        if layout is not None and layout.upper() not in accepted:
+            raise ValueError(
+                f"{name} {layout!r} is not supported; only "
+                f"{'/'.join(accepted)} is accepted for a "
+                f"{'3-D' if is_3d else '2-D'} convolution"
+            )
 
     from kernels.common.conv_implicit_gemm import ConvProblem
 
+    depth = (
+        dict(
+            Di=miopen_args.Di,
+            Z=miopen_args.Z,
+            sD=miopen_args.sD,
+            pD=miopen_args.pD,
+            dD=miopen_args.dD,
+        )
+        if is_3d
+        else {}
+    )
     problem = ConvProblem(
         N=miopen_args.N,
         Hi=miopen_args.Hi,
@@ -928,6 +1074,7 @@ def parse_miopen_cmd(cmd: str):
         dH=miopen_args.dH,
         dW=miopen_args.dW,
         groups=miopen_args.groups,
+        **depth,
     )
     return problem, dtype, miopen_args.forw
 
@@ -1112,8 +1259,9 @@ def main() -> int:
         "--dtype",
         default=None,
         choices=_DTYPES,
-        help="data type (default: fp16). --compile-all builds the cache for "
-        "fp16 and bf16 unless --dtype names one.",
+        help="data type (default: fp16). tf32 = fp32 tensors, TF32 matrix-core "
+        "math. --compile-all builds the cache for fp16 and bf16 unless --dtype "
+        "names one.",
     )
     parser.add_argument(
         "--top",
@@ -1211,7 +1359,7 @@ def main() -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="verify first valid kernel against torch reference before sweep",
+        help="verify every kernel against the torch reference; ranking skips failures",
     )
     parser.add_argument(
         "--dump-fail",
@@ -1542,6 +1690,11 @@ def main() -> int:
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else _COMPILE_DTYPES
     if args.dtype is None:
         args.dtype = "fp16"
+    # A TF32 kernel that silently computes at lower precision would still run
+    # fast, so a TF32 ranking is only meaningful over verified kernels.
+    if "tf32" in args.compile_dtypes and not args.verify:
+        print("--dtype tf32 implies --verify")
+        args.verify = True
     # --direction likewise: fwd for shape flags, every direction for
     # --compile-all unless one is named.
     args.compile_directions = (
@@ -1640,8 +1793,8 @@ def main() -> int:
     arch = args.arch
     target = ArchTarget.from_gfx(arch)
 
-    # Build the list of (problem, dtype) cases to sweep.
-    cases: list  # List[Tuple[ConvProblem, str]]
+    # Build the list of (problem, dtype, direction) cases to sweep.
+    cases: list  # List[Tuple[ConvProblem, str, str]]
     if args.json_file is not None:
         import json
 
@@ -1669,7 +1822,7 @@ def main() -> int:
                     continue
             try:
                 prob, dt = parse_json_case(entry)
-                cases.append((prob, dt))
+                cases.append((prob, dt, args.direction))
             except ValueError as e:
                 print(f"[warn] {path} case {case_id}: skipping — {e}", file=sys.stderr)
         if not cases:
@@ -1719,6 +1872,13 @@ def main() -> int:
             groups=args.groups,
         )
         cases = [(problem, args.dtype, args.direction)]
+
+    # A TF32 case can come from --dtype, a JSON case or a MIOpenDriver
+    # ``-M 0`` command; whichever, its ranking is only meaningful over
+    # verified kernels.
+    if not args.verify and any(len(c) > 1 and c[1] == "tf32" for c in cases):
+        print("tf32 cases imply --verify")
+        args.verify = True
 
     _csv_fields = [
         "rank",
@@ -1779,7 +1939,7 @@ def main() -> int:
     n_csv_rows = 0
     try:
         for case_idx, (problem, dtype, direction) in enumerate(cases):
-            _elem_bytes = 4 if dtype == "fp32" else 2
+            _elem_bytes = 4 if storage_dtype(dtype) == "fp32" else 2
             _A_bytes = (
                 problem.N
                 * (problem.Di or 1)
@@ -1964,7 +2124,6 @@ def _build_fwd_one(args_tuple):
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import (
-        ConvDataSpec,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
         is_valid_spec_for_problem,
@@ -1987,7 +2146,7 @@ def _build_fwd_one(args_tuple):
     spec = ImplicitGemmConvSpec(
         problem=problem,
         name="rocke_bench_igemm_conv",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2035,7 +2194,6 @@ def _build_wgrad_one(args_tuple):
     group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
-    from kernels.common.conv_implicit_gemm import ConvDataSpec
     from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
@@ -2063,8 +2221,8 @@ def _build_wgrad_one(args_tuple):
     # same predicate dispatch uses.
     lds_k_outer = WgradConvSpec.default_lds_k_outer(
         arch=arch,
-        dtype_a=dtype,
-        dtype_b=dtype,
+        dtype_a=storage_dtype(dtype),
+        dtype_b=storage_dtype(dtype),
         warp_tile_m=warp_tile_mn,
         warp_tile_n=warp_tile_mn,
         wave_size=target.wave_size,
@@ -2075,8 +2233,8 @@ def _build_wgrad_one(args_tuple):
     lds_k_pad = WgradConvSpec.default_lds_k_pad(
         arch=arch,
         tile_k=tile_k,
-        dtype_a=dtype,
-        dtype_b=dtype,
+        dtype_a=storage_dtype(dtype),
+        dtype_b=storage_dtype(dtype),
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
         wave_size=target.wave_size,
@@ -2107,7 +2265,7 @@ def _build_wgrad_one(args_tuple):
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2188,7 +2346,6 @@ def _build_wgrad_two_stage_one(args_tuple):
     ws_replicas = combo.ws_replicas
 
     from rocke.core.arch import ArchTarget
-    from kernels.common.conv_implicit_gemm import ConvDataSpec
     from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
@@ -2246,8 +2403,8 @@ def _build_wgrad_two_stage_one(args_tuple):
     # it: an explicit pad is rejected under the K-outer tile.
     _ts_k_outer = WgradConvSpec.default_lds_k_outer(
         arch=arch,
-        dtype_a=dtype,
-        dtype_b=dtype,
+        dtype_a=storage_dtype(dtype),
+        dtype_b=storage_dtype(dtype),
         warp_tile_m=warp_tile_mn,
         warp_tile_n=warp_tile_mn,
         wave_size=target.wave_size,
@@ -2256,7 +2413,7 @@ def _build_wgrad_two_stage_one(args_tuple):
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad_2s",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2288,8 +2445,8 @@ def _build_wgrad_two_stage_one(args_tuple):
         lds_k_pad=WgradConvSpec.default_lds_k_pad(
             arch=arch,
             tile_k=tile_k,
-            dtype_a=dtype,
-            dtype_b=dtype,
+            dtype_a=storage_dtype(dtype),
+            dtype_b=storage_dtype(dtype),
             lds_k_outer=_ts_k_outer,
             async_dma=async_dma,
             wave_size=target.wave_size,
@@ -2319,7 +2476,7 @@ def _build_wgrad_two_stage_one(args_tuple):
 
     s2_spec = WgradReduceSpec(
         problem=problem,
-        dtype_d=dtype,
+        dtype_d=storage_dtype(dtype),
         groups=problem.groups,
         # Must match Stage 1. Folding fewer slabs than Stage 1 wrote silently
         # drops part of the sum; folding more reads past the scratch.
@@ -2364,7 +2521,6 @@ def _build_dgrad_one(args_tuple):
         return None
 
     from rocke.core.arch import ArchTarget
-    from kernels.common.conv_implicit_gemm import ConvDataSpec
     from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
@@ -2415,14 +2571,14 @@ def _build_dgrad_one(args_tuple):
         # layouts directly rather than going through this driver.
         lds_k_outer=DgradConvSpec.default_lds_k_outer(
             arch=arch,
-            dtype_b=dtype,
+            dtype_b=storage_dtype(dtype),
             warp_tile_n=warp_tile_mn,
             cpg=problem.cpg,
             wave_size=target.wave_size,
             pipeline=pipeline,
         ),
         name="rocke_bench_igemm_dgrad",
-        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        data=conv_data_spec(dtype),
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
@@ -2684,7 +2840,7 @@ def _run_sweep(
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
-    }[dtype]
+    }[storage_dtype(dtype)]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -2708,7 +2864,7 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype, is_3d=p.is_3d)
+    sig = conv_args_signature(storage_dtype(dtype), is_3d=p.is_3d)
     # AOT args: extents, strides and magic constants the kernel would otherwise
     # have had folded in as compile-time constants.
     # Built per spec below: the tile is part of the args object because the
@@ -2985,6 +3141,7 @@ def _run_sweep(
                 dump_fail=args.dump_fail,
                 u8=_u8,
                 arch=arch,
+                compute_dtype=dtype,
             )
             if stopped:
                 rt.free(A_dev)
@@ -3017,7 +3174,7 @@ def _run_sweep(
         # making the merged and unmerged legs indistinguishable in the table.
         _pl = spec.merged_problem
         _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(
-            _pl.cpg, _pl.kpg, dtype
+            _pl.cpg, _pl.kpg, storage_dtype(dtype)
         )
         _tile_vec = _choose_load_vec(spec)
         _va = min(_va, _tile_vec)
@@ -3076,7 +3233,10 @@ def _run_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results, _failed = _rank_results(results)
+    if not results:
+        print("No configuration passed verify.", file=sys.stderr)
+        return 1, _failed
     top_n = min(args.top, len(results))
 
     show_verify = args.verify
@@ -3112,7 +3272,7 @@ def _run_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
-    return 0, results
+    return 0, results + _failed
 
 
 def _run_wgrad_sweep(
@@ -3167,8 +3327,8 @@ def _run_wgrad_sweep(
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
     }
-    _torch_dtype = _TORCH_DT[dtype]
-    _torch_dtype_d = _TORCH_DT[dtype]
+    _torch_dtype = _TORCH_DT[storage_dtype(dtype)]
+    _torch_dtype_d = _TORCH_DT[dtype_triple(dtype)[2]]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -3197,7 +3357,7 @@ def _run_wgrad_sweep(
     # AOT: wgrad-specific signature with runtime problem dims. There is only
     # one form now -- ks/ks_count are always kernargs -- so the split and
     # unsplit launches below share it.
-    sig = conv_args_signature(dtype, direction="wgrad", is_3d=p.is_3d)
+    sig = conv_args_signature(storage_dtype(dtype), direction="wgrad", is_3d=p.is_3d)
 
     # Pre-compute wgrad AOT args (dims, strides, magic numbers).
     # Built per spec below; see the forward sweep.
@@ -3416,7 +3576,11 @@ def _run_wgrad_sweep(
     # axis here; the pipelines that alias another's code are skipped as in
     # the AOT grid. The CTA pool is a kernarg (--streamk-ctas).
     _sk_reductions = tuple(
-        r for r in args.streamk_reductions if r != "atomic" or dtype == "fp32"
+        r
+        for r in args.streamk_reductions
+        # The atomic reduction adds into dW, which needs a 32-bit dW (tf32
+        # stores dW as fp32).
+        if r != "atomic" or dtype_triple(dtype)[2] == "fp32"
     )
     pending_sk = []
     if args.streamk_modes and arch not in ("gfx942", "gfx950"):
@@ -3659,7 +3823,7 @@ def _run_wgrad_sweep(
             n_run += 1
 
             _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                p.C, p.K, dtype, split_k=_launch_sk
+                p.C, p.K, storage_dtype(dtype), split_k=_launch_sk
             )
             results.append(
                 Result(
@@ -3682,6 +3846,7 @@ def _run_wgrad_sweep(
                     vec_b=_vb,
                     vec_c=_vc,
                     group_merge=_gm,
+                    passed=kernel_passed,
                 )
             )
 
@@ -3911,7 +4076,7 @@ def _run_wgrad_sweep(
                 n_run += 1
 
                 _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                    p.C, p.K, dtype, split_k=_launch_sk
+                    p.C, p.K, storage_dtype(dtype), split_k=_launch_sk
                 )
                 results.append(
                     Result(
@@ -3935,6 +4100,7 @@ def _run_wgrad_sweep(
                         two_stage=True,
                         group_merge=_gm,
                         ws_replicas=spec.ws_replicas,
+                        passed=kernel_passed,
                     )
                 )
                 print(
@@ -4043,7 +4209,7 @@ def _run_wgrad_sweep(
                 cur_gbps = (bytes_xfer / ms) * 1e-6
                 n_run += 1
                 _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-                    p.C, p.K, dtype, split_k=1
+                    p.C, p.K, storage_dtype(dtype), split_k=1
                 )
                 results.append(
                     Result(
@@ -4090,7 +4256,10 @@ def _run_wgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results, _failed = _rank_results(results, "wgrad ")
+    if not results:
+        print("No wgrad configuration passed verify.", file=sys.stderr)
+        return 1, _failed
     top_n = min(args.top, len(results))
 
     print(f"\n{'='*92}")
@@ -4121,7 +4290,7 @@ def _run_wgrad_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
-    return 0, results
+    return 0, results + _failed
 
 
 def _run_dgrad_sweep(
@@ -4171,11 +4340,20 @@ def _run_dgrad_sweep(
     _u8 = u8
     p = problem
 
+    if p.is_3d:
+        # The dgrad kernel (tilde sub-GEMMs, 4-D dX) is 2-D only.
+        print(
+            f"error: dgrad of a 3-D convolution ({p.short()}) is not supported "
+            f"by the implicit-GEMM dgrad kernel (2-D only).",
+            file=sys.stderr,
+        )
+        return 2, []
+
     _torch_dtype = {
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
-    }[dtype]
+    }[storage_dtype(dtype)]
     torch.manual_seed(42)
 
     def _make(*shape):
@@ -4195,11 +4373,13 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, dtype)
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(
+        p.cpg, p.kpg, storage_dtype(dtype)
+    )
     # AOT: dgrad signature with runtime dims + sub_gemm tilde buffer.
     # The dgrad ABI already carries the tilde record buffer; there is no
     # separate "extended" form.
-    base_sig = conv_args_signature(dtype, direction="dgrad")
+    base_sig = conv_args_signature(storage_dtype(dtype), direction="dgrad")
     ext_sig = base_sig
 
     # Pre-compute dgrad AOT args.
@@ -4355,13 +4535,14 @@ def _run_dgrad_sweep(
                 extra_tensors={"dY": dY_t, "W": W_t},
                 u8=_u8,
                 arch=arch,
+                compute_dtype=dtype,
             )
             if stopped:
                 rt.free(sgbuf_dev)
                 rt.free(dY_dev)
                 rt.free(W_dev)
                 rt.free(dX_dev)
-                return 1
+                return 1, []
 
         if _zero_init:
 
@@ -4408,6 +4589,7 @@ def _run_dgrad_sweep(
                 vec_a=vec_a,
                 vec_b=vec_b,
                 vec_c=vec_c,
+                passed=kernel_passed,
             )
         )
 
@@ -4438,7 +4620,10 @@ def _run_dgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results, _failed = _rank_results(results, "dgrad ")
+    if not results:
+        print("No dgrad configuration passed verify.", file=sys.stderr)
+        return 1, _failed
     top_n = min(args.top, len(results))
 
     print(f"\n{'='*80}")
@@ -4459,8 +4644,8 @@ def _run_dgrad_sweep(
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 
     best = results[0]
-    print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
-    return 0, results
+    print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
+    return 0, results + _failed
 
 
 # ---------------------------------------------------------------------------
@@ -4694,7 +4879,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     flush=True,
                 )
 
-            torch_dt = _TORCH_DT[case_dtype]
+            torch_dt = _TORCH_DT[storage_dtype(case_dtype)]
             torch.manual_seed(42)
             # Operand shapes follow the direction: fwd contracts A x B -> D,
             # wgrad contracts dY x X -> dW, dgrad contracts dY x W -> dX. The
@@ -5095,15 +5280,17 @@ def _signature_for_identity(ident, dtype):
 
     if ident.direction == "wgrad":
         return conv_args_signature(
-            dtype,
+            storage_dtype(dtype),
             direction="wgrad",
             is_3d=ident.is_3d,
             two_stage=ident.two_stage,
             streamk=ident.streamk_reduction if ident.streamk != "off" else None,
         )
     if ident.direction == "dgrad":
-        return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
-    return conv_args_signature(dtype, is_3d=ident.is_3d)
+        return conv_args_signature(
+            storage_dtype(dtype), direction="dgrad", is_3d=ident.is_3d
+        )
+    return conv_args_signature(storage_dtype(dtype), is_3d=ident.is_3d)
 
 
 def _ws_replicas_of(ident) -> int:
@@ -5296,14 +5483,11 @@ def _cached_streamk_run(
     kernargs depend only on the tile, the warp layout, the stream-K mode and
     reduction, the scratch replicas and the launch shape.
     """
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
     from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
     spec = WgradConvSpec(
         problem=problem,
-        data=ConvDataSpec(
-            dtype_a=ident.dtype_a, dtype_b=ident.dtype_b, dtype_d=ident.dtype_d
-        ),
+        data=conv_data_spec(ident.dtype_a, ident.dtype_b, ident.dtype_d),
         tile_m=ident.tile_m,
         tile_n=ident.tile_n,
         tile_k=ident.tile_k,
