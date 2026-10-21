@@ -21,7 +21,6 @@ import argparse
 import gzip
 import importlib.util
 import json
-import shlex
 import shutil
 import sys
 import tarfile
@@ -36,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from .artifact import manifest_operation, unpack
+from .artifact import display_command, manifest_operation, unpack
 from .cases import compare_manifest_cases, describe_case, match_manifest_cases
 from .numeric import (
     ErrorBudget,
@@ -571,7 +570,7 @@ class ReferenceOperation:
         )
         return (
             f"{lead} dvc pull and artifact.py unpack:\n"
-            f"    {shlex.join(['dvc', 'pull', _shown(pointer)])}\n"
+            f"    {display_command(['dvc', 'pull', _shown(pointer)])}\n"
             f"    {self._unpack_command(archive, bundle, lock)}"
         )
 
@@ -689,10 +688,10 @@ class ReferenceOperation:
         published = directory.with_name(f"{directory.name}.tar.gz")
         pointer = published.with_name(f"{published.name}.dvc")
         if archive.resolve() == published.resolve() and pointer.is_file():
-            fetch = shlex.join(["dvc", "pull", _shown(pointer)])
+            fetch = display_command(["dvc", "pull", _shown(pointer)])
             step = f"delete {_shown(archive)}, then fetch it again with: {fetch}"
         elif archive.suffix == ".dvc":
-            fetch = shlex.join(["dvc", "pull", _shown(archive)])
+            fetch = display_command(["dvc", "pull", _shown(archive)])
             step = (
                 "pass the archive that this DVC pointer tracks, "
                 f"{_shown(archive.with_suffix(''))}, after fetching it with: {fetch}"
@@ -1264,7 +1263,7 @@ class ReferenceOperation:
         current = (
             [] if current_root is None else ["--current-root", _shown(current_root)]
         )
-        return shlex.join(
+        return display_command(
             [
                 "python",
                 _shown(self._package.parent / f"run_{self.name}_reference.py"),
@@ -1282,7 +1281,7 @@ class ReferenceOperation:
 
     def _unpack_command(self, archive: Path, bundle: Path, lock: Path) -> str:
         """Show the artifact.py command that extracts and authenticates an archive."""
-        return shlex.join(
+        return display_command(
             [
                 "python",
                 _shown(Path(__file__).with_name("artifact.py")),
@@ -1310,5 +1309,5 @@ class ReferenceOperation:
             f"{_shown(archive)} is a file, but {option} needs an extracted bundle "
             "directory. Unpack and authenticate the archive with:\n  "
             f"{self._unpack_command(archive, directory, lock)}\n"
-            f"then pass {option} {_shown(directory)}"
+            f"then pass {display_command([option, _shown(directory)])}"
         )

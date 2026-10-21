@@ -12,6 +12,7 @@ import json
 import shutil
 import tarfile
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
 
@@ -42,6 +43,22 @@ def manifest_operation(operation: str) -> str:
     _check_operation(operation)
     metadata = _TESTS / f"{operation}_reference" / "operation.json"
     return json.loads(metadata.read_text())["manifest_operation"]
+
+
+def display_command(arguments: Iterable[str]) -> str:
+    """Show a suggested command as plain text, with its arguments as typed.
+
+    Recovery hints are read, never executed, so they follow no one shell's
+    escaping rules: POSIX quoting would wrap Windows paths in single quotes,
+    which cmd.exe keeps as part of the argument. Only an argument containing
+    whitespace is wrapped, in double quotes, which group it in bash, cmd.exe,
+    and PowerShell alike. Every other character, such as a backslash or a
+    ``$``, is shown as is, even where a shell would expand it.
+    """
+    return " ".join(
+        f'"{argument}"' if any(char.isspace() for char in argument) else argument
+        for argument in arguments
+    )
 
 
 def _digest(path: Path) -> str:
@@ -179,7 +196,8 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
         except ValueError as error:
             mismatch = f"{archive} is not the archive that {lock} pins"
             if _is_published_pair(archive, lock, operation=operation):
-                mismatch += f"; fetch that archive with: dvc pull {archive}.dvc"
+                fetch = display_command(["dvc", "pull", f"{archive}.dvc"])
+                mismatch += f"; fetch that archive with: {fetch}"
             raise ValueError(f"{error}\n  {mismatch}") from None
         if output.exists():
             # Unpack never replaces an existing bundle; it must already match.

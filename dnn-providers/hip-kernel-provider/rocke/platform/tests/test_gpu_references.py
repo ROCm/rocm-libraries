@@ -275,7 +275,9 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
     output = result.stdout + result.stderr
     assert expected[problem] in output
     if problem == "archive":
-        assert str(library / "reference_bundles/conv/gfx942.tar.gz.dvc") in output
+        # CMake wraps message text at spaces, so a path with a space spans lines.
+        pointer = str(library / "reference_bundles/conv/gfx942.tar.gz.dvc")
+        assert " ".join(pointer.split()) in " ".join(output.split())
     if problem == "lock":
         assert "baseline_lock.json" in output
         assert "Traceback" not in output

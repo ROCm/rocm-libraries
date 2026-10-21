@@ -8,8 +8,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from fractions import Fraction
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 import tarfile
@@ -19,6 +20,7 @@ import pytest
 
 from reference_common.artifact import (
     OPERATIONS,
+    display_command,
     manifest_operation,
     pack,
     unpack,
@@ -71,6 +73,15 @@ def _run(*args, script=_SCRIPT):
         capture_output=True,
         text=True,
     )
+
+
+def _arguments(command):
+    """Split a command that ``display_command`` showed back into its arguments.
+
+    ``shlex.split`` would treat the backslashes of a Windows path as escapes.
+    """
+    found = re.findall(r'"([^"]*)"|(\S+)', command)
+    return [quoted or plain for quoted, plain in found]
 
 
 def _another_operation(operation):
@@ -829,7 +840,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
         assert "dvc pull" not in message
     elif published:
         assert "fetch and extract it with dvc pull and artifact.py unpack" in message
-        assert f"dvc pull {pointer}\n" in message
+        assert f"{display_command(['dvc', 'pull', str(pointer)])}\n" in message
         assert f"artifact.py unpack --operation {operation} " in message
     else:
         assert (
@@ -868,7 +879,72 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
     message = str(failure.value)
     assert "--rocke-reference-bundle needs an extracted bundle directory" in message
     assert f"artifact.py unpack --operation {operation} " in message
-    assert f"then pass --rocke-reference-bundle {tmp_path / architecture}" in message
+    option = ["--rocke-reference-bundle", str(tmp_path / architecture)]
+    assert f"then pass {display_command(option)}" in message
+
+
+def test_displayed_commands_are_plain_text_for_every_shell():
+    """Hints show arguments as typed and double-quote only whitespace.
+
+    POSIX quoting would wrap a Windows path in single quotes, which cmd.exe
+    keeps as part of the argument.
+    """
+    plain = ["dvc", "pull", "--operation", "conv", "gfx942.tar.gz.dvc"]
+    windows = [
+        str(PureWindowsPath("tests/library/tests/reference_common/artifact.py")),
+        str(PureWindowsPath("D:/build/rocke$1/gfx942.tar.gz")),
+    ]
+    spaced = ["--bundle", str(PureWindowsPath("D:/build root/rocke $1/gfx942"))]
+    assert display_command(plain) == "dvc pull --operation conv gfx942.tar.gz.dvc"
+    assert display_command(windows) == (
+        r"tests\library\tests\reference_common\artifact.py "
+        r"D:\build\rocke$1\gfx942.tar.gz"
+    )
+    assert display_command(spaced) == r'--bundle "D:\build root\rocke $1\gfx942"'
+    for arguments in (plain, windows, spaced):
+        assert "'" not in display_command(arguments)
+        assert _arguments(display_command(arguments)) == arguments
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, operation):
+    """A recovery hint shows Windows paths as typed, without POSIX quoting.
+
+    This host's paths have no backslashes, so the hint shows each path as the
+    Windows text a Windows host would: the script and committed lock relative
+    to the working directory above an installed test tree, and the temporary
+    directory as an absolute path whose names contain a space and a $.
+    """
+    from importlib import import_module
+
+    from reference_common import cli as common_cli
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    tests = _relocate(monkeypatch, tmp_path, operation, "source")
+    _track(tests, operation, "gfx942")
+    here = Path(__file__).parent.resolve()
+    root = PureWindowsPath("D:/build root/rocke $1")
+    installed = PureWindowsPath("tests/library/tests")
+
+    def shown(path):
+        path = path.resolve()
+        if path.is_relative_to(tmp_path.resolve()):
+            return str(root.joinpath(*path.relative_to(tmp_path.resolve()).parts))
+        return str(installed.joinpath(*path.relative_to(here).parts))
+
+    monkeypatch.setattr(common_cli, "_shown", shown)
+    hint = spec.bundle_hint("gfx942", tmp_path / "missing")
+    archive = root / "rocke/library/tests/reference_bundles" / operation
+    archive /= "gfx942.tar.gz"
+    lock = installed / f"{operation}_reference/architectures/gfx942/baseline_lock.json"
+    assert hint == (
+        "fetch and extract it with dvc pull and artifact.py unpack:\n"
+        f'    dvc pull "{archive}.dvc"\n'
+        r"    python tests\library\tests\reference_common\artifact.py unpack "
+        f'--operation {operation} --archive "{archive}" '
+        rf'--bundle "D:\build root\rocke $1\missing" --lock {lock}'
+    )
+    assert "'" not in hint
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1563,7 +1639,7 @@ def _check_published_cohort(operation, architecture):
             pytest.skip(
                 f"no {name} bundle data: {archive} has not been fetched and no "
                 f"bundle is extracted at {bundle}; fetch the archive with: "
-                f"dvc pull {pointer}"
+                + display_command(["dvc", "pull", str(pointer)])
             )
         pytest.skip(
             f"no {name} bundle is installed at {bundle}; installed trees have it "
@@ -1592,7 +1668,7 @@ def _check_published_cohort(operation, architecture):
             + "A cohort or budget change needs a complete requalification and a "
             "new published archive, lock, and DVC pointer; see "
             f"{_WORKFLOW_DOC}. Repeat this comparison with: "
-            f"python {script} diff --arch {architecture}",
+            + display_command(["python", str(script), "diff", "--arch", architecture]),
             pytrace=False,
         )
 
@@ -1670,11 +1746,12 @@ def test_published_cohort_check_names_unqualified_cases(
     with pytest.raises(pytest.fail.Exception) as failure:
         _check_published_cohort(operation, architecture)
     message = str(failure.value)
+    script = Path(__file__).with_name(f"run_{operation}_reference.py")
     for expected in (
         f"enrolled but not in the bundle: {cases[-1].id} (",
         "needs a complete requalification and a new published archive",
         _WORKFLOW_DOC,
-        f"run_{operation}_reference.py diff --arch {architecture}",
+        display_command(["python", str(script), "diff", "--arch", architecture]),
     ):
         assert expected in message
     # Data the lock does not pin, such as an archive from an earlier pointer,
@@ -1695,9 +1772,9 @@ def test_published_cohort_check_names_unqualified_cases(
         assert failure.value.__context__ is None
         message = str(failure.value)
         assert f"archive {archive.resolve()} cannot be read: " in message
+        fetch = display_command(["dvc", "pull", str(pointer.resolve())])
         assert (
-            f"delete {archive.resolve()}, then fetch it again with: dvc pull "
-            f"{pointer.resolve()}"
+            f"delete {archive.resolve()}, then fetch it again with: {fetch}"
         ) in message
 
     if layout == "archive":
@@ -1712,7 +1789,7 @@ def test_published_cohort_check_names_unqualified_cases(
         assert "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON" in reason
     else:
         assert f"{archive} has not been fetched" in reason
-        assert reason.endswith(f"dvc pull {pointer}")
+        assert reason.endswith(display_command(["dvc", "pull", str(pointer)]))
 
 
 # Qualification runs this tree's adapter with the baseline snapshot's rocKE and
@@ -2028,8 +2105,6 @@ def test_baseline_preparation_check_says_why_it_skips(tmp_path, monkeypatch, mis
 
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
-    import shlex
-
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
     archive = tmp_path / f"{architecture}.tar.gz"
     pack(bundle, archive, lock, operation=operation)
@@ -2043,7 +2118,7 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     # The suggested command extracts and authenticates a usable bundle.
     suggested = next(line for line in error.splitlines() if "artifact.py" in line)
     subprocess.run(
-        [sys.executable, *shlex.split(suggested)[1:]], check=True, capture_output=True
+        [sys.executable, *_arguments(suggested)[1:]], check=True, capture_output=True
     )
     assert spec.load_bundle(tmp_path / architecture, lock, architecture=architecture)
     with pytest.raises(SystemExit) as exit:
@@ -2272,10 +2347,9 @@ def test_verification_failures_name_side_values_cause_and_next_step(
         assert f"baseline_bound={budget.baseline_error_bound:.9g}" in message
         assert f"original_tolerance={case.tolerance:.9g}" in message
         assert "frozen baseline reproduced its qualified output" in message
-        assert (
-            f"run_{operation}_reference.py verify --arch {architecture} --bundle "
-            f"{tmp_path} --current-root {tmp_path} --case {case.id}`"
-        ) in message
+        rerun = ["verify", "--arch", architecture, "--bundle", str(tmp_path)]
+        rerun += ["--current-root", str(tmp_path), "--case", case.id]
+        assert f"run_{operation}_reference.py {display_command(rerun)}`" in message
     elif failure == "qualified-target":
         assert (
             f"frozen baseline (replay) ran on device target {other_target}, but the "
@@ -2336,8 +2410,6 @@ def test_worker_failures_say_which_side_failed_and_keep_the_log(
 
 def test_failures_point_at_the_workflow_triage_section():
     """The section that failures link to exists in source and installed trees."""
-    import re
-
     from reference_common import cli as common_cli
 
     path, _, anchor = common_cli._TRIAGE.partition("#")
@@ -2458,9 +2530,10 @@ def test_rejected_bundles_say_how_to_replace_them(
         assert (
             f"delete {bundle.resolve()}, then re-run dvc pull and artifact.py unpack:"
         ) in message
-        assert f"dvc pull {pointer}\n" in message
+        assert f"{display_command(['dvc', 'pull', str(pointer)])}\n" in message
         assert f"artifact.py unpack --operation {operation} --archive " in message
-        assert f"--bundle {bundle.resolve()} --lock {lock.resolve()}" in message
+        paths = ["--bundle", str(bundle.resolve()), "--lock", str(lock.resolve())]
+        assert display_command(paths) in message
         assert message.endswith(_TRIAGE_DOC)
 
 
@@ -2566,7 +2639,8 @@ def test_unpack_suggests_a_fetch_only_for_a_published_pair(
     assert result.returncode != 0
     assert "GPU reference manifest does not match the pinned lock" in result.stderr
     assert f"{archive} is not the archive that {selected} pins" in result.stderr
-    fetch = f"; fetch that archive with: dvc pull {archive}.dvc"
+    pull = display_command(["dvc", "pull", f"{archive}.dvc"])
+    fetch = f"; fetch that archive with: {pull}"
     assert (fetch in result.stderr) == (pairing == "published")
     assert ("dvc pull" in result.stderr) == (pairing == "published")
     assert not output.exists()
@@ -2578,9 +2652,6 @@ def test_rerun_command_repeats_the_failing_bundle_and_lock(
     tmp_path, monkeypatch, operation, lock
 ):
     """A failing candidate's rerun must not check it against the committed lock."""
-    import re
-    import shlex
-
     from reference_common import cli as common_cli
 
     spec, architecture, case, manifest, output = _verifiable_case(
@@ -2615,7 +2686,7 @@ def test_rerun_command_repeats_the_failing_bundle_and_lock(
             architecture=architecture,
         )
     (rerun,) = re.findall(r"rerun only this case with `([^`]+)`", str(error.value))
-    python, script, *arguments = shlex.split(rerun)
+    python, script, *arguments = _arguments(rerun)
     # The script is installed beside the tests, so the command runs in both layouts.
     assert python == "python"
     assert Path(script).is_file()
