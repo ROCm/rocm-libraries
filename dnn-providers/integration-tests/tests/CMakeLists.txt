@@ -54,6 +54,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuRMSNormPlan.cpp
     TestGpuSdpaRaggedFwdSignatureKey.cpp
     TestGpuSdpaRaggedFwdPlan.cpp
+    TestGpuSdpaPagedFwdSignatureKey.cpp
+    TestGpuSdpaPagedFwdPlan.cpp
     TestGpuBatchnormFwdInfSignatureKey.cpp
     TestGpuBatchnormFwdInfPlan.cpp
     TestGpuBatchnormFwdInfVarianceSignatureKey.cpp
@@ -127,6 +129,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
     gpu-ref/TestGpuFpReferenceSdpaRagged.cpp
+    gpu-ref/TestGpuFpReferenceSdpaPaged.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
     gpu-ref/TestGpuFpReferenceLayernormFwd.cpp

@@ -429,4 +429,172 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+// Optional parts of a paged SDPA graph. Defaults leave each one out.
+struct PagedSdpaFwdGraphOptions
+{
+    // Node attributes such as bounds and scale. Tensor uids and max_seq_len_kv are filled in.
+    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs{};
+    // K/V container strides. Empty means token-major inside each block (raggedStrides).
+    std::vector<int64_t> kStrides;
+    std::vector<int64_t> vStrides;
+    // INT32 [B, 1, 1, 1] seq_len_q.
+    std::optional<int64_t> seqLenQUid;
+    // Ragged Q/O (RFC-0014 element offsets, multiplier 1). Set both for ragged Q.
+    std::optional<int64_t> raggedOffsetQUid;
+    std::optional<int64_t> raggedOffsetOUid;
+    // Dense FLOAT LSE output [B, H, Sq, 1].
+    std::optional<int64_t> statsUid;
+};
+
+// Builds a one-node paged-KV SDPA forward graph (vLLM block tables). Q/O are [B, H, Sq, D] with
+// BSHD strides (dense, or ragged with the offset uids). K/V are block containers
+// [num_blocks, H, block_size, D]. page_table_k/v are INT32 [B, 1, M, 1] with the zero-copy
+// block_table strides [M, M, 1, 1], M = ceil(maxSeqLenKv / block_size); equal uids share one
+// tensor. seq_len_kv is INT32 [B, 1, 1, 1].
+inline flatbuffers::FlatBufferBuilder
+    createPagedSdpaFwdGraph(int64_t qUid,
+                            int64_t kUid,
+                            int64_t vUid,
+                            int64_t oUid,
+                            int64_t pageTableKUid,
+                            int64_t pageTableVUid,
+                            int64_t seqLenKvUid,
+                            int32_t maxSeqLenKv,
+                            const std::vector<int64_t>& qDims,
+                            const std::vector<int64_t>& kDims,
+                            const std::vector<int64_t>& vDims,
+                            const std::vector<int64_t>& oDims,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                            const PagedSdpaFwdGraphOptions& options = {})
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_test_sdk::utilities::raggedStrides;
+
+    const int64_t batch = qDims[0];
+    const int64_t blockSize = kDims[2];
+    const int64_t maxBlocks = (maxSeqLenKv + blockSize - 1) / blockSize;
+
+    auto attrs = options.attrs;
+    attrs.q_tensor_uid = qUid;
+    attrs.k_tensor_uid = kUid;
+    attrs.v_tensor_uid = vUid;
+    attrs.o_tensor_uid = oUid;
+    attrs.page_table_k_tensor_uid = pageTableKUid;
+    attrs.page_table_v_tensor_uid = pageTableVUid;
+    attrs.seq_len_kv_tensor_uid = seqLenKvUid;
+    attrs.max_seq_len_kv = maxSeqLenKv;
+    if(options.seqLenQUid.has_value())
+    {
+        attrs.seq_len_q_tensor_uid = options.seqLenQUid;
+    }
+    if(options.statsUid.has_value())
+    {
+        attrs.stats_tensor_uid = options.statsUid;
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    const auto qStrides = raggedStrides(qDims);
+    const auto oStrides = raggedStrides(oDims);
+    const auto kStrides = options.kStrides.empty() ? raggedStrides(kDims) : options.kStrides;
+    const auto vStrides = options.vStrides.empty() ? raggedStrides(vDims) : options.vStrides;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   qUid,
+                                                   "Q",
+                                                   dataType,
+                                                   &qStrides,
+                                                   &qDims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   /*is_runtime_pass_by_value=*/false,
+                                                   options.raggedOffsetQUid));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "K", dataType, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "V", dataType, &vStrides, &vDims));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   oUid,
+                                                   "O",
+                                                   dataType,
+                                                   &oStrides,
+                                                   &oDims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   /*is_runtime_pass_by_value=*/false,
+                                                   options.raggedOffsetOUid));
+
+    const std::vector<int64_t> pageTableDims = {batch, 1, maxBlocks, 1};
+    const std::vector<int64_t> pageTableStrides = {maxBlocks, maxBlocks, 1, 1};
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, pageTableKUid, "PageTableK", DataType::INT32, &pageTableStrides, &pageTableDims));
+    if(pageTableVUid != pageTableKUid)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       pageTableVUid,
+                                                       "PageTableV",
+                                                       DataType::INT32,
+                                                       &pageTableStrides,
+                                                       &pageTableDims));
+    }
+
+    const std::vector<int64_t> seqLenDims = {batch, 1, 1, 1};
+    const auto seqLenStrides = generateStrides(seqLenDims);
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, seqLenKvUid, "SeqLenKv", DataType::INT32, &seqLenStrides, &seqLenDims));
+    if(options.seqLenQUid.has_value())
+    {
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       options.seqLenQUid.value(),
+                                                       "SeqLenQ",
+                                                       DataType::INT32,
+                                                       &seqLenStrides,
+                                                       &seqLenDims));
+    }
+
+    const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
+    const auto offsetStrides = generateStrides(offsetDims);
+    for(const auto& [uid, name] : {std::pair{&options.raggedOffsetQUid, "RaggedOffsetQ"},
+                                   std::pair{&options.raggedOffsetOUid, "RaggedOffsetO"}})
+    {
+        if(uid->has_value())
+        {
+            tensors.push_back(CreateTensorAttributesDirect(
+                builder, uid->value(), name, DataType::INT32, &offsetStrides, &offsetDims));
+        }
+    }
+
+    std::vector<int64_t> statsDims;
+    std::vector<int64_t> statsStrides;
+    if(options.statsUid.has_value())
+    {
+        statsDims = {qDims[0], qDims[1], qDims[2], 1};
+        statsStrides = generateStrides(statsDims);
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       options.statsUid.value(),
+                                                       "Stats",
+                                                       DataType::FLOAT,
+                                                       &statsStrides,
+                                                       &statsDims));
+    }
+
+    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_paged_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttrs.Union()));
+
+    auto graph = CreateGraphDirect(
+        builder, "SdpaPagedFwdTestGraph", dataType, dataType, DataType::FLOAT, &tensors, &nodes);
+
+    builder.Finish(graph);
+    return builder;
+}
+
 } // namespace hipdnn_integration_tests::test_utils

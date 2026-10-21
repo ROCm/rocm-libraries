@@ -63,6 +63,7 @@ The following table lists the operations currently executable through the GPU gr
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
 | SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
+| SDPA Forward (paged KV) | FP16, BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when the node has `page_table_k`/`page_table_v`; Q/O dense or ragged |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 
@@ -117,6 +118,7 @@ but are not reachable through graph-level verification.
 | Reduction | `GpuReductionPlanBuilder` | `GpuReductionSignatureKey` | Reduction over the requested dimensions |
 | SDPA Forward (dense) | `GpuSdpaFwdPlanBuilder` | `GpuSdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
 | SDPA Forward (ragged) | `GpuSdpaRaggedFwdPlanBuilder` | `GpuSdpaRaggedFwdSignatureKey` | Packed (ragged) attention forward pass |
+| SDPA Forward (paged KV) | `GpuSdpaPagedFwdPlanBuilder` | `GpuSdpaPagedFwdSignatureKey` | Paged-KV (vLLM block table) attention forward pass, dense or ragged Q |
 
 ### Pointwise Operations
 
@@ -146,19 +148,28 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 
 ### SDPA Restrictions
 
-| Feature | Dense SDPA Forward | Ragged SDPA Forward |
-|---------|--------------------|---------------------|
-| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone |
-| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
-| Dropout | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | Not supported |
-| Paged KV cache, block-sparse attention | Not supported | Not supported |
-| Softmax max / sum-exp stats outputs | Not supported | - |
-| Additive attention bias (`attn_mask`) | - | Not supported |
+| Feature | Dense SDPA Forward | Ragged SDPA Forward | Paged-KV SDPA Forward |
+|---------|--------------------|---------------------|-----------------------|
+| Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) | Supported (`FP32`; packed only with ragged Q) |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported; lengths come from `ragged_offset` alone | Required: `seq_len_kv` and `max_seq_len_kv`; `seq_len_q` optional for dense Q, required for ragged Q |
+| FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
+| Dropout | Not supported | Not supported | Not supported |
+| ALiBi / padding mask | Not supported | Not supported | ALiBi not supported; `padding_mask` accepted either way (seq lens are always honored) |
+| Paged KV cache | Not supported | Not supported | Supported: K/V containers `[num_blocks, H, block_size, D]` with any strides, `INT32` page tables `[B, 1, M, 1]` with any strides (may be one shared tensor) |
+| Block-sparse attention, attention sinks | Not supported | Not supported | Not supported |
+| Softmax max / sum-exp stats outputs | Not supported | - | Not supported |
+| Additive attention bias (`attn_mask`) | - | Not supported | Not supported |
 
 The ragged plan requires the RFC-0014 `[B, S, H, D]` token-major layout with a `ragged_offset` aux on every primary. A node is routed to the ragged plan as soon as any of its Q/K/V/O tensors has a `ragged_offset`; a
-partly ragged node is rejected there instead of running as dense. The harness records the
+partly ragged node is rejected there instead of running as dense.
+
+A node with a page table is routed to the paged plan before the ragged and dense checks, and the
+dense and ragged plans reject page tables. In the paged plan K/V must not be ragged, and Q and O are
+both dense or both ragged. Key row `skv` of batch `b` is row `skv % block_size` of block
+`page_table[b, 0, skv / block_size, 0]`; only the first `ceil(seq_len_kv[b] / block_size)` entries
+are read, and each must lie in `[0, num_blocks)` (checked on the host). Query rows at or past
+`seq_len_q[b]` are left untouched; a live row with no unmasked key (including `seq_len_kv[b] == 0`)
+writes zeros and LSE `-inf`. The harness records the
 dense-path gaps (variable sequence lengths, FP8) in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
 
@@ -194,7 +205,7 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
+| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3; paged KV with dense or ragged Q) |
 | SDPA Backward | Yes | No |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |
@@ -217,7 +228,7 @@ otherwise the GPU lane reports `OUTSIDE_OP_SET` for it. The set is currently **C
 - **BFP16**: Brain floating point (16-bit)
 - **FP32**: Single-precision floating point (32-bit)
 - **FP64**: Double-precision floating point (64-bit), reduction compute type only
-- **FP8 E4M3**: 8-bit floating point, ragged SDPA only
+- **FP8 E4M3**: 8-bit floating point, ragged and paged-KV SDPA only
 - **INT8, UINT8, INT32**: Integer datatypes, validators only
 
 ### Layouts
