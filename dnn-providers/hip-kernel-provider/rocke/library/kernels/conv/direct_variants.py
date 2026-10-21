@@ -62,6 +62,9 @@ DIRECT_HALO_VARIANTS = ("direct_nongrouped", DIRECT_GROUPED_HALO)
 # sums into the output. Shape-independent (one binary per split_c and dtype),
 # cached under its own direction and found by exact identity.
 DIRECT_SPLIT_REDUCE = "direct_split_reduce"
+# Stride-1 depthwise dgrad through the output-stationary forward kernel with
+# the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
+DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 # variant -> (transpose helper, reorganize helper)
 DIRECT_MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE),
@@ -107,6 +110,7 @@ DIRECT_WAVE_PARAMETRIC = frozenset(
         "direct_depthwise_spatial",
         "direct_depthwise_tiled",
         "direct_depthwise_col",
+        DIRECT_DEPTHWISE_TILED_DGRAD,
     }
 )
 
@@ -157,6 +161,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     if variant == "direct_depthwise_tiled":
         return dc.DirectDepthwiseTiledSpec(
             problem=problem, name="rocke_direct_depthwise_tiled", **knobs
+        )
+    if variant == DIRECT_DEPTHWISE_TILED_DGRAD:
+        return dc.DirectDepthwiseTiledSpec(
+            problem=problem, name="rocke_direct_dw_tiled_dgrad", dgrad=True, **knobs
         )
     if variant == "direct_depthwise_col":
         # The col spec carries its own element type; a binary serves only the
@@ -419,7 +427,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return dc.is_valid_depthwise_spec(spec, arch=arch)
         if variant == "direct_depthwise_spatial":
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
-        if variant == "direct_depthwise_tiled":
+        if variant in ("direct_depthwise_tiled", DIRECT_DEPTHWISE_TILED_DGRAD):
             return dc.is_valid_depthwise_tiled_spec(spec, arch=arch)
         if variant == "direct_depthwise_col":
             spec.validate()
@@ -515,6 +523,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_depthwise": dc.build_direct_depthwise,
         "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
         "direct_depthwise_tiled": dc.build_direct_depthwise_tiled,
+        DIRECT_DEPTHWISE_TILED_DGRAD: dc.build_direct_depthwise_tiled,
         "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
@@ -577,6 +586,10 @@ def direct_spec_for_problem(
         return None, (
             f"binary bakes C={knobs['channels']}, problem has C={problem.groups}"
         )
+    if getattr(problem, "PAD_W", problem.PAD) != problem.PAD and (
+        variant != DIRECT_DEPTHWISE_TILED_DGRAD
+    ):
+        return None, "one padding for both axes (only the rotated-filter dgrad differs)"
     spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
