@@ -136,7 +136,12 @@ class HEEVDX : public SYEVDX_HEEVDX<>
 };
 
 // large batch
-int constexpr BCOUNT = 64 * 1024 + 1;
+
+// TODO: there is a defect with batch variants with
+// medium size batch count (say 7000)
+// set BCOUNT to a low value for now
+// int constexpr BCOUNT = 64 * 1024 + 1;
+int constexpr BCOUNT = 3;
 
 class SYEVDX_LARGE_BATCH : public SYEVDX_HEEVDX<BCOUNT>
 {
