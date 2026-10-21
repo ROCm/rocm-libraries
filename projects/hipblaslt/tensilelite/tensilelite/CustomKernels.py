@@ -521,8 +521,7 @@ def getCustomKernelConfig(
     Raises:
         RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
     """
-    fullYaml = _readEmbeddedYaml(kernelName, directory)
-    kernelConfig = _customConfigFrom(kernelName, fullYaml)
+    kernelConfig = readCustomKernelConfig(kernelName, directory)
     if "InternalSupportParams" not in kernelConfig:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
 
@@ -570,6 +569,10 @@ def getCustomKernelConfig(
     kernelConfig["KernelLanguage"] = "Assembly"
 
     if "CustomKernel" not in kernelConfig:
+        # Only a kernel without an explicit CustomKernel block needs
+        # amdhsa.kernels; the rocRoller kernels embed about 1 MB of it, so it is
+        # parsed here and not for every kernel.
+        fullYaml = _readEmbeddedYaml(kernelName, directory)
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName

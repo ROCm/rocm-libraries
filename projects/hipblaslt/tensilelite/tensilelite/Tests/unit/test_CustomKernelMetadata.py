@@ -1470,27 +1470,28 @@ def test_embedded_metadata_is_parsed_with_libyaml(monkeypatch):
     assert loaders == [yaml.CSafeLoader]
 
 
-def test_get_custom_kernel_config_parses_embedded_metadata_once(tmp_path, monkeypatch):
+def test_get_custom_kernel_config_parses_whole_metadata_block_once(tmp_path, monkeypatch):
     # No CustomKernel block, so the config is inferred from amdhsa.kernels and
-    # both halves of the metadata are needed.
+    # the whole block is needed. It is parsed once, after the custom.config slice.
     write_kernel(tmp_path / "metadata_only.s", """\
           InternalSupportParams:
             KernArgsVersion: 0
           ProblemType: {}
           MatrixInstruction: [16, 16, 16, 1]
         """)
-    calls = []
+    wholeBlockParses = []
     realRead = ck_mod._readEmbeddedYaml
 
-    def spy(name, directory=None):
-        calls.append(name)
-        return realRead(name, directory)
+    def spy(name, directory=None, customConfigOnly=False):
+        if not customConfigOnly:
+            wholeBlockParses.append(name)
+        return realRead(name, directory, customConfigOnly)
 
     monkeypatch.setattr(ck_mod, "_readEmbeddedYaml", spy)
     config = getCustomKernelConfig("metadata_only", {}, str(tmp_path))
 
     assert config["CustomKernel"]["args"][0]["semantic"] == "AddressD"
-    assert calls == ["metadata_only"]
+    assert wholeBlockParses == ["metadata_only"]
 
 
 def test_metadata_loader_matches_pure_python_safe_loader():
