@@ -1143,57 +1143,6 @@ def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
         assert cache.supports_problem(ident, p)[0], (s, d)
 
 
-def test_deep_fused_conv_pool_signature_matches_kernel_params():
-    """deep_fused_conv_pool builds conv0 through the AOT implicit-GEMM builder,
-    so its launch signature has to carry the runtime problem block too -- and
-    the launch values have to fill every entry of it."""
-    from kernels.common.deep_fused_conv_pool import (
-        build_deep_fused_conv_pool,
-        deep_fused_conv_pool_problem_values,
-        deep_fused_conv_pool_signature,
-        make_deep_fused_conv_pool_spec,
-    )
-    from rocke.runtime.packing import pack_args
-
-    spec = make_deep_fused_conv_pool_spec(
-        n=1,
-        h=64,
-        w=128,
-        c=8,
-        k0=16,
-        k1=16,
-        r=3,
-        s=3,
-        pool_tile_h=4,
-        pool_tile_w=8,
-        tile_n=16,
-        tile_k=16,
-        warp_m=2,
-        warp_n=1,
-        warp_tile_m=16,
-        warp_tile_n=16,
-        warp_tile_k=16,
-        wave_size=64,
-    )
-    kernel = build_deep_fused_conv_pool(spec, arch="gfx950")
-    sig = deep_fused_conv_pool_signature(spec)
-    # The kernel names its output D; the manifest/launcher calls it Y.
-    kernel_order = [
-        {"D": "Y", "D_bytes": "Y_bytes"}.get(p.name, p.name) for p in kernel.params
-    ]
-    assert _names(sig) == kernel_order
-
-    values = dict.fromkeys(("A", "B", "Y", "W1"), 0x1000)
-    values.update(dict.fromkeys(("W1_bytes", "A_bytes", "B_bytes", "Y_bytes"), 1))
-    values.update(
-        deep_fused_conv_pool_problem_values(
-            spec.problem.conv, tile_m=spec.tile_m, tile_n=spec.tile_n
-        )
-    )
-    assert set(values) == set(_names(sig))
-    pack_args(sig, values)
-
-
 def _cache_identity(**kw):
     from benchmarks.common.kernel_cache import KernelIdentity
 

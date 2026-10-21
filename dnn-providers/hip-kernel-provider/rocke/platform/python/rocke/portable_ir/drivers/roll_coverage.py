@@ -14,14 +14,13 @@
 #   T1 small op       : qk_block (vec8 head dot)              over head_size D
 #   T2 GEMM           : gemm_universal (k-atom nest)          over tile_n
 #   T3 attention      : unified-attention 2D (the Section-3 kernel) over head_size
-#   T4 deep fused conv: deep_fused_conv_pool (conv0->conv1->pool) over pool tile
 #
 #   python3 -m rocke.portable_ir.drivers.roll_coverage
 #
-# The four tiers differ in how their kernel is reached, and that is the point of
-# running them together: T2 and T4 are spec-driven production kernels, while T1
+# The tiers differ in how their kernel is reached, and that is the point of
+# running them together: T2 is a spec-driven production kernel, while T1
 # and T3 are example builders taking plain arguments with no spec dataclass at
-# all. All four go through the same roll_kernel entry point, which is the driver
+# all. All three go through the same roll_kernel entry point, which is the driver
 # every other one here is built on, so this doubles as the check that it fits
 # kernels that do not follow the conventions its module lookup assumes.
 
@@ -33,10 +32,6 @@ ARCH = "gfx950"
 
 
 def _tiers():
-    from kernels.common.deep_fused_conv_pool import (
-        build_deep_fused_conv_pool,
-        make_deep_fused_conv_pool_spec,
-    )
     from rocke.instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
@@ -59,30 +54,6 @@ def _tiers():
             data=DataSpec(),
             wave_size=64,
             block_size=64,
-        ),
-    )
-    conv_pool = Kernel(
-        label="deep_fused_conv_pool",
-        build_fn=build_deep_fused_conv_pool,
-        make_spec=lambda **kw: make_deep_fused_conv_pool_spec(
-            n=1,
-            h=64,
-            w=128,
-            c=8,
-            k0=16,
-            k1=16,
-            r=3,
-            s=3,
-            pool_tile_h=4,
-            pool_tile_w=kw["pool_tile_w"],
-            tile_n=16,
-            tile_k=16,
-            warp_m=2,
-            warp_n=1,
-            warp_tile_m=16,
-            warp_tile_n=16,
-            warp_tile_k=16,
-            wave_size=64,
         ),
     )
     return [
@@ -116,16 +87,6 @@ def _tiers():
                 holdout={"D": [256, 192, 96, 512]},
                 structural="D",
                 extra_spec={"dtype": "fp16"},
-            ),
-        ),
-        (
-            "T4",
-            "deep_fused_conv_pool",
-            dict(
-                kernel=conv_pool,
-                axes={"pool_tile_w": [4, 8]},
-                holdout={"pool_tile_w": [16]},
-                structural="pool_tile_w",
             ),
         ),
     ]

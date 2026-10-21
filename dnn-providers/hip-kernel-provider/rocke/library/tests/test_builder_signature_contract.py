@@ -341,10 +341,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
-    "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
-    "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
     "kernels.common.img2col.Img2ColSpec": ("problem",),
-    "kernels.gfx1151.deep_fused_conv_pool.Gfx1151DeepFusedConvPoolSpec": ("problem",),
 }
 
 

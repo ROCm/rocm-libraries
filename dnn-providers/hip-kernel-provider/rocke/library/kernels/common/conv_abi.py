@@ -146,9 +146,9 @@ def _fwd_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
 def conv_fwd_problem_block(*, is_3d: bool = False) -> List[ArgSpec]:
     """The forward AOT problem block on its own, without the leading pointers.
 
-    A fused kernel that embeds the forward conv body (``deep_fused_conv_pool``)
-    keeps its own pointer convention and appends this block, so it picks up the
-    same runtime problem args in the same order.
+    A fused kernel that embeds the forward conv body keeps its own pointer
+    convention and appends this block, so it picks up the same runtime
+    problem args in the same order.
     """
     return _fwd_arg_names(is_3d=is_3d)[_LEADING_ARGS:]
 

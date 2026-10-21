@@ -7,8 +7,8 @@
 # config index, one "name kind" line per entry, so run_diff.py can byte-compare
 # it with conv_abi_emit.c. The conv builders emit their params from these
 # lists, so the kernel families already cover the variants they build; this
-# family also covers the ones no builder reaches yet (3-D dgrad), the rejected
-# inputs, and the deep_fused_conv_pool launch signature, which is not IR.
+# family also covers the ones no builder reaches yet (3-D dgrad) and the
+# rejected inputs.
 #
 # Config index map:
 #   0  -- conv_arg_names("fwd")
@@ -23,11 +23,10 @@
 #   9  -- conv_direct_arg_names("dgrad")
 #   10 -- conv_fwd_problem_block()
 #   11 -- conv_fwd_problem_block(is_3d)
-#   12 -- deep_fused_conv_pool_signature(2-D spec)
-#   13 -- conv_arg_names("fwd", two_stage)       (rejected)
-#   14 -- conv_arg_names("bwd")                  (rejected)
-#   15 -- conv_direct_arg_names("wgrad")
-#   16 -- conv_direct_arg_names("bwd")           (rejected)
+#   12 -- conv_arg_names("fwd", two_stage)       (rejected)
+#   13 -- conv_arg_names("bwd")                  (rejected)
+#   14 -- conv_direct_arg_names("wgrad")
+#   15 -- conv_direct_arg_names("bwd")           (rejected)
 import sys
 
 from kernels.common.conv_abi import (
@@ -35,18 +34,6 @@ from kernels.common.conv_abi import (
     conv_direct_arg_names,
     conv_fwd_problem_block,
 )
-
-
-def _deep_signature():
-    from kernels.common.deep_fused_conv_pool import (
-        deep_fused_conv_pool_signature,
-        make_deep_fused_conv_pool_spec,
-    )
-
-    spec = make_deep_fused_conv_pool_spec(
-        h=64, w=128, c=8, k0=16, k1=16, r=3, s=3, pool_tile_h=4, pool_tile_w=8
-    )
-    return [(e["name"], e["type"]) for e in deep_fused_conv_pool_signature(spec)]
 
 
 _CONFIGS = {
@@ -62,11 +49,10 @@ _CONFIGS = {
     9: lambda: conv_direct_arg_names(direction="dgrad"),
     10: lambda: conv_fwd_problem_block(),
     11: lambda: conv_fwd_problem_block(is_3d=True),
-    12: _deep_signature,
-    13: lambda: conv_arg_names(direction="fwd", two_stage=True),
-    14: lambda: conv_arg_names(direction="bwd"),
-    15: lambda: conv_direct_arg_names(direction="wgrad"),
-    16: lambda: conv_direct_arg_names(direction="bwd"),
+    12: lambda: conv_arg_names(direction="fwd", two_stage=True),
+    13: lambda: conv_arg_names(direction="bwd"),
+    14: lambda: conv_direct_arg_names(direction="wgrad"),
+    15: lambda: conv_direct_arg_names(direction="bwd"),
 }
 
 

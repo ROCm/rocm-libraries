@@ -2234,50 +2234,6 @@ def cfgs_gfx950_attention_tiled_3d():
     return cfgs_gfx942_attention_tiled_3d()
 
 
-def cfgs_deep_fused_conv_pool():
-    # all 8 emitter configs; 0..5 are reject-only (engine rejects them),
-    # 6 (gfx950) + 7 (gfx1201) are the buildable ones.
-    def mk(h, w, c, k0, k1, tn, tk, wt, ws):
-        return dict(
-            n=1,
-            h=h,
-            w=w,
-            c=c,
-            k0=k0,
-            k1=k1,
-            r=3,
-            s=3,
-            pool_tile_h=4,
-            pool_tile_w=8,
-            tile_n=tn,
-            tile_k=tk,
-            warp_m=2,
-            warp_n=1,
-            warp_tile_m=wt,
-            warp_tile_n=wt,
-            warp_tile_k=16,
-            wave_size=ws,
-        )
-
-    return [
-        (mk(112, 112, 64, 64, 64, 32, 16, 32, 64), "gfx950"),
-        (mk(56, 56, 128, 128, 128, 32, 16, 32, 64), "gfx950"),
-        (mk(28, 28, 256, 256, 256, 32, 16, 32, 64), "gfx950"),
-        (mk(112, 112, 64, 64, 64, 32, 16, 16, 32), "gfx1201"),
-        (
-            mk(56, 56, 32, 32, 32, 32, 16, 32, 64) | dict(cache_input_footprint=True),
-            "gfx950",
-        ),
-        (
-            mk(28, 28, 64, 64, 64, 32, 16, 32, 64)
-            | dict(direct_conv0_from_input_cache=True),
-            "gfx950",
-        ),
-        (mk(64, 128, 8, 16, 16, 16, 16, 16, 64), "gfx950"),
-        (mk(64, 128, 8, 16, 16, 16, 16, 16, 32), "gfx1201"),
-    ]
-
-
 # (family, lower_fn_name, configs, arch). arch=None => use per-config arch
 # (configs are (dict, arch) tuples). Otherwise configs are plain dicts.
 FAMILIES = [
@@ -2436,12 +2392,6 @@ FAMILIES = [
         "gfx950_attention_tiled_3d_lower_llvm",
         cfgs_gfx950_attention_tiled_3d(),
         "gfx950",
-    ),
-    (
-        "deep_fused_conv_pool",
-        "deep_fused_conv_pool_lower_llvm",
-        cfgs_deep_fused_conv_pool(),
-        None,
     ),
 ]
 

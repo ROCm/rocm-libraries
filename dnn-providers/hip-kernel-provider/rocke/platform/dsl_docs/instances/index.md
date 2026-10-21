@@ -30,12 +30,6 @@ Quantized-weight GEMM:
 `MatMulNBitsSpec` for fp16 activations and packed-int4 weights with group size
 32. Its validator accepts gfx1151 and gfx1201.
 
-Deep fusion:
-[`deep_fused_conv_pool.py`](../../../library/kernels/common/deep_fused_conv_pool.py)
-ships the conv -> epilogue -> conv -> maxpool prototype. gfx950 and gfx1201 use
-the shared target-selected `MmaOp` body; gfx1151 has a target-specific
-implementation.
-
 ## Convolution Family
 
 | File | Spec | Doc |

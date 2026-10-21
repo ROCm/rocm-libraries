@@ -256,9 +256,9 @@ class TestRollGeneralization(unittest.TestCase):
 
 
 def build_fan(L):
-    """A variable loop-carry fan: a runtime scf.for carrying L accumulators (the
-    T4 pattern, e.g. deep_fused_conv_pool's per-output-row accumulators). Lane
-    count L is the structural axis."""
+    """A variable loop-carry fan: a runtime scf.for carrying L accumulators
+    (e.g. a fused kernel's per-output-row accumulators). Lane count L is the
+    structural axis."""
     from rocke.core.ir import I32
 
     b = IRBuilder(f"fan_{L}")

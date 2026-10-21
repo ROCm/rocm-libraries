@@ -191,7 +191,7 @@ Two trees, split by layer, holding the same kind of artifact:
 arch-portable builders that take `arch` as a parameter (`gemm_universal.py`,
 `conv_implicit_gemm.py`, `fused_moe.py`, `layernorm2d.py`), and
 `instances/<arch>/` holds the specializations that could not stay portable
-(`gfx950/deep_fused_conv_pool.py`).
+(`gfx950/block_scaled_gemm.py`).
 
 Whichever tree it lands in, the artifact has the same shape, and that is what
 makes registration mechanical later: a frozen spec dataclass with a
@@ -2038,11 +2038,10 @@ here too — either it gains a producer and a runner, or it goes.
 said to "port the remaining `run_*_manifest_problem` adapters to their
 families", which reads as though every adapter should be replaced by a
 candidate's `bind`. That would break most of the manifest workflows, because
-they do not go through dispatch and have nothing to bind *from*: of the fourteen
-registered manifest kinds, **ten have no dispatch candidate at all** —
-`gemm_iu8`, `batched_gemm_fp16`, `matmul_nbits_fp16`, both
-`deep_fused_conv_pool_*`, and the five simple ops. The examples that emit them
-(`wmma_iu8_probe`, `matmul_nbits_verify`, `deep_fused_conv_pool_verify`, the
+they do not go through dispatch and have nothing to bind *from*: of the twelve
+registered manifest kinds, **eight have no dispatch candidate at all** —
+`gemm_iu8`, `batched_gemm_fp16`, `matmul_nbits_fp16`, and the five simple ops.
+The examples that emit them (`wmma_iu8_probe`, `matmul_nbits_verify`, the
 gfx950 skinny-decode sweep, and the rest) build a spec, compile it, write a
 manifest, and shell out to `python -m rocke.run_manifest`. There is no
 `KernelCandidate` anywhere in that path, and for kernels dispatch has never
@@ -2094,7 +2093,7 @@ signature of every family, so it waits for a family that needs it.
 **Build through the C++ builder from dispatch.** The `build` hook in section 5.2
 calls the Python builder. The C++ engine has builders of its own for most
 families — `rocke_build_wmma_fmha_fwd`, `rocke_build_gemm_multi_d`,
-`rocke_build_deep_fused_conv_pool`, and the rest of the `rocke_build_*` surface —
+and the rest of the `rocke_build_*` surface —
 and they emit byte-identical IR from the same spec. Dispatch should be able to
 drive either engine through a binding it owns, rather than through the
 per-family entry points hand-registered in `cpp/bindings/rocke_engine.cpp`.

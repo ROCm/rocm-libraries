@@ -1,16 +1,14 @@
 {
   "_comment": "Kernels that do not reach HSACO, pinned by name so a NEW one fails CI while these known-broken ones do not. 'uncompilable' is an LLVM fatal error -- a defect in the kernel, not in portable IR. 'refused' is the Python lowerer correctly declining a wrong-arch-family kernel. Regenerate with: hsaco_parity --update-baseline",
   "gfx942": {
-    "compared": 32,
+    "compared": 30,
     "refused": [
-      "gfx1151_deep_fused_conv_pool",
       "gfx1151_wmma_fmha_fwd",
       "gfx1151_wmma_fmha_fwd_v2",
       "gfx1151_wmma_gemm",
       "gfx1151_wmma_gemm_int8",
       "gfx1151_wmma_gemm_iu8",
       "gfx1151_wmma_gemm_iu8_dequant",
-      "gfx1201_deep_fused_conv_pool",
       "gfx1201_wmma_fmha_fwd",
       "gfx1201_wmma_gemm",
       "matmul_nbits"
@@ -33,16 +31,14 @@
     }
   },
   "gfx950": {
-    "compared": 45,
+    "compared": 43,
     "refused": [
-      "gfx1151_deep_fused_conv_pool",
       "gfx1151_wmma_fmha_fwd",
       "gfx1151_wmma_fmha_fwd_v2",
       "gfx1151_wmma_gemm",
       "gfx1151_wmma_gemm_int8",
       "gfx1151_wmma_gemm_iu8",
       "gfx1151_wmma_gemm_iu8_dequant",
-      "gfx1201_deep_fused_conv_pool",
       "gfx1201_wmma_fmha_fwd",
       "gfx1201_wmma_gemm",
       "matmul_nbits"

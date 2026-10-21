@@ -23,7 +23,6 @@ _CONV_BUILDERS = [
     "build_direct_depthwise",
     "build_direct_depthwise_spatial",
     "build_direct_depthwise_col",
-    "build_deep_fused_conv_pool",
     "build_img2col",
 ]
 

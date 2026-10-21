@@ -85,7 +85,7 @@ bool rocke_conv_arg_names_ex(const char* direction,
 bool rocke_conv_direct_arg_names(const char* direction, rocke_conv_arg_list_t* out);
 
 /* The forward problem block without the leading pointer/byte-size six, for a
- * fused kernel that keeps its own pointer convention (deep_fused_conv_pool). */
+ * fused kernel that keeps its own pointer convention. */
 void rocke_conv_fwd_problem_block(bool is_3d, rocke_conv_arg_list_t* out);
 
 /* Called for every non-i32 entry; returns the declared param. The caller owns

@@ -840,8 +840,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      * the CONV spec's kernel_name regardless of any name the caller gave the
      * builder. The C entry reuses a caller-supplied builder, so name its kernel
      * here to stay byte-faithful: this is the lever that fixes wrapped callers
-     * (e.g. deep_fused_conv_pool, which inits the builder with the deep-fusion
-     * kernel_name() but must emit under the conv1 wrapped name). */
+     * that init the builder with a fused kernel_name() but must emit under the
+     * conv1 wrapped name. */
     if(b->kernel != NULL)
     {
         char name[256];

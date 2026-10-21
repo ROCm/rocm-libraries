@@ -1025,48 +1025,6 @@ def img2col_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
-def deep_fused_conv_pool_spec_to_dict(spec: Any) -> Dict[str, Any]:
-    """:class:`DeepFusedConvPoolSpec` -> the factory-argument dict the binding
-    feeds to ``rocke_make_deep_fused_conv_pool_spec``. The factory derives the
-    same fields both engines do, so the flat conv/pool shape + tiling knobs are
-    sufficient."""
-    prob = spec.problem
-    conv = prob.conv
-    r = getattr(conv, "Y", None)
-    if r is None:
-        r = conv.R
-    s = getattr(conv, "X", None)
-    if s is None:
-        s = conv.S
-    return dict(
-        n=conv.N,
-        h=conv.Hi,
-        w=conv.Wi,
-        c=conv.C,
-        k0=conv.K,
-        k1=prob.conv1_k,
-        r=r,
-        s=s,
-        pool_tile_h=spec.pool_tile_h,
-        pool_tile_w=spec.pool_tile_w,
-        tile_n=spec.tile_n,
-        tile_k=spec.tile_k,
-        conv1_tile_k=spec.conv1_tile_k,
-        warp_m=spec.warp_m,
-        warp_n=spec.warp_n,
-        warp_tile_m=spec.warp_tile_m,
-        warp_tile_n=spec.warp_tile_n,
-        warp_tile_k=spec.warp_tile_k,
-        wave_size=spec.wave_size,
-        name=spec.name,
-        pipeline=spec.pipeline,
-        unroll_k=spec.unroll_k,
-        async_dma=spec.async_dma,
-        cache_input_footprint=spec.cache_input_footprint,
-        direct_conv0_from_input_cache=spec.direct_conv0_from_input_cache,
-    )
-
-
 # --------------------------- generic dispatch -------------------------
 
 
@@ -1658,44 +1616,5 @@ def lower_img2col(
         py_fn,
         lambda: eng.img2col_lower_llvm(sd, arch=arch),
         lambda: eng.img2col_serialize_ir(sd, arch=arch),
-        _name_of(spec),
-    )
-
-
-def lower_deep_fused_conv_pool(
-    spec: Any,
-    *,
-    arch: str,
-    backend: Optional[str] = None,
-    want_ir: bool = False,
-) -> "GemmLowerResult":
-    """Lower a :class:`DeepFusedConvPoolSpec`."""
-
-    def py_fn(wi: bool) -> Tuple[str, str]:
-        from kernels.common.deep_fused_conv_pool import (
-            build_deep_fused_conv_pool,
-        )
-        from .lower_llvm import lower_kernel_to_llvm
-
-        k = build_deep_fused_conv_pool(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
-
-    eng = _import_engine()
-    sd = deep_fused_conv_pool_spec_to_dict(spec)
-    return _lower_family(
-        "deep_fused_conv_pool",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.deep_fused_conv_pool_lower_llvm(sd, arch=arch),
-        lambda: eng.deep_fused_conv_pool_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )

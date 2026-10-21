@@ -23,8 +23,6 @@ _CHAIN_KINDS = frozenset(
         "conv_bf16",
         "conv_fp16",
         "conv_fp32",
-        "deep_fused_conv_pool_fp16",
-        "deep_fused_conv_pool_i8i4",
         "elementwise_fp16",
         "gemm_fp16",
         "gemm_iu8",

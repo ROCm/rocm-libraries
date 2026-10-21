@@ -47,7 +47,6 @@ extern "C" {
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
-#include "rocke/instance_deep_fused_conv_pool.h"
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
@@ -1913,84 +1912,6 @@ std::vector<std::string> conv_direct_nongrouped_verify(const py::dict& d, const 
                              rocke_direct_conv_nongrouped_spec_t,
                              dnongrouped_build_spec,
                              rocke_build_direct_conv_nongrouped_new(&b, &s, arch.c_str()));
-}
-
-/* ======================= deep_fused_conv_pool ======================= */
-
-/* This family is constructed through a factory in both reference emitters; the
- * binding mirrors the factory call exactly (tile_m is auto-derived inside). */
-rocke_deep_fused_conv_pool_spec_t dfcp_build_spec(const py::dict& d, std::deque<std::string>& store)
-{
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
-    const char* name = nullptr;
-    const char* pipeline = nullptr;
-    {
-        std::string v;
-        if(dict_str(d, "name", v))
-            name = keep(v);
-        if(dict_str(d, "pipeline", v))
-            pipeline = keep(v);
-    }
-    return rocke_make_deep_fused_conv_pool_spec(
-        dict_int(d, "n", 1),
-        dict_int(d, "h", 0),
-        dict_int(d, "w", 0),
-        dict_int(d, "c", 0),
-        dict_int(d, "k0", 0),
-        dict_int(d, "k1", 0),
-        dict_int(d, "r", 3),
-        dict_int(d, "s", 3),
-        dict_int(d, "pool_tile_h", 4),
-        dict_int(d, "pool_tile_w", 8),
-        dict_int(d, "tile_n", 32),
-        dict_int(d, "tile_k", 16),
-        dict_int(d, "conv1_tile_k", 0),
-        dict_int(d, "warp_m", 2),
-        dict_int(d, "warp_n", 1),
-        dict_int(d, "warp_tile_m", 32),
-        dict_int(d, "warp_tile_n", 32),
-        dict_int(d, "warp_tile_k", 16),
-        dict_int(d, "wave_size", 64),
-        name,
-        pipeline,
-        dict_bool(d, "unroll_k", false),
-        dict_bool(d, "async_dma", false),
-        dict_bool(d, "cache_input_footprint", false),
-        dict_bool(d, "direct_conv0_from_input_cache", false));
-}
-
-std::string deep_fused_conv_pool_lower_llvm(const py::dict& d, const std::string& arch)
-{
-    require_arch(arch);
-    std::deque<std::string> store;
-    rocke_deep_fused_conv_pool_spec_t s = dfcp_build_spec(d, store);
-    char* ll = nullptr;
-    char err[ROCKE_ERR_MSG_CAP];
-    err[0] = '\0';
-    rocke_status_t st = rocke_deep_fused_conv_pool_lower_to_llvm(
-        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
-    return take_lowered(st, ll, err, "rocke_engine.deep_fused_conv_pool_lower_llvm");
-}
-
-std::string deep_fused_conv_pool_serialize_ir(const py::dict& d, const std::string& arch)
-{
-    require_arch(arch);
-    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.deep_fused_conv_pool_serialize_ir",
-                                rocke_deep_fused_conv_pool_spec_t,
-                                dfcp_build_spec,
-                                rocke_build_deep_fused_conv_pool_new(&b, &s, arch.c_str()));
-}
-
-std::vector<std::string> deep_fused_conv_pool_verify(const py::dict& d, const std::string& arch)
-{
-    require_arch(arch);
-    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.deep_fused_conv_pool_verify",
-                             rocke_deep_fused_conv_pool_spec_t,
-                             dfcp_build_spec,
-                             rocke_build_deep_fused_conv_pool_new(&b, &s, arch.c_str()));
 }
 
 /* ==================================================================== *
@@ -4273,10 +4194,6 @@ PYBIND11_MODULE(rocke_engine, m)
          &conv_direct_nongrouped_serialize_ir,
          &conv_direct_nongrouped_verify);
     register_img2col(m); /* separate TU; see note at top of file */
-    reg3("deep_fused_conv_pool",
-         &deep_fused_conv_pool_lower_llvm,
-         &deep_fused_conv_pool_serialize_ir,
-         &deep_fused_conv_pool_verify);
 
     /* ---- norm / elementwise / tensor-op families ---- */
     reg3("layernorm2d", &layernorm2d_lower_llvm, &layernorm2d_serialize_ir, &layernorm2d_verify);

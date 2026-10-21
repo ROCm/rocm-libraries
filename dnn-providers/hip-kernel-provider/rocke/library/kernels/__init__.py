@@ -227,23 +227,3 @@ from .common.img2col import (  # noqa: F401
     img2col_signature,
     is_valid_spec as is_valid_img2col_spec,
 )
-from .common.deep_fused_conv_pool import (  # noqa: F401
-    FusedConvPoolProblem,
-    DeepFusedConvPoolSpec,
-    build_deep_fused_conv_pool,
-    deep_fused_conv_pool_grid,
-    deep_fused_conv_pool_signature,
-    is_valid_spec as is_valid_deep_fused_conv_pool_spec,
-)
-from .gfx950.deep_fused_conv_pool import (  # noqa: F401
-    Gfx950DeepFusedConvPoolSpec,
-    make_deep_fused_conv_pool_spec as make_gfx950_deep_fused_conv_pool_spec,
-)
-from .gfx1151.deep_fused_conv_pool import (  # noqa: F401
-    Gfx1151DeepFusedConvPoolSpec,
-    make_deep_fused_conv_pool_spec as make_gfx1151_deep_fused_conv_pool_spec,
-)
-from .gfx1201.deep_fused_conv_pool import (  # noqa: F401
-    Gfx1201DeepFusedConvPoolSpec,
-    make_deep_fused_conv_pool_spec as make_gfx1201_deep_fused_conv_pool_spec,
-)

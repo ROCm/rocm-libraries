@@ -98,14 +98,6 @@ def registered_manifest_kinds() -> Tuple[str, ...]:
 # function is looked up by name. This extends the existing runner_module
 # mechanism from manifest JSON to built-in library families.
 _LIBRARY_RUNNER_MODULES: Dict[str, Tuple[str, str]] = {
-    "deep_fused_conv_pool_fp16": (
-        "kernels.common.deep_fused_conv_pool",
-        "run_deep_fused_conv_pool_fp16_manifest_problem",
-    ),
-    "deep_fused_conv_pool_i8i4": (
-        "kernels.gfx1151.deep_fused_conv_pool",
-        "run_deep_fused_conv_pool_i8i4_manifest_problem",
-    ),
     "conv_fp16": (
         "kernels.common.manifest_runner.conv",
         "run_conv_manifest_problem",
@@ -131,7 +123,7 @@ def resolve_manifest_runner(manifest: dict) -> ProblemBuilder:
     :func:`register_manifest_runner`. The import is skipped when the kind
     is already registered, so a GEMM manifest is unaffected.
 
-    Library-owned kinds (e.g. deep_fused_conv_pool_*) are resolved lazily
+    Library-owned kinds (e.g. conv_fp16) are resolved lazily
     via :data:`_LIBRARY_RUNNER_MODULES` — the library module is imported on
     first use so a standalone-installed rocke wheel stays importable without
     the library on sys.path.
@@ -168,9 +160,8 @@ def _register_builtin_runners() -> None:
     register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
     register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
     register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)
-    # deep_fused_conv_pool_* and conv_{fp16,bf16,fp32} runners live in the
-    # library tree and are resolved lazily via _LIBRARY_RUNNER_MODULES in
-    # resolve_manifest_runner().
+    # conv_{fp16,bf16,fp32} runners live in the library tree and are
+    # resolved lazily via _LIBRARY_RUNNER_MODULES in resolve_manifest_runner().
 
 
 _register_builtin_runners()

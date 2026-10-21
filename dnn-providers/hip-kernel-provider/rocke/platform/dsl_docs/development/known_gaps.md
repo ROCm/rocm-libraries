@@ -195,8 +195,6 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 |---|---|---|
 | `gemm_universal.cpp` | `all_dispatcher_configs()` host-side enumerator. | A streaming generator does not translate to a single C call; needs a callback-walker entry point added to the **public header `rocke/instance_gemm_universal.h`** (out of body-chunk edit scope). Emits no IR. |
 | `gemm_epilogue.cpp` | Heterogeneous-dtype `_storage_dtype` `ValueError` text. | No public `_storage_dtype` validator exists in a shared header. Emit-path call sites only need the resolved IR type (dtypes already validated upstream by `ck_gemm_storage_dtype` in `gemm_spec.cpp`), so IR is byte-identical; only the heterogeneous-reject *message* is deferred until a shared validator lands. |
-| `deep_fused_conv_pool_value_types_and_spec.cpp` | Leading underlying-conv gate (`conv_spec=spec.conv_spec()`; `is_valid_conv_spec`) in `is_valid_spec`. | The per-family gate `rocke_implicit_gemm_conv_is_valid_spec` is public, but `spec.conv_spec()`'s only C port requires an `ir_builder_t*` for `kernel_name_join`; this validator is pure-compute with no builder. Needs a builder-free `conv_spec()` / validate path. |
-| `deep_fused_conv_pool_conv1_gemm_and_lds_staging.cpp` | `rocke_conv_apply_accumulator_epilogue` peer (called via a local extern-C forward decl). | The peer's `ConvAccumulatorEpilogue` struct in its private header collides with this TU's struct of the same name; needs the peer epilogue type exposed through a non-conflicting shared header. Currently **link-resolved (correct at runtime)**; forward-decl retained. |
 
 ---
 

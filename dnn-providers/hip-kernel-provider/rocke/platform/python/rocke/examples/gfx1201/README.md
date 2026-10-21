@@ -1,14 +1,13 @@
 # gfx1201 (RDNA4) WMMA examples
 
 Bring-up and verification examples for the **gfx1201** GPU (RDNA4, Navi 48,
-wave32), authored in `rocke` (Python → LLVM IR → HSACO). Three kernels, all
+wave32), authored in `rocke` (Python → LLVM IR → HSACO). Two kernels, both
 built on the single new **gfx12 WMMA `16×16×16` f16 atom**
 (`wmma_gfx12_f32_16x16x16_f16`):
 
-1. a **WMMA GEMM lane-map probe** that proves the RDNA4 fragment ABI on silicon,
+1. a **WMMA GEMM lane-map probe** that proves the RDNA4 fragment ABI on silicon, and
 2. a **`MatMulNBits`** weight-only-quantized (int4) matmul covering the full
-   Qwen3.5-9B set, and
-3. an **experimental deep-fused conv + maxpool** prototype.
+   Qwen3.5-9B set.
 
 > For the math each kernel computes, the RDNA4 fragment layout, and *why* an
 > asymmetric-input probe is the correctness proof, see
@@ -22,9 +21,9 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
   a distinct builtin/intrinsic, and a column-distributed `<8 × float>`
   accumulator. The lane maps are a *hypothesis* in code until the probe confirms
   them on hardware.
-- **One atom, three real shapes.** The same WMMA primitive backs a plain GEMM, a
-  quantized linear (three tile families incl. a non-WMMA scalar GEMV), and a
-  fused conv-pool — at increasing levels of composition.
+- **One atom, two real shapes.** The same WMMA primitive backs a plain GEMM and a
+  quantized linear (three tile families incl. a non-WMMA scalar GEMV), at
+  increasing levels of composition.
 
 ## Prerequisites
 
@@ -44,17 +43,15 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
 | `README.md` | this guide |
 | `wmma_probe.py` | builds the gfx1201 WMMA GEMM and verifies `C = A @ B.T` with random asymmetric inputs to confirm the lane map (a PASS at multiple tile counts uniquely pins it) |
 | `matmul_nbits_verify.py` | builds + numeric-verifies the `MatMulNBits` int4 matmul; `--family large_n / skinny_n / decode_gemv`, optional `--opt` body |
-| `deep_fused_conv_pool_verify.py` | emits + verifies the experimental fused conv0(3×3)→ReLU→conv1(1×1)→ReLU→2×2 maxpool kernel (no HBM intermediates) |
 
 The kernel sources these drivers build live outside this directory:
-`instances/gfx1201/wmma_gemm.py` (GEMM + lane maps),
+`instances/gfx1201/wmma_gemm.py` (GEMM + lane maps), and
 `instances/common/matmul_nbits.py` + its family bodies (`_matmul_nbits_large_n.py`,
-`_matmul_nbits_large_n_opt.py` for `--opt`, `_matmul_nbits_decode_gemv.py`), and
-`instances/gfx1201/deep_fused_conv_pool.py` (conv-pool spec).
+`_matmul_nbits_large_n_opt.py` for `--opt`, `_matmul_nbits_decode_gemv.py`).
 
 ## Run
 
-Run from `dnn-providers/hip-kernel-provider/rocke/platform/python`. All three are Python modules
+Run from `dnn-providers/hip-kernel-provider/rocke/platform/python`. Both are Python modules
 (`python3 -m …`).
 
 ### 1. WMMA lane-map probe
@@ -107,36 +104,13 @@ Flags: `--arch` (default `gfx1201`; `gfx1151` also supported), `--group-size`
 `M % tile_m == 0`, and `N % tile_n == 0`; `decode_gemv` only needs
 `K % tile_k == 0`.
 
-### 3. Deep-fused conv + maxpool (experimental)
-
-```bash
-PYTHONPATH=python python3 -m rocke.examples.gfx1201.deep_fused_conv_pool_verify \
-    --arch gfx1201 --verify --h 16 --w 16 --c 8 --k0 32 --k1 24
-```
-
-This emits the artifact and (with `--verify`) checks it against the gfx950
-harness's numpy reference. Add `--bench` to time it (`--warmup`/`--iters`,
-defaults 100/100). The conv is fixed `3×3` pad-1 stride-1 (conv0) + `1×1`
-(conv1); the pool is fixed `2×2` stride-2.
-
-Tunables (defaults shown): `--n 1`, `--h 16`, `--w 16`, `--c 8` (conv0 input
-N/H/W/C), `--k0 32` (conv0 output channels), `--k1 24` (conv1 output channels),
-`--tile-k 16`, `--conv1-tile-k 0` (0 reuses `--tile-k`), `--tile-n 32`,
-`--pool-tile-h 4`, `--pool-tile-w 4`, `--warp-m 2`, `--warp-n 1`,
-`--pipeline mem` (`mem`/`compv3`/`compv4`), `--unroll-k`, `--tol 1e-2`,
-`--seed 123`, `--output-dir` (default `output/deep_fused_conv_pool` next to this
-driver, i.e. `examples/gfx1201/output/deep_fused_conv_pool`). This path is
-**gfx1201-only** — the driver exits if `--arch` (or `--isa`) resolves to anything
-else.
-
 ## Results
 
 Not benchmarked in this directory. These are correctness/bring-up examples: the
 probe and the verify drivers report a `max_abs_diff` against a numpy reference
-and a PASS/FAIL versus `--tol` (default `1e-2`); `deep_fused_conv_pool_verify.py`
-adds an optional `--bench` for raw timing, but no published throughput numbers
-accompany this example. The verification tolerance is `1e-2` (not bit-exact)
-because WMMA accumulates in f32 in a different order than the numpy reference.
+and a PASS/FAIL versus `--tol` (default `1e-2`). The verification tolerance is
+`1e-2` (not bit-exact) because WMMA accumulates in f32 in a different order than
+the numpy reference.
 
 ## Arch notes
 
@@ -155,9 +129,6 @@ because WMMA accumulates in f32 in a different order than the numpy reference.
   the gfx1201 and gfx1151 builds differ only in the WMMA op_id tagged in the
   manifest (`wmma_gfx12_f32_16x16x16_f16` vs `wmma_f32_16x16x16_f16`). The
   `decode_gemv` family is scalar and arch-agnostic.
-- **The conv-pool driver reuses the gfx950 harness.** Its numpy reference and
-  verify/bench helpers are spec-generic, so the gfx1201 driver imports them
-  verbatim and only pins the WMMA geometry.
 
 ## Troubleshooting
 
@@ -169,8 +140,5 @@ because WMMA accumulates in f32 in a different order than the numpy reference.
   (`large_n`: `tile_m=64, tile_n=128`; `skinny_n`: `tile_m=64, tile_n=32`).
 - **`--opt is only supported for --family large_n`.** The combined-optimization
   body is `large_n`-only.
-- **`deep_fused_conv_pool WMMA path is gfx1201-only`.** This kernel only builds
-  for gfx1201; do not pass another `--arch`/`--isa`.
 - **No verify output / no device.** The `--verify` step needs a gfx1201 GPU. To
-  build and write the artifact on a host without one, use `--no-verify` (probe
-  and `matmul_nbits`) or drop `--verify`/`--bench` (conv-pool).
+  build and write the artifact on a host without one, use `--no-verify`.

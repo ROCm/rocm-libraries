@@ -12,44 +12,20 @@
  *   6  dgrad            7  dgrad 3-D
  *   8  direct fwd       9  direct dgrad
  *  10  fwd problem block          11  fwd problem block 3-D
- *  12  deep_fused_conv_pool signature (2-D)
- *  13  fwd two_stage (rejected)   14  direction "bwd" (rejected)
- *  15  direct wgrad                16  direct "bwd" (rejected)
+ *  12  fwd two_stage (rejected)   13  direction "bwd" (rejected)
+ *  14  direct wgrad                15  direct "bwd" (rejected)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "rocke/arena.h"
-#include "rocke/helper_rocke.instances.common.deep_fused_conv_pool.h"
 #include "rocke/instance_conv_abi.h"
 
 static void print_list(const rocke_conv_arg_list_t* l)
 {
     for(int i = 0; i < l->count; ++i)
         printf("%s %s\n", l->items[i].name, rocke_conv_arg_kind_str(l->items[i].kind));
-}
-
-static int print_deep_signature(void)
-{
-    rocke_arena_t arena;
-    rocke_deep_fused_conv_pool_spec_t spec;
-    const rocke_sig_entry_t* items = NULL;
-    size_t count = 0;
-    if(rocke_arena_init(&arena, 0) != 0)
-        return 1;
-    /* The signature depends only on whether conv0 is 3-D. */
-    memset(&spec, 0, sizeof(spec));
-    spec.problem.conv.is_3d = false;
-    if(rocke_deep_fused_conv_pool_signature(&arena, &spec, &items, &count) != ROCKE_OK)
-    {
-        rocke_arena_destroy(&arena);
-        return 1;
-    }
-    for(size_t i = 0; i < count; ++i)
-        printf("%s %s\n", items[i].name, items[i].type);
-    rocke_arena_destroy(&arena);
-    return 0;
 }
 
 int main(int argc, char** argv)
@@ -109,17 +85,15 @@ int main(int argc, char** argv)
         rocke_conv_fwd_problem_block(true, &list);
         break;
     case 12:
-        return print_deep_signature();
-    case 13:
         ok = rocke_conv_arg_names("fwd", false, true, &list);
         break;
-    case 14:
+    case 13:
         ok = rocke_conv_arg_names("bwd", false, false, &list);
         break;
-    case 15:
+    case 14:
         ok = rocke_conv_direct_arg_names("wgrad", &list);
         break;
-    case 16:
+    case 15:
         ok = rocke_conv_direct_arg_names("bwd", &list);
         break;
     default:
