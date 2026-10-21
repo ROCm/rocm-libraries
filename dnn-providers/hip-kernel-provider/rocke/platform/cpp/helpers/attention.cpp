@@ -20,6 +20,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_type_is */
 
 /* ----------------------------------------------------------------- helpers */
 
@@ -166,14 +167,25 @@ rocke_value_t* rocke_warp_xor_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v
 {
     /* cur = v
      * for k in range(stages):
-     *     remote = b.warp_shuffle_xor(cur, 1 << k)
+     *     mask = 1 << k
+     *     if mask in (1, 2) and cur.type in (f32, i32):  # intra-quad -> dpp
+     *         remote = b.warp_shuffle_xor_dpp(cur, mask)  # quad_perm on gfx9
+     *     else:
+     *         remote = b.warp_shuffle_xor(cur, mask)      # ds_swizzle
      *     cur = b.fadd(cur, remote)
-     * return cur */
+     * return cur
+     * Mirrors helpers/attention.py::warp_xor_reduce_sum (same f32/i32 guard). */
     rocke_value_t* cur = v;
     int k;
     for(k = 0; k < stages; ++k)
     {
-        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        int mask = 1 << k;
+        rocke_value_t* remote;
+        if((mask == 1 || mask == 2)
+           && (rocke_i_type_is(cur->type, "f32") || rocke_i_type_is(cur->type, "i32")))
+            remote = rocke_b_warp_shuffle_xor_dpp(b, cur, mask);
+        else
+            remote = rocke_b_warp_shuffle_xor(b, cur, mask);
         cur = rocke_b_fadd(b, cur, remote);
     }
     return cur;

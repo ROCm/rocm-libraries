@@ -202,7 +202,16 @@ static rocke_value_t* rocke_red_warp_xor_reduce(rocke_ir_builder_t* b,
     cur = val;
     for(k = 0; k < stages; ++k)
     {
-        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        /* Masks 1 and 2 stay inside the 4-lane quad -> warp_shuffle_xor_dpp
+         * (quad_perm on gfx9: VALU DPP, no LDS crossbar / no lgkmcnt(0) wait)
+         * for f32/i32; wider masks cross the quad and stay on ds_swizzle.
+         * Mirrors reduction.py::_warp_xor_reduce. */
+        int mask = 1 << k;
+        rocke_value_t* remote;
+        if((mask == 1 || mask == 2) && (rocke_red_is_f32(cur) || rocke_red_is_i32(cur)))
+            remote = rocke_b_warp_shuffle_xor_dpp(b, cur, mask);
+        else
+            remote = rocke_b_warp_shuffle_xor(b, cur, mask);
         cur = rocke_red_emit_combine(b, combine, cur, remote);
     }
     return cur;

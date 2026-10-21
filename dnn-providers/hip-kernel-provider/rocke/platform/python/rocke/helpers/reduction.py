@@ -231,9 +231,12 @@ def _warp_xor_reduce(
     """Wave-internal XOR butterfly reduce — no LDS round-trip.
 
     For ``wave_size = 2^n``, performs ``n`` cross-lane XOR-mask
-    shuffles (``ds_swizzle_xor`` for masks <32, ``ds_bpermute`` for
-    mask=32 on wave64). After the last stage every lane in the wave
-    holds the wave-local reduction.
+    shuffles. Masks 1 and 2 stay inside the four-lane quad and ride
+    ``warp_shuffle_xor_dpp`` (``quad_perm`` on gfx9 CDNA: VALU DPP, no
+    LDS crossbar / no ``lgkmcnt(0)`` wait) when the value is f32/i32;
+    wider masks cross the quad and use ``ds_swizzle_xor`` (masks <32)
+    or ``ds_bpermute`` (mask=32 on wave64). After the last stage every
+    lane in the wave holds the wave-local reduction.
 
     Promoted from the working prototype in ``instances/reduce.py::
     _warp_xor_reduce`` (P20).
@@ -243,7 +246,11 @@ def _warp_xor_reduce(
     stages = wave_size.bit_length() - 1
     cur = val
     for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
+        mask = 1 << k
+        if mask in (1, 2) and cur.type.name in ("f32", "i32"):
+            remote = b.warp_shuffle_xor_dpp(cur, mask)
+        else:
+            remote = b.warp_shuffle_xor(cur, mask)
         cur = _emit_combine(b, combine, cur, remote)
     return cur
 

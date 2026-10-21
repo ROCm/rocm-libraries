@@ -1800,11 +1800,11 @@ def build_unified_attention_2d_tiled(
         vals = p_regs_f32
         for bit in (0, 1):
             lane_bit = _bit2(lane_col_mod4, bit)
-            reg_bit = 1 << bit
+            reg_bit = 1 << bit  # 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle
             old = vals
             vals = []
             for reg in range(4):
-                partner = b.warp_shuffle_xor(old[reg ^ reg_bit], reg_bit)
+                partner = b.warp_shuffle_xor_dpp(old[reg ^ reg_bit], reg_bit)
                 same_bit = b.cmp_eq(lane_bit, b.const_i32((reg >> bit) & 1))
                 vals.append(b.select(same_bit, old[reg], partner))
 
