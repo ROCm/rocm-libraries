@@ -270,7 +270,7 @@ def fake_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _node(node_type: str = FAKE_TYPE, **fields) -> dict:

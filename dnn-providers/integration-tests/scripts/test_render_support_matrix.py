@@ -58,7 +58,7 @@ SUBPROCESS_TIMEOUT = 120
 
 def _write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _tensor(uid: int, dims: list[int], strides: list[int] | None = None) -> dict:
@@ -900,8 +900,10 @@ class TestCollection:
     def test_malformed_graph_is_an_error(self, bundle_root: Path) -> None:
         directory = bundle_root / "quick" / "Conv" / "Default"
         directory.mkdir(parents=True)
-        (directory / "ConvFwd.json").write_text("{not json")
-        (directory / "ConvFwd.support.json").write_text('{"version": 1, "claims": {}}')
+        (directory / "ConvFwd.json").write_text("{not json", encoding="utf-8")
+        (directory / "ConvFwd.support.json").write_text(
+            '{"version": 1, "claims": {}}', encoding="utf-8"
+        )
         errors: list[str] = []
         assert collect_units(bundle_root, errors) == []
         assert any("ConvFwd.json: invalid JSON" in e for e in errors)
@@ -920,7 +922,7 @@ class TestCollection:
     ) -> None:
         directory = bundle_root / "quick" / "Conv" / "Default"
         directory.mkdir(parents=True)
-        (directory / "ConvFwd.json").write_text(document)
+        (directory / "ConvFwd.json").write_text(document, encoding="utf-8")
         errors: list[str] = []
         assert collect_units(bundle_root, errors) == []
         assert errors == [f"{directory / 'ConvFwd.json'}: not a JSON object"]
@@ -932,7 +934,7 @@ class TestCollection:
         # A ``null`` template used to be dropped with no error at all: the
         # parse succeeded, and the non-object check only looked at non-None.
         sweep = _sweep_bundle(bundle_root, "quick/Conv/Sweep", cases=[{"id": "a"}])
-        (sweep / "graph.template.json").write_text(document)
+        (sweep / "graph.template.json").write_text(document, encoding="utf-8")
         errors: list[str] = []
         assert collect_units(bundle_root, errors) == []
         assert errors == [f"{sweep / 'graph.template.json'}: not a JSON object"]
@@ -943,7 +945,7 @@ class TestCollection:
     ) -> None:
         _single_bundle(bundle_root, "quick/Conv/Default", "ConvFwd")
         sidecar = bundle_root / "quick" / "Conv" / "Default" / "ConvFwd.support.json"
-        sidecar.write_text(document)
+        sidecar.write_text(document, encoding="utf-8")
         errors: list[str] = []
         (unit,) = collect_units(bundle_root, errors)
         assert unit.claims == {}
@@ -1059,17 +1061,17 @@ def _move_sweep_case(root: Path, source: str, target: str, case_id: str) -> None
     """What moving one case to another tier does: split it out of a sweep
     into the same path under another tier, claims and golden data with it."""
     src, dst = root / source, root / target
-    manifest = json.loads((src / "sweep.json").read_text())
+    manifest = json.loads((src / "sweep.json").read_text(encoding="utf-8"))
     moving = [c for c in manifest["cases"] if c["id"] == case_id]
     manifest["cases"] = [c for c in manifest["cases"] if c["id"] != case_id]
     _write_json(src / "sweep.json", manifest)
     _write_json(dst / "sweep.json", {"cases": moving})
     _write_json(
         dst / "graph.template.json",
-        json.loads((src / "graph.template.json").read_text()),
+        json.loads((src / "graph.template.json").read_text(encoding="utf-8")),
     )
 
-    sidecar = json.loads((src / "support.json").read_text())
+    sidecar = json.loads((src / "support.json").read_text(encoding="utf-8"))
     moved: dict = {}
     for engine, groups in sidecar["claims"].items():
         for group in groups:
@@ -1919,7 +1921,9 @@ def _recount_overview(root: Path) -> dict:
 
     for sweep_dir in sweeps:
         where = _below_tier(sweep_dir, root)
-        cases = json.loads((sweep_dir / "sweep.json").read_text()).get("cases", [])
+        cases = json.loads((sweep_dir / "sweep.json").read_text(encoding="utf-8")).get(
+            "cases", []
+        )
         ids = {c["id"] for c in cases if isinstance(c, dict) and "id" in c}
         for case_id in ids:
             ops[(where, case_id)] = where[0]
@@ -1928,7 +1932,7 @@ def _recount_overview(root: Path) -> dict:
         support = sweep_dir / "support.json"
         if not support.is_file():
             continue
-        claims = json.loads(support.read_text()).get("claims", {})
+        claims = json.loads(support.read_text(encoding="utf-8")).get("claims", {})
         for engine, groups in claims.items():
             for group in groups:
                 for case_id in group.get("cases", []):
@@ -1952,7 +1956,7 @@ def _recount_overview(root: Path) -> dict:
         support = graph.with_name(f"{graph.stem}.support.json")
         if not support.is_file():
             continue  # Counted in the denominator; contributes to no numerator.
-        claims = json.loads(support.read_text()).get("claims", {})
+        claims = json.loads(support.read_text(encoding="utf-8")).get("claims", {})
         for engine, arch_map in claims.items():
             for arch, platforms in arch_map.items():
                 for platform in platforms:

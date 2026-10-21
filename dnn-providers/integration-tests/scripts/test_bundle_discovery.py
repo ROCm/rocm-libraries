@@ -48,7 +48,7 @@ HEADER = (
 
 def _touch(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{}")
+    path.write_text("{}", encoding="utf-8")
     return path
 
 
@@ -264,13 +264,13 @@ class TestSingleGraphCompanionNames:
 class TestLoadJson:
     def test_parses_a_document(self, tmp_path: Path) -> None:
         path = tmp_path / "a.json"
-        path.write_text('{"cases": [1, 2]}')
+        path.write_text('{"cases": [1, 2]}', encoding="utf-8")
         assert load_json(path) == ({"cases": [1, 2]}, None)
 
     def test_null_document_is_not_an_error(self, tmp_path: Path) -> None:
         """Callers must be able to tell `null` from a file that failed."""
         path = tmp_path / "a.json"
-        path.write_text("null")
+        path.write_text("null", encoding="utf-8")
         assert load_json(path) == (None, None)
 
     @pytest.mark.parametrize(
@@ -302,7 +302,7 @@ class TestReadSweepCases:
 
     def _write(self, tmp_path: Path, manifest: object) -> Path:
         path = tmp_path / SWEEP_MANIFEST_NAME
-        path.write_text(json.dumps(manifest))
+        path.write_text(json.dumps(manifest), encoding="utf-8")
         return path
 
     def test_returns_the_cases(self, tmp_path: Path) -> None:
@@ -333,7 +333,7 @@ class TestReadSweepCases:
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / SWEEP_MANIFEST_NAME
-        path.write_text("{")
+        path.write_text("{", encoding="utf-8")
         cases, error = read_sweep_cases(path)
         assert cases is None
         assert "invalid JSON" in error

@@ -563,7 +563,9 @@ class TestMalformedFiles(unittest.TestCase):
     def test_deeply_nested_sidecar_reports_an_error(self) -> None:
         # json.loads raises RecursionError, which is not a ValueError.
         _write_json(self.bundle_root / "A" / "Small.json", {})
-        (self.bundle_root / "A" / "Small.support.json").write_text("[" * 100000)
+        (self.bundle_root / "A" / "Small.support.json").write_text(
+            "[" * 100000, encoding="utf-8"
+        )
         errors = verify_all(self.bundle_root)
         self.assertEqual(len(errors), 1)
         self.assertIn("nested too deeply", errors[0])
@@ -590,7 +592,7 @@ class TestMalformedFiles(unittest.TestCase):
 
     def test_unparseable_meta_json_fails(self) -> None:
         _write_json(self.bundle_root / "A" / "Small.json", {})
-        (self.bundle_root / "A" / "Small.meta.json").write_text("{")
+        (self.bundle_root / "A" / "Small.meta.json").write_text("{", encoding="utf-8")
         _write_json(self.bundle_root / "A" / "Small.support.json", _CLAIMED_SIDECAR)
         errors = verify_all(self.bundle_root)
         self.assertEqual(len(errors), 1)
