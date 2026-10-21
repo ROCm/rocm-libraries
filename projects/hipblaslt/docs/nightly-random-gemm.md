@@ -72,8 +72,8 @@ start empty, and every race report fails. Inputs and results are saved under the
 output directory. Use `--help` for all options.
 
 `--explicit-cases` loads a JSON list of required inputs in addition to the random
-samples. Each entry has a stable `id`, a description, a tracking link and a
-complete `problem`. Required cases never consume random draws. The summary
+samples. Each entry has a stable `id`, a description and a complete `problem`.
+Required cases never consume random draws. The summary
 reports `random` and `explicit` counts separately; `sampled` counts only random
 inputs, while `requested` includes both. Each run writes `cases.md` and
 `cases.json`, listing every input and observed result. Explicit tests retain the
