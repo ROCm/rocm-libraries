@@ -154,6 +154,15 @@ typedef struct rocke_dgrad_conv_spec
      * Appended last so existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */
     bool uniform_k_decode; /* default false */
+
+    /* patch: a patch embedding (stride >= filter, no padding or dilation,
+     * ungrouped) as ONE GEMM over the filter's (y, x, c): M = N*Ho*Wo,
+     * N = Y*X*C, K = K. The record is the pointwise problem's, so the K loop
+     * is unchanged; the dX store splits column n into (y, x*C + c) and lands
+     * y*Wi*C + x*C + c past the patch's first element. MFMA only; rejected
+     * with split_k > 1, wavelet and groups > 1. Mirrors DgradConvSpec.patch.
+     * Appended last; default false: every existing config is byte-identical. */
+    bool patch; /* default false */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
