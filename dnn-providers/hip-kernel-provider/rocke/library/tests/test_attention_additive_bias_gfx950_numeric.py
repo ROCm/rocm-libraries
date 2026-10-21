@@ -22,7 +22,10 @@ the GQA cases check that a per-query-head bias is not collapsed onto KV heads.
 
 The numeric tests are marked ``gpu`` and gated with a device skipif, so they
 are a graceful skip on a CPU CI box. The host-side argument-validation tests at
-the bottom need only torch (CPU tensors) and run everywhere. Run standalone:
+the bottom need torch for real CPU tensors (``_validate_additive_bias`` checks
+a torch-specific dtype string), so they are gated with ``requires_torch`` and
+skip, rather than erroring the whole module, on an image with no torch (e.g.
+TheRock's gfx94X CI). Run standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
 """
@@ -33,13 +36,20 @@ import pytest
 
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
+try:
+    import torch
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
+    _HAS_TORCH = True
+except ImportError:
+    torch = None
+    _HAS_TORCH = False
+
+requires_torch = pytest.mark.skipif(not _HAS_TORCH, reason="ROCm torch required")
 
 
 def _gpu_ready():
     """True only on a gfx950 box with ROCm torch (gate on ``gcnArchName``)."""
-    if not torch.cuda.is_available():
+    if not _HAS_TORCH or not torch.cuda.is_available():
         return False
     arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
     return "gfx950" in arch
@@ -412,7 +422,7 @@ def _launch_with_bias(problem, additive_bias, **kwargs):
     )
 
 
-_BIAS = dict(dtype=torch.float32)
+_BIAS = dict(dtype=torch.float32) if _HAS_TORCH else {}
 
 
 @pytest.mark.parametrize(
@@ -427,6 +437,7 @@ _BIAS = dict(dtype=torch.float32)
     ],
     ids=["missing", "flag_off", "fp16", "sk_strided", "no_sq_stride", "short_sq"],
 )
+@requires_torch
 def test_additive_bias_bad_args_rejected(use_bias, make_bias, sq_stride, match):
     with pytest.raises(ValueError, match=match):
         _launch_with_bias(
@@ -436,6 +447,7 @@ def test_additive_bias_bad_args_rejected(use_bias, make_bias, sq_stride, match):
         )
 
 
+@requires_torch
 @pytest.mark.parametrize("sq_stride", [0, 64, 71])
 def test_additive_bias_sq_stride_accepted(sq_stride):
     from kernels.common.attention_unified import _validate_additive_bias
@@ -453,6 +465,7 @@ def test_additive_bias_off_needs_no_sq_stride():
     assert _validate_additive_bias(_bias_problem(False), None, 0, 0, None, None) == 0
 
 
+@requires_torch
 def test_additive_bias_device_mismatch_rejected():
     from kernels.common.attention_unified import _validate_additive_bias
 
@@ -497,6 +510,7 @@ def _validate_long(num_seqs, batch_stride, numel=1):
     )
 
 
+@requires_torch
 def test_additive_bias_i32_index_overflow_rejected():
     with pytest.raises(NotImplementedError, match="i32 bias addressing"):
         _validate_long(3, _LONG_BATCH)
@@ -507,10 +521,12 @@ def test_additive_bias_i32_index_overflow_rejected():
     [(2, _LONG_BATCH, 2 * _LONG_BATCH), (3, 0, _LONG_BATCH)],
     ids=["max_index_fits", "batch_broadcast"],
 )
+@requires_torch
 def test_additive_bias_i32_index_limit_accepted(num_seqs, batch_stride, numel):
     assert _validate_long(num_seqs, batch_stride, numel) == _LONG
 
 
+@requires_torch
 @pytest.mark.parametrize("batch_stride", [-1, 2**31], ids=["negative", "over_i32"])
 def test_additive_bias_stride_range_rejected(batch_stride):
     from kernels.common.attention_unified import _validate_additive_bias
@@ -532,6 +548,7 @@ def test_additive_bias_stride_range_rejected(batch_stride):
     ],
     ids=["exact", "short", "offset_exact", "offset_short"],
 )
+@requires_torch
 def test_additive_bias_storage_bounds(make_bias, ok):
     from kernels.common.attention_unified import _validate_additive_bias
 

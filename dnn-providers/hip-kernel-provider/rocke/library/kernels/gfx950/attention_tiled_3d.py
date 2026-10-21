@@ -1244,7 +1244,7 @@ def build_unified_attention_3d_tiled(
                         s_scaled,
                         additive_bias,
                         seq_idx=seq_idx,
-                        q_head=hoist_qh_r[reg],
+                        q_head=qh_r,
                         q_row=qp_r,
                         col=col_abs,
                         mask=m_ok,
