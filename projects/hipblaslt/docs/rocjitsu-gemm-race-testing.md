@@ -1,13 +1,10 @@
 # Random matrix multiplication tests with rocJITsu
 
-hipBLASLt is a library for matrix multiplication on AMD GPUs. It can scale the
-product, add another matrix or a bias, and apply a function to the result.
-The matrix multiplication is commonly called a GEMM. Different sizes and number formats
-can use different GPU functions, so checking a range of inputs exercises more
-of the library.
+This test samples hipBLASLt GEMMs and runs them through rocJITsu, which executes
+GPU instructions on CPUs. It varies sizes, number formats and operation options
+to exercise different GPU functions.
 
-This test samples GEMMs and runs them through rocJITsu, which executes GPU
-instructions on CPUs. Its race detector looks for GPU instructions that read or
+The race detector looks for GPU instructions that read or
 overwrite memory or registers too early. This can happen when a required wait or
 coordination between threads is missing. The benchmark also compares the computed
 output with a separate CPU calculation. No physical GPU is required.
