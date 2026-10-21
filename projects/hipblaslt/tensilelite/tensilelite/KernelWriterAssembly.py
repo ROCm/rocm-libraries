@@ -84,7 +84,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
-                                tdmMemberIsLive
+                                tdmMemberIsLive, tdmHintDeciders
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
@@ -495,7 +495,11 @@ class KernelWriterAssembly(KernelWriter):
     """TENSORModifiers for the tensor_load_to_lds that issues `tc`'s descriptor set, or None.
 
     A wave-separated set is moved by one instruction for all of its live members,
-    so their cache hints are merged (see tdmCacheModifiers).
+    so one set of th/scope/nv bits serves them all. When the set holds a data
+    tensor (A or B), the data tensors decide and the hints of the scale tensors
+    riding along are ignored (see tdmHintDeciders); a set without a data tensor
+    lets every member decide. Among the deciders a field is emitted only when they
+    agree (see tdmCacheModifiers).
     """
     members = (tc,)
     if self.isTdmWaveSeparated(kernel) and not kernel.get("UseSubtileImpl"):
@@ -506,7 +510,7 @@ class KernelWriterAssembly(KernelWriter):
     for m in members:
       tP = self._tdmTensorParameters(m)
       hints.append((tP["NonTemporal"], TemporalHint(tP["TemporalHint"]), _nonVolatile(kernel, m)))
-    return tdmCacheModifiers(self.states.asmCaps, hints)
+    return tdmCacheModifiers(self.states.asmCaps, hints, tdmHintDeciders(members))
 
   def _tdmTensorParameters(self, tc: str):
     """Tensor parameters of TDM member `tc` (A, B, MXSA, MXSB or Metadata)."""
