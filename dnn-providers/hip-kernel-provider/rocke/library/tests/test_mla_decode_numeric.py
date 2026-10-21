@@ -27,7 +27,8 @@ _ARCHES = ("gfx942", "gfx950")
 
 def _device_arch() -> str | None:
     """The device's gfx target (``gcnArchName``, not the product name)."""
-    if not torch.cuda.is_available():
+    # gcnArchName is a ROCm property: CUDA torch has a device but not it.
+    if torch.version.hip is None or not torch.cuda.is_available():
         return None
     arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0].lower()
     return arch if arch in _ARCHES else None
