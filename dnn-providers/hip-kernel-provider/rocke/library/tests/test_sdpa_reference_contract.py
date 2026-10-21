@@ -138,6 +138,24 @@ def test_gfx942_source_adapter_supports_published_dispatch_api(monkeypatch):
         assert spec.causal is case.causal
 
 
+def test_gfx942_source_adapter_reports_a_renamed_current_api(monkeypatch):
+    """A renamed current API fails on its own name, not in the published path."""
+    import kernels
+    from dispatch import attention
+
+    # A symbol rename moves the function but leaves this adapter's call behind.
+    monkeypatch.setattr(
+        attention,
+        "attention_spec_with_knobs",
+        attention.tuning_spec_with_knobs,
+        raising=False,
+    )
+    monkeypatch.delattr(attention, "tuning_spec_with_knobs")
+    root = str(Path(kernels.__file__).resolve().parent.parent)
+    with pytest.raises(AttributeError, match="no attribute 'tuning_spec_with_knobs'"):
+        get_architecture("gfx942").prepare(CASES[0], root)
+
+
 @pytest.mark.parametrize("case", get_architecture("gfx950").CASES, ids=lambda c: c.id)
 @pytest.mark.parametrize("causal", [False, True], ids=["full", "causal"])
 def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):

@@ -89,13 +89,17 @@ class ErrorBudget:
         # Round strictly below the exact remainder: B + D < T even with no reserve.
         return math.nextafter(float(self.remaining), -math.inf)
 
-    def check(self, distance: float) -> None:
-        """Reject a comparison that does not certify the original tolerance."""
+    def check(self, distance: float, metric: str = "max_abs") -> None:
+        """Reject a comparison that does not certify the original tolerance.
+
+        ``metric`` names the distance in the failure, such as an operation's
+        normalized error, so the reported value is not mistaken for another.
+        """
         if not math.isfinite(distance) or distance < 0:
             raise ValueError("invalid GPU reference comparison distance")
         if distance > self.comparison_limit:
             raise AssertionError(
-                f"GPU reference max_abs={distance:.9g} exceeds remaining limit "
+                f"GPU reference {metric}={distance:.9g} exceeds remaining limit "
                 f"{self.comparison_limit:.9g}; baseline_bound="
                 f"{self.baseline_error_bound:.9g}, margin={self.margin:.9g}, "
                 f"original_tolerance={self.tolerance:.9g}"

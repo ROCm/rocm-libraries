@@ -489,6 +489,7 @@ def test_reference_session_uses_hardware_target_identity(
         with pytest.raises(pytest.exit.Exception, match="different GPU lane") as error:
             start_reference_session(config)
         assert error.value.returncode == 77
+        assert f"AMDGPU_TARGETS={targets!r}" in str(error.value)
     elif outcome == "error":
         with pytest.raises(pytest.UsageError, match=f"required {architecture} GPU"):
             start_reference_session(config)
@@ -628,8 +629,34 @@ def test_reference_fixture_skips_supported_gpu_without_cohort(
     fixture = gpu_tests.reference_bundle.__wrapped__(
         SimpleNamespace(getoption=lambda option: None)
     )
-    with pytest.raises(pytest.skip.Exception, match="no .* reference cohort"):
+    enrolled = ", ".join(
+        import_module(f"{operation}_reference.architectures").ARCHITECTURES
+    )
+    with pytest.raises(pytest.skip.Exception, match="no .* reference cohort") as skip:
         next(fixture)
+    assert f"enrolled for {architecture}; run on an enrolled" in str(skip.value)
+    assert f"({enrolled})" in str(skip.value)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_reference_fixture_skip_says_no_gpu_was_detected(operation, monkeypatch):
+    """Without a GPU, the skip must not read as an enrollment problem."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    registry = import_module(f"{operation}_reference.architectures")
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: None)
+    fixture = gpu_tests.reference_bundle.__wrapped__(
+        SimpleNamespace(getoption=lambda option: None)
+    )
+    with pytest.raises(pytest.skip.Exception, match="no GPU detected") as skip:
+        next(fixture)
+    reason = str(skip.value)
+    assert f"({', '.join(registry.ARCHITECTURES)})" in reason
+    assert "None" not in reason and "cohort" not in reason
 
 
 @pytest.mark.parametrize(
@@ -742,8 +769,58 @@ def test_reference_missing_bundle_fails_only_when_selected(
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
         with pytest.raises(
             pytest.fail.Exception if selected else pytest.skip.Exception
-        ):
+        ) as outcome:
             next(fixture)
+    message = str(outcome.value)
+    name = operation.upper()
+    assert (
+        f"required {architecture} {name} reference bundle is missing"
+        if selected
+        else f"no extracted {architecture} {name} reference bundle at"
+    ) in message
+    # A source checkout tracks each published archive beside the default bundle.
+    pointer = Path(__file__).parent / (
+        f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
+    )
+    if pointer.is_file():
+        assert "fetch and extract it with dvc pull and artifact.py unpack" in message
+        assert f"reference_bundles/{operation}/{architecture}.tar.gz.dvc" in message
+        assert f"artifact.py unpack --operation {operation} " in message
+    else:
+        assert f"no published {architecture} {name} archive is tracked" in message
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
+    operation, tmp_path, monkeypatch
+):
+    from contextlib import closing
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    registry = import_module(f"{operation}_reference.architectures")
+    architecture = registry.ARCHITECTURES[0]
+    archive = tmp_path / f"{architecture}.tar.gz"
+    archive.write_bytes(b"archive fixture")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+    options = {
+        "--rocke-reference-operation": operation,
+        "--rocke-reference-bundle": str(archive),
+    }
+    fixture = gpu_tests.reference_bundle.__wrapped__(
+        SimpleNamespace(getoption=options.get)
+    )
+    with closing(fixture), pytest.raises(pytest.fail.Exception) as failure:
+        next(fixture)
+    message = str(failure.value)
+    assert "--rocke-reference-bundle needs an extracted bundle directory" in message
+    assert f"artifact.py unpack --operation {operation} " in message
+    assert f"then pass --rocke-reference-bundle {tmp_path / architecture}" in message
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -964,8 +1041,16 @@ def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
     session = WorkerSession(
         module="fixture_reference.worker", timeout=0.5 if behavior == "timeout" else 10
     )
+    # Each failure names the worker's role and keeps its log, which has the cause.
+    expected = {
+        "raise": "(?s)replay worker failed with exit code 1:.*deliberate worker failure",
+        "exit": "replay worker failed with exit code 17",
+        "timeout": "replay worker exceeded its 0.5 s request timeout",
+    }[behavior]
     try:
-        with pytest.raises(TimeoutError if behavior == "timeout" else RuntimeError):
+        with pytest.raises(
+            TimeoutError if behavior == "timeout" else RuntimeError, match=expected
+        ):
             session.execute(
                 "replay", request, dict(os.environ, PYTHONPATH=str(tmp_path))
             )
@@ -1408,3 +1493,295 @@ def test_every_reference_command_and_option_has_help(operation):
         assert summaries[name] and command.description, name
         for action in command._actions:
             assert action.help, f"{name} {action.option_strings} has no help"
+
+
+_WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
+
+
+def _verifiable_case(monkeypatch, operation):
+    """An operation's first case enrolled alone, with a synthetic qualified entry."""
+    from dataclasses import asdict
+    from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    architecture = spec.architectures.ARCHITECTURES[0]
+    target = spec.architectures.get_architecture(architecture)
+    case = target.CASES[0]
+    monkeypatch.setattr(target, "CASES", (case,))
+    inputs = spec.contract.make_inputs(case)
+    output = encode(np.ones(case.output_shape), case.dtype)
+    budget = ErrorBudget(case.tolerance, 0.001)
+    entry = {
+        "case": asdict(case),
+        "input_digests": {name: array_digest(a) for name, a in inputs.items()},
+        "output_digest": array_digest(output),
+        "device_target": f"{architecture}:sramecc+:xnack-",
+        "budget": asdict(budget),
+        "comparison_limit": budget.comparison_limit,
+        "kernel": {},
+        **spec.metric.parameters(np.ones(1)),
+    }
+    return spec, architecture, case, {"cases": {case.id: entry}}, output
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(
+    "failure", ["baseline-output", "current-output", "qualified-target", "features"]
+)
+def test_verification_failures_name_side_values_cause_and_next_step(
+    tmp_path, monkeypatch, operation, failure
+):
+    from reference_common import cli as common_cli
+
+    spec, architecture, case, manifest, output = _verifiable_case(
+        monkeypatch, operation
+    )
+    entry = manifest["cases"][case.id]
+    changed = decode(output, case.dtype).copy()
+    changed.flat[0] += 100
+    changed = encode(changed, case.dtype)
+    other_target = f"{architecture}:sramecc+:xnack+"
+    modes = []
+
+    def worker(request, **kwargs):
+        mode = request["mode"]
+        modes.append(mode)
+        outputs = [output, output]
+        if (failure, mode) in (
+            ("baseline-output", "replay"),
+            ("current-output", "source"),
+        ):
+            outputs = [output, changed]
+        device = entry["device_target"]
+        if (failure, mode) in (("qualified-target", "replay"), ("features", "source")):
+            device = other_target
+        return outputs, {
+            "device_target": device,
+            "launches": 2,
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    with pytest.raises(AssertionError if "output" in failure else ValueError) as error:
+        spec.verify_case(
+            case,
+            bundle=tmp_path,
+            manifest=manifest,
+            current_root=tmp_path,
+            architecture=architecture,
+        )
+    message = str(error.value)
+    subject = f"{spec.label} {architecture} case {case.id}"
+    assert subject in message
+    assert "\n  likely cause: " in message and "\n  next step: " in message
+    assert message.endswith(_WORKFLOW_DOC)
+    if failure == "baseline-output":
+        # The environment, not the current kernel, changed the frozen output.
+        assert f"reference qualification failure for {subject}" in message
+        assert "frozen baseline (replay) output of repetition 2 of 2" in message
+        assert f"has digest {array_digest(changed)[:12]}" in message
+        assert f"qualification recorded {entry['output_digest'][:12]}" in message
+        assert "the current kernel did not run" in message
+        assert modes == ["replay"]
+    elif failure == "current-output":
+        budget = ErrorBudget(**entry["budget"])
+        assert "current kernel (source) output of repetition 2 of 2" in message
+        assert f"GPU reference {spec.metric.name}=" in message
+        assert f"exceeds remaining limit {budget.comparison_limit:.9g}" in message
+        assert f"baseline_bound={budget.baseline_error_bound:.9g}" in message
+        assert f"original_tolerance={case.tolerance:.9g}" in message
+        assert "frozen baseline reproduced its qualified output" in message
+        assert (
+            f"run_{operation}_reference.py verify --arch {architecture} --bundle "
+            f"{tmp_path} --current-root {tmp_path} --case {case.id}`"
+        ) in message
+    elif failure == "qualified-target":
+        assert (
+            f"frozen baseline (replay) ran on device target {other_target}, but the "
+            f"bundle was qualified on {entry['device_target']}"
+        ) in message
+        assert "differs from the qualified target" in message
+    else:
+        assert (
+            f"current kernel (source) ran on device target {other_target}, but the "
+            f"frozen baseline (replay) ran on {entry['device_target']}"
+        ) in message
+        assert "different target features" in message
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("mode", ["replay", "source"])
+@pytest.mark.parametrize("kind", [RuntimeError, TimeoutError])
+def test_worker_failures_say_which_side_failed_and_keep_the_log(
+    tmp_path, monkeypatch, operation, mode, kind
+):
+    from reference_common import cli as common_cli
+
+    spec, architecture, case, manifest, output = _verifiable_case(
+        monkeypatch, operation
+    )
+    entry = manifest["cases"][case.id]
+    log = "Traceback (most recent call last):\nAttributeError: renamed_dispatch_api"
+
+    def worker(request, **kwargs):
+        if request["mode"] == mode:
+            raise kind(f"GPU reference {mode} worker failed with exit code 1:\n{log}")
+        return [output, output], {
+            "device_target": entry["device_target"],
+            "launches": 2,
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    with pytest.raises(kind) as error:
+        spec.verify_case(
+            case,
+            bundle=tmp_path,
+            manifest=manifest,
+            current_root=tmp_path,
+            architecture=architecture,
+        )
+    message = str(error.value)
+    side = "frozen baseline (replay)" if mode == "replay" else "current kernel (source)"
+    assert message.startswith(
+        f"{spec.label} {architecture} case {case.id}: the {side} worker failed\n"
+    )
+    assert f"\n  see {_WORKFLOW_DOC}\n" in message
+    assert message.endswith(log)
+    # Only the current side points at the adapter that calls production APIs.
+    adapter = f"library/tests/{operation}_reference/architectures/{architecture}/"
+    assert (adapter in message) == (mode == "source")
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+def test_reference_workers_report_missing_launches(tmp_path, persistent):
+    from contextlib import nullcontext
+
+    from reference_common.runner import run_worker
+    from reference_common.session import reuse_workers
+
+    (tmp_path / "silent_worker.py").write_text(
+        """
+import json
+import sys
+from pathlib import Path
+import numpy as np
+
+def run(request, work):
+    np.savez(work / "outputs.npz", out_0=np.zeros(1))
+    (work / "report.json").write_text(json.dumps({"launches": 0}))
+
+if __name__ == "__main__":
+    run(json.loads(Path(sys.argv[1]).read_text()), Path(sys.argv[2]))
+"""
+    )
+    context = reuse_workers("silent_worker") if persistent else nullcontext()
+    expected = "source worker reported 0 launches for 1 repetitions"
+    with context, pytest.raises(RuntimeError, match=expected):
+        run_worker(
+            {"mode": "source", "repetitions": 1},
+            runner=tmp_path,
+            platform=tmp_path,
+            library=None,
+            work=tmp_path / "work",
+            module="silent_worker",
+        )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(
+    "problem", ["stale", "no-manifest", "modified", "archive", "candidate"]
+)
+def test_rejected_bundles_say_how_to_replace_them(
+    tmp_path, monkeypatch, operation, problem
+):
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    if problem != "candidate":
+        # The committed lock authenticates the published bundle.
+        monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    if problem in ("stale", "candidate"):
+        # The lock now pins a newer manifest than the one extracted earlier.
+        extracted = (bundle / "manifest.json").read_bytes()
+        manifest = json.loads(extracted)
+        manifest["baseline_revision"] = "b" * 40
+        _relock(bundle, manifest, lock)
+        (bundle / "manifest.json").write_bytes(extracted)
+        expected = (
+            "manifest does not match the pinned lock: "
+            f"{bundle.resolve() / 'manifest.json'} has sha256 "
+            f"{hashlib.sha256(extracted).hexdigest()[:12]}, but {lock.resolve()} pins "
+            f"{json.loads(lock.read_text())['manifest_sha256'][:12]}"
+        )
+    elif problem == "no-manifest":
+        (bundle / "manifest.json").unlink()
+        expected = f"bundle {bundle.resolve()} has no manifest.json"
+    elif problem == "modified":
+        (bundle / "payload/kernel.hsaco").write_bytes(b"modified")
+        expected = "payload has missing, modified, or extra files: 1 differ, "
+        expected += "including kernel.hsaco"
+    else:
+        archive = tmp_path / f"{architecture}.tar.gz"
+        pack(bundle, archive, lock, operation=operation)
+        bundle = archive
+        expected = "is a file, but --bundle needs an extracted bundle directory"
+    with pytest.raises(ValueError) as error:
+        spec.load_bundle(
+            bundle, lock if problem == "candidate" else None, architecture=architecture
+        )
+    message = str(error.value)
+    assert expected in message
+    if problem == "candidate":
+        assert "qualification-lock.json that qualification wrote" in message
+        assert "dvc pull" not in message
+    elif problem == "archive":
+        assert f"artifact.py unpack --operation {operation} " in message
+    else:
+        # Unpack does not replace a directory, so the stale one goes first.
+        assert "stale (left from an earlier archive)" in message
+        assert (
+            f"delete {bundle.resolve()}, then re-run dvc pull and artifact.py unpack:"
+        ) in message
+        assert f"reference_bundles/{operation}/{architecture}.tar.gz.dvc" in message
+        assert f"artifact.py unpack --operation {operation} --archive " in message
+        assert f"--bundle {bundle.resolve()} --lock {lock.resolve()}" in message
+        assert message.endswith(_WORKFLOW_DOC)
+
+
+def test_unpack_explains_a_stale_archive_or_extracted_bundle(tmp_path, operation):
+    import shutil
+
+    bundle, lock = _fixture(tmp_path, operation)
+    archive = tmp_path / "earlier.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    output = tmp_path / "extracted"
+    unpack(archive, output, lock, operation=operation)
+    # A pulled lock pins a newer manifest; the archive and extraction are stale.
+    old_digest = hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest()
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["baseline_revision"] = "b" * 40
+    encoded = json.dumps(manifest).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    newer = tmp_path / "newer-lock.json"
+    new_digest = hashlib.sha256(encoded).hexdigest()
+    newer.write_text(
+        json.dumps(
+            {"schema": 2, "baseline_revision": "b" * 40, "manifest_sha256": new_digest}
+        )
+    )
+    with pytest.raises(ValueError, match="does not match the pinned lock") as error:
+        unpack(archive, output, newer, operation=operation)
+    message = str(error.value)
+    assert (
+        f"sha256 {old_digest[:12]}, newer-lock.json pins {new_digest[:12]}" in message
+    )
+    assert f"fetch that archive with: dvc pull {archive}.dvc" in message
+    current = tmp_path / "current.tar.gz"
+    pack(bundle, current, newer, operation=operation)
+    with pytest.raises(ValueError, match="does not match the pinned lock") as error:
+        unpack(current, output, newer, operation=operation)
+    assert (
+        f"{output} is a stale or modified extracted bundle; delete it and re-run"
+    ) in str(error.value)
+    shutil.rmtree(output)
+    unpack(current, output, newer, operation=operation)
+    validate_bundle(output, newer, operation=operation)

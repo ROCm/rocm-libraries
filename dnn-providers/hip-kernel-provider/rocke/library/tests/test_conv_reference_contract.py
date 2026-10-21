@@ -522,13 +522,8 @@ def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(
     json.dumps(metadata, allow_nan=False)
 
 
-@pytest.mark.parametrize("with_torch", [False, True])
-def test_qualification_freezes_self_contained_replay_support(
-    tmp_path, monkeypatch, with_torch
-):
-    """Exercise qualification plumbing with a synthetic GPU-worker result."""
-    import subprocess
-    import sys
+def _baseline_snapshot(tmp_path):
+    """A committed-snapshot layout whose runtime qualification can copy."""
     from reference_common.numeric import payload_digests
 
     baseline = tmp_path / "baseline"
@@ -539,6 +534,18 @@ def test_qualification_freezes_self_contained_replay_support(
         baseline / "snapshot.json",
         {"revision": "a" * 40, "files": payload_digests(baseline / "source")},
     )
+    return baseline
+
+
+@pytest.mark.parametrize("with_torch", [False, True])
+def test_qualification_freezes_self_contained_replay_support(
+    tmp_path, monkeypatch, with_torch
+):
+    """Exercise qualification plumbing with a synthetic GPU-worker result."""
+    import subprocess
+    import sys
+
+    baseline = _baseline_snapshot(tmp_path)
     target = get_architecture("gfx942")
     case = Case("tiny", "fp16", Hi=1, Wi=1, C=1, K=1, Y=1, X=1, pH=0, pW=0)
     monkeypatch.setattr(target, "CASES", (case,))
@@ -600,6 +607,37 @@ assert 'torch' not in sys.modules
         cwd=tmp_path,
         check=True,
     )
+
+
+@pytest.mark.parametrize("failure", ["nondeterministic", "worker"])
+def test_qualification_failures_name_the_snapshot_case_and_cause(
+    tmp_path, monkeypatch, failure
+):
+    baseline = _baseline_snapshot(tmp_path)
+    target = get_architecture("gfx942")
+    case = Case("tiny", "fp16", Hi=1, Wi=1, C=1, K=1, Y=1, X=1, pH=0, pW=0)
+    monkeypatch.setattr(target, "CASES", (case,))
+
+    def worker(request, **kwargs):
+        if failure == "worker":
+            raise RuntimeError(
+                "GPU reference source worker failed with exit code 1:\nworker log"
+            )
+        values = (np.ones(case.output_shape), np.zeros(case.output_shape))
+        return [encode(value, case.dtype) for value in values], {}
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    with pytest.raises(RuntimeError if failure == "worker" else ValueError) as error:
+        cli.qualify(baseline, tmp_path / "bundle", repetitions=2)
+    message = str(error.value)
+    assert f"convolution gfx942 case {case.id}: the baseline snapshot " in message
+    assert "likely cause: " in message and "next step: " in message
+    if failure == "worker":
+        assert "(qualification) worker failed" in message
+        assert "conv_reference/architectures/gfx942/__init__.py" in message
+        assert message.endswith("worker log")
+    else:
+        assert "produced 2 different outputs in 2 executions" in message
 
 
 @pytest.mark.parametrize("package", ["kernels", "dispatch"])

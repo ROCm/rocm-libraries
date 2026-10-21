@@ -37,33 +37,52 @@ def select_bundle(
     """Yield the GPU's adapter, bundle, and authenticated manifest, or skip.
 
     An explicitly selected operation or bundle is required: a missing enrolled
-    GPU or bundle fails instead of skipping. Workers are reused for the module.
-    The test module passes its own bundle lookup helpers so host tests can
-    replace them there.
+    GPU or bundle fails instead of skipping. Each skip says which of these it
+    was, or that options selected another operation, and how to run the tests.
+    Workers are reused for the module. The test module passes its own bundle
+    lookup helpers so host tests can replace them there.
     """
     selected = config.getoption("--rocke-reference-operation")
     name = operation.name.upper()
     if selected and selected != operation.name:
-        pytest.skip("reference options select another operation")
+        pytest.skip(
+            f"not selected: --rocke-reference-operation {selected} selects another "
+            "operation"
+        )
     configured = config.getoption("--rocke-reference-bundle")
     arch = get_device_processor()
+    enrolled = ", ".join(operation.architectures.ARCHITECTURES)
     if arch not in operation.architectures.ARCHITECTURES:
         required = selected or configured
         if not arch and required:
-            pytest.fail(f"the required enrolled {name} GPU is not available")
-        pytest.skip(f"no {name} reference cohort is enrolled for {arch}")
+            pytest.fail(
+                f"the required enrolled {name} GPU is not available: HIP reports no "
+                f"GPU; run on an enrolled processor ({enrolled})"
+            )
+        reason = (
+            f"no {name} reference cohort is enrolled for {arch}"
+            if arch
+            else "no GPU detected: HIP reports no device"
+        )
+        pytest.skip(f"{reason}; run on an enrolled {name} processor ({enrolled})")
     target = operation.architectures.get_architecture(arch)
     bundle = (
         Path(configured).resolve()
         if configured
         else default_bundle_path(_TESTS, arch, operation=operation.name)
     )
-    if not bundle.is_dir():
-        if selected or configured:
-            pytest.fail(f"required {arch} {name} reference bundle is missing: {bundle}")
-        pytest.skip(f"qualified {name} bundle not installed; see TESTING.md")
     lock = config.getoption("--rocke-reference-lock")
-    manifest = load_bundle(bundle, Path(lock) if lock else None, architecture=arch)
+    lock = Path(lock) if lock else None
+    if not bundle.is_dir():
+        hint = operation.bundle_hint(
+            arch, bundle, lock, option="--rocke-reference-bundle"
+        )
+        if selected or configured:
+            pytest.fail(
+                f"required {arch} {name} reference bundle is missing: {bundle}\n{hint}"
+            )
+        pytest.skip(f"no extracted {arch} {name} reference bundle at {bundle}; {hint}")
+    manifest = load_bundle(bundle, lock, architecture=arch)
     with reuse_workers(operation.worker_module):
         yield target, bundle, manifest
 
@@ -93,7 +112,10 @@ def pinned_reference_tests(
     def test_correctness_against_qualified_rocke(architecture, case, reference_bundle):
         target, bundle, manifest = reference_bundle
         if architecture != target.NAME:
-            pytest.skip(f"case requires {architecture}, found {target.NAME}")
+            pytest.skip(
+                f"not selected: this {architecture} case runs only on a "
+                f"{architecture} GPU, and this GPU is {target.NAME}"
+            )
         report = operation.verify_case(
             case, bundle=bundle, manifest=manifest, architecture=architecture
         )

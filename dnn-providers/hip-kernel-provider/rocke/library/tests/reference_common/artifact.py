@@ -56,8 +56,16 @@ def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
     """Authenticate the manifest and every payload file before installation."""
     _check_operation(operation)
     expected = json.loads(lock.read_text())
-    if _digest(bundle / "manifest.json") != expected["manifest_sha256"]:
-        raise ValueError("GPU reference manifest does not match the pinned lock")
+    if not (bundle / "manifest.json").is_file():
+        raise ValueError(f"GPU reference bundle has no manifest.json: {bundle}")
+    digest = _digest(bundle / "manifest.json")
+    if digest != expected["manifest_sha256"]:
+        # Indented detail lines stay intact when CMake formats the message.
+        raise ValueError(
+            "GPU reference manifest does not match the pinned lock\n"
+            f"  manifest.json sha256 {digest[:12]}, {lock.name} pins "
+            f"{expected['manifest_sha256'][:12]}"
+        )
     manifest = json.loads((bundle / "manifest.json").read_text())
     if (
         manifest["schema"] != expected["schema"]
@@ -143,9 +151,22 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
                 with tar.extractfile(member) as source, target.open("wb") as dest:
                     shutil.copyfileobj(source, dest)
         bundle = staged / f"{operation}_reference_bundle"
-        validate_bundle(bundle, lock, operation=operation)
+        try:
+            validate_bundle(bundle, lock, operation=operation)
+        except ValueError as error:
+            raise ValueError(
+                f"{error}\n  {archive} is not the archive that {lock} pins; fetch "
+                f"that archive with: dvc pull {archive}.dvc"
+            ) from None
         if output.exists():
-            validate_bundle(output, lock, operation=operation)
+            # Unpack never replaces an existing bundle; it must already match.
+            try:
+                validate_bundle(output, lock, operation=operation)
+            except (OSError, ValueError) as error:
+                raise ValueError(
+                    f"{error}\n  {output} is a stale or modified extracted bundle; "
+                    "delete it and re-run this unpack command"
+                ) from None
         else:
             bundle.rename(output)
 

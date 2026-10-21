@@ -49,6 +49,16 @@ from .source import snapshot
 from .targets import processor_from_target_id
 
 _WORKFLOW = "library/tests/reference_common/docs/gpu-reference-workflow.md"
+# Failures name the side that failed: verification replays the frozen baseline
+# and runs the current kernel; qualification runs a baseline source snapshot.
+_BASELINE = "frozen baseline (replay)"
+_CURRENT = "current kernel (source)"
+_SNAPSHOT = "baseline snapshot (qualification)"
+
+
+def _triage(problem: str, cause: str, step: str) -> str:
+    """Follow a failure with its likely cause and the next step to take."""
+    return f"{problem}\n  likely cause: {cause}\n  next step: {step}\n  see {_WORKFLOW}"
 
 
 def _no_parameters(reference: np.ndarray) -> dict[str, Any]:
@@ -139,19 +149,70 @@ class ReferenceOperation:
         self,
         request: dict,
         *,
+        side: str,
+        case: Any,
         runner: Path,
         platform: Path,
         library: Path | None,
         work: Path,
     ) -> tuple[list[np.ndarray], dict]:
-        return run_worker(
-            request,
-            runner=runner,
-            platform=platform,
-            library=library,
-            work=work,
-            module=self.worker_module,
+        try:
+            return run_worker(
+                request,
+                runner=runner,
+                platform=platform,
+                library=library,
+                work=work,
+                module=self.worker_module,
+            )
+        except (RuntimeError, TimeoutError) as error:
+            # The message keeps the worker's log tail, which holds the cause; the
+            # parent's own traceback would only repeat it.
+            kind = TimeoutError if isinstance(error, TimeoutError) else RuntimeError
+            raise kind(
+                self._worker_failure(case, request["architecture"], side, error)
+            ) from None
+
+    def _worker_failure(
+        self, case: Any, architecture: str, side: str, error: Exception
+    ) -> str:
+        adapter = (
+            f"library/tests/{self.name}_reference/architectures/{architecture}/"
+            "__init__.py"
         )
+        if side == _BASELINE:
+            cause = (
+                "this environment cannot run the frozen runtime and code object "
+                "(GPU driver, ROCm runtime, or device visibility); the current "
+                "kernel did not run"
+            )
+            step = (
+                "read the worker log below and compare this environment with the "
+                "one the bundle was qualified in"
+            )
+        elif side == _CURRENT:
+            cause = (
+                "the reference adapter no longer matches the current sources, such "
+                "as a renamed or re-signed dispatch, build, or launch API, or the "
+                "current kernel no longer compiles or launches once per repetition"
+            )
+            step = (
+                "read the worker log below; if a production API changed, update "
+                f"{adapter} to call the current one"
+            )
+        else:
+            cause = (
+                "the reference adapter does not support the snapshot's production "
+                "API, or the baseline kernel does not compile or launch on this GPU"
+            )
+            step = (
+                "read the worker log below; select another committed baseline or "
+                f"extend {adapter} for its API"
+            )
+        problem = (
+            f"{self.label} {architecture} case {case.id}: the {side} worker failed"
+        )
+        return f"{_triage(problem, cause, step)}\n{error}"
 
     def freeze_runner(self, destination: Path) -> None:
         """Copy the replay runner and its implementation dependencies into a bundle."""
@@ -241,6 +302,8 @@ class ReferenceOperation:
                         "export": str(case_dir / "kernel.hsaco"),
                         "repetitions": repetitions,
                     },
+                    side=_SNAPSHOT,
+                    case=case,
                     runner=self._package.parent,
                     platform=source / "platform/python",
                     library=source / "library",
@@ -249,7 +312,16 @@ class ReferenceOperation:
             digests = {array_digest(array) for array in outputs}
             if len(digests) != 1:
                 raise ValueError(
-                    f"old {self.label} output is not deterministic for {case.id}"
+                    _triage(
+                        f"{self.label} {architecture} case {case.id}: the "
+                        f"{_SNAPSHOT} produced {len(digests)} different outputs in "
+                        f"{repetitions} executions; old {self.label} output is not "
+                        "deterministic",
+                        "the baseline kernel's result depends on execution order "
+                        "on this GPU, such as through atomics or a race",
+                        "qualify a committed baseline whose kernel is deterministic "
+                        "for this case",
+                    )
                 )
             reference = self.contract.independent_reference(case, inputs)
             parameters = self.metric.parameters(reference)
@@ -333,33 +405,78 @@ class ReferenceOperation:
     def _authenticated_manifest(
         self, bundle: Path, lock_path: Path | None, architecture: str
     ) -> dict:
-        """Require the pinned manifest and payload; the cohort is checked separately."""
+        """Require the pinned manifest and payload; the cohort is checked separately.
+
+        A bundle the lock rejects, such as one extracted from an earlier archive,
+        fails with the commands that replace it.
+        """
         self.architectures.get_architecture(architecture)
         schema = self.contract.SCHEMA_VERSION
-        lock = json.loads(
-            (lock_path or self.architectures.baseline_lock(architecture)).read_text()
-        )
+        lock_path = lock_path or self.architectures.baseline_lock(architecture)
+        lock = json.loads(lock_path.read_text())
         if lock["schema"] != schema:
             raise ValueError(f"unsupported {self.label} lock schema")
-        if file_digest(bundle / "manifest.json") != lock["manifest_sha256"]:
+        if bundle.is_file():
+            raise ValueError(self.bundle_hint(architecture, bundle, lock_path))
+        manifest_path = bundle / "manifest.json"
+        if not manifest_path.is_file():
             raise ValueError(
-                f"{self.label} bundle manifest does not match the pinned lock"
+                self._rejected_bundle(
+                    f"{self.label} bundle {_shown(bundle)} has no manifest.json",
+                    architecture,
+                    bundle,
+                    lock_path,
+                )
             )
-        manifest = json.loads((bundle / "manifest.json").read_text())
+        digest = file_digest(manifest_path)
+        if digest != lock["manifest_sha256"]:
+            raise ValueError(
+                self._rejected_bundle(
+                    f"{self.label} bundle manifest does not match the pinned lock: "
+                    f"{_shown(manifest_path)} has sha256 {digest[:12]}, but "
+                    f"{_shown(lock_path)} pins {lock['manifest_sha256'][:12]}",
+                    architecture,
+                    bundle,
+                    lock_path,
+                )
+            )
+        manifest = json.loads(manifest_path.read_text())
         if (
             manifest["schema"] != schema
             or manifest["baseline_revision"] != lock["baseline_revision"]
         ):
-            raise ValueError(f"{self.label} baseline identity mismatch")
-        if payload_digests(bundle / "payload") != manifest["files"]:
             raise ValueError(
-                f"{self.label} bundle payload has missing, modified, or extra files"
+                f"{self.label} baseline identity mismatch: the manifest records "
+                f"schema {manifest['schema']} at {manifest['baseline_revision']}, "
+                f"but {_shown(lock_path)} pins schema {lock['schema']} at "
+                f"{lock['baseline_revision']}"
+            )
+        files = payload_digests(bundle / "payload")
+        if files != manifest["files"]:
+            changed = sorted(
+                name
+                for name in files.keys() | manifest["files"].keys()
+                if files.get(name) != manifest["files"].get(name)
+            )
+            raise ValueError(
+                self._rejected_bundle(
+                    f"{self.label} bundle payload has missing, modified, or extra "
+                    f"files: {len(changed)} differ, including "
+                    + ", ".join(changed[:3]),
+                    architecture,
+                    bundle,
+                    lock_path,
+                )
             )
         expected = manifest_operation(self.name)
         # As in artifact.py, the selected lock identifies an undeclared manifest.
         undeclared = None if self.declares_operation else expected
-        if manifest.get("operation", undeclared) != expected:
-            raise ValueError("wrong reference operation")
+        declared = manifest.get("operation", undeclared)
+        if declared != expected:
+            raise ValueError(
+                f"wrong reference operation: the manifest declares {declared!r}, "
+                f"but {self.label} bundles declare {expected!r}"
+            )
         if manifest.get("input_generation") != self.contract.INPUT_GENERATOR:
             raise ValueError(f"unsupported {self.label} input generator contract")
         if any(p.is_file() and p.suffix in (".npz", ".npy") for p in bundle.rglob("*")):
@@ -367,6 +484,69 @@ class ReferenceOperation:
                 f"generated-input {self.label} bundles must not contain tensor files"
             )
         return manifest
+
+    def _rejected_bundle(
+        self, problem: str, architecture: str, bundle: Path, lock: Path
+    ) -> str:
+        return _triage(
+            problem,
+            "the extracted bundle is stale (left from an earlier archive), partly "
+            "extracted, or modified, or the lock does not belong to it",
+            self.bundle_hint(architecture, bundle, lock, stale=True),
+        )
+
+    def bundle_hint(
+        self,
+        architecture: str,
+        bundle: Path,
+        lock: Path | None = None,
+        *,
+        stale: bool = False,
+        option: str = "--bundle",
+    ) -> str:
+        """Tell an author how to put a usable extracted bundle at ``bundle``.
+
+        An archive passed in place of the directory gets the command that unpacks
+        it. Otherwise a source checkout gets the commands that fetch and extract
+        the published archive tracked by the DVC pointer beside the default
+        bundle; installed trees have no pointers because CMake stages their
+        bundles. ``stale`` asks for the directory's removal first, since unpack
+        does not replace an existing bundle. ``option`` names the setting that
+        selects a bundle.
+        """
+        committed = self.architectures.baseline_lock(architecture)
+        lock = lock or committed
+        if bundle.is_file():
+            return self._unpack_hint(bundle, lock, option=option)
+        if lock.resolve() != committed.resolve():
+            return (
+                "pass a candidate bundle directory together with the "
+                "qualification-lock.json that qualification wrote with it"
+            )
+        archive = (
+            self._package.parent
+            / "reference_bundles"
+            / self.name
+            / f"{architecture}.tar.gz"
+        )
+        pointer = archive.with_name(f"{archive.name}.dvc")
+        if not pointer.is_file():
+            return (
+                f"no published {architecture} {self.label} archive is tracked at "
+                f"{_shown(pointer)}; installed trees receive published bundles when "
+                "built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON, and an unpublished "
+                "architecture needs a qualified candidate bundle and its lock"
+            )
+        lead = (
+            f"delete {_shown(bundle)}, then re-run"
+            if stale
+            else "fetch and extract it with"
+        )
+        return (
+            f"{lead} dvc pull and artifact.py unpack:\n"
+            f"    {shlex.join(['dvc', 'pull', _shown(pointer)])}\n"
+            f"    {self._unpack_command(archive, bundle, lock)}"
+        )
 
     def validate_cases(self, manifest: dict, architecture: str) -> None:
         """Preserve the cohort and budgets across qualification and verification."""
@@ -499,7 +679,13 @@ class ReferenceOperation:
         repetitions: int = 2,
         architecture: str = "gfx942",
     ) -> dict:
-        """Run old/current in separate interpreters and check every current output."""
+        """Run old/current in separate interpreters and check every current output.
+
+        Each failure names the side that failed, its measured values, the likely
+        cause, and the next step. A changed frozen baseline output is a reference
+        qualification failure, raised before the current kernel runs; only an
+        out-of-budget current output implicates the current kernel.
+        """
         if repetitions < 1:
             raise ValueError("verification must execute at least once")
         target = self.architectures.get_architecture(architecture)
@@ -507,6 +693,7 @@ class ReferenceOperation:
             raise ValueError("case is not enrolled for the selected architecture")
         key = self.manifest_key(manifest, case, architecture=architecture)
         entry = manifest["cases"][key]
+        subject = f"{self.label} {architecture} case {case.id}"
         payload = bundle / "payload"
         case_dir = payload / "cases" / key
         base = {
@@ -529,30 +716,67 @@ class ReferenceOperation:
                     kernel=entry["kernel"],
                     hsaco=str(case_dir / "kernel.hsaco"),
                 ),
+                side=_BASELINE,
+                case=case,
                 runner=payload / "runner",
                 platform=payload / "runtime",
                 library=None,
                 work=temporary / "old",
             )
-            for array in old:
-                if array_digest(array) != entry["output_digest"]:
+            for repetition, array in enumerate(old, 1):
+                digest = array_digest(array)
+                if digest != entry["output_digest"]:
                     raise AssertionError(
-                        f"reference qualification failure for {case.id}: old output "
-                        "does not match the independently qualified result"
+                        _triage(
+                            f"reference qualification failure for {subject}: the "
+                            f"{_BASELINE} output of repetition {repetition} of "
+                            f"{len(old)} has digest {digest[:12]}, but "
+                            f"qualification recorded {entry['output_digest'][:12]}",
+                            "the GPU driver, ROCm runtime, or firmware differs from "
+                            "the qualified environment, or the frozen kernel is not "
+                            "deterministic here; the current kernel did not run and "
+                            "is not the cause",
+                            "rerun to confirm that it reproduces and compare this "
+                            "environment with the qualified one; do not change the "
+                            "current kernel or its tolerance to make it pass",
+                        )
                     )
             platform, library = self._current_paths(current_root)
             current, current_report = self._worker(
                 dict(base, mode="source"),
+                side=_CURRENT,
+                case=case,
                 runner=self._package.parent,
                 platform=platform,
                 library=library,
                 work=temporary / "current",
             )
         if old_report["device_target"] != entry["device_target"]:
-            raise ValueError("reference target differs from the qualified target")
+            raise ValueError(
+                _triage(
+                    f"{subject}: the {_BASELINE} ran on device target "
+                    f"{old_report['device_target']}, but the bundle was qualified on "
+                    f"{entry['device_target']}; the reference target differs from "
+                    "the qualified target",
+                    "this GPU's target features, such as xnack or sramecc, are "
+                    "configured differently from the qualified GPU",
+                    "run on a GPU configured like the qualified one, or qualify a "
+                    "bundle for this target",
+                )
+            )
         if current_report["device_target"] != old_report["device_target"]:
             raise ValueError(
-                "current and reference workers used different target features"
+                _triage(
+                    f"{subject}: the {_CURRENT} ran on device target "
+                    f"{current_report['device_target']}, but the {_BASELINE} ran on "
+                    f"{old_report['device_target']}; the workers used different "
+                    "target features",
+                    "the current and frozen runtimes report this GPU's target "
+                    "features differently, or the workers' environments select "
+                    "different features",
+                    "compare the current runtime's get_device_target_id with the "
+                    "frozen runtime's; both sides must run on the qualified target",
+                )
             )
         budget = ErrorBudget(**entry["budget"])
         reference = decode(old[0], case.dtype)
@@ -560,8 +784,25 @@ class ReferenceOperation:
             self.metric.distance(decode(array, case.dtype), reference, entry)
             for array in current
         ]
-        for distance in distances:
-            budget.check(distance)
+        for repetition, distance in enumerate(distances, 1):
+            try:
+                budget.check(distance, metric=self.metric.name)
+            except AssertionError as error:
+                rerun = self._rerun_command(case, architecture, bundle, current_root)
+                raise AssertionError(
+                    _triage(
+                        f"{subject}: the {_CURRENT} output of repetition "
+                        f"{repetition} of {len(distances)} is outside its qualified "
+                        f"budget: {error}",
+                        "the current kernel or its dispatch changed the output; the "
+                        "frozen baseline reproduced its qualified output on this GPU",
+                        f"rerun only this case with `{rerun}` and check the current "
+                        "output against the independent reference offline; fix a "
+                        "regression, or qualify a replacement baseline for an "
+                        "intended numerical change, rather than widening the "
+                        "tolerance",
+                    )
+                ) from None
         return {
             "case": case.id,
             self.metric.name: max(distances),
@@ -876,13 +1117,31 @@ class ReferenceOperation:
                 flush=True,
             )
 
-    def _unpack_hint(self, archive: Path, lock: Path) -> str:
-        """Show the artifact.py command that extracts and authenticates an archive."""
-        stem = archive.name.removesuffix(".tar.gz")
-        directory = archive.with_name(
-            stem if stem != archive.name else f"{stem}-bundle"
+    def _rerun_command(
+        self, case: Any, architecture: str, bundle: Path, current_root: Path | None
+    ) -> str:
+        """Show the verify command that repeats one case's comparison."""
+        current = (
+            [] if current_root is None else ["--current-root", _shown(current_root)]
         )
-        command = shlex.join(
+        return shlex.join(
+            [
+                "python",
+                _shown(self._package.parent / f"run_{self.name}_reference.py"),
+                "verify",
+                "--arch",
+                architecture,
+                "--bundle",
+                _shown(bundle),
+                *current,
+                "--case",
+                case.id,
+            ]
+        )
+
+    def _unpack_command(self, archive: Path, bundle: Path, lock: Path) -> str:
+        """Show the artifact.py command that extracts and authenticates an archive."""
+        return shlex.join(
             [
                 "python",
                 _shown(Path(__file__).with_name("artifact.py")),
@@ -892,13 +1151,23 @@ class ReferenceOperation:
                 "--archive",
                 _shown(archive),
                 "--bundle",
-                _shown(directory),
+                _shown(bundle),
                 "--lock",
                 _shown(lock),
             ]
         )
+
+    def _unpack_hint(
+        self, archive: Path, lock: Path, *, option: str = "--bundle"
+    ) -> str:
+        """Explain how to extract an archive passed where a bundle directory belongs."""
+        stem = archive.name.removesuffix(".tar.gz")
+        directory = archive.with_name(
+            stem if stem != archive.name else f"{stem}-bundle"
+        )
         return (
-            f"{_shown(archive)} is a file, but --bundle needs an extracted bundle "
-            f"directory. Unpack and authenticate the archive with:\n  {command}\n"
-            f"then pass --bundle {_shown(directory)}"
+            f"{_shown(archive)} is a file, but {option} needs an extracted bundle "
+            "directory. Unpack and authenticate the archive with:\n  "
+            f"{self._unpack_command(archive, directory, lock)}\n"
+            f"then pass {option} {_shown(directory)}"
         )

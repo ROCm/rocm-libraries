@@ -140,7 +140,9 @@ def run_case(
 
         if launches != request["repetitions"]:
             raise RuntimeError(
-                f"expected {request['repetitions']} GPU launches, got {launches}"
+                f"{operation.label} {request['mode']} expected "
+                f"{request['repetitions']} GPU launches, one per repetition, "
+                f"got {launches}"
             )
         for name, array in arrays.items():
             returned = np.empty_like(array)

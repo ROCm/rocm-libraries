@@ -41,12 +41,15 @@ def prepare(case: Case, library_root: str) -> Gfx942AttentionDenseSpec:
     import dispatch.attention as attention
 
     request = attention_request(case, NAME)
-    tuning = getattr(attention, "tuning_spec_with_knobs", None)
-    if tuning is None:
+    # Recognize published baseline sources by their own API, so a renamed
+    # current API fails on its name rather than inside the historical path.
+    if not hasattr(attention, "tuning_spec_with_knobs") and hasattr(
+        attention, "dense_spec_for_request"
+    ):
         # Published baseline sources select this knob through the request.
         request = replace(request, dense_persistent="on" if case.persistent else "off")
         return attention.dense_spec_for_request(request)
-    return tuning(
+    return attention.tuning_spec_with_knobs(
         request,
         "gfx942_dense",
         {"persistent": case.persistent},
