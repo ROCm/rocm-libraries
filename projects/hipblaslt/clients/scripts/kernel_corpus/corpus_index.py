@@ -140,7 +140,8 @@ def flatten_predicates(tree: object) -> Iterator[dict]:
 
 
 def hardware_requirements(tree: object) -> dict:
-    """The processor and CU count a solution's hardware predicate demands, if any."""
+    """The processor, CU count and PCI chip IDs a solution's hardware predicate demands, if any.
+    Device-specific libraries accept any of several chip IDs (an Or), so those are a list."""
     found: dict = {}
 
     def walk(node: object) -> None:
@@ -153,7 +154,7 @@ def hardware_requirements(tree: object) -> dict:
         elif kind == "CUCount":
             found["cu_count"] = value
         elif kind == "PciChipIdEqual" or kind == "PciChipId":
-            found["pci_chip_id"] = value
+            found.setdefault("pci_chip_ids", []).append(value)
         if isinstance(value, dict):
             walk(value)
         elif isinstance(value, list):

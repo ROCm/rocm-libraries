@@ -68,7 +68,12 @@ def load_results(out: Path) -> dict[str, dict]:
                 # Rows written before a classification rule existed are classified again.
                 row["status"] = classify_failure(row.get("message", ""), row.get("fault", False))
             latest[row["case_id"]] = row
-    return latest
+    # A device-specific solution is unreachable on some devices of an architecture and runs on
+    # others. Once any device ran it, its unreachable rows from the rest are not a result.
+    ran = {r["index"] for r in latest.values() if r.get("shape") is not None}
+    return {
+        k: r for k, r in latest.items() if not (r["status"] == "unreachable" and r["index"] in ran)
+    }
 
 
 def case_from_row(row: dict) -> Optional[plan.Case]:
