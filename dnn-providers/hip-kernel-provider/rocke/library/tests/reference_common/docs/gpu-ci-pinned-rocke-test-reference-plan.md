@@ -293,7 +293,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
 | `worker.py` | Operation-specific launch and replay-argument binding for `../reference_common/worker.py`, the shared HIP execution loop |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
-| `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands |
+| `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands and the host-only `cases` and `diff` cohort checks |
 | `../reference_common/pinned_tests.py` | The required GPU comparisons and failure controls each `test_<operation>_pinned_reference.py` binds |
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |

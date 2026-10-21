@@ -10,7 +10,9 @@ and the old/current comparison are shared, so every operation certifies its
 original tolerance in the same way. The snapshot and qualification commands are
 offline maintenance operations. Verification only executes a locked bundle and
 current kernels; it never downloads dependencies, generates independent answers,
-or promotes a baseline.
+or promotes a baseline. The cases and diff commands only read the enrolled cohort
+and an authenticated manifest, so an author can review a cohort change on a host
+without a GPU.
 """
 
 from __future__ import annotations
@@ -18,10 +20,11 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shlex
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import ModuleType
@@ -29,8 +32,8 @@ from typing import Any
 
 import numpy as np
 
-from .artifact import manifest_operation
-from .cases import match_manifest_cases
+from .artifact import manifest_operation, unpack
+from .cases import compare_manifest_cases, describe_case, match_manifest_cases
 from .numeric import (
     ErrorBudget,
     array_digest,
@@ -39,14 +42,30 @@ from .numeric import (
     payload_digests,
     write_json,
 )
+from .paths import default_bundle_path
 from .runner import run_worker
 from .session import reuse_workers
 from .source import snapshot
 from .targets import processor_from_target_id
 
+_WORKFLOW = "library/tests/reference_common/docs/gpu-reference-workflow.md"
+
 
 def _no_parameters(reference: np.ndarray) -> dict[str, Any]:
     return {}
+
+
+def _budget_policy(manifest: dict) -> str | None:
+    policy = manifest.get("budget_policy")
+    if policy not in (None, "max-reference-bound-v1"):
+        raise ValueError("unsupported reference budget policy")
+    return policy
+
+
+def _shown(path: Path) -> str:
+    """Show a path relative to the working directory when it lies inside it."""
+    path, here = path.resolve(), Path.cwd().resolve()
+    return str(path.relative_to(here) if path.is_relative_to(here) else path)
 
 
 @dataclass(frozen=True)
@@ -307,6 +326,14 @@ class ReferenceOperation:
         architecture: str = "gfx942",
     ) -> dict:
         """Require the independently pinned manifest, payload, and exact case cohort."""
+        manifest = self._authenticated_manifest(bundle, lock_path, architecture)
+        self.validate_cases(manifest, architecture)
+        return manifest
+
+    def _authenticated_manifest(
+        self, bundle: Path, lock_path: Path | None, architecture: str
+    ) -> dict:
+        """Require the pinned manifest and payload; the cohort is checked separately."""
         self.architectures.get_architecture(architecture)
         schema = self.contract.SCHEMA_VERSION
         lock = json.loads(
@@ -339,39 +366,104 @@ class ReferenceOperation:
             raise ValueError(
                 f"generated-input {self.label} bundles must not contain tensor files"
             )
-        self.validate_cases(manifest, architecture)
         return manifest
 
     def validate_cases(self, manifest: dict, architecture: str) -> None:
         """Preserve the cohort and budgets across qualification and verification."""
-        policy = manifest.get("budget_policy")
-        if policy not in (None, "max-reference-bound-v1"):
-            raise ValueError("unsupported reference budget policy")
+        policy = _budget_policy(manifest)
         target = self.architectures.get_architecture(architecture)
         keys = match_manifest_cases(manifest["cases"], target.CASES, label=self.label)
-        compiler_target = getattr(target, "COMPILER_TARGET", None)
         for case in target.CASES:
             entry = manifest["cases"][keys[case.id]]
-            if processor_from_target_id(entry["device_target"]) != architecture:
-                raise ValueError(
-                    f"{self.label} bundle targets a different architecture: {case.id}"
-                )
-            if (
-                compiler_target is not None
-                and entry["kernel"].get("compiler_target") != compiler_target
-            ):
-                raise ValueError(
-                    f"{self.label} bundle has a different compiler target: {case.id}"
-                )
-            # Reject recorded metric parameters, such as a scale, before any GPU run.
-            self.metric.distance(np.zeros(1), np.zeros(1), entry)
-            budget = ErrorBudget(**entry["budget"])
-            if (
-                budget.tolerance != case.tolerance
-                or budget.margin != (case.tolerance / 20 if policy is None else 0.0)
-                or entry["comparison_limit"] != budget.comparison_limit
-            ):
-                raise ValueError(f"{self.label} tolerance or budget changed: {case.id}")
+            problem = self._entry_problem(case, entry, target, architecture, policy)
+            if problem is not None:
+                raise ValueError(f"{self.label} {problem}")
+
+    def cohort_differences(self, manifest: dict, architecture: str) -> list[str]:
+        """Describe every way the enrolled cohort differs from a manifest's cases.
+
+        This applies ``validate_cases``'s contract matching and per-case checks,
+        but collects each difference instead of raising at the first, so an
+        author can review a cohort edit on the host before qualifying it. An
+        empty list means verification accepts the manifest's cases.
+        """
+        policy = _budget_policy(manifest)
+        target = self.architectures.get_architecture(architecture)
+        comparison = compare_manifest_cases(
+            manifest["cases"], target.CASES, label=self.label
+        )
+        differences = [
+            f"enrolled but not in the bundle: {describe_case(*item)}"
+            for item in comparison.missing.items()
+        ]
+        differences += [
+            f"in the bundle but not enrolled: {describe_case(*item)}"
+            for item in comparison.extra.items()
+        ]
+        differences += [
+            f"recorded more than once: {case_id} ({', '.join(keys)})"
+            for case_id, keys in comparison.repeated.items()
+        ]
+        for case in target.CASES:
+            if case.id in comparison.keys:
+                entry = manifest["cases"][comparison.keys[case.id]]
+                problem = self._entry_problem(case, entry, target, architecture, policy)
+                if problem is not None:
+                    differences.append(problem)
+        return differences
+
+    def _entry_problem(
+        self,
+        case: Any,
+        entry: dict,
+        target: ModuleType,
+        architecture: str,
+        policy: str | None,
+    ) -> str | None:
+        """Explain why a matched manifest entry cannot certify a case, if it cannot."""
+        if processor_from_target_id(entry["device_target"]) != architecture:
+            return f"bundle targets a different architecture: {case.id}"
+        compiler_target = getattr(target, "COMPILER_TARGET", None)
+        if (
+            compiler_target is not None
+            and entry["kernel"].get("compiler_target") != compiler_target
+        ):
+            return f"bundle has a different compiler target: {case.id}"
+        # Reject recorded metric parameters, such as a scale, before any GPU run.
+        self.metric.distance(np.zeros(1), np.zeros(1), entry)
+        budget = ErrorBudget(**entry["budget"])
+        if (
+            budget.tolerance != case.tolerance
+            or budget.margin != (case.tolerance / 20 if policy is None else 0.0)
+            or entry["comparison_limit"] != budget.comparison_limit
+        ):
+            return (
+                f"tolerance or budget changed: {case.id} (enrolled tolerance "
+                f"{case.tolerance:g}; recorded tolerance {budget.tolerance:g}, "
+                f"margin {budget.margin:g})"
+            )
+        return None
+
+    def diff_bundle(
+        self, bundle: Path, lock_path: Path | None = None, *, architecture: str
+    ) -> list[str]:
+        """Compare the enrolled cohort with a bundle directory or packed archive.
+
+        An archive is unpacked into a temporary directory by ``artifact.unpack``,
+        which rejects unsafe members and authenticates the manifest and payload
+        against the lock before the manifest is read.
+        """
+        lock = lock_path or self.architectures.baseline_lock(architecture)
+        if bundle.is_dir():
+            manifest = self._authenticated_manifest(bundle, lock, architecture)
+        else:
+            with tempfile.TemporaryDirectory(
+                prefix=f"rocke-{self.name}-diff-"
+            ) as temporary:
+                staged = Path(temporary) / "bundle"
+                unpack(bundle, staged, lock, operation=self.name)
+                manifest = self._authenticated_manifest(staged, lock, architecture)
+        return self.cohort_differences(manifest, architecture)
 
     def manifest_key(
         self, manifest: dict, case: Any, *, architecture: str = "gfx942"
@@ -482,23 +574,67 @@ class ReferenceOperation:
             or current_report["torch_imported"],
         }
 
-    def main(self) -> None:
+    def _parser(self) -> argparse.ArgumentParser:
         architectures = self.architectures.ARCHITECTURES
-        parser = argparse.ArgumentParser(description=self.description)
+        parser = argparse.ArgumentParser(
+            description=self.description,
+            epilog=(
+                "The cases and diff commands need no GPU or Torch. See "
+                f"{_WORKFLOW} for the authoring and publication procedure."
+            ),
+        )
         commands = parser.add_subparsers(dest="command", required=True)
         export = commands.add_parser(
-            "snapshot", help="export an immutable old source revision"
+            "snapshot",
+            help="export an immutable old source revision",
+            description=(
+                "Export a committed revision's production sources, with their "
+                "digests, as the baseline that qualification runs."
+            ),
         )
-        export.add_argument("--repository", required=True, type=Path)
-        export.add_argument("--revision", required=True)
-        export.add_argument("--output", required=True, type=Path)
+        export.add_argument(
+            "--repository",
+            required=True,
+            type=Path,
+            help="git checkout that contains the revision",
+        )
+        export.add_argument(
+            "--revision", required=True, help="committed baseline revision"
+        )
+        export.add_argument(
+            "--output", required=True, type=Path, help="new snapshot directory"
+        )
         qualification = commands.add_parser(
-            "qualify", help=f"qualify old {self.label} on an enrolled architecture"
+            "qualify",
+            help=f"qualify old {self.label} on an enrolled architecture",
+            description=(
+                f"Run a snapshot's {self.label} kernels for every enrolled case "
+                "on this GPU, require deterministic outputs, bound their error "
+                "against independent references, and write a candidate bundle "
+                "and its qualification-lock.json."
+            ),
         )
-        qualification.add_argument("--arch", choices=architectures, default="gfx942")
-        qualification.add_argument("--baseline", required=True, type=Path)
-        qualification.add_argument("--output", required=True, type=Path)
-        qualification.add_argument("--repetitions", type=int, default=3)
+        qualification.add_argument(
+            "--arch",
+            choices=architectures,
+            default="gfx942",
+            help="enrolled architecture of this GPU (default: %(default)s)",
+        )
+        qualification.add_argument(
+            "--baseline",
+            required=True,
+            type=Path,
+            help="directory written by the snapshot command",
+        )
+        qualification.add_argument(
+            "--output", required=True, type=Path, help="new candidate bundle directory"
+        )
+        qualification.add_argument(
+            "--repetitions",
+            type=int,
+            default=3,
+            help="old executions per case, at least 2 (default: %(default)s)",
+        )
         if len(self.torch.devices) == 1:
             qualification.add_argument(
                 "--torch-reference",
@@ -515,14 +651,97 @@ class ReferenceOperation:
                 help=self.torch.help,
             )
         verification = commands.add_parser(
-            "verify", help="run every required GPU comparison"
+            "verify",
+            help="run every required GPU comparison",
+            description=(
+                "Authenticate a bundle against its lock, then run each enrolled "
+                "case's frozen and current kernels on this GPU and check every "
+                "current output against the case's qualified budget."
+            ),
         )
-        verification.add_argument("--arch", choices=architectures, default="gfx942")
-        verification.add_argument("--bundle", required=True, type=Path)
-        verification.add_argument("--lock", type=Path)
-        verification.add_argument("--current-root", type=Path)
-        verification.add_argument("--repetitions", type=int, default=2)
-        args = parser.parse_args()
+        verification.add_argument(
+            "--arch",
+            choices=architectures,
+            default="gfx942",
+            help="enrolled architecture of this GPU (default: %(default)s)",
+        )
+        verification.add_argument(
+            "--bundle",
+            required=True,
+            type=Path,
+            help="extracted bundle directory; unpack a .tar.gz archive with "
+            "reference_common/artifact.py first",
+        )
+        verification.add_argument(
+            "--lock",
+            type=Path,
+            help="lock that authenticates the bundle (default: the committed "
+            "baseline_lock.json)",
+        )
+        verification.add_argument(
+            "--current-root",
+            type=Path,
+            help="rocKE root that provides the current kernels (default: the "
+            "importable rocke package)",
+        )
+        verification.add_argument(
+            "--repetitions",
+            type=int,
+            default=2,
+            help="old and current executions per case (default: %(default)s)",
+        )
+        verification.add_argument(
+            "--case",
+            action="append",
+            dest="cases",
+            metavar="ID",
+            help="run only this enrolled case; repeat to run several. A subset "
+            "run is not a full verification",
+        )
+        listing = commands.add_parser(
+            "cases",
+            help="list an architecture's enrolled cases",
+            description=(
+                "Print each enrolled case id with its tolerance and case contract."
+            ),
+        )
+        listing.add_argument(
+            "--arch", choices=architectures, required=True, help="enrolled architecture"
+        )
+        listing.add_argument(
+            "--json", action="store_true", help="print the cohort as JSON"
+        )
+        comparison = commands.add_parser(
+            "diff",
+            help="compare the enrolled cases with a qualified bundle",
+            description=(
+                "Authenticate a bundle's manifest against its lock, then report "
+                "enrolled cases it does not record, recorded cases that are not "
+                "enrolled, and changed tolerances or budgets, matching cases as "
+                "verification does. Exits with status 1 on any difference."
+            ),
+        )
+        comparison.add_argument(
+            "--arch", choices=architectures, required=True, help="enrolled architecture"
+        )
+        comparison.add_argument(
+            "--bundle",
+            type=Path,
+            help="bundle directory or .tar.gz archive (default: the "
+            "architecture's DVC archive, else its extracted bundle)",
+        )
+        comparison.add_argument(
+            "--lock",
+            type=Path,
+            help="lock that authenticates the bundle (default: the committed "
+            "baseline_lock.json)",
+        )
+        return parser
+
+    def main(self, argv: Sequence[str] | None = None) -> None:
+        """Run one command; ``argv`` defaults to the process arguments."""
+        parser = self._parser()
+        args = parser.parse_args(argv)
         if args.command == "snapshot":
             snapshot(args.repository.resolve(), args.revision, args.output.resolve())
         elif args.command == "qualify":
@@ -533,24 +752,153 @@ class ReferenceOperation:
                 args.arch,
                 torch_reference=args.torch_reference,
             )
+        elif args.command == "cases":
+            self._list_cases(args.arch, as_json=args.json)
+        elif args.command == "diff":
+            self._diff(parser, args)
         else:
+            self._verify(parser, args)
+
+    def _list_cases(self, architecture: str, *, as_json: bool) -> None:
+        cases = self.architectures.get_architecture(architecture).CASES
+        if as_json:
+            listing = {
+                "operation": self.name,
+                "architecture": architecture,
+                "cases": [
+                    {"id": case.id, "tolerance": case.tolerance, "case": asdict(case)}
+                    for case in cases
+                ],
+            }
+            print(json.dumps(listing, indent=2))
+            return
+        width = max((len(case.id) for case in cases), default=0)
+        for case in cases:
+            fields = " ".join(f"{name}={value}" for name, value in asdict(case).items())
+            print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
+        print(f"{self.label} {architecture}: {len(cases)} enrolled cases")
+
+    def _diff(self, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+        lock = args.lock or self.architectures.baseline_lock(args.arch)
+        if args.lock is None and not lock.is_file():
+            parser.error(
+                f"{args.arch} has no published {self.label} bundle: {_shown(lock)} "
+                "does not exist; pass a candidate's --bundle and --lock"
+            )
+        if not lock.is_file():
+            parser.error(f"lock not found: {_shown(lock)}")
+        if args.bundle is not None:
             bundle = args.bundle.resolve()
-            manifest = self.load_bundle(bundle, args.lock, architecture=args.arch)
-            target = self.architectures.get_architecture(args.arch)
-            current = args.current_root.resolve() if args.current_root else None
-            with reuse_workers(self.worker_module):
-                for case in target.CASES:
-                    report = self.verify_case(
-                        case,
-                        bundle=bundle,
-                        manifest=manifest,
-                        current_root=current,
-                        repetitions=args.repetitions,
-                        architecture=args.arch,
-                    )
-                    print(json.dumps(report, sort_keys=True), flush=True)
+            if not bundle.exists():
+                parser.error(f"bundle not found: {_shown(bundle)}")
+        else:
+            directory = default_bundle_path(
+                self._package.parent, args.arch, operation=self.name
+            )
+            archive = directory.with_name(f"{directory.name}.tar.gz")
+            bundle = archive if archive.is_file() else directory
+            if not bundle.exists():
+                parser.error(
+                    f"no {args.arch} {self.label} bundle at {_shown(archive)} or "
+                    f"{_shown(directory)}; fetch the archive with DVC or pass --bundle"
+                )
+        differences = self.diff_bundle(bundle, lock, architecture=args.arch)
+        cases = self.architectures.get_architecture(args.arch).CASES
+        if not differences:
+            print(
+                f"{self.label} {args.arch}: all {len(cases)} enrolled cases match "
+                f"{_shown(bundle)}"
+            )
+            return
+        print(
+            f"{self.label} {args.arch}: the enrolled cases differ from "
+            f"{_shown(bundle)}"
+        )
+        for difference in differences:
+            print(f"  {difference}")
+        print(
+            "A cohort or budget change needs a complete requalification; see "
+            f"{_WORKFLOW}."
+        )
+        raise SystemExit(1)
+
+    def _verify(
+        self, parser: argparse.ArgumentParser, args: argparse.Namespace
+    ) -> None:
+        bundle = args.bundle.resolve()
+        if bundle.is_file():
+            lock = args.lock or self.architectures.baseline_lock(args.arch)
+            parser.error(self._unpack_hint(bundle, lock))
+        if not bundle.is_dir():
+            parser.error(f"bundle directory not found: {_shown(bundle)}")
+        target = self.architectures.get_architecture(args.arch)
+        cases = target.CASES
+        if args.cases:
+            unknown = sorted(set(args.cases) - {case.id for case in cases})
+            if unknown:
+                parser.error(
+                    f"not enrolled for {args.arch}: {', '.join(unknown)}; list the "
+                    f"enrolled ids with: {parser.prog} cases --arch {args.arch}"
+                )
+            cases = tuple(case for case in cases if case.id in args.cases)
+        skipped = len(target.CASES) - len(cases)
+        manifest = self.load_bundle(bundle, args.lock, architecture=args.arch)
+        if skipped:
+            print(
+                f"{self.label}: running {len(cases)} of {len(target.CASES)} "
+                f"enrolled {args.arch} cases selected with --case; a subset run "
+                "is not a full verification",
+                flush=True,
+            )
+        current = args.current_root.resolve() if args.current_root else None
+        with reuse_workers(self.worker_module):
+            for case in cases:
+                report = self.verify_case(
+                    case,
+                    bundle=bundle,
+                    manifest=manifest,
+                    current_root=current,
+                    repetitions=args.repetitions,
+                    architecture=args.arch,
+                )
+                print(json.dumps(report, sort_keys=True), flush=True)
+        if skipped:
+            print(
+                f"{self.label}: {len(cases)}/{len(cases)} selected GPU cases "
+                f"passed; this subset run is not a full verification ({skipped} "
+                "enrolled cases did not run)",
+                flush=True,
+            )
+        else:
             print(
                 f"{self.label}: {len(target.CASES)}/{len(target.CASES)} "
                 "required GPU cases passed",
                 flush=True,
             )
+
+    def _unpack_hint(self, archive: Path, lock: Path) -> str:
+        """Show the artifact.py command that extracts and authenticates an archive."""
+        stem = archive.name.removesuffix(".tar.gz")
+        directory = archive.with_name(
+            stem if stem != archive.name else f"{stem}-bundle"
+        )
+        command = shlex.join(
+            [
+                "python",
+                _shown(Path(__file__).with_name("artifact.py")),
+                "unpack",
+                "--operation",
+                self.name,
+                "--archive",
+                _shown(archive),
+                "--bundle",
+                _shown(directory),
+                "--lock",
+                _shown(lock),
+            ]
+        )
+        return (
+            f"{_shown(archive)} is a file, but --bundle needs an extracted bundle "
+            f"directory. Unpack and authenticate the archive with:\n  {command}\n"
+            f"then pass --bundle {_shown(directory)}"
+        )

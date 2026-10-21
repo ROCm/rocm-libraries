@@ -34,6 +34,22 @@ manifest's case set and contracts to match the current cohort. Do not append a
 case or edit a budget in a qualified manifest to make verification pass.
 Requalify the complete cohort; the CLI does not incrementally extend bundles.
 
+Before qualifying on a GPU, check what a cohort edit changes. From the rocKE
+root, these commands run without a GPU or Torch:
+
+```bash
+python library/tests/run_conv_reference.py cases --arch gfx942
+python library/tests/run_conv_reference.py diff --arch gfx942
+```
+
+`cases` lists the enrolled case ids with their tolerances and case contracts;
+add `--json` for tools. `diff` authenticates the published bundle's manifest
+against the committed lock, matches cases by contract as verification does, and
+names enrolled cases the bundle does not record, recorded cases that are no
+longer enrolled, and changed tolerances or budgets. It exits non-zero on any
+difference. It reads the DVC archive, or the extracted bundle when no archive
+is present; pass `--bundle` and `--lock` to check a candidate instead.
+
 ## 1. Choose coverage and implement the contract
 
 Use cases that exercise distinct production paths, rather than counting shapes
@@ -209,6 +225,12 @@ python "library/tests/run_${REFERENCE_OPERATION}_reference.py" verify \
 python -m pytest library/tests/test_reference_common.py \
   "library/tests/test_${REFERENCE_OPERATION}_reference_contract.py" -q
 ```
+
+`verify` reads an extracted bundle directory; given a `.tar.gz` archive, it
+prints the `artifact.py unpack` command to run first. To iterate on a failing
+case, add `--case <id>`, repeated as needed, to run only those cases. The output
+states that such a subset run is not a full verification; verify the complete
+cohort before promoting a candidate.
 
 For the GPU pytest suite, pass the candidate bundle and lock explicitly:
 

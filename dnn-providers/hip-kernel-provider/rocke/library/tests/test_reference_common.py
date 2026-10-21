@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Shared reference numerics, archives, worker isolation, and test selection."""
+"""Shared reference numerics, archives, CLI, worker isolation, and test selection."""
 
 from __future__ import annotations
 
@@ -1044,3 +1044,367 @@ def test_manifest_cases_match_by_contract_and_ids_cannot_collide():
         index_cases((*cases, Case("a", 3)), label="test")
     with pytest.raises(ValueError, match="duplicate test case id: a"):
         match_manifest_cases(entries, (*cases, Case("a", 3)), label="test")
+
+
+def test_cohort_comparison_reports_each_difference_without_raising():
+    from dataclasses import dataclass
+
+    from reference_common.cases import compare_manifest_cases
+
+    @dataclass(frozen=True)
+    class Case:
+        name: str
+        size: int = 1
+
+        @property
+        def id(self) -> str:
+            return self.name
+
+    entries = {
+        "a": {"case": {"name": "a", "size": 1}},
+        "b": {"case": {"name": "b", "size": 1}},
+        "b-copy": {"case": {"name": "b", "size": 1}},
+        "retired": {"case": {"name": "c", "size": 1}},
+        "unrecorded": {},
+    }
+    comparison = compare_manifest_cases(
+        entries, (Case("a"), Case("b"), Case("d", 2)), label="test"
+    )
+    assert comparison.keys == {"a": "a"}
+    assert comparison.missing == {"d": {"name": "d", "size": 2}}
+    assert comparison.extra == {"retired": {"name": "c", "size": 1}, "unrecorded": None}
+    assert comparison.repeated == {"b": ["b", "b-copy"]}
+
+
+def _qualified_cohort(tmp_path, operation):
+    """A locked synthetic bundle recording an operation's first enrolled cohort."""
+    from dataclasses import asdict
+    from importlib import import_module
+
+    from reference_common.numeric import payload_digests
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    architecture = spec.architectures.ARCHITECTURES[0]
+    target = spec.architectures.get_architecture(architecture)
+    bundle = tmp_path / "bundle"
+    (bundle / "payload").mkdir(parents=True)
+    (bundle / "payload/kernel.hsaco").write_bytes(b"host cohort fixture")
+    entries = {}
+    for case in target.CASES:
+        budget = ErrorBudget(case.tolerance, 0.001)
+        entries[case.id] = {
+            "case": asdict(case),
+            "device_target": architecture,
+            "kernel": {
+                "compiler_target": getattr(target, "COMPILER_TARGET", architecture)
+            },
+            "budget": asdict(budget),
+            "comparison_limit": budget.comparison_limit,
+            **spec.metric.parameters(np.ones(1)),
+        }
+    manifest = {
+        "schema": 2,
+        "budget_policy": "max-reference-bound-v1",
+        "operation": manifest_operation(operation),
+        "baseline_revision": "a" * 40,
+        "input_generation": spec.contract.INPUT_GENERATOR,
+        "files": payload_digests(bundle / "payload"),
+        "cases": entries,
+    }
+    lock = tmp_path / "lock.json"
+    _relock(bundle, manifest, lock)
+    return spec, architecture, bundle, lock
+
+
+def _relock(bundle, manifest, lock):
+    encoded = json.dumps(manifest).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    lock.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "baseline_revision": manifest["baseline_revision"],
+                "manifest_sha256": hashlib.sha256(encoded).hexdigest(),
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operation):
+    import os
+    from dataclasses import asdict
+    from importlib import import_module
+
+    # Any import of Torch, the rocKE runtime, or production kernels fails.
+    for name in ("torch", "rocke", "kernels", "dispatch"):
+        (tmp_path / f"{name}.py").write_text(
+            f"raise AssertionError('imported {name}')\n"
+        )
+    env = dict(os.environ, PYTHONPATH=str(tmp_path), PYTHONNOUSERSITE="1")
+    script = Path(__file__).with_name(f"run_{operation}_reference.py")
+    registry = import_module(f"{operation}_reference.architectures")
+    for architecture in registry.ARCHITECTURES:
+        cases = registry.get_architecture(architecture).CASES
+        result = subprocess.run(
+            [sys.executable, str(script), "cases", "--arch", architecture, "--json"],
+            check=False,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        listing = json.loads(result.stdout)
+        assert (listing["operation"], listing["architecture"]) == (
+            operation,
+            architecture,
+        )
+        assert [entry["id"] for entry in listing["cases"]] == [c.id for c in cases]
+        assert [entry["case"] for entry in listing["cases"]] == [
+            json.loads(json.dumps(asdict(case))) for case in cases
+        ]
+        assert [entry["tolerance"] for entry in listing["cases"]] == [
+            case.tolerance for case in cases
+        ]
+    result = subprocess.run(
+        [sys.executable, str(script), "cases", "--arch", architecture],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert [line.split()[0] for line in lines[:-1]] == [case.id for case in cases]
+    assert lines[-1].endswith(f"{architecture}: {len(cases)} enrolled cases")
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("form", ["directory", "archive"])
+def test_diff_reports_every_difference_that_verification_rejects(
+    tmp_path, capsys, monkeypatch, operation, form
+):
+    from dataclasses import asdict
+
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    target = spec.architectures.get_architecture(architecture)
+    cases = target.CASES
+    source = bundle
+    if form == "archive":
+        source = tmp_path / f"{architecture}.tar.gz"
+        pack(bundle, source, lock, operation=operation)
+    command = ["diff", "--arch", architecture, "--bundle", str(source)]
+    spec.main([*command, "--lock", str(lock)])
+    output = capsys.readouterr().out
+    assert f"all {len(cases)} enrolled cases match" in output
+    # The author dropped one qualified case and enrolled another after
+    # qualification; the bundle also changed one budget and repeats a case.
+    monkeypatch.setattr(target, "CASES", cases[1:])
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    entries = manifest["cases"]
+    del entries[cases[-1].id]
+    budget = ErrorBudget(cases[1].tolerance * 2, 0.001)
+    entries[cases[1].id].update(
+        budget=asdict(budget), comparison_limit=budget.comparison_limit
+    )
+    entries["copy"] = entries[cases[2].id]
+    _relock(bundle, manifest, lock)
+    if form == "archive":
+        source.unlink()
+        pack(bundle, source, lock, operation=operation)
+    with pytest.raises(SystemExit) as exit:
+        spec.main([*command, "--lock", str(lock)])
+    assert exit.value.code == 1
+    output = capsys.readouterr().out
+    for expected in (
+        f"enrolled but not in the bundle: {cases[-1].id} (",
+        f"in the bundle but not enrolled: {cases[0].id} (",
+        f"recorded more than once: {cases[2].id} (",
+        (
+            f"tolerance or budget changed: {cases[1].id} (enrolled tolerance "
+            f"{cases[1].tolerance:g}; recorded tolerance {budget.tolerance:g}"
+        ),
+        "needs a complete requalification",
+        "library/tests/reference_common/docs/gpu-reference-workflow.md",
+    ):
+        assert expected in output
+    assert len(spec.diff_bundle(source, lock, architecture=architecture)) == 4
+    # diff reports exactly what verification refuses to run.
+    with pytest.raises(ValueError):
+        spec.load_bundle(bundle, lock, architecture=architecture)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_diff_authenticates_an_archive_before_reading_it(tmp_path, operation):
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    archive = tmp_path / "bundle.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    other = tmp_path / "other-lock.json"
+    other.write_text(
+        json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
+    )
+    with pytest.raises(ValueError, match="does not match the pinned lock"):
+        spec.diff_bundle(archive, other, architecture=architecture)
+    unsafe = tmp_path / "unsafe.tar.gz"
+    with tarfile.open(unsafe, "w:gz") as tar:
+        tar.addfile(
+            tarfile.TarInfo(f"{operation}_reference_bundle/../../escaped"),
+            io.BytesIO(),
+        )
+    with pytest.raises(ValueError, match="invalid .* archive member"):
+        spec.diff_bundle(unsafe, lock, architecture=architecture)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("fetched", ["archive", "directory", None])
+def test_diff_defaults_to_the_published_bundle_and_committed_lock(
+    tmp_path, capsys, monkeypatch, operation, fetched
+):
+    from reference_common import cli as common_cli
+
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    published = tmp_path / "published" / architecture
+    published.parent.mkdir()
+    if fetched == "archive":
+        pack(
+            bundle,
+            published.with_name(f"{architecture}.tar.gz"),
+            lock,
+            operation=operation,
+        )
+    elif fetched == "directory":
+        bundle.rename(published)
+    monkeypatch.setattr(
+        common_cli, "default_bundle_path", lambda *args, **kwargs: published
+    )
+    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    if fetched is None:
+        with pytest.raises(SystemExit) as exit:
+            spec.main(["diff", "--arch", architecture])
+        assert exit.value.code == 2
+        assert "fetch the archive with DVC or pass --bundle" in capsys.readouterr().err
+    else:
+        spec.main(["diff", "--arch", architecture])
+        output = capsys.readouterr().out
+        assert "enrolled cases match" in output
+        assert output.rstrip().endswith(
+            f"{architecture}.tar.gz" if fetched == "archive" else architecture
+        )
+    lock.unlink()
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["diff", "--arch", architecture])
+    assert exit.value.code == 2
+    assert f"{architecture} has no published" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_fetched_archives_record_the_enrolled_cohorts(operation):
+    """Each fetched DVC archive matches its committed lock and current cohort."""
+    import re
+    from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    registry = spec.architectures
+    checked = []
+    for architecture in registry.ARCHITECTURES:
+        archive = Path(__file__).parent / (
+            f"reference_bundles/{operation}/{architecture}.tar.gz"
+        )
+        pointer = archive.with_name(archive.name + ".dvc")
+        if not (archive.is_file() and pointer.is_file()):
+            continue
+        # Skip an archive left behind by an earlier pointer; dvc pull updates it.
+        recorded = re.search(r"md5: ([0-9a-f]{32})", pointer.read_text())
+        digest = hashlib.md5(archive.read_bytes(), usedforsecurity=False).hexdigest()
+        if not recorded or digest != recorded.group(1):
+            continue
+        differences = spec.diff_bundle(archive, architecture=architecture)
+        assert not differences, (
+            f"{operation} {architecture} cohort differs from its published "
+            f"bundle: {differences}"
+        )
+        checked.append(architecture)
+    if not checked:
+        pytest.skip(f"no current {operation} reference archive has been fetched")
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
+    import shlex
+
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    archive = tmp_path / f"{architecture}.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    command = ["verify", "--arch", architecture, "--lock", str(lock), "--bundle"]
+    with pytest.raises(SystemExit) as exit:
+        spec.main([*command, str(archive)])
+    assert exit.value.code == 2
+    error = capsys.readouterr().err
+    assert "Traceback" not in error
+    assert f"artifact.py unpack --operation {operation} " in error
+    # The suggested command extracts and authenticates a usable bundle.
+    suggested = next(line for line in error.splitlines() if "artifact.py" in line)
+    subprocess.run(
+        [sys.executable, *shlex.split(suggested)[1:]], check=True, capture_output=True
+    )
+    assert spec.load_bundle(tmp_path / architecture, lock, architecture=architecture)
+    with pytest.raises(SystemExit) as exit:
+        spec.main([*command, str(tmp_path / "missing")])
+    assert exit.value.code == 2
+    assert "bundle directory not found" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
+    tmp_path, capsys, monkeypatch, operation
+):
+    from reference_common.cli import ReferenceOperation
+
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    cases = spec.architectures.get_architecture(architecture).CASES
+    ran = []
+
+    def verify_case(self, case, **kwargs):
+        ran.append(case.id)
+        return {"case": case.id}
+
+    monkeypatch.setattr(ReferenceOperation, "verify_case", verify_case)
+    command = ["verify", "--arch", architecture, "--bundle", str(bundle)]
+    command += ["--lock", str(lock)]
+    spec.main([*command, "--case", cases[2].id, "--case", cases[0].id])
+    assert ran == [cases[0].id, cases[2].id]
+    output = capsys.readouterr().out
+    assert output.count("not a full verification") == 2
+    assert "2/2 selected GPU cases passed" in output
+    ran.clear()
+    spec.main(command)
+    assert ran == [case.id for case in cases]
+    output = capsys.readouterr().out
+    assert "not a full verification" not in output
+    assert f"{len(cases)}/{len(cases)} required GPU cases passed" in output
+    with pytest.raises(SystemExit) as exit:
+        spec.main([*command, "--case", "unenrolled"])
+    assert exit.value.code == 2
+    assert f"not enrolled for {architecture}: unenrolled" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_every_reference_command_and_option_has_help(operation):
+    import argparse
+    from importlib import import_module
+
+    parser = import_module(f"{operation}_reference.cli").OPERATION._parser()
+    assert parser.description and parser.epilog
+    (commands,) = (
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    assert set(commands.choices) == {"snapshot", "qualify", "verify", "cases", "diff"}
+    summaries = {action.dest: action.help for action in commands._choices_actions}
+    for name, command in commands.choices.items():
+        assert summaries[name] and command.description, name
+        for action in command._actions:
+            assert action.help, f"{name} {action.option_strings} has no help"
