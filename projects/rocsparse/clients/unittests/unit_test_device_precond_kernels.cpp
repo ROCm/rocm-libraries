@@ -30,10 +30,6 @@
 //                         (library/src/precond/csrilu0/rocsparse_csrilu0_kernel_launch.cpp)
 // csrildlt0 binsearch:    max row nnz > 512
 //                         (library/src/precond/csrildlt0/rocsparse_csrildlt0_kernel_launch.cpp)
-//
-// The wave64 tests report a 64-lane wavefront to the numeric call; on a wave32 GPU only
-// the status, the reported pivot and the finiteness of the factor are checked then (see
-// forced_wavefront).
 
 #include "unit_test_device_precond_common.hpp"
 
@@ -60,8 +56,10 @@ namespace
     // Lower-triangular matrix whose last row holds `fat` entries (columns 1..fat). Earlier
     // rows plant a binary-search hit (column 1 is in the fat row) and a miss (column 0 is
     // not). Diagonal 4, off-diagonal 0.1: the factorizations exist without a zero pivot.
+    // `upper` mirrors it for csrilu0 (see with_upper_triangle): the fat row then finds
+    // column m - 1 in every row it depends on, and the short rows miss it.
     template <typename T>
-    csr_matrix<T> make_binsearch_matrix(int32_t fat, Pivot pivot)
+    csr_matrix<T> make_binsearch_matrix(int32_t fat, Pivot pivot, bool upper = false)
     {
         const int32_t                     m = fat + 1;
         std::vector<std::vector<int32_t>> rows(m);
@@ -89,7 +87,12 @@ namespace
             }
             a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
         }
-        return a;
+        if(!upper)
+            return a;
+        csr_matrix<T> full = with_upper_triangle(a);
+        if(pivot == Pivot::exact)
+            full.val[full.ptr[0]] = make_value<T>(0.0);
+        return full;
     }
 
     int64_t pivot_row(Pivot pivot)
@@ -97,14 +100,12 @@ namespace
         return pivot == Pivot::none ? -1 : (pivot == Pivot::structural ? 5 : 0);
     }
 
-    // csrilu0 through the legacy interface. singular_tol < 0 keeps the library default;
-    // wavefront > 0 is reported to the numeric call.
+    // csrilu0 through the legacy interface. singular_tol < 0 keeps the library default.
     template <typename T>
-    void run_csrilu0(
-        rocsparse_handle handle, Pivot pivot, double singular_tol, int wavefront, int32_t fat = 513)
+    void run_csrilu0(rocsparse_handle handle, Pivot pivot, double singular_tol, int32_t fat = 513)
     {
-        SCOPED_TRACE("fat " + std::to_string(fat) + " wavefront " + std::to_string(wavefront));
-        const csr_matrix<T>          a = make_binsearch_matrix<T>(fat, pivot);
+        SCOPED_TRACE("fat " + std::to_string(fat));
+        const csr_matrix<T>          a = make_binsearch_matrix<T>(fat, pivot, true);
         const rocsparse_int          m = a.n, nnz = a.nnz();
         device_vector<rocsparse_int> drow{as_rocsparse_int(a.ptr)};
         device_vector<rocsparse_int> dcol{as_rocsparse_int(a.ind)};
@@ -146,24 +147,18 @@ namespace
             ASSERT_EQ(rocsparse_csrilu0_set_tolerance(handle, di.info, singular_tol),
                       rocsparse_status_success);
 
-        const bool       forced = forced_wavefront(handle, wavefront);
-        rocsparse_status st     = rocsparse_status_internal_error;
-        {
-            ScopedOverride<int> guard(handle->wavefront_size,
-                                      wavefront > 0 ? wavefront : handle->wavefront_size);
-            st = PRECOND_CALL(T,
-                              csrilu0,
-                              handle,
-                              m,
-                              nnz,
-                              di.descr,
-                              dval.ptr,
-                              drow.ptr,
-                              dcol.ptr,
-                              di.info,
-                              rocsparse_solve_policy_auto,
-                              buffer.ptr);
-        }
+        const rocsparse_status st = PRECOND_CALL(T,
+                                                 csrilu0,
+                                                 handle,
+                                                 m,
+                                                 nnz,
+                                                 di.descr,
+                                                 dval.ptr,
+                                                 drow.ptr,
+                                                 dcol.ptr,
+                                                 di.info,
+                                                 rocsparse_solve_policy_auto,
+                                                 buffer.ptr);
         if(pivot == Pivot::none)
             ASSERT_EQ(st, rocsparse_status_success);
         else
@@ -176,11 +171,10 @@ namespace
         EXPECT_EQ(position, pivot_row(pivot));
         if(pivot != Pivot::none)
             return;
+        expect_diagonally_dominant(a);
         const auto got = to_host(dval);
-        if(forced)
-            expect_finite(got);
-        else
-            expect_close(got, host_ilu0(a), tolerance<T>(max_row_length(a)));
+        expect_close(got, host_ilu0(a), tolerance<T>(max_row_length(a)));
+        expect_small_residual(ilu_pattern_residual(a, got), a);
     }
 
     // spildlt0 with I / J indices. `boost` sets the numeric boost (read from the matrix
@@ -188,12 +182,10 @@ namespace
     // in a separate array. The singularity tolerance of the exact-pivot case is above every
     // pivot.
     template <typename T, typename I, typename J>
-    void run_csrildlt0(
-        rocsparse_handle handle, Pivot pivot, bool boost, bool copy_diag, int wavefront)
+    void run_csrildlt0(rocsparse_handle handle, Pivot pivot, bool boost, bool copy_diag)
     {
-        using real_t = real_of<T>;
-        using A      = api<Kind::ildlt>;
-        SCOPED_TRACE("wavefront " + std::to_string(wavefront));
+        using real_t          = real_of<T>;
+        using A               = api<Kind::ildlt>;
         const csr_matrix<T> a = make_binsearch_matrix<T>(513, pivot);
         dev_csr<T, I, J>    d;
         d.init(a, 1, true);
@@ -255,19 +247,14 @@ namespace
         device_vector<char> compute_buffer{compute_size ? compute_size : size_t{1}};
         ASSERT_TRUE(compute_buffer.ptr);
 
-        const bool forced = forced_wavefront(handle, wavefront);
-        {
-            ScopedOverride<int> wave(handle->wavefront_size,
-                                     wavefront > 0 ? wavefront : handle->wavefront_size);
-            ASSERT_EQ(A::run(handle,
-                             descr,
-                             d.A,
-                             d.A,
-                             A::stage(Stage::compute),
-                             compute_size,
-                             compute_buffer.ptr),
-                      rocsparse_status_success);
-        }
+        ASSERT_EQ(A::run(handle,
+                         descr,
+                         d.A,
+                         d.A,
+                         A::stage(Stage::compute),
+                         compute_size,
+                         compute_buffer.ptr),
+                  rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         rocsparse_singularity singularity = rocsparse_singularity_numeric_near;
@@ -282,12 +269,7 @@ namespace
         if(pivot != Pivot::none)
             return;
 
-        const auto got = to_host(d.val);
-        if(forced)
-        {
-            expect_finite(got);
-            return;
-        }
+        const auto           got    = to_host(d.val);
         const double         tol    = tolerance<T>(max_row_length(a));
         const std::vector<T> factor = host_ildlt0(a, boost ? 1.0e20 : -1.0, 1.0);
         expect_close(got, factor, tol);
@@ -307,18 +289,18 @@ class PrecondCsrilu0Binsearch : public HandleTest
 
 TEST_F(PrecondCsrilu0Binsearch, f32_singular_and_zero)
 {
-    run_csrilu0<float>(handle, Pivot::none, 1.0e6, 0);
-    run_csrilu0<float>(handle, Pivot::structural, 1.0e6, 0);
-    run_csrilu0<float>(handle, Pivot::exact, 0.0, 0);
+    run_csrilu0<float>(handle, Pivot::none, 1.0e6);
+    run_csrilu0<float>(handle, Pivot::structural, 1.0e6);
+    run_csrilu0<float>(handle, Pivot::exact, 0.0);
 }
 
-TEST_F(PrecondCsrilu0Binsearch, wave64)
+TEST_F(PrecondCsrilu0Binsearch, value_types_1024)
 {
-    // max nnz 1024 is the wave64 binsearch threshold. 513 would fall through to hash.
-    run_csrilu0<float>(handle, Pivot::none, -1.0, 64, 1024);
-    run_csrilu0<double>(handle, Pivot::none, -1.0, 64, 1024);
-    run_csrilu0<rocsparse_float_complex>(handle, Pivot::none, -1.0, 64, 1024);
-    run_csrilu0<rocsparse_double_complex>(handle, Pivot::none, -1.0, 64, 1024);
+    // max nnz 1024 selects the binary search on both wave sizes (513 does on wave32 only).
+    run_csrilu0<float>(handle, Pivot::none, -1.0, 1024);
+    run_csrilu0<double>(handle, Pivot::none, -1.0, 1024);
+    run_csrilu0<rocsparse_float_complex>(handle, Pivot::none, -1.0, 1024);
+    run_csrilu0<rocsparse_double_complex>(handle, Pivot::none, -1.0, 1024);
 }
 
 class PrecondCsrildlt0Binsearch : public HandleTest
@@ -327,21 +309,19 @@ class PrecondCsrildlt0Binsearch : public HandleTest
 
 TEST_F(PrecondCsrildlt0Binsearch, f32_layouts)
 {
-    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::none, false, true, 0);
-    run_csrildlt0<float, int64_t, int32_t>(handle, Pivot::none, false, false, 0);
-    run_csrildlt0<float, int64_t, int64_t>(handle, Pivot::none, false, false, 0);
-    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::none, true, false, 0);
-    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::structural, false, false, 0);
-    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::exact, false, false, 0);
+    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::none, false, true);
+    run_csrildlt0<float, int64_t, int32_t>(handle, Pivot::none, false, false);
+    run_csrildlt0<float, int64_t, int64_t>(handle, Pivot::none, false, false);
+    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::none, true, false);
+    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::structural, false, false);
+    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::exact, false, false);
 }
 
-TEST_F(PrecondCsrildlt0Binsearch, wave64)
+TEST_F(PrecondCsrildlt0Binsearch, value_types)
 {
-    run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::none, false, false, 64);
-    run_csrildlt0<double, int32_t, int32_t>(handle, Pivot::none, false, false, 64);
-    run_csrildlt0<rocsparse_float_complex, int32_t, int32_t>(handle, Pivot::none, false, false, 64);
-    run_csrildlt0<rocsparse_double_complex, int32_t, int32_t>(
-        handle, Pivot::none, false, false, 64);
-    run_csrildlt0<double, int64_t, int32_t>(handle, Pivot::none, false, false, 64);
-    run_csrildlt0<double, int64_t, int64_t>(handle, Pivot::none, false, false, 64);
+    run_csrildlt0<double, int32_t, int32_t>(handle, Pivot::none, false, false);
+    run_csrildlt0<rocsparse_float_complex, int32_t, int32_t>(handle, Pivot::none, false, false);
+    run_csrildlt0<rocsparse_double_complex, int32_t, int32_t>(handle, Pivot::none, false, false);
+    run_csrildlt0<double, int64_t, int32_t>(handle, Pivot::none, false, false);
+    run_csrildlt0<double, int64_t, int64_t>(handle, Pivot::none, false, false);
 }

@@ -293,7 +293,6 @@ namespace
         rocsparse_int options   = rocsparse_itilu0_option_compute_nrm_residual;
         rocsparse_int nmaxiter  = 80;
         rocsparse_int nfreeiter = 0;
-        int           wavefront = 0;
     };
 
     template <typename T>
@@ -386,52 +385,46 @@ namespace
                                                                buffer.ptr)),
                   rocsparse_status_success);
 
-        const bool       forced  = forced_wavefront(handle, opt.wavefront);
         rocsparse_int    nsweeps = opt.nmaxiter;
         const real_of<T> tol     = std::is_same_v<real_of<T>, float> ? 1.0e-6f : 1.0e-12;
-        rocsparse_status status  = rocsparse_status_internal_error;
         const bool       verbose = (opt.options & rocsparse_itilu0_option_verbose) != 0;
         if(verbose)
         {
             testing::internal::CaptureStdout();
         }
-        {
-            ScopedOverride<int> guard(handle->wavefront_size,
-                                      opt.wavefront > 0 ? opt.wavefront : handle->wavefront_size);
-            status = rocsparse::csritilu0x_compute_impl<T, I, J>(handle,
-                                                                 alg,
-                                                                 opt.options,
-                                                                 &nsweeps,
-                                                                 opt.nfreeiter,
-                                                                 tol,
-                                                                 m,
-                                                                 nnz,
-                                                                 dptr.ptr,
-                                                                 dptr.ptr + 1,
-                                                                 dind.ptr,
-                                                                 dval.ptr,
-                                                                 base,
-                                                                 ldiag,
-                                                                 ldir,
-                                                                 lnnz,
-                                                                 dlptr.ptr,
-                                                                 dlptr.ptr + 1,
-                                                                 dlind.ptr,
-                                                                 dlval.ptr,
-                                                                 base,
-                                                                 udiag,
-                                                                 udir,
-                                                                 unnz,
-                                                                 duptr.ptr,
-                                                                 duptr.ptr + 1,
-                                                                 duind.ptr,
-                                                                 duval.ptr,
-                                                                 base,
-                                                                 ddval.ptr,
-                                                                 buffer_size,
-                                                                 buffer.ptr);
-        }
-        std::string log_text;
+        const rocsparse_status status = rocsparse::csritilu0x_compute_impl<T, I, J>(handle,
+                                                                                    alg,
+                                                                                    opt.options,
+                                                                                    &nsweeps,
+                                                                                    opt.nfreeiter,
+                                                                                    tol,
+                                                                                    m,
+                                                                                    nnz,
+                                                                                    dptr.ptr,
+                                                                                    dptr.ptr + 1,
+                                                                                    dind.ptr,
+                                                                                    dval.ptr,
+                                                                                    base,
+                                                                                    ldiag,
+                                                                                    ldir,
+                                                                                    lnnz,
+                                                                                    dlptr.ptr,
+                                                                                    dlptr.ptr + 1,
+                                                                                    dlind.ptr,
+                                                                                    dlval.ptr,
+                                                                                    base,
+                                                                                    udiag,
+                                                                                    udir,
+                                                                                    unnz,
+                                                                                    duptr.ptr,
+                                                                                    duptr.ptr + 1,
+                                                                                    duind.ptr,
+                                                                                    duval.ptr,
+                                                                                    base,
+                                                                                    ddval.ptr,
+                                                                                    buffer_size,
+                                                                                    buffer.ptr);
+        std::string            log_text;
         if(verbose)
         {
             log_text = testing::internal::GetCapturedStdout();
@@ -452,13 +445,6 @@ namespace
             EXPECT_EQ(headers, static_cast<size_t>(nsweeps));
         }
 
-        if(forced)
-        {
-            expect_finite(to_host(dlval));
-            expect_finite(to_host(duval));
-            expect_finite(to_host(ddval));
-            return;
-        }
         const std::vector<T> ref = host_ilu0(a);
         const double rel_tol = iterative_tolerance<T>(is_stopping(opt.options), max_row_length(a));
         expect_close(to_host(dlval), gather(ref, split.lpos), rel_tol);
@@ -540,19 +526,13 @@ namespace
                       rocsparse_status_success);
         }
 
-        // wavefront > 0 is reported to the compute call.
-        run_out compute(rocsparse_handle handle,
-                        real_of<T>       tol,
-                        rocsparse_int    nfreeiter = 0,
-                        int              wavefront = 0)
+        run_out compute(rocsparse_handle handle, real_of<T> tol, rocsparse_int nfreeiter = 0)
         {
             run_out       out;
             rocsparse_int nmaxiter = nmaxiter_in;
             const bool    verbose  = (options & rocsparse_itilu0_option_verbose) != 0;
             if(verbose)
                 testing::internal::CaptureStdout();
-            ScopedOverride<int> wave(handle->wavefront_size,
-                                     wavefront > 0 ? wavefront : handle->wavefront_size);
             out.compute_status = compute_ex<T>(handle,
                                                alg,
                                                options,
@@ -597,8 +577,7 @@ namespace
                             rocsparse_int        options,
                             rocsparse_int        nmaxiter,
                             const std::string&   what,
-                            rocsparse_itilu0_alg alg      = rocsparse_itilu0_alg_sync_split,
-                            bool                 poisoned = false)
+                            rocsparse_itilu0_alg alg = rocsparse_itilu0_alg_sync_split)
     {
         SCOPED_TRACE(what);
         using I = int32_t;
@@ -718,15 +697,6 @@ namespace
         std::string log_text;
         if(verbose)
             log_text = testing::internal::GetCapturedStdout();
-        if(poisoned)
-        {
-            // Non-finite data: the iteration may notice and report a zero pivot, or end at the
-            // sweep limit. It must not fault.
-            EXPECT_TRUE(status == rocsparse_status_success || status == rocsparse_status_zero_pivot)
-                << status;
-            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-            return;
-        }
         ASSERT_EQ(status, rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_GE(nsweeps, 1);
@@ -1167,15 +1137,6 @@ TEST_F(PrecondItilu0, x_async_split_options)
     check_async_split_x<double>(handle, make_band_matrix<double>(32, 2), opt, "verbose");
 }
 
-TEST_F(PrecondItilu0, x_async_split_wavefront_64)
-{
-    // A 64 lane wavefront selects the widest sweep kernel for dense rows (values compared
-    // on a wave64 GPU only, see forced_wavefront).
-    x_options opt;
-    opt.wavefront = 64;
-    check_async_split_x<double>(handle, make_band_matrix<double>(100, 100), opt, "wave64");
-}
-
 // The stopping criterion with a tolerance the residual cannot reach in a sensible
 // number of sweeps: the iteration ends before the sweep limit only through the
 // stagnation test, or runs to the limit. Either way it succeeds with a converged factor.
@@ -1408,46 +1369,47 @@ TEST_F(PrecondItilu0, temporary_storage_when_the_handle_buffer_is_small)
 
 // The sweep kernel of the public interface follows the mean number of entries per row
 // (2, 4, 8, 16, 32, 64 and above): a tridiagonal matrix and dense matrices of order 4 to
-// 65, with a free sweep, the COO option, the verbose table and a 64-lane wavefront
-// (compared on a wave64 GPU only, see forced_wavefront).
+// 65, with a free sweep, the COO option and the verbose table.
 TEST_F(PrecondItilu0, public_interface_sweep_kernels)
 {
-    const auto check =
-        [&](rocsparse_itilu0_alg alg, int32_t m, int32_t w, rocsparse_int extra, int wavefront) {
-            SCOPED_TRACE("alg " + std::to_string(alg) + " m " + std::to_string(m) + " w "
-                         + std::to_string(w));
-            const auto         a = make_band_matrix<double>(m, w);
-            itilu0_run<double> r;
-            r.prepare(
-                handle, alg, a, stopping | nrm_residual | nrm_correction | history_opt | extra, 80);
-            const bool forced = forced_wavefront(handle, wavefront);
-            const auto out    = r.compute(handle, default_tol<double>(), 1, wavefront);
-            ASSERT_EQ(out.compute_status, rocsparse_status_success);
-            // The log holds the correction norms, then the residual norms, of every sweep.
-            rocsparse_int       niter = -1;
-            std::vector<double> log(2 * 80, -1.0);
-            ASSERT_EQ(history<double>(handle, alg, &niter, log.data(), r.buffer_size, r.buffer.ptr),
-                      rocsparse_status_success);
-            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-            EXPECT_EQ(niter, out.nmaxiter);
-            const auto got = to_host(r.dilu);
-            if(forced)
-            {
-                expect_finite(got);
-                return;
-            }
-            expect_close(got, host_ilu0(a), iterative_tolerance<double>(true, max_row_length(a)));
-            ASSERT_GE(niter, 1);
-            expect_finite(std::vector<double>(log.begin(), log.begin() + 2 * niter));
-        };
+    const auto check = [&](rocsparse_itilu0_alg alg, int32_t m, int32_t w, rocsparse_int extra) {
+        SCOPED_TRACE("alg " + std::to_string(alg) + " m " + std::to_string(m) + " w "
+                     + std::to_string(w));
+        const auto         a = make_band_matrix<double>(m, w);
+        itilu0_run<double> r;
+        r.prepare(
+            handle, alg, a, stopping | nrm_residual | nrm_correction | history_opt | extra, 80);
+        const auto out = r.compute(handle, default_tol<double>(), 1);
+        ASSERT_EQ(out.compute_status, rocsparse_status_success);
+        // The log holds the correction norms, then the residual norms, of every sweep.
+        rocsparse_int       niter = -1;
+        std::vector<double> log(2 * 80, -1.0);
+        ASSERT_EQ(history<double>(handle, alg, &niter, log.data(), r.buffer_size, r.buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(niter, out.nmaxiter);
+        expect_close(
+            to_host(r.dilu), host_ilu0(a), iterative_tolerance<double>(true, max_row_length(a)));
+        ASSERT_GE(niter, 1);
+        ASSERT_LE(niter, 80);
+        for(rocsparse_int i = 0; i < 2 * niter; ++i)
+        {
+            EXPECT_TRUE(std::isfinite(log[i])) << "entry " << i;
+            EXPECT_GE(log[i], 0.0) << "entry " << i;
+        }
+        if(niter > 1)
+            EXPECT_LT(log[2 * niter - 1], log[niter]);
+        if(niter < 80)
+            EXPECT_LE(log[2 * niter - 1], default_tol<double>());
+    };
     const auto inplace = rocsparse_itilu0_alg_async_inplace;
-    check(inplace, 4, 1, 0, 0);
+    check(inplace, 4, 1, 0);
     for(const int32_t m : {4, 8, 16, 32, 64, 65})
-        check(inplace, m, m, 0, 0);
-    check(inplace, 4, 1, rocsparse_itilu0_option_coo_format, 0);
-    check(inplace, 8, 8, rocsparse_itilu0_option_coo_format, 0);
-    check(rocsparse_itilu0_alg_sync_split, 4, 4, verbose_opt, 0);
-    check(rocsparse_itilu0_alg_sync_split, 65, 65, 0, 64);
+        check(inplace, m, m, 0);
+    check(inplace, 4, 1, rocsparse_itilu0_option_coo_format);
+    check(inplace, 8, 8, rocsparse_itilu0_option_coo_format);
+    check(rocsparse_itilu0_alg_sync_split, 4, 4, verbose_opt);
+    check(rocsparse_itilu0_alg_sync_split, 65, 65, 0);
 }
 
 // The extended interface only implements the split algorithms; the others are refused

@@ -220,7 +220,7 @@ namespace
             reset();
         }
 
-        info_guard(const info_guard&)            = delete;
+        info_guard(const info_guard&) = delete;
         info_guard& operator=(const info_guard&) = delete;
     };
 
@@ -255,7 +255,7 @@ namespace
                 (void)rocsparse_destroy_mat_descr(upper);
         }
 
-        trm_fixture(const trm_fixture&)            = delete;
+        trm_fixture(const trm_fixture&) = delete;
         trm_fixture& operator=(const trm_fixture&) = delete;
     };
 

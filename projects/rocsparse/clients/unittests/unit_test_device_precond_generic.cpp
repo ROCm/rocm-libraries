@@ -36,6 +36,7 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include <algorithm>
 #include <string>
 
 using namespace precond_ut;
@@ -119,9 +120,13 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
     check_csr_matrix<Kind::ic, double>(
         handle, make_fat_row_matrix<double>(520, false, 3), opt, "fat 520", one);
     check_csr_matrix<Kind::ilu, double>(
-        handle, make_lower_band_matrix<double>(60, 5), opt, "band", one);
+        handle, with_upper_triangle(make_lower_band_matrix<double>(60, 5)), opt, "band", one);
     check_csr_matrix<Kind::ilu, double>(
-        handle, make_fat_row_matrix<double>(520, true, 3), opt, "fat 520", one);
+        handle,
+        with_upper_triangle(make_fat_row_matrix<double>(520, true, 3)),
+        opt,
+        "fat 520",
+        one);
     check_csr_matrix<Kind::ildlt, double>(
         handle, make_fat_row_matrix<double>(40, true, 3), opt, "fat 40", one);
 }
@@ -206,6 +211,40 @@ TYPED_TEST(PrecondIluIc, near_singularity_tolerance_boundaries)
 }
 
 // ---------------------------------------------------------------------------
+// Numeric boost
+// ---------------------------------------------------------------------------
+namespace
+{
+    // On the grid matrix (positive pivots) a boost tolerance above every pivot replaces
+    // each of them by the boost value, one below every pivot replaces none.
+    template <typename T>
+    void check_ilu_boost(rocsparse_handle handle)
+    {
+        const auto           a     = make_grid_matrix<T>(4, true);
+        const std::vector<T> plain = host_ilu0(a);
+        std::vector<double>  pivots;
+        for(int32_t r = 0; r < a.n; ++r)
+            pivots.push_back(std::abs(to_cd(plain[diagonal_position(a, r)])));
+        const double largest  = *std::max_element(pivots.begin(), pivots.end());
+        const double smallest = *std::min_element(pivots.begin(), pivots.end());
+        for(const double tol : {2.0 * largest, 0.5 * smallest})
+        {
+            run_options opt;
+            opt.boost     = true;
+            opt.boost_tol = tol;
+            opt.boost_val = 7.0;
+            check_csr_matrix<Kind::ilu, T>(handle, a, opt, "boost tol " + std::to_string(tol));
+        }
+    }
+}
+
+// Not spildlt0: rocsparse_spildlt0 ignores the boost inputs of its descriptor (bug).
+TEST_F(PrecondGeneric, spilu0_numeric_boost)
+{
+    for_all_types([&](auto tag) { check_ilu_boost<decltype(tag)>(handle); });
+}
+
+// ---------------------------------------------------------------------------
 // BSR
 // ---------------------------------------------------------------------------
 
@@ -227,82 +266,69 @@ TYPED_TEST(PrecondIluIc, bsr_block_dims_and_index_base)
         check_bsr_case<K, float>(handle, 4, 5, dir, opt);
         check_bsr_case<K, rocsparse_float_complex>(handle, 3, 6, dir, opt);
         check_bsr_case<K, rocsparse_double_complex>(handle, 3, 7, dir, opt);
-        check_bsr_case<K, double>(handle, 4, 3, dir, opt, true, one);
-        check_bsr_case<K, float>(handle, 3, 9, dir, opt, true, one);
+        check_bsr_case<K, double>(handle, 4, 3, dir, opt, one);
+        check_bsr_case<K, float>(handle, 3, 9, dir, opt, one);
     }
     run_options opt;
     opt.policy = rocsparse_analysis_policy_force;
     check_bsr_case<K, double>(handle, 4, 4, rocsparse_direction_row, opt);
 }
 
-// A handle that reports a 64 wide wavefront selects the specialised block
-// kernels (2_8 / 9_32 / 33_64 for ILU, 2_8_unrolled / 2_8 / 9_16 / 17_32 for IC).
-// They are written for 64 lanes: on a wave64 GPU every case is checked against the
-// host reference, on a 32-lane GPU only the status and the structure (see
-// check_bsr_matrix). The numeric result of every block dimension is covered by the
-// wavefront-32 test above.
+// A 64-lane wavefront selects the specialised block kernels (2_8 / 9_32 / 33_64 for
+// ILU, 2_8_unrolled / 2_8 / 9_16 / 17_32 for IC), so this only runs on a wave64 GPU.
 TYPED_TEST(PrecondIluIc, bsr_wave64_kernels)
 {
+    if(device_warp_size() != 64)
+        GTEST_SKIP() << "needs a GPU with a wavefront of 64";
     constexpr Kind             K      = TestFixture::K;
     const auto                 handle = this->handle;
-    const bool                 verify = !forced_wavefront(handle, 64);
     const std::vector<int32_t> wide = (K == Kind::ilu) ? std::vector<int32_t>{8, 9, 16, 32, 33, 64}
                                                        : std::vector<int32_t>{8, 9, 16, 17, 32};
     for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
     {
-        run_options opt;
-        opt.wavefront = 64;
+        const run_options opt;
         for(const int32_t block_dim : {2, 4})
         {
-            check_bsr_case<K, double>(handle, 4, block_dim, dir, opt, verify);
-            check_bsr_case<K, float>(handle, 3, block_dim, dir, opt, verify);
+            check_bsr_case<K, double>(handle, 4, block_dim, dir, opt);
+            check_bsr_case<K, float>(handle, 3, block_dim, dir, opt);
         }
-        check_bsr_case<K, rocsparse_float_complex>(handle, 3, 3, dir, opt, verify);
-        check_bsr_case<K, rocsparse_double_complex>(handle, 3, 2, dir, opt, verify);
+        check_bsr_case<K, rocsparse_float_complex>(handle, 3, 3, dir, opt);
+        check_bsr_case<K, rocsparse_double_complex>(handle, 3, 2, dir, opt);
         for(const int32_t block_dim : wide)
-            check_bsr_case<K, double>(handle, 3, block_dim, dir, opt, verify);
-        check_bsr_case<K, float>(handle, 3, 20, dir, opt, verify);
-        check_bsr_case<K, rocsparse_float_complex>(handle, 3, 12, dir, opt, verify);
-        check_bsr_case<K, rocsparse_double_complex>(handle, 3, 20, dir, opt, verify);
+            check_bsr_case<K, double>(handle, 3, block_dim, dir, opt);
+        check_bsr_case<K, float>(handle, 3, 20, dir, opt);
+        check_bsr_case<K, rocsparse_float_complex>(handle, 3, 12, dir, opt);
+        check_bsr_case<K, rocsparse_double_complex>(handle, 3, 20, dir, opt);
     }
 }
 
-// Block rows of 33 to 128 blocks and block_dim <= 8 select the plain (not
-// unrolled) 2_8 bsric0 kernel on a 64 lane wavefront; the lower block pattern has a
-// last block row of `fat` blocks. The wavefront-32 (general) kernel is checked on
-// the same matrices. The forced 64-lane runs are compared with the host only on a
-// wave64 GPU, as in bsr_wave64_kernels.
-TEST_F(PrecondGeneric, spic0_bsr_wave64_long_block_rows)
+// Block rows of 33 to 128 blocks and block_dim <= 8 select the plain (not unrolled) 2_8
+// bsric0 kernel on a wave64 GPU and the general kernel on a wave32 GPU; the lower block
+// pattern has a last block row of `fat` blocks.
+TEST_F(PrecondGeneric, spic0_bsr_long_block_rows)
 {
-    const bool  verify = !forced_wavefront(handle, 64);
-    run_options general;
-    run_options forced;
-    forced.wavefront = 64;
+    const run_options opt;
     for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
     {
         for(const int32_t block_dim : {2, 3, 4, 8})
         {
-            const auto m    = make_fat_block_row_matrix<double>(40, block_dim, dir);
-            const auto what = "fat block row, block_dim=" + std::to_string(block_dim);
-            check_bsr_matrix<Kind::ic, double>(handle, m, general, true, what + " (default)");
-            check_bsr_matrix<Kind::ic, double>(handle, m, forced, verify, what + " (wave64)");
+            check_bsr_matrix<Kind::ic, double>(
+                handle,
+                make_fat_block_row_matrix<double>(40, block_dim, dir),
+                opt,
+                "fat block row, block_dim=" + std::to_string(block_dim));
         }
-        check_bsr_matrix<Kind::ic, float>(handle,
-                                          make_fat_block_row_matrix<float>(100, 3, dir),
-                                          forced,
-                                          verify,
-                                          "fat block row 100");
+        check_bsr_matrix<Kind::ic, float>(
+            handle, make_fat_block_row_matrix<float>(100, 3, dir), opt, "fat block row 100");
         check_bsr_matrix<Kind::ic, rocsparse_float_complex>(
             handle,
             make_fat_block_row_matrix<rocsparse_float_complex>(40, 4, dir),
-            forced,
-            verify,
+            opt,
             "fat block row, float complex");
         check_bsr_matrix<Kind::ic, rocsparse_double_complex>(
             handle,
             make_fat_block_row_matrix<rocsparse_double_complex>(40, 2, dir),
-            forced,
-            verify,
+            opt,
             "fat block row, complex");
     }
 }
@@ -532,6 +558,7 @@ namespace
                          compute_size ? compute_buffer.ptr : nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        check_factor<K>(d.base, to_host(d.val), run_options{}, "stage api");
 
         // After the compute stage the analysis cannot run again.
         EXPECT_NE(A::run(handle, descr, d.A, d.A, A::stage(Stage::analysis), size, buffer.ptr),
@@ -580,18 +607,24 @@ namespace
         const run_options opt;
         // IC(0) accepts only the lower triangle and real products.
         constexpr bool real_only = (K == Kind::ic);
+        // ILU(0) gets the upper triangle as well, or its update would have nothing to do.
+        const auto shape = [](const csr_matrix<T>& lower) {
+            return (K == Kind::ilu) ? with_upper_triangle(lower) : lower;
+        };
 
         // Short rows: hash kernel with the smallest table.
         check_csr_matrix<K, T, I, J>(
-            handle, make_lower_band_matrix<T>(12, 3, !real_only), opt, what + " short rows");
+            handle, shape(make_lower_band_matrix<T>(12, 3, !real_only)), opt, what + " short rows");
         // A row of 100 entries: hash kernel with a table of 128.
         check_csr_matrix<K, T, I, J>(
-            handle, make_fat_row_matrix<T>(100, !real_only, 3), opt, what + " fat row 100");
+            handle, shape(make_fat_row_matrix<T>(100, !real_only, 3)), opt, what + " fat row 100");
         // A row of 520 entries: binary-search kernel.
         // Not for spildlt0 i32 rows / i64 cols: csrildlt0 binsearch drops the inner sums (bug).
         if constexpr(!(K == Kind::ildlt && sizeof(I) == 4 && sizeof(J) == 8))
-            check_csr_matrix<K, T, I, J>(
-                handle, make_fat_row_matrix<T>(520, !real_only, 3), opt, what + " fat row 520");
+            check_csr_matrix<K, T, I, J>(handle,
+                                         shape(make_fat_row_matrix<T>(520, !real_only, 3)),
+                                         opt,
+                                         what + " fat row 520");
     }
 
     template <Kind K, typename T>
@@ -671,7 +704,7 @@ namespace
                     (void)rocsparse_destroy_spmat_descr(*d);
         }
 
-        other_format_matrices(const other_format_matrices&)            = delete;
+        other_format_matrices(const other_format_matrices&) = delete;
         other_format_matrices& operator=(const other_format_matrices&) = delete;
     };
 

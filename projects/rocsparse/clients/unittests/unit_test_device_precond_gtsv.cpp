@@ -302,7 +302,10 @@ namespace
                                      got.begin() + static_cast<size_t>(k) * stride + m);
             expect_solution(sol, want[k], "batch " + std::to_string(k));
             for(int32_t i = m; i < stride; ++i)
+            {
                 EXPECT_EQ(re(got[static_cast<size_t>(k) * stride + i]), 0.0);
+                EXPECT_EQ(im(got[static_cast<size_t>(k) * stride + i]), 0.0);
+            }
         }
     }
 
@@ -359,8 +362,11 @@ TEST_F(PrecondTridiagonal, pivot_spike_grid_sizes)
     {
         run_multi_rhs<Solver::pivot, double>(handle, m, 2);
     }
-    run_multi_rhs<Solver::pivot, float>(handle, 30000, 1);
-    run_multi_rhs<Solver::pivot, rocsparse_double_complex>(handle, 9000, 1);
+    // Systems that need row exchanges, one per value type.
+    run_multi_rhs<Solver::pivot, double>(handle, 16000, 1, 0, true);
+    run_multi_rhs<Solver::pivot, float>(handle, 30000, 1, 0, true);
+    run_multi_rhs<Solver::pivot, rocsparse_float_complex>(handle, 8000, 1, 0, true);
+    run_multi_rhs<Solver::pivot, rocsparse_double_complex>(handle, 9000, 1, 0, true);
 }
 
 // Above 262144 rows the SPIKE grid would exceed 512 blocks: the block dimension doubles.

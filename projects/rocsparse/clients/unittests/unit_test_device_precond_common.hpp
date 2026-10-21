@@ -42,6 +42,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace precond_ut
@@ -70,8 +71,7 @@ namespace precond_ut
         return std::vector<rocsparse_int>(v.begin(), v.end());
     }
 
-    // Overrides a handle member (the wavefront size or the size of the internal buffer)
-    // for the lifetime of the guard.
+    // Overrides a handle member for the lifetime of the guard.
     template <typename T>
     struct ScopedOverride
     {
@@ -90,7 +90,7 @@ namespace precond_ut
             member = saved;
         }
 
-        ScopedOverride(const ScopedOverride&)            = delete;
+        ScopedOverride(const ScopedOverride&) = delete;
         ScopedOverride& operator=(const ScopedOverride&) = delete;
     };
 
@@ -114,7 +114,7 @@ namespace precond_ut
                 (void)rocsparse_destroy_mat_descr(descr);
         }
 
-        descr_info(const descr_info&)            = delete;
+        descr_info(const descr_info&) = delete;
         descr_info& operator=(const descr_info&) = delete;
     };
 
@@ -138,10 +138,10 @@ namespace precond_ut
         rocsparse_s##NAME, rocsparse_d##NAME, rocsparse_c##NAME, rocsparse_z##NAME, __VA_ARGS__)
 
     template <typename T>
-    using real_of = std::conditional_t<std::is_same_v<T, double>
-                                           || std::is_same_v<T, rocsparse_double_complex>,
-                                       double,
-                                       float>;
+    using real_of = std::conditional_t<
+        std::is_same_v<T, double> || std::is_same_v<T, rocsparse_double_complex>,
+        double,
+        float>;
 
     template <typename T>
     constexpr bool is_cplx
@@ -268,15 +268,6 @@ namespace precond_ut
             EXPECT_TRUE(std::isfinite(re(v[i])) && std::isfinite(im(v[i]))) << "entry " << i;
     }
 
-    // True when a test that reports `wavefront` lanes to the library runs on a GPU of
-    // another wave size. A 64-lane kernel run on 32 lanes is outside its design, so its
-    // values are not compared then (only the status, and the values where that holds,
-    // their finiteness).
-    inline bool forced_wavefront(rocsparse_handle handle, int wavefront)
-    {
-        return wavefront > 0 && handle->wavefront_size != wavefront;
-    }
-
     // ------------------------------------------------------------------
     // Scalar CSR matrices
     // ------------------------------------------------------------------
@@ -313,7 +304,7 @@ namespace precond_ut
                     a.ind.push_back(j);
                     const double s = (skew && j < i) ? 1.15 : 1.0;
                     // Hermitian imaginary part: im(i, j) = -im(j, i).
-                    const double w = (std::abs(j - i) == 1) ? 1.0 : 0.5;
+                    const double w    = (std::abs(j - i) == 1) ? 1.0 : 0.5;
                     const double imag = (is_cplx<T> && j != i) ? (j > i ? 0.1 * w : -0.1 * w) : 0.0;
                     a.val.push_back(make_value<T>(r * s, imag));
                 };
@@ -414,6 +405,52 @@ namespace precond_ut
                     a.val.push_back(
                         make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
                                       (imag && is_cplx<T>) ? 0.01 * ((r - c) % 3) : 0.0));
+            }
+            a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
+        }
+        return a;
+    }
+
+    // ILU(0) input from a lower-triangular matrix: every stored a_ij (j < i) gets the
+    // mirror a_ji = 0.8 * conj(a_ij), so the update loop over the dependency row after its
+    // diagonal has entries to hit and to miss. Each diagonal entry becomes
+    // 1 + 1.25 * S with S the sum of the moduli of the off-diagonal entries of its row and
+    // its column: the matrix stays strictly diagonally dominant. A row without a diagonal
+    // entry keeps none. The last row gains nothing, so a fat last row keeps its length.
+    template <typename T>
+    csr_matrix<T> with_upper_triangle(const csr_matrix<T>& lower)
+    {
+        std::vector<std::vector<std::pair<int32_t, T>>> rows(static_cast<size_t>(lower.n));
+        std::vector<double>                             dominance(static_cast<size_t>(lower.n));
+        for(int32_t i = 0; i < lower.n; ++i)
+        {
+            for(int32_t p = lower.ptr[i]; p < lower.ptr[i + 1]; ++p)
+            {
+                const int32_t j = lower.ind[p];
+                if(j > i)
+                    throw std::invalid_argument("with_upper_triangle needs a lower matrix");
+                rows[i].push_back({j, lower.val[p]});
+                if(j < i)
+                {
+                    rows[j].push_back({i, from_cd<T>(0.8 * std::conj(to_cd(lower.val[p])))});
+                    const double mod = 1.8 * std::abs(to_cd(lower.val[p]));
+                    dominance[i] += mod;
+                    dominance[j] += mod;
+                }
+            }
+        }
+        csr_matrix<T> a;
+        a.n = lower.n;
+        a.ptr.push_back(0);
+        for(int32_t i = 0; i < a.n; ++i)
+        {
+            std::sort(rows[i].begin(), rows[i].end(), [](const auto& x, const auto& y) {
+                return x.first < y.first;
+            });
+            for(const auto& [j, v] : rows[i])
+            {
+                a.ind.push_back(j);
+                a.val.push_back(j == i ? make_value<T>(1.0 + 1.25 * dominance[i]) : v);
             }
             a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
         }
@@ -1021,8 +1058,7 @@ namespace precond_ut
         bool                      set_sing_tol = false;
         double                    sing_tol     = 0.0;
         bool                      tol_after    = false; // set the tolerance after the analysis
-        int                       wavefront = 0; // > 0: wavefront size reported to the numeric call
-        size_t device_memory                = 0; // > 0: size of the internal buffer of the handle
+        size_t device_memory = 0; // > 0: size of the internal buffer of the handle
     };
 
     template <typename T>
@@ -1053,7 +1089,7 @@ namespace precond_ut
                 (void)api<K>::destroy(handle, descr);
         }
 
-        descr_guard(const descr_guard&)            = delete;
+        descr_guard(const descr_guard&) = delete;
         descr_guard& operator=(const descr_guard&) = delete;
     };
 
@@ -1135,10 +1171,6 @@ namespace precond_ut
         device_vector<char> compute_buffer{compute_size ? compute_size : size_t{1}};
         ASSERT_TRUE(compute_buffer.ptr);
 
-        std::unique_ptr<ScopedOverride<int>> wavefront;
-        if(opt.wavefront > 0)
-            wavefront
-                = std::make_unique<ScopedOverride<int>>(handle->wavefront_size, opt.wavefront);
         out.compute_status = api<K>::run(handle,
                                          descr,
                                          A,
@@ -1191,8 +1223,8 @@ namespace precond_ut
         device_vector<T>           val;
         rocsparse_spmat_descr      A = nullptr;
 
-        dev_csr()                          = default;
-        dev_csr(const dev_csr&)            = delete;
+        dev_csr()               = default;
+        dev_csr(const dev_csr&) = delete;
         dev_csr& operator=(const dev_csr&) = delete;
 
         ~dev_csr()
@@ -1264,8 +1296,8 @@ namespace precond_ut
         device_vector<T>       val;
         rocsparse_spmat_descr  A = nullptr;
 
-        dev_bsr()                          = default;
-        dev_bsr(const dev_bsr&)            = delete;
+        dev_bsr()               = default;
+        dev_bsr(const dev_bsr&) = delete;
         dev_bsr& operator=(const dev_bsr&) = delete;
 
         ~dev_bsr()
@@ -1316,16 +1348,22 @@ namespace precond_ut
     }
 
     // Expected factor of a scalar matrix for each kind. For IC(0) only the
-    // lower triangle is a factor; the entries above it are not compared.
+    // lower triangle is a factor; the entries above it are not compared. The IC(0)
+    // reference has no numeric boost (its semantics are not documented).
     template <Kind K, typename T>
     std::vector<T> reference(const csr_matrix<T>& a, const run_options& opt)
     {
+        const double boost_tol = opt.boost ? opt.boost_tol : -1.0;
         if constexpr(K == Kind::ilu)
-            return host_ilu0(a, opt.boost ? opt.boost_tol : -1.0, opt.boost_val);
+            return host_ilu0(a, boost_tol, opt.boost_val);
         else if constexpr(K == Kind::ic)
+        {
+            if(opt.boost)
+                throw std::invalid_argument("no IC(0) reference with a numeric boost");
             return keep_lower_only(a, host_ic0(a));
+        }
         else
-            return host_ildlt0(a);
+            return host_ildlt0(a, boost_tol, opt.boost_val);
     }
 
     // Compares one factorized scalar matrix with the host reference and checks the residual.
@@ -1388,23 +1426,13 @@ namespace precond_ut
         }
     }
 
-    // Factorization of the BSR matrix `m` through the generic API.
-    //
-    // verify == true: the factor must match the host reference (the scalar
-    // expansion factorized on the host) and no singularity may be reported.
-    //
-    // verify == false is used for the wave64-specialised kernels forced onto a 32-lane
-    // GPU by the wave64 tests (see forced_wavefront): the values are not compared, and
-    // finiteness cannot be asserted either (block dimensions above 4 give non-finite
-    // values on 32 lanes). The call must still
-    // succeed, the sparsity pattern the library was given must be unchanged, and the
-    // factorization must have written to the values. On a native 64-lane GPU the tests
-    // verify the values.
+    // Factorization of the BSR matrix `m` through the generic API: the factor must match
+    // the host reference (the scalar expansion factorized on the host) and no singularity
+    // may be reported.
     template <Kind K, typename T>
     void check_bsr_matrix(rocsparse_handle     handle,
                           const bsr_matrix<T>& m,
                           const run_options&   opt,
-                          bool                 verify,
                           const std::string&   what,
                           rocsparse_index_base base = rocsparse_index_base_zero)
     {
@@ -1412,29 +1440,11 @@ namespace precond_ut
         dev_bsr<T> d;
         d.init(m, base);
         ASSERT_NE(d.A, nullptr);
-        // Whatever the wave size, the matrix must admit the factorization.
         expect_diagonally_dominant(expand_bsr(m));
         run_result<T> out;
         run_factorization<K, T>(handle, d.A, d.val, 1, opt, out);
         ASSERT_EQ(out.compute_status, rocsparse_status_success);
         ASSERT_EQ(out.values.size(), d.base.val.size());
-        if(!verify)
-        {
-            const int32_t shift = (base == rocsparse_index_base_one) ? 1 : 0;
-            const auto    row   = to_host(d.row);
-            const auto    col   = to_host(d.col);
-            ASSERT_EQ(row.size(), d.base.ptr.size());
-            ASSERT_EQ(col.size(), d.base.ind.size());
-            for(size_t i = 0; i < row.size(); ++i)
-                EXPECT_EQ(row[i], d.base.ptr[i] + shift) << "row pointer " << i;
-            for(size_t i = 0; i < col.size(); ++i)
-                EXPECT_EQ(col[i], d.base.ind[i] + shift) << "column index " << i;
-            bool written = false;
-            for(size_t i = 0; i < out.values.size(); ++i)
-                written = written || !(to_cd(out.values[i]) == to_cd(d.base.val[i]));
-            EXPECT_TRUE(written) << "the kernel left every value unchanged";
-            return;
-        }
         const csr_matrix<T> scalar = expand_bsr(d.base);
         const csr_matrix<T> got    = expand_bsr([&] {
             bsr_matrix<T> f = d.base;
@@ -1452,14 +1462,12 @@ namespace precond_ut
                         int32_t              block_dim,
                         rocsparse_direction  dir,
                         const run_options&   opt,
-                        bool                 verify = true,
-                        rocsparse_index_base base   = rocsparse_index_base_zero)
+                        rocsparse_index_base base = rocsparse_index_base_zero)
     {
         const bool skew = (K == Kind::ilu);
         check_bsr_matrix<K, T>(handle,
                                make_block_matrix<T>(mb, block_dim, dir, skew),
                                opt,
-                               verify,
                                "mb=" + std::to_string(mb)
                                    + " block_dim=" + std::to_string(block_dim),
                                base);
@@ -1517,6 +1525,8 @@ namespace precond_ut
     }
 
     // `want_position` is zero based; the library reports it in the matrix index base.
+    // Without a zero pivot (none or numeric_near) the factor is the plain one and is
+    // compared too.
     template <Kind K, typename T>
     void singular_case(rocsparse_handle      handle,
                        const csr_matrix<T>&  a,
@@ -1533,6 +1543,9 @@ namespace precond_ut
         EXPECT_EQ(out.compute_status, rocsparse_status_success);
         EXPECT_EQ(out.singularity[0], want_singularity);
         EXPECT_EQ(out.position[0], position_in_base(want_position, base));
+        if(want_singularity == rocsparse_singularity_none
+           || want_singularity == rocsparse_singularity_numeric_near)
+            check_factor<K>(d.base, out.values, opt, "singularity tolerance");
     }
 
     // Pivot of every row as the singularity test sees it: |u_ii| for ILU(0) (the test

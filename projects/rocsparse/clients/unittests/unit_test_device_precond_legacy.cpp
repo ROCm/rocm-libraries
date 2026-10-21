@@ -632,12 +632,11 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
                 }
                 EXPECT_EQ(out.zero_pivot_status, rocsparse_status_success);
                 EXPECT_EQ(out.zero_pivot, -1);
-                // The boosted pivot is exactly +-2.
+                // The boosted pivot (block (0,0), entry (0,0)) is exactly +-2.
                 if(boost)
                 {
                     const double sign = (pivot0 < 0.0) ? -1.0 : 1.0;
-                    EXPECT_EQ(to_cd(host_ilu0(expand_bsr(bsr), req.tol, req.val)[0]),
-                              std::complex<double>(2.0 * sign, 0.0));
+                    EXPECT_EQ(to_cd(out.values[0]), std::complex<double>(2.0 * sign, 0.0));
                 }
                 expect_bsr_factor(bsr, out, req);
             }
@@ -668,8 +667,16 @@ namespace
         EXPECT_EQ(boost(handle, nullptr, 1, &tol, &val), rocsparse_status_invalid_pointer);
         EXPECT_EQ(boost(handle, di.info, 1, nullptr, &val), rocsparse_status_invalid_pointer);
         EXPECT_EQ(boost(handle, di.info, 1, &tol, nullptr), rocsparse_status_invalid_pointer);
-        // Disabling needs no values.
-        EXPECT_EQ(boost(handle, di.info, 0, nullptr, nullptr), rocsparse_status_success);
+        EXPECT_EQ(boost(handle, di.info, 0, &tol, &val), rocsparse_status_success);
         EXPECT_EQ(boost(handle, di.info, 1, &tol, &val), rocsparse_status_success);
     }
+}
+
+TEST_F(PrecondLegacy, numeric_boost_argument_checks)
+{
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        check_boost_arguments<false, T>(handle);
+        check_boost_arguments<true, T>(handle);
+    });
 }

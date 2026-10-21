@@ -42,7 +42,10 @@
 #include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_singularity.hpp"
 
+#include <algorithm>
 #include <complex>
+#include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -190,7 +193,7 @@ namespace
                 (void)rocsparse_destroy_hyb_mat(hyb);
         }
 
-        hyb_guard(const hyb_guard&)            = delete;
+        hyb_guard(const hyb_guard&) = delete;
         hyb_guard& operator=(const hyb_guard&) = delete;
     };
 
@@ -610,7 +613,7 @@ namespace
                 (void)rocsparse_destroy_dnmat_descr(descr);
         }
 
-        dn_matrix(const dn_matrix&)            = delete;
+        dn_matrix(const dn_matrix&) = delete;
         dn_matrix& operator=(const dn_matrix&) = delete;
 
         size_t position(int64_t b, int64_t i, int64_t j) const
@@ -648,7 +651,7 @@ namespace
                 (void)rocsparse_destroy_dnvec_descr(descr);
         }
 
-        dn_scalars(const dn_scalars&)            = delete;
+        dn_scalars(const dn_scalars&) = delete;
         dn_scalars& operator=(const dn_scalars&) = delete;
     };
 
@@ -739,6 +742,29 @@ namespace
             EXPECT_EQ(near4_wide.create_singular_pivot_async(4, rocsparse_indextype_i64, stream),
                       rocsparse_status_success);
         }
+
+        // Writes the markers of the 4-entry trackers. Entry 0: exact 6 before near 11,
+        // entry 1: near 3 before exact 9, entry 2: exact 8 only, entry 3: nothing.
+        void plant(hipStream_t stream)
+        {
+            constexpr int32_t n32 = std::numeric_limits<int32_t>::max();
+            constexpr int64_t n64 = std::numeric_limits<int64_t>::max();
+            ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+            set(exact4, std::vector<int32_t>{6, 9, 8, n32});
+            set(near4, std::vector<int32_t>{11, 3, n32, n32});
+            set(exact4_wide, std::vector<int64_t>{6, 9, 8, n64});
+            set(near4_wide, std::vector<int64_t>{11, 3, n64, n64});
+        }
+
+        template <typename I>
+        static void set(rocsparse::singular_info_t& t, const std::vector<I>& markers)
+        {
+            EXPECT_EQ(hipMemcpy(t.get_position(),
+                                markers.data(),
+                                markers.size() * sizeof(I),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
     };
 }
 
@@ -771,18 +797,30 @@ TEST_F(PrecondAuxiliary, position_read_back_checks_the_trackers)
     EXPECT_NE(read(4, &t.exact4_wide, &t.near4, false), rocsparse_status_success);
     EXPECT_NE(read(4, &t.exact4, &t.near4_wide, true), rocsparse_status_success);
 
-    // Consistent trackers are read back.
-    EXPECT_EQ(read(4, &t.exact4, &t.near4, false), rocsparse_status_success);
-    EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
-    EXPECT_EQ(read(4, &t.exact4_wide, &t.near4_wide, true), rocsparse_status_success);
-    EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
+    // Consistent trackers are read back: fresh ones hold no position, planted ones the
+    // smaller of the exact and the near marker.
+    const auto read_both = [&](const std::vector<int64_t>& want) {
+        ASSERT_EQ(read(4, &t.exact4, &t.near4, false), rocsparse_status_success);
+        ASSERT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
+        ASSERT_EQ(read(4, &t.exact4_wide, &t.near4_wide, true), rocsparse_status_success);
+        ASSERT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
+        for(size_t i = 0; i < want.size(); ++i)
+        {
+            EXPECT_EQ(host_position[i], want[i]) << "entry " << i;
+            EXPECT_EQ(host_position64[i], want[i]) << "entry " << i;
+        }
+    };
+    read_both({-1, -1, -1, -1});
+    t.plant(handle->stream);
+    read_both({6, 3, 8, -1});
 }
 
 TEST_F(PrecondAuxiliary, singularity_read_back_checks_the_trackers)
 {
     trackers              t(handle->stream);
-    rocsparse_singularity host_singularity[4];
-    auto                  read = [&](int64_t                           batch,
+    const auto            sentinel            = static_cast<rocsparse_singularity>(-123);
+    rocsparse_singularity host_singularity[4] = {sentinel, sentinel, sentinel, sentinel};
+    auto                  read                = [&](int64_t                           batch,
                     const rocsparse::singular_info_t* exact,
                     const rocsparse::singular_info_t* near) {
         return rocsparse::singularity_get_async(
@@ -795,13 +833,20 @@ TEST_F(PrecondAuxiliary, singularity_read_back_checks_the_trackers)
     EXPECT_NE(read(4, &t.exact4_wide, &t.near4), rocsparse_status_success);
     EXPECT_NE(read(4, &t.exact4, &t.near4_wide), rocsparse_status_success);
 
-    EXPECT_EQ(read(4, &t.exact4, &t.near4), rocsparse_status_success);
-    EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
-    for(const auto s : host_singularity)
-    {
-        EXPECT_TRUE(s == rocsparse_singularity_numeric_exact
-                    || s == rocsparse_singularity_numeric_near
-                    || s == rocsparse_singularity_symbolic || s == rocsparse_singularity_none)
-            << "unexpected singularity " << static_cast<int>(s);
-    }
+    const auto check = [&](const rocsparse::singular_info_t&         exact,
+                           const rocsparse::singular_info_t&         near,
+                           const std::vector<rocsparse_singularity>& want) {
+        std::fill(std::begin(host_singularity), std::end(host_singularity), sentinel);
+        ASSERT_EQ(read(4, &exact, &near), rocsparse_status_success);
+        ASSERT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
+        for(size_t i = 0; i < want.size(); ++i)
+            EXPECT_EQ(host_singularity[i], want[i]) << "entry " << i;
+    };
+    const auto none  = rocsparse_singularity_none;
+    const auto exact = rocsparse_singularity_numeric_exact;
+    const auto near  = rocsparse_singularity_numeric_near;
+    check(t.exact4, t.near4, {none, none, none, none});
+    t.plant(handle->stream);
+    check(t.exact4, t.near4, {exact, near, exact, none});
+    check(t.exact4_wide, t.near4_wide, {exact, near, exact, none});
 }
