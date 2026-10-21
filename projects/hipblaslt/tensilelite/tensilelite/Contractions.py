@@ -72,6 +72,17 @@ def _computeInputsFromOperandTypes(d, srcType, computeA, computeB):
         return computeA, computeB
     return operandA, operandB
 
+# DPP store-fold (DPPStoreFold) is only a win on store-bound (large-output)
+# problems; below this output dimension (in both M and N) the kernel is
+# launch/occupancy-bound and the fold's blend VALU is unamortized overhead
+# (measured: ~-2 to -6% on <=~3kx3k, +7 to +17% on store-bound shapes, with the
+# knee at ~3kx3k independent of PLSIN).  Rather than gate inside the kernel (a
+# runtime branch cannot be hidden on the weave store arm), a DPPStoreFold=True
+# solution carries a SizeGreaterThan predicate so the library only SELECTS it at
+# >= this size in both free dims and falls back to a DPPStoreFold=False solution
+# otherwise -- zero per-kernel overhead.  Set to 0 to disable the size gate.
+DPPSF_FOLD_MIN_OUTPUT_DIM = 4096
+
 @state_key_ordering
 class FreeIndex:
     StateKeys = ['isA', 'i', 'c', 'd']
@@ -683,6 +694,15 @@ class ProblemPredicate(Properties.Predicate):
 
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
+
+        # DPP store-fold is store-bound-only: gate the DPPStoreFold solution to
+        # large outputs so the library selects it only when BOTH free dims are
+        # >= DPPSF_FOLD_MIN_OUTPUT_DIM and otherwise picks a DPPStoreFold=False
+        # solution.  index 0 = M (free0), index 1 = N (free1); SizeGreaterThan is
+        # strict, hence the -1.
+        if state.get('DPPStoreFold') and DPPSF_FOLD_MIN_OUTPUT_DIM > 0:
+            rv += [cls('SizeGreaterThan', index=0, value=DPPSF_FOLD_MIN_OUTPUT_DIM - 1)]
+            rv += [cls('SizeGreaterThan', index=1, value=DPPSF_FOLD_MIN_OUTPUT_DIM - 1)]
 
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
