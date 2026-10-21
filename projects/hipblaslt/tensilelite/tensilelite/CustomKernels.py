@@ -260,9 +260,7 @@ def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
 def readCustomKernelConfig(name, directory=None):
-    return _customConfigFrom(name, _readEmbeddedYaml(name, directory, customConfigOnly=True))
-
-def _customConfigFrom(name, parsed):
+    parsed = _readEmbeddedYaml(name, directory, customConfigOnly=True)
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
         raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
     config = parsed["custom.config"]
