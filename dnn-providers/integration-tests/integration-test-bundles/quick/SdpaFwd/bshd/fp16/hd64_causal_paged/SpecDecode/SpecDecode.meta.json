@@ -1,0 +1,99 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_fwd_paged_golden.py",
+    "generator_sha256": "4af7b10eb5ee3c319232457acf05ac61bc91762f30fe82c956316592a6475cc2",
+    "helpers_sha256": "237072d299cb470ad103d7d9620f03e928555f3b593a7e6e478e65cd08650382",
+    "generated_at": "2026-10-21T22:48:21Z",
+    "reference_source": "PyTorch 2.13.0+rocm10.0.0",
+    "reference_backend": "pytorch_math_backend (gather-then-dense)",
+    "rocm_version": "10.0.0",
+    "generator_version": "1.0.0",
+    "generation_precision": "like-for-like: FP16 inputs, FP32 intermediates, FP16 output",
+    "direction": "forward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "config": {
+        "batch": 3,
+        "num_heads_q": 4,
+        "num_heads_kv": 1,
+        "seq_q": 4,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "fp16",
+        "causal": "bottom_right",
+        "window_left": -1,
+        "window_right": -1,
+        "stats": false,
+        "scale": 0.125,
+        "gqa_ratio": 4,
+        "layout": "bshd",
+        "ragged_q": false,
+        "seq_lens_q": null,
+        "seq_lens_kv": [
+            96,
+            5,
+            0
+        ],
+        "max_seq_len_kv": 96,
+        "block_size": 32,
+        "max_blocks_per_seq": 3,
+        "num_blocks": 6,
+        "used_blocks": 4,
+        "spare_blocks": 2,
+        "kv_container_layout": "[num_blocks, block_size, H_kv, D] (vLLM)",
+        "interleaved_kv": false,
+        "k_strides": [
+            2048,
+            64,
+            64,
+            1
+        ],
+        "v_strides": [
+            2048,
+            64,
+            64,
+            1
+        ],
+        "spare_fill": 100.0,
+        "interleave_fill": null,
+        "shared_page_table": true,
+        "page_table_k": [
+            [
+                0,
+                2,
+                5
+            ],
+            [
+                4,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "page_table_v": [
+            [
+                0,
+                2,
+                5
+            ],
+            [
+                4,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1
+            ]
+        ]
+    }
+}
