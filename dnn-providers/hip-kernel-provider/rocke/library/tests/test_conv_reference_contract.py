@@ -601,6 +601,7 @@ assert "reference_common.worker" in sys.modules
 assert 'kernels' not in sys.modules
 assert 'dispatch' not in sys.modules
 assert 'torch' not in sys.modules
+assert 'pytest' not in sys.modules
 """
     subprocess.run(
         [sys.executable, "-I", "-c", script, str(bundle / "payload/runner")],

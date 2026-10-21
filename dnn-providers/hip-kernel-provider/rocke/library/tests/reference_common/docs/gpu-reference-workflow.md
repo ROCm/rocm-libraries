@@ -102,13 +102,14 @@ only its own parts:
 
 | File | Declares |
 |---|---|
-| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, `Metric`, and `TorchReference`; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
+| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, `Metric`, and an optional `TorchReference` for offline Torch cross-checks; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
 | `worker.py` | `run(request, output)`, which passes a `WorkerOperation` with the adapter's launch call and the frozen replay-argument binding to `reference_common.worker.run_case` |
 | `test_<operation>_pinned_reference.py` | A `reference_bundle` fixture from `select_bundle` and the tests from `pinned_reference_tests`, with a negative-control perturbation that exceeds the comparison limit in the operation's metric |
 
 Qualification freezes the package's `contract.py`, `worker.py`, `architectures/`,
-and `implementations/`, with all of `reference_common/`, into each bundle; the
-worker must not import anything else from the tests tree.
+and `implementations/`, with `reference_common/` except its pytest-only
+`pinned_tests.py` and `pytest_support.py`, into each bundle; the worker must not
+import anything else from the tests tree.
 
 No shared list names the operations: each
 `library/tests/<operation>_reference/` package with `architectures/registry.json`

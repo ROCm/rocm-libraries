@@ -1524,17 +1524,20 @@ def _published_pairs():
 
     Configuration requires a lock for each published pair, and installed trees
     carry the locks but not the CMake publication list, so these pairs cover
-    every published pair in both layouts.
+    every published pair in both layouts. Lock paths come from the registry
+    directory, not ``baseline_lock``, which imports the adapter: a broken
+    adapter must fail its own tests, not this module's collection.
     """
     from importlib import import_module
 
     pairs = []
     for operation in OPERATIONS:
         registry = import_module(f"{operation}_reference.architectures")
+        root = Path(registry.__file__).parent
         pairs += [
             (operation, architecture)
             for architecture in registry.ARCHITECTURES
-            if registry.baseline_lock(architecture).is_file()
+            if (root / architecture / "baseline_lock.json").is_file()
         ]
     return pairs
 
@@ -1597,6 +1600,26 @@ def _check_published_cohort(operation, architecture):
 def test_published_bundles_record_the_enrolled_cohorts(operation, architecture):
     """A cohort edit cannot pass host tests while its published bundle lags."""
     _check_published_cohort(operation, architecture)
+
+
+def test_published_pairs_are_listed_without_importing_adapters(monkeypatch):
+    """A broken adapter cannot stop the shared tests from collecting."""
+    from importlib import import_module
+
+    expected = []
+    for operation in OPERATIONS:
+        registry = import_module(f"{operation}_reference.architectures")
+        expected += [
+            (operation, architecture)
+            for architecture in registry.ARCHITECTURES
+            if registry.baseline_lock(architecture).is_file()
+        ]
+        # A None entry makes any import of the adapter fail, as a broken one would.
+        for architecture in registry.ARCHITECTURES:
+            monkeypatch.setitem(
+                sys.modules, f"{registry.__name__}.{architecture}", None
+            )
+    assert _published_pairs() == expected
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1819,6 +1842,29 @@ def test_every_reference_command_and_option_has_help(operation):
         assert "status 1" in description and " 2 when the lock or bundle" in description
     assert "PYTHONPATH=platform/python" in commands.choices["diff"].description
     assert "--case" in commands.choices["verify"].description
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_operation_without_torch_offers_no_torch_cross_check(tmp_path, operation):
+    """A new operation need not declare a placeholder Torch reference."""
+    from dataclasses import replace
+    from importlib import import_module
+
+    spec = replace(import_module(f"{operation}_reference.cli").OPERATION, torch=None)
+    parser = spec._parser()
+    qualify = ["qualify", "--baseline", "baseline", "--output", "bundle"]
+    assert parser.parse_args(qualify).torch_reference is None
+    with pytest.raises(SystemExit):
+        parser.parse_args([*qualify, "--torch-reference"])
+    with pytest.raises(ValueError, match="qualification has no Torch reference"):
+        spec.qualify(
+            tmp_path / "baseline",
+            tmp_path / "bundle",
+            2,
+            spec.architectures.ARCHITECTURES[0],
+            torch_reference="cpu",
+        )
+    assert not (tmp_path / "bundle").exists()
 
 
 def _verifiable_case(monkeypatch, operation):
@@ -2282,3 +2328,40 @@ def test_pinned_correctness_verifies_with_the_selected_lock(
     test = getattr(gpu_tests, f"test_{operation}_correctness_against_qualified_rocke")
     test(architecture, target.CASES[0], (target, tmp_path, {}), config)
     assert locks == [lock]
+
+
+@pytest.mark.parametrize(
+    "report,expected",
+    [
+        (
+            {"torch_imported": True, "old_launches": 2, "current_launches": 2},
+            "assert not True",
+        ),
+        (
+            {"torch_imported": False, "old_launches": 2, "current_launches": 1},
+            "assert 2 == 1",
+        ),
+    ],
+)
+def test_pinned_correctness_failures_show_the_reported_values(
+    tmp_path, monkeypatch, report, expected
+):
+    """A failed shared pinned assert shows the reported values, as in a test module."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from reference_common.cli import ReferenceOperation
+
+    operation = OPERATIONS[0]
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    registry = gpu_tests.OPERATION.architectures
+    architecture = registry.ARCHITECTURES[0]
+    target = registry.get_architecture(architecture)
+    monkeypatch.setattr(
+        ReferenceOperation, "verify_case", lambda self, case, **kwargs: report
+    )
+    config = SimpleNamespace(getoption={"--rocke-reference-lock": None}.get)
+    test = getattr(gpu_tests, f"test_{operation}_correctness_against_qualified_rocke")
+    with pytest.raises(AssertionError) as error:
+        test(architecture, target.CASES[0], (target, tmp_path, {}), config)
+    assert expected in str(error.value)

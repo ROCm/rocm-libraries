@@ -6,6 +6,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -126,7 +127,10 @@ def publish(project, **architectures):
 
 
 def register(project, operation):
-    """Add an operation package that has qualified no architecture yet."""
+    """Add an operation package that has qualified no architecture yet.
+
+    Tests name it "fictional" so that it cannot collide with a real package.
+    """
     package = project / f"library/tests/{operation}_reference"
     (package / "architectures").mkdir(parents=True)
     (package / "architectures/registry.json").write_text('["gfx942"]\n')
@@ -281,21 +285,21 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
 def test_half_wired_operation_fails_configuration(project, missing):
     """Each half-wired state fails instead of silently losing coverage."""
     if missing == "package":
-        publish(project, gemm=["gfx942"])
+        publish(project, fictional=["gfx942"])
         expected = [
-            "ROCKE_PUBLISHED_GEMM_ARCHITECTURES names no reference operation",
-            "gemm_reference/architectures/registry.json does not exist",
+            "ROCKE_PUBLISHED_FICTIONAL_ARCHITECTURES names no reference operation",
+            "fictional_reference/architectures/registry.json does not exist",
         ]
     elif missing == "publication":
-        register(project, "gemm")
-        expected = ["Reference operation gemm has no publication list"]
+        register(project, "fictional")
+        expected = ["Reference operation fictional has no publication list"]
     else:
-        register(project, "gemm")
-        (project / "library/tests/gemm_reference/operation.json").unlink()
-        publish(project, gemm=[])
+        register(project, "fictional")
+        (project / "library/tests/fictional_reference/operation.json").unlink()
+        publish(project, fictional=[])
         expected = [
-            "Reference operation gemm has no",
-            "gemm_reference/operation.json recording the manifest_operation",
+            "Reference operation fictional has no",
+            "fictional_reference/operation.json recording the manifest_operation",
         ]
     result = configure(project)
     assert result.returncode != 0
@@ -305,22 +309,22 @@ def test_half_wired_operation_fails_configuration(project, missing):
 
 
 def test_registered_operation_may_publish_no_architecture(project):
-    register(project, "gemm")
-    published = publish(project, gemm=[])
+    register(project, "fictional")
+    published = publish(project, fictional=[])
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
     assert installed(project) == published
 
 
 def test_operations_extending_a_name_keep_the_artifact_cli_order(project):
-    """gemm_bwd_reference/ globs before gemm_reference/, but gemm sorts first."""
-    for operation in ("gemm", "gemm_bwd"):
+    """The glob finds fictional_bwd_reference/ first, but fictional sorts first."""
+    for operation in ("fictional", "fictional_bwd"):
         register(project, operation)
-    publish(project, gemm=[], gemm_bwd=[])
+    publish(project, fictional=[], fictional_bwd=[])
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
     # CTests register in CMake's order.
-    expected = sorted([*_OPERATIONS, "gemm", "gemm_bwd"])
+    expected = sorted([*_OPERATIONS, "fictional", "fictional_bwd"])
     assert _artifact_operations(project / "library") == expected
     assert list(installed(project)) == expected
 
@@ -366,11 +370,19 @@ def test_reference_operations_are_defined_once_by_their_packages(tmp_path):
     assert _artifact_operations(_LIBRARY) == _OPERATIONS
     assert sorted(_published(tmp_path)) == _OPERATIONS
     tests = _LIBRARY / "tests"
+    owners = {}
     for operation in _OPERATIONS:
         metadata = json.loads(
             (tests / f"{operation}_reference/operation.json").read_text()
         )
-        assert isinstance(metadata["manifest_operation"], str)
+        declared = metadata["manifest_operation"]
+        assert isinstance(declared, str)
+        # An id names one operation's bundles; a copied package keeps the original's.
+        assert declared not in owners, (
+            f"{operation} and {owners[declared]} both declare manifest_operation "
+            f"{declared!r}"
+        )
+        owners[declared] = operation
         # CTest registration and the workflow address these files by convention.
         for name in (
             f"test_{operation}_reference_contract.py",
@@ -393,3 +405,70 @@ def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
             assert lock["schema"] == 2
             assert len(bytes.fromhex(lock["baseline_revision"])) == 20
             assert len(bytes.fromhex(lock["manifest_sha256"])) == 32
+
+
+def _reference_ctests(published):
+    """Expand the CTest names that platform/CMakeLists.txt registers per operation.
+
+    A name is registered once per operation or, when it also names the
+    architecture, once per published pair.
+    """
+    text = (_PLATFORM / "CMakeLists.txt").read_text()
+    names = []
+    for template in re.findall(r"add_test\((\S*\$\{_operation\}\S*)", text):
+        for operation, architectures in published.items():
+            name = template.replace("${_operation}", operation)
+            if "${_arch}" in name:
+                names += [name.replace("${_arch}", arch) for arch in architectures]
+            else:
+                names.append(name)
+    return names
+
+
+def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
+    """The provider category patterns must keep matching the registered names.
+
+    Every rocke_<operation>_reference_unit_pytest and published
+    rocke_<operation>_gpu_<arch>_pytest needs each category label that the
+    shared rocke_reference_common_pytest gets. A name that no longer matches
+    the patterns keeps only the quick label baked into the installed tests.
+    """
+    # The provider YAML sits beside rocke/ and the monorepo's shared parser
+    # applies it; a standalone rocKE tree has neither.
+    provider = _PLATFORM.parent.parent
+    categories = provider / "ROCKE_ENGINE_test_categories_external.yaml"
+    parser = provider.parent.parent / "shared/ctest/parse_ctest_categories.py"
+    for path in (categories, parser):
+        if not path.is_file():
+            pytest.skip(f"no provider CTest categories to check: {path} does not exist")
+    pytest.importorskip("yaml", reason="the shared category parser needs PyYAML")
+    published = _published(tmp_path)
+    names = _reference_ctests(published)
+    # One host suite per operation and one GPU suite per published pair.
+    assert len(names) == len(published) + sum(map(len, published.values())), names
+    shared = "rocke_reference_common_pytest"
+    # Label an installed CTest file the way the provider build does.
+    ctests = tmp_path / "CTestTestfile.cmake"
+    ctests.write_text(
+        "".join(f"add_test({name} python)\n" for name in [shared, *names])
+    )
+    result = subprocess.run(
+        [sys.executable, str(parser), str(categories), str(ctests)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    labels = {
+        name: set(value.split(";"))
+        for name, value in re.findall(
+            r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)',
+            result.stdout,
+        )
+    }
+    assert labels.get(shared), f"{categories.name} no longer labels {shared}"
+    for name in names:
+        missing = labels[shared] - labels.get(name, set())
+        assert not missing, (
+            f"{name} lacks the {shared} labels {sorted(missing)}: the patterns in "
+            f"{categories.name} no longer match it"
+        )

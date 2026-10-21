@@ -39,6 +39,11 @@ _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
+# pytest rewrites asserts only in test modules and conftest files. Every
+# operation's pinned GPU tests come from this helper, so register it before a
+# test module imports it; otherwise a failed assert shows none of its values.
+pytest.register_assert_rewrite("reference_common.pinned_tests")
+
 
 def pytest_addoption(parser):
     from reference_common.artifact import OPERATIONS

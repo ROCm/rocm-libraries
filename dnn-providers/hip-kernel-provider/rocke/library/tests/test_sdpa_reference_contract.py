@@ -1003,6 +1003,8 @@ def test_frozen_runner_imports_all_adapters_without_source_checkout(tmp_path):
     OPERATION.freeze_runner(runner)
     assert not list(runner.rglob("baseline_lock.json"))
     assert not list(runner.rglob("__pycache__"))
+    for name in ("pinned_tests.py", "pytest_support.py"):
+        assert not (runner / "reference_common" / name).exists()
     # Isolated mode ignores inherited PYTHONPATH and the source working directory.
     # Only the frozen runner is added; production modules must remain lazy.
     script = """
@@ -1031,6 +1033,7 @@ assert "reference_common.worker" in sys.modules
 assert "kernels" not in sys.modules
 assert "dispatch" not in sys.modules
 assert "torch" not in sys.modules
+assert "pytest" not in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", script, str(runner), *ARCHITECTURES],

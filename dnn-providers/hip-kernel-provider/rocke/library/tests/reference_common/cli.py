@@ -128,7 +128,8 @@ class ReferenceOperation:
     ``make_inputs``, and ``independent_reference``; ``architectures`` provides
     ``ARCHITECTURES``, ``get_architecture``, and ``baseline_lock``. ``reference``
     describes the independent reference's implementation, metric, and input
-    generator in each manifest.
+    generator in each manifest. Without ``torch``, qualification bounds only the
+    independent reference and offers no ``--torch-reference`` option.
     """
 
     name: str
@@ -138,7 +139,7 @@ class ReferenceOperation:
     architectures: ModuleType
     reference: Mapping[str, str]
     metric: Metric
-    torch: TorchReference
+    torch: TorchReference | None = None
     # Published SDPA manifests predate the operation field. SDPA qualification
     # keeps omitting it, so new manifests keep the published form.
     declares_operation: bool = True
@@ -235,10 +236,13 @@ class ReferenceOperation:
                     "__pycache__", "*.pyc", "baseline_lock.json"
                 ),
             )
+        # Workers never import the pytest-only helpers, which need pytest.
         shutil.copytree(
             self._package.parent / "reference_common",
             destination / "reference_common",
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            ignore=shutil.ignore_patterns(
+                "__pycache__", "*.pyc", "pinned_tests.py", "pytest_support.py"
+            ),
         )
 
     def checked_inputs(
@@ -265,6 +269,8 @@ class ReferenceOperation:
         """Measure the old version's bounds and require deterministic old outputs."""
         target = self.architectures.get_architecture(architecture)
         if torch_reference is not None:
+            if self.torch is None:
+                raise ValueError(f"{self.label} qualification has no Torch reference")
             if torch_reference not in self.torch.devices:
                 raise ValueError(
                     f"{self.label} Torch reference device must be one of "
@@ -950,7 +956,9 @@ class ReferenceOperation:
             default=3,
             help="old executions per case, at least 2 (default: %(default)s)",
         )
-        if len(self.torch.devices) == 1:
+        if self.torch is None:
+            qualification.set_defaults(torch_reference=None)
+        elif len(self.torch.devices) == 1:
             qualification.add_argument(
                 "--torch-reference",
                 action="store_const",
