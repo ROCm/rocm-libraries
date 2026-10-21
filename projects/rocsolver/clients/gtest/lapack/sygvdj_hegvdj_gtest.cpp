@@ -69,7 +69,7 @@ const vector<vector<int>> large_matrix_size_range = {
 
 // for weekly_lapack tests (large batch_count)
 // each matrix_size_range is a {n, lda, ldb, singular}
-const vector<vector<int>> large_batch_matrix_size_range = {{7, 7, 7, 0},{17,17,17,0}};
+const vector<vector<int>> large_batch_matrix_size_range = {{7, 7, 7, 0}, {17, 17, 17, 0}};
 
 Arguments sygvdj_setup_arguments(sygvdj_tuple tup)
 {

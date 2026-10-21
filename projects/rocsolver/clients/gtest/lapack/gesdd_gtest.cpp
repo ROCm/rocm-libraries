@@ -94,8 +94,8 @@ const vector<vector<int>> large_opt_range
 // each size_range vector is a {m, n};
 // each opt_range vector is a {lda, ldu, ldv, leftsv, rightsv};
 const vector<vector<int>> large_batch_size_range = {{7, 7}, {17, 17}};
-const vector<vector<int>> large_batch_opt_range = 
-     {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
+const vector<vector<int>> large_batch_opt_range
+    = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
 Arguments gesdd_setup_arguments(gesdd_tuple tup, bool notransv)
 {

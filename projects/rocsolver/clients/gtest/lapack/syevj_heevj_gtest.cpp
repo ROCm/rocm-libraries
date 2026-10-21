@@ -71,7 +71,7 @@ const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}
 
 // for weekly_lapack tests (large batch_count)
 // each size_range vector is a {n, lda}
-const vector<vector<int>> large_batch_size_range = {{7, 7},{17,17}};
+const vector<vector<int>> large_batch_size_range = {{7, 7}, {17, 17}};
 
 Arguments syevj_heevj_setup_arguments(syevj_heevj_tuple tup)
 {

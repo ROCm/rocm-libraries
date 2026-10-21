@@ -91,9 +91,9 @@ const vector<vector<int>> large_opt_range
     = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
 // for weekly_lapack tests (large batch_count)
-const vector<vector<int>> large_batch_size_range = {{7, 7},{17,17}};
-const vector<vector<int>> large_batch_opt_range = 
-    {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
+const vector<vector<int>> large_batch_size_range = {{7, 7}, {17, 17}};
+const vector<vector<int>> large_batch_opt_range
+    = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
 Arguments gesvdj_setup_arguments(gesvdj_tuple tup, bool notransv)
 {

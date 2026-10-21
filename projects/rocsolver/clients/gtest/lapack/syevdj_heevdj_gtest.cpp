@@ -62,7 +62,7 @@ const vector<vector<int>> size_range = {
 const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}};
 
 // for weekly_lapack tests (large batch_count)
-const vector<vector<int>> large_batch_size_range = {{7, 7}, {17,17}};
+const vector<vector<int>> large_batch_size_range = {{7, 7}, {17, 17}};
 
 Arguments syevdj_heevdj_setup_arguments(syevdj_heevdj_tuple tup)
 {
