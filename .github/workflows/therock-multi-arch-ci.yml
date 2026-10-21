@@ -307,7 +307,6 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
         ) &&
         needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true' &&
         contains(needs.setup.outputs.linux_build_config, '"gfx125X-dcgpu"')
       }}
     continue-on-error: true
