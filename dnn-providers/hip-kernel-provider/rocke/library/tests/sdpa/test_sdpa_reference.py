@@ -15,6 +15,7 @@ Two oracles, neither sharing the vectorised attention math it delegates to:
 from __future__ import annotations
 
 import math
+import zlib
 from dataclasses import replace
 
 import numpy as np
@@ -140,7 +141,9 @@ REFERENCE_CASES = sorted(set(CASES) - set(NOT_IMPLEMENTED))
 @pytest.mark.parametrize("name", REFERENCE_CASES)
 def test_case_table_matches_loop_oracle(name):
     req = CASES[name]
-    _check(req, make_tensors(req, seed=hash(name) % 1000))
+    # crc32, not hash(): str hashes are randomized per process, so a failure
+    # here could not be replayed.
+    _check(req, make_tensors(req, seed=zlib.crc32(name.encode()) % 1000))
 
 
 @pytest.mark.parametrize("name", sorted(NOT_IMPLEMENTED))
