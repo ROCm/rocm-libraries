@@ -35,6 +35,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -120,6 +121,10 @@ void StinkyAsmModule::setOutputDir(const std::string& dir) {
 
 std::string StinkyAsmModule::getOutputDir() const {
     return pImpl->outputDir;
+}
+
+bool StinkyAsmModule::ModuleOptions::sgprsCompacted() const {
+    return kernelRewritesRegisters(RegisterAllocation, RegisterAllocationConfig, RegType::S);
 }
 
 std::array<int, 3> StinkyAsmModule::getArch() const {

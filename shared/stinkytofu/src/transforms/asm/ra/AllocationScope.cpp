@@ -143,18 +143,22 @@ std::vector<AllocationScope::HeldRange> AllocationScope::unbankableOperandRegist
 
     // One range per register run rather than one per operand: the same registers
     // are named by every instruction that reads them, and isPinnedRegister scans
-    // the list per value.
+    // the list per value. Overlapping and adjacent ranges merge, so the report
+    // names v0:15 rather than sixteen single registers.
     std::sort(ranges.begin(), ranges.end(), [](const HeldRange& a, const HeldRange& b) {
         if (a.regClass != b.regClass) return a.regClass < b.regClass;
         return a.start != b.start ? a.start < b.start : a.end < b.end;
     });
-    ranges.erase(std::unique(ranges.begin(), ranges.end(),
-                             [](const HeldRange& a, const HeldRange& b) {
-                                 return a.regClass == b.regClass && a.start == b.start &&
-                                        a.end == b.end;
-                             }),
-                 ranges.end());
-    return ranges;
+    std::vector<HeldRange> runs;
+    for (const HeldRange& range : ranges) {
+        if (!runs.empty() && runs.back().regClass == range.regClass &&
+            range.start <= runs.back().end + 1) {
+            runs.back().end = std::max(runs.back().end, range.end);
+            continue;
+        }
+        runs.push_back(range);
+    }
+    return runs;
 }
 
 bool AllocationScope::isPinnedRegister(RegType regClass, uint32_t idx) const {

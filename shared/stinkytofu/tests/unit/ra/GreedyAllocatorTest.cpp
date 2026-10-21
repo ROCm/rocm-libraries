@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <memory>
 #include <set>
 #include <string>
@@ -974,4 +975,139 @@ TEST_F(GreedyAllocatorTest, AnUnsatisfiablePairingIsSkippedRatherThanRefused) {
     const AllocationResult coloured = colourWith(allocator, paired);
 
     EXPECT_NE(coloured.assignmentOf(dest->valueId()).idx, 300u) << coloured.toString();
+}
+
+namespace {
+
+/// `v<dest> = v_mov_b32 0`, a value the function defines and so may move.
+StinkyInstruction* vMovZero(BasicBlock* bb, int dest) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+    mov->addDestReg(StinkyRegister("v", dest, 1));
+    mov->addSrcReg(StinkyRegister(0));
+    return mov;
+}
+
+/// mem[v<addr>] = v<data>: reads two values and defines none.
+void dsStoreB32(BasicBlock* bb, int addr, int data) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* store = builder.create(getMCIDByUOp(GFX::ds_store_b32, kRaTestArch));
+    store->addSrcReg(StinkyRegister("v", addr, 1));
+    store->addSrcReg(StinkyRegister("v", data, 1));
+}
+
+/// Four ranges in a path, A-B-C-D, each overlapping only its neighbours, so
+/// two registers hold them all when they are placed in the order they start.
+///
+/// Weights are uses over length, which puts D first, then A, B and C. D and A
+/// do not overlap, so both take v0; B takes v1; and C, which overlaps B and D,
+/// is the lightest of the four and may evict neither.
+std::vector<StinkyInstruction*> overlappingPath(BasicBlock* entry) {
+    std::vector<StinkyInstruction*> defs;
+    defs.push_back(vMovZero(entry, 0));  // A
+    defs.push_back(vMovZero(entry, 1));  // B
+    dsStoreB32(entry, 0, 0);
+    dsStoreB32(entry, 0, 0);             // A ends, after four uses
+    defs.push_back(vMovZero(entry, 2));  // C
+    dsStoreB32(entry, 1, 1);             // B ends, after two
+    defs.push_back(vMovZero(entry, 3));  // D
+    dsStoreB32(entry, 2, 3);             // C ends, after one
+    dsStoreB32(entry, 3, 3);             // D ends, after three
+    return defs;
+}
+
+}  // namespace
+
+TEST_F(GreedyAllocatorTest, ProgramOrderColoursAPathThatWeightOrderCannot) {
+    const std::vector<StinkyInstruction*> defs = overlappingPath(block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+    ASSERT_NO_FATAL_FAILURE(keepOnlyFirstVgprs(setup, 2));
+
+    CompactingGreedyAllocator byWeight;
+    EXPECT_TRUE(byWeight.allocate(setup.context()).hasError());
+
+    ProgramOrderedGreedyAllocator byProgram;
+    const AllocationResult coloured = colourWith(byProgram, setup);
+    // A and C share one register, B and D the other.
+    const auto regOf = [&](size_t i) {
+        return coloured.assignmentOf(idOf(ssaDefinedValue(*defs[i]))).idx;
+    };
+    EXPECT_EQ(regOf(0), 0u);
+    EXPECT_EQ(regOf(1), 1u);
+    EXPECT_EQ(regOf(2), 0u);
+    EXPECT_EQ(regOf(3), 1u);
+}
+
+TEST_F(GreedyAllocatorTest, LargestFirstPlacesTheLongestRangeFirst) {
+    const std::vector<StinkyInstruction*> defs = overlappingPath(block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+    ASSERT_NO_FATAL_FAILURE(keepOnlyFirstVgprs(setup, 2));
+
+    LargestFirstGreedyAllocator bySize;
+    const AllocationResult coloured = colourWith(bySize, setup);
+    // B lives longest, so it is placed first and takes the lowest register.
+    EXPECT_EQ(coloured.assignmentOf(idOf(ssaDefinedValue(*defs[1]))).idx, 0u)
+        << coloured.toString();
+}
+
+TEST_F(GreedyAllocatorTest, PreferringTheProducerQuadrantKeepsABlockInItsBank) {
+    BasicBlock* entry = block("entry");
+    const StinkyInstruction* def = vMovZero(entry, 300);
+    dsStoreB32(entry, 300, 300);
+    ASSERT_TRUE(liftForAllocation(*func));
+    const SSAValueID value = idOf(ssaDefinedValue(*def));
+
+    AllocationSetup setup(*func);
+    CompactingGreedyAllocator allocator;
+    EXPECT_EQ(colourWith(allocator, setup).assignmentOf(value).idx, 0u) << "packs to the bottom";
+
+    AllocationContext preferring = setup.context();
+    preferring.preferProducerQuadrant = true;
+    Expected<AllocationResult> kept = allocator.allocate(preferring);
+    ASSERT_TRUE(kept.hasValue()) << kept.getError();
+    EXPECT_EQ(kept->assignmentOf(value).idx, kVgprBankSize) << "the lowest base in bank 1";
+}
+
+TEST_F(GreedyAllocatorTest, PreferringTheProducerQuadrantFallsBackWhenTheBankIsFull) {
+    BasicBlock* entry = block("entry");
+    const StinkyInstruction* def = vMovZero(entry, 300);
+    dsStoreB32(entry, 300, 300);
+    ASSERT_TRUE(liftForAllocation(*func));
+    const SSAValueID value = idOf(ssaDefinedValue(*def));
+
+    AllocationSetup setup(*func);
+    setup.target().reserve(RegType::V, /*first=*/kVgprBankSize, /*count=*/kVgprBankSize);
+    AllocationContext preferring = setup.context();
+    preferring.preferProducerQuadrant = true;
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(preferring);
+
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_EQ(coloured->assignmentOf(value).idx, 0u);
+}
+
+TEST_F(GreedyAllocatorTest, ThePlacementTableHasARowPerBlockAndMarksTheRefusal) {
+    overlappingPath(block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+    ASSERT_NO_FATAL_FAILURE(keepOnlyFirstVgprs(setup, 2));
+
+    const std::string path = ::testing::TempDir() + "greedy_blocks.tsv";
+    AllocationContext dumping = setup.context();
+    dumping.blockDumpPath = path;
+    CompactingGreedyAllocator byWeight;
+    ASSERT_TRUE(byWeight.allocate(dumping).hasError());
+
+    std::ifstream in(path);
+    std::vector<std::string> lines;
+    for (std::string line; std::getline(in, line);) lines.push_back(line);
+    ASSERT_EQ(lines.size(), 5u) << "a header and the four blocks";
+    EXPECT_TRUE(lines[0].starts_with("class\tleader\twidth")) << lines[0];
+    size_t refused = 0;
+    for (size_t i = 1; i < lines.size(); ++i) {
+        if (lines[i].ends_with("\t1")) ++refused;
+    }
+    EXPECT_EQ(refused, 1u);
 }

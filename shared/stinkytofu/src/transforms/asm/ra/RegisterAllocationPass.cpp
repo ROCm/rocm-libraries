@@ -26,6 +26,7 @@
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
+#include "stinkytofu/support/PassArguments.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
@@ -192,14 +193,23 @@ bool couldHaveTaken(RegKey reg, SSAValueID mover, SSAValueID partner,
     return true;
 }
 
+/// How the colouring treated operands that cannot name a bank.
+struct UnbankableChoice {
+    /// The registers held, or empty when the operands were allocated.
+    std::span<const AllocationScope::HeldRange> held;
+    /// Auto chose the treatment by trying, rather than being told.
+    bool automatic = false;
+    /// Why allocating them was refused, when Auto went on to hold them.
+    std::string allocateRefusal;
+};
+
 /// One line per kernel comparing a colouring against the producer's: what it
 /// would cost, next to the pressure floor it could not go below.
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
                          const AllocationRules& rules, const AsmTargetRegisters& target,
-                         std::span<const AllocationScope::HeldRange> unbankable,
-                         const char* allocator) {
+                         const UnbankableChoice& unbankable, const char* allocator) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -314,20 +324,36 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // modes, because under Hold these registers are why the high-water mark
     // cannot fall below them, and under Allocate the constraint is still in
     // force even though nothing is frozen -- a silent report there would read
-    // as no constraint at all.
-    if (!unbankable.empty()) {
-        text += " unbankable[held";
-        for (const AllocationScope::HeldRange& range : unbankable) {
+    // as no constraint at all. "auto" marks a treatment found by trying; the
+    // refusal that sent Auto on to holding follows on a line of its own.
+    const std::string chosen = unbankable.automatic ? "auto " : "";
+    if (!unbankable.held.empty()) {
+        text += " unbankable[" + chosen + "held";
+        for (const AllocationScope::HeldRange& range : unbankable.held) {
             text += " " + regTypeToString(range.regClass) + std::to_string(range.start);
             if (range.end != range.start) text += ":" + std::to_string(range.end);
         }
         text += "]";
     } else if (const CappedValues capped = cappedValuesOf(function, constraints);
                capped.count > 0) {
-        text += " unbankable[allocated " + std::to_string(capped.count) + " value(s) max " +
-                std::to_string(capped.ceiling) + "]";
+        text += " unbankable[" + chosen + "allocated " + std::to_string(capped.count) +
+                " value(s) max " + std::to_string(capped.ceiling) + "]";
     }
+    if (!unbankable.allocateRefusal.empty())
+        text +=
+            "\n  held them because the allocate attempt was refused: " + unbankable.allocateRefusal;
     return text;
+}
+
+/// \p message without the "@function: " that every refusal starts with, for
+/// quoting one refusal inside another.
+std::string withoutFunctionName(const Function& function, const std::string& message) {
+    const std::string prefix = "@" + function.getName() + ": ";
+    return message.starts_with(prefix) ? message.substr(prefix.size()) : message;
+}
+
+const char* unbankableName(RegisterAllocationOptions::UnbankableOperands policy) {
+    return policy == RegisterAllocationOptions::UnbankableOperands::Hold ? "hold" : "allocate";
 }
 
 /// The architecture's rules with any forced statuses applied, or a message
@@ -365,6 +391,35 @@ Expected<AllocationRules> resolveRules(const Function& function,
     }
     rules.force(options.rules);
     return rules;
+}
+
+/// Write \p allocated into the operands, the only step that changes the
+/// function. A message when destruction refuses, nullopt otherwise.
+std::optional<std::string> applyColouring(Function& function, const AllocationResult& allocated,
+                                          const RegisterAllocationOptions& options,
+                                          std::string* report) {
+    const SSADestructionResult destroyed = destroyAttachedSSA(function, allocated);
+    if (!destroyed.ok()) return destroyed.toString();
+    SymbolSyncOptions syncOptions;
+    syncOptions.emitRegisterMap = options.emitRegisterMap;
+    syncOptions.emitBreadcrumbs = options.emitSymbolBreadcrumbs;
+    SymbolSyncReport syncReport;
+    syncRegisterSymbols(function, destroyed.rewritten, syncOptions, &syncReport);
+
+    // An operand whose name never described where it sat is the shape of a
+    // wrong-register bug: the emitter prints the name, the allocator reasoned
+    // about the index, and nothing else reconciles them. Reported whatever
+    // `report` asks for, because it is a correctness warning rather than a
+    // statistic -- silence here is how a stale name reaches the assembler.
+    if (!syncReport.suspectOperands.empty() && report != nullptr) {
+        if (!report->empty()) *report += "\n";
+        *report += "symbol sync: " + std::to_string(syncReport.suspectOperands.size()) +
+                   " operand(s) whose symbolic name disagrees with their register";
+        for (const std::string& suspect : syncReport.suspectOperands) {
+            *report += "\n  " + suspect;
+        }
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -422,7 +477,7 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
     // Scope reads the same ranges the allocator will, so "movable" cannot mean
     // something the allocator then finds it cannot place. Slot numbering is
     // untouched by widening, so the cut below means the same in either set.
-    AllocationScope scope =
+    AllocationScope regionScope =
         AllocationScope::wholeFunction(constraints, ruleIntervals, options.allocate);
     if (!options.regionEnd.empty()) {
         const BasicBlock* endBlock = findBlockByLabel(function, options.regionEnd);
@@ -432,82 +487,94 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
                                                      "' was not found");
         }
         const SlotIndex cut = ruleIntervals.slots().blockEnd(endBlock);
-        scope = AllocationScope::upTo(constraints, ruleIntervals, options.allocate, cut);
+        regionScope = AllocationScope::upTo(constraints, ruleIntervals, options.allocate, cut);
     }
 
-    // Before the requested holds, so a register in both reports the constraint
-    // rather than the request.
-    //
-    // Allocate holds nothing. The ceiling is collected under either policy, so
-    // the same constraint reaches the allocator as a limit to place under.
+    // A backwards pair holds nothing, which reads as "holding made no
+    // difference". Hold nothing by passing nothing instead.
+    for (const AllocationScope::HeldRange& range : options.pinRegisters) {
+        if (range.end < range.start) {
+            return Expected<AllocationResult>::Error(
+                "@" + function.getName() + ": asked to hold " + regTypeToString(range.regClass) +
+                std::to_string(range.start) + " through " + regTypeToString(range.regClass) +
+                std::to_string(range.end) +
+                ", which is empty because the bounds are inclusive and run backwards");
+        }
+    }
+
+    // Which treatments of the operands that cannot name a bank to try, in
+    // order. Auto tries Allocate, then Hold, because each refuses kernels the
+    // other colours. Holding differs from allocating only when such an operand
+    // exists, so without one Auto is a single attempt. The ceiling is collected
+    // either way; Allocate places under it and Hold leaves it nothing to move.
+    using Unbankable = RegisterAllocationOptions::UnbankableOperands;
+    const bool automatic = options.unbankableOperands == Unbankable::Auto;
     const std::vector<AllocationScope::HeldRange> unbankable =
-        options.unbankableOperands == RegisterAllocationOptions::UnbankableOperands::Hold
-            ? AllocationScope::unbankableOperandRegisters(function, target)
-            : std::vector<AllocationScope::HeldRange>{};
-    if (!unbankable.empty()) scope.holdUnbankableOperands(constraints, unbankable);
-
-    if (!options.pinRegisters.empty()) {
-        // A backwards pair holds nothing, which reads as "holding made no
-        // difference". Hold nothing by passing nothing instead.
-        for (const AllocationScope::HeldRange& range : options.pinRegisters) {
-            if (range.end < range.start) {
-                return Expected<AllocationResult>::Error(
-                    "@" + function.getName() + ": asked to hold " +
-                    regTypeToString(range.regClass) + std::to_string(range.start) + " through " +
-                    regTypeToString(range.regClass) + std::to_string(range.end) +
-                    ", which is empty because the bounds are inclusive and run backwards");
-            }
-        }
-        scope.pinRegisters(constraints, options.pinRegisters);
+        options.unbankableOperands == Unbankable::Allocate
+            ? std::vector<AllocationScope::HeldRange>{}
+            : AllocationScope::unbankableOperandRegisters(function, target);
+    std::vector<Unbankable> attempts{options.unbankableOperands};
+    if (automatic) {
+        attempts = {Unbankable::Allocate};
+        if (!unbankable.empty()) attempts.push_back(Unbankable::Hold);
     }
 
-    const AllocationContext context{function, ruleIntervals, target, constraints,
-                                    loops,    rules,         scope};
+    std::vector<std::string> refusals;
+    for (const Unbankable attempt : attempts) {
+        const std::span<const AllocationScope::HeldRange> held =
+            attempt == Unbankable::Hold ? std::span<const AllocationScope::HeldRange>(unbankable)
+                                        : std::span<const AllocationScope::HeldRange>{};
+        // Held before the requested registers, so a register in both reports
+        // the constraint rather than the request.
+        AllocationScope scope = regionScope;
+        if (!held.empty()) scope.holdUnbankableOperands(constraints, held);
+        if (!options.pinRegisters.empty()) scope.pinRegisters(constraints, options.pinRegisters);
 
-    Expected<AllocationResult> allocated = allocator.allocate(context);
-    if (allocated.hasError()) return allocated;
-
-    if (options.verify) {
-        const AllocationVerificationResult checked =
-            verifyAllocation(function, *allocated, context);
-        if (!checked.ok()) {
-            return Expected<AllocationResult>::Error(checked.toString());
+        AllocationContext context{function, ruleIntervals, target, constraints,
+                                  loops,    rules,         scope};
+        context.preferProducerQuadrant =
+            options.quadrant == RegisterAllocationOptions::Quadrant::Prefer;
+        if (!options.blockDumpPrefix.empty()) {
+            context.blockDumpPath =
+                options.blockDumpPrefix + allocator.name() + "." + unbankableName(attempt) + ".tsv";
         }
+
+        Expected<AllocationResult> allocated = allocator.allocate(context);
+        if (allocated.hasValue() && options.verify) {
+            const AllocationVerificationResult checked =
+                verifyAllocation(function, *allocated, context);
+            if (!checked.ok()) allocated = Expected<AllocationResult>::Error(checked.toString());
+        }
+        if (allocated.hasError()) {
+            refusals.push_back(allocated.getError());
+            continue;
+        }
+
+        // Before destruction, which clears the attached SSA the report reads.
+        if (options.report && report != nullptr) {
+            UnbankableChoice choice{held, automatic, {}};
+            if (!refusals.empty())
+                choice.allocateRefusal = withoutFunctionName(function, refusals.front());
+            *report = shadowReport(function, *allocated, intervals, constraints, scope, rules,
+                                   target, choice, allocator.name());
+        }
+        if (options.applyToOperands) {
+            if (std::optional<std::string> problem =
+                    applyColouring(function, *allocated, options, report))
+                return Expected<AllocationResult>::Error(*problem);
+        }
+        return allocated;
     }
 
-    // Before destruction, which clears the attached SSA the report reads.
-    if (options.report && report != nullptr) {
-        *report = shadowReport(function, *allocated, intervals, constraints, scope, rules, target,
-                               unbankable, allocator.name());
+    if (refusals.size() == 1) return Expected<AllocationResult>::Error(refusals.front());
+    std::string message = "@" + function.getName() +
+                          ": refused whether the operands that cannot name a bank are allocated "
+                          "or held";
+    for (size_t i = 0; i < refusals.size(); ++i) {
+        message += "\n  " + std::string(unbankableName(attempts[i])) + ": " +
+                   withoutFunctionName(function, refusals[i]);
     }
-
-    if (options.applyToOperands) {
-        const SSADestructionResult destroyed = destroyAttachedSSA(function, *allocated);
-        if (!destroyed.ok()) {
-            return Expected<AllocationResult>::Error(destroyed.toString());
-        }
-        SymbolSyncOptions syncOptions;
-        syncOptions.emitRegisterMap = options.emitRegisterMap;
-        syncOptions.emitBreadcrumbs = options.emitSymbolBreadcrumbs;
-        SymbolSyncReport syncReport;
-        syncRegisterSymbols(function, destroyed.rewritten, syncOptions, &syncReport);
-
-        // An operand whose name never described where it sat is the shape of a
-        // wrong-register bug: the emitter prints the name, the allocator reasoned
-        // about the index, and nothing else reconciles them. Reported whatever
-        // `report` asks for, because it is a correctness warning rather than a
-        // statistic -- silence here is how a stale name reaches the assembler.
-        if (!syncReport.suspectOperands.empty() && report != nullptr) {
-            if (!report->empty()) *report += "\n";
-            *report += "symbol sync: " + std::to_string(syncReport.suspectOperands.size()) +
-                       " operand(s) whose symbolic name disagrees with their register";
-            for (const std::string& suspect : syncReport.suspectOperands) {
-                *report += "\n  " + suspect;
-            }
-        }
-    }
-
-    return allocated;
+    return Expected<AllocationResult>::Error(message);
 }
 
 class RegisterAllocationPassImpl : public Pass {
@@ -540,11 +607,27 @@ class RegisterAllocationPassImpl : public Pass {
             return preserveCFGAnalyses();
         }
 
-        if (allocator_ == nullptr) {
-            allocator_ = AllocatorRegistry::createAllocator(options_.allocator);
-            if (allocator_ == nullptr) {
-                missed(passCtx, "@" + func.getName() + ": allocator '" + options_.allocator +
-                                    "' is not registered");
+        // The allocators to try, in order: the injected one, or every name in
+        // the options. A chain is tried until one colours the function, and
+        // only that one's colouring is applied.
+        std::vector<std::unique_ptr<RegisterAllocator>> created;
+        std::vector<RegisterAllocator*> chain;
+        if (allocator_ != nullptr) {
+            chain.push_back(allocator_.get());
+        } else {
+            for (const std::string& name : splitPlusList(options_.allocator)) {
+                std::unique_ptr<RegisterAllocator> allocator =
+                    AllocatorRegistry::createAllocator(name);
+                if (allocator == nullptr) {
+                    missed(passCtx,
+                           "@" + func.getName() + ": allocator '" + name + "' is not registered");
+                    return preserveCFGAnalyses();
+                }
+                chain.push_back(allocator.get());
+                created.push_back(std::move(allocator));
+            }
+            if (chain.empty()) {
+                missed(passCtx, "@" + func.getName() + ": no allocator named");
                 return preserveCFGAnalyses();
             }
         }
@@ -557,10 +640,32 @@ class RegisterAllocationPassImpl : public Pass {
         emitRuleAudit(func, passCtx, options);
 
         std::string report;
-        Expected<AllocationResult> result = allocateRegisters(func, *allocator_, options, &report);
-        if (result.hasError()) {
-            PASS_DEBUG(std::cerr << "RegisterAllocation: " << result.getError() << "\n");
-            missed(passCtx, result.getError());
+        std::vector<std::string> refusals;
+        std::optional<AllocationResult> coloured;
+        RegisterAllocator* winner = nullptr;
+        for (RegisterAllocator* allocator : chain) {
+            Expected<AllocationResult> result =
+                allocateRegisters(func, *allocator, options, &report);
+            if (result.hasError()) {
+                PASS_DEBUG(std::cerr << "RegisterAllocation: " << result.getError() << "\n");
+                refusals.push_back(result.getError());
+                continue;
+            }
+            coloured.emplace(std::move(*result));
+            winner = allocator;
+            break;
+        }
+        if (winner == nullptr) {
+            std::string message = refusals.front();
+            if (refusals.size() > 1) {
+                message = "@" + func.getName() + ": every allocator in " + options_.allocator +
+                          " refused";
+                for (size_t i = 0; i < refusals.size(); ++i) {
+                    message += "\n  " + std::string(chain[i]->name()) + ": " +
+                               withoutFunctionName(func, refusals[i]);
+                }
+            }
+            missed(passCtx, message);
             return preserveCFGAnalyses();
         }
         if (!report.empty()) {
@@ -568,9 +673,15 @@ class RegisterAllocationPassImpl : public Pass {
                        {OptimizationRemark::Kind::Analysis, kPassName, "ShadowReport", report});
         }
 
-        const std::string summary = "@" + func.getName() + ": coloured " +
-                                    std::to_string(result->valueCount()) + " value(s) with " +
-                                    allocator_->name();
+        std::string summary = "@" + func.getName() + ": coloured " +
+                              std::to_string(coloured->valueCount()) + " value(s) with " +
+                              winner->name();
+        if (!refusals.empty()) {
+            summary += " after";
+            for (size_t i = 0; i < refusals.size(); ++i)
+                summary += std::string(i == 0 ? " " : ", ") + chain[i]->name();
+            summary += " refused";
+        }
         if (options_.applyToOperands) {
             emitRemark(passCtx, {OptimizationRemark::Kind::Passed, kPassName, "AllocatedRegisters",
                                  summary});

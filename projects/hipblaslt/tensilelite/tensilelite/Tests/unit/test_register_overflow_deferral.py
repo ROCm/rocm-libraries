@@ -233,6 +233,14 @@ class TestDeferral:
         assert writer.states.overflowedResources == 1
         assert writer.states.overflowPendingRA == 0
 
+    @pytest.mark.parametrize("value,defers", [("force,classes=vs", True),
+                                              ("apply,classes=vs", False)])
+    def test_a_config_string_defers_by_the_mode_it_starts_with(self, value, defers):
+        writer = _writer(standing=1)
+        writer.deferRegisterOverflowForAllocation(
+            _kernel(StinkyTofuRegisterAllocation=value))
+        assert (writer.states.overflowPendingRA == 1) is defers
+
     def test_no_stinkytofu_path_means_no_deferral(self):
         # Nothing would resolve it: the mode is gated on the same two questions
         # the conversion gate asks.

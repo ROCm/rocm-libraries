@@ -2645,13 +2645,8 @@
       'value': -1,
     }),
     'StinkyTofuRegisterAllocation': dict({
-      'head': list([
-        0,
-        1,
-        2,
-      ]),
-      'len': 4,
-      'type': 'list',
+      'type': 'int',
+      'value': -1,
     }),
     'StorePriorityOpt': dict({
       'head': list([

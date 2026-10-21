@@ -23,6 +23,7 @@
 #include "GreedyAllocator.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -35,6 +36,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
@@ -153,7 +155,9 @@ class Greedy {
         if (!buildBlocks()) return fail(error_);
         if (mayFoldPairs_) foldPairs();
         measure();
-        if (!place()) return fail(error_);
+        const bool placedAll = place();
+        if (!context_.blockDumpPath.empty()) dumpBlocks();
+        if (!placedAll) return fail(error_);
 
         AllocationResult result(context_.function);
         for (const Block& block : blocks_) {
@@ -620,15 +624,25 @@ class Greedy {
 
         const SSAArena& arena = context_.function.ssaArena();
         for (Block& block : blocks_) {
+            SlotIndex first = std::numeric_limits<SlotIndex>::max();
+            SlotIndex last = 0;
             for (const Member& member : block.members) {
                 const StinkySSAValue* value = arena.get(member.value);
                 const double uses = value == nullptr ? 0.0 : static_cast<double>(value->useCount());
                 double factor = 1.0;
                 const uint32_t nesting = std::min(depthOfValue[member.value], kMaxLoopDepth);
                 for (uint32_t level = 0; level < nesting; ++level) factor *= kLoopWeight;
-                const SlotIndex length = rangeOf(member.value).length();
+                const LiveRange& range = rangeOf(member.value);
+                const SlotIndex length = range.length();
                 block.weight += uses * factor / static_cast<double>(std::max<SlotIndex>(1, length));
+                if (range.empty()) continue;
+                first = std::min(first, range.start());
+                last = std::max(last, range.end());
             }
+            // A block that is never live starts after everything, so program
+            // order places it last.
+            block.start = first;
+            block.span = last > first ? last - first : 0;
             block.hintBase = hintBaseOf(block);
             block.pinReason = pinReasonOf(block);
         }
@@ -881,6 +895,7 @@ class Greedy {
                                         ", so it must keep its original register, but ";
             if (!block.hintBase.has_value()) {
                 error_ = unmoved + "it has none recorded";
+                refused_ = &block;
                 return false;
             }
             if (!availableAt(block, *block.hintBase)) {
@@ -888,6 +903,7 @@ class Greedy {
                          std::to_string(*block.hintBase) +
                          (reachableAt(block, *block.hintBase) ? " is already taken"
                                                               : " is not allocatable");
+                refused_ = &block;
                 return false;
             }
             bindAt(block, *block.hintBase);
@@ -908,6 +924,8 @@ class Greedy {
         std::sort(capped.begin(), capped.end(), [this](size_t a, size_t b) {
             return policy_.placesBefore(blocks_[a], blocks_[b]);
         });
+        uint32_t nextRank = 1;
+        for (size_t index : capped) blocks_[index].rank = nextRank++;
         for (size_t index : capped) {
             Block& block = blocks_[index];
             if (tryPlace(block)) continue;
@@ -919,6 +937,7 @@ class Greedy {
                      ", which its operands cannot address past (" +
                      std::to_string(block.placementFreedom) + " legal base(s) before occupancy)" +
                      refusalDetail(block);
+            refused_ = &block;
             return false;
         }
 
@@ -930,6 +949,7 @@ class Greedy {
         std::sort(queue.begin(), queue.end(), [this](size_t a, size_t b) {
             return policy_.placesBefore(blocks_[a], blocks_[b]);
         });
+        for (size_t index : queue) blocks_[index].rank = nextRank++;
 
         uint32_t evictionBudget = static_cast<uint32_t>(blocks_.size()) * kMaxEvictionsPerBlock + 1;
         std::vector<size_t> worklist(queue.rbegin(), queue.rend());
@@ -953,6 +973,7 @@ class Greedy {
                          // full file from a shape with almost nowhere to go.
                          " (" + std::to_string(block.placementFreedom) +
                          " legal base(s) before occupancy)" + refusalDetail(block);
+                refused_ = &block;
                 return false;
             }
 
@@ -1028,6 +1049,17 @@ class Greedy {
     template <typename Acceptable>
     std::optional<uint32_t> pickBase(const Block& block, Acceptable acceptable) const {
         const uint32_t indexes = context_.target.indexCount(block.regClass);
+        // The producer's bank first, lowest base first, and the whole file only
+        // when it has no room. Staying in that bank outranks any pairing, so
+        // nothing is scored inside it.
+        if (context_.preferProducerQuadrant && block.regClass == RegType::V &&
+            block.hintBase.has_value()) {
+            const uint32_t bankStart = *block.hintBase / kVgprBankSize * kVgprBankSize;
+            const uint32_t bankEnd = std::min(indexes, bankStart + kVgprBankSize);
+            for (uint32_t base = bankStart; base + block.width <= bankEnd; ++base) {
+                if (acceptable(base)) return base;
+            }
+        }
         const std::vector<OpenPairing> open =
             block.preferences.empty() ? std::vector<OpenPairing>{} : openPairings(block);
         // Asked per block, not per table. A chip can declare a pairing rule
@@ -1062,6 +1094,26 @@ class Greedy {
         return best;
     }
 
+    /// Write one row per block to AllocationContext::blockDumpPath: what it is,
+    /// what constrained it, and where and when it was placed. `refused` marks
+    /// the block the colouring stopped on. For reading a colouring offline.
+    void dumpBlocks() const {
+        std::ofstream out(context_.blockDumpPath);
+        if (!out) return;
+        out << "class\tleader\twidth\tmembers\tstart\tspan\tweight\tfreedom\tcapped\tpinned\thint"
+               "\tplaced\tbase\tevictions\trank\trefused\n";
+        for (const Block& block : blocks_) {
+            out << regTypeToString(block.regClass) << '\t' << block.leader << '\t' << block.width
+                << '\t' << block.members.size() << '\t' << block.start << '\t' << block.span << '\t'
+                << block.weight << '\t' << block.placementFreedom << '\t'
+                << (block.maxIndex.has_value() ? 1 : 0) << '\t'
+                << (block.pinReason != nullptr ? 1 : 0) << '\t'
+                << (block.hintBase.has_value() ? static_cast<int64_t>(*block.hintBase) : -1) << '\t'
+                << (block.placed ? 1 : 0) << '\t' << block.base << '\t' << block.evictions << '\t'
+                << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\n';
+        }
+    }
+
     static constexpr size_t kNoBlock = static_cast<size_t>(-1);
 
     const AllocationContext& context_;
@@ -1073,6 +1125,7 @@ class Greedy {
     std::vector<Block> blocks_;
     std::vector<size_t> blockIndexOf_;
     std::string error_;
+    const Block* refused_ = nullptr;
 };
 
 /// Heaviest first, with capped blocks taken ahead of the queue.

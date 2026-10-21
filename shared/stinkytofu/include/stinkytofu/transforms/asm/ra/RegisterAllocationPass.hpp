@@ -44,7 +44,9 @@ namespace stinkytofu {
 class Pass;
 
 struct RegisterAllocationOptions {
-    /// Registry name; "greedy" and "legacy" are both registered.
+    /// Registry name, such as "greedy" or "legacy". Several names joined with
+    /// '+' are tried in turn, and the pass applies the first that colours the
+    /// function; allocateRegisters() itself takes one allocator.
     std::string allocator = "greedy";
 
     /// Register classes the policy may move; see AllocationScope::classes(). The
@@ -76,11 +78,23 @@ struct RegisterAllocationOptions {
     /// keeps choosing reachable ones. Asked to freeze an out-of-reach register
     /// it refuses, having no other register to offer.
     ///
-    /// Allocate is the default. The two were measured against each other and
-    /// came out close on high-water mark and occupancy, which left robustness
-    /// to decide it.
-    enum class UnbankableOperands { Hold, Allocate };
-    UnbankableOperands unbankableOperands = UnbankableOperands::Allocate;
+    /// Auto tries Allocate and, when that colouring is refused, Hold. Each
+    /// fails where the other does not: Allocate can find no room under the
+    /// ceiling once the matrix operands are pinned into the bottom bank, and
+    /// Hold has nothing to offer when the producer placed an operand out of
+    /// reach. Only the colouring that succeeds is applied.
+    enum class UnbankableOperands { Hold, Allocate, Auto };
+    UnbankableOperands unbankableOperands = UnbankableOperands::Auto;
+
+    /// Where in the register file a free block may start.
+    ///
+    /// Any takes the lowest legal base. Prefer first searches the 256-register
+    /// VGPR bank that holds the block's producer register, lowest base first,
+    /// and searches the whole file only when that bank has no room. Values that
+    /// stay in their producer's bank need no s_set_vgpr_msb switch the producer
+    /// did not already pay for, at the cost of a less compact colouring.
+    enum class Quadrant { Any, Prefer };
+    Quadrant quadrant = Quadrant::Any;
 
     bool applyToOperands = false;  // false = shadow
     bool verify = true;
@@ -96,6 +110,12 @@ struct RegisterAllocationOptions {
 
     /// After apply, append per-instruction breadcrumbs when a symbolic name is stripped.
     bool emitSymbolBreadcrumbs = false;
+
+    /// When non-empty, every attempt writes the allocator's placement table --
+    /// one row per block with its width, live span, placement rank and base --
+    /// to `<blockDumpPrefix><allocator>.<unbankable>.tsv`. Only allocators built
+    /// on the greedy engine write one. A debugging aid; it changes no colouring.
+    std::string blockDumpPrefix;
 
     /// Module capabilities, which parameterize an architecture's allocation
     /// rules (see AllocationRulesRegistry). Carried here rather than as another
@@ -114,6 +134,10 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createRegisterAllocationPass(
     RegisterAllocationOptions options = {}, std::unique_ptr<RegisterAllocator> allocator = nullptr);
 
 /// Driver without a PassManager, for tests.
+///
+/// Under UnbankableOperands::Auto this may colour twice, once allocating the
+/// operands that cannot name a bank and once holding them. Only the colouring
+/// returned is applied, and a refusal of both names each attempt's reason.
 ///
 /// \p report receives the per-kernel comparison when `options.report` is set. It
 /// is an out-parameter because the report reads attached SSA, which destruction

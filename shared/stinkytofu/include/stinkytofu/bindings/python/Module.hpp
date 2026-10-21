@@ -56,6 +56,14 @@
  * block: one emitted at kernel entry reuses registers from inside the kernel's
  * range, one emitted mid-kernel takes registers above every index the kernel
  * names.
+ * @note RegisterAllocation: the mode of Tensile `StinkyTofuRegisterAllocation`,
+ * 0 off, 1 shadow, 2 apply, 3 force. RegisterAllocationConfig is the rest of
+ * that parameter, in its canonical spelling (RegisterAllocationConfig.hpp);
+ * empty means every default at this mode.
+ * @note RegisterAllocationDump: Tensile `StinkyTofuRegisterAllocationDump`.
+ * Writes what allocation saw and did -- the IR before the lift, the SSA form,
+ * its live ranges, and each attempt's placement table -- to
+ * <outputDir>/<kernel>/ra/, or ./<kernel>/ra/ without an output directory.
  * @note TimePasses: print a per-pass wall-time report to stderr after the
  * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
  * `--time-passes`).
@@ -106,6 +114,8 @@
     X(PrefetchLocalRead, int)                     \
     X(UnrollLoopCopies, int)                      \
     X(RegisterAllocation, int)                    \
+    X(RegisterAllocationConfig, std::string)      \
+    X(RegisterAllocationDump, bool)               \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
@@ -186,6 +196,11 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 #define GEN_MEMBER_OPTION_WITH_DEFAULT(name, type, value) type name = value;
         MODULE_OPTIONS_WITH_DEFAULTS_LIST(GEN_MEMBER_OPTION_WITH_DEFAULT)
 #undef GEN_MEMBER_OPTION_WITH_DEFAULT
+
+        /// True when register allocation renumbers the kernel's SGPRs: the
+        /// mode applies and the configuration allocates scalars. A pass after
+        /// allocation that found SGPRs by the producer's numbering asks this.
+        bool sgprsCompacted() const;
     };
 
     /**

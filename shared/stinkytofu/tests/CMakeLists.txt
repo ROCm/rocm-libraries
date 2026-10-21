@@ -93,6 +93,7 @@ set(UNIT_ASM_TEST_FILES
     unit/ra/AllocationRulesRegistryTest.cpp
     unit/ra/ExecMaskedWriteTieTest.cpp
     unit/ra/Gfx1250AllocationRulesTest.cpp
+    unit/ra/RegisterAllocationConfigTest.cpp
     unit/ra/RegisterAllocationPassTest.cpp
     unit/ra/RegisterBudgetTest.cpp
     unit/ra/RegisterSymbolSyncTest.cpp

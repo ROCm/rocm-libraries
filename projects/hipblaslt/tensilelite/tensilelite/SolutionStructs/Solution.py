@@ -70,6 +70,7 @@ from ..Common.ValidParameters import validParameters, \
                                             _expectedParamTypes, \
                                             _skipTypeCheck, \
                                             normalizeSwInstructionPrefetch, \
+                                            parseStinkyTofuRegisterAllocation, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
@@ -768,6 +769,12 @@ class Solution(collections.abc.Mapping):
     for key in config:
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
         self._state[key] = config[key]
+    # StinkyTofuRegisterAllocation is a mode or a StinkyTofu config string. Keep its
+    # shortest spelling, so that two spellings of one configuration are one kernel
+    # with one name; a configuration that is only a mode stays an int.
+    if "StinkyTofuRegisterAllocation" in self._state:
+      self._state["StinkyTofuRegisterAllocation"] = parseStinkyTofuRegisterAllocation(
+          self._state["StinkyTofuRegisterAllocation"])[0]
     # User-facing StinkyTofuParameters -> internal _StinkyTofuParameters. The public key is
     # removed; the internal copy tags the kernel name when set and is dropped before the logic yaml.
     self._state.pop("StinkyTofuParameters", None)

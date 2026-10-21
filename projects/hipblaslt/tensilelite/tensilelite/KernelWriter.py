@@ -70,8 +70,8 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
-  SW_INSTRUCTION_PREFETCH_AUTO
-from .SolutionStructs.Naming import getKernelNameMin
+  parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
+from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -7177,6 +7177,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
                                "RegisterAllocation": self.stinkyTofuRegisterAllocationMode(kernel),
+                               # The rest of StinkyTofuRegisterAllocation, in its shortest
+                               # spelling; the mode above is the one that holds.
+                               "RegisterAllocationConfig": str(
+                                   kernel.get("StinkyTofuRegisterAllocation", 0)),
+                               "RegisterAllocationDump": bool(
+                                   globalParameters.get("StinkyTofuRegisterAllocationDump") or False),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
@@ -7270,6 +7276,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                            options=stinky_module_options)
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
+
+      # The allocation dump goes to a directory per kernel, named like the
+      # kernel's own files, under StinkyTofuCostOutputDir when that is set.
+      if stinky_module_options["RegisterAllocationDump"]:
+        stModule.setOutputName(getKernelFileBase(self.debugConfig.splitGSU, kernel))
+        if globalParameters.get("StinkyTofuCostOutputDir"):
+          stModule.setOutputDir(str(globalParameters["StinkyTofuCostOutputDir"]))
 
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
@@ -10689,9 +10702,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
   def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
     """Effective register allocation mode from the kernel parameter: 0 off, 1 shadow,
-    2 apply, 3 force apply, higher clamping to 3, and 0 whenever the StinkyTofu
-    path will not run -- the module is built on the same conditions checked here,
-    so mode 3 guarantees the resolver is reached, which is what makes deferring safe.
+    2 apply, 3 force apply -- the mode a config string starts with -- and 0 whenever
+    the StinkyTofu path will not run. The module is built on the same conditions
+    checked here, so mode 3 guarantees the resolver is reached, which is what makes
+    deferring safe.
 
     Only mode 3 defers, because only it needs to: shadow could not lower a count,
     and plain apply admits no kernel the pool estimate rejected, since a verdict
@@ -10708,8 +10722,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if not rocisa.isSupportedByStinkyTofu(self.states.version):
       return 0
     # TODO: ask whether the backend's capabilities include the allocation passes
-    configured = int(kernel.get("StinkyTofuRegisterAllocation", 0))
-    return max(0, min(configured, 3))
+    return parseStinkyTofuRegisterAllocation(kernel.get("StinkyTofuRegisterAllocation", 0))[1]
 
   def deferRegisterOverflowForAllocation(self, kernel) -> None:
     """Override in KernelWriterAssembly to defer a budget verdict to allocation."""

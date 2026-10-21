@@ -69,6 +69,13 @@ struct Block {
     /// AllocationConstraints::preferences(). Empty for almost every block,
     /// which is what keeps placement on its first-fit path.
     std::vector<size_t> preferences;
+    /// First slot any member is live, and the slots from there to where the
+    /// last member's range ends. What the program and largest-first orders sort on.
+    SlotIndex start = 0;
+    SlotIndex span = 0;
+    /// Position in placement order: 0 for pinned blocks, then counting up from 1
+    /// through the early phase and the queue. Read only by the placement dump.
+    uint32_t rank = 0;
     uint32_t evictions = 0;
     bool placed = false;
     uint32_t base = 0;
@@ -105,6 +112,14 @@ const PlacementPolicy& weightPolicy();
 /// Fewest legal bases first, which folds the capped phase into the order.
 /// Defined in FreedomOrderedGreedyAllocator.cpp.
 const PlacementPolicy& freedomPolicy();
+
+/// Program order: the block that becomes live first goes first, with capped
+/// blocks in a phase ahead of the queue. Defined in OrderedGreedyAllocators.cpp.
+const PlacementPolicy& programPolicy();
+
+/// Most register-time first (width times live span), with capped blocks in a
+/// phase ahead of the queue. Defined in OrderedGreedyAllocators.cpp.
+const PlacementPolicy& largestPolicy();
 
 /// Colour \p context, with \p policy deciding what is placed when.
 ///
