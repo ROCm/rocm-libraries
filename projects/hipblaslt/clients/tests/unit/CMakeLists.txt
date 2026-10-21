@@ -7,6 +7,7 @@
 set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/allclose_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_setup_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rocroller_kernel_match_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
@@ -21,10 +22,15 @@ target_sources(hipblaslt-test PRIVATE ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 # it is not linked here.
 add_executable(hipblaslt-test-hostunit ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 
+# roc::tensilelite-host arrives here transitively through roc::hipblaslt anyway;
+# naming it is what puts TensileLite's include dirs on this target, including the
+# generated tensilelitehost/export.h that Tensile/ContractionProblem.hpp needs.
+# hipblaslt-test already links it the same way (see ../../CMakeLists.txt).
 target_link_libraries(hipblaslt-test-hostunit
     PRIVATE
         hipblaslt::hipblaslt-clients-common
         hip::device
+        roc::tensilelite-host
         GTest::gtest
         GTest::gtest_main
 )
