@@ -42,9 +42,11 @@
 #define MFMA_LB 256
 #endif
 
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
+#endif
 
 #include "miopen_depthwise_mfma_kernels.hpp"
 
