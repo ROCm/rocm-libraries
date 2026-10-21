@@ -770,8 +770,8 @@ class Solution(collections.abc.Mapping):
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
         self._state[key] = config[key]
     # StinkyTofuRegisterAllocation is a mode or a StinkyTofu config string. Keep its
-    # shortest spelling, so that two spellings of one configuration are one kernel
-    # with one name; a configuration that is only a mode stays an int.
+    # shortest spelling, so two spellings of one configuration compare equal and the
+    # logic files record one; a configuration that is only a mode stays an int.
     if "StinkyTofuRegisterAllocation" in self._state:
       self._state["StinkyTofuRegisterAllocation"] = parseStinkyTofuRegisterAllocation(
           self._state["StinkyTofuRegisterAllocation"])[0]

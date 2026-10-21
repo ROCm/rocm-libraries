@@ -294,6 +294,31 @@ TEST_F(RegisterAllocationPassTest, PassReportsAMissingGraph) {
     EXPECT_EQ(physicalIR(*func), before);
 }
 
+TEST_F(RegisterAllocationPassTest, TheNotRunPassReportsAsTheAllocationPassWould) {
+    // For a pipeline that decides while being built not to allocate: the same
+    // NotAllocated remark, and nothing else.
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    const std::string before = physicalIR(*func);
+
+    PassContext passCtx;
+    passCtx.setRemarksEnabled(true);
+    AnalysisManager am;
+    registerAllAnalyses(am);
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    createRegisterAllocationNotRunPass("register allocation config 'x' does not parse")
+        ->run(*func, passCtx, am);
+    std::cerr.rdbuf(previous);
+
+    const std::string text = captured.str();
+    EXPECT_TRUE(contains(text,
+                         "missed: RegisterAllocation: @kernel: register allocation config "
+                         "'x' does not parse"))
+        << text;
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
 TEST_F(RegisterAllocationPassTest, AuditRemarksOnAProducerViolationAndStillColours) {
     // Audit is the pre-flight check that keeps a new rule from silently
     // uncolouring kernels: it reports against the producer's own registers and
