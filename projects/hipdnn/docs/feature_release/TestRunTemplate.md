@@ -165,11 +165,11 @@ Windows (PowerShell):
 .\rocm-artifacts\bin\<test_binary>.exe --gtest_filter="<Suite1*:Suite2*>" --gtest_brief=1
 
 # Integration tests that load test plugins
-$env:HIPDNN_PLUGIN_DIR = "$PWD\rocm-artifacts\lib\test_plugins\custom"
+$env:HIPDNN_PLUGIN_DIR = "$PWD\rocm-artifacts\bin\test_plugins\custom"
 .\rocm-artifacts\bin\hipdnn_public_frontend_tests.exe --gtest_filter="<*IntegrationFeature*>" --gtest_brief=1
 
 # One installed sample
-$env:HIPDNN_PLUGIN_DIR = "$PWD\rocm-artifacts\lib\hipdnn_plugins\engines"
+$env:HIPDNN_PLUGIN_DIR = "$PWD\rocm-artifacts\bin\hipdnn_plugins\engines"
 ctest --test-dir .\rocm-artifacts\bin\hipdnn_samples -R <test_name_regex> --output-on-failure
 ```
 
@@ -200,7 +200,7 @@ git sparse-checkout set projects/hipdnn dnn-providers cmake shared
 git checkout <develop-or-pin-sha>
 ```
 
-Configure and build against the installed artifacts (run from the `rocm-libraries` folder, sibling to `rocm-artifacts`):
+Configure and build against the installed artifacts (run from the `rocm-libraries` folder, sibling to `rocm-artifacts`). The configure needs clang-format 18 and the third-party libraries (GTest, spdlog); the Windows artifacts do not ship the libraries. Where they are not installed, add `-DENABLE_CLANG_FORMAT=OFF` and `-DALLOW_FETCH_DEPS=ON` ([Third-Party Libraries](../Building.md#third-party-libraries)), as the Windows block does:
 
 ```bash
 cmake -S projects/hipdnn \
@@ -229,7 +229,9 @@ cmake -S projects/hipdnn `
   -DCMAKE_CXX_COMPILER="$PWD/../rocm-artifacts/lib/llvm/bin/clang++.exe" `
   -DGPU_TARGETS=<gpu-target> `
   -DHIPDNN_SKIP_TESTS=OFF `
-  -DENABLE_CLANG_TIDY=OFF
+  -DENABLE_CLANG_TIDY=OFF `
+  -DENABLE_CLANG_FORMAT=OFF `
+  -DALLOW_FETCH_DEPS=ON
 
 cmake --build build/hipdnn-tests
 ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8

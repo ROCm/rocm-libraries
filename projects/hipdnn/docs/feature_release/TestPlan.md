@@ -85,7 +85,7 @@ Run the `full` tier in every hipDNN test directory of the artifacts. Each compon
 
 ```bash
 for dir in hipdnn hipdnn_integration_tests_ctest hipdnn_samples miopen_plugin hipblaslt_plugin hip_kernel_provider; do
-  ctest --test-dir rocm-artifacts/bin/$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8
+  ctest --test-dir rocm-artifacts/bin/$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8 --timeout 7200
 done
 ```
 
@@ -93,9 +93,11 @@ Windows (PowerShell):
 
 ```powershell
 foreach ($dir in 'hipdnn','hipdnn_integration_tests_ctest','hipdnn_samples','miopen_plugin','hipblaslt_plugin','hip_kernel_provider') {
-  ctest --test-dir rocm-artifacts\bin\$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8
+  ctest --test-dir rocm-artifacts\bin\$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8 --timeout 7200
 }
 ```
+
+The `--timeout 7200` limit per test matches CI. A directory can run for over an hour, so size the job's time limit accordingly.
 
 Where a directory has suites labelled for the GPU under test, replace `-LE ex_gpu` with `-L '^ex_gpu_<arch>$'`, as CI does ([Building and running tests](../TESTING.md#building-and-running-tests)). Add `--verbose` for each test's full output.
 
@@ -171,6 +173,12 @@ Build with address sanitizer enabled following the [Address Sanitizer Build](../
 ### Test Case 1: Benchmark the Release Build 📈
 
 [dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) times hipDNN graphs on each engine. Set it up by following its [setup guide](https://github.com/ROCm/dnn-benchmarking/blob/main/docs/setup.md), passing `--rocm-libraries-ref <pin_sha>` with the `pin_sha` recorded from the manifest, so it builds hipDNN and the providers from the release's source commit. Run it on each GPU family you validate.
+
+The workload tarballs are tracked with DVC, so a fresh clone holds only `.dvc` pointers. Pull the headline set first ([workload files](https://github.com/ROCm/dnn-benchmarking#workload-files)):
+
+```bash
+dvc pull -R Workloads/headline
+```
 
 Run the headline workloads, the curated regression set described in its [README](https://github.com/ROCm/dnn-benchmarking#workload-files), and write one results file. The set takes about an hour on one GPU:
 
