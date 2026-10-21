@@ -21,7 +21,7 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sort.h>
 
-#include _THRUST_STD_INCLUDE(__algorithm_)
+#include _THRUST_STD_INCLUDE(algorithm)
 #include _THRUST_STD_INCLUDE(iterator)
 #include _THRUST_STD_INCLUDE(type_traits)
 

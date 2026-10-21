@@ -46,7 +46,7 @@
 
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD
 #    include _THRUST_LIBCXX_INCLUDE(functional)
-#    include _THRUST_STD_INCLUDE(__algorithm_)
+#    include _THRUST_STD_INCLUDE(algorithm)
 #    include _THRUST_STD_INCLUDE(iterator)
 #  endif
 
