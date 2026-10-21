@@ -1218,6 +1218,35 @@ def test_read_custom_kernel_config_matches_a_full_parse_of_shipped_kernels():
     for path in paths:
         name = os.path.basename(path)[:-2]
         assert readCustomKernelConfig(name) == _readEmbeddedYaml(name)["custom.config"], name
+
+_REAL_ENTRY = "custom.config:\n  A: 1\n"
+
+@pytest.mark.parametrize("before", [
+    pytest.param("", id="plain"),
+    pytest.param("custom.config:x: 1\n", id="key-continues-after-the-colon"),
+    pytest.param("customXconfig:\n  Z: 0\n", id="other-character-for-the-dot"),
+    pytest.param('note: "see custom.config: here"\n', id="text-inside-a-line"),
+    pytest.param("outer:\n  custom.config:\n    Z: 0\n", id="indented"),
+])
+def test_custom_config_yaml_slices_the_real_entry_past_lookalike_lines(before):
+    # readCustomKernelConfig returns the right config even when a lookalike
+    # makes it parse the whole block, so the config alone cannot show that the
+    # slice was used. The whole block of a rocRoller kernel is about 1 MB.
+    contents = ".amdgpu_metadata\n---\n" + before + _REAL_ENTRY + "...\ns_nop 0\n"
+    assert ck_mod._customConfigYaml(contents) == _REAL_ENTRY
+
+def test_custom_config_yaml_is_the_whole_entry_and_nothing_else_for_shipped_kernels():
+    # Every shipped kernel takes the slice, and the slice holds custom.config
+    # and no other top-level key. A scanner that returns None, or one that does
+    # not stop at the end of the entry, would still give the right config
+    # through a whole-block parse, so check the slice itself.
+    names = [os.path.basename(p)[:-2] for p in iterCustomKernelFiles()]
+    assert names
+    for name in names:
+        text = ck_mod._customConfigYaml(ck_mod.getCustomKernelContents(name))
+        assert text is not None, name
+        assert list(yaml.load(text, Loader=ck_mod.SafeLoader)) == ["custom.config"], name
+
 def test_build_from_metadata_non_dict_yaml_raises():
     with pytest.raises(RuntimeError, match="no parseable .amdgpu_metadata"):
         _buildCustomKernelFromMetadata("k", None, {"MatrixInstruction": [16, 16, 16, 1]})
