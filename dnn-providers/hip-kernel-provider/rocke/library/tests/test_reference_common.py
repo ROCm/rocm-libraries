@@ -346,14 +346,13 @@ def test_reference_pytest_selects_cohort_and_keeps_negative_checks(tmp_path):
     """Test collection with a fake HIP probe; this does not execute GPU kernels."""
     import os
 
-    runtime = tmp_path / "rocke/runtime"
-    runtime.mkdir(parents=True)
-    (runtime.parent / "__init__.py").touch()
-    (runtime / "__init__.py").touch()
-    (runtime / "hip_module.py").write_text("def get_device_arch(): return 'gfx942'\n")
+    import rocke
+
     (tmp_path / "conftest.py").write_text(
         """
 from reference_common.pytest_support import start_reference_session, select_reference_items
+from rocke.runtime import hip_module
+hip_module.get_device_target_id = lambda device=0: "gfx942"
 def pytest_addoption(parser):
     parser.addoption("--rocke-reference-arch")
     parser.addoption("--rocke-reference-operation")
@@ -376,7 +375,12 @@ def test_negative_control():
 """
     )
     env = dict(os.environ, AMDGPU_FAMILIES="gfx94X-dcgpu", AMDGPU_TARGETS="gfx942")
-    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(Path(__file__).parent)])
+    env["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(Path(rocke.__file__).resolve().parent.parent),
+            str(Path(__file__).parent),
+        ]
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -399,12 +403,55 @@ def test_negative_control():
     assert "2 passed, 1 deselected" in result.stdout
 
 
+@pytest.mark.parametrize(
+    "architecture,device_target,targets,outcome",
+    [
+        ("gfx1200", "gfx1200", "gfx1200,gfx1201", "run"),
+        ("gfx1200", "gfx1201", "gfx1200,gfx1201", "skip"),
+        ("gfx1201", "gfx1200", "gfx1200,gfx1201", "skip"),
+        ("gfx1201", "gfx1200-strict:xnack-", "gfx1200,gfx1201", "skip"),
+        ("gfx1201", "gfx1201", "gfx1200,gfx1201", "run"),
+        ("gfx1201", "gfx1201-strict:xnack-", "gfx1200,gfx1201", "run"),
+        ("gfx1201", None, "gfx1200,gfx1201", "error"),
+        ("gfx1201", "gfx950", "gfx1200,gfx1201", "error"),
+        ("gfx1151", "gfx1100", "gfx1100,gfx1151", "skip"),
+        ("gfx942", "gfx942:sramecc+:xnack-", "gfx942", "run"),
+    ],
+)
+def test_reference_session_uses_hardware_target_identity(
+    monkeypatch, architecture, device_target, targets, outcome
+):
+    """Keep real catalog normalization while stubbing only the HIP target query."""
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
+
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: device_target
+    )
+    monkeypatch.setenv("AMDGPU_FAMILIES", "")
+    monkeypatch.setenv("AMDGPU_TARGETS", targets)
+    options = {
+        "--rocke-reference-operation": "sdpa",
+        "--rocke-reference-arch": architecture,
+    }
+    config = SimpleNamespace(getoption=options.get)
+    if outcome == "skip":
+        with pytest.raises(pytest.exit.Exception, match="different GPU lane") as error:
+            start_reference_session(config)
+        assert error.value.returncode == 77
+    elif outcome == "error":
+        with pytest.raises(pytest.UsageError, match=f"required {architecture} GPU"):
+            start_reference_session(config)
+    else:
+        start_reference_session(config)
+
+
 def test_reference_entry_skips_a_different_gpu_lane():
     from reference_common.pytest_support import architecture_available
 
-    assert not architecture_available(
-        "gfx942", ("gfx942", "gfx94x"), "gfx950", "gfx950-dcgpu"
-    )
+    assert not architecture_available("gfx942", "gfx950")
 
 
 @pytest.mark.parametrize("device", [None, "gfx950"], ids=["missing-gpu", "wrong-gpu"])
@@ -412,35 +459,105 @@ def test_reference_selected_target_requires_matching_hardware(device):
     from reference_common.pytest_support import architecture_available
 
     with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
-        architecture_available(
-            "gfx942", ("gfx942", "gfx94x"), device, "gfx94X-dcgpu", "gfx942"
-        )
+        architecture_available("gfx942", device, "gfx942")
 
 
-def test_reference_exact_targets_override_the_family():
+def test_reference_exact_targets_select_only_matching_cohorts():
     from reference_common.pytest_support import architecture_available
 
-    # Same family, different artifact target: do not require the gfx942 bundle.
-    assert not architecture_available(
-        "gfx942", ("gfx942", "gfx94x"), "gfx941", "gfx94X-dcgpu", "gfx941"
-    )
+    # Same family, different artifact target: do not require the gfx1201 bundle.
+    assert not architecture_available("gfx1201", "gfx1200", "gfx1200")
     # Downloading both artifacts does not mean both devices are present.
-    assert not architecture_available(
-        "gfx942", ("gfx942", "gfx94x"), "gfx941", "gfx94X-dcgpu", "gfx941,gfx942"
-    )
+    assert not architecture_available("gfx1201", "gfx1200", "gfx1200,gfx1201")
 
 
 def test_reference_local_run_without_a_gpu_fails():
     from reference_common.pytest_support import architecture_available
 
     with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
-        architecture_available("gfx942", ("gfx942", "gfx94x"), None, "")
+        architecture_available("gfx942", None)
 
 
 @pytest.mark.parametrize("operation", ["sdpa", "conv"])
+def test_reference_family_labels_do_not_require_another_processors_cohort(
+    operation, monkeypatch
+):
+    """A multi-family job may run on a supported GPU without this reference."""
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
+
+    monkeypatch.setenv("AMDGPU_FAMILIES", "gfx94X-dcgpu,gfx950-dcgpu")
+    monkeypatch.delenv("AMDGPU_TARGETS", raising=False)
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: "gfx950")
+    options = {
+        "--rocke-reference-operation": operation,
+        "--rocke-reference-arch": "gfx942",
+    }
+    with pytest.raises(pytest.exit.Exception, match="different GPU lane") as error:
+        start_reference_session(SimpleNamespace(getoption=options.get))
+    assert error.value.returncode == 77
+
+
+def test_reference_family_label_does_not_hide_a_missing_gpu(monkeypatch):
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
+
+    monkeypatch.setenv("AMDGPU_FAMILIES", "gfx120X-all")
+    monkeypatch.delenv("AMDGPU_TARGETS", raising=False)
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: None)
+    options = {
+        "--rocke-reference-operation": "sdpa",
+        "--rocke-reference-arch": "gfx1201",
+    }
+    with pytest.raises(pytest.UsageError, match="required gfx1201 GPU unavailable"):
+        try:
+            start_reference_session(SimpleNamespace(getoption=options.get))
+        except pytest.exit.Exception:
+            pytest.fail("a selected reference must not skip a missing GPU")
+
+
+@pytest.mark.parametrize(
+    "operation,architecture",
+    [("sdpa", "gfx1100"), ("conv", "gfx950"), ("conv", "gfx1151")],
+)
+def test_reference_fixture_skips_supported_gpu_without_cohort(
+    operation, architecture, monkeypatch
+):
+    """Broader build families do not enroll reference coverage for this GPU."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    monkeypatch.setenv("AMDGPU_FAMILIES", "gfx94X-dcgpu,gfx110X-all,gfx950-dcgpu")
+    monkeypatch.setenv("AMDGPU_TARGETS", architecture)
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+
+    def unexpected_bundle_lookup(*args, **kwargs):
+        pytest.fail("an unenrolled processor must skip before looking up a bundle")
+
+    monkeypatch.setattr(gpu_tests, "default_bundle_path", unexpected_bundle_lookup)
+    fixture = gpu_tests.reference_bundle.__wrapped__(
+        SimpleNamespace(getoption=lambda option: None)
+    )
+    with pytest.raises(pytest.skip.Exception, match="no .* reference cohort"):
+        next(fixture)
+
+
+@pytest.mark.parametrize(
+    "operation,architecture",
+    [("sdpa", "gfx942"), ("sdpa", "gfx1200"), ("sdpa", "gfx1201"), ("conv", "gfx942")],
+)
 @pytest.mark.parametrize("candidate", [False, True])
 def test_reference_fixture_selects_explicit_paths(
-    operation, candidate, tmp_path, monkeypatch
+    operation, architecture, candidate, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -456,7 +573,9 @@ def test_reference_fixture_selects_explicit_paths(
             tmp_path / "candidate-lock.json" if candidate else None
         ),
     }
-    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
     monkeypatch.setattr(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path
     )
@@ -471,11 +590,11 @@ def test_reference_fixture_selects_explicit_paths(
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
         target, bundle, manifest = next(fixture)
         assert (target.NAME, bundle, manifest) == (
-            "gfx942",
+            architecture,
             tmp_path,
             {"candidate": candidate},
         )
-    assert calls == [(tmp_path, options["--rocke-reference-lock"], "gfx942")]
+    assert calls == [(tmp_path, options["--rocke-reference-lock"], architecture)]
     if candidate:
         options["--rocke-reference-operation"] = (
             "conv" if operation == "sdpa" else "sdpa"
@@ -512,10 +631,13 @@ def test_reference_path_options_require_explicit_scope(options, message):
         start_reference_session(SimpleNamespace(getoption=options.get))
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize(
+    "operation,architecture",
+    [("sdpa", "gfx942"), ("conv", "gfx942"), ("sdpa", "gfx1200")],
+)
 @pytest.mark.parametrize("selected", [False, True])
 def test_reference_missing_bundle_fails_only_when_selected(
-    operation, selected, tmp_path, monkeypatch
+    operation, architecture, selected, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -524,7 +646,9 @@ def test_reference_missing_bundle_fails_only_when_selected(
     from rocke.runtime import hip_module
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
-    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
     monkeypatch.setattr(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
     )

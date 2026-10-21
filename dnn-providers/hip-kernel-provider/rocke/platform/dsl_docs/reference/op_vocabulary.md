@@ -8,7 +8,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 |------------------------|-----------------------------------|----------------------------------------|
 | `arith.constant`       | `const_i32`, `const_i64`, `const_f32`, `const_f64`, `fp16_zero` | constant value |
 | `arith.constant_vec`   | `zero_vec_f32`, `zero_vec`        | `zeroinitializer` vector               |
-| `arith.add`            | `add`                             | `add` (integer)                        |
+| `arith.add`            | `add`, `add_nuw`                  | `add nsw` (`add`), `add nuw` (`add_nuw`, attr `wrap = "nuw"`) |
 | `arith.sub`            | `sub`                             | `sub`                                  |
 | `arith.mul`            | `mul`                             | `mul`                                  |
 | `arith.div`            | `div`                             | `sdiv`                                 |
@@ -21,7 +21,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fneg`           | `fneg`                            | `fneg`                                 |
 | `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f64,f32,f16,bf16}`       |
 | `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
-| `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne` | `icmp {slt,sle,sgt,sge,eq,ne}` |
+| `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne`, `cmp_ult` | `icmp {slt,sle,sgt,sge,eq,ne,ult}` |
+| `arith.assume_range`   | (private `_assume_range`, for checked callers only) | nothing: uses of the result print the marked value; the attrs record a range and congruence for the tiling layer's range walk |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
 | `arith.and`            | `land`                            | `and`                                  |
 | `arith.or`             | `lor`                             | `or`                                   |
@@ -35,6 +36,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.cast_f32_to`    | `cast_f32_to`                     | `fptrunc` to f16/bf16                  |
 | `arith.trunc_f32_to_f16` | `trunc_f32_to_f16`              | `fptrunc` (vec-packed in some emissions) |
 | `arith.sitofp_f32`     | `sitofp_f32`                      | `sitofp i32 to float`                  |
+| `arith.cvt_f32_to_f64` | `cvt_f32_to_f64`                  | `fpext float to double` (exact)        |
+| `arith.cvt_f64_to_f32` | `cvt_f64_to_f32`                  | `fptrunc double to float` (round to nearest even) |
 | `arith.cvt_fp8_to_f32` | `cvt_fp8_to_f32`                  | `llvm.amdgcn.cvt.f32.fp8`              |
 | `arith.cvt_bf8_to_f32` | `cvt_bf8_to_f32`                  | `llvm.amdgcn.cvt.f32.bf8`              |
 | `arith.cvt_f32_to_fp8` | `cvt_f32_to_fp8`                  | `llvm.amdgcn.cvt.pk.fp8.f32` (low byte) |

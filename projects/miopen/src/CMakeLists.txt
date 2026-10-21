@@ -507,6 +507,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/hip_math_ops.hpp
         kernels/inst_wrappers.inc
         kernels/miopen_cstdint.hpp
+        kernels/miopen_initializer_list.hpp
         kernels/miopen_limits.hpp
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
@@ -984,9 +985,21 @@ endif()
 # sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
 # only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
 # driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+#
+# The same opt-out is needed at link time. These shared libraries link with --hip-link, and the
+# device toolchain otherwise inherits the host -fsanitize=undefined. Since LLVM #219973, clang then
+# links the host-side libclang_rt.ubsan_offload.a into the shared library. That archive references
+# sanitizer_common internals (e.g. __sanitizer::SanitizerToolName) that only the static
+# ubsan_standalone runtime of the executable defines and that the executable does not export, so
+# every consumer fails to load with "undefined symbol: _ZN11__sanitizer17SanitizerToolNameE".
+# The link option is per-target, not add_link_options: links without --hip-link (host tools)
+# would reject the unused -Xarch_device argument under -Werror.
 if(MIOPEN_DISABLE_DEVICE_UBSAN)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+    foreach(_miopen_lib IN LISTS _MIOPEN_INSTALL_TARGETS)
+        target_link_options(${_miopen_lib} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
+    endforeach()
 endif()
 
 # Add dependency on inlined rocrand header if it was created
