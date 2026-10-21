@@ -1941,8 +1941,8 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 156
         },
         "expected_failures": 4,
         "families": {
@@ -1965,11 +1965,12 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2,
           "paged_decode_splitk": 3
         },
-        "ok_cases": 229
+        "ok_cases": 239
       }
     },
     "llvm22": {
@@ -3913,8 +3914,8 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 156
         },
         "expected_failures": 4,
         "families": {
@@ -3937,11 +3938,12 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2,
           "paged_decode_splitk": 3
         },
-        "ok_cases": 229
+        "ok_cases": 239
       }
     },
     "llvm23": {
@@ -5900,8 +5902,8 @@
           "gfx1201": 8,
           "gfx1250": 8,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 156
         },
         "expected_failures": 0,
         "families": {
@@ -5924,11 +5926,12 @@
           "gemm": 17,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2,
           "paged_decode_splitk": 3
         },
-        "ok_cases": 233
+        "ok_cases": 243
       }
     }
   },
