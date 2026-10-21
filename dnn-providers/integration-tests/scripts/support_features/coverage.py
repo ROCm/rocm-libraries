@@ -45,7 +45,12 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from support_features import FeatureError  # noqa: E402
 from support_features import registry  # noqa: E402
-from support_matrix_units import ClaimUnit, collect_units, report_error  # noqa: E402
+from support_matrix_units import (  # noqa: E402
+    ClaimUnit,
+    collect_units,
+    report_error,
+    write_stdout,
+)
 
 DEFAULT_BUNDLES_DIR = SCRIPTS_DIR.parent / "integration-test-bundles"
 
@@ -344,9 +349,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     if args.graphs:
-        sys.stdout.write(render_graph_list(found))
+        write_stdout(render_graph_list(found))
     else:
-        sys.stdout.write(render_markdown(coverage))
+        write_stdout(render_markdown(coverage))
     return 0
 
 

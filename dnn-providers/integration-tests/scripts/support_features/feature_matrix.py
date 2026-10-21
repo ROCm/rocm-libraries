@@ -44,7 +44,12 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from support_features import registry  # noqa: E402
 from support_features.coverage import unit_features, unit_location  # noqa: E402
 from support_matrix_markdown import FULL, PARTIAL  # noqa: E402
-from support_matrix_units import ClaimUnit, collect_units, report_error  # noqa: E402
+from support_matrix_units import (  # noqa: E402
+    ClaimUnit,
+    collect_units,
+    report_error,
+    write_stdout,
+)
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[4]
@@ -530,10 +535,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     document = render(claims)
     if args.output is None:
-        sys.stdout.write(document)
+        write_stdout(document)
     else:
         args.output.write_text(document, encoding="utf-8")
-        print(f"wrote {args.output}")
+        # To stderr, so the status line can never land in a piped document.
+        print(f"wrote {args.output}", file=sys.stderr)
     return 0
 
 

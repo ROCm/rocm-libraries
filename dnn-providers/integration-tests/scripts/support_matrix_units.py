@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import re
 import sys
@@ -124,6 +125,22 @@ def report_error(errors: list[str] | None, message: str) -> None:
     print(f"error: {message}", file=sys.stderr)
     if errors is not None:
         errors.append(message)
+
+
+def write_stdout(document: str) -> None:
+    """Write a rendered document to stdout as UTF-8, whatever the locale.
+
+    The documents carry emoji, which a cp1252 Windows console cannot encode,
+    so the bytes go to the buffer directly rather than through ``sys.stdout``.
+    """
+    try:
+        sys.stdout.buffer.write(document.encode("utf-8"))
+        sys.stdout.buffer.flush()
+    except BrokenPipeError:
+        # `| head` closing the pipe early is the caller's choice, not a
+        # failure. Point the remaining buffered writes at devnull so the
+        # interpreter does not report the same broken pipe again at exit.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
 
 
 # --------------------------------------------------------------------------

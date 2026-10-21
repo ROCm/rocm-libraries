@@ -37,7 +37,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import pathlib
 import sys
 
@@ -48,7 +47,7 @@ from support_matrix_markdown import (  # noqa: E402
     REGEN_OVERVIEW_COMMAND,
     render_markdown,
 )
-from support_matrix_units import collect_units, warn  # noqa: E402
+from support_matrix_units import collect_units, warn, write_stdout  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Paths
@@ -173,14 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if str(args.output) == "-":
-        try:
-            sys.stdout.buffer.write(document.encode("utf-8"))
-            sys.stdout.buffer.flush()
-        except BrokenPipeError:
-            # `| head` closing the pipe early is the caller's choice, not a
-            # failure. Point the remaining buffered writes at devnull so the
-            # interpreter does not report the same broken pipe again at exit.
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        write_stdout(document)
         return 0
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

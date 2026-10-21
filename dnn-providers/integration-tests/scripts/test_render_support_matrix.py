@@ -1968,3 +1968,38 @@ class TestRealBundleTree:
         assert renderer.wait() == 0
         assert renderer.stderr is not None
         assert renderer.stderr.read() == b""
+
+    def test_write_stdout_survives_a_consumer_that_closes_early(self) -> None:
+        """The guard itself, for every CLI that shares it.
+
+        The feature CLIs' documents fit in a pipe buffer today, so only a
+        document larger than any buffer is sure to hit the closed pipe.
+        """
+        writer = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.path.insert(0, sys.argv[1]); "
+                "from support_matrix_units import write_stdout; "
+                "write_stdout('✅ line\\n' * 1_000_000)",
+                str(Path(__file__).parent),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert writer.stdout is not None
+        reader = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.stdin.buffer.readline()); sys.exit(0)",
+            ],
+            stdin=writer.stdout,
+            stdout=subprocess.PIPE,
+        )
+        writer.stdout.close()
+        line, _ = reader.communicate()
+        assert line == "✅ line\n".encode("utf-8")
+        assert writer.wait() == 0
+        assert writer.stderr is not None
+        assert writer.stderr.read() == b""

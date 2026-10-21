@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -905,7 +908,9 @@ class TestFeatureMatrixCli:
         assert output.read_text(encoding="utf-8").startswith(
             "# Support matrix by API option"
         )
-        assert capsys.readouterr().out == f"wrote {output}\n"
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == f"wrote {output}\n"
 
     def test_defect_exits_one_and_writes_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -916,6 +921,33 @@ class TestFeatureMatrixCli:
         assert feature_matrix_main(argv) == 1
         assert not output.exists()
         assert "error: 1 defect(s); nothing rendered" in capsys.readouterr().err
+
+
+class TestStdoutEncoding:
+    """Both CLIs print emoji, so stdout must not depend on the console locale.
+
+    A Windows console defaults to cp1252, which has no code point for them;
+    writing through ``sys.stdout`` there raised UnicodeEncodeError. Forcing
+    cp1252 reproduces that on any host.
+    """
+
+    @pytest.mark.parametrize("script", ["feature_matrix.py", "coverage.py"])
+    def test_stdout_is_utf8_under_a_cp1252_console(self, script: str) -> None:
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+        env.pop("PYTHONUTF8", None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).with_name("support_features") / script),
+            ],
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+        assert result.stderr == b""
+        document = result.stdout.decode("utf-8")
+        assert document.startswith("# ")
 
 
 # --------------------------------------------------------------------------
