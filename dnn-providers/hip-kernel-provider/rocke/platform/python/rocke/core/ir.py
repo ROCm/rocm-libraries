@@ -2255,9 +2255,10 @@ class IRBuilder:
 
     # ----- gfx1250 workgroup clusters -----
     #
-    # Lowering requires gfx1250 and the llvm23 flavor. A launch without a
-    # cluster shape is a 1x1x1 cluster: every id and max id inside the cluster
-    # reads 0 and the cluster id equals the workgroup id.
+    # Lowering requires a target with memory.has_cluster_launch and the llvm23
+    # flavor. A launch without a cluster shape is a 1x1x1 cluster: every id and
+    # max id inside the cluster reads 0 and the cluster id equals the workgroup
+    # id.
 
     def set_cluster_dims(self, x: int, y: int = 1, z: int = 1) -> None:
         """Declare the workgroup-cluster shape this kernel must be launched with.
@@ -3713,13 +3714,17 @@ class IRBuilder:
     # ----- gfx1250 data prefetch -----
     #
     # All of these are hints: they must never change a kernel's results, only
-    # when data arrives. Lowering requires gfx1250 and the llvm23 flavor.
+    # when data arrives. Lowering requires a target with
+    # memory.has_scalar_data_prefetch (``s_*prefetch_data``) or
+    # memory.has_global_prefetch (``global``/``flat_prefetch``) and the llvm23
+    # flavor.
 
     def s_setreg(self, simm16: int, value: Value) -> None:
         """``llvm.amdgcn.s.setreg`` — write ``value`` into a hardware-register field.
 
         ``simm16`` selects the register field; build it with :func:`hwreg`.
-        Field layouts differ between generations, so the op is gfx1250-only.
+        Field layouts differ between target families, so lowering requires
+        target_family gfx12_cdna.
         """
         simm16 = _check_u16("s_setreg", "simm16", simm16)
         self._check_i32_value("s_setreg", "value", value)
@@ -4795,7 +4800,8 @@ class IRBuilder:
     # One load, delivered to every workgroup of the cluster whose bit is set in
     # ``mask``. The mask goes to M0[15:0] (bit i is the workgroup whose
     # cluster_workgroup_flat_id is i); lanes of the issuing workgroup must pass
-    # the same wave-uniform mask. Lowering requires gfx1250 and llvm23.
+    # the same wave-uniform mask. Lowering requires a target with
+    # memory.has_multicast_load and llvm23.
 
     def cluster_load(
         self,

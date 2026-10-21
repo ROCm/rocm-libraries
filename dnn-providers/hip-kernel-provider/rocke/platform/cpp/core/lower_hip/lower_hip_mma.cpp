@@ -28,6 +28,8 @@
  * getattr-dispatch raises immediately and we reproduce that same rejection.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
+#include <ctype.h>
+
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
@@ -119,13 +121,28 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     const bool scale16 = spec->scales.block_k == 16;
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
-    if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
+    /* Admitted on any target whose MMA catalog lists the atom, never by the
+     * target's name; the rule and message of Python _require_wmma_arch. */
+    const rocke_arch_target_t* target
+        = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
+    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, op_id))
     {
+        char family[16] = "(UNKNOWN)";
+        if(target)
+        {
+            size_t i = 0;
+            for(; target->family[i] && i + 1 < sizeof(family); ++i)
+                family[i] = (char)toupper((unsigned char)target->family[i]);
+            family[i] = '\0';
+        }
         return rocke_h_fail(lw,
                             ROCKE_ERR_NOTIMPL,
-                            "WMMA op '%s' is not available on %s",
+                            "WMMA op '%s' is not available on %s "
+                            "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                            "The MFMA atoms are the matrix path on CDNA.",
                             op_id,
-                            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+                            lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                            family);
     }
     if(op->num_operands != 5 || op->num_results != 1)
     {
