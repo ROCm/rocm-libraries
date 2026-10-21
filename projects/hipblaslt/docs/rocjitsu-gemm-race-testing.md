@@ -63,28 +63,10 @@ the selected GEMM ran with race detection. Races, numerical failures, missing
 solutions and emulator diagnostics fail the run. There are no exclusions or
 expected-failure exemptions; `known_failures` is reserved and stays zero.
 
-`--explicit-cases` adds a JSON list with `id`, `description` and `problem` fields.
-These cases do not consume random draws and use the same checks. Reports contain
-separate random and explicit totals, plus sampled types, transposes, epilogues
-and elapsed time. Each case retains its input, commands, logs and result;
-`cases.md` and `cases.json` collect the inputs and outcomes for the whole run.
-
-The checked-in [required cases](../../../.github/scripts/hipblaslt_explicit_gemms.json)
-contain one BF16 TN input, 256×160×192 with one batch, matching the reduced shape from
-[the reported prefetch race](https://github.com/ROCm/rocm-libraries/pull/14147).
-The heuristic may select a different kernel, so this checks the shape without
-guaranteeing coverage of that particular custom schedule. Results record
-the selected kernel names. Use `--count 0 --explicit-cases ...` to run the list
-alone, or `--explicit-case ID --explicit-cases ...` to replay one named input.
-`--case N` continues to replay only the Nth random sample. Early stopping also
-applies to explicit tests; omit `--stop-on-failure` to attempt the full list.
-
-The separate [diagnostic cases](../../../.github/scripts/hipblaslt_diagnostic_gemms.json)
-retain five observed numerical-validation failures near zero or FP16 overflow.
-They are available through `--count 0 --explicit-cases` using that file, with
-the same strict checks and no exemptions. They are outside the initial CI
-workload because they exercise validation edge cases documented in the
-[test results](rocjitsu-gemm-race-results.md).
+Reports contain sampled types, transposes, epilogues and elapsed time. Each
+case retains its input, commands, logs and result; `cases.md` and `cases.json`
+collect the inputs and outcomes for the whole run. Use `--case N` with the same
+seed to replay the Nth sampled GEMM.
 
 ## CI and pre-merge validation
 
@@ -95,8 +77,6 @@ nightly samples 1,000. Both use gfx950, seed 0 and eight concurrent GEMMs, so
 the per-PR inputs are the first 100 nightly inputs. The job fetches the matching
 BLAS runtime, device library and bench test payload from that workflow run.
 The emulator is pinned independently to a revision validated with these types.
-Both callers also run the same required BF16 case, giving 101 per-PR inputs
-and 1,001 nightly inputs.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
 but they do not change the required Multi-Arch summary. Every sample is
