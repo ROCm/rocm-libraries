@@ -9,13 +9,17 @@ GPU is touched.
 
 from __future__ import annotations
 
+import itertools
 import json
+from dataclasses import replace
 
 import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
+from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.conv.direct_variants import direct_mfma_knobs_reason
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
@@ -25,7 +29,9 @@ _ARCH = "gfx950"
 @pytest.fixture(scope="module")
 def jobs():
     return dks.enumerate_direct_jobs(
-        arch=_ARCH, target=ArchTarget.from_gfx(_ARCH), directions=("fwd", "dgrad")
+        arch=_ARCH,
+        target=ArchTarget.from_gfx(_ARCH),
+        directions=("fwd", "dgrad", "wgrad"),
     )
 
 
@@ -160,13 +166,17 @@ def test_padding_zero_is_a_baked_value(cache):
 
 @pytest.mark.parametrize("groups", [1, 3, 16, 48])
 def test_group_count_is_runtime(cache, groups):
-    """Any group count is served; only tiles that do not divide it drop out."""
+    """Any group count is served; only tiles that do not divide it drop out.
+
+    The LDS-halo kernels (dense, and grouped through merging) have shape rules
+    of their own -- merge degree, chunk and tile fits -- so they are left out.
+    """
     plans, rejected = dks.direct_plans(cache, _problem(groups=groups), "fwd", _ARCH)
     assert plans
     assert all(
         "block_groups" in why
         for ident, why in rejected
-        if ident.algorithm != "direct_nongrouped"
+        if ident.algorithm not in dks._HALO_VARIANTS
     )
 
 
@@ -197,13 +207,20 @@ def test_small_group_depthwise_offers_spatial(cache, groups, stride):
 @pytest.mark.parametrize("stride", [1, 2])
 def test_large_depthwise_filters_get_the_tiled_kernel(cache, stride):
     """Filters past the row-streaming grid (13x13 .. 31x31) are served by the
-    output-stationary kernel, launched with one block per output-row tile."""
+    output-stationary kernel, launched with one block per output-row tile.
+    At stride 1 the column-streamed kernel competes with it (the spatial one
+    too, but only below a wave of groups)."""
     problem = _problem(
         N=2, H=28, W=28, groups=192, cpg=1, kpg=1, KH=31, KW=31, PAD=15, stride=stride
     )
     plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
-    assert plans and _variants(plans) == {"direct_depthwise_tiled"}
+    expected = {"direct_depthwise_tiled"}
+    if stride == 1:
+        expected.add("direct_depthwise_col")
+    assert plans and _variants(plans) == expected
     for plan in plans:
+        if plan.identity.algorithm != "direct_depthwise_tiled":
+            continue
         knobs = json.loads(plan.identity.knobs)
         (step,) = plan.steps
         assert step.grid == (
@@ -253,8 +270,75 @@ def test_nongrouped_channels_are_runtime(cache, C, K, H, W):
             "direct_nongrouped", problem, json.loads(plan.identity.knobs)
         )
         assert spec.tile_w in tile_w_candidates(problem.Wo, spec.atom_tile)
+        if spec.split_c == 1:
+            (step,) = plan.steps
+            assert step.grid == spec.grid()
+            continue
+        # Split-C: the conv pass fills the fp32 workspace, the reduction
+        # folds it into y.
+        conv, fold = plan.steps
+        assert conv.grid == spec.grid()
+        assert conv.buffers == ("x", "w", "ws_split")
+        assert fold.buffers == ("ws_split", "w", "y")
+        assert plan.workspaces == {"ws_split": spec.workspace_bytes}
+
+
+def test_every_split_kernel_has_its_reduction(jobs):
+    """A split-C kernel is useless without the reduction of its degree, so the
+    grid builds one per degree it uses -- and only those."""
+    degrees = {
+        json.loads(j.identity.knobs).get("split_c", 1)
+        for j in jobs
+        if j.identity.algorithm == "direct_nongrouped"
+    } - {1}
+    assert degrees
+    reduces = [j for j in jobs if j.identity.algorithm == "direct_split_reduce"]
+    assert {json.loads(j.identity.knobs)["split_c"] for j in reduces} == degrees
+    for job in reduces:
+        assert dks.direct_job_for_identity(job.identity) == job
+
+
+def test_grouped_halo_serves_grouped_problems_only(cache):
+    """The grouped LDS-halo kernel is offered to grouped problems, with merge
+    degrees that make the merged channels fit its chunks; a dense problem gets
+    the non-grouped kernel instead."""
+    problem = _problem(groups=32, cpg=4, kpg=4, H=56, W=56)
+    plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
+    halo = [p for p in plans if p.identity.algorithm == "direct_grouped_halo"]
+    assert halo
+    for plan in halo:
+        knobs = json.loads(plan.identity.knobs)
+        spec = dks.make_spec("direct_grouped_halo", problem, knobs)
+        assert (problem.cpg * knobs["group_merge"]) % spec.ck == 0
+        assert spec.tile_k <= spec.merged_k
         (step,) = plan.steps
         assert step.grid == spec.grid()
+    dense = dks.direct_plans(cache, _problem(groups=1, cpg=64, kpg=64), "fwd", _ARCH)[0]
+    assert "direct_grouped_halo" not in _variants(dense)
+
+
+def test_large_batch_is_split_into_launches(cache):
+    """A batch whose activations pass the kernels' 32-bit buffer range runs as
+    balanced per-chunk launches over windows of the same buffers."""
+    problem = _problem(N=8, H=768, W=768, groups=1, cpg=256, kpg=128)
+    assert dks._batch_chunks(problem) == [4, 4]
+    assert dks._batch_chunks(replace(problem, N=2)) is None
+    plans = _nongrouped(dks.direct_plans(cache, problem, "fwd", _ARCH)[0])
+    assert plans
+    in_img = 2 * 768 * 768 * 256
+    out_img = 2 * 768 * 768 * 128
+    for plan in plans:
+        assert json.loads(plan.identity.knobs).get("split_c", 1) == 1
+        assert [st.views for st in plan.steps] == [
+            ((0, 4 * in_img), None, (0, 4 * out_img)),
+            ((4 * in_img, 4 * in_img), None, (4 * out_img, 4 * out_img)),
+        ]
+        values = dks.launch_values(
+            plan.steps[1], {"x": 0x1000, "w": 0x2000, "y": 0x3000}, {"w": 1 << 20}
+        )
+        assert values["A"] == 0x1000 + 4 * in_img
+        assert values["A_bytes"] == 4 * in_img
+        assert values["p_N"] == 4
 
 
 def test_nongrouped_grid_skips_spilling_tiles(jobs):
@@ -296,6 +380,107 @@ def test_nongrouped_grid_skips_spilling_tiles(jobs):
     assert "accumulator file" in nongrouped_register_reason(full, _ARCH)
 
 
+def _code_object(text: bytes, scratch: int = 0, entry: int = 0) -> bytes:
+    """A minimal ELF64 code object: ``.text`` and one 64-byte ``k.kd``."""
+    import struct
+
+    kd = bytearray(64)
+    struct.pack_into("<I", kd, 4, scratch)
+    struct.pack_into("<q", kd, 16, entry)
+    kd_addr = 0x1000
+    strtab = b"\0k.kd\0"
+    symtab = bytes(24) + struct.pack("<IBBHQQ", 1, 0x11, 0, 2, kd_addr, 64)
+    names = [b".text", b".rodata", b".symtab", b".strtab", b".shstrtab"]
+    shstrtab = b"\0" + b"".join(n + b"\0" for n in names)
+    name_off = [1 + sum(len(n) + 1 for n in names[:i]) for i in range(len(names))]
+    blobs = [text, bytes(kd), symtab, strtab, shstrtab]
+    # (type, addr, link): .text, .rodata, .symtab -> .strtab, .strtab, .shstrtab
+    kinds = [(1, 0, 0), (1, kd_addr, 0), (2, 0, 4), (3, 0, 0), (3, 0, 0)]
+    body, offsets = b"", []
+    for blob in blobs:
+        offsets.append(64 + len(body))
+        body += blob
+    shoff = 64 + len(body)
+    sections = bytes(64)
+    for (sh_type, addr, link), off, blob, name in zip(kinds, offsets, blobs, name_off):
+        sections += struct.pack(
+            "<IIQQQQIIQQ", name, sh_type, 0, addr, off, len(blob), link, 0, 1, 0
+        )
+    header = b"\x7fELF\x02\x01\x01" + bytes(9)
+    header += struct.pack(
+        "<HHIQQQIHHHHHH", 3, 224, 1, 0, 0, shoff, 0, 64, 0, 0, 64, 6, 5
+    )
+    return header + body + sections
+
+
+def test_code_facts_read_text_descriptor_and_scratch():
+    code, scratch = dks._elf_code_facts(_code_object(b"\x01\x02", scratch=12))
+    assert scratch == 12
+    assert len(code) == 32  # a SHA-256 digest, not the code itself
+    # The entry-point offset is file layout, not code.
+    assert dks._elf_code_facts(_code_object(b"\x01\x02", entry=256))[0] == (
+        dks._elf_code_facts(_code_object(b"\x01\x02"))[0]
+    )
+    assert dks._elf_code_facts(_code_object(b"\x01\x03"))[0] != code
+    assert dks._elf_code_facts(b"placeholder") is None
+
+
+def _hint_pairs(jobs, kind):
+    """``(waves_per_eu=None, waves_per_eu=3)`` identity pairs of one kernel kind:
+    ``halo`` (grouped), ``split`` (split-C) or ``dense`` (unsplit non-grouped)."""
+    by_key = {}
+    for job in jobs:
+        ident = job.identity
+        if ident.algorithm not in dks._HALO_VARIANTS:
+            continue
+        knobs = json.loads(ident.knobs)
+        if ident.algorithm == "direct_grouped_halo":
+            this = "halo"
+        else:
+            this = "split" if knobs.get("split_c", 1) > 1 else "dense"
+        if this != kind:
+            continue
+        we = knobs.pop("waves_per_eu", None)
+        key = replace(ident, knobs=json.dumps(knobs, sort_keys=True))
+        by_key.setdefault(key, {})[we] = ident
+    return [(p[None], p[3]) for p in by_key.values() if set(p) == {None, 3}]
+
+
+def test_prune_drops_spilling_and_hint_duplicate_new_entries(tmp_path, jobs):
+    """A grouped-halo or split-C waves_per_eu=3 entry whose code equals its
+    default twin's goes, as does one that spills; a hint that changed the code
+    stays, entries without an ELF binary are left alone, and the dense unsplit
+    grid is never touched."""
+    (same_none, same_3), (diff_none, diff_3) = _hint_pairs(jobs, "halo")[:2]
+    (spill_none, spill_3), (split_none, split_3) = _hint_pairs(jobs, "split")[:2]
+    (dense_none, dense_3) = _hint_pairs(jobs, "dense")[0]
+    c = KernelCache(tmp_path, _ARCH)
+    binaries = {
+        same_none: _code_object(b"\x01"),
+        same_3: _code_object(b"\x01", entry=64),
+        diff_none: _code_object(b"\x02"),
+        diff_3: _code_object(b"\x03"),
+        spill_none: _code_object(b"\x04", scratch=8),
+        spill_3: b"placeholder",
+        split_none: _code_object(b"\x05"),
+        split_3: _code_object(b"\x05"),
+        dense_none: _code_object(b"\x06", scratch=8),
+        dense_3: _code_object(b"\x06", scratch=8),
+    }
+    for ident, blob in binaries.items():
+        c.put(ident, blob, {"kernel_name": ident.label()})
+    assert dks.prune_halo_entries(c, jobs, log=lambda _: None) == 3
+    assert {i for i, _ in c.list_all("direct_fwd")} == {
+        same_none,
+        diff_none,
+        diff_3,
+        spill_3,
+        split_none,
+        dense_none,
+        dense_3,
+    }
+
+
 def test_nongrouped_only_serves_one_group(cache):
     plans, rejected = dks.direct_plans(cache, _problem(groups=16), "fwd", _ARCH)
     assert not _nongrouped(plans)
@@ -329,16 +514,30 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
 
 
 def test_capabilities_outside_the_list_are_not_served(cache):
-    assert dks.direct_plans(cache, _problem(cpg=24, kpg=24), "fwd", _ARCH)[0] == []
-    # Grouped forward stride 2 has no rocke kernel.
-    assert dks.direct_plans(cache, _problem(stride=2), "fwd", _ARCH)[0] == []
+    # The baked-channel grouped kernels cover cpg in {4, 8, 16, 32} at stride
+    # 1; anything else grouped is left to the runtime-channel LDS-halo kernel.
+    for problem in (_problem(cpg=24, kpg=24), _problem(stride=2)):
+        plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
+        assert plans
+        assert _variants(plans) == {"direct_grouped_halo"}
+    # A filter no fwd row carries has no kernel at all.
+    assert dks.direct_plans(cache, _problem(KH=5, KW=5, PAD=2), "fwd", _ARCH)[0] == []
 
 
 def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
     plans, _ = dks.direct_plans(cache, _problem(), "dgrad", _ARCH)
-    assert _variants(plans) == {"direct_grouped_dgrad", "direct_grouped_dgrad_mfma"}
+    # cpg = kpg = 16 has the fixed-channel MFMA entries and also the
+    # runtime-channel ones (one K-atom, one M-tile).
+    assert _variants(plans) == {
+        "direct_grouped_dgrad",
+        "direct_grouped_dgrad_mfma",
+        "direct_dgrad_mfma_rtc",
+    }
     for plan in plans:
-        if plan.identity.algorithm != "direct_grouped_dgrad_mfma":
+        if plan.identity.algorithm not in (
+            "direct_grouped_dgrad_mfma",
+            "direct_dgrad_mfma_rtc",
+        ):
             continue
         # transpose, then the forward compute pass reading the transposed weights
         assert [s.buffers for s in plan.steps] == [
@@ -346,6 +545,49 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
             ("dy", "ws_t", "dx"),
         ]
         assert set(plan.workspaces) == {"ws_t"}
+
+
+@pytest.mark.parametrize("cpg,kpg", _DENSE_MFMA_DGRAD_CHANNELS)
+def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
+    """Each tuned dense (cpg, kpg) row in ``_DENSE_MFMA_DGRAD_CHANNELS`` must
+    reach the MFMA dgrad pipeline for a real problem with those channel
+    counts, with a groups=1-compatible knob -- otherwise the row is buildable
+    but never dispatched to."""
+    problem = _problem(groups=1, cpg=cpg, kpg=kpg)
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    mfma = [p for p in plans if p.identity.algorithm == "direct_grouped_dgrad_mfma"]
+    assert mfma
+    assert all(json.loads(p.identity.knobs)["block_groups"] == 1 for p in mfma)
+
+
+def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
+    """With waves_k > 1 the MFMA dgrad's fprop pass preloads its weights into
+    registers; specs past the budget spill at the 512-VGPR ceiling, where
+    comgr has produced a wrong-dX kernel. None of them is built."""
+    built = [j for j in jobs if j.identity.algorithm == "direct_grouped_dgrad_mfma"]
+    assert built
+    for job in built:
+        caps = dks.DirectCaps(**job.caps)
+        probe = dks.probe_problem(caps, dks.DIRECT_DTYPE, "direct_grouped_dgrad_mfma")
+        assert (
+            direct_mfma_knobs_reason(probe, job.spec_kwargs) is None
+        ), job.identity.label()
+
+    # The spec that computed the wrong dX on gfx950 is rejected; halving its
+    # Q tile brings it under the budget and it stays.
+    problem = _problem(groups=1, cpg=48, kpg=192)
+    knobs = dict(
+        block_q=32,
+        block_groups=1,
+        block_h=8,
+        waves_q=1,
+        waves_k=2,
+        runtime_k_loop=False,
+        persistent_grid=False,
+        fold_k32=True,
+    )
+    assert "spill" in direct_mfma_knobs_reason(problem, knobs)
+    assert direct_mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
 
 
 @pytest.mark.parametrize(
@@ -359,15 +601,235 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         ("dgrad", _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)),
         ("dgrad", _problem(cpg=8, kpg=8, stride=2)),
         ("dgrad", _problem()),
+        ("wgrad", _problem()),
+        ("wgrad", _problem(groups=1, cpg=48, kpg=192, KH=5, KW=5, PAD=0)),
+        # Dense MFMA dgrad (runtime channels): transforms take two scalars.
+        ("dgrad", _problem(groups=1, cpg=48, kpg=192)),
+        ("dgrad", _problem(groups=1, cpg=24, kpg=24)),
     ],
 )
 def test_plans_pack_against_their_signatures(cache, direction, problem):
     plans, _ = dks.direct_plans(cache, problem, direction, _ARCH)
     assert plans
-    names = ("x", "w", "y", "dy", "dx", "ws_t", "ws_coa")
+    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split")
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:
         for step in plan.steps:
             compile_packer(step.signature)(dks.launch_values(step, ptrs, sizes))
             assert all(g > 0 for g in step.grid)
+
+
+def _wgrad(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_wgrad"]
+
+
+@pytest.mark.parametrize(
+    "groups,cpg,kpg",
+    [(1, 24, 24), (1, 48, 192), (1, 128, 128), (4, 64, 64), (32, 16, 16)],
+)
+def test_wgrad_channels_are_runtime(cache, groups, cpg, kpg):
+    """One wgrad binary per knob serves any channel count its knobs fit, and
+    the launch grid follows the real problem, not the probe it was built on."""
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+
+    problem = _problem(groups=groups, cpg=cpg, kpg=kpg)
+    plans, rejected = dks.direct_plans(cache, problem, "wgrad", _ARCH)
+    plans = _wgrad(plans)
+    assert plans
+    c_tiles = -(-cpg // 16)
+    for plan in plans:
+        assert plan.identity.cpg == 0 and plan.identity.kpg == 0
+        knobs = json.loads(plan.identity.knobs)
+        assert knobs["waves_c"] <= c_tiles
+        (step,) = plan.steps
+        assert step.buffers == ("dy", "x", "dw")
+        spec = dks.make_spec("direct_wgrad", problem, knobs)
+        assert spec.runtime_channels
+        assert (step.grid, step.block) == direct_launch_geometry(spec)
+    # Every knob combination too wide for the channels is turned away, with
+    # the reason; nothing else is.
+    for ident, why in rejected:
+        if ident.algorithm == "direct_wgrad":
+            assert json.loads(ident.knobs)["waves_c"] > c_tiles, why
+    offered = {json.loads(p.identity.knobs)["waves_c"] for p in plans}
+    assert 1 in offered
+    if c_tiles in {w[1] for w in dks.wgrad_waves()}:
+        assert c_tiles in offered
+
+
+def test_wgrad_serves_valid_and_same_padding_only_at_stride_1(cache):
+    for pad in (0, 1):
+        plans, _ = dks.direct_plans(cache, _problem(PAD=pad), "wgrad", _ARCH)
+        assert _wgrad(plans) and all(p.identity.pad_h == pad for p in plans)
+    # The kernel is stride-1 only; nothing is cached for stride 2.
+    assert dks.direct_plans(cache, _problem(stride=2), "wgrad", _ARCH)[0] == []
+    assert not [j for j in dks.DIRECT_CAPABILITIES["direct_wgrad"][1] if j.stride != 1]
+
+
+def test_wgrad_needs_a_full_wave_tile_of_channels(cache):
+    """cpg/kpg below the 16-wide wave tile are a per-problem rejection now."""
+    plans, rejected = dks.direct_plans(
+        cache, _problem(cpg=8, kpg=8, groups=32), "wgrad", _ARCH
+    )
+    assert not _wgrad(plans)
+    assert any(i.algorithm == "direct_wgrad" for i, _ in rejected)
+
+
+# ---------------------------------------------------------------------------
+# Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc)
+# ---------------------------------------------------------------------------
+
+
+def _rtc(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_dgrad_mfma_rtc"]
+
+
+def _jit_dgrad_mfma_combos(problem):
+    """The (block_q, block_groups, block_h, waves) combos the JIT dgrad sweep
+    builds for ``problem`` (benchmark_direct_conv._run_dgrad_sweep), as knobs."""
+    out = set()
+    for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
+        dks.BLOCK_Q, dks.BLOCK_GROUPS, dks.DGRAD_BLOCK_H, dks.DGRAD_WAVES
+    ):
+        if problem.groups % bg or bq // wq < 16:
+            continue
+        if k32:
+            if problem.kpg % 32:
+                continue
+            n_atoms = problem.kpg // 32
+        else:
+            n_atoms = (problem.kpg + 15) // 16
+        if n_atoms == 0 or n_atoms % wk:
+            continue
+        out.add((bq, bg, bh, wq, wk, rk, pg, k32))
+    return out
+
+
+@pytest.mark.parametrize(
+    "groups,cpg,kpg",
+    [
+        (1, 48, 192),
+        (1, 4, 320),
+        (1, 24, 24),
+        (1, 64, 128),
+        (1, 16, 512),
+        (4, 40, 20),
+        (16, 16, 16),
+    ],
+)
+def test_dgrad_rtc_serves_any_channels_its_tiles_fit(cache, groups, cpg, kpg):
+    """One runtime-channel binary per tile count serves every channel count
+    that rounds to it; the knobs offered are the JIT sweep's, less the
+    duplicated runtime_k_loop splits and the configs that would spill."""
+    from kernels.common.conv_direct_grouped import direct_launch_geometry
+
+    problem = _problem(groups=groups, cpg=cpg, kpg=kpg)
+    plans = _rtc(dks.direct_plans(cache, problem, "dgrad", _ARCH)[0])
+    assert plans
+    offered = set()
+    for plan in plans:
+        ident = plan.identity
+        assert (ident.cpg, ident.kpg) == (0, 0)
+        knobs = json.loads(ident.knobs)
+        atom = 32 if knobs["fold_k32"] else 16
+        assert knobs["m_tiles"] == -(-cpg // 16)
+        assert knobs["k_atoms"] == (kpg // atom if knobs["fold_k32"] else -(-kpg // 16))
+        offered.add(
+            (
+                knobs["block_q"],
+                knobs["block_groups"],
+                knobs["block_h"],
+                knobs["waves_q"],
+                knobs["waves_k"],
+                knobs["runtime_k_loop"],
+                knobs["persistent_grid"],
+                knobs["fold_k32"],
+            )
+        )
+        *helpers, fprop = plan.steps
+        assert helpers[0].buffers == ("w", None, "ws_t")
+        for step in helpers:
+            assert dict(step.scalars) == {"p_cpg": cpg, "p_kpg": kpg}
+            assert [a["name"] for a in step.signature][-2:] == ["p_cpg", "p_kpg"]
+        # The compute pass launches on the real (transposed) problem.
+        spec = dks.make_spec("direct_dgrad_mfma_rtc", problem, knobs)
+        assert spec.runtime_channels
+        assert (fprop.grid, fprop.block) == direct_launch_geometry(spec)
+        coalesced = knobs["waves_k"] > 1 or knobs["runtime_k_loop"]
+        assert fprop.buffers[1] == ("ws_coa" if coalesced else "ws_t")
+        assert len(helpers) == (2 if coalesced else 1)
+    jit = _jit_dgrad_mfma_combos(problem)
+    assert offered <= jit
+    missing = jit - offered
+    for bq, bg, bh, wq, wk, rk, pg, k32 in missing:
+        knobs = dict(
+            block_q=bq,
+            block_groups=bg,
+            block_h=bh,
+            waves_q=wq,
+            waves_k=wk,
+            runtime_k_loop=rk,
+            persistent_grid=pg,
+            fold_k32=k32,
+            k_atoms=(kpg // 32 if k32 else -(-kpg // 16)),
+            m_tiles=-(-cpg // 16),
+        )
+        why = (
+            (wk > 1 and rk)
+            # A K split's LDS reduction is per group: the spec rejects it.
+            or (wk > 1 and bg > 1)
+            or knobs["k_atoms"] not in dks.dgrad_rtc_k_atoms(wk, k32)
+            or knobs["m_tiles"] not in dks.DGRAD_RTC_M_TILES
+            or dks.dgrad_rtc_spills(knobs, 3, 3, _ARCH)
+        )
+        assert why, f"JIT config {knobs} has no cached binary"
+
+
+def test_dgrad_rtc_cached_scope(jobs):
+    """The tile counts built, and only binaries that fit their registers."""
+    built = [
+        json.loads(j.identity.knobs)
+        for j in jobs
+        if j.identity.algorithm == "direct_dgrad_mfma_rtc"
+    ]
+    assert built
+    assert {k["m_tiles"] for k in built} == set(dks.DGRAD_RTC_M_TILES)
+    for k in built:
+        assert k["k_atoms"] in dks.dgrad_rtc_k_atoms(k["waves_k"], k["fold_k32"])
+        assert not dks.dgrad_rtc_spills(k, 3, 3, _ARCH)
+        assert not (k["waves_k"] > 1 and k["runtime_k_loop"])
+    # One transpose binary and one reorganize binary per fold_k32 serve them.
+    helpers = [
+        j.identity
+        for j in jobs
+        if j.identity.algorithm
+        in ("direct_dgrad_transpose_rtc", "direct_dgrad_reorganize_rtc")
+    ]
+    assert sorted((i.algorithm, i.knobs) for i in helpers) == sorted(
+        [
+            ("direct_dgrad_reorganize_rtc", json.dumps({"fold_k32": False})),
+            ("direct_dgrad_reorganize_rtc", json.dumps({"fold_k32": True})),
+            ("direct_dgrad_transpose_rtc", json.dumps({})),
+        ]
+    )
+    assert all((i.cpg, i.kpg) == (0, 0) for i in helpers)
+
+
+@pytest.mark.parametrize(
+    "groups,cpg,kpg,why",
+    [
+        # 640 dY channels: more K-atoms than any cached binary holds.
+        (1, 48, 640, "K-atoms"),
+        # 80 dX channels: five M-tiles, past the cached range.
+        (1, 80, 192, "M-tiles"),
+        # A ragged dX channel count: the epilogue stores 4 channels per lane.
+        (1, 6, 64, "kpg % 4"),
+    ],
+)
+def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
+    problem = _problem(groups=groups, cpg=cpg, kpg=kpg)
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    assert not _rtc(plans)
+    reasons = [r for i, r in rejected if i.algorithm == "direct_dgrad_mfma_rtc"]
+    assert reasons and any(why in r for r in reasons), reasons[:3]

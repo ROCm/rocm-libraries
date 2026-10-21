@@ -14,6 +14,8 @@ from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _kv_cache_policy_3d,
+    _num_segments,
     _tiled_2d_impl,
     _tiled_3d_impl,
 )
@@ -30,7 +32,7 @@ TILE_POLICIES: Tuple[str, ...] = (
 NUM_WARPS: Tuple[int, ...] = (1, 2, 4, 8)
 BLOCK_M_PER_WARP: Tuple[int, ...] = (16, 32)
 WAVES_PER_EU: Tuple[Optional[int], ...] = (None, 1, 2, 3, 4)
-NUM_SEGMENTS: Tuple[int, ...] = (8, 16, 32, 64, 128)
+NUM_SEGMENTS: Tuple[int, ...] = (2, 4, 8, 16, 32, 64, 128)
 
 
 def validate_explicit_fp8_encoding(*, arch: str, use_fp8: bool, fp8_fnuz: bool) -> None:
@@ -72,7 +74,8 @@ class ExplicitAttention2DConfig:
 
 @dataclass(frozen=True)
 class ExplicitAttention3DConfig:
-    """A complete, non-heuristic 3D segment/reduce setting."""
+    """A complete 3D segment/reduce setting. ``num_segments=0`` takes the
+    dispatcher's split-rule count for the problem (``_num_segments``)."""
 
     num_segments: int
     tile_policy: str = "1x"
@@ -103,6 +106,27 @@ def resolve_tile_policy(block_size: int, policy: str) -> int:
             )
         return tile
     raise ValueError(f"tile_policy must be one of {TILE_POLICIES}, got {policy!r}")
+
+
+def resolve_num_segments(
+    problem: UnifiedAttentionProblem, num_segments: int, *, arch: str
+) -> int:
+    """The segment count an explicit 3D config names for ``problem``."""
+    return _num_segments(problem, arch) if num_segments == 0 else num_segments
+
+
+def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
+    """Mask spec fields; only the gfx950 tiled specs declare them."""
+    if problem.default_mask:
+        return {}
+    if arch != "gfx950":
+        raise ValueError(f"non-default attention mask is gfx950-only, got {arch}")
+    fields: dict = {}
+    if problem.causal_top_left:
+        fields["causal_top_left"] = True
+    if problem.right_bound != 0:
+        fields["right_bound"] = problem.right_bound
+    return fields
 
 
 def _semantic_fields(problem: UnifiedAttentionProblem) -> dict:
@@ -151,6 +175,9 @@ _SEMANTIC_FIELDS = frozenset(
         "kv_storage_dtype",
         "kv_layout",
         "use_i64_kv_addr",
+        "use_decode_grid",
+        "causal_top_left",
+        "right_bound",
     }
 )
 
@@ -197,6 +224,7 @@ def make_explicit_attention_2d_spec(
     knobs = _checked_knobs(config.knob_dict())
     spec = spec_type(
         **_semantic_fields(problem),
+        **_mask_fields(problem, arch),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
@@ -244,7 +272,8 @@ def make_explicit_attention_3d_specs(
     *,
     arch: str,
 ):
-    """Construct explicit segment and reduce specs without segment heuristics."""
+    """Construct explicit segment and reduce specs. The segment count is the
+    config's, or the split rule's for 0."""
     if arch not in ("gfx942", "gfx950"):
         raise ValueError(
             f"explicit 3D attention tuning requires gfx942/gfx950, got {arch}"
@@ -252,14 +281,15 @@ def make_explicit_attention_3d_specs(
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
-    if config.num_segments not in NUM_SEGMENTS:
-        raise ValueError(f"num_segments must be one of {NUM_SEGMENTS}")
+    num_segments = resolve_num_segments(problem, config.num_segments, arch=arch)
     if config.waves_per_eu not in WAVES_PER_EU:
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
 
     tile = resolve_tile_policy(problem.block_size, config.tile_policy)
-    if arch == "gfx950" and tile != int(problem.block_size):
-        raise ValueError("gfx950 3D implements only tile_size == block_size")
+    if arch == "gfx950" and (tile % int(problem.block_size) or tile > 128):
+        raise ValueError(
+            "gfx950 3D implements tiles that are a multiple of block_size, up to 128"
+        )
     if arch == "gfx942" and tile not in (
         int(problem.block_size),
         max(1, int(problem.block_size) // 2),
@@ -273,11 +303,17 @@ def make_explicit_attention_3d_specs(
         for name in ("use_invariant_hoist", "use_wide_kv_load")
     ):
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
+    # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
+    knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
     segment = spec_type(
         **_semantic_fields(problem),
-        num_segments=int(config.num_segments),
+        **_mask_fields(problem, arch),
+        num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
         tile_size_override=(None if tile == int(problem.block_size) else int(tile)),
+        # Both explicit 3D arches implement the all-decode grid
+        # (``_use_decode_grid``); it follows the problem, never the config.
+        use_decode_grid=bool(problem.all_decode),
         **knobs,
     )
     ok, why = supports(
@@ -299,7 +335,7 @@ def make_explicit_attention_3d_specs(
         num_query_heads=problem.num_query_heads,
         num_kv_heads=problem.num_kv_heads,
         dtype=problem.dtype,
-        num_segments=int(config.num_segments),
+        num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
     )
     return segment, reduce

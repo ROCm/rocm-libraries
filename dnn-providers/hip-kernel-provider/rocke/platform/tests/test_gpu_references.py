@@ -147,6 +147,42 @@ def test_disabled_references_need_neither_python_nor_bundles(project):
     assert (project / "build/installed.txt").read_text() == "sdpa=\nconv=\n"
 
 
+def test_shared_code_payloads_install_under_separate_processor_directories(project):
+    """Artifact routing follows the qualification processor, not shared code bytes."""
+    tests = project / "library/tests"
+    for architecture in ("gfx1200", "gfx1201"):
+        lock_dir = tests / f"sdpa_reference/architectures/{architecture}"
+        lock_dir.mkdir()
+        shutil.copyfile(
+            tests / "sdpa_reference/architectures/gfx942/baseline_lock.json",
+            lock_dir / "baseline_lock.json",
+        )
+        shutil.copyfile(
+            tests / "reference_bundles/sdpa/gfx942.tar.gz",
+            tests / f"reference_bundles/sdpa/{architecture}.tar.gz",
+        )
+    (project / "cmake/PublishedGpuReferences.cmake").write_text(
+        "set(ROCKE_PUBLISHED_SDPA_ARCHITECTURES gfx1200 gfx1201)\n"
+        "set(ROCKE_PUBLISHED_CONV_ARCHITECTURES gfx942)\n"
+    )
+    result = configure(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        project / "build/installed.txt"
+    ).read_text() == "sdpa=gfx1200;gfx1201\nconv=gfx942\n"
+    prefix = project / "installed"
+    subprocess.run(
+        [_CMAKE, "--install", str(project / "build"), "--prefix", str(prefix)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    root = prefix / "tests/engines/test_arch_content/rocke/sdpa"
+    assert {p.name for p in root.iterdir()} == {"gfx1200", "gfx1201"}
+    for architecture in ("gfx1200", "gfx1201"):
+        assert (root / architecture / "payload/kernel.hsaco").read_bytes() == b"sdpa"
+
+
 @pytest.mark.parametrize("problem", ["archive", "lock", "integrity", "python"])
 def test_required_reference_prerequisites_fail_configuration(project, problem):
     library = project / "library/tests"
@@ -167,10 +203,13 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         "integrity": "does not match the pinned lock",
         "python": "requires a Python3 interpreter",
     }
-    assert expected[problem] in result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    assert expected[problem] in output
+    if problem == "archive":
+        assert str(library / "reference_bundles/conv/gfx942.tar.gz.dvc") in output
     if problem == "lock":
-        assert "baseline_lock.json" in result.stdout + result.stderr
-        assert "Traceback" not in result.stdout + result.stderr
+        assert "baseline_lock.json" in output
+        assert "Traceback" not in output
 
 
 def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):

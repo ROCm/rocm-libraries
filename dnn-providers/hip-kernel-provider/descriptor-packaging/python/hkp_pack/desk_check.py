@@ -9,9 +9,11 @@ interchangeably, and reports "neither location has a spec" as its own outcome.
 from __future__ import annotations
 
 import collections
+import json
 from pathlib import Path
 
 from . import agreement, descriptor_context, provenance_sidecar
+from . import generic_targets as gtmod
 from .errors import HkpPackError
 from .kpack_resolver import load_kpack
 
@@ -44,6 +46,9 @@ _DTYPE_ALIASES = {
 # Sentinel for "this kernel does not declare that field at all", so a tuple
 # identity can say so explicitly instead of silently shortening.
 _ABSENT = "<absent>"
+
+#: Stands in for "any device" when a list is empty (unrestricted).
+_SYNTHETIC_DEVICE = "<any-device>"
 
 
 def _canonical_dtype(value) -> str:
@@ -188,6 +193,13 @@ def metadata_identity_fields(kernels: list[dict]) -> tuple[str, ...]:
     return tuple(fields)
 
 
+def load_kdp_arch(kdp_path: Path) -> list[str]:
+    """The arch list a `.kdp.json` declares (inherited by kernels with none)."""
+    return list(
+        json.loads(Path(kdp_path).read_text(encoding="utf-8")).get("arch") or []
+    )
+
+
 def load_variant_set(
     kdp_path: Path, *, provenance_root=None, descriptor_root=None
 ) -> tuple[list[dict], tuple[str, ...] | None]:
@@ -239,6 +251,7 @@ def _payload(
 
 def compiled_agreement(
     kdp_path: Path,
+    generic_targets,
     kpack_python_dir=None,
     *,
     provenance_root=None,
@@ -281,7 +294,9 @@ def compiled_agreement(
             0,
         )
     arch = arches[0]
-    all_records = descriptor_context.consumer_records(bundles, schemas, arch)
+    all_records = descriptor_context.consumer_records(
+        bundles, schemas, arch, generic_targets
+    )
     failures: list[str] = []
     unclaimed: list[str] = []
     verified = 0
@@ -323,7 +338,13 @@ def compiled_agreement(
                     f"verified against a binary"
                 )
                 continue
-            payload = _payload(entry, arch, kpack_python_dir)
+            payload = _payload(
+                entry,
+                descriptor_context.archive_arch(
+                    entry.arch or [arch], arch, generic_targets
+                ),
+                kpack_python_dir,
+            )
             agreement.verify(kernel, records, payload)
             verified += 1
         except HkpPackError as exc:
@@ -398,25 +419,38 @@ def metadata_spec_drift(kernels: list[dict], fields=None) -> list[tuple[str, str
     return bad
 
 
-def _reachable_together(group: list[dict]) -> int:
-    """The largest number of kernels in `group` one device reaches.
-
-    A tuple shared across disjoint arches is no collision. An absent or empty
-    `arch` is a wildcard and counts against every arch in the group.
+def _reachable_together(group: list[dict], generic_targets, kdp_arch=()) -> int:
+    """The largest number of kernels in `group` tying at one arch tier on one device
+    (the loader's `archesCompete` rule). A kernel's arch is its own list, else `kdp_arch`.
     """
-    sets = [frozenset(k.get("arch") or ()) for k in group]
-    named = frozenset().union(*sets) if sets else frozenset()
-    if not named:
+    lists = [list(k.get("arch") or kdp_arch) for k in group]
+    if not any(lists):
         return len(group)
-    return max(sum(1 for s in sets if not s or arch in s) for arch in named)
+    devices: set[str] = set()
+    for entries in lists:
+        for entry in entries:
+            if gtmod.is_generic_shaped(entry):
+                if generic_targets.has(entry):
+                    devices.update(generic_targets.members(entry))
+            else:
+                devices.add(entry)
+    if not all(lists):
+        devices.add(_SYNTHETIC_DEVICE)
+    best = 0
+    for device in devices:
+        tiers = [gtmod.list_tier(e, device, generic_targets) for e in lists]
+        reached = [t for t in tiers if t is not None]
+        if reached:
+            best = max(best, max(collections.Counter(reached).values()))
+    return best
 
 
 def duplicate_matcher_tuples(
-    kernels: list[dict], fields=DEFAULT_MATCHER_FIELDS
+    kernels: list[dict], fields, generic_targets, kdp_arch=()
 ) -> dict[tuple, int]:
     """Invariant 2: no two kernels may share a matcher tuple on the same arch --
     one is unreachable. Returns {tuple: count} for every tuple two kernels reach
-    one device with, the scope the runtime refuses in.
+    one device at the same arch tier with, the scope the runtime refuses in.
 
     The compared set is the union of `fields` present in any kernel's metadata,
     never ``kernels[0]``'s, which would make the identity list-order dependent. A
@@ -427,7 +461,9 @@ def duplicate_matcher_tuples(
     for kernel in kernels:
         key = tuple(kernel.get("metadata", {}).get(f, _ABSENT) for f in present)
         groups[key].append(kernel)
-    counts = {t: _reachable_together(g) for t, g in groups.items()}
+    counts = {
+        t: _reachable_together(g, generic_targets, kdp_arch) for t, g in groups.items()
+    }
     return {t: c for t, c in counts.items() if c > 1}
 
 
@@ -486,6 +522,8 @@ class DeskCheckReport:
         drift_fields=None,
         *,
         mode: str,
+        generic_targets,
+        kdp_arch=(),
         agreement_failures=None,
         agreement_unclaimed=None,
         agreement_verified=0,
@@ -518,7 +556,9 @@ class DeskCheckReport:
             self.drift = metadata_spec_drift(kernels, self.drift_fields)
         except DeskCheckNoSpecFound as exc:
             self.spec_drift_error = str(exc)
-        self.duplicate_tuples = duplicate_matcher_tuples(kernels, self.fields)
+        self.duplicate_tuples = duplicate_matcher_tuples(
+            kernels, self.fields, generic_targets, kdp_arch
+        )
 
         self.toc_applicable = _field_applicable(kernels, "toc_key")
         self.toc_distinct, self.toc_total = (

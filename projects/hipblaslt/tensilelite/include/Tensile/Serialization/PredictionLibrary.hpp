@@ -160,6 +160,8 @@ namespace TensileLite
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
+                    // Once per library load. rank_configs reads the flags.
+                    origami::memoize_non_temporal_availability(lib.origami_config_list);
                 }
             }
             const static bool flow = false;

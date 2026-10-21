@@ -21,6 +21,7 @@ GPU), so the default run keeps the no-subprocess contract.
 
 from __future__ import annotations
 
+import re
 import unittest
 from unittest.mock import patch, Mock
 
@@ -35,7 +36,6 @@ from rocke import (
     I8,
     I16,
     I32,
-    F32,
     I64,
     IRBuilder,
     PtrType,
@@ -127,14 +127,14 @@ class TestCoreIR(unittest.TestCase):
     def test_lower_llvm_emits_amdgpu_target_triple(self):
         b = IRBuilder("smoke")
         b.param("A", PtrType(F16, "global"))
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn('target triple = "amdgcn-amd-amdhsa"', ll)
         self.assertIn("define amdgpu_kernel void @smoke", ll)
 
     def test_lower_llvm_emits_agpr_alloc_kernel_attr(self):
         b = IRBuilder("agpr_attr_smoke")
         b.kernel.attrs["agpr_alloc"] = (0, 0)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn('"amdgpu-agpr-alloc"="0,0"', ll)
 
     def test_zero_agpr_alloc_requests_mfma_vgpr_form(self):
@@ -149,7 +149,7 @@ class TestCoreIR(unittest.TestCase):
         b = IRBuilder("static_for_smoke")
         b.static_for(0, 3, body=lambda i: b.const_i32(i))
         self.assertEqual(len(b.kernel.body.ops), 3)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertNotIn("for.header", ll)
 
     def test_ssa_value_cannot_be_used_as_python_bool(self):
@@ -168,7 +168,7 @@ class TestCoreIR(unittest.TestCase):
         cond = b.cmp_eq(v, b.const_i32(1))
         with b.scf_if(cond):
             b.const_i32(3)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("br i1", ll)
         self.assertIn("if.then", ll)
 
@@ -196,7 +196,7 @@ class TestCoreIR(unittest.TestCase):
             align=16,
             dereferenceable=128,
         )
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn(
             "ptr addrspace(1) noalias readonly nocapture align 16 dereferenceable(128) %A",
             ll,
@@ -210,7 +210,7 @@ class TestCoreIR(unittest.TestCase):
         # wait becomes a full VMEM drain. lgkmcnt=16 is out of range on
         # gfx950 and should clamp to 15 rather than wrap to 0.
         b.s_waitcnt(vmcnt=16, lgkmcnt=16)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("call void @llvm.amdgcn.s.waitcnt(i32 20336)", ll)
 
     def test_global_load_typed_wrappers(self):
@@ -235,7 +235,7 @@ class TestCoreIR(unittest.TestCase):
                 tid = b.thread_id_x()
                 # Call global_load_{ir_type}(X, tid)
                 getattr(b, wrapper_name)(X, tid)
-                ll = lower_kernel_to_llvm(b.kernel)
+                ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
                 self.assertIn(
                     f"getelementptr inbounds {llvm_type}, ptr addrspace(1)", ll
                 )
@@ -275,7 +275,7 @@ class TestTransforms(unittest.TestCase):
         off, valid = desc.offset(b, m=m, k=k)
         safe = b.select(valid, off, b.const_i32(0))
         b.global_load_f16(A, safe)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # The conv address arithmetic must contain at least one sdiv (for
         # `m -> (n, ho, wo)` unmerge), srem (the same), and an icmp slt
         # (the pad's bounds check).
@@ -833,7 +833,7 @@ class TestHelpers(unittest.TestCase):
         v32 = b.cvt_fp8_to_f32(v8)
         b.global_store(out_p, tid, v32, align=4)
         b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
         # The conversion uses a zext-to-i32 + lane-0 intrinsic call.
         self.assertIn("zext i8", ll)
@@ -862,7 +862,7 @@ class TestInstances(unittest.TestCase):
             trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
         )
         kernel = build_universal_gemm(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # 256 threads in a block, max_workgroup_size attribute set.
         self.assertIn("define amdgpu_kernel void", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
@@ -885,7 +885,7 @@ class TestInstances(unittest.TestCase):
             epilogue="cshuffle",
         )
         kernel = build_implicit_gemm_conv(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
         # The buffer rsrc DW3 flag-word must be 0x00027000, not 0 — the
         # critical correctness fix from the bake-off debugging session.
@@ -945,7 +945,7 @@ class TestInstances(unittest.TestCase):
             async_dma=True,
         )
         kernel = build_implicit_gemm_conv(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # 1) The async DMA intrinsic itself is emitted.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
         # 2) Interwave ping-pong: setprio bookends. We expect *both*
@@ -969,7 +969,7 @@ class TestInstances(unittest.TestCase):
         )
         spec = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=True)
         kernel = build_direct_conv_16c(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # K32-folded hot loop emits ONLY the wide 16x16x32 MFMA: S=0/1 fold
         # into one wide atom and the S=2 residual is promoted to a SECOND
         # wide atom (zero-padded upper K) so both atoms on the accumulator
@@ -981,7 +981,7 @@ class TestInstances(unittest.TestCase):
         self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
         # The unfolded (gfx942-capable) path still uses only 16x16x16.
         spec_nf = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=False)
-        ll_nf = lower_kernel_to_llvm(build_direct_conv_16c(spec_nf))
+        ll_nf = lower_kernel_to_llvm(build_direct_conv_16c(spec_nf), arch="gfx950")
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll_nf)
         self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll_nf)
 
@@ -991,7 +991,7 @@ class TestInstances(unittest.TestCase):
         )
         spec = DirectConv4cSpec(problem=prob, block_q=8, block_groups=16)
         kernel = build_direct_conv_4c(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # 4x4x4 atom emits one MFMA per (r, s) tile (9 per output row).
         self.assertIn("@llvm.amdgcn.mfma.f32.4x4x4f16", ll)
 
@@ -1007,7 +1007,7 @@ class TestElementwiseInstance(unittest.TestCase):
 
         for op in ("copy", "neg", "abs", "relu", "exp2", "silu", "gelu_tanh"):
             kernel = build_elementwise(ElementwiseSpec(op=op))
-            ll = lower_kernel_to_llvm(kernel)
+            ll = lower_kernel_to_llvm(kernel, arch="gfx950")
             self.assertIn("define amdgpu_kernel void", ll)
 
     def test_binary_builds(self):
@@ -1015,14 +1015,14 @@ class TestElementwiseInstance(unittest.TestCase):
 
         for op in ("add", "sub", "mul", "max", "min"):
             kernel = build_elementwise(ElementwiseSpec(op=op))
-            ll = lower_kernel_to_llvm(kernel)
+            ll = lower_kernel_to_llvm(kernel, arch="gfx950")
             self.assertIn("define amdgpu_kernel void", ll)
 
     def test_bf16_path_builds(self):
         from rocke.instances import ElementwiseSpec, build_elementwise
 
         kernel = build_elementwise(ElementwiseSpec(op="add", dtype="bf16"))
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("bfloat", ll)
 
     def test_rejects_unknown_op(self):
@@ -1031,6 +1031,22 @@ class TestElementwiseInstance(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_elementwise(ElementwiseSpec(op="bogus"))
 
+    def test_f64_path_builds(self):
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        self.assertIn("fadd double", ll)
+
+    def test_f64_rejects_transcendental_ops_and_wide_vec(self):
+        from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
+
+        for op in ("exp2", "tanh", "silu", "gelu_tanh"):
+            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            self.assertFalse(ok, op)
+        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+        self.assertFalse(ok)
+
 
 class TestLayerNormInstance(unittest.TestCase):
     def test_builds_with_save_mean(self):
@@ -1038,7 +1054,7 @@ class TestLayerNormInstance(unittest.TestCase):
 
         spec = LayerNorm2DSpec(n_per_block=4096, save_mean_invstd=True)
         kernel = build_layernorm2d(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # The reduction uses LDS tree (s_barrier) and the rsqrt intrinsic.
         self.assertIn("@llvm.amdgcn.s.barrier", ll)
         self.assertIn("@llvm.amdgcn.rsq.f32", ll)
@@ -1056,7 +1072,7 @@ class TestRMSNormInstance(unittest.TestCase):
         from rocke.instances import RMSNorm2DSpec, build_rmsnorm2d
 
         kernel = build_rmsnorm2d(RMSNorm2DSpec(n_per_block=4096))
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("@llvm.amdgcn.rsq.f32", ll)
 
 
@@ -1066,8 +1082,22 @@ class TestReduceInstance(unittest.TestCase):
 
         for op in ("sum", "max", "mean"):
             kernel = build_reduce2d(Reduce2DSpec(n_per_block=4096, op=op))
-            ll = lower_kernel_to_llvm(kernel)
+            ll = lower_kernel_to_llvm(kernel, arch="gfx950")
             self.assertIn("define amdgpu_kernel void", ll)
+
+    def test_f64_path_builds(self):
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        for op in ("sum", "max", "mean"):
+            spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
+            ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
+            self.assertIn("double", ll)
+
+    def test_f64_rejects_wide_vec(self):
+        from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
+
+        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        self.assertFalse(ok)
 
 
 class TestTransposeInstance(unittest.TestCase):
@@ -1075,7 +1105,7 @@ class TestTransposeInstance(unittest.TestCase):
         from rocke.instances import Transpose2DSpec, build_transpose2d
 
         kernel = build_transpose2d(Transpose2DSpec())
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # Transpose uses a global memory load->LDS->global store and a
         # workgroup barrier between the two phases.
         self.assertIn("@llvm.amdgcn.s.barrier", ll)
@@ -1109,7 +1139,7 @@ class TestBatchedGemmInstance(unittest.TestCase):
             trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
         )
         kernel = build_batched_gemm(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # The batched form pulls in `block_id_z` for the batch index.
         self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
@@ -1146,7 +1176,7 @@ class TestTensorViewHelper(unittest.TestCase):
         # The offset call is the thing under test; we don't read the
         # returned Value because we inspect the lowered IR instead.
         d.offset(builder, [builder.const_i32(3), builder.const_i32(2)])
-        ll = lower_kernel_to_llvm(builder.kernel)
+        ll = lower_kernel_to_llvm(builder.kernel, arch="gfx950")
         self.assertIn("mul nsw i32", ll)
 
     def test_tile_window_origin_arithmetic(self):
@@ -1175,7 +1205,7 @@ class TestTensorViewHelper(unittest.TestCase):
         y_tile.store_vec(
             builder, builder.const_i32(0), builder.const_i32(0), value=v2, n=8
         )
-        ll = lower_kernel_to_llvm(builder.kernel)
+        ll = lower_kernel_to_llvm(builder.kernel, arch="gfx950")
         # Expect LDS round-trip via addrspace(3) + a barrier.
         self.assertIn("addrspace(3)", ll)
         self.assertIn("@llvm.amdgcn.s.barrier", ll)
@@ -1205,7 +1235,7 @@ class TestReductionHelper(unittest.TestCase):
             b, b.const_f32(1.0), lds, tid, block_size=64, combine="sum"
         )
         b.global_store(b.param("Y", PtrType(F32_ir(), "global")), b.const_i32(0), total)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # Six barrier stages for block_size=64 (log2(64)=6).
         self.assertGreaterEqual(ll.count("@llvm.amdgcn.s.barrier"), 6)
 
@@ -1237,7 +1267,7 @@ class TestTensorCoordinate(unittest.TestCase):
         # Index has been bumped.
         self.assertNotEqual(c0.index, c1.index)
         # Lower the kernel to make sure the chain is well-formed.
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("define amdgpu_kernel void", ll)
 
     def test_move_rank_mismatch_raises(self):
@@ -1317,7 +1347,7 @@ class TestWindowLoadStoreMethods(unittest.TestCase):
         dt.fill(b.const_f32(1.0))
         tile.store(b, dt, ps=[[tid]], traits=traits)
 
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # Confirm vectorised global store was emitted.
         self.assertIn("store <8 x half>", ll)
 
@@ -1340,7 +1370,7 @@ class TestBufferView(unittest.TestCase):
         self.assertIs(view.buffer, rsrc)
         tile = make_tile_window(view, lengths=(0,), origin=(b.const_i32(0),))
         tile.load_vec(b, b.const_i32(0), n=4)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # The buffer rsrc construction emits a call to make.buffer.rsrc.
         self.assertIn("llvm.amdgcn.make.buffer.rsrc", ll)
         # And the load emits a raw_ptr_buffer_load intrinsic.
@@ -1372,7 +1402,7 @@ class TestBufferView(unittest.TestCase):
         view = make_buffer_view(rsrc, shape=(0,), dtype=F16)
         tile = make_tile_window(view, lengths=(0,), origin=(b.const_i32(0),))
         tile.load_scalar(b, b.const_i32(0))
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # raw_ptr_buffer_load.u16 is the scalar half buffer load.
         self.assertIn("raw.ptr.buffer.load", ll)
 
@@ -1426,7 +1456,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 
         ll = lower_kernel_to_llvm(
-            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM20
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM20, arch="gfx950"
         )
         self.assertIn(
             "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
@@ -1440,7 +1470,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM22
 
         ll = lower_kernel_to_llvm(
-            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22, arch="gfx950"
         )
         self.assertIn(
             "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
@@ -1456,7 +1486,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
 
         ll = lower_kernel_to_llvm(
-            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23, arch="gfx950"
         )
         self.assertIn(
             "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
@@ -1474,7 +1504,9 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         X = b.param("X", PtrType(F16, "global"), align=16)
         N_bytes = b.param("N_bytes", I64)
         b.buffer_rsrc(X, N_bytes)
-        ll = lower_kernel_to_llvm(b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM23)
+        ll = lower_kernel_to_llvm(
+            b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM23, arch="gfx950"
+        )
         self.assertNotIn("zext", ll)
         self.assertIn("i64 %N_bytes, i32 159744)", ll)
 
@@ -1489,7 +1521,9 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         X = b.param("X", PtrType(F16, "global"), align=16)
         N_bytes = b.param("N_bytes", I64)
         b.buffer_rsrc(X, N_bytes)
-        ll = lower_kernel_to_llvm(b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM22)
+        ll = lower_kernel_to_llvm(
+            b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM22, arch="gfx950"
+        )
         self.assertNotIn("zext", ll)
         self.assertIn("i64 %N_bytes, i32 159744)", ll)
 
@@ -1497,7 +1531,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 
         ll = lower_kernel_to_llvm(
-            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM20
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM20, arch="gfx950"
         )
         self.assertIn(
             "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -1513,7 +1547,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM22
 
         ll = lower_kernel_to_llvm(
-            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22, arch="gfx950"
         )
         self.assertIn(
             "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -1532,7 +1566,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
 
         ll = lower_kernel_to_llvm(
-            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23, arch="gfx950"
         )
         self.assertIn(
             "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -1550,7 +1584,9 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
     def test_unknown_flavor_raises(self):
         with self.assertRaises(ValueError):
             lower_kernel_to_llvm(
-                self._buffer_rsrc_kernel(), llvm_flavor="not-a-real-flavor"
+                self._buffer_rsrc_kernel(),
+                llvm_flavor="not-a-real-flavor",
+                arch="gfx950",
             )
 
 
@@ -1767,10 +1803,14 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         from rocke.runtime import comgr as comgr_mod
 
         candidates = ["/first/libamd_comgr.so", "/second/libamd_comgr.so"]
-        with patch.object(
-            comgr_mod, "_candidate_lib_paths", return_value=candidates
-        ), patch.object(comgr_mod, "_add_dll_dir"), patch.object(
-            comgr_mod.ctypes, "CDLL", side_effect=OSError("cannot open shared object")
+        with (
+            patch.object(comgr_mod, "_candidate_lib_paths", return_value=candidates),
+            patch.object(comgr_mod, "_add_dll_dir"),
+            patch.object(
+                comgr_mod.ctypes,
+                "CDLL",
+                side_effect=OSError("cannot open shared object"),
+            ),
         ):
             with self.assertRaises(comgr_mod.ComgrError) as cm:
                 comgr_mod._load_lib()
@@ -2008,6 +2048,110 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         with open(os.path.join(root, ".info", "version"), "w") as fh:
             fh.write("7.0.0\n")
         self._assert_agree({"ROCM_PATH": root})
+
+    def test_agree_when_comgr_lib_is_pinned_in_a_torch_package(self):
+        """``$ROCKE_COMGR_LIB`` naming a comgr in a torch package, torch not
+        imported: both engines follow the loaded compiler (LLVM 20 here), not
+        the package's ``version.py`` (ROCm 7.13 here)."""
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        if sys.platform != "linux" or not shutil.which("cc"):
+            self.skipTest("ELF compiler fixture requires a Linux C compiler")
+        lib = _fake_torch_comgr(self, "7.13.0")
+        source = os.path.join(os.path.dirname(lib), "compiler.c")
+        with open(source, "w") as fh:
+            fh.write(
+                "void LLVMGetVersion(unsigned *a, unsigned *b, unsigned *c) "
+                "{ *a=20; *b=0; *c=0; }\n"
+            )
+        subprocess.run(["cc", "-shared", "-fPIC", source, "-o", lib], check=True)
+        dl = self._assert_agree({"ROCKE_COMGR_LIB": lib})
+        self.assertIn("-p8:128:128-", dl)
+
+
+def _fake_torch_comgr(case, hip):
+    """``<tmp>/site-packages/torch/lib/libamd_comgr.so`` (empty file) with the
+    ``version.py`` a ROCm torch wheel ships (``hip`` as given; ``None``
+    writes the line of a build without ROCm). Removed with ``case``."""
+    import os
+    import shutil
+    import tempfile
+
+    root = tempfile.mkdtemp()
+    case.addCleanup(shutil.rmtree, root, ignore_errors=True)
+    pkg = os.path.join(root, "site-packages", "torch")
+    os.makedirs(os.path.join(pkg, "lib"))
+    value = "None" if hip is None else repr(hip)
+    with open(os.path.join(pkg, "version.py"), "w") as fh:
+        fh.write(
+            "from typing import Optional\n\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'xpu']\n"
+            "__version__ = '2.12.0+rocm7.0'\n"
+            "debug = False\n"
+            "cuda: Optional[str] = None\n"
+            "git_version = '0123456789abcdef'\n"
+            f"hip: Optional[str] = {value}\n"
+            "xpu: Optional[str] = None\n"
+        )
+    lib = os.path.join(pkg, "lib", "libamd_comgr.so")
+    open(lib, "w").close()
+    return lib
+
+
+class TestTorchPackageComgrVersion(unittest.TestCase):
+    """``comgr.resolved_lib_rocm_version`` of a comgr inside a torch package
+    when torch is not imported (an explicit ``ROCKE_COMGR_LIB``): the
+    package's ``version.py`` names the vintage, read without importing torch.
+    Without it the version came from ``/opt/rocm``: the host's ROCm, not the
+    library's. This is package metadata (the attention backward's toolchain
+    identity); the LLVM flavor follows the loaded compiler."""
+
+    def _version(self, lib):
+        import os
+        from unittest import mock
+
+        from rocke.runtime import comgr
+
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": lib}),
+            mock.patch.object(comgr, "_lib", None),
+        ):
+            return comgr.resolved_lib_rocm_version()
+
+    def test_the_package_version_file_dates_the_library(self):
+        self.assertEqual(
+            self._version(_fake_torch_comgr(self, "7.2.53211-e7b7fa7cd")), (7, 2)
+        )
+        self.assertEqual(self._version(_fake_torch_comgr(self, "6.4.43482")), (6, 4))
+
+    def test_a_build_without_rocm_gives_no_package_version(self):
+        from rocke.runtime import comgr
+
+        lib = _fake_torch_comgr(self, None)
+        self.assertIsNone(comgr._torch_package_rocm_version(lib))
+
+    def test_the_version_line_parse(self):
+        from rocke.runtime.comgr import _torch_package_hip_text as hip
+
+        self.assertEqual(hip("hip: Optional[str] = '7.2.1-x'\n"), "7.2.1-x")
+        self.assertEqual(hip('hip = "7.0.0"'), "7.0.0")
+        self.assertIsNone(hip("hip: Optional[str] = None"))
+        self.assertIsNone(hip("hipify = '9.9'\ncuda = None"))
+        self.assertEqual(hip("hipify = '9.9'\nhip = '6.3.1'"), "6.3.1")
+
+    def test_only_a_torch_lib_directory_is_read(self):
+        import os
+
+        from rocke.runtime import comgr
+
+        lib = _fake_torch_comgr(self, "7.0.0")
+        other = os.path.join(os.path.dirname(os.path.dirname(lib)), "libamd_comgr.so")
+        open(other, "w").close()
+        self.assertEqual(comgr._torch_package_rocm_version(lib), (7, 0))
+        self.assertIsNone(comgr._torch_package_rocm_version(other))
 
 
 class TestTransformsBridge(unittest.TestCase):
@@ -2452,7 +2596,7 @@ class TestGroupedGemmInstance(unittest.TestCase):
             trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
         )
         kernel = build_grouped_gemm(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # The (current) per-group launcher uses the non-batched kernel
         # so there's no block_id_z dependency.
         self.assertIn("define amdgpu_kernel void", ll)
@@ -2484,7 +2628,7 @@ class TestGroupedGemmInstance(unittest.TestCase):
         self.assertEqual(sig[1]["type"], "ptr<bf16, global>")
         self.assertEqual(sig[2]["type"], "ptr<bf16, global>")
 
-        ll = lower_kernel_to_llvm(build_grouped_gemm(spec))
+        ll = lower_kernel_to_llvm(build_grouped_gemm(spec), arch="gfx950")
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.bf16", ll)
         self.assertIn("load <8 x bfloat>", ll)
         self.assertIn("store <4 x bfloat>", ll)
@@ -2627,7 +2771,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         # Fake "compute": just emit a sched_barrier(0)
         b.sched_barrier(0)
         pol.emit_compute_epilogue(b)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # Both s_setprio(1) and s_setprio(0) must appear.
         self.assertIn("@llvm.amdgcn.s.setprio(i16 1)", ll)
         self.assertIn("@llvm.amdgcn.s.setprio(i16 0)", ll)
@@ -2644,7 +2788,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         pol.emit_compute_prologue(b)
         b.sched_barrier(0)
         pol.emit_compute_epilogue(b)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # Intrawave mode must NOT emit the per-compute setprio bookends
         # (the prologue setprio is a separate hook).
         self.assertNotIn("@llvm.amdgcn.s.setprio", ll)
@@ -2659,7 +2803,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         b.param("X", PtrType(F16, "global"))
         pol = SchedulePolicy.for_pipeline("compv4")  # emit_hints=True
         pol.emit_mfma_valu_pairs(b, pairs=3, valu_per_pair=2)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # MFMA=0x008 = i32 8 ; VALU=0x002 = i32 2.
         # `sched.group.barrier(MFMA, 1, 0)` and `sched.group.barrier(VALU, 2, 0)`.
         self.assertEqual(
@@ -2685,7 +2829,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         # is what triggers the readfirstlane + asm emission.
         b.to_sgpr_u32(v)
         b.param("Out", PtrType(I32, "global"))
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # readfirstlane + matched-constraint SGPR-pin asm.
         self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
         # Constraint "=s,0" ties output 0 (SGPR class) to input 0 — the
@@ -2696,19 +2840,36 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertNotIn("asm sideeffect", ll)
 
     # ---- wave_all / wave_any ----
-    def test_wave_all_lowers_to_ballot_eq_minus_one(self):
+    def _lower_wave_votes(self, arch):
         from rocke.core.ir import IRBuilder, PtrType, I32
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-        b = IRBuilder("wave_all_smoke")
+        b = IRBuilder("wave_vote_smoke")
         b.kernel.attrs["max_workgroup_size"] = 64
         Out = b.param("Out", PtrType(I32, "global"))
-        all_t = b.wave_all(b.const_i32(1))
-        b.global_store(Out, b.const_i32(0), all_t)
-        ll = lower_kernel_to_llvm(b.kernel)
-        self.assertIn("@llvm.amdgcn.ballot.i64", ll)
-        # Compares ballot to -1 (i.e. all wave64 lanes voted true).
-        self.assertIn("icmp eq i64", ll)
+        pred = b.const_i32(1)
+        b.global_store(Out, b.const_i32(0), b.wave_all(pred))
+        b.global_store(Out, b.const_i32(1), b.wave_any(pred))
+        return lower_kernel_to_llvm(b.kernel, arch=arch)
+
+    def test_wave_all_full_mask_matches_wave_size(self):
+        import re
+
+        # ballot.i64 only sets the low wave_size bits: the full-wave mask
+        # is -1 on wave64 but 0xffffffff on wave32.
+        for arch, full in (
+            ("gfx950", "-1"),
+            ("gfx942", "-1"),
+            ("gfx1151", "4294967295"),
+            ("gfx11-generic", "4294967295"),
+            ("gfx12-generic", "4294967295"),
+            ("gfx1201", "4294967295"),
+        ):
+            with self.subTest(arch=arch):
+                ll = self._lower_wave_votes(arch)
+                self.assertIn("@llvm.amdgcn.ballot.i64", ll)
+                self.assertRegex(ll, rf"icmp eq i64 %\S+, {re.escape(full)}\n")
+                self.assertRegex(ll, r"icmp ne i64 %\S+, 0\n")
 
     # ---- coherency hints ----
     def test_async_buffer_load_lds_addr_propagates_aux(self):
@@ -2736,7 +2897,7 @@ class TestCdnaPrimitives(unittest.TestCase):
             dwords=4,
             coherency=CACHE_STREAM,
         )
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # Last arg should be `i32 2` (CACHE_STREAM = 2).
         self.assertIn("i32 0, i32 2)", ll)
 
@@ -2833,7 +2994,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         b.kernel.attrs["max_workgroup_size"] = 256
         b.kernel.attrs["waves_per_eu"] = 2
         b.param("X", PtrType(F16, "global"))
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
     def test_waves_per_eu_tuple_range(self):
@@ -2844,7 +3005,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         b.kernel.attrs["max_workgroup_size"] = 256
         b.kernel.attrs["waves_per_eu"] = (2, 4)
         b.param("X", PtrType(F16, "global"))
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn('"amdgpu-waves-per-eu"="2,4"', ll)
 
     # ---- Instance integration tests ----
@@ -2881,7 +3042,7 @@ class TestCdnaPrimitives(unittest.TestCase):
                 chiplet_wgm=8,
             ),
         )
-        ll = lower_kernel_to_llvm(build_universal_gemm(spec))
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
         # Chiplet remap: the closed-form formula generates `sdiv` /
         # `srem` by the chunk_size and num_xcds constants.
         self.assertIn("sdiv i32", ll)
@@ -2923,7 +3084,7 @@ class TestCdnaPrimitives(unittest.TestCase):
                 waves_per_eu=2,
             ),
         )
-        ll = lower_kernel_to_llvm(build_universal_gemm(spec))
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
     def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
@@ -2964,7 +3125,7 @@ class TestCdnaPrimitives(unittest.TestCase):
             chiplet_wgm=4,
             waves_per_eu=2,
         )
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec))
+        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx950")
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
         # The chiplet swizzle takes both blockIdx.x and blockIdx.y.
@@ -3010,7 +3171,7 @@ class TestCdnaPrimitives(unittest.TestCase):
             epilogue="cshuffle",
             async_dma=True,
         )
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec))
+        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx950")
         # readfirstlane for wave-uniform LDS offset.
         self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
         # SGPR-pin asm constraint.
@@ -3049,7 +3210,7 @@ class TestCdnaPrimitives(unittest.TestCase):
                 dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
             ),
         )
-        ll = lower_kernel_to_llvm(build_universal_gemm(spec))
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
         self.assertIn("ptr addrspace(1) noalias readonly nocapture align 16 %A", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.bf16", ll)
         self.assertIn("load <8 x bfloat>", ll)
@@ -3265,10 +3426,208 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
         b = self._builder(name)
         build(b)
+        kw.setdefault("arch", "gfx950")
         ll = _lower_kernel_to_llvm_python(b.kernel, **kw)
         _assert_engines_agree(self, b.kernel, ll, **kw)
         _assert_ir_assembles(self, ll, name)
         return ll
+
+    # ---- cross-workgroup fence / flag ops (stream-K fixup) ----
+    @staticmethod
+    def _flag_kernel(b):
+        from rocke.core.ir import I32, PtrType
+
+        return b.param("flags", PtrType(I32, "global"))
+
+    def test_fence_renders_scope_and_ordering(self):
+        ll = self._lower("fence", lambda b: b.fence(scope="agent", ordering="release"))
+        self.assertIn('  fence syncscope("agent") release', ll)
+
+    def test_fence_system_scope_has_no_syncscope_clause(self):
+        ll = self._lower(
+            "fencesys", lambda b: b.fence(scope="system", ordering="acquire")
+        )
+        self.assertIn("  fence acquire", ll)
+        self.assertNotIn("syncscope", ll)
+
+    def test_global_flag_store_is_scoped_atomic_store(self):
+        def build(b):
+            flags = self._flag_kernel(b)
+            b.global_flag_store(flags, b.const_i32(3), b.const_i32(1))
+
+        ll = self._lower("flagst", build)
+        self.assertRegex(
+            ll,
+            r"store atomic i32 1, ptr addrspace\(1\) %gep\.\d+ "
+            r'syncscope\("agent"\) release, align 4',
+        )
+
+    def test_global_flag_wait_eq_is_acquire_spin_loop(self):
+        def build(b):
+            flags = self._flag_kernel(b)
+            b.global_flag_wait_eq(flags, b.const_i32(2), b.const_i32(1))
+
+        ll = self._lower("flagwt", build)
+        self.assertRegex(
+            ll,
+            r"(?s)br label %(flag\.wait\.\d+)\n\1:\n"
+            r"  (%flag\.\d+) = load atomic i32, ptr addrspace\(1\) %gep\.\d+ "
+            r'syncscope\("agent"\) acquire, align 4\n'
+            r"  (%flag\.hit\.\d+) = icmp eq i32 \2, 1\n"
+            r"  br i1 \3, label %flag\.done\.\d+, label %\1\n",
+        )
+
+    def test_flag_ops_lower_to_hip_atomics(self):
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        b = self._builder("flaghip")
+        flags = self._flag_kernel(b)
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.fence(scope="agent", ordering="acquire")
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        hip = lower_kernel_to_hip(b.kernel)
+        self.assertIn("__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);", hip)
+        self.assertIn('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");', hip)
+        self.assertIn("while (__hip_atomic_load(", hip)
+
+    def test_flag_ops_reject_bad_scope_ordering_and_type(self):
+        b = self._builder("flagbad")
+        flags = self._flag_kernel(b)
+        with self.assertRaisesRegex(ValueError, "unknown fence scope"):
+            b.fence(scope="device")
+        with self.assertRaisesRegex(ValueError, "unknown fence ordering"):
+            b.fence(ordering="monotonic")
+        with self.assertRaisesRegex(ValueError, "expects an i32 value"):
+            b.global_flag_store(flags, b.const_i32(0), b.const_f32(1.0))
+        with self.assertRaisesRegex(ValueError, "unknown flag store ordering"):
+            b.global_flag_store(
+                flags, b.const_i32(0), b.const_i32(1), ordering="acquire"
+            )
+        with self.assertRaisesRegex(ValueError, "unknown flag scope"):
+            b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1), scope="gpu")
+
+    def test_flag_ops_reject_non_i32_pointer(self):
+        # LLVM GEPs the flag as i32 while HIP indexes the pointee type, so any
+        # other element type would make the two engines address different
+        # bytes. Builder and verifier both refuse it (C++ mirror:
+        # case_flag_ops_reject_non_i32_ptr).
+        from rocke.core.ir import F16, PtrType
+        from rocke.core.verify import ERROR, verify
+
+        b = self._builder("flagf16")
+        half = b.param("flags", PtrType(F16, "global"))
+        for name, emit in (
+            ("global_flag_store", b.global_flag_store),
+            ("global_flag_wait_eq", b.global_flag_wait_eq),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                f"^{name} expects a global i32 pointer, got ptr<f16,global>$",
+            ):
+                emit(half, b.const_i32(0), b.const_i32(1))
+
+        b = self._builder("flagf16verify")
+        flags = self._flag_kernel(b)
+        half = b.param("half", PtrType(F16, "global"))
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        b.ret()
+        for op in b.kernel.body.ops:
+            if op.name.startswith("memref.global_flag_"):
+                op.operands[0] = half
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        for name in ("memref.global_flag_store", "memref.global_flag_wait_eq"):
+            needle = f"{name}: expected a global i32 pointer, got ptr<f16,global>"
+            self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+
+    def test_flag_ops_lowerers_reject_bad_attrs(self):
+        # Python counterpart of the C++ expect_flag_attr_rejected: an op with a
+        # missing or unknown scope / ordering (serialized IR that skipped the
+        # builder and the verifier) is rejected by BOTH lowerers instead of
+        # defaulting or rendering invalid IR such as ``fence ... bogus``.
+        from rocke.core.backend import BackendError, _lower_via_cpp_engine
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        valid = {
+            "memref.fence": {"scope": "agent", "ordering": "acq_rel"},
+            "memref.global_flag_store": {"scope": "agent", "ordering": "release"},
+            "memref.global_flag_wait_eq": {"scope": "agent"},
+        }
+        cases = [
+            ("memref.fence", "ordering", "bogus"),
+            ("memref.fence", "scope", "bogus"),
+            ("memref.fence", "ordering", "monotonic"),
+            ("memref.global_flag_store", "ordering", "bogus"),
+            ("memref.global_flag_store", "ordering", "acquire"),
+            ("memref.global_flag_store", "scope", "bogus"),
+            ("memref.global_flag_wait_eq", "scope", "bogus"),
+        ] + [(name, key, None) for name, attrs in valid.items() for key in attrs]
+        for name, key, value in cases:
+            with self.subTest(op=name, key=key, value=value):
+                b = self._builder("flag_bad_attr")
+                if name == "memref.fence":
+                    b.fence()
+                else:
+                    flags = self._flag_kernel(b)
+                    emit = getattr(b, name.split(".", 1)[1])
+                    emit(flags, b.const_i32(0), b.const_i32(1))
+                b.ret()
+                (op,) = [o for o in b.kernel.body.ops if o.name == name]
+                op.attrs.clear()
+                op.attrs.update(valid[name])
+                if value is None:
+                    del op.attrs[key]
+                    want = f"{name}: {key} attribute missing or not a string"
+                else:
+                    op.attrs[key] = value
+                    want = f"{name}: unknown {key} '{value}'"
+                with self.assertRaisesRegex(ValueError, re.escape(want)):
+                    lower_kernel_to_hip(b.kernel)
+                with self.assertRaisesRegex(ValueError, re.escape(want)):
+                    _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
+                try:
+                    _lower_via_cpp_engine(serialize(b.kernel), "gfx950", "llvm20")
+                except BackendError:
+                    continue  # engine not built: C++ is covered by its ctest
+                except Exception as e:  # noqa: BLE001 -- engine error type
+                    self.assertIn(want, str(e))
+                else:
+                    self.fail(f"C++ engine accepted {name} with {key}={value!r}")
+
+    def test_verifier_rejects_malformed_flag_ops(self):
+        # Serialized IR can carry flag ops the builder would have refused; the
+        # verifier has to catch them before a lowerer unpacks the operands.
+        from rocke.core.ir import F32
+        from rocke.core.verify import ERROR, verify
+
+        b = self._builder("flagverify")
+        flags = self._flag_kernel(b)
+        b.fence(scope="agent", ordering="release")
+        b.global_flag_store(flags, b.const_i32(0), b.const_i32(1))
+        b.global_flag_wait_eq(flags, b.const_i32(0), b.const_i32(1))
+        b.ret()
+        ops = {op.name: op for op in b.kernel.body.ops}
+        self.assertEqual(
+            [d for d in verify(b.kernel) if d.severity == ERROR], [], "well-formed"
+        )
+        ops["memref.fence"].attrs["ordering"] = "monotonic"
+        ops["memref.global_flag_store"].attrs["scope"] = "gpu"
+        wait = ops["memref.global_flag_wait_eq"]
+        wait.operands[2] = b.const_f32(1.0)
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        for needle in (
+            "memref.fence: unknown ordering 'monotonic'",
+            "memref.global_flag_store: unknown scope 'gpu'",
+            f"memref.global_flag_wait_eq: value must be i32, got {F32.name}",
+        ):
+            self.assertTrue(any(needle in m for m in msgs), (needle, msgs))
+        del wait.operands[2]
+        msgs = [d.message for d in verify(b.kernel) if d.severity == ERROR]
+        self.assertTrue(
+            any("expected 3 operands / 0 results, got 2 / 0" in m for m in msgs), msgs
+        )
 
     # ---- ds_swizzle (raw offset + XOR-butterfly encoding) ----
     def test_ds_swizzle_passes_raw_offset_immediate(self):
@@ -3335,7 +3694,6 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         (``[3,3,3,3]``) -- a silently different shuffle, so a wrong
         reduction computes wrong numbers instead of failing.
         """
-        from rocke.core.ir import IRBuilder
         from rocke.core.lower_hip import lower_kernel_to_hip
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -3348,7 +3706,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     with self.assertRaisesRegex(
                         ValueError, r"ctrl must be in 0\.\.255"
                     ):
-                        lower(b.kernel)
+                        lower(b.kernel, arch="gfx950")
 
     def test_warp_shuffle_xor_quad_maps_masks(self):
         ll = self._lower(
@@ -3365,6 +3723,317 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("qperm_xor_bad")
         with self.assertRaises(ValueError):
             b.warp_shuffle_xor_quad(b.const_i32(1), 4)
+
+    # ---- dpp_xor / warp_shuffle_xor_dpp ----
+    _DPP_CALL = (
+        "call i32 @llvm.amdgcn.update.dpp.i32("
+        "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
+    )
+
+    def test_warp_shuffle_xor_dpp_gfx9_encodings(self):
+        """gfx9 CDNA has no ``row_xmask``: each mask with a register-only
+        encoding lowers to it (quad_perm 1/2/3, row_half_mirror 7, row_ror:8,
+        row_mirror 15), one kernel per (arch, mask), with exactly one DPP call
+        so a swapped table entry fails here."""
+        want = {1: 177, 2: 78, 3: 27, 7: 321, 8: 296, 15: 320}
+        for arch in ("gfx942", "gfx950"):
+            for mask, ctrl in want.items():
+                with self.subTest(arch=arch, mask=mask):
+                    ll = self._lower(
+                        f"dppx_{arch}_{mask}",
+                        lambda b: b.warp_shuffle_xor_dpp(b.const_i32(1), mask),
+                        arch=arch,
+                    )
+                    self.assertIn(self._DPP_CALL.format(ctrl), ll)
+                    self.assertEqual(
+                        ll.count("call i32 @llvm.amdgcn.update.dpp.i32("), 1
+                    )
+
+    def test_warp_shuffle_xor_dpp_row_xmask_targets_unchanged(self):
+        """Targets with ``row_xmask`` (gfx11, gfx12, gfx1250) keep
+        ``0x160 | mask`` for every mask, as before the gfx9 table existed."""
+        for arch in ("gfx1151", "gfx1201", "gfx1250"):
+            for mask in range(1, 16):
+                with self.subTest(arch=arch, mask=mask):
+                    ll = self._lower(
+                        f"dppx_{arch}_{mask}",
+                        lambda b: b.warp_shuffle_xor_dpp(b.const_i32(1), mask),
+                        arch=arch,
+                    )
+                    self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
+
+    def test_warp_shuffle_xor_dpp_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        for arch, want in (("gfx942", 321), ("gfx950", 321), ("gfx1201", 359)):
+            with self.subTest(arch=arch):
+                b = IRBuilder(f"dppx_hip_{arch}")
+                b.warp_shuffle_xor_dpp(b.const_i32(1), 7)
+                hip = lower_kernel_to_hip(b.kernel, arch=arch)
+                self.assertIn(
+                    f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
+                )
+
+    def test_warp_shuffle_xor_dpp_f32_goes_through_i32(self):
+        ll = self._lower(
+            "dppx_f32", lambda b: b.warp_shuffle_xor_dpp(b.const_f32(1.0), 15)
+        )
+        self.assertIn("bitcast float", ll)
+        self.assertIn("i32 320, i32 15, i32 15, i1 true)", ll)
+        self.assertIn("to float", ll)
+
+    def test_warp_shuffle_xor_dpp_gfx9_rejects_unencodable_mask(self):
+        """A mask with no register-only encoding on gfx9 CDNA fails loudly in
+        every lowerer, naming the supported masks and the LDS fallback; the
+        same mask lowers on a ``row_xmask`` target."""
+        import importlib.util
+
+        from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        have_cpp = importlib.util.find_spec("rocke_engine") is not None
+        msg = r"no register-only DPP encoding on gfx942.*1, 2, 3, 7, 8 and 15.*warp_shuffle_xor"
+        for mask in range(1, 16):
+            if mask in DPP_XOR_CTRL_NO_ROW_XMASK:
+                continue
+            with self.subTest(mask=mask):
+                b = self._builder(f"dppx_bad_{mask}")
+                b.warp_shuffle_xor_dpp(b.const_i32(1), mask)
+                b.ret()
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(ValueError, msg):
+                        lower(b.kernel, arch="gfx942")
+                if have_cpp:
+                    from rocke.core.backend import _lower_via_cpp_engine
+
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        _lower_via_cpp_engine(serialize(b.kernel), "gfx942", None)
+                _lower_kernel_to_llvm_python(b.kernel, arch="gfx1201")
+
+    def test_dpp_xor_lowering_rejects_bad_mask(self):
+        """A raw ``xor_mask`` outside 1..15 used to be masked with ``& 0xF``
+        (0 and 16 both became row_xmask:0). Now every lowerer rejects it, on
+        every target."""
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad in (0, 16, -1, 0x141):
+            for arch in ("gfx950", "gfx1201"):
+                with self.subTest(mask=bad, arch=arch):
+                    b = self._builder(f"dppx_raw_{bad}")
+                    value = b.dpp_xor(b.const_i32(1), 1)
+                    value.op.attrs["xor_mask"] = bad
+                    for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                        with self.assertRaisesRegex(
+                            ValueError, r"xor_mask must be in 1\.\.15"
+                        ):
+                            lower(b.kernel, arch=arch)
+
+    def test_warp_shuffle_xor_dpp_builder_rejects_invalid_input(self):
+        b = self._builder("dppx_builder_bad")
+        for bad in (0, 16, -1):
+            with self.subTest(lane_xor=bad):
+                with self.assertRaisesRegex(ValueError, "must be 1..15"):
+                    b.warp_shuffle_xor_dpp(b.const_i32(1), bad)
+                with self.assertRaisesRegex(ValueError, "must be 1..15"):
+                    b.dpp_xor(b.const_i32(1), bad)
+        # The mask is never coerced: True would silently become mask 1.
+        for bad in (True, 1.0, "1"):
+            with self.subTest(lane_xor=bad):
+                with self.assertRaisesRegex(TypeError, "must be an int"):
+                    b.warp_shuffle_xor_dpp(b.const_i32(1), bad)
+                with self.assertRaisesRegex(TypeError, "must be an int"):
+                    b.dpp_xor(b.const_i32(1), bad)
+        with self.assertRaises(ValueError):
+            b.dpp_xor(b.const_f32(1.0), 1)
+        with self.assertRaises(ValueError):
+            b.warp_shuffle_xor_dpp(b.const_i64(1), 1)
+
+    @staticmethod
+    def _dpp_src_lane(ctrl, lane):
+        """Source lane of ``lane`` under a DPP control word: the hardware
+        definitions of each pattern, independent of the XOR claim."""
+        row, i = lane & ~15, lane & 15
+        if ctrl <= 0xFF:  # quad_perm: lane 4q + j reads 4q + sel[j]
+            return (lane & ~3) | ((ctrl >> (2 * (lane & 3))) & 3)
+        if ctrl == 0x128:  # row_ror:8: rotate the 16-lane row by 8
+            return row | ((i + 8) & 15)
+        if ctrl == 0x140:  # row_mirror: lane i reads 15 - i
+            return row | (15 - i)
+        if ctrl == 0x141:  # row_half_mirror: lane i of a half-row reads 7 - i
+            return (lane & ~7) | (7 - (lane & 7))
+        if 0x161 <= ctrl <= 0x16F:  # row_xmask
+            return row | (i ^ (ctrl & 15))
+        raise AssertionError(f"unmodelled DPP control {ctrl:#x}")
+
+    def test_dpp_xor_every_encoding_is_exactly_xor(self):
+        """Every control word the lowerers pick, on every target, moves lane
+        ``i`` to read lane ``i ^ mask`` of its 16-lane row, in wave32 and
+        wave64. Driven by :func:`dpp_xor_ctrl` itself, so it checks the
+        table the lowerers use, not a restatement of it."""
+        from rocke.core.arch.target import ArchTarget
+        from rocke.core.ir import dpp_xor_ctrl
+
+        for gfx in ("gfx942", "gfx950", "gfx1151", "gfx1201", "gfx1250"):
+            arch = ArchTarget.from_gfx(gfx)
+            for mask in range(1, 16):
+                b = self._builder("dppx_model")
+                op = b.dpp_xor(b.const_i32(1), mask).op
+                try:
+                    ctrl = dpp_xor_ctrl(op, arch)
+                except ValueError:
+                    self.assertFalse(arch.has_dpp_row_xmask, (gfx, mask))
+                    continue
+                for lane in range(64):
+                    with self.subTest(gfx=gfx, mask=mask, lane=lane):
+                        self.assertEqual(self._dpp_src_lane(ctrl, lane), lane ^ mask)
+
+    def _xor_butterfly(self, masks, vals, active=None):
+        """Lane model of ``v = v + shuffle(v, m)`` for ``m`` in ``masks``,
+        through the gfx9 control words. ``active[i]`` False models lane ``i``
+        disabled in EXEC for the whole sequence: it never updates, and with
+        ``bound_ctrl`` a lane reading it gets ``0``."""
+        from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
+
+        n = len(vals)
+        if active is None:
+            active = [True] * n
+        cur = list(vals)
+        for m in masks:
+            ctrl = DPP_XOR_CTRL_NO_ROW_XMASK[m]
+            src = [self._dpp_src_lane(ctrl, i) for i in range(n)]
+            cur = [
+                (
+                    (cur[i] + (cur[src[i]] if active[src[i]] else 0))
+                    if active[i]
+                    else cur[i]
+                )
+                for i in range(n)
+            ]
+        return cur
+
+    def test_xor_butterfly_leaves_row_sum_in_every_lane(self):
+        """Masks that span all four lane-index bits (``1, 2, 7, 15`` or
+        ``1, 2, 8, 7``, both register-only on gfx9) leave each 16-lane row's
+        sum in every lane of that row, in wave32 and wave64."""
+        import random
+
+        rng = random.Random(0)
+        for masks in ((1, 2, 7, 15), (1, 2, 8, 7), (15, 7, 2, 1)):
+            for wave in (32, 64):
+                for _ in range(20):
+                    vals = [rng.randint(-1000, 1000) for _ in range(wave)]
+                    cur = self._xor_butterfly(masks, vals)
+                    for row in range(wave // 16):
+                        lanes = cur[16 * row : 16 * row + 16]
+                        self.assertEqual(
+                            set(lanes), {sum(vals[16 * row : 16 * row + 16])}
+                        )
+
+    def test_xor_butterfly_needs_every_lane_active(self):
+        """One inactive lane breaks the sum. ``bound_ctrl`` makes it read as
+        ``0``, but every lane also relays its partners' partial sums, so the
+        active lanes lose more than the inactive lane's own value and end
+        with different, wrong totals."""
+        vals = list(range(1, 17))
+        active = [lane != 2 for lane in range(16)]
+        cur = self._xor_butterfly((1, 2, 7, 15), vals, active)
+        got = [cur[i] for i in range(16) if active[i]]
+        want = sum(v for v, on in zip(vals, active) if on)
+        self.assertNotEqual(set(got), {want})
+
+    def test_dpp_xor_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("dppx_pure")
+        value = b.dpp_xor(b.const_i32(1), 15)
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.dpp_xor"))
+
+    def test_dpp_lowering_rejects_malformed_raw_op(self):
+        """Raw IR that skipped the builder is rejected, never coerced, by both
+        Python lowerers for both DPP ops: anything but one operand and one
+        result is a ValueError (zero operands included, not a crash), a
+        missing ``ctrl`` / ``xor_mask`` is a KeyError, a non-``int`` one a
+        TypeError (``int()`` used to turn 320.9 into 320, ``"321"`` into 321
+        and ``True`` into quad_perm control 1 or xor mask 1), and non-i32 data
+        or a non-i32 result a ValueError (HIP would convert between ``int``
+        and ``float`` silently). The C++ twins return ROCKE_ERR_VALUE / _KEY /
+        _TYPE (``tests/core/future_intrinsic_lowering.cpp``)."""
+        from rocke.core.ir import F32, I32
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        def i32_data(b):
+            return [b.const_i32(1)]
+
+        for op_name, key, ctrl in (
+            ("tile.quad_perm", "ctrl", 177),
+            ("tile.dpp_xor", "xor_mask", 7),
+        ):
+            ok = {key: ctrl}
+            cases = (
+                ("missing", i32_data, [I32], {}, KeyError, f"missing '{key}'"),
+                (
+                    "float",
+                    i32_data,
+                    [I32],
+                    {key: ctrl + 0.9},
+                    TypeError,
+                    "must be an int",
+                ),
+                (
+                    "str",
+                    i32_data,
+                    [I32],
+                    {key: str(ctrl)},
+                    TypeError,
+                    "must be an int",
+                ),
+                ("bool", i32_data, [I32], {key: True}, TypeError, "must be an int"),
+                (
+                    "f32_data",
+                    lambda b: [b.const_f32(1.0)],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "requires i32 data",
+                ),
+                (
+                    "f32_result",
+                    i32_data,
+                    [F32],
+                    ok,
+                    ValueError,
+                    "requires an i32 result",
+                ),
+                (
+                    "two_operands",
+                    lambda b: [b.const_i32(1), b.const_i32(2)],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "expects one operand and one result, got 2 and 1",
+                ),
+                (
+                    "no_operands",
+                    lambda b: [],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "expects one operand and one result, got 0 and 1",
+                ),
+            )
+            for label, operands, results, attrs, exc, msg in cases:
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.subTest(op=op_name, case=label, lower=lower.__name__):
+                        b = self._builder(f"dpp_raw_{label}")
+                        b._op(op_name, operands(b), list(results), attrs=dict(attrs))
+                        with self.assertRaisesRegex(exc, msg):
+                            lower(b.kernel, arch="gfx950")
 
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
@@ -3627,7 +4296,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             r"av_load_b128: pointer operand is ptr addrspace\(3\), "
             r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
         ):
-            lower_kernel_to_llvm(b.kernel)
+            lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
     def test_av_store_b128_requires_v4i32_data(self):
         from rocke.core.ir import I32, PtrType
@@ -3685,8 +4354,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
         )
         self.assertIn(
-            "call void @llvm.amdgcn.s.prefetch.inst.p1("
-            "ptr addrspace(1) %code, i32 64)",
+            "call void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1) %code, i32 64)",
             ll,
         )
 
@@ -3733,7 +4401,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
             r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
         ):
-            lower_kernel_to_llvm(b.kernel)
+            lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
     # ---- async buffer / global -> LDS ----
     def test_buffer_load_lds_async_converts_dwords_to_bytes(self):
@@ -3881,8 +4549,14 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         b.ret()
         return b.kernel
 
-    def _run(self, cpp_result, arch=None):
-        """Dispatch with the cpp engine stubbed to ``cpp_result``."""
+    def _run(self, cpp_result, arch="gfx950"):
+        """Dispatch with the cpp engine stubbed to ``cpp_result``.
+
+        ``arch`` is named rather than left to default, because there is no
+        default: ``lower_kernel_via_backend`` rejects a ``None`` target. These
+        tests are about what dispatch does with the two results, not about
+        target selection, so they pick one and move on.
+        """
 
         def python_lower(kernel, *, llvm_flavor=None, arch=None):
             return "PYTHON IR\n"
@@ -4471,7 +5145,7 @@ class TestExpandedEpilogueOps(unittest.TestCase):
             b, x, m=idx, n=idx, elem_idx=0, params=dict(fe._live_params)
         )
         b.global_store(out_p, idx, y, align=2)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         return b.kernel, ll
 
     def test_gelu_builds_and_lowers(self):
@@ -4637,6 +5311,58 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "mean")
 
 
+class TestGemmEpilogueLowererTarget(unittest.TestCase):
+    """The fused GEMM lowerer with an explicit target needs no GPU.
+
+    A candidate made for a wave64 target must be refused by a lowerer whose
+    explicit target is wave32. The refusal happens before any kernel is
+    built or loaded, so this runs on any host without stand-ins for HIP.
+    """
+
+    def test_wave64_candidate_refused_on_wave32_target(self):
+        from rocke.helpers import (
+            FusionOp,
+            FusionTensor,
+            GemmEpilogueLowerer,
+            GreedyFusionScheduler,
+            build_graph,
+        )
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (128, 64), "fp16", is_input=True),
+                FusionTensor("B", (64, 128), "fp16", is_input=True),
+                FusionTensor("mm", (128, 128), "fp16"),
+                FusionTensor("out", (128, 128), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("mm0", "matmul", ("A", "B"), ("mm",)),
+                FusionOp("relu0", "relu", ("mm",), ("out",)),
+            ],
+            inputs=("A", "B"),
+            outputs=("out",),
+        )
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        cfgs = GemmEpilogueLowerer(arch="gfx950").candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        self.assertEqual(cfgs[0].spec.wave_size, 64)
+        with self.assertRaises(ValueError) as ctx:
+            GemmEpilogueLowerer(arch="gfx1151").build(cfgs[0])
+        msg = str(ctx.exception)
+        head, _, targets = msg.partition(" with one of: ")
+        self.assertEqual(
+            head,
+            f"fused GEMM candidate {cfgs[0].spec.name!r} was made for wave size "
+            "64, but the explicit target gfx1151 has wave size 32. Build the "
+            "candidates and the kernel with the same lowerer, or pass a target "
+            "of wave size 64 explicitly: GemmEpilogueLowerer(arch=...)",
+        )
+        # The suggested targets are the known wave64 targets only.
+        suggested = targets.rstrip(".").split(", ")
+        self.assertIn("gfx950", suggested)
+        self.assertNotIn("gfx1151", suggested)
+
+
 class TestLoweringRegistryBuild(unittest.TestCase):
     """Lowerer tests: candidate generation phase (GPU-agnostic).
 
@@ -4762,6 +5488,48 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertIsNotNone(built.launcher)
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
+
+    def test_gemm_epilogue_build_refuses_candidate_for_other_wave_size(self):
+        """A wave32 candidate is refused on the wave64 active device.
+
+        The candidate comes from a lowerer targeting gfx1151 (wave32); the
+        default lowerer targets the active device, reported as gfx950
+        (wave64). The build must fail with a message naming the device, both
+        wave sizes and how to pass a target, not build for another target.
+        """
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        cfgs = GemmEpilogueLowerer(arch="gfx1151").candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        with self.assertRaises(ValueError) as ctx:
+            GemmEpilogueLowerer().build(cfgs[0])
+        msg = str(ctx.exception)
+        self.assertIn("made for wave size 32", msg)
+        self.assertIn("the active device gfx950 has wave size 64", msg)
+        self.assertIn("GemmEpilogueLowerer(arch=...)", msg)
+        self.assertIn("gfx1151", msg)
+
+    def test_gemm_epilogue_explicit_target_overrides_device(self):
+        """An explicit target is used for candidates and build, not the device.
+
+        The active device reports gfx950 (wave64); the lowerer is given
+        gfx1151 (wave32), so its candidates are wave32 WMMA candidates and
+        they build for gfx1151.
+        """
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        lowerer = GemmEpilogueLowerer(arch="gfx1151")
+        cfgs = lowerer.candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        for cfg in cfgs:
+            self.assertEqual(cfg.spec.wave_size, 32)
+        built = lowerer.build(cfgs[0])
+        self.assertIsNotNone(built.launcher)
+        self.assertEqual(built.block_size, cfgs[0].spec.block_size)
 
     def test_elementwise_lowerer_round_trips(self):
         from rocke.helpers import (
@@ -5175,7 +5943,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
             problem=DirectConvProblem(N=1, H=8, W=8, groups=8, cpg=16, kpg=16)
         )
         kernel = build_direct_conv_16c(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # Smoke check: the generated LLVM IR mentions amdgpu and the
         # kernel name (proves the body got emitted).
         self.assertIn("amdgpu", ll)
@@ -5193,7 +5961,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
             problem=DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4)
         )
         kernel = build_direct_conv_4c(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("amdgpu", ll)
         self.assertIn(kernel.name, ll)
 
@@ -5229,8 +5997,8 @@ class TestTransformsRuntimeAware(unittest.TestCase):
 
         k_pad, _ = build_with(pad)
         k_dyn, _ = build_with(pad_dynamic)
-        ll_pad = lower_kernel_to_llvm(k_pad)
-        ll_dyn = lower_kernel_to_llvm(k_dyn)
+        ll_pad = lower_kernel_to_llvm(k_pad, arch="gfx950")
+        ll_dyn = lower_kernel_to_llvm(k_dyn, arch="gfx950")
         # Both should compile to amdgpu IR; the dynamic-with-ints variant
         # is operationally identical to the compile-time pad variant.
         self.assertIn("amdgpu", ll_pad)
@@ -5254,7 +6022,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         off, valid = desc.offset(b, idx=idx_v)
         self.assertIsNotNone(valid)  # validity is in flight
         b.zext(valid, I32)  # touch it so it doesn't get DCE'd
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("amdgpu", ll)
         # Two parameters: ``idx`` and ``hi``. The IR must mention ``hi``
         # otherwise our runtime upper bound was dropped.
@@ -5277,7 +6045,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         _, valid = desc.offset(b, idx=idx_v)
         self.assertIsNotNone(valid)
         b.zext(valid, I32)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("amdgpu", ll)
 
     def test_indirect_emits_table_lookup_in_chain(self):
@@ -5302,7 +6070,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         # Now the descriptor's user-facing coords are ("tile_idx", "dim").
         self.assertEqual(set(desc.upper_names), {"tile_idx", "dim"})
         off, _ = desc.offset(b, tile_idx=tile_idx, dim=dim)
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # The chain must lower to AMDGPU IR and the table+base parameters
         # must show up in the function signature (proves we issued the
         # table load).
@@ -6410,11 +7178,14 @@ class TestRuntimeLaunchKeepAlive(unittest.TestCase):
         rt = Runtime()
         prior = self._isolate_pending()
         try:
-            with mock.patch(
-                "rocke.runtime.hip_module._hipModuleLaunchKernel", return_value=0
-            ), mock.patch(
-                "rocke.runtime.hip_module._hipStreamSynchronize", return_value=0
-            ) as sync_stub:
+            with (
+                mock.patch(
+                    "rocke.runtime.hip_module._hipModuleLaunchKernel", return_value=0
+                ),
+                mock.patch(
+                    "rocke.runtime.hip_module._hipStreamSynchronize", return_value=0
+                ) as sync_stub,
+            ):
                 rt.launch_blocking(
                     _HipFunctionHandle(),
                     (1, 1, 1),
@@ -6709,6 +7480,298 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
 
+    def _fake_torch_site(self, tmp):
+        """A site-packages holding a torch package and TheRock's
+        ``_rocm_sdk_core`` wheel layout: HIP and comgr under
+        ``_rocm_sdk_core/lib`` with only their SONAMEs, nothing in torch/lib."""
+        import os
+        import types
+
+        site = os.path.join(tmp, "site-packages")
+        os.makedirs(os.path.join(site, "torch", "lib"))
+        core_lib = os.path.join(site, "_rocm_sdk_core", "lib")
+        os.makedirs(core_lib)
+        open(os.path.join(site, "_rocm_sdk_core", "__init__.py"), "w").close()
+        for name in ("libamdhip64.so.7", "libamd_comgr.so.3", "libhiprtc.so.7"):
+            open(os.path.join(core_lib, name), "w").close()
+        torch_stub = types.ModuleType("torch")
+        torch_stub.__file__ = os.path.join(site, "torch", "__init__.py")
+        return site, core_lib, torch_stub
+
+    def _enter_fake_process(
+        self, stack, tmp, site, modules, absent=(), maps=None, root_libdirs=None
+    ):
+        """Patch this process to look like one that imported ``modules`` (and
+        not ``absent``), has ``site`` on sys.path, maps the libs listed in the
+        ``maps`` file and finds the ROCm installs ``root_libdirs``."""
+        import importlib
+        import os
+        import sys
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        stack.enter_context(mock.patch.dict(sys.modules, modules))
+        stack.enter_context(mock.patch.object(sys, "path", [site] + sys.path))
+        stack.enter_context(mock.patch.object(rc, "_IS_WINDOWS", False))
+        stack.enter_context(
+            mock.patch.object(rc, "_PROC_MAPS", maps or os.path.join(tmp, "no-maps"))
+        )
+        if root_libdirs is not None:
+            stack.enter_context(
+                mock.patch.object(rc, "_rocm_root_libdirs", return_value=root_libdirs)
+            )
+        stack.enter_context(mock.patch.object(comgr_mod, "_lib", None))
+        stack.enter_context(mock.patch.dict(os.environ))
+        for name in ("_rocm_sdk_core",) + tuple(absent):
+            sys.modules.pop(name, None)
+        importlib.invalidate_caches()
+        os.environ.pop("ROCKE_HIP_LIB", None)
+        os.environ.pop("ROCKE_COMGR_LIB", None)
+
+    def test_torch_lib_resolves_into_the_rocm_sdk_core_wheel(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch preloads _rocm_sdk_core/lib/libamdhip64.so.7. Looking only
+        # in torch/lib missed it, so rocke loaded /opt/rocm's HIP as a second
+        # runtime and hipModuleGetFunction failed with hipError(500).
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            with (
+                mock.patch.dict(
+                    sys.modules,
+                    {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+                ),
+                mock.patch.object(sys, "path", [site] + sys.path),
+                mock.patch.object(rc, "_IS_WINDOWS", False),
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")),
+                mock.patch.dict(os.environ),
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_HIP_LIB", None)
+                hip = os.path.join(core_lib, "libamdhip64.so.7")
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), hip)
+                self.assertEqual(
+                    rc._torch_bundled_lib("amd_comgr"),
+                    os.path.join(core_lib, "libamd_comgr.so.3"),
+                )
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[0], hip)
+                # The explicit override still outranks it.
+                os.environ["ROCKE_HIP_LIB"] = "/custom/libamdhip64.so"
+                paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+                self.assertEqual(paths[:2], ["/custom/libamdhip64.so", hip])
+
+    def test_rocm_sdk_core_libs_need_therock_torch(self):
+        import contextlib
+        import os
+        import tempfile
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # A CUDA, CPU or older ROCm torch in a venv that also has rocm-sdk-core
+        # installed: torch loaded no ROCm libs and rocm_sdk is not imported.
+        # Binding to the wheel's HIP there picks a runtime nothing else uses.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            self._enter_fake_process(
+                stack, tmp, site, {"torch": torch_stub}, absent=("rocm_sdk",)
+            )
+            self.assertIsNone(rc._torch_bundled_lib("amdhip64"))
+            self.assertIsNone(rc._torch_bundled_lib("amd_comgr"))
+            paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+            self.assertNotIn(os.path.join(core_lib, "libamdhip64.so.7"), paths)
+
+    def test_torch_lib_prefers_the_copy_already_mapped(self):
+        import os
+        import sys
+        import tempfile
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Whatever layout torch's HIP came from, the mapped copy is the instance
+        # torch is using; it wins over every on-disk guess. Near-miss names
+        # (libhiprtc, libamdhip64_dbg) must not match.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            open(os.path.join(site, "torch", "lib", "libamdhip64.so"), "w").close()
+            mapped = "/opt/vendor dir/lib/libamdhip64.so.7.16.60100"
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(
+                    "7f00-7f01 r-xp 00000000 08:01 11 /opt/x/lib/libamdhip64_dbg.so.7\n"
+                    "7f01-7f02 r-xp 00000000 08:01 12 /opt/x/lib/libhiprtc.so.7\n"
+                    "7f02-7f03 rw-p 00000000 00:00 0\n"
+                    f"7f03-7f04 r-xp 00000000 08:01 13 {mapped}\n"
+                )
+            with (
+                mock.patch.dict(sys.modules, {"torch": torch_stub}),
+                mock.patch.object(rc, "_IS_WINDOWS", False),
+                mock.patch.object(rc, "_PROC_MAPS", maps),
+            ):
+                self.assertEqual(rc._torch_bundled_lib("amdhip64"), mapped)
+                self.assertIsNone(rc._mapped_lib("amd_comgr"))
+
+    def test_multiple_mapped_hip_copies_are_not_selected_by_address(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamdhip64.so.7")
+            foreign = "/opt/rocm-7.2.3/lib/libamdhip64.so.7"
+            other = "/opt/rocm-7.3.0/lib/libamdhip64.so.7"
+            maps = os.path.join(tmp, "maps")
+
+            def mapped(*paths):
+                with open(maps, "w") as fh:
+                    for index, path in enumerate(paths):
+                        fh.write(
+                            f"7f0{index}-7f0{index + 1} r-xp 00000000 "
+                            f"08:01 1{index} {path}\n"
+                        )
+
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+                maps=maps,
+            )
+            mapped(foreign, wheel)
+            self.assertEqual(rc._mapped_lib("amdhip64"), wheel)
+            self.assertEqual(
+                rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])[0],
+                wheel,
+            )
+            mapped(wheel, foreign)
+            self.assertEqual(rc._mapped_lib("amdhip64"), wheel)
+
+            mapped(foreign, other)
+            self.assertIsNone(rc._mapped_lib("amdhip64"))
+
+            torch_lib = os.path.join(site, "torch", "lib", "libamdhip64.so")
+            open(torch_lib, "w").close()
+            mapped(foreign, torch_lib)
+            self.assertEqual(rc._mapped_lib("amdhip64"), torch_lib)
+
+            mapped(foreign, foreign)
+            self.assertEqual(rc._mapped_lib("amdhip64"), foreign)
+
+    def test_comgr_override_rejects_only_a_different_unique_mapped_file(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamd_comgr.so.3")
+            with open(wheel, "wb") as fh:
+                fh.write(b"\x7fELF")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            os.makedirs(root)
+            host = os.path.join(root, "libamd_comgr.so.3")
+            with open(host, "wb") as fh:
+                fh.write(b"\x7fELF")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                # Multiple map segments for one file are still one copy.
+                for address in ("7f00-7f01", "7f01-7f02"):
+                    fh.write(f"{address} r-xp 00000000 08:01 11 {wheel}\n")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            stack.enter_context(mock.patch.object(comgr_mod, "_IS_WINDOWS", False))
+            self.assertEqual(rc._mapped_lib("amd_comgr", require_unique=True), wheel)
+
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                with self.assertRaises(comgr_mod.ComgrError) as error:
+                    comgr_mod._load_lib()
+                load.assert_not_called()
+            self.assertIn(repr(host), str(error.exception))
+            self.assertIn(repr(wheel), str(error.exception))
+            self.assertIn("separate process", str(error.exception))
+
+            # A different spelling of the *same* mapped file keeps override
+            # precedence; path aliases must not become hard failures.
+            same_file = os.path.join(core_lib, "..", "lib", "libamd_comgr.so.3")
+            self.assertEqual(os.path.realpath(same_file), os.path.realpath(wheel))
+            os.environ["ROCKE_COMGR_LIB"] = same_file
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                self.assertIs(comgr_mod._load_lib(), load.return_value)
+                load.assert_called_once_with(same_file)
+
+            # An invalid override retains the existing fallback to torch's
+            # mapped library rather than becoming a new hard error.
+            missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
+            os.environ["ROCKE_COMGR_LIB"] = missing
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("missing"), object()]
+            ) as load:
+                comgr_mod._load_lib()
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [missing, wheel]
+                )
+
+            # An existing text file is still an unloadable override, not a
+            # second COMGR. The native detector can map the fallback before
+            # Python resolves it, so this check must not reject its fallback.
+            invalid = os.path.join(tmp, "broken.so")
+            with open(invalid, "w") as fh:
+                fh.write("not a shared library")
+            os.environ["ROCKE_COMGR_LIB"] = invalid
+            loaded = object()
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("invalid ELF"), loaded]
+            ) as load:
+                self.assertIs(comgr_mod._load_lib(), loaded)
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [invalid, wheel]
+                )
+
+            # No mapped copy, or multiple distinct mapped copies, leaves the
+            # existing override and mapped-tier policy unchanged.
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")):
+                self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+                with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                    comgr_mod._load_lib()
+                    load.assert_called_once_with(host)
+            with open(maps, "a") as fh:
+                fh.write(f"7f02-7f03 r-xp 00000000 08:01 12 {host}\n")
+            self.assertEqual(rc._mapped_lib("amd_comgr"), wheel)
+            self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                comgr_mod._load_lib()
+                load.assert_called_once_with(host)
+
     def test_rocm_version_parsed_from_versioned_libdir(self):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 
@@ -6808,6 +7871,202 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                     self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
                     self.assertTrue(rc._torch_comgr_is_stale())
 
+    def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
+        # 10.2); its _rocm_sdk_core comgr belongs to the wheel's ROCm release.
+        # Read as a release, 7.17 is older than any /opt/rocm-10.x, so the
+        # wheel's comgr was always demoted, even beside the same release.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            bundled = os.path.join(core_lib, "libamd_comgr.so.3")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[os.path.join(tmp, "rocm-10.2.0", "lib")],
+            )
+            sdk_stub.__version__ = "10.2.0a20261001"
+            self.assertEqual(rc._torch_rocm_version(bundled), (10, 2))
+            self.assertFalse(rc._torch_comgr_is_stale(bundled))
+            # An older release beside it is still stale: the check compares.
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self.assertTrue(rc._torch_comgr_is_stale(bundled))
+
+    def test_mapped_rocm_sdk_core_comgr_is_never_demoted(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # ROCm 10.1 TheRock torch on a ROCm 10.2 host. initialize_process loaded
+        # the wheel comgr RTLD_GLOBAL; demoting it made rocke load the 10.2 comgr
+        # beside it, and two LLVMs in one process abort ("support is already
+        # registered for analysis").
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], comgr)
+            self.assertEqual(paths.count(comgr), 1)
+            # The staleness check itself still fires; only the demotion is skipped.
+            self.assertTrue(rc._torch_comgr_is_stale(comgr))
+            # Control: the same wheel comgr, not loaded yet, is still demoted.
+            stack.enter_context(
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps"))
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_mapped_torch_lib_comgr_is_still_demoted_when_stale(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older wheels keep comgr in torch/lib; the demotion they were written
+        # for is unchanged, mapped or not.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub},
+                absent=("rocm_sdk",),
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_torch_lib_comgr_version_ignores_an_unrelated_rocm_sdk(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older ROCm 7.0 torch with comgr in torch/lib on a ROCm 7.2 host, with
+        # rocm_sdk 10.2 imported for something else. The comgr is 7.0 and stale;
+        # reading rocm_sdk.__version__ called it 10.2 and kept it first, while
+        # resolved_lib_rocm_version (by path) said 7.0.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.2.0a20261001"
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+            # Both version readers agree on the lib that will load.
+            self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+            self.assertEqual(rc._torch_rocm_version(comgr), (7, 0))
+            self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (7, 0))
+
+    def test_rocm_sdk_core_comgr_reports_the_wheel_release(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch's comgr lives in _rocm_sdk_core/lib, outside the torch
+        # package. Its version came from the /opt/rocm fallback instead of the
+        # wheel, so a ROCm 10.1 wheel on a 10.2 host picked the LLVM flavor and
+        # capability guards for a comgr that was not the one loaded.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            with (
+                mock.patch.dict(
+                    sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
+                ),
+                mock.patch.object(sys, "path", [site] + sys.path),
+                mock.patch.object(rc, "_IS_WINDOWS", False),
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")),
+                mock.patch.object(rc, "_rocm_root_libdirs", return_value=[]),
+                mock.patch.object(comgr_mod, "_lib", None),
+                mock.patch.dict(os.environ),
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_COMGR_LIB", None)
+                self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+                for sdk_version, expected in (
+                    ("10.1.0a20260822", (10, 1)),
+                    ("10.2.0a20261001", (10, 2)),
+                ):
+                    with self.subTest(rocm_sdk=sdk_version):
+                        sdk_stub.__version__ = sdk_version
+                        self.assertEqual(
+                            comgr_mod.resolved_lib_rocm_version(), expected
+                        )
+                # rocm_sdk not imported (e.g. ROCKE_COMGR_LIB points into the
+                # wheel): the installed rocm-sdk-core distribution names it.
+                del sdk_stub.__version__
+                with mock.patch(
+                    "importlib.metadata.version", return_value="10.1.0a20260822"
+                ) as dist_version:
+                    self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (10, 1))
+                dist_version.assert_called_with("rocm-sdk-core")
+
 
 # ---------------------------------------------------------------------
 # Build smoke tests for the FMHA / Sage / sparse-attention instance
@@ -6829,7 +8088,7 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         idx = b.param("i", I32)
         b.global_atomic_add_pk_bf16(ptr, idx, b.zero_vec(BF16, 2))
         b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # There is no llvm.amdgcn.global.atomic.fadd.v2bf16 in the shipping ROCm
         # LLVM; the packed-bf16 atomic goes through a generic atomicrmw plus the
         # AMDGPU memory-model metadata that selects global_atomic_pk_add_bf16.
@@ -6846,7 +8105,7 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         c = b.param("c", I32)
         b.umul_hi_i32(a, c)
         b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("zext i32", ll)
         self.assertIn("mul i64", ll)
         self.assertIn("lshr i64", ll)
@@ -6874,7 +8133,7 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         )
         apply_rotary_pair_f32(b, b.const_f32(1.0), b.const_f32(2.0), cos_v, sin_v)
         b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("fmul float", ll)
         self.assertIn("fsub float", ll)
 
@@ -6897,7 +8156,7 @@ class TestExtendedHelperBuilds(unittest.TestCase):
             keep_prob_f32=keep,
         )
         b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         # 10 rounds of mulhilo = 20 mul i64 operations.
         self.assertGreaterEqual(ll.count("mul i64"), 20)
 
@@ -6910,7 +8169,7 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         v = b.param("v", I32)
         codebook_lookup_i8_to_fp8(b, cb, v)
         b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
+        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
         self.assertIn("@llvm.amdgcn.cvt.pk.fp8.f32", ll)
 
 
@@ -6931,7 +8190,7 @@ class TestMfmaGemm(unittest.TestCase):
 
         spec = MfmaGemmSpec(M=32, N=32, K=32, dtype="f16")
         kernel = build_mfma_gemm(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         # The default ``kpack=True`` selects the f16 16x16x32 atom on
         # gfx950+; fall back to a substring match so the test stays
         # honest if a future worker bumps the default again.
@@ -6986,7 +8245,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
     """
 
     def _llvm_for(self, build_fn, spec):
-        return lower_kernel_to_llvm(build_fn(spec))
+        return lower_kernel_to_llvm(build_fn(spec), arch="gfx950")
 
     def test_mfma_gemm_uses_mfma(self):
         from rocke.instances import MfmaGemmSpec, build_mfma_gemm
@@ -7118,7 +8377,7 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
             return b_.add(b_.mul(m_val, N), n_val), None
 
         epi.store(b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc)
-        return lower_kernel_to_llvm(b.kernel)
+        return lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
     def test_cshuffle_fp16_emits_lds_staging_and_half_store(self):
         ll = self._build_ll("fp16")

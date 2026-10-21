@@ -5,6 +5,19 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.41
 
+### Added
+
+* Added further support for very large FFTs (length greater than 2^32).
+* JIT callbacks specified with the `rocfft_plan_description_set_load_callback` and
+  `rocfft_plan_description_set_store_callback` APIs can now be used with transforms that have fields
+  specified on the same plan description.
+
+### Changed
+
+* Function pointer callbacks specified with the deprecated `rocfft_execution_info_set_load_callback` and
+  `rocfft_execution_info_set_store_callback` APIs are now disallowed with transforms that have fields
+  specified on the plan description.
+
 ### Resolved issues
 
 * Fixed possible failures of `rocfft_plan_create` for multi-device plans.
@@ -16,15 +29,32 @@ Documentation for rocFFT is available at
 * Fixed a possible hang in `rocfft_cleanup` in builds with RCCL enabled, for single-process multi-device usage.
 * Fixed incorrect results for 1D complex transforms of lengths involving large prime factors
   with large batch sizes, where 32-bit kernel indexing could overflow.
-
-### Added
-
-* Added further support for very large FFTs (length greater than 2^32).
+* Fixed `rocfft_plan_create` failures for 1D complex transforms of lengths involving large prime
+  factors when the output data layout uses a batch distance larger than the transform length.
+* Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
+  lengths involving large prime factors when batches are interleaved (unit batch distance).
 
 ### Optimized
 
-* Improved performance of unit-strided, interleaved, complex-to-real FFTs for the following lengths:
+* Improved performance of unit-strided, interleaved, complex-to-real FFTs on gfx1201, gfx90a, gfx942, and gfx950 for the following lengths:
+  * (100,100,100)
+  * (192,96,96)
+  * (200,96,96)
+  * (128,128,256)
+  * (160,168,168)
+  * (160,168,192)
+  * (168,168,192)
+  * (168,192,192)
+  * (192,192,192)
+  * (192,192,200)
+  * (192,200,200)
+  * (200,200,200)
+  * (216,216,216)
+  * (216,104,104)
   * (216,104,100)
+  * (224,104,104)
+  * (224,108,104)
+  * (224,108,108)
 
 ## rocFFT 1.0.40 for ROCm 10.1
 

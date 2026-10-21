@@ -13,6 +13,12 @@
 > from a citation into a measurement. It also adds a trap list to §9 and paper citations
 > to §11. **No equation or geometry value changed**; §0–§2 and §4–§5 are re-verified
 > against the primary sources now listed in §11 and stand as written.
+>
+> **Revision 3 (AICK-1502) — gfx942 bf16 prefill as built.** Scoped to §9 row 1 only;
+> every other row, and every gfx950 section, stands as written. The shipped gfx942
+> prefill kernel absorbs `W_UK` into the query instead of expanding the latent inside
+> the flash loop, and §3.1 is not built. §2.5 records why and what the gfx942
+> measurement showed, §3 and §9 point at it. **No equation or geometry value changed.**
 
 Covers DeepSeek V2/V3/V3.1/R1 and Kimi-K2. The kernel family splits into
 two distinct kernels (prefill and decode-absorb) and a separate fp8 phase for
@@ -434,6 +440,47 @@ attention but is memory-bandwidth-bound on `W_UK` at large tile counts.
 > only — it yields no shippable rocKE instance — so that prototype should come first
 > but does not remove the spec-layer work.
 
+> **gfx942 bf16, as built (Revision 3).** This note covers the gfx942 prefill kernel
+> (§9 row 1) only. gfx950 and the other rows still follow the text above.
+>
+> - **Chunked strategy: absorption, not in-loop expansion.** The kernel folds
+>   `W_UK`'s `K_nope` half into the query once per query row in the prologue, runs the
+>   flash loop in latent space (QK width $r_{KV} + d_{\text{rope}} = 576$, PV width
+>   $r_{KV} = 512$), and applies `W_UV` once per row in the epilogue — the §4 decode
+>   structure applied to prefill. The latent is never expanded. In-loop expansion was
+>   dropped because every query block re-expands every key tile it visits, so the
+>   expansion repeats $\lceil S_q / B_q \rceil$ times per key, at
+>   $r_{KV} \cdot (d_{\text{nope}} + d_V)$ multiply-adds per key per head — more than
+>   the attention it feeds. Absorption pays $r_{KV} \cdot (d_{\text{nope}} + d_V)$
+>   multiply-adds per *query* per head instead (prologue plus epilogue), independent of
+>   $S_k$, which is why §10.6 uses it below the
+>   threshold. The first row of the regime table should read "absorption (§4 structure)"
+>   for gfx942.
+> - **Full-prompt strategy: materialize is still the right choice, and it is not
+>   built.** The §3.1 path was measured on a 304-CU gfx942 against the absorbed kernel,
+>   with every arm gated against the fp32 reference at the §8.1 tolerance, at
+>   $H_q \in \{128, 64\}$, $B = 1$ unless noted, chunked
+>   $S_q \in [128, 2048] \times S_k \in \{8\text{K}, 32\text{K}\}$ and full prompts
+>   $S_q = S_k \in [1\text{K}, 8\text{K}]$. Materialize (torch expansion GEMM plus the
+>   AITER Triton flash kernel at $(192, 128)$, used as the stand-in for a competitive
+>   flash kernel) was faster at every measured full-prompt configuration, with the gap
+>   widening as $S$ grows. This agrees with Yun et al. The absorbed kernel was faster at
+>   every chunked configuration with $S_q \le 256$.
+> - **Measured crossover on gfx942.** Between $S_q = 256$ and $320$ at both $S_k$ for
+>   $H_q = 128$; between $256$ and $320$ at $S_k = 32\text{K}$ and between $384$ and
+>   $512$ at $S_k = 8\text{K}$ for $H_q = 64$. This replaces the ~200 citation above
+>   for gfx942 only. It is a measurement of today's kernels, not a bound: the
+>   expansion in that run was unfused (GEMM plus concat plus copy), so a fused
+>   expansion moves it down, and part of the step at $S_q = 320$ comes from the
+>   absorbed kernel switching to its one-workgroup-per-CU layout.
+> - **Why the gfx942 kernel ships absorbed-only for now.** rocKE has no competitive
+>   $(192, 128)$ flash kernel to put behind §3.1: expansion plus the existing tiled-2D
+>   kernel at `head_size = 192` (V padded) was slower than the absorbed kernel at every
+>   measured shape, and tiled-2D has no `head_size = 192` route at all for
+>   $S_q \le 512$ (its narrow route exceeds the gfx942 LDS budget). Absorbed-only is
+>   therefore an **interim** state for gfx942, blocked on that flash kernel; §9 rows 3
+>   and 4 remain open and the threshold above is what row 4 should start from.
+
 ### 2.6 Online softmax
 
 The streaming softmax recurrence (identical to the existing unified attention) runs
@@ -457,6 +504,11 @@ The two kernels place that V expansion differently:
 ## 3. Prefill kernel specification
 
 **Op:** `mla_prefill_fwd` — compressed-KV + decoupled RoPE, causal mask, bf16.
+
+> **gfx942 as built (Revision 3).** The gfx942 kernel replaces the in-loop expansion
+> below with `W_UK` absorption (§2.5, "gfx942 bf16, as built"). The pre-kernel (steps 2–3:
+> the `W_UQ` GEMM and query RoPE) is not yet in the tree, so the gfx942 kernel takes the
+> projected, RoPE-rotated query (`q_nope`, `q_rope`) in place of `q_latent` and `W_UQ`.
 
 #### Inputs
 
@@ -1678,7 +1730,7 @@ that drive gfx942/gfx950 MLA decode performance.
 
 | # | Deliverable | Arch | Dtype | Spec |
 |---|---|---|---|---|
-| 1 | MLA prefill — chunked (in-loop expansion) | gfx942 | bf16 | §3, §5.1 prefill tiling |
+| 1 | MLA prefill — chunked (`W_UK` absorption; Revision 3) | gfx942 | bf16 | §3, §5.1 prefill tiling, §2.5 gfx942 note |
 | 2 | MLA prefill — chunked (in-loop expansion) | gfx950 | bf16 | §3, §5.2 prefill tiling |
 | 3 | MLA prefill — full-prompt (materialize) | arch-independent | bf16 | **§3.1** + §7.2 spec-layer edits |
 | 4 | Prefill strategy dispatch (§2.5 footprint bound + $S_q$ threshold) | arch-independent | — | **§2.5**, `library/dispatch/attention/` |

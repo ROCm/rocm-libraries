@@ -121,6 +121,8 @@ ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
 ```
 
 A change is done only when the gate is GREEN for every family at every flavor.
+The llvm20 and llvm22 runs also re-run the `gfx1250_lowering` family at llvm23,
+because its gfx1250-only ops lower at no other flavor.
 
 ## Build / test / run
 
@@ -205,12 +207,41 @@ The runtime resolves the ROCm shared libs WITHOUT importing torch
 priority order:
 
 1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
-2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
-   is already imported** (never imports torch to get it);
+2. the lib torch uses, an opportunistic fast-path **only if torch is already
+   imported** (never imports torch to get it): an unambiguous mapped copy,
+   else `<torch>/lib/lib*.so`, else TheRock's
+   `_rocm_sdk_core/lib/lib*.so*` (only when `rocm_sdk` is imported, i.e. the
+   torch is TheRock's). Exception for comgr only: a stale torch comgr moves
+   below every step 3 candidate (see below);
 3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first;
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
+the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
+ambiguous mappings rather than treating address order as load order.
+
+Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
+of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
+release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
+elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
+and compared with the release of the first step 3 install whose version is
+readable. If both are known and torch's is older, torch's comgr is tried after
+every step 3 candidate (still before step 4), because an older comgr rejects
+ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
+process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
+`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
+ERROR: support is already registered for analysis`. It stays first; if it
+cannot handle the target ISA, the compile fails at `set_isa`.
+
+On Linux, if exactly one distinct COMGR path is mapped and `ROCKE_COMGR_LIB`
+names another existing file with an ELF header, the Python loader raises
+`ComgrError` before `dlopen` can load a second LLVM. An alias of the same file
+still works. Missing or non-ELF overrides keep the existing load-failure
+fallback. With multiple mapped paths or unreadable maps, this check does not
+change override precedence or mapped-library selection. To use a different
+COMGR, compile in a separate process before importing torch.
 
 If you hit `cannot load libamd_comgr.so` in a torch-less process, set
 `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
@@ -445,10 +476,13 @@ dual-engine vs Python-only split.
 
 | flag | meaning |
 |---|---|
+| `ROCKE_ARCH_DOMAIN` | `warn` (default) \| `off` — warn when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `off` skips the lookup entirely. Any other value raises rather than falling back to `warn`: every way of misspelling this is an attempt to switch the lane *off*, and defaulting would leave it on |
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (AUTO queries the loaded COMGR compiler: LLVM <=20, 21/22, >=23; unavailable evidence raises; explicit flavors support offline emission) |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
+| `ROCKE_ONLINE_LIB` / `ROCKE_REPLAY_CLI` | explicit portable-IR shared engine / standalone replay CLI; explicit paths never fall back |
+| `ROCKE_PROVENANCE_MANIFEST` | build-generated expected version/build ID for validating explicit native artifacts in a source-less installed test tree |

@@ -130,18 +130,36 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 
 `run_all.py --build-root <build>` builds all configured targets before pytest,
 then obtains each native parity executable from CTest, as listed in
-`NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`) and
-`rocke_nontemporal_hip` (`ROCKE_NONTEMPORAL_HIP_TEST`). Both pytest passes
-receive those paths, so the storage IR/HIP parity, serialization and nontemporal
-HIP-source parity tests run automatically. `--config` selects the native test
-configuration (default `Release`). A build or fixture-discovery failure stops the
-runner instead of silently skipping coverage.
+`NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`),
+`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`), `rocke_nontemporal_hip`
+(`ROCKE_NONTEMPORAL_HIP_TEST`) and `rocke_unsigned_int_ops`
+(`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
+storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
+HIP-source parity and unsigned integer op C API parity tests run automatically.
+The installed `rocke_pytest` ctest sets `ROCKE_UNSIGNED_INT_OPS_CLI` itself.
+`--config` selects the native test configuration (default `Release`). A build
+or fixture-discovery failure stops the runner instead of silently skipping
+coverage.
 
-An explicit `ROCKE_STORAGE_TEST` / `ROCKE_NONTEMPORAL_HIP_TEST` overrides
-discovery for that binary and must name an existing executable; it does not skip
-the configured build. With no configured build or explicit override, the runner
+An explicit `ROCKE_STORAGE_TEST` / `ROCKE_IR_TYPES_TEST` /
+`ROCKE_NONTEMPORAL_HIP_TEST` / `ROCKE_UNSIGNED_INT_OPS_CLI` overrides discovery
+for that binary and must name an existing executable; it does not skip the
+configured build. With no configured build or explicit override, the runner
 reports that parity as skipped; direct pytest invocations can use the same
 overrides.
+
+### Optimization-barrier coverage
+
+The standalone `rocke_optimization_barrier` CTest checks native scalar admission,
+rejection, serialization round trips, and LLVM lowering. It is installed with the
+other native tests and does not require a pytest executable-discovery fixture.
+
+`core/test_optimization_barrier.py` checks the Python builder and serialized LLVM
+output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
+verification; committed golden entries anchor the existing configurations.
+`instances/test_optimization_barrier_numeric.py` compiles through COMGR and
+checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
+Native HIP-source lowering is outside this feature's supported path.
 
 ## Installed pinned-reference suites
 
@@ -155,11 +173,14 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx950_pytest` | Seven gfx950 numerical cases and three failure checks | When the gfx950 SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx1151_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1151 SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx1201_pytest` | Eight FP16 WMMA cases compiled for gfx12-generic and three failure checks | When the gfx1201 SDPA bundle is installed |
 | `rocke_conv_gpu_gfx942_pytest` | Sixteen gfx942 forward cases and three failure checks | When the convolution bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs. SDPA/gfx942 and convolution/gfx942 are published
-and installed by default for provider builds. Publication is listed in
+operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 are enrolled
+for installation by default in provider builds. Publication is listed in
 `platform/cmake/PublishedGpuReferences.cmake` relative to the rocKE root. CMake
 uses the standard archives and committed locks; verify replacement candidates
 with the offline CLI using explicit `--bundle` and `--lock` paths. Each operation

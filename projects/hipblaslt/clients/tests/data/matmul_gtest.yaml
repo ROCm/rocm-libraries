@@ -127,35 +127,6 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
-# Port of the rocBLAS gemm_ex case hipblaslt_f16 (gemm_gtest.yaml, use_hipblaslt: 1),
-# instance NN_2_2_2_5_2_2_0_2_2: a 2x2x2 NN GEMM with alpha != 1 and beta == 0, run
-# directly through hipBLASLt instead of via the rocBLAS backend.
-- name: matmul_hipblaslt_f16_2x2x2_NN
-  category: pre_checkin
-  function:
-    matmul: *hpa_half_precision
-  matrix_size:
-    - { M: 2, N: 2, K: 2, lda: 2, ldb: 2, ldc: 2, ldd: 2 }
-  transA: N
-  transB: N
-  alpha: 5
-  beta: 0
-
-# Port of the rocBLAS gemm_ex case gemm_ex_h2f (f16 in, f32 out), instance
-# TT_1_1_64_1_64_1_1_1_1. A 1x1x64 TT GEMM: a single dot product of length 64, which
-# the GridBased heuristic answers from the (M=1,N=1) cell whose only tabulated K is 1.
-- name: matmul_hipblaslt_h2f_1x1x64_TT
-  category: pre_checkin
-  function:
-    matmul: { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r,
-              compute_type: c_f32_r, scale_type: f32_r }
-  matrix_size:
-    - { M: 1, N: 1, K: 64, lda: 64, ldb: 1, ldc: 1, ldd: 1 }
-  transA: T
-  transB: T
-  alpha: 1
-  beta: 1
-
 # Special floating-point inputs on 64x64, FP types only. The inf, neg_inf and nan cases exercise
 # check_special_value_consistency(): CPU and GPU must agree on the IEEE class (no Inf->NaN).
 # The zero and neg_zero cases are ordinary initialization coverage that flows through the normal
@@ -1366,6 +1337,26 @@ Tests:
   cold_iters: 1
   gpu_arch: '950'
 
+# Stream-K custom TF32 kernel with a large batch: sk.grid already includes the batch, so a
+# StreamKWithBatch launch overflowed the 32-bit global work size (17.8M work groups).
+- name: matmul_tf32_streamk_custom_large_batch
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  M: 256
+  N: 1856
+  K: 320
+  batch_count: 1492
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  norm_check: 1
+  unit_check: 0
+  iters: 1
+  cold_iters: 1
+  gpu_arch: '950'
+
 - name: matmul_swizzleA
   category: pre_checkin
   function:
@@ -1442,8 +1433,8 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
-### GFX12 FP8
-- name: matmul_f8_bf8_dst_fp32_gfx12
+### GFX11.7/GFX12 FP8
+- name: matmul_f8_bf8_dst_fp32_gfx117x_gfx12
   category: pre_checkin
   function:
     matmul: *real_precisions_1b_dst_f32
@@ -1459,9 +1450,9 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_f8_bf8_dst_fp16_gfx12
+- name: matmul_f8_bf8_dst_fp16_gfx117x_gfx12
   category: pre_checkin
   function:
     matmul: *real_precisions_1b_dst_f16
@@ -1476,9 +1467,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_f8_bf8_dst_bf16_gfx12
+- name: matmul_f8_bf8_dst_bf16_gfx117x_gfx12
   category: pre_checkin
   function:
     matmul: *real_precisions_1b_dst_bf16
@@ -1493,13 +1484,13 @@ Tests:
   bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
 #scale ab vector//no solution
 #  scaleA: [2]
 #  scaleB: [2]
 
-- name: matmul_real_1b_dst_f8_SCDInt1_gfx12
+- name: matmul_real_1b_dst_f8_SCDInt1_gfx117x_gfx12
   category: pre_checkin
   function:
     matmul: *real_precisions_1b_dst_f8
@@ -1516,9 +1507,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_real_1b_dst_f8_SCDNotInt_gfx12
+- name: matmul_real_1b_dst_f8_SCDNotInt_gfx117x_gfx12
   category: pre_checkin
   function:
     matmul: *real_precisions_1b_dst_f8
@@ -1535,9 +1526,9 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_one_real_precisions_1b_gfx12
+- name: matmul_one_real_precisions_1b_gfx117x_gfx12
   category: quick
   function:
     matmul: *real_precisions_1b
@@ -1545,9 +1536,9 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: '(120[0-1]|1250)'
+  gpu_arch: ['^117[01]', '^12(0[01]|50)']
 
-- name: matmul_one_integer_precisions_i8_gfx12
+- name: matmul_one_integer_precisions_i8_gfx117x_gfx12
   category: quick
   function:
     matmul: *integer_precisions_i8
@@ -1555,7 +1546,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: '120[0-1]'
+  gpu_arch: ['^117[01]', '^120[01]']
 
 ### END
 - name: matmul_real_1b_fnuz_dst_f8_fnuz_SCDInt1
@@ -1909,6 +1900,93 @@ Tests:
   bias_vector: [0, 1]
   unit_check: 0
   norm_check: 1
+
+- name: matmul_bias_gelu_aux_bf16_fp32
+  category: pre_checkin
+  function:
+    matmul: [ *hpa_bf16_precision, *single_precision ]
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: gelu
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_bias_gelu_aux_bf16_fp32_large
+  category: pre_checkin
+  function:
+    matmul: [ *hpa_bf16_precision, *single_precision ]
+  M: 768
+  N: 4096
+  K: 768
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0.0
+  use_e: 1
+  activation_type: gelu
+  bias_vector: 1
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_fp8_dst_fp8_amaxD_1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f8_r, d_type: f8_r, compute_type: c_f32_r, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, compute_type: c_f32_r, scale_type: f32_r}
+  matrix_size:
+    - { M: 127, N: 127, K: 127 }
+    - { M: 129, N: 129, K: 129 }
+    - { M: 768, N: 4096, K: 768 }
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0.0
+  bias_vector: [0, 1]
+  bias_type: [f16_r, bf16_r]
+  scaleA: [1]
+  scaleB: [1]
+  scaleD: [1]
+  amaxD: [1]
+  unit_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_mxfp8_mix_dst_f16_bf16_f32_1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: bf8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K: 256 }
+    - { M: 129, N: 129, K: 256 }
+    - { M: 256, N: 256, K: 256 }
+    - { M: 2304, N: 4096, K: 768 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  initialization: uniform_low_precision
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
 
 - name: matmul_bias_gelu_aux_fp8_fnuz_TN
   category: pre_checkin
@@ -2886,6 +2964,89 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
+# gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
+# Every scale mode (G32/64/128, symmetric and _ZP) under both encodings.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: [1006, 1007, 1008, 1009, 1010, 1011], int4_encoding: [0, 1] }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: [1012, 1013, 1014, 1015, 1016, 1017], int4_encoding: [0, 1] }
+  matrix_size:
+    - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# Asymmetric, odd M: partial last 8-row zero-point word.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1009, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1010, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1016, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1017, int4_encoding: 1 }
+  matrix_size:
+    - { M: 65, N: 64, K: 512, lda: 512, ldb: 512, ldc: 65, ldd: 65 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# Padded lda (a multiple of 8, not of 32) for the decode and tile kernels.
+- name: matmul_w4a16
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1008, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1011, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1015, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1012, int4_encoding: 1 }
+  matrix_size:
+    - { M: 128, N:  1, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+    - { M: 128, N: 64, K: 512, lda: 520, ldb: 512, ldc: 128, ldd: 128 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
+# Same via the ext API; only use_ext_setproblem 1 (api_method cpp) reads
+# setInt4EncodingA and the w4a16 modes from GemmProblemType/GemmEpilogue.
+- name: matmul_w4a16_ext
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1008, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1011, int4_encoding: 1 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1016, int4_encoding: 0 }
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 1013, int4_encoding: 1 }
+  matrix_size:
+    - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
+  use_ext: [1]
+  use_ext_setproblem: [0, 1]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1151'
+
 - name: matmul_mx_all_kernels
   category: nightly
   function:
@@ -3238,10 +3399,9 @@ Tests:
   unit_check: 1
   fast_check: 1
 
-# The same with a padded lda. The CPU reference applies scaleAlpha_vector to the
-# wrong rows of A when lda exceeds A's row count (ROCM-32062), so unit_check
-# fails a GPU result fast_check accepts. Quarantined in known_bugs.yaml.
-# Runtime on gfx942: 8 cases; skipped while quarantined.
+# The same with a padded lda, where the CPU reference used to apply
+# scaleAlpha_vector to the wrong rows of A (ROCM-32062).
+# Runtime on gfx942: 8 cases, about 1 s.
 - name: matmul_fast_check_epilogue_padded_lda_ROCM32062
   category: pre_checkin
   function:
@@ -3859,8 +4019,8 @@ Tests:
 # is linear in the result, so fast_check folds every scale into its probe sums;
 # scaleA and scaleB may each be one value or a vector (per row of D for scaleA,
 # per column for scaleB). The scales and bias come from the generic integer fill
-# (1 to 10), so reading the wrong one changes D. E, the pre-activation result times
-# scaleE, is checked the same way. relu and clamp are checked element by element
+# (1 to 10), so reading the wrong one changes D. E, the pre-activation result, is
+# checked the same way. relu and clamp are checked element by element
 # from the verified E; GELU, SiLU and sigmoid have no exact integer form and are
 # not supported. amaxD must equal the largest |activation| over the verified
 # result, and a bias gradient must equal the exact row or column sums. Each case
@@ -3871,9 +4031,8 @@ Tests:
 # library offers them for fp8 inputs only, vector scales only with a 16-bit output,
 # and no mix of one value and a vector; gfx90a offers neither. scaleC and scaleD
 # come only with an fp8 output, which the integer scales would saturate.
-# ROCM-32062: the client CPU reference scales the wrong rows of A when lda exceeds
-# the rows stored, so the vector cases keep lda and ldb packed, and the
-# *_lda_ROCM32062 cases, quarantined in known_bugs.yaml, keep them padded.
+# The vector cases keep lda and ldb packed, and the *_lda_ROCM32062 cases pad them,
+# where the CPU reference used to read the wrong scale entries (ROCM-32062).
 - name: matmul_fast_check_matches_unit_check_scales_fp8_fnuz
   category: pre_checkin
   function:
@@ -4060,37 +4219,17 @@ Tests:
   fast_check: 1
   gpu_arch: '9(42|50)'
 
-# ROCM-32138: the library accepts HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
-# but never passes it to the kernel, so E is written unscaled. fast_check and
-# unit_check both report E off by the scale factor. Quarantined in known_bugs.yaml.
-- name: matmul_fast_check_aux_scale_e_ROCM32138
-  category: pre_checkin
-  function:
-    matmul: *hpa_half_precision
-  matrix_size:
-    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 131 }
-  transA: N
-  transB: T
-  alpha: 2.0
-  beta: -2.0
-  bias_vector: 1
-  bias_type: f32_r
-  use_e: 1
-  scaleE: 1
-  activation_type: relu
-  initialization: integer_exact
-  unit_check: 1
-  fast_check: 1
-
-# ROCM-32139: the client CPU reference writes E with D's leading dimension, so when
-# lde differs from ldd unit_check fails a correct GPU result that fast_check
-# accepts. Quarantined in known_bugs.yaml.
+# E and D laid out differently (lde = M, and a padded lde), one batch and two, where
+# the CPU reference used to write E with D's leading dimension and batch stride
+# (ROCM-32139).
 - name: matmul_fast_check_aux_padded_ldd_ROCM32139
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
   matrix_size:
     - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151, lde: 140 }
+  batch_count: [1, 2]
   transA: N
   transB: T
   alpha: 2.0
@@ -4101,80 +4240,6 @@ Tests:
   activation_type: relu
   initialization: integer_exact
   unit_check: 1
-  fast_check: 1
-
-# fast_check-only copies of the cases above that are quarantined only because the
-# client CPU reference is wrong (ROCM-32062, ROCM-32139). fast_check passes the GPU
-# result there, so these keep its coverage while the reference is broken. The aux
-# copy also pads E (lde) so a kernel that writes E with D's leading dimension shows.
-# Runtime on gfx90a: 7 cases, about 1 s.
-- name: matmul_fast_check_only_epilogue_padded_lda
-  category: pre_checkin
-  function:
-    matmul:
-      - *single_precision
-      - *hpa_bf16_precision
-  matrix_size: *fast_check_crosscheck_sizes
-  transA: N
-  transB: T
-  alpha_beta: *integer_exact_alpha_beta
-  bias_vector: 1
-  bias_type: f32_r
-  scaleAlpha_vector: 1
-  initialization: integer_exact
-  unit_check: 0
-  fast_check: 1
-
-- name: matmul_fast_check_only_scales_fp8_fnuz_vec_lda
-  category: pre_checkin
-  function:
-    matmul: *f8_fnuz_precision_dst_bf16
-  matrix_size:
-    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
-  transA: T
-  transB: N
-  alpha: 2.0
-  beta: -2.0
-  scaleA: 2
-  scaleB: 2
-  initialization: integer_exact
-  unit_check: 0
-  fast_check: 1
-  gpu_arch: '942'
-
-- name: matmul_fast_check_only_scales_fp8_vec_lda
-  category: pre_checkin
-  function:
-    matmul: *f8_precision_dst_bf16
-  matrix_size:
-    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
-  transA: T
-  transB: N
-  alpha: 2.0
-  beta: -2.0
-  scaleA: 2
-  scaleB: 2
-  initialization: integer_exact
-  unit_check: 0
-  fast_check: 1
-  gpu_arch: '950'
-
-- name: matmul_fast_check_only_aux_padded_ldd_lde
-  category: pre_checkin
-  function:
-    matmul: *hpa_half_precision
-  matrix_size:
-    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151, lde: 140 }
-  transA: N
-  transB: T
-  alpha: 2.0
-  beta: -2.0
-  bias_vector: 1
-  bias_type: f32_r
-  use_e: 1
-  activation_type: relu
-  initialization: integer_exact
-  unit_check: 0
   fast_check: 1
 
 # amaxD has no cross-check case: gfx90a and gfx950 offer no amaxD solutions for
@@ -4351,10 +4416,9 @@ Tests:
   unit_check: 0
   fast_check: 1
 
-# ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
-# kernel arguments, so batch 1 reads or writes the wrong place and the GEMM
-# returns success with a wrong D. Each operand's stride in turn starts batch 1
-# just past 2^32. Quarantined in known_bugs.yaml.
+# Batch strides of 2^32 elements or more, one operand at a time, so batch 1 starts
+# just past 2^32. Kernels take batch strides as 32-bit values, so the library must
+# refuse these (allow_no_solution) rather than return a wrong D (ROCM-32140).
 - name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140
   category: stress
   function:

@@ -858,13 +858,31 @@ def test_build_from_metadata_no_args_raises():
         _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
 
 
-def test_build_from_metadata_streamk_batched_grid():
+@pytest.mark.parametrize("batched", [False, True])
+def test_build_from_metadata_streamk_grid_excludes_batch(batched):
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]),
         {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK",
-         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": True}},
+         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": batched}},
     )
-    assert ck["grid"][0] == "StreamKWithBatch"
+    assert ck["grid"] == ["StreamKNoBatch", "One", "One"]
+
+
+_SK3_TF32_KERNELS = [
+    "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
+    "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
+    "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
+]
+
+
+@pytest.mark.parametrize("name", _SK3_TF32_KERNELS)
+def test_sk3_tf32_custom_kernel_launches_batch_inclusive_grid(name):
+    # The host's sk.grid already counts every batch's tiles, and these kernels
+    # index the flat problem-wide tile space from WorkGroup0. StreamKWithBatch
+    # would launch sk.grid * batch work groups, which overflows the 32-bit
+    # global work size for large batch counts.
+    config = getCustomKernelConfig(name, {})
+    assert config["CustomKernel"]["grid"] == ["StreamKNoBatch", "One", "One"]
 
 
 @pytest.mark.parametrize("batched", [False, True])
@@ -941,12 +959,54 @@ def test_build_from_metadata_numworkgroups_grid():
     assert ck["grid"][0] == "TilesXYBatchGSU"
 
 
+@pytest.mark.parametrize("segment, padding", [(16, 4), (12, None)])
+def test_build_from_metadata_pads_trailing_group_size(segment, padding):
+    """The kernarg segment can end past the trailing groupSize; the gap is padding."""
+    full = _kernel_yaml([dict(_D_ARG, **{".offset": 0}),
+                         {".name": "groupSize", ".size": 4, ".offset": 8,
+                          ".value_kind": "by_value"}])
+    full["amdhsa.kernels"][0][".kernarg_segment_size"] = segment
+    ck = _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
+    assert ck["args"][-1]["semantic"] == "ScaleBlockSizeA"
+    assert ck["args"][-1].get("padding") == padding
+
+
 def test_build_from_metadata_default_multidim_grid():
     # Version 0 split-K kernels need one work group per GSU slice along Y.
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
     )
     assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+@pytest.mark.parametrize("name", ["foreign_WGM", "foreign_WGM_"])
+def test_build_from_metadata_wgm_name_without_rocroller_args_stays_multidim(name):
+    ck = _buildCustomKernelFromMetadata(
+        name, _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
+    )
+    assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+def test_build_from_metadata_rocroller_wgm_args_flatten_workgroup_x():
+    wgm = {
+        "type": "CommandArgument",
+        "name": "WGM",
+        ".size": 4,
+        ".value_kind": "by_value",
+    }
+    magic = {
+        ".name": "MagicMultiple_22",
+        ".size": 4,
+        ".value_kind": "by_value",
+        ".variableType": {"dataType": "Int32"},
+        ".expression": {"type": "MagicMultiple", "arg": wgm},
+    }
+    ck = _buildCustomKernelFromMetadata(
+        "not_named_for_wgm",
+        _kernel_yaml([magic, _D_ARG]),
+        {"MatrixInstruction": [16, 16, 16, 1]},
+    )
+    assert ck["grid"] == ["TilesXY", "One", "Batch"]
 
 
 def test_build_from_metadata_macrotile_name_fallback():
