@@ -1159,6 +1159,23 @@ def test_read_custom_kernel_config_key_text_inside_a_quoted_scalar_takes_the_who
         """)
     assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
 
+@pytest.mark.parametrize("indicator", ["|", ">", "|+"])
+@pytest.mark.parametrize("configIsLast", [False, True])
+def test_read_custom_kernel_config_keeps_the_final_newline_of_a_block_scalar(
+    tmp_path, indicator, configIsLast
+):
+    # A block scalar ending the custom.config entry keeps its final newline,
+    # whether another key follows the entry or the entry ends the block.
+    _write_metadata(tmp_path / "k.s", f"""\
+        custom.config:
+          A: 1
+          B: {indicator}
+            text
+        """ + ("" if configIsLast else "amdhsa.kernels: []\n"))
+    expected = {"A": 1, "B": "text\n"}
+    assert readCustomKernelConfig("k", str(tmp_path)) == expected
+    assert ck_mod._readEmbeddedYaml("k", str(tmp_path))["custom.config"] == expected
+
 def test_read_custom_kernel_config_without_the_entry_still_raises(tmp_path):
     _write_metadata(tmp_path / "k.s", "amdhsa.kernels: []\n")
     with pytest.raises(RuntimeError, match="has no custom.config"):

@@ -232,6 +232,9 @@ def _customConfigYaml(contents):
     duplicate keys, and the same line can sit inside a multi-line quoted scalar
     of an earlier key, so the first match is not safe to slice on its own; the
     whole block decides instead.
+
+    The text ends with a newline so that a block scalar ending the entry keeps
+    its final newline, as it does in a whole-block parse.
     """
     section = None
     inEntry = False
@@ -246,7 +249,7 @@ def _customConfigYaml(contents):
                 inEntry = False
             else:
                 section.append(line)
-    return None if section is None else "\n".join(section)
+    return None if section is None else "\n".join(section) + "\n"
 
 def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
     """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
@@ -264,7 +267,9 @@ def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
     contents = getCustomKernelContents(name, directory)
     text = _customConfigYaml(contents) if customConfigOnly else None
     if text is None:
-        text = "\n".join(_embeddedYamlLines(contents))
+        # The final newline keeps the last block scalar's own newline, which
+        # the slice above keeps as well.
+        text = "\n".join(_embeddedYamlLines(contents)) + "\n"
     try:
         return yaml.load(text, Loader=SafeLoader)
     except yaml.YAMLError as e:
