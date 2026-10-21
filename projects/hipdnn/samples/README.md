@@ -444,3 +444,7 @@ Built only with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. They use cuDNN fronten
 - [`cudnn_shim/Pointwise.cpp`](./cudnn_shim/Pointwise.cpp): builds and validates a binary pointwise graph (host only).
 - [`cudnn_shim/SdpaRoundTrip.cpp`](./cudnn_shim/SdpaRoundTrip.cpp): builds and validates an SDPA forward graph (host only; also needs `HIPDNN_ENABLE_SDPA`).
 - [`cudnn_shim/HipifyConvFprop.cpp`](./cudnn_shim/HipifyConvFprop.cpp): a cuDNN frontend convolution forward program after textual hipify, with each rewritten line marked `// cuDNN:`. Runs on a GPU and checks the output.
+- [`cudnn_shim/ConvFpropV8.cpp`](./cudnn_shim/ConvFpropV8.cpp): a convolution forward built with the v0.x builders (cuDNN v8 API). Runs on a GPU and checks the output; `--overhead` measures the shim's per-call cost.
+- [`cudnn_shim/ConvBiasReluV8.cpp`](./cudnn_shim/ConvBiasReluV8.cpp): a fused convolution, bias and ReLU built with the v0.x builders. Runs on a GPU.
+- [`cudnn_shim/MatmulBiasActV8.cpp`](./cudnn_shim/MatmulBiasActV8.cpp): a matmul with bias and activation built with the v0.x builders. Runs on a GPU; skipped where no provider runs matmul.
+- [`cudnn_shim/PointwiseReluV8.cpp`](./cudnn_shim/PointwiseReluV8.cpp): a pointwise ReLU built with the v0.x builders. Runs on a GPU.

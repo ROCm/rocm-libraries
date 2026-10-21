@@ -97,8 +97,8 @@ cuDNN v9 graph API
 Source written against the v9 graph API (``cudnn_frontend::graph::Graph``) compiles after the include
 change. Every heuristic mode runs hipDNN's fallback engine selection.
 
-cuDNN v8 API: v0.x builders and the backend C API
--------------------------------------------------
+cuDNN v8 API: v0.x builders
+---------------------------
 
 The same include provides the cuDNN v8 surface:
 
@@ -109,10 +109,14 @@ The same include provides the cuDNN v8 surface:
   ``VariantPackBuilder``, plus filters, errata, ``ExecutionPlanCache`` and ``get_heuristics_list``.
   As upstream, a failed ``build()`` throws ``cudnnException`` unless ``NV_CUDNN_DISABLE_EXCEPTION``
   is defined.
-* The backend descriptor C API: ``cudnnBackendCreateDescriptor``, ``cudnnBackendSetAttribute``,
-  ``cudnnBackendGetAttribute``, ``cudnnBackendFinalize``, ``cudnnBackendExecute``,
-  ``cudnnBackendDestroyDescriptor`` and ``cudnnGetLastErrorString``. Code that uses only the C API
-  can include ``<hipdnn_compatibility/cudnn/cudnn.h>`` instead.
+* From the backend C API, only ``cudnnBackendExecute`` and ``cudnnGetLastErrorString``, both passing
+  straight through to hipDNN. ``cudnnBackendDescriptor_t`` is ``hipdnnBackendDescriptor_t``, and
+  ``get_raw_desc()`` of a plan or variant pack is the hipDNN descriptor. The descriptor calls
+  (``cudnnBackendCreateDescriptor``, ``cudnnBackendSetAttribute``, ``cudnnBackendGetAttribute``,
+  ``cudnnBackendFinalize``, ``cudnnBackendDestroyDescriptor``) and the ``CUDNN_ATTR_*`` and
+  ``CUDNN_TYPE_*`` enums are not provided, so code that calls them directly does not compile; build
+  the objects with the builders instead
+  (`Backend descriptor C API <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#backend-descriptor-c-api>`__).
 * Plan search: include ``<hipdnn_compatibility/cudnn/cudnn_frontend_get_plan.h>`` for
   ``EngineConfigGenerator::cudnnGetPlan`` and ``<hipdnn_compatibility/cudnn/cudnn_frontend_find_plan.h>``
   for ``cudnnFindPlan``, ``cudnnFindPlanAndCache`` and ``time_sorted_plan``, as with upstream.
@@ -199,8 +203,8 @@ has the full list.
 
 * **Heuristics:** every ``CUDNN_HEUR_MODE_*`` returns the same list, in hipDNN's fallback order
   (`Heuristic modes <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#heuristic-modes>`__).
-* **Handles:** ``OperationGraphBuilder`` needs ``setHandle``, and ``cudnnBackendExecute`` must use
-  the graph's handle; any other handle returns ``CUDNN_STATUS_BAD_PARAM``
+* **Handles:** ``OperationGraphBuilder`` needs ``setHandle``; without it ``build()`` returns
+  ``CUDNN_STATUS_BAD_PARAM``. ``cudnnBackendExecute`` runs a plan on whichever handle it is given
   (`Operation graphs <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#operation-graphs>`__,
   `Engines, plans and execution <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#engines-plans-and-execution>`__).
 * **Convolution mode:** call ``setMathMode(CUDNN_CROSS_CORRELATION)``. A graph that keeps the

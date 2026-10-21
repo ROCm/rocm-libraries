@@ -15,8 +15,11 @@ hipDNN contains source code derived from the following third-party project.
   `frontend/include/hipdnn_frontend/Error.hpp` are derived from cuDNN frontend.
   The cuDNN-shim samples `samples/cudnn_shim/ConvFprop.cpp`,
   `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp` and `Pointwise.cpp` mirror upstream samples, and
-  `tests/cudnn_samples/legacy/overlay/cudnn.h` (legacy-corpus harness only)
-  declares raw backend C functions of upstream `include/cudnn_frontend_shim.h`.
+  `tests/cudnn_samples/legacy/overlay/cudnn.h` (legacy-corpus harness only,
+  installed with the harness under `share/hipdnn/cudnn_samples`, never under
+  `include/`) stubs the raw backend C functions that upstream
+  `include/cudnn_frontend_shim.h` wraps, with the attribute names and types
+  one legacy sample passes to them.
   Each such file carries a "Portions derived from NVIDIA cuDNN frontend" header
   naming its upstream sources.
   `tests/cudnn_samples/legacy/utils/helpers.h` and `error_util.h` are

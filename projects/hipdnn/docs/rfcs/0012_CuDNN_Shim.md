@@ -688,6 +688,12 @@ That implies:
 - Within a major version of `hipdnn_frontend`, the shim's surface area may
   **only** grow (new node wrappers, new enum values mapped) — never shrink
   or change signatures.
+  Waived once, for the cuDNN v8 proof of concept:
+  [RFC 0021 §9](./0021_CuDNN_V8_Shim.md#9-amendment-builders-over-hipdnn)
+  removed (R4) the backend descriptor C API functions and three whole enums that
+  no remaining shim code names, and changed the parameter types of the
+  errata helper `check_shape`. A non-POC release with these changes needs a
+  `hipdnn_frontend` major version bump.
 - The shim's public symbols will additionally expose the upstream-style
   version macros (`CUDNN_FRONTEND_MAJOR_VERSION=1`,
   `CUDNN_FRONTEND_MINOR_VERSION=24`, `CUDNN_FRONTEND_PATCH_VERSION=0`,
