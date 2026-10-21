@@ -66,7 +66,6 @@ namespace local_kernel_test
     }
 
     // PCI device id of the current GPU, e.g. "75a0", or empty if unreadable.
-    // Shard filenames include the device ids they were built for.
     inline std::string devicePciId()
     {
         int device = 0;
@@ -87,6 +86,20 @@ namespace local_kernel_test
         if(id.rfind("0x", 0) == 0)
             id = id.substr(2);
         return id;
+    }
+
+    // Whether a shard serves the GPU with this PCI device id. Shards of an
+    // architecture split by chip (gfx950) end in "_ID<id>[-<id>...]_<arch>";
+    // the others (gfx942) have no such suffix and serve every chip.
+    inline bool shardServesDevice(std::string const& name, std::string const& pciId)
+    {
+        auto const idAt = name.rfind("_ID");
+        if(pciId.empty() || idAt == std::string::npos)
+            return true;
+        auto const  end = name.find('_', idAt + 1);
+        std::string ids = name.substr(idAt + 3, end == std::string::npos ? end : end - idAt - 3);
+        std::transform(ids.begin(), ids.end(), ids.begin(), ::tolower);
+        return ("-" + ids + "-").find("-" + pciId + "-") != std::string::npos;
     }
 
     // Directories that may hold compiled kernel shards, relative to the
@@ -141,10 +154,7 @@ namespace local_kernel_test
                     if(name.find("_Alik_Bljk_") == std::string::npos)
                         continue;
 
-                    std::string lowerName(name);
-                    std::transform(
-                        lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
-                    if(!pciId.empty() && lowerName.find(pciId) == std::string::npos)
+                    if(!shardServesDevice(name, pciId))
                         continue;
 
                     // Pass the bare ".dat" name; the loader finds ".dat.zlib".
