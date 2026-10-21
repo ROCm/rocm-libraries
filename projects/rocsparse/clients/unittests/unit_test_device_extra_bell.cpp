@@ -24,7 +24,8 @@
 
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
-// product is zero, so C = beta * C) and with formats spmm does not support.
+// product is zero, so C = beta * C), with a blocked ELL matrix built by
+// dense_to_sparse, and with formats spmm does not support.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -141,6 +142,142 @@ TEST_F(ExtraBell, no_stored_blocks_scales_C)
             if(HasFatalFailure())
                 return;
         }
+}
+
+namespace
+{
+    // rocsparse_dense_to_sparse into a blocked ELL matrix (not documented as supported,
+    // so any error is accepted), then spmm with the result is compared with the dense
+    // product.
+    template <typename T, typename I>
+    void
+        run_dense_to_bell(rocsparse_handle handle, rocsparse_order order, rocsparse_index_base base)
+    {
+        SCOPED_TRACE("order=" + std::to_string(static_cast<int>(order))
+                     + " base=" + std::to_string(static_cast<int>(base)));
+        const rocsparse_datatype dt = rocsparse_ut::dt_of<T>();
+        const int64_t            bd = 2, mb = 3, nb = 4, m = mb * bd, k = nb * bd, n = 3;
+        // Stored blocks (block row, block column); block row 2 has the most (3).
+        const int64_t blocks[][2] = {{0, 0}, {0, 2}, {1, 3}, {2, 1}, {2, 2}, {2, 3}};
+        Rng           rng(23);
+        Dense         A(m, k);
+        for(const auto& b : blocks)
+            for(int64_t r = 0; r < bd; ++r)
+                for(int64_t c = 0; c < bd; ++c)
+                    if(r != c || b[1] != 2)
+                        A.at(b[0] * bd + r, b[1] * bd + c) = round_to<T>(rand_val<T>(rng));
+        const int64_t lda = (order == rocsparse_order_column ? m : k) + 1;
+        DevBuf<T>     dA  = up_raw<T>(store_dense<T>(A, order, lda));
+        DnmatH        mA;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&mA.p, m, k, lda, dA.ptr, dt, order),
+                  rocsparse_status_success);
+
+        DevBuf<I> ind0(size_t{1});
+        DevBuf<T> val0(size_t{1});
+        SpmatH    sp;
+        ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+                                              m,
+                                              k,
+                                              rocsparse_direction_row,
+                                              bd,
+                                              0,
+                                              ind0.ptr,
+                                              val0.ptr,
+                                              rocsparse_ut::it_of<I>(),
+                                              base,
+                                              dt),
+                  rocsparse_status_success);
+        const auto alg = rocsparse_dense_to_sparse_alg_default;
+        size_t     bsz = 0;
+        if(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, nullptr)
+           != rocsparse_status_success)
+            return;
+        DevBuf<char> buffer(bsz);
+        if(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, nullptr, buffer.ptr)
+           != rocsparse_status_success)
+            return;
+
+        int64_t              rows = 0, cols = 0, block_dim = 0, ell_cols = -1;
+        rocsparse_direction  dir;
+        void*                pind = nullptr;
+        void*                pval = nullptr;
+        rocsparse_indextype  it;
+        rocsparse_index_base got_base;
+        rocsparse_datatype   got_dt;
+        ASSERT_EQ(rocsparse_bell_get(sp.p,
+                                     &rows,
+                                     &cols,
+                                     &dir,
+                                     &block_dim,
+                                     &ell_cols,
+                                     &pind,
+                                     &pval,
+                                     &it,
+                                     &got_base,
+                                     &got_dt),
+                  rocsparse_status_success);
+        ASSERT_EQ(ell_cols % bd, 0);
+        ASSERT_GE(ell_cols, 3 * bd);
+        DevBuf<I> ind = up_idx<I>(std::vector<int64_t>(mb * (ell_cols / bd), -5));
+        DevBuf<T> val = up_val<T>(std::vector<cplx>(m * ell_cols, cplx(-66.0, 0.0)));
+        ASSERT_EQ(rocsparse_bell_set_pointers(sp.p, ind.ptr, val.ptr), rocsparse_status_success);
+        if(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, buffer.ptr)
+           != rocsparse_status_success)
+            return;
+
+        const Dense   X   = random_dense<T>(k, n, rng);
+        const Dense   C0  = random_dense<T>(m, n, rng);
+        const int64_t ldc = m + 2;
+        DevBuf<T>     dX  = up_raw<T>(store_dense<T>(X, rocsparse_order_column, k));
+        DevBuf<T>     dC  = up_raw<T>(store_dense<T>(C0, rocsparse_order_column, ldc));
+        DnmatH        mX, mC;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&mX.p, k, n, k, dX.ptr, dt, rocsparse_order_column),
+                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(&mC.p, m, n, ldc, dC.ptr, dt, rocsparse_order_column),
+            rocsparse_status_success);
+        const T alpha = from_c<T>(cplx(1.5, -0.5));
+        const T beta  = from_c<T>(cplx(-0.5, 0.25));
+        size_t  sbsz  = 0;
+        for(rocsparse_spmm_stage stage : {rocsparse_spmm_stage_buffer_size,
+                                          rocsparse_spmm_stage_preprocess,
+                                          rocsparse_spmm_stage_compute})
+        {
+            DevBuf<char> sbuf(sbsz);
+            ASSERT_EQ(rocsparse_spmm(handle,
+                                     rocsparse_operation_none,
+                                     rocsparse_operation_none,
+                                     &alpha,
+                                     sp.p,
+                                     mX.p,
+                                     &beta,
+                                     mC.p,
+                                     dt,
+                                     rocsparse_spmm_alg_bell,
+                                     stage,
+                                     &sbsz,
+                                     sbuf.ptr),
+                      rocsparse_status_success);
+        }
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        const Dense want = axpby(to_c<T>(alpha), matmul(A, X), to_c<T>(beta), C0);
+        expect_dense_equal<T>(
+            dC.host(), want, rocsparse_order_column, ldc, "C", cplx(-77.0, 0.0), 1e-5);
+    }
+}
+
+TEST_F(ExtraBell, dense_to_sparse_blocked_ell_used_by_spmm)
+{
+    for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
+    {
+        run_dense_to_bell<float, int32_t>(handle, order, rocsparse_index_base_zero);
+        if(HasFatalFailure())
+            return;
+        run_dense_to_bell<rocsparse_double_complex, int64_t>(
+            handle, order, rocsparse_index_base_one);
+        if(HasFatalFailure())
+            return;
+    }
 }
 
 TEST_F(ExtraBell, unsupported_formats_are_rejected)

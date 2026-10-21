@@ -41,6 +41,72 @@
 #include <iostream>
 #include <sstream>
 
+// The rocsparse_Xcsxsldu_* entry points are defined (extern "C") in the csxsldu
+// translation units compiled into this binary, but declared in no header.
+#define CSXSLDU_DECLARE(X, T)                                                            \
+    extern "C" rocsparse_status rocsparse_##X##csxsldu_buffer_size(rocsparse_handle,     \
+                                                                   rocsparse_direction,  \
+                                                                   rocsparse_int,        \
+                                                                   rocsparse_int,        \
+                                                                   rocsparse_int,        \
+                                                                   const rocsparse_int*, \
+                                                                   const rocsparse_int*, \
+                                                                   const T*,             \
+                                                                   rocsparse_index_base, \
+                                                                   rocsparse_diag_type,  \
+                                                                   rocsparse_direction,  \
+                                                                   rocsparse_diag_type,  \
+                                                                   rocsparse_direction,  \
+                                                                   size_t*);             \
+    extern "C" rocsparse_status rocsparse_##X##csxsldu_preprocess(rocsparse_handle,      \
+                                                                  rocsparse_direction,   \
+                                                                  rocsparse_int,         \
+                                                                  rocsparse_int,         \
+                                                                  rocsparse_int,         \
+                                                                  const rocsparse_int*,  \
+                                                                  const rocsparse_int*,  \
+                                                                  const T*,              \
+                                                                  rocsparse_index_base,  \
+                                                                  rocsparse_diag_type,   \
+                                                                  rocsparse_direction,   \
+                                                                  rocsparse_int*,        \
+                                                                  rocsparse_int*,        \
+                                                                  rocsparse_index_base,  \
+                                                                  rocsparse_diag_type,   \
+                                                                  rocsparse_direction,   \
+                                                                  rocsparse_int*,        \
+                                                                  rocsparse_int*,        \
+                                                                  rocsparse_index_base,  \
+                                                                  void*);                \
+    extern "C" rocsparse_status rocsparse_##X##csxsldu_compute(rocsparse_handle,         \
+                                                               rocsparse_direction,      \
+                                                               rocsparse_int,            \
+                                                               rocsparse_int,            \
+                                                               rocsparse_int,            \
+                                                               const rocsparse_int*,     \
+                                                               const rocsparse_int*,     \
+                                                               T*,                       \
+                                                               rocsparse_index_base,     \
+                                                               rocsparse_diag_type,      \
+                                                               rocsparse_direction,      \
+                                                               rocsparse_int,            \
+                                                               rocsparse_int*,           \
+                                                               rocsparse_int*,           \
+                                                               T*,                       \
+                                                               rocsparse_index_base,     \
+                                                               rocsparse_diag_type,      \
+                                                               rocsparse_direction,      \
+                                                               rocsparse_int,            \
+                                                               rocsparse_int*,           \
+                                                               rocsparse_int*,           \
+                                                               T*,                       \
+                                                               rocsparse_index_base,     \
+                                                               T*,                       \
+                                                               void*)
+CSXSLDU_DECLARE(s, float);
+CSXSLDU_DECLARE(z, rocsparse_double_complex);
+#undef CSXSLDU_DECLARE
+
 using namespace convut;
 
 namespace
@@ -705,6 +771,114 @@ namespace
             check(uval, c.uval, "upper val");
             check(diag, c.diag, "diag");
         }
+    }
+
+    // The whole split through the C entry points: buffer size, preprocess (sizes and
+    // pointers of L and U) and compute. Same matrix as above, L and U strict in the row
+    // direction, L one based; the diagonal is extracted.
+    template <typename T, typename BS, typename PRE, typename COMP>
+    void run_csxsldu_c_api(rocsparse_handle handle, BS buffer_size, PRE preprocess, COMP compute)
+    {
+        const auto           unit = rocsparse_diag_type_unit;
+        const std::vector<I> ptr{0, 2, 3, 5}, ind{0, 1, 1, 0, 2};
+        std::vector<T>       val;
+        for(int k = 1; k <= 5; ++k)
+            val.push_back(make_val<T>(k, -k));
+        DevBuf<I> d_ptr(ptr), d_ind(ind);
+        DevBuf<T> d_val(val);
+
+        size_t bytes = 0;
+        ASSERT_EQ(buffer_size(handle,
+                              dir_r,
+                              3,
+                              3,
+                              5,
+                              d_ptr,
+                              d_ind,
+                              d_val,
+                              base0,
+                              unit,
+                              dir_r,
+                              unit,
+                              dir_r,
+                              &bytes),
+                  st_ok);
+        DevBuf<char> buffer(bytes);
+        DevBuf<I>    lptr(std::vector<I>(4, -7)), uptr(std::vector<I>(4, -7));
+        I            lnnz = -1, unnz = -1;
+        ASSERT_EQ(preprocess(handle,
+                             dir_r,
+                             3,
+                             3,
+                             5,
+                             d_ptr,
+                             d_ind,
+                             d_val,
+                             base0,
+                             unit,
+                             dir_r,
+                             &lnnz,
+                             lptr,
+                             base1,
+                             unit,
+                             dir_r,
+                             &unnz,
+                             uptr,
+                             base0,
+                             buffer.get()),
+                  st_ok);
+        ASSERT_EQ(lnnz, 1);
+        ASSERT_EQ(unnz, 1);
+        EXPECT_EQ(lptr.read(), (std::vector<I>{1, 1, 1, 2}));
+        EXPECT_EQ(uptr.read(), (std::vector<I>{0, 1, 1, 1}));
+
+        DevBuf<I> lind(std::vector<I>{-9}), uind(std::vector<I>{-9});
+        DevBuf<T> lval(std::vector<T>{make_val<T>(-99)}), uval(std::vector<T>{make_val<T>(-99)}),
+            diag(std::vector<T>(3, make_val<T>(-99)));
+        ASSERT_EQ(compute(handle,
+                          dir_r,
+                          3,
+                          3,
+                          5,
+                          d_ptr,
+                          d_ind,
+                          d_val,
+                          base0,
+                          unit,
+                          dir_r,
+                          lnnz,
+                          lptr,
+                          lind,
+                          lval,
+                          base1,
+                          unit,
+                          dir_r,
+                          unnz,
+                          uptr,
+                          uind,
+                          uval,
+                          base0,
+                          diag,
+                          buffer.get()),
+                  st_ok);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(lind.read(), std::vector<I>{1});
+        EXPECT_EQ(uind.read(), std::vector<I>{1});
+        EXPECT_TRUE(lval.read() == std::vector<T>{val[3]});
+        EXPECT_TRUE(uval.read() == std::vector<T>{val[1]});
+        EXPECT_TRUE(diag.read() == (std::vector<T>{val[0], val[2], val[4]}));
+    }
+
+    TEST_F(ConvInternal, CsxsLduCApi)
+    {
+        run_csxsldu_c_api<float>(handle,
+                                 rocsparse_scsxsldu_buffer_size,
+                                 rocsparse_scsxsldu_preprocess,
+                                 rocsparse_scsxsldu_compute);
+        run_csxsldu_c_api<rocsparse_double_complex>(handle,
+                                                    rocsparse_zcsxsldu_buffer_size,
+                                                    rocsparse_zcsxsldu_preprocess,
+                                                    rocsparse_zcsxsldu_compute);
     }
 
     // ------------------------------------------------------------------

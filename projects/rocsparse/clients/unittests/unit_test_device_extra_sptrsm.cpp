@@ -76,6 +76,11 @@ namespace
         // Singular matrices: row whose diagonal is zero (value) or missing.
         int64_t singular_row = -1;
         bool    missing_diag = false;
+        // Diagonal solve mode (D * Y = alpha * op(X)), with |d| when `absolute`.
+        bool diagonal = false;
+        bool absolute = false;
+        // Documented as unsupported: not_implemented is accepted.
+        bool unsupported = false;
     };
 
     std::string describe(const SptrsmCase& c)
@@ -89,7 +94,9 @@ namespace
                + " oY=" + std::to_string(static_cast<int>(c.order_Y)) + " policy="
                + std::to_string(static_cast<int>(c.policy)) + " m=" + std::to_string(c.m)
                + " nrhs=" + std::to_string(c.nrhs) + " batch=" + std::to_string(c.batch)
-               + " dev=" + std::to_string(c.device) + " f64_alpha=" + std::to_string(c.f64_alpha);
+               + " dev=" + std::to_string(c.device) + " f64_alpha=" + std::to_string(c.f64_alpha)
+               + " diagonal=" + std::to_string(c.diagonal)
+               + " absolute=" + std::to_string(c.absolute);
     }
 
     // Diagonally dominant triangular matrix. Off-diagonal entries are small
@@ -164,10 +171,10 @@ namespace
         return D;
     }
 
-    template <typename T, typename I>
-    void make_matrix(DevSparse<T, I, I>& d, const SptrsmCase& c, const Csr& A)
+    template <typename T, typename I, typename J>
+    void make_matrix(DevSparse<T, I, J>& d, const SptrsmCase& c, const Csr& A)
     {
-        make_sparse<T, I, I>(d, c.fmt, A);
+        make_sparse<T, I, J>(d, c.fmt, A);
         if(::testing::Test::HasFatalFailure())
             return;
         ASSERT_EQ(rocsparse_spmat_set_attribute(
@@ -188,10 +195,10 @@ namespace
     }
 
     // Everything needed to run the stages of one solve.
-    template <typename T, typename I>
+    template <typename T, typename I, typename J = I>
     struct SptrsmProblem
     {
-        DevSparse<T, I, I> A;
+        DevSparse<T, I, J> A;
         DnmatH             X, Y;
         SptrsmDescrH       descr;
         Scalar<T>          alpha;
@@ -208,13 +215,13 @@ namespace
         }
     };
 
-    template <typename T, typename I>
-    void setup(SptrsmProblem<T, I>& pr, rocsparse_handle handle, const SptrsmCase& c, Rng& rng)
+    template <typename T, typename I, typename J>
+    void setup(SptrsmProblem<T, I, J>& pr, rocsparse_handle handle, const SptrsmCase& c, Rng& rng)
     {
         const rocsparse_datatype dt = rocsparse_ut::dt_of<T>();
         const Csr                A  = triangular<T>(c, rng);
         pr.Aref                     = reference_matrix(c, A);
-        make_matrix<T, I>(pr.A, c, A);
+        make_matrix<T, I, J>(pr.A, c, A);
         if(::testing::Test::HasFatalFailure())
             return;
 
@@ -289,14 +296,33 @@ namespace
                             alpha_ptr,
                             sizeof(const void*)),
                   rocsparse_status_success);
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+        if(c.diagonal)
+        {
+            const rocsparse_solve_mode        mode     = rocsparse_solve_mode_diagonal;
+            const rocsparse_diagonal_modifier modifier = c.absolute
+                                                             ? rocsparse_diagonal_modifier_absolute
+                                                             : rocsparse_diagonal_modifier_none;
+            ASSERT_EQ(
+                set_input(
+                    handle, pr.descr.d, rocsparse_sptrsm_input_solve_mode, &mode, sizeof(mode)),
+                rocsparse_status_success);
+            ASSERT_EQ(set_input(handle,
+                                pr.descr.d,
+                                rocsparse_sptrsm_input_diagonal_modifier,
+                                &modifier,
+                                sizeof(modifier)),
+                      rocsparse_status_success);
+        }
+#endif
     }
 
     // buffer size + stage execution. Returns the status of the stage.
-    template <typename T, typename I>
-    rocsparse_status run_stage(rocsparse_handle       handle,
-                               SptrsmProblem<T, I>&   pr,
-                               rocsparse_sptrsm_stage stage,
-                               DevBuf<char>&          buffer)
+    template <typename T, typename I, typename J>
+    rocsparse_status run_stage(rocsparse_handle        handle,
+                               SptrsmProblem<T, I, J>& pr,
+                               rocsparse_sptrsm_stage  stage,
+                               DevBuf<char>&           buffer)
     {
         size_t bytes = 0;
         auto   st    = rocsparse_sptrsm_buffer_size(
@@ -315,28 +341,39 @@ namespace
                                 nullptr);
     }
 
-    template <typename T, typename I>
+    template <typename T, typename I, typename J = I>
     void run_sptrsm(rocsparse_handle handle, const SptrsmCase& c)
     {
         SCOPED_TRACE(describe(c));
         Rng rng(static_cast<uint64_t>(c.m * 31 + c.nrhs * 7 + c.batch) + 3);
 
-        SptrsmProblem<T, I> pr(c);
-        setup<T, I>(pr, handle, c, rng);
+        SptrsmProblem<T, I, J> pr(c);
+        setup<T, I, J>(pr, handle, c, rng);
         if(::testing::Test::HasFatalFailure())
             return;
 
         DevBuf<char> buf_a, buf_c;
-        ASSERT_EQ((run_stage<T, I>(handle, pr, rocsparse_sptrsm_stage_analysis, buf_a)),
-                  rocsparse_status_success);
-        ASSERT_EQ((run_stage<T, I>(handle, pr, rocsparse_sptrsm_stage_compute, buf_c)),
-                  rocsparse_status_success);
+        for(const auto stage : {rocsparse_sptrsm_stage_analysis, rocsparse_sptrsm_stage_compute})
+        {
+            const rocsparse_status st = run_stage<T, I, J>(
+                handle, pr, stage, stage == rocsparse_sptrsm_stage_analysis ? buf_a : buf_c);
+            if(c.unsupported && st == rocsparse_status_not_implemented)
+                return;
+            ASSERT_EQ(st, rocsparse_status_success);
+        }
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         const bool lower
             = (c.fill == rocsparse_fill_mode_lower) == (c.opA == rocsparse_operation_none);
-        const Dense  Aop = apply_op(pr.Aref, c.opA);
-        const auto   hy  = pr.dY.host();
+        Dense Aop = apply_op(pr.Aref, c.opA);
+        if(c.diagonal)
+        {
+            Dense D(c.m, c.m);
+            for(int64_t i = 0; i < c.m; ++i)
+                D.at(i, i) = c.absolute ? cplx(std::abs(Aop.at(i, i)), 0.0) : Aop.at(i, i);
+            Aop = D;
+        }
+        const auto   hy = pr.dY.host();
         const double tol
             = (sizeof(T) == 4 || sizeof(T) == 8 && is_complex_t<T>::value) ? 2e-4 : 1e-9;
         for(int64_t b = 0; b < c.batch; ++b)
@@ -475,6 +512,92 @@ TEST_F(ExtraSptrsm, right_hand_side_counts)
                 return;
         }
 }
+
+// Strided batches of X and Y with one and several right-hand sides, every data
+// type and both orders. A conjugate transposed X is documented as unsupported.
+TEST_F(ExtraSptrsm, strided_batch_types_and_orders)
+{
+    for(int64_t nrhs : {1, 3})
+        for(rocsparse_order o : all_orders)
+        {
+            SptrsmCase c;
+            c.batch   = 3;
+            c.nrhs    = nrhs;
+            c.m       = 17;
+            c.order_X = o;
+            c.order_Y = o;
+            run_sptrsm<float, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.opA = rocsparse_operation_transpose;
+            run_sptrsm<double, int64_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.opA   = rocsparse_operation_none;
+            c.alpha = cplx(0.5, -1.0);
+            run_sptrsm<rocsparse_float_complex, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.opX = rocsparse_operation_transpose;
+            run_sptrsm<rocsparse_double_complex, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.opX         = rocsparse_operation_conjugate_transpose;
+            c.unsupported = true;
+            run_sptrsm<rocsparse_float_complex, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            run_sptrsm<rocsparse_double_complex, int64_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+// Diagonal solve mode for CSR and CSC matrices, every data type, both index
+// types, with and without the absolute value of the diagonal.
+TEST_F(ExtraSptrsm, diagonal_solve_types_and_formats)
+{
+    for(SFmt f : {SFmt::csr, SFmt::csc})
+        for(rocsparse_operation opA : {rocsparse_operation_none, rocsparse_operation_transpose})
+        {
+            SptrsmCase c;
+            c.fmt      = f;
+            c.opA      = opA;
+            c.diagonal = true;
+            c.absolute = true;
+            run_sptrsm<double, int64_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.batch   = 2;
+            c.order_Y = rocsparse_order_row;
+            run_sptrsm<float, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.absolute = false;
+            c.batch    = 1;
+            c.alpha    = cplx(0.5, -1.0);
+            run_sptrsm<rocsparse_float_complex, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            c.opX = rocsparse_operation_transpose;
+            run_sptrsm<rocsparse_double_complex, int64_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+            // 64-bit offsets with 32-bit indices.
+            c.opX   = rocsparse_operation_none;
+            c.alpha = cplx(-1.5, 0.0);
+            run_sptrsm<double, int64_t, int32_t>(handle, c);
+            if(HasFatalFailure())
+                return;
+        }
+}
+#else
+TEST_F(ExtraSptrsm, diagonal_solve_types_and_formats)
+{
+    GTEST_SKIP() << "built without ROCSPARSE_WITH_DIAGONAL_SOLVE";
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Singular systems: a zero or a missing diagonal entry is reported by the

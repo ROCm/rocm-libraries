@@ -248,6 +248,71 @@ namespace
         }
     }
 
+    TEST_F(L2DeviceGebsrmv, empty_matrix_scales_y_by_beta)
+    {
+        // nb == 0: y (mb * row_block_dim entries) = beta * y. mb == 0: y is empty and
+        // never accessed.
+        const int32_t rbd = 3, cbd = 2;
+        for(const bool device : {false, true})
+            for(const int32_t mb : {4, 0})
+            {
+                SCOPED_TRACE("device=" + std::to_string(device) + " mb=" + std::to_string(mb));
+                const std::vector<double> y0    = make_vector<double>(12, 3);
+                const double              alpha = 2.0, beta = -0.75;
+                mat_descr                 descr;
+                ASSERT_NE(descr.d, nullptr);
+                device_vector<rocsparse_int> ptr(std::vector<rocsparse_int>(5, 0));
+                device_vector<double>        x(std::vector<double>(1, 0.0));
+                device_vector<double>        y(y0);
+                device_vector<double>        dalpha(std::vector<double>(1, alpha)),
+                    dbeta(std::vector<double>(1, beta));
+                ASSERT_TRUE(ptr.ptr && x.ptr && y.ptr && dalpha.ptr && dbeta.ptr);
+                scoped_pointer_mode mode(handle, device);
+                ASSERT_EQ(gebsrmv<double>(handle,
+                                          rocsparse_direction_column,
+                                          rocsparse_operation_none,
+                                          mb,
+                                          mb == 0 ? 5 : 0,
+                                          0,
+                                          device ? dalpha.ptr : &alpha,
+                                          descr,
+                                          nullptr,
+                                          ptr.ptr,
+                                          nullptr,
+                                          rbd,
+                                          cbd,
+                                          x.ptr,
+                                          device ? dbeta.ptr : &beta,
+                                          y.ptr),
+                          rocsparse_status_success);
+                std::vector<double> want(y0);
+                for(int32_t i = 0; i < mb * rbd; ++i)
+                    want[i] *= beta;
+                EXPECT_TRUE(expect_near(want, to_host(y), "gebsrmv beta scaling"));
+            }
+
+        mat_descr descr;
+        ASSERT_NE(descr.d, nullptr);
+        const double alpha = 1.0;
+        EXPECT_EQ(gebsrmv<double>(handle,
+                                  rocsparse_direction_row,
+                                  rocsparse_operation_none,
+                                  4,
+                                  0,
+                                  0,
+                                  &alpha,
+                                  descr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  rbd,
+                                  cbd,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr),
+                  rocsparse_status_invalid_pointer);
+    }
+
     //
     // bsrxmv / bsrmv with a square (bd x bd) block.
     //

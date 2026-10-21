@@ -967,6 +967,21 @@ namespace
     {
     };
 
+    TEST_F(L2DeviceSptrsvMisc, handle_based_descriptor_create_and_destroy)
+    {
+        rocsparse_sptrsv_descr d = nullptr;
+        EXPECT_EQ(rocsparse_sptrsv_descr_create(nullptr, &d, nullptr),
+                  rocsparse_status_invalid_handle);
+        EXPECT_EQ(d, nullptr);
+        EXPECT_EQ(rocsparse_sptrsv_descr_create(handle, nullptr, nullptr),
+                  rocsparse_status_invalid_pointer);
+        EXPECT_EQ(rocsparse_sptrsv_descr_destroy(nullptr, nullptr, nullptr),
+                  rocsparse_status_invalid_handle);
+        ASSERT_EQ(rocsparse_sptrsv_descr_create(handle, &d, nullptr), rocsparse_status_success);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(rocsparse_sptrsv_descr_destroy(handle, d, nullptr), rocsparse_status_success);
+    }
+
     TEST_F(L2DeviceSptrsvMisc, missing_diagonal_is_a_symbolic_singularity)
     {
         // Row 1 has no diagonal entry.
