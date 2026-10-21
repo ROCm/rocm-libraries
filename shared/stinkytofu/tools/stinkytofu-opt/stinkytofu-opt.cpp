@@ -217,8 +217,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--vgpr-msb-mode=") || arg == "--vgpr-msb-keep-unused-slots" ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -510,8 +510,11 @@ int main(int argc, char** argv) {
     // Useful when running on a host whose comgr doesn't know the target ISA,
     // so the FileCheck/regression tests can pin the mode explicitly.
     std::optional<stinkytofu::VgprMsbMode> vgprMsbOverride;
+    // --vgpr-msb-keep-unused-slots: AsmCapsConfig::vgprMsbKeepUnusedSlots.
+    bool vgprMsbKeepUnusedSlots = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
+        if (a == "--vgpr-msb-keep-unused-slots") vgprMsbKeepUnusedSlots = true;
         if (a.starts_with("--vgpr-msb-mode=")) {
             std::string val = a.substr(std::string("--vgpr-msb-mode=").size());
             if (val == "none")
@@ -926,6 +929,7 @@ int main(int argc, char** argv) {
             passManager.setGemmTileConfig(gemmTileConfig);
             auto caps = stinkytofu::ToolchainCaps::probe(archID);
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
+            caps.vgprMsbKeepUnusedSlots = vgprMsbKeepUnusedSlots;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
             caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};

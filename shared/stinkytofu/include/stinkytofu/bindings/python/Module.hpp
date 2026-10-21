@@ -103,6 +103,7 @@
     X(VgprMsbMode, int)                           \
     X(RequiresXCntForVolatileVMEM, bool)          \
     X(EnableXnackReplay, bool)                    \
+    X(VgprMsbKeepUnusedSlots, bool)               \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \

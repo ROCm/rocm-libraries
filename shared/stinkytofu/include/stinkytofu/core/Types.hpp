@@ -216,5 +216,12 @@ struct AsmCapsConfig {
     /// active if `requiresXCntForVolatileVMEM` is set independently.
     /// See Gfx1250HazardPass for the complete rule definitions.
     bool enableXnackReplay = false;
+
+    /// Let a VGPR bank selector an instruction does not use keep whatever is in
+    /// force (UnusedVgprMsbSlots::Keep), so InsertVgprMsbPass only switches
+    /// banks for the slots an instruction encodes, and register allocation
+    /// scores colourings the same way. Off until the ISA confirms the hardware
+    /// ignores an unused slot's selector.
+    bool vgprMsbKeepUnusedSlots = false;
 };
 }  // namespace stinkytofu

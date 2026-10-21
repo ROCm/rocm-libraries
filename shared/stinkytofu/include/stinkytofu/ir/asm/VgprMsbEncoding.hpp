@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -232,11 +233,26 @@ inline VgprMsbNeed vgprMsbNeed(const StinkyInstruction& inst) {
     return vgprMsbNeed(inst, [](const StinkyRegister& reg, size_t, bool) { return reg.reg.idx; });
 }
 
+/// What the bank state has to hold in a slot an instruction does not use.
+enum class UnusedVgprMsbSlots {
+    /// Bank 0: the byte in force has to equal the instruction's byte in every
+    /// slot. What InsertVgprMsbPass has always emitted.
+    Zero,
+    /// Anything. Only the slots an instruction uses have to match, and a new
+    /// byte gives each slot it leaves unused the bank the next instruction in
+    /// the block wants there. Correct only if the hardware ignores the selector
+    /// of a slot the instruction does not encode, which the ISA has to confirm
+    /// before this becomes a default.
+    Keep,
+};
+
 /// The byte the last s_set_vgpr_msb put in force, followed along a block in
 /// order. Unknown where a block starts, after a label and after a call, because
 /// control can arrive there with any byte in force.
 class VgprMsbState {
    public:
+    explicit VgprMsbState(UnusedVgprMsbSlots unused = UnusedVgprMsbSlots::Zero) : unused_(unused) {}
+
     bool known() const {
         return current_ >= 0;
     }
@@ -248,11 +264,30 @@ class VgprMsbState {
 
     /// Whether an instruction with \p need has to be preceded by an s_set_vgpr_msb.
     bool needsSet(const VgprMsbNeed& need) const {
-        return need.any() && need.value != current_;
+        if (!need.any()) return false;
+        if (!known()) return true;
+        const int differs = need.value ^ current_;
+        return (unused_ == UnusedVgprMsbSlots::Keep ? differs & need.usedSlots : differs) != 0;
     }
 
-    void set(const VgprMsbNeed& need) {
-        current_ = need.value;
+    /// Put \p need in force and return the byte that does it. \p ahead is what
+    /// the block's later instructions need, up to the next point the byte is
+    /// forgotten; under Keep it fills the slots \p need leaves unused.
+    int set(const VgprMsbNeed& need, std::span<const VgprMsbNeed> ahead = {}) {
+        int byte = need.value;
+        if (unused_ == UnusedVgprMsbSlots::Keep) {
+            constexpr int kAllSlots = 0xff;
+            int decided = need.usedSlots;
+            for (const VgprMsbNeed& later : ahead) {
+                if (decided == kAllSlots) break;
+                const int open = later.usedSlots & ~decided;
+                byte |= later.value & open;
+                decided |= open;
+            }
+            if (known()) byte |= current_ & ~decided;
+        }
+        current_ = byte;
+        return byte;
     }
 
     void forget() {
@@ -260,6 +295,7 @@ class VgprMsbState {
     }
 
    private:
+    UnusedVgprMsbSlots unused_;
     int current_ = -1;
 };
 

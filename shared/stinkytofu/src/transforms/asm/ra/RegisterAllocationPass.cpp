@@ -485,7 +485,9 @@ struct ColouringRun {
           target(AsmTargetRegisters::forFunction(func)),
           constraints(markAndBuild(func, target, rules)),
           loops(detectLoops(func)),
-          loopMsb(func, loops),
+          loopMsb(func, loops,
+                  opts.caps.vgprMsbKeepUnusedSlots ? UnusedVgprMsbSlots::Keep
+                                                   : UnusedVgprMsbSlots::Zero),
           ruleIntervals(applyEarlyClobber(func, intervals, rules)),
           regionScope(regionScopeOf(constraints, ruleIntervals, opts.allocate, regionEnd)),
           unbankable(opts.unbankableOperands ==

@@ -129,6 +129,7 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     // After the probe above, which replaces the whole struct.
     asmCapsConfig.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
     asmCapsConfig.enableXnackReplay = opts.EnableXnackReplay;
+    asmCapsConfig.vgprMsbKeepUnusedSlots = opts.VgprMsbKeepUnusedSlots;
 
     pm.setAsmCapsConfig(asmCapsConfig);
 

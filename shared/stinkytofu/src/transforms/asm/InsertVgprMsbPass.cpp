@@ -26,6 +26,8 @@
 #include <cassert>
 #include <cstdint>
 #include <iterator>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -86,9 +88,10 @@ void collectUnbankableOperands(const StinkyInstruction& inst, const std::string&
         });
 }
 
-/// Put \p need in force with an s_set_vgpr_msb before \p insertBefore.
-void emitVgprMsb(const VgprMsbNeed& need, VgprMsbState& state, bool afterLabel,
-                 AsmIRBuilder& irBuilder, GfxArchID archId, IRBase* insertBefore,
+/// Put \p need in force with an s_set_vgpr_msb before \p insertBefore. \p ahead
+/// is what the block's later instructions need, for VgprMsbState::set.
+void emitVgprMsb(const VgprMsbNeed& need, std::span<const VgprMsbNeed> ahead, VgprMsbState& state,
+                 bool afterLabel, AsmIRBuilder& irBuilder, GfxArchID archId, IRBase* insertBefore,
                  VgprMsbMode msbMode) {
     if (afterLabel) {
         StinkyInstruction* nopInst =
@@ -96,21 +99,50 @@ void emitVgprMsb(const VgprMsbNeed& need, VgprMsbState& state, bool afterLabel,
         nopInst->addSrcReg(StinkyRegister(0));
     }
 
-    int combinedSetVal = need.value;
-    if (msbMode == VgprMsbMode::Msb16 && state.known()) combinedSetVal += (state.current() << 8);
+    const int previous = state.known() ? state.current() : -1;
+    const int byte = state.set(need, ahead);
+    int combinedSetVal = byte;
+    if (msbMode == VgprMsbMode::Msb16 && previous >= 0) combinedSetVal += (previous << 8);
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
     assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
     StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
     msbInst->addSrcReg(StinkyRegister(combinedSetVal));
 
-    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(need.value, 0)) +
-                             ", src1: " + std::to_string(decodeVgprMsbForSlot(need.value, 1)) +
-                             ", src2: " + std::to_string(decodeVgprMsbForSlot(need.value, 2)) +
-                             ", dst: " + std::to_string(decodeVgprMsbForSlot(need.value, 3));
+    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(byte, 0)) +
+                             ", src1: " + std::to_string(decodeVgprMsbForSlot(byte, 1)) +
+                             ", src2: " + std::to_string(decodeVgprMsbForSlot(byte, 2)) +
+                             ", dst: " + std::to_string(decodeVgprMsbForSlot(byte, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
-    state.set(need);
 }
+
+/// What each instruction of \p bb that InsertVgprMsbPass visits needs, in
+/// order, and for each the end of its run: the next label or call, where the
+/// byte in force is forgotten. Only Keep looks ahead, so only Keep asks.
+struct BlockNeeds {
+    std::vector<VgprMsbNeed> needs;
+    std::vector<size_t> runEnd;
+
+    explicit BlockNeeds(BasicBlock& bb) {
+        // Every need since the last label or call ends its run here.
+        const auto closeRun = [&] { runEnd.resize(needs.size(), needs.size()); };
+        for (IRBase& node : bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (inst == nullptr) continue;
+            if (inst->getUnifiedOpcode() == GFX::LABEL || isCall(*inst)) {
+                closeRun();
+                continue;
+            }
+            if (isPseudoInst(inst)) continue;
+            needs.push_back(vgprMsbNeed(*inst));
+        }
+        closeRun();
+    }
+
+    std::span<const VgprMsbNeed> after(size_t index) const {
+        return std::span<const VgprMsbNeed>(needs).subspan(index + 1, runEnd[index] - index - 1);
+    }
+};
 
 bool preferInsertAfter(const StinkyInstruction& inst) {
     return isVectorALU(inst) || (isScalarALU(inst) && !isBarrier(inst)) ||
@@ -143,7 +175,10 @@ class InsertVgprMsbPassImpl : public Pass {
         // says only that the choice is not encodable, and says it per operand so
         // a release build names them rather than emitting them in silence.
         std::vector<std::string> unbankable;
-        runOnFunction(func, archId, msbMode, unbankable);
+        const UnusedVgprMsbSlots unused = passCtx.getAsmCapsConfig().vgprMsbKeepUnusedSlots
+                                              ? UnusedVgprMsbSlots::Keep
+                                              : UnusedVgprMsbSlots::Zero;
+        runOnFunction(func, archId, msbMode, unused, unbankable);
         for (const std::string& operand : unbankable) {
             emitRemark(passCtx, {OptimizationRemark::Kind::Missed, "InsertVgprMsb",
                                  "UnbankableOperand", operand});
@@ -153,11 +188,17 @@ class InsertVgprMsbPassImpl : public Pass {
 
    private:
     static void runOnFunction(Function& func, GfxArchID archId, VgprMsbMode msbMode,
-                              std::vector<std::string>& unbankable) {
+                              UnusedVgprMsbSlots unused, std::vector<std::string>& unbankable) {
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
-            VgprMsbState state;
+            VgprMsbState state(unused);
+            // Read before anything is inserted; each visited instruction takes
+            // the next entry.
+            const std::optional<BlockNeeds> blockNeeds =
+                unused == UnusedVgprMsbSlots::Keep ? std::optional<BlockNeeds>(BlockNeeds(bb))
+                                                   : std::nullopt;
+            size_t visited = 0;
             // Only the instruction straight after a label: its s_set_vgpr_msb is
             // preceded by an s_nop.
             bool afterLabel = false;
@@ -199,10 +240,15 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
 
-                const VgprMsbNeed need = vgprMsbNeed(*inst);
+                const size_t index = visited++;
+                const VgprMsbNeed need = blockNeeds ? blockNeeds->needs[index] : vgprMsbNeed(*inst);
                 const bool emittedVgprMsb = state.needsSet(need);
-                if (emittedVgprMsb)
-                    emitVgprMsb(need, state, afterLabel, irBuilder, archId, insertBefore, msbMode);
+                if (emittedVgprMsb) {
+                    const std::span<const VgprMsbNeed> ahead =
+                        blockNeeds ? blockNeeds->after(index) : std::span<const VgprMsbNeed>{};
+                    emitVgprMsb(need, ahead, state, afterLabel, irBuilder, archId, insertBefore,
+                                msbMode);
+                }
                 afterLabel = false;
                 collectUnbankableOperands(*inst, func.getName(), unbankable);
                 encodeVgprOperands(inst);

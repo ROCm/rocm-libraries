@@ -77,4 +77,60 @@ TEST_F(VgprMsbEncodingTest, StateAsksForASetOnlyWhenTheByteChanges) {
     EXPECT_TRUE(state.needsSet(low));
 }
 
+/// `v<dst> = v_mov_b32 v<src>`: src0 and dst, nothing in src1 or src2.
+VgprMsbNeed movNeed(BasicBlock* bb, GfxArchID arch, int dst, int src) {
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
+    mov->addDestReg(StinkyRegister("v", dst, 1));
+    mov->addSrcReg(StinkyRegister("v", src, 1));
+    return vgprMsbNeed(*mov);
+}
+
+TEST_F(VgprMsbEncodingTest, UnderZeroAnUnusedSlotHasToReadBankZero) {
+    const VgprMsbNeed add = vgprMsbNeed(*createVAddInBlock(bb, arch, 300, 301, 302));
+    const VgprMsbNeed mov = movNeed(bb, arch, 303, 304);
+    EXPECT_EQ(mov.usedSlots, kSrc0 | kDst);
+
+    VgprMsbState state;
+    state.set(add);
+    EXPECT_TRUE(state.needsSet(mov)) << "src1 is in bank 1, and Zero wants it at 0";
+}
+
+TEST_F(VgprMsbEncodingTest, UnderKeepOnlyTheUsedSlotsHaveToMatch) {
+    const VgprMsbNeed add = vgprMsbNeed(*createVAddInBlock(bb, arch, 300, 301, 302));
+    const VgprMsbNeed mov = movNeed(bb, arch, 303, 304);
+
+    VgprMsbState state(UnusedVgprMsbSlots::Keep);
+    EXPECT_EQ(state.set(add), add.value);
+    EXPECT_FALSE(state.needsSet(mov));
+    EXPECT_TRUE(state.needsSet(movNeed(bb, arch, 3, 304))) << "dst is used, and differs";
+}
+
+TEST_F(VgprMsbEncodingTest, UnderKeepANewByteFillsUnusedSlotsFromWhatComesNext) {
+    // The mov leaves src1 open; the add after it wants bank 1 there.
+    const VgprMsbNeed mov = movNeed(bb, arch, 303, 304);
+    const VgprMsbNeed add = vgprMsbNeed(*createVAddInBlock(bb, arch, 300, 301, 302));
+    const VgprMsbNeed ahead[] = {add};
+
+    VgprMsbState state(UnusedVgprMsbSlots::Keep);
+    EXPECT_EQ(state.set(mov, ahead), add.value);
+    EXPECT_FALSE(state.needsSet(add));
+
+    // Zero ignores what comes next.
+    VgprMsbState zero;
+    EXPECT_EQ(zero.set(mov, ahead), mov.value);
+}
+
+TEST_F(VgprMsbEncodingTest, UnderKeepASlotNothingAheadUsesKeepsItsBank) {
+    const VgprMsbNeed add = vgprMsbNeed(*createVAddInBlock(bb, arch, 300, 301, 302));
+    const VgprMsbNeed mov = movNeed(bb, arch, 3, 4);
+
+    VgprMsbState state(UnusedVgprMsbSlots::Keep);
+    state.set(add);
+    const int byte = state.set(mov);
+    EXPECT_EQ(decodeVgprMsbForSlot(byte, 1), 1) << "src1 keeps the bank in force";
+    EXPECT_EQ(decodeVgprMsbForSlot(byte, 0), 0);
+    EXPECT_EQ(decodeVgprMsbForSlot(byte, 3), 0);
+}
+
 }  // namespace

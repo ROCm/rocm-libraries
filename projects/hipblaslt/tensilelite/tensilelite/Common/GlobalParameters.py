@@ -409,6 +409,12 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # slow kernel generation can be attributed to individual passes.
 globalParameters["StinkyTofuTimePasses"] = False
 
+# Let an s_set_vgpr_msb leave the bank of every operand slot the next instructions do
+# not use as it was, so StinkyTofu switches banks only for the slots an instruction
+# encodes, and scores register allocations the same way. Off until the gfx1250 ISA
+# confirms the hardware ignores the selector of a slot an instruction does not use.
+globalParameters["StinkyTofuVgprMsbKeepUnusedSlots"] = False
+
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
 # e.g. {WmmaQueueDepth: 8, WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.

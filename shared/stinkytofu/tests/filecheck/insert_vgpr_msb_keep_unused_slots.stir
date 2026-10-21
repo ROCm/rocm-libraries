@@ -1,0 +1,32 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb8 --vgpr-msb-keep-unused-slots --InsertVgprMsbPass --LoopRegionRemarkPass --remarks --print-output 2>&1
+#
+# With --vgpr-msb-keep-unused-slots a slot an instruction does not use may keep
+# whatever bank is in force, so only the slots it encodes have to match.
+#
+# The movs use src0 and dst, the adds src0, src1 and dst, everything in bank 1.
+# With unused slots read as bank 0 every change of shape needs an
+# s_set_vgpr_msb, four in the loop. Here the first one also puts bank 1 in src1,
+# which the mov leaves open and the add after it wants, so one is enough.
+
+# CHECK: loop 'label_loop' summary: {{[0-9]+}} insts, 1 s_set_vgpr_msb,
+# CHECK-LABEL: ^label_loop:
+# CHECK-NEXT: "st.s_set_vgpr_msb"(69)
+# CHECK-NEXT: v300 = "st.v_mov_b32"(v301)
+# CHECK-NEXT: v302 = "st.v_add_f32"(v303, v304)
+# CHECK-NEXT: v305 = "st.v_mov_b32"(v306)
+# CHECK-NEXT: v307 = "st.v_add_f32"(v308, v309)
+
+st.func @keep_unused_slots() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop
+^label_loop:
+  v300 = "st.v_mov_b32"(v301) { issueCycles = 1, latencyCycles = 1 }
+  v302 = "st.v_add_f32"(v303, v304) { issueCycles = 1, latencyCycles = 5 }
+  v305 = "st.v_mov_b32"(v306) { issueCycles = 1, latencyCycles = 1 }
+  v307 = "st.v_add_f32"(v308, v309) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc0"(label_loop, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop, ^label_end
+^label_end:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

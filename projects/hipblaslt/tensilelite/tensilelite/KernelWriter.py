@@ -7235,6 +7235,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                    self.states.archCaps["RequiresXCntForVolatileVMEM"]),
                                "EnableXnackReplay": bool(
                                    self.states.archCaps["EnableXnackReplay"]),
+                               "VgprMsbKeepUnusedSlots": bool(
+                                   globalParameters.get("StinkyTofuVgprMsbKeepUnusedSlots") or False),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.

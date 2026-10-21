@@ -29,10 +29,13 @@ namespace stinkytofu {
 ///
 /// The walk is per block, as the pass's is: the byte in force is unknown where
 /// a block starts and after a label or a call. Each loop block is walked once,
-/// which is what one iteration pays.
+/// which is what one iteration pays. \p unused has to be the rule the pass will
+/// emit by (AsmCapsConfig::vgprMsbKeepUnusedSlots), or the count predicts a
+/// different program.
 class LoopMsbCost {
    public:
-    LoopMsbCost(const Function& function, const std::vector<Loop>& loops);
+    LoopMsbCost(const Function& function, const std::vector<Loop>& loops,
+                UnusedVgprMsbSlots unused = UnusedVgprMsbSlots::Zero);
 
     /// The count if each operand of a lifted class were at the VGPR index
     /// `indexOf(value, operand)` gives, where `value` is the SSA value in the
@@ -58,8 +61,11 @@ class LoopMsbCost {
     struct Step {
         const StinkyInstruction* instruction = nullptr;
         OperandGroups values;
+        /// One past the last step before the next forget point.
+        size_t runEnd = 0;
     };
     std::vector<Step> steps_;
+    UnusedVgprMsbSlots unused_;
 };
 
 template <typename IndexOf>
@@ -67,21 +73,28 @@ uint32_t LoopMsbCost::count(IndexOf&& indexOf) const {
     static_assert(std::is_invocable_r_v<uint32_t, IndexOf, SSAValueID, const StinkyRegister&>,
                   "LoopMsbCost::count lookup must be callable as "
                   "(SSAValueID value, const StinkyRegister& operand) -> uint32_t");
-    uint32_t emitted = 0;
-    VgprMsbState state;
-    for (const Step& step : steps_) {
-        if (step.instruction == nullptr) {
-            state.forget();
-            continue;
-        }
-        const VgprMsbNeed need = vgprMsbNeed(
+    // Every need first: under Keep, a new byte looks ahead to the later ones.
+    std::vector<VgprMsbNeed> needs(steps_.size());
+    for (size_t i = 0; i < steps_.size(); ++i) {
+        const Step& step = steps_[i];
+        if (step.instruction == nullptr) continue;
+        needs[i] = vgprMsbNeed(
             *step.instruction,
             [&](const StinkyRegister& reg, size_t operand, bool isDest) -> uint32_t {
                 const std::span<const SSAValueID> units = step.values.at(operand, isDest);
                 return units.empty() ? reg.reg.idx : indexOf(units.front(), reg);
             });
-        if (!state.needsSet(need)) continue;
-        state.set(need);
+    }
+    uint32_t emitted = 0;
+    VgprMsbState state(unused_);
+    for (size_t i = 0; i < steps_.size(); ++i) {
+        if (steps_[i].instruction == nullptr) {
+            state.forget();
+            continue;
+        }
+        if (!state.needsSet(needs[i])) continue;
+        state.set(needs[i],
+                  std::span<const VgprMsbNeed>(needs).subspan(i + 1, steps_[i].runEnd - i - 1));
         ++emitted;
     }
     return emitted;

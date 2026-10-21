@@ -12,7 +12,9 @@
 
 namespace stinkytofu {
 
-LoopMsbCost::LoopMsbCost(const Function& function, const std::vector<Loop>& loops) {
+LoopMsbCost::LoopMsbCost(const Function& function, const std::vector<Loop>& loops,
+                         UnusedVgprMsbSlots unused)
+    : unused_(unused) {
     std::unordered_map<const BasicBlock*, std::unordered_set<const BasicBlock*>> bodies;
     for (const Loop& loop : loops) {
         if (loop.headerBB == nullptr) continue;
@@ -44,6 +46,11 @@ LoopMsbCost::LoopMsbCost(const Function& function, const std::vector<Loop>& loop
                                                ? operandGroupsOf(*instruction, lifted)
                                                : OperandGroups{}});
         }
+    }
+    size_t runEnd = steps_.size();
+    for (size_t i = steps_.size(); i-- > 0;) {
+        if (steps_[i].instruction == nullptr) runEnd = i;
+        steps_[i].runEnd = runEnd;
     }
 }
 
