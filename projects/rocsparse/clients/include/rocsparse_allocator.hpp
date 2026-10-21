@@ -244,14 +244,12 @@ private:
                 init_guards(guard, PAD);
 
                 // Copy guard to device memory before allocated memory
-                rocsparse_clients_throw_hip_error(
-                    "hipMemcpy",
+                CHECK_HIP_THROW_ERROR(
                     hipMemcpy(d,
                               guard,
                               sizeof(guard),
                               memory_mode::get_hipMemcpyKind(MODE, memory_mode::host)));
-                rocsparse_clients_throw_hip_error(
-                    "hipMemcpy",
+                CHECK_HIP_THROW_ERROR(
                     hipMemcpy(d + PAD,
                               guard,
                               sizeof(guard),
@@ -261,8 +259,7 @@ private:
                 d += 2 * PAD;
 
                 // Copy guard to device memory after allocated memory
-                rocsparse_clients_throw_hip_error(
-                    "hipMemcpy",
+                CHECK_HIP_THROW_ERROR(
                     hipMemcpy(d + size,
                               guard,
                               sizeof(guard),
