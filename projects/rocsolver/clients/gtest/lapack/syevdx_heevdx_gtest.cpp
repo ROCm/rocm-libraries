@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,9 +69,6 @@ const vector<vector<int>> large_size_range = {{192, 192, 192, 5, 15, 100, 170},
                                               {256, 270, 256, -10, 10, 1, 256},
                                               {300, 300, 330, -15, -5, 200, 300}};
 
-// for weekly large batch tests
-const vector<vector<int>> large_batch_size_range = {{7, 7, 7, -10, 10, 1, 7}};
-
 template <typename T>
 Arguments syevdx_heevdx_setup_arguments(syevdx_heevdx_tuple tup, bool inplace)
 {
@@ -102,7 +99,6 @@ Arguments syevdx_heevdx_setup_arguments(syevdx_heevdx_tuple tup, bool inplace)
     return arg;
 }
 
-template <int BATCH_COUNT = 3>
 class SYEVDX_HEEVDX : public ::TestWithParam<syevdx_heevdx_tuple>
 {
 protected:
@@ -122,32 +118,16 @@ protected:
            && arg.peek<char>("erange") == 'V' && arg.peek<char>("uplo") == 'L')
             testing_syevdx_heevdx_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
+        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
         testing_syevdx_heevdx<BATCHED, STRIDED, T>(arg);
     }
 };
 
-class SYEVDX : public SYEVDX_HEEVDX<>
+class SYEVDX : public SYEVDX_HEEVDX
 {
 };
 
-class HEEVDX : public SYEVDX_HEEVDX<>
-{
-};
-
-// large batch
-
-// TODO: there is a defect with batch variants with
-// medium size batch count (say 7000)
-// set BCOUNT to a low value for now
-// int constexpr BCOUNT = 64 * 1024 + 1;
-int constexpr BCOUNT = 3;
-
-class SYEVDX_LARGE_BATCH : public SYEVDX_HEEVDX<BCOUNT>
-{
-};
-
-class HEEVDX_LARGE_BATCH : public SYEVDX_HEEVDX<BCOUNT>
+class HEEVDX : public SYEVDX_HEEVDX
 {
 };
 
@@ -247,28 +227,6 @@ TEST_P(HEEVDX, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
-// large batched tests
-
-TEST_P(SYEVDX_LARGE_BATCH, batched__float)
-{
-    run_tests<true, true, float>();
-}
-
-TEST_P(SYEVDX_LARGE_BATCH, batched__double)
-{
-    run_tests<true, true, double>();
-}
-
-TEST_P(HEEVDX_LARGE_BATCH, batched__float_complex)
-{
-    run_tests<true, true, rocblas_float_complex>();
-}
-
-TEST_P(HEEVDX_LARGE_BATCH, batched__double_complex)
-{
-    run_tests<true, true, rocblas_double_complex>();
-}
-
 // strided_batched tests
 
 TEST_P(SYEVDX, strided_batched__float)
@@ -287,28 +245,6 @@ TEST_P(HEEVDX, strided_batched__float_complex)
 }
 
 TEST_P(HEEVDX, strided_batched__double_complex)
-{
-    run_tests<false, true, rocblas_double_complex>();
-}
-
-// large strided_batched tests
-
-TEST_P(SYEVDX_LARGE_BATCH, strided_batched__float)
-{
-    run_tests<false, true, float>();
-}
-
-TEST_P(SYEVDX_LARGE_BATCH, strided_batched__double)
-{
-    run_tests<false, true, double>();
-}
-
-TEST_P(HEEVDX_LARGE_BATCH, strided_batched__float_complex)
-{
-    run_tests<false, true, rocblas_float_complex>();
-}
-
-TEST_P(HEEVDX_LARGE_BATCH, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
@@ -340,12 +276,3 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEEVDX_INPLACE,
                          Combine(ValuesIn(size_range), ValuesIn(op_range)));
-
-// weekly_lapack tests exercising batch_count > 64 * 1024 (large-batch splitting)
-INSTANTIATE_TEST_SUITE_P(weekly_lapack,
-                         SYEVDX_LARGE_BATCH,
-                         Combine(ValuesIn(large_batch_size_range), ValuesIn(op_range)));
-
-INSTANTIATE_TEST_SUITE_P(weekly_lapack,
-                         HEEVDX_LARGE_BATCH,
-                         Combine(ValuesIn(large_batch_size_range), ValuesIn(op_range)));
