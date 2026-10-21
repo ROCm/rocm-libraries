@@ -216,7 +216,6 @@ endif()
 add_subdirectory( library )
 
 include( cmake/buildopts.cmake )
-include( clients/cmake/build-options.cmake )
 
 # Build clients of the library
 if( BUILD_CLIENTS )
