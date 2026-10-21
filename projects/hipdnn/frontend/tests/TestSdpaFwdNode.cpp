@@ -574,3 +574,298 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
     EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
 }
+
+//==============================================================================
+// Paged K/V and variable sequence lengths (cuDNN paged-attention contract)
+//==============================================================================
+
+namespace
+{
+std::shared_ptr<TensorAttributes> makeInt32Tensor(const std::vector<int64_t>& dims)
+{
+    auto t = std::make_shared<TensorAttributes>();
+    t->set_dim(dims).set_data_type(DataType::INT32);
+    return t;
+}
+
+// Paged decode: B=2, Hq=8, Hkv=2, Sq=1, D=64; containers of 10 blocks of 16 tokens;
+// max_seq_len_kv=64, so the page tables are [2, 1, 4, 1].
+struct PagedGraph
+{
+    static constexpr int64_t BATCH = 2;
+    static constexpr int64_t BLOCK_SIZE = 16;
+    static constexpr int64_t NUM_BLOCKS = 10;
+    static constexpr int32_t MAX_SEQ_LEN_KV = 64;
+    static constexpr int64_t MAX_BLOCKS_PER_SEQ = 4;
+
+    std::shared_ptr<TensorAttributes> q = makeTensor4D(BATCH, 8, 1, 64);
+    std::shared_ptr<TensorAttributes> k = makeTensor4D(NUM_BLOCKS, 2, BLOCK_SIZE, 64);
+    std::shared_ptr<TensorAttributes> v = makeTensor4D(NUM_BLOCKS, 2, BLOCK_SIZE, 64);
+    std::shared_ptr<TensorAttributes> pageTableK
+        = makeInt32Tensor({BATCH, 1, MAX_BLOCKS_PER_SEQ, 1});
+    std::shared_ptr<TensorAttributes> pageTableV
+        = makeInt32Tensor({BATCH, 1, MAX_BLOCKS_PER_SEQ, 1});
+    std::shared_ptr<TensorAttributes> seqLenKv = makeInt32Tensor({BATCH, 1, 1, 1});
+
+    SdpaAttributes attrs() const
+    {
+        auto a = makeMinimalAttrs(q, k, v);
+        a.set_paged_attention_k_table(pageTableK);
+        a.set_paged_attention_v_table(pageTableV);
+        a.set_seq_len_kv(seqLenKv);
+        a.set_paged_attention_max_seq_len_kv(MAX_SEQ_LEN_KV);
+        return a;
+    }
+};
+
+Error preValidate(SdpaAttributes&& attrs)
+{
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    return node.pre_validate_node();
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPagedDecode)
+{
+    // K/V dim 0 is num_blocks (10), not the batch (2): the batch check must not apply.
+    const PagedGraph g;
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPagedSharedPageTable)
+{
+    PagedGraph g;
+    g.pageTableV = g.pageTableK;
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPagedPartialLastBlock)
+{
+    // max_seq_len_kv=50 with block_size 16 needs ceil(50/16) = 4 blocks per sequence.
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_paged_attention_max_seq_len_kv(50);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPagedRaggedQWithSeqLenQ)
+{
+    PagedGraph g;
+    g.q = makeTensor4D(PagedGraph::BATCH, 8, 7, 64);
+    g.q->set_ragged_offset(makeInt32Tensor({PagedGraph::BATCH + 1, 1, 1, 1}));
+    auto attrs = g.attrs();
+    attrs.set_seq_len_q(makeInt32Tensor({PagedGraph::BATCH, 1, 1, 1}));
+    attrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT).set_diagonal_band_right_bound(0);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedRaggedQWithoutSeqLenQ)
+{
+    PagedGraph g;
+    g.q = makeTensor4D(PagedGraph::BATCH, 8, 7, 64);
+    g.q->set_ragged_offset(makeInt32Tensor({PagedGraph::BATCH + 1, 1, 1, 1}));
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedOnlyKTable)
+{
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_paged_attention_v_table(std::shared_ptr<TensorAttributes>{});
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedOnlyVTable)
+{
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_paged_attention_k_table(std::shared_ptr<TensorAttributes>{});
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPageTableWrongRank)
+{
+    PagedGraph g;
+    g.pageTableK = makeInt32Tensor({PagedGraph::BATCH, PagedGraph::MAX_BLOCKS_PER_SEQ});
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPageTableWrongDataType)
+{
+    PagedGraph g;
+    g.pageTableV = makeTensor4D(PagedGraph::BATCH, 1, PagedGraph::MAX_BLOCKS_PER_SEQ, 1);
+    g.pageTableV->set_data_type(DataType::INT64);
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPageTableBatchMismatch)
+{
+    PagedGraph g;
+    g.pageTableK = makeInt32Tensor({PagedGraph::BATCH + 1, 1, PagedGraph::MAX_BLOCKS_PER_SEQ, 1});
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPageTableNonUnitDims)
+{
+    PagedGraph g;
+    g.pageTableK = makeInt32Tensor({PagedGraph::BATCH, 2, PagedGraph::MAX_BLOCKS_PER_SEQ, 1});
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsRaggedPageTable)
+{
+    // Packed (ragged) page tables are a cuDNN feature hipDNN does not support.
+    const PagedGraph g;
+    g.pageTableK->set_ragged_offset(makeInt32Tensor({PagedGraph::BATCH + 1, 1, 1, 1}));
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedMissingMaxSeqLenKv)
+{
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.max_seq_len_kv.reset();
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedNonPositiveMaxSeqLenKv)
+{
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_paged_attention_max_seq_len_kv(0);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedMaxSeqLenKvNeedsMoreBlocks)
+{
+    // 65 tokens need 5 blocks of 16, but the tables hold 4.
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_paged_attention_max_seq_len_kv(65);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedMaxSeqLenKvNeedsFewerBlocks)
+{
+    // 48 tokens need 3 blocks of 16; cuDNN requires the table width to match exactly.
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_paged_attention_max_seq_len_kv(48);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedMissingSeqLenKv)
+{
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    attrs.set_seq_len_kv(std::shared_ptr<TensorAttributes>{});
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedBlockSizeMismatch)
+{
+    PagedGraph g;
+    g.v = makeTensor4D(PagedGraph::NUM_BLOCKS, 2, 2 * PagedGraph::BLOCK_SIZE, 64);
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsMaxSeqLenKvWithoutPaging)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_paged_attention_max_seq_len_kv(32);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsSeqLensWithoutPaging)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_seq_len_q(makeInt32Tensor({2, 1, 1, 1}));
+    attrs.set_seq_len_kv(makeInt32Tensor({2, 1, 1, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsRankOneSeqLensWithoutPaging)
+{
+    // The [B, 1, 1, 1] shape applies to every SDPA forward graph, not only paged ones.
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_seq_len_q(makeInt32Tensor({2}));
+    attrs.set_seq_len_kv(makeInt32Tensor({2}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSeqLenKvWrongShape)
+{
+    PagedGraph g;
+    g.seqLenKv = makeInt32Tensor({PagedGraph::BATCH});
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSeqLenKvBatchMismatch)
+{
+    PagedGraph g;
+    g.seqLenKv = makeInt32Tensor({PagedGraph::BATCH + 1, 1, 1, 1});
+    auto err = preValidate(g.attrs());
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSeqLenQWrongDataType)
+{
+    const PagedGraph g;
+    auto attrs = g.attrs();
+    auto seqLenQ = makeTensor4D(PagedGraph::BATCH, 1, 1, 1);
+    seqLenQ->set_data_type(DataType::FLOAT);
+    attrs.set_seq_len_q(seqLenQ);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidatePagedAttnMaskUsesMaxSeqLenKv)
+{
+    // With paged K/V the mask's KV extent is max_seq_len_kv (64), not the block size (16).
+    const PagedGraph g;
+    auto ok = g.attrs();
+    auto mask = std::make_shared<TensorAttributes>();
+    mask->set_dim({PagedGraph::BATCH, 8, 1, PagedGraph::MAX_SEQ_LEN_KV});
+    ok.set_bias(mask);
+    auto err = preValidate(std::move(ok));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    auto bad = g.attrs();
+    auto blockMask = std::make_shared<TensorAttributes>();
+    blockMask->set_dim({PagedGraph::BATCH, 8, 1, PagedGraph::BLOCK_SIZE});
+    bad.set_bias(blockMask);
+    err = preValidate(std::move(bad));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
