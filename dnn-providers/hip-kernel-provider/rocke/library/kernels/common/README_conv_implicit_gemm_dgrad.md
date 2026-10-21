@@ -1,6 +1,7 @@
 # Conv Backward Data (dgrad) — Implicit-GEMM Instance
 
-Computes the input gradient of a 2-D convolution:
+Computes the input gradient of a 2-D convolution. 3-D dgrad is not supported
+for any dtype: `validate()` and `is_valid_dgrad_spec` reject a 3-D problem.
 
 ```
 dX[n, hi, wi, c] = sum_{y, x, k} dY[n, ho, wo, k] * W[k, y, x, c]
@@ -120,6 +121,9 @@ The caller must zero-initialise `dX`. Supported dtypes:
 - `bf16` — packed `global_atomic_fadd_v2bf16` (`<2 x bfloat>`)
 - `fp16` — packed `global_atomic_fadd_v2f16` (`<2 x half>`)
 
+A TF32 kernel keeps any `dX` dtype: an fp32 `dX` uses the scalar f32 atomics,
+a 16-bit `dX` the packed ones above.
+
 ## Vector Loads
 
 Both A and B tiles are loaded via `CoalescedTileLoader` with dtype-aware vector
@@ -196,10 +200,11 @@ Global `buffer_load`s are unchanged.
 rejected rather than emitting a lane formula the hardware does not implement.
 gfx950 wave64 admits `warp_tile_n ∈ (16, 32)`; gfx1250 wave32 admits only the
 `16x16x32` atom (whose 16-element fragment is two `ds_load_tr16_b128` reads).
-Plus 16-bit B. Rejected with `async_dma=True` (the tilde builder has no direct
-global→LDS path) and with `pipeline="wavelet"` (`build_wavelet_loaders` pins the
-B tile to `(block_n, block_k)` and takes the unswapped descriptor, so it would
-write M-outer into a K-outer allocation).
+Plus 16-bit B, so TF32 (fp32 tiles in LDS) never takes it. Rejected with
+`async_dma=True` (the tilde builder has no direct global→LDS path) and with
+`pipeline="wavelet"` (`build_wavelet_loaders` pins the B tile to `(block_n,
+block_k)` and takes the unswapped descriptor, so it would write M-outer into a
+K-outer allocation).
 
 **Not a knob.** The spec field defaults `False`; the value is deduced by
 the keyword-only `DgradConvSpec.default_lds_k_outer(*, arch, dtype_b,
@@ -209,6 +214,49 @@ asymmetric with wgrad's — B-side dtype and warp tile only, never the A-side
 counterparts — and additionally keys on `cpg`: the saving is proportional to the
 B load width, which collapses to 1 on an odd channel run, where `axis_b` is
 already `"col"` and there is no scatter to remove.
+
+## TF32 compute (`mma_dtype="tf32"`)
+
+TF32 is a compute mode, not a storage dtype:
+`ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")`. `dY`, `W` and `dX`
+stay fp32 in memory and in LDS, so the global loads, vector widths, LDS byte
+budget and epilogues are the fp32 kernel's. Only the MMA changes:
+
+| Arch | Atoms (`warp_tile`) | Fragment per lane | Issued as |
+|------|---------------------|-------------------|-----------|
+| gfx942 | `16x16x8`, `32x32x4` | 2 fp32 | native `v_mfma_f32_*_xf32` |
+| gfx950 | `16x16x32`, `32x32x16` | 8 fp32 | 3 × `v_mfma_f32_*_bf16` (BF16x3) |
+
+- **Operand conversion.** Each fragment is read from LDS as fp32, in loads of
+  at most 4 elements (`_load_mma_operand`: two `<4 x float>` halves joined on
+  gfx950, one `<2 x float>` on gfx942). It is then bitcast to `<N x tf32>`
+  (`_to_mma_operand`), once per fragment. Nothing is rounded: gfx942's XF32
+  instruction drops the low mantissa bits itself, and gfx950's BF16x3 expansion
+  splits the whole fp32 value into a bf16 high and low part (big×small,
+  small×big, big×big). gfx950 is therefore closer to fp32 than truncated TF32,
+  and the two archs do not give bit-identical results.
+- **Atom choice** keys on the MMA dtype (`ConvDataSpec.mma_a`/`mma_b`):
+  `spec.atom`, `is_valid_dgrad_spec`'s shape check and `_resolve_dgrad_op`.
+  The LDS fragment type keys on storage (`_smem_dtype_for(dtype_a)`).
+- **Rejected:** `lds_k_outer` (16-bit transpose read only), any wave32 / WMMA
+  target and any MFMA arch without a TF32 row (gfx90a), fp16/bf16
+  storage with `mma_dtype="tf32"`, `"tf32"`/`"xf32"` spelled as a storage
+  dtype, and a swizzled `lds_layout`.
+- **LDS row stride.** Each fragment load claims `min(N, 4) × 4` bytes of
+  alignment (16 B on gfx950, 8 B on gfx942), which is all the LDS pool
+  guarantees. The row stride `tile_k + pad` must be a multiple of `min(N, 4)`
+  elements. The default pad of 8 always passes. On gfx950 `lds_k_pad=2` is
+  rejected and `lds_k_pad=4` is accepted.
+- **Scheduling hints** (`compv3` / `compv4`) count what TF32 issues: on gfx950
+  two `ds_read_b128` per fragment and three MFMAs per logical atom.
+- On gfx950, a warp tile with 384 or more fp32 accumulators per lane is
+  rejected for TF32. With the BF16x3 split temporaries live, such a tile sits at
+  the 512-VGPR ceiling, where the compiler's VGPR-to-AGPR spill path was seen to
+  miscompile a two-stage wgrad kernel (the same IR is correct at `-O1`). The
+  native gfx942 atom is not affected.
+- **Kernel name** gets a trailing `_tf32` flag. It is needed because the name
+  carries no dtype, and a gfx950 TF32 atom has the same shape as the bf16 one.
+- **C++ engine.** The C++ dgrad instance has no TF32 mirror yet.
 
 ## Per-tile K decode (`uniform_k_decode`)
 
@@ -245,6 +293,7 @@ pipeline)` (on for gfx950 wave64 outside the wavelet pipeline).
 | `../../../platform/cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
 | `../../../platform/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
 | `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
+| `../../tests/test_conv_dgrad_tf32.py` | TF32 host-side gate (validation, IR, ISA) |
 
 There is no dgrad dispatcher family yet — dgrad is built directly, without a
 `dispatch/` selection policy of its own.

@@ -54,7 +54,6 @@ from math import gcd as _gcd
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
-    BF16,
     F16,
     F32,
     I32,
@@ -96,8 +95,13 @@ from kernels.common._conv_implicit_gemm_common import (
     vector_width_reason,
     _emit_frag_smem_load,
     _emit_mfma,
-    _emit_smem_load,
     _ir_dtype,
+    _smem_dtype_for,
+    _TF32_LDS_LOAD_MAX,
+    _load_mma_operand,
+    _mfma_issues_per_mma,
+    _tf32_lds_stride_reason,
+    _tf32_reason,
     _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_param_block,
@@ -703,8 +707,10 @@ class DgradConvSpec:
 
     @property
     def atom(self) -> MfmaAtom:
+        # Keyed on the MMA dtype: a TF32 spec keeps fp32 storage but issues
+        # the XF32 atom (native on gfx942, BF16x3 on gfx950).
         return mfma_atom(
-            self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
+            self.data.mma_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
         )
 
     # ---- vector-size helpers ----
@@ -851,10 +857,17 @@ class DgradConvSpec:
                 "spkauto": self.split_k == -1,
                 # A different K-loop body; only tagged when set.
                 "ukd": self.uniform_k_decode,
+                # The name carries no dtype, and on gfx950 a TF32 atom shares
+                # its shape with the bf16 one, so the cache would otherwise
+                # collide an fp32-storage TF32 kernel with a 16-bit one.
+                "tf32": self.data.is_tf32,
             },
         )
 
     def validate(self) -> None:
+        _dtype_why = _mma_dtype_conflict(self)
+        if _dtype_why:
+            raise ValueError(_dtype_why)
         if self.tile_m % (self.warp_m * self.warp_tile_m) != 0:
             raise ValueError(
                 f"tile_m {self.tile_m} not divisible by warp_m * warp_tile_m "
@@ -1014,6 +1027,53 @@ class DgradConvSpec:
         return pipeline != "wavelet"
 
 
+def _mma_dtype_conflict(spec: "DgradConvSpec") -> str:
+    """Why the spec's storage/MMA dtype pair cannot build, or ``""``.
+
+    Arch-agnostic, shared by ``validate`` and ``is_valid_dgrad_spec`` (which
+    adds the per-arch checks in :func:`_tf32_reason`). Everything past the
+    first check applies to TF32 only, so every other spec is judged exactly as
+    before.
+    """
+    why = spec.data.mma_dtype_reason()
+    if why is not None:
+        return why
+    if not spec.data.is_tf32:
+        return ""
+    if spec.lds_k_outer:
+        # The K-outer B tile is read with ds_read_tr16_b64 / ds_load_tr16_b128,
+        # 16-bit transpose reads; there is no 32-bit LDS transpose read, so a
+        # TF32 kernel (fp32 tiles in LDS) keeps the M-outer B tile.
+        return (
+            "mma_dtype='tf32': lds_k_outer is not supported -- the K-outer "
+            "transpose read is 16-bit only and TF32 keeps fp32 tiles in LDS"
+        )
+    if spec.wave_size != 64:
+        return (
+            f"mma_dtype='tf32' is MFMA-only; wave_size={spec.wave_size} is a "
+            "WMMA target"
+        )
+    try:
+        frag = spec.atom.a_per_lane
+    except (KeyError, ValueError):
+        return (
+            f"mma_dtype='tf32': warp_tile "
+            f"{(spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)} is not a "
+            "TF32 atom on any arch"
+        )
+    layout = spec.lds_layout
+    if layout is not None and layout.swizzle is not None:
+        return (
+            "mma_dtype='tf32': a swizzled lds_layout is not supported -- the "
+            "fragment is read as contiguous fp32 vectors"
+        )
+    try:
+        _row = spec.effective_lds_layout().row_stride
+    except ValueError as e:
+        return str(e)
+    return _tf32_lds_stride_reason(_row, frag) or ""
+
+
 def _uniform_k_decode_conflict(spec: "DgradConvSpec") -> str:
     """Why ``spec.uniform_k_decode`` cannot be honoured, or ``""`` if it can.
 
@@ -1048,6 +1108,13 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     p = spec.problem
     if p.is_3d:
         return False, "dgrad only supports 2-D convolution currently"
+    _dtype_why = _mma_dtype_conflict(spec)
+    if _dtype_why:
+        return False, _dtype_why
+    if spec.data.is_tf32:
+        _tf32_why = _tf32_reason(spec, target, _dgrad_mma_family(arch), arch)
+        if _tf32_why is not None:
+            return False, _tf32_why
     if spec.max_sub_gemms < 1:
         return False, "max_sub_gemms must be at least 1"
     _n_sub = len(spec.compute_sub_gemms())
@@ -1118,14 +1185,14 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
         family=family,
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
     ):
-        return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
+        return False, f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}"
 
     if spec.lds_k_outer:
         # This gate has NO counterpart in validate() and that split is the whole
@@ -1285,8 +1352,8 @@ def _resolve_dgrad_op(spec: DgradConvSpec, arch: str):
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
         family=_dgrad_mma_family(arch),
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
@@ -1548,10 +1615,20 @@ def _build_tilde_dgrad(
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
-    _smem_dtype: Optional[Type] = (
-        BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
-    )
+    # LDS element type follows STORAGE: a TF32 kernel holds fp32 tiles and
+    # reinterprets each fragment after the read (_to_mma_operand).
+    _smem_dtype: Optional[Type] = _smem_dtype_for(spec.data.dtype_a)
     c_per_lane = op.c_frag_len
+    # Scheduling-hint group sizes. Only TF32 departs from one ds_read and one
+    # MFMA per fragment / atom: _load_mma_operand reads its fp32 fragment in
+    # loads of at most 4 elements (two ds_read_b128 for the 8-wide gfx950
+    # fragment) and the gfx950 BF16x3 emulation issues three physical MFMAs per
+    # logical atom.
+    _ds_reads_per_frag = 1
+    _mfma_issues_per_atom = 1
+    if spec.data.is_tf32:
+        _ds_reads_per_frag = -(-a_per_lane // _TF32_LDS_LOAD_MAX)
+        _mfma_issues_per_atom = _mfma_issues_per_mma(op)
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
@@ -2094,8 +2171,14 @@ def _build_tilde_dgrad(
                     b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom),
                 )
                 a_rows.append(
-                    _emit_smem_load(
-                        b, A_src, a_row, col_base, a_per_lane, smem_dtype=_smem_dtype
+                    _load_mma_operand(
+                        b,
+                        A_src,
+                        a_row,
+                        col_base,
+                        a_per_lane,
+                        smem_dtype=_smem_dtype,
+                        data=spec.data,
                     )
                 )
             b_cols = []
@@ -2116,8 +2199,14 @@ def _build_tilde_dgrad(
                     b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom),
                 )
                 b_cols.append(
-                    _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                    _load_mma_operand(
+                        b,
+                        B_src,
+                        b_row,
+                        col_base,
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
+                        data=spec.data,
                     )
                 )
             flat = 0
@@ -2128,8 +2217,8 @@ def _build_tilde_dgrad(
                     flat += 1
             schedule.emit_after_mfma_step(
                 b,
-                ds_read_count=mfmas_m + mfmas_n,
-                mfma_count=mfmas_m * mfmas_n,
+                ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+                mfma_count=mfmas_m * mfmas_n * _mfma_issues_per_atom,
             )
         return new_accs
 

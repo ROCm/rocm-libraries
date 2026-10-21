@@ -63,6 +63,66 @@ B and D use simpler descriptors:
 | Direct store | `epilogue="default"` | Per-lane scalar write to D via the NHWK descriptor. |
 | CShuffleEpilogue | `epilogue="cshuffle"` | LDS-stage accumulators in MFMA layout, re-read coalesced for wide vector global stores. |
 
+### Data types
+
+`ConvDataSpec` sets the storage type of each tensor: `dtype_a` (input), `dtype_b`
+(weights), `dtype_d` (output). The accumulator is always fp32.
+
+| Storage A/B | `mma_dtype` | MMA input | Notes |
+|-------------|-------------|-----------|-------|
+| `fp16` | `None` | fp16 | The default. |
+| `bf16` | `None` | bf16 | |
+| `fp32` | `None` | fp32 | The fp32 atoms `16x16x4` / `32x32x2` on gfx942 and gfx950. |
+| `fp32` | `"tf32"` | TF32 | TF32 compute: see below. MFMA targets only. |
+
+**TF32 compute.** Set `ConvDataSpec(dtype_a="fp32", dtype_b="fp32",
+dtype_d="fp32", mma_dtype="tf32")`. `dtype_d` may be any storage type.
+`"tf32"` is a compute mode, not a storage type: `dtype_a="tf32"` is rejected.
+
+- A and B stay fp32 in global memory and in LDS. Loaders, vector widths, the LDS
+  budget and the kernel ABI are the fp32 ones.
+- After each LDS fragment read, the fp32 fragment is reinterpreted as
+  `vec<tf32xN>`, once per fragment. This is a bitcast: it emits no instruction
+  and does not round.
+- The warp tile must be a TF32 atom of the target:
+
+  | Arch | Atoms (`warp_tile_m x n x k`) | Fragment per lane | Lowering |
+  |------|-------------------------------|-------------------|----------|
+  | gfx942 | `16x16x8`, `32x32x4` | 2 fp32 (`ds_read_b64`) | Native `v_mfma_f32_*_xf32`. |
+  | gfx950 | `16x16x32`, `32x32x16` | 8 fp32 (two `ds_read_b128`) | Emulated: three `v_mfma_f32_*_bf16` per atom (BF16x3). |
+
+  WMMA targets, and any arch whose catalog has no TF32 atom, are rejected with a
+  reason from `is_valid_spec`.
+- The LDS row stride `tile_k + lds_k_pad` must be a multiple of
+  `min(fragment, 4)` fp32 elements, so that every fragment read is 8- or 16-byte
+  aligned. The default pad of 8 and the unpadded `async_dma` layout both satisfy
+  this.
+- `a_operand_override` cannot be combined with TF32, because it supplies the A
+  operand without the LDS read. The builder rejects the combination.
+- Under `compv3` / `compv4` the scheduling hints count the real instruction stream:
+  two DS reads per 8-wide fragment and three MFMAs per emulated atom.
+- On gfx950, a warp tile with 384 or more fp32 accumulators per lane is
+  rejected for TF32. With the BF16x3 split temporaries live, such a tile sits at
+  the 512-VGPR ceiling, where the compiler's VGPR-to-AGPR spill path was seen to
+  miscompile a two-stage wgrad kernel (the same IR is correct at `-O1`). The
+  native gfx942 atom is not affected.
+- Kernel names end in `_tf32`. Names of kernels without TF32 are unchanged.
+
+**Numerics.** Each operand is passed as its raw fp32 payload, matching CK on both
+arches:
+
+- gfx942 hardware reads the top 19 bits (sign, 8-bit exponent, 10-bit mantissa)
+  and ignores the low 13 mantissa bits. Inputs are truncated, not rounded to
+  nearest.
+- gfx950 splits each fp32 value into a bf16 high part and a bf16 low part
+  (`v_cvt_pk_bf16_f32`, round to nearest even). It then accumulates
+  `hi*hi + hi*lo + lo*hi` and drops `lo*lo`. The result is much closer to fp32
+  than gfx942 TF32.
+
+Results are therefore **not bit-reproducible across arches**. Compare a gfx942
+result against a reference computed from inputs masked with `& 0xFFFFE000`.
+Compare a gfx950 result against an fp32 (or fp64) reference.
+
 ### Additional features
 
 - **Grouped convolution:** `groups > 1` supported on CDNA targets. The descriptor DAG adds a group-unmerge so each group's GEMM stays within its own `(C/groups, K/groups)` slab.
@@ -160,6 +220,19 @@ The wavelet schedule (`helpers/schedule.py`) sets `emit_hints=False` and `mode="
 #### Known issue: `ds_load_tr16_b128` mis-optimisation (gfx1250)
 
 The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that feeds a WMMA instruction with `ds_load_tr16_b128` (a transposed LDS read). This optimisation assumes LDS was stored in column-major layout, but the wavelet kernel stores A_smem / B_smem row-major (for coalesced DRAM→LDS writes). The result is garbage WMMA inputs even though the load-wave transfers completed correctly. Root cause and three candidate fixes are tracked in the debug notes;
+
+### TF32 compute (`ConvDataSpec.mma_dtype="tf32"`)
+
+- The atom, catalog check and op lookup key on the MMA dtype (`data.mma_a` /
+  `data.mma_b`). The LDS element type keys on the storage dtype.
+- The fp32 fragment is bitcast to `vec<tf32xN>` after the LDS read. An 8-wide
+  fragment is read as two 4-wide loads, so no load claims more than 16-byte
+  alignment.
+- `is_valid_spec` rejects WMMA targets, arches without TF32 atoms, non-TF32 warp
+  tiles and misaligning LDS row strides.
+- The compv3/compv4 hint counts are scaled for TF32 only.
+- Specs without TF32 emit byte-identical IR.
+- See [Data types](#data-types).
 
 ### Python-level K-loop unroll (`unroll_k`)
 

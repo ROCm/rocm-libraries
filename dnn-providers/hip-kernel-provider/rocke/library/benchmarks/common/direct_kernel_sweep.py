@@ -41,6 +41,7 @@ import struct
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -58,10 +59,12 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DGRAD_RTC_VGPR_FILL,
     DGRAD_WAVES,
     DIRECT_CAPABILITIES,
+    DIRECT_COMPILE_DTYPES,
     DIRECT_DIRECTIONS,
     DIRECT_DTYPE,
     DIRECT_DTYPES,
     DOUBLE_BUFFER,
+    GROUPED_FOLD_K32,
     DW_BLOCK_W_DGRAD,
     DW_BLOCK_W_FWD,
     DW_BLOCK_WAVES,
@@ -85,9 +88,14 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     dgrad_rtc_k_atoms,
     dgrad_rtc_spills,
     dgrad_rtc_vgprs,
+    dgrad_waves,
+    direct_dtype_triple,
     direct_job_for_identity,
     direct_kernel_for_job,
+    direct_storage_dtype,
     probe_problem,
+    tf32_is_emulated,
+    tf32_narrow_reason,
     wgrad_waves,
 )
 from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
@@ -104,6 +112,31 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
 )
+
+# --verify bound on the peak-normalised error max|out-ref| / max(max|ref|, 1)
+# against an IEEE fp32 reference. TF32 has two rows because the two arches run
+# it differently: gfx942 encodes XF32 natively (operands truncated to a 10-bit
+# mantissa), gfx950 emulates it with three bf16 MFMAs over the full fp32
+# payload, about as accurate as fp32. 1e-4 on the emulated path still fails a
+# dropped cross term or a single bf16 pass. The scalar-FMA kernels run a tf32
+# problem in fp32 and clear either bound.
+DIRECT_VERIFY_TOL = {
+    "fp16": 5e-2,
+    "bf16": 5e-2,
+    "fp32": 1e-4,
+    "tf32_emulated": 1e-4,
+    "tf32_native": 1e-3,
+}
+
+
+def direct_verify_tol(dtype: str, arch: str) -> float:
+    """``--verify`` bound for a direct kernel of problem dtype ``dtype``."""
+    if dtype == "tf32":
+        return DIRECT_VERIFY_TOL[
+            "tf32_emulated" if tf32_is_emulated(arch) else "tf32_native"
+        ]
+    direct_storage_dtype(dtype)  # reject an unknown dtype
+    return DIRECT_VERIFY_TOL[dtype]
 
 
 def _caps_worker(payload):
@@ -421,7 +454,10 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     return DirectStep(
         kernel_name=meta["kernel_name"],
         hsaco_path=hsaco_path,
-        signature=conv_direct_args_signature(identity.dtype_a, direction=direction),
+        # The ABI takes the storage type: a tf32 kernel's tensors are fp32.
+        signature=conv_direct_args_signature(
+            direct_storage_dtype(identity.dtype_a), direction=direction
+        ),
         grid=grid,
         block=block,
         buffers=buffers,
@@ -481,6 +517,9 @@ def plan_for(
             return _batch_split_plan(
                 cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
             )
+    why = tf32_narrow_reason(variant, problem, knobs, arch)
+    if why:
+        return None, why
     spec, why = direct_spec_for_problem(variant, problem, knobs, arch)
     if spec is None:
         return None, why

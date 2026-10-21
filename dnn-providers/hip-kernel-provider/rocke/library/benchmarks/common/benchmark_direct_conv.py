@@ -50,7 +50,6 @@ from kernels.conv.direct_aot_jobs import (
     BLOCK_Q as _BLOCK_Q,
     DGRAD_BLOCK_H as _DGRAD_BLOCK_H,
     DGRAD_BLOCK_Q as _DGRAD_BLOCK_Q,
-    DGRAD_WAVES as _DGRAD_WAVES,
     DOUBLE_BUFFER as _DOUBLE_BUFFER,
     DW_BLOCK_W_DGRAD as _DW_BLOCK_W_DGRAD,
     DW_BLOCK_W_FWD as _DW_BLOCK_W_FWD,
@@ -61,7 +60,12 @@ from kernels.conv.direct_aot_jobs import (
     DW_TILED_UNROLL as _DW_TILED_UNROLL,
     DW_COL_BLOCK_H as _DW_COL_BLOCK_H,
     DW_COL_BLOCK_W as _DW_COL_BLOCK_W,
+    GROUPED_FOLD_K32 as _GROUPED_FOLD_K32,
+    dgrad_waves,
+    direct_storage_dtype,
+    tf32_narrow_reason,
 )
+from benchmarks.common.direct_kernel_sweep import direct_verify_tol
 
 # The non-grouped (groups == 1) geometry sweep lives next to the kernel, in
 # ``kernels.common.conv_direct_nongrouped.nongrouped_specs``, because the useful
@@ -117,12 +121,46 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 
+def _torch_dtype_of(dtype: str):
+    """Host tensor dtype of a direct problem's tensors: fp32 for fp32 and tf32
+    (TF32 is fp32 storage with a math mode)."""
+    import torch
+
+    return {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[direct_storage_dtype(dtype)]
+
+
+def _abi_dtype(dtype: str) -> str:
+    """The dtype a direct kernel's launch signature is spelled in (storage)."""
+    return direct_storage_dtype(dtype)
+
+
+def _rank_verified(results: list, tflops, passed) -> list:
+    """``results`` by TFLOPS, without the kernels that failed ``--verify``.
+
+    A failed kernel is reported in the sweep log, never ranked: it must not
+    become ``Best:`` (a fast kernel that silently computes in a lower
+    precision would otherwise win a TF32 sweep). ``passed is None`` (verify
+    not run) ranks as before. ``tflops`` / ``passed`` read a result.
+    """
+    ordered = sorted(results, key=tflops, reverse=True)
+    ranked = [r for r in ordered if passed(r) is not False]
+    n_failed = len(ordered) - len(ranked)
+    if n_failed:
+        print(f"\n{n_failed} kernel(s) failed verify and are not ranked.", flush=True)
+    return ranked
+
+
 # ---------------------------------------------------------------------------
 # MIOpen driver command parser
 # ---------------------------------------------------------------------------
 
 _MIOPEN_DTYPE_MAP = {
-    "conv": "fp32",  # rejected — fp32 not supported
+    # fp32 tensors; ``-M 0`` (MIOpen's "TF32 if possible" math type) is "tf32".
+    "conv": "fp32",
     "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
@@ -134,9 +172,12 @@ def parse_miopen_cmd_direct(cmd: str):
     """Parse a MIOpenDriver command string into a ``DirectConvProblem``.
 
     Supports 2-D NHWC forward (F=1), dgrad (F=2) and wgrad (F=4) convolutions.
-    Raises ``ValueError`` for unsupported cases.
-    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
-    ``"fp32"`` and ``forw`` is the raw MIOpen ``-F`` value.
+    Raises ``ValueError`` for unsupported cases (int8, 3-D, NCHW).
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
+    ``"fp32"`` or ``"tf32"`` and ``forw`` is the raw MIOpen ``-F`` value. The
+    plain fp32 driver (``conv``/``convfp32``) is ``"fp32"``, or ``"tf32"`` with
+    ``-M 0`` (MIOpen's "use TF32 if possible" math type); ``-M`` has no effect
+    on the 16-bit drivers, which MIOpen never runs as TF32.
 
     Note: ``DirectConvProblem`` requires ``cpg == kpg`` and cpg must be either
     1 (depthwise) or a positive multiple of 4 (grouped).
@@ -163,17 +204,15 @@ def parse_miopen_cmd_direct(cmd: str):
             f"(expected one of: {list(_MIOPEN_DTYPE_MAP)})"
         )
     dtype = _MIOPEN_DTYPE_MAP[driver_kw]
-    if dtype == "fp32":
-        raise ValueError(
-            f"fp32 ({driver_kw!r}) is not supported by this benchmark; "
-            f"use convfp16 or convbfp16"
-        )
     if driver_kw == "convint8":
         raise ValueError(
-            "convint8 is not supported by this benchmark; " "use convfp16 or convbfp16"
+            "convint8 is not supported by this benchmark; "
+            "use conv, convfp16 or convbfp16"
         )
 
-    sub = argparse.ArgumentParser(add_help=False)
+    # No abbreviations: ``-i 10`` (iterations) would otherwise match
+    # ``-in_layout``.
+    sub = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     sub.add_argument("-n", "--n", dest="N", type=int, default=1)
     sub.add_argument("-c", "--c", dest="C", type=int, default=1)
     sub.add_argument("-H", "--H", dest="Hi", type=int, default=1)
@@ -190,14 +229,26 @@ def parse_miopen_cmd_direct(cmd: str):
     sub.add_argument("-g", "--g", dest="groups", type=int, default=1)
     sub.add_argument("-F", "--F", dest="forw", type=int, default=1)
     sub.add_argument(
-        "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
+        "-I", "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
     )
+    # 0 = TF32 if possible, 1 = IEEE (MIOpenDriver's default).
+    sub.add_argument("-M", "--math_type", dest="math_type", type=int, default=1)
     sub.add_argument("-m", "--m", dest="_mode", type=str, default="conv")
     sub.add_argument("-t", "--t", dest="_time", type=int, default=0)
     sub.add_argument("-V", "--V", dest="_verify", type=int, default=1)
+    # Consumed so that ``-i 10`` is not read as an abbreviated ``-in_layout``.
+    sub.add_argument("-i", "--iter", dest="_iter", type=int, default=10)
     sub.add_argument("-_", "--_", dest="_spatial_dim", type=int, default=2)
 
     miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
+
+    if dtype == "fp32" and miopen_args.math_type == 0:
+        dtype = "tf32"
+    if miopen_args._spatial_dim != 2:
+        raise ValueError(
+            f"-_ {miopen_args._spatial_dim}: direct conv computes 2-D "
+            f"convolutions only"
+        )
 
     layout = miopen_args.in_layout.upper()
     if layout not in ("NHWC", "NWC"):
@@ -265,7 +316,7 @@ def parse_miopen_cmd_direct(cmd: str):
         KW=miopen_args.X,
         PAD=miopen_args.pH,
         stride=sH,
-        dtype=dtype if dtype in ("fp16", "bf16") else "fp16",
+        dtype=dtype,
         dil_h=miopen_args.dH,
         dil_w=miopen_args.dW,
     )
@@ -341,7 +392,10 @@ def _verify_kernel(
     kernel_name: str,
     dump_fail: "str | None",
     u8,
+    tol: float = 5e-2,
 ) -> "tuple[bool, bool]":
+    """Run once and compare to ``ref_out``; ``tol`` is the problem dtype's
+    bound (:func:`direct_kernel_sweep.direct_verify_tol`)."""
     import torch
 
     from rocke.runtime.launcher import LaunchConfig
@@ -356,7 +410,6 @@ def _verify_kernel(
     abs_diff = out_f32.sub(ref_out).abs()
     ref_scale = ref_out.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    tol = 5e-2
     status = "PASS" if rel_err < tol else f"FAIL(rel_err={rel_err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
@@ -560,7 +613,7 @@ def _run_depthwise_sweep(
     # All three variants take fp16 and bf16 -- preload and spatial off
     # problem.dtype, col off DirectDepthwiseColSpec.dtype -- so every dtype
     # sweeps the full bake-off rather than a subset of the variants.
-    _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    _torch_dtype = _torch_dtype_of(dtype)
 
     torch.manual_seed(42)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
@@ -570,7 +623,7 @@ def _run_depthwise_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    sig = conv_direct_args_signature(_abi_dtype(dtype))
     _direct_args = ConvArgs.from_problem(p)
 
     # For the spatial layout block_w is derived from block_waves internally,
@@ -616,10 +669,9 @@ def _run_depthwise_sweep(
         flush=True,
     )
 
-    n_skipped = 0
-    pending = []
-    for combo in combos:
-        variant, block_h, block_w, block_waves, unroll_rows = combo
+    def _candidate(variant, block_h, block_w, block_waves, unroll_rows):
+        """``(spec, ok, build)`` of one depthwise combo; a variant with no
+        kernel for this dtype (fp32/tf32) may raise ``ValueError``."""
         if variant == "tiled":
             spec = DirectDepthwiseTiledSpec(
                 problem=p,
@@ -661,8 +713,19 @@ def _run_depthwise_sweep(
             build = build_direct_depthwise
         # A spilling row-streaming kernel takes minutes to build and is left to
         # the output-stationary kernel (as in the AOT grid).
-        if variant in ("preload", "spatial"):
-            ok = ok and depthwise_stream_register_reason(spec) is None
+        if ok and variant in ("preload", "spatial"):
+            ok = depthwise_stream_register_reason(spec) is None
+        return spec, ok, build
+
+    n_skipped = 0
+    pending = []
+    for combo in combos:
+        try:
+            spec, ok, build = _candidate(*combo)
+        except ValueError:
+            # Refused on construction or validation: skip it, not the sweep.
+            n_skipped += 1
+            continue
         if not ok:
             n_skipped += 1
             continue
@@ -747,6 +810,7 @@ def _run_depthwise_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                tol=direct_verify_tol(dtype, arch),
             )
             if stopped:
                 rt.free(A_dev)
@@ -808,7 +872,10 @@ def _run_depthwise_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results = _rank_verified(results, lambda r: r.tflops, lambda r: r.passed)
+    if not results:
+        print("No depthwise configuration passed verify.", file=sys.stderr)
+        return 1, []
     _print_depthwise_results(results, args.top, arch, p, args.verify, dtype=dtype)
     return 0, results
 
@@ -843,7 +910,7 @@ def _run_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    _torch_dtype = _torch_dtype_of(dtype)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
     B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
@@ -853,10 +920,13 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    sig = conv_direct_args_signature(_abi_dtype(dtype))
     _direct_args = ConvArgs.from_problem(p)
 
-    combos = list(itertools.product(_BLOCK_Q, _BLOCK_GROUPS, _DOUBLE_BUFFER))
+    # fp32 storage (fp32/tf32) also sweeps the K-32 fold, as the AOT grid
+    # does; the 16-bit sweep keeps the kernel's default (no fold).
+    _folds = _GROUPED_FOLD_K32 if direct_storage_dtype(dtype) == "fp32" else (False,)
+    combos = list(itertools.product(_BLOCK_Q, _BLOCK_GROUPS, _DOUBLE_BUFFER, _folds))
 
     if args.sample is not None:
         total = len(combos)
@@ -876,15 +946,22 @@ def _run_sweep(
     n_skipped = 0
     pending = []
     for combo in combos:
-        block_q, block_groups, double_buffer = combo
-        spec = DirectConvSpec(
-            problem=p,
-            name="rocke_bench_direct_conv",
-            block_q=block_q,
-            block_groups=block_groups,
-            double_buffer=double_buffer,
-        )
-        ok, _ = is_valid_spec(spec, arch=arch)
+        block_q, block_groups, double_buffer, fold_k32 = combo
+        if tf32_narrow_reason("direct_grouped", p, {"fold_k32": fold_k32}, arch):
+            n_skipped += 1
+            continue
+        try:
+            spec = DirectConvSpec(
+                problem=p,
+                name="rocke_bench_direct_conv",
+                block_q=block_q,
+                block_groups=block_groups,
+                double_buffer=double_buffer,
+                **({"fold_k32": True} if fold_k32 else {}),
+            )
+            ok, _ = is_valid_spec(spec, arch=arch)
+        except ValueError:
+            ok = False
         if not ok:
             n_skipped += 1
             continue
@@ -921,7 +998,7 @@ def _run_sweep(
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, kernel in pending:
-        block_q, block_groups, double_buffer = combo
+        block_q, block_groups, double_buffer, _ = combo
         artifact = artifact_map[kernel.name]
 
         try:
@@ -966,6 +1043,7 @@ def _run_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                tol=direct_verify_tol(dtype, arch),
             )
             if stopped:
                 rt.free(A_dev)
@@ -1004,7 +1082,7 @@ def _run_sweep(
         )
         print(
             f"[{n_run:4d}] bq={block_q:3d} bg={block_groups:3d} "
-            f"db={double_buffer}  "
+            f"db={double_buffer}{' k32' if spec.fold_k32 else ''}  "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -1021,7 +1099,10 @@ def _run_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results = _rank_verified(results, lambda r: r.tflops, lambda r: r.passed)
+    if not results:
+        print("No configuration passed verify.", file=sys.stderr)
+        return 1, []
     _print_results(results, args.top, arch, p, args.verify, dtype=dtype)
     return 0, results
 
@@ -1065,7 +1146,7 @@ def _run_nongrouped_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    _torch_dtype = _torch_dtype_of(dtype)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
     B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
@@ -1075,9 +1156,22 @@ def _run_nongrouped_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    sig = conv_direct_args_signature(_abi_dtype(dtype))
 
-    specs = nongrouped_specs(p, arch=arch, name="rocke_bench_direct_conv_nongrouped")
+    try:
+        specs = nongrouped_specs(
+            p, arch=arch, name="rocke_bench_direct_conv_nongrouped"
+        )
+    except ValueError as e:
+        # The kernel has no build for this dtype (fp32/tf32) yet.
+        print(f"No non-grouped kernel for this problem: {e}", file=sys.stderr)
+        return 1, []
+    # TF32 on an emulated arch: drop narrow atoms a wide one covers.
+    specs = [
+        sp
+        for sp in specs
+        if not tf32_narrow_reason("direct_nongrouped", p, {"atom": sp.atom}, arch)
+    ]
     if args.sample is not None:
         total = len(specs)
         specs = _sample_combos(specs, args.sample, args.seed)
@@ -1180,6 +1274,7 @@ def _run_nongrouped_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                tol=direct_verify_tol(dtype, arch),
             )
             if stopped:
                 rt.free(A_dev)
@@ -1230,7 +1325,10 @@ def _run_nongrouped_sweep(
         print("No valid configurations found.", file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r.tflops, reverse=True)
+    results = _rank_verified(results, lambda r: r.tflops, lambda r: r.passed)
+    if not results:
+        print("No non-grouped configuration passed verify.", file=sys.stderr)
+        return 1, []
     top_n = min(args.top, len(results))
     width = 110
     print(f"\n{'='*width}")
@@ -1287,7 +1385,7 @@ def _run_wgrad_sweep(
     p = problem
     # dY and X carry the problem dtype; dW is fp32 either way -- the
     # split-K reduction lands through fp32 global atomics.
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    _torch_dtype = _torch_dtype_of(dtype)
 
     torch.manual_seed(42)
     X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
@@ -1300,7 +1398,7 @@ def _run_wgrad_sweep(
     flop = float(p.flops)
 
     # Direct conv is AOT: the whole shape travels as kernargs; D is fp32 dW.
-    sig_wg = conv_direct_args_signature(dtype, direction="wgrad")
+    sig_wg = conv_direct_args_signature(_abi_dtype(dtype), direction="wgrad")
     _direct_args = ConvArgs.from_problem(p, direction="wgrad")
 
     # (waves_k, waves_c, waves_q). waves_c > 1 is what lets one block cover the
@@ -1341,16 +1439,23 @@ def _run_wgrad_sweep(
     n_skipped = 0
     pending = []
     for waves_k, waves_c, waves_q, hpb, mk in combos:
-        spec = DirectConvWgradSpec(
-            problem=p,
-            name="rocke_bench_direct_wgrad",
-            waves_k=waves_k,
-            waves_c=waves_c,
-            waves_q=waves_q,
-            ho_per_block=hpb,
-            mfma_k=mk,
-        )
-        ok, _ = is_valid_wgrad_spec(spec, arch=arch)
+        if tf32_narrow_reason("direct_wgrad", p, {"mfma_k": mk}, arch):
+            n_skipped += 1
+            continue
+        try:
+            spec = DirectConvWgradSpec(
+                problem=p,
+                name="rocke_bench_direct_wgrad",
+                waves_k=waves_k,
+                waves_c=waves_c,
+                waves_q=waves_q,
+                ho_per_block=hpb,
+                mfma_k=mk,
+            )
+            ok, _ = is_valid_wgrad_spec(spec, arch=arch)
+        except ValueError:
+            # No wgrad kernel for this dtype (fp32/tf32): skip, not crash.
+            ok = False
         if not ok:
             n_skipped += 1
             continue
@@ -1433,7 +1538,7 @@ def _run_wgrad_sweep(
             abs_diff = (dW_cpu.float() - dW_ref_t.float()).abs()
             ref_scale = dW_ref_t.float().abs().max().clamp(min=1.0)
             rel_err = float(abs_diff.max() / ref_scale)
-            tol = 5e-2
+            tol = direct_verify_tol(dtype, arch)
             kernel_passed = rel_err < tol
             status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
             print(f"  verify {artifact.kernel_name}: {status}", flush=True)
@@ -1471,6 +1576,7 @@ def _run_wgrad_sweep(
                 "gbps": gbps,
                 "passed": kernel_passed,
                 "n_blocks": n_blocks,
+                "kernel_name": artifact.kernel_name,
             }
         )
         n_run += 1
@@ -1491,7 +1597,10 @@ def _run_wgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r["tflops"], reverse=True)
+    results = _rank_verified(results, lambda r: r["tflops"], lambda r: r["passed"])
+    if not results:
+        print("No wgrad configuration passed verify.", file=sys.stderr)
+        return 1, []
     best = results[0]
     passed_str = (
         f"  {'PASS' if best['passed'] else 'FAIL'}"
@@ -1501,6 +1610,12 @@ def _run_wgrad_sweep(
     print(
         f"\nBest wgrad: wk={best['wk']} wc={best['wc']} wq={best['wq']} hpb={best['hpb']} mk={best['mk']}  "
         f"blocks={best['n_blocks']}  {best['tflops']:.1f} TFLOPS  {best['ms']:.3f} ms{passed_str}",
+        flush=True,
+    )
+    # The line benchmark_conv_compare.py reads ("Best: <tflops> TFLOPS — <name>"),
+    # which the detailed line above does not match.
+    print(
+        f"Best: {best['tflops']:.1f} TFLOPS — {best['kernel_name']}  {best['ms']:.3f} ms",
         flush=True,
     )
     return 0, results
@@ -1566,7 +1681,7 @@ def _run_dgrad_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    _torch_dtype = _torch_dtype_of(dtype)
     dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
@@ -1578,9 +1693,9 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype, direction="dgrad")
+    sig = conv_direct_args_signature(_abi_dtype(dtype), direction="dgrad")
     _direct_args = ConvArgs.from_problem(p, direction="dgrad")
-    fprop_sig = conv_direct_args_signature(dtype)
+    fprop_sig = conv_direct_args_signature(_abi_dtype(dtype))
 
     is_depthwise = p.cpg == 1
 
@@ -1601,13 +1716,16 @@ def _run_dgrad_sweep(
         n_skipped = 0
         pending = []
         for block_w, block_waves in combos_dw:
-            spec = DirectDepthwiseDgradStreamSpec(
-                problem=p,
-                name="rocke_bench_dw_dgrad",
-                block_w=block_w,
-                block_waves=block_waves,
-            )
-            ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+            try:
+                spec = DirectDepthwiseDgradStreamSpec(
+                    problem=p,
+                    name="rocke_bench_dw_dgrad",
+                    block_w=block_w,
+                    block_waves=block_waves,
+                )
+                ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+            except ValueError:
+                ok = False
             if not ok:
                 n_skipped += 1
                 continue
@@ -1651,7 +1769,7 @@ def _run_dgrad_sweep(
             pending = []
             for block_q, block_groups in combos:
                 for block_h in _DGRAD_BLOCK_H:
-                    for waves_q, waves_k, use_rk, use_pg, use_k32 in _DGRAD_WAVES:
+                    for waves_q, waves_k, use_rk, use_pg, use_k32 in dgrad_waves(dtype):
                         if block_q // waves_q < 16:
                             n_skipped += 1
                             continue
@@ -1667,21 +1785,40 @@ def _run_dgrad_sweep(
                         if N_KA == 0 or N_KA % waves_k != 0:
                             n_skipped += 1
                             continue
-                        fprop_spec = make_dgrad_fprop_spec(
+                        if tf32_narrow_reason(
+                            "direct_grouped_dgrad_mfma",
                             p,
-                            block_q=block_q,
-                            block_groups=block_groups,
-                            block_h=block_h,
-                            waves_q=waves_q,
-                            waves_k=waves_k,
-                            runtime_k_loop=use_rk,
-                            persistent_grid=use_pg,
-                        )
+                            dict(
+                                block_q=block_q,
+                                waves_q=waves_q,
+                                waves_k=waves_k,
+                                runtime_k_loop=use_rk,
+                                persistent_grid=use_pg,
+                                fold_k32=use_k32,
+                            ),
+                            arch,
+                        ):
+                            n_skipped += 1
+                            continue
                         from dataclasses import replace as dc_replace
 
-                        if use_k32:
-                            fprop_spec = dc_replace(fprop_spec, fold_k32=True)
-                        ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
+                        try:
+                            fprop_spec = make_dgrad_fprop_spec(
+                                p,
+                                block_q=block_q,
+                                block_groups=block_groups,
+                                block_h=block_h,
+                                waves_q=waves_q,
+                                waves_k=waves_k,
+                                runtime_k_loop=use_rk,
+                                persistent_grid=use_pg,
+                            )
+                            if use_k32:
+                                fprop_spec = dc_replace(fprop_spec, fold_k32=True)
+                            ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
+                        except ValueError:
+                            # No MFMA dgrad for this dtype (fp32/tf32).
+                            ok = False
                         if not ok:
                             n_skipped += 1
                             continue
@@ -1727,13 +1864,16 @@ def _run_dgrad_sweep(
             n_skipped = 0
             pending = []
             for block_q, block_groups in combos:
-                spec = DirectConvDgradSpec(
-                    problem=p,
-                    name="rocke_bench_direct_dgrad",
-                    block_q=block_q,
-                    block_groups=block_groups,
-                )
-                ok, _ = is_valid_dgrad_spec(spec, arch=arch)
+                try:
+                    spec = DirectConvDgradSpec(
+                        problem=p,
+                        name="rocke_bench_direct_dgrad",
+                        block_q=block_q,
+                        block_groups=block_groups,
+                    )
+                    ok, _ = is_valid_dgrad_spec(spec, arch=arch)
+                except ValueError:
+                    ok = False
                 if not ok:
                     n_skipped += 1
                     continue
@@ -1882,12 +2022,11 @@ def _run_dgrad_sweep(
         # For 3-kernel MFMA pipeline: load transpose1 and reorganize launchers.
         t1_launcher = t2_launcher = None
         if is_mfma_pair:
-            _wt_sig = [
-                {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-                {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
-                {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-                {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-            ]
+            from kernels.common.conv_abi import (
+                conv_direct_transform_signature as _transform_signature,
+            )
+
+            _wt_sig = _transform_signature(dtype)
             kt1_art = artifact_map.get(kt[0].name)
             kt2_art = artifact_map.get(kt[1].name)
             if kt1_art is None or kt2_art is None:
@@ -1992,7 +2131,7 @@ def _run_dgrad_sweep(
                     ref_f32 = ref_out.float().cpu()
                     abs_diff = (out_f32 - ref_f32).abs()
                     rel_err = float(abs_diff.max() / ref_f32.abs().max().clamp(min=1.0))
-                    tol = 5e-2
+                    tol = direct_verify_tol(dtype, arch)
                     kernel_passed = rel_err < tol
                     status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
                     print(f"  verify {artifact.kernel_name}: {status}", flush=True)
@@ -2010,6 +2149,7 @@ def _run_dgrad_sweep(
                     kernel_name=artifact.kernel_name,
                     dump_fail=args.dump_fail,
                     u8=u8,
+                    tol=direct_verify_tol(dtype, arch),
                 )
                 if stopped:
                     rt.free(dY_dev)
@@ -2078,7 +2218,10 @@ def _run_dgrad_sweep(
             print(_stop.summary(), file=sys.stderr)
         return 1, []
 
-    results.sort(key=lambda r: r["tflops"], reverse=True)
+    results = _rank_verified(results, lambda r: r["tflops"], lambda r: r["passed"])
+    if not results:
+        print("No dgrad configuration passed verify.", file=sys.stderr)
+        return 1, []
     best = results[0]
     passed_str = (
         f"  {'PASS' if best['passed'] else 'FAIL'}"
@@ -2198,7 +2341,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 f"{'/'.join(DIRECT_DTYPES)} (got {dtype})"
             )
             continue
-        torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
+        torch_dt = _torch_dtype_of(dtype)
         for direction in directions or (case_direction,):
             plans, rejected = direct_plans(cache, p, direction, arch)
             if not plans:
@@ -2317,13 +2460,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                         (out_cpu.float() - ref_f32).abs().max()
                         / ref_f32.abs().max().clamp(min=1.0)
                     )
-                    passed = rel_err < 5e-2
+                    passed = rel_err < direct_verify_tol(dtype, arch)
                     if not passed:
                         overall_rc = 1
-                        print(
-                            f"  verify {plan.label}: FAIL(rel_err={rel_err:.2e})",
-                            flush=True,
-                        )
+                    status = "PASS" if passed else f"FAIL(rel_err={rel_err:.2e})"
+                    print(f"  verify {plan.label}: {status}", flush=True)
 
                 try:
                     ms = _stop.measure(
@@ -2358,7 +2499,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     print(f"  {_stop.summary()}", flush=True)
                 overall_rc = overall_rc or 1
                 continue
-            results.sort(key=lambda r: r[0], reverse=True)
+            results = _rank_verified(results, lambda r: r[0], lambda r: r[3])
+            if not results:
+                print("  no cached kernel passed verify", flush=True)
+                overall_rc = overall_rc or 1
+                continue
             print(
                 f"  {'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  kernel"
             )
@@ -2503,11 +2648,13 @@ def main() -> int:
     )
     conv.add_argument(
         "--dtype",
-        choices=("fp16", "bf16"),
+        choices=("fp16", "bf16", "fp32", "tf32"),
         default=None,
         help="I/O data type when using shape flags (default: fp16; cases from "
-        "--miopen-cmd/--miopen-file carry their own dtype). --compile-all builds "
-        "the cache for every data type unless --dtype names one.",
+        "--miopen-cmd/--miopen-file carry their own dtype). fp32 and tf32 both "
+        "store fp32 tensors; tf32 feeds the MFMA kernels TF32 operands (native "
+        "XF32 on gfx942, BF16x3 on gfx950), fp32 the exact fp32 atoms. "
+        "--compile-all builds the cache for fp16 and bf16 unless --dtype names one.",
     )
 
     cache_grp = parser.add_argument_group(
@@ -2560,9 +2707,11 @@ def main() -> int:
 
     args = parser.parse_args()
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
-    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_COMPILE_DTYPES
 
-    args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
+    args.compile_dtypes = (
+        (args.dtype,) if args.dtype is not None else DIRECT_COMPILE_DTYPES
+    )
     if args.dtype is None:
         args.dtype = "fp16"
     # --direction likewise: fwd for shape flags, every cached direction for
@@ -2692,6 +2841,13 @@ def main() -> int:
             dil_w=args.dW,
         )
         cases = [(problem, args.dtype, args.direction)]
+
+    # A TF32 case (--dtype tf32 or a MIOpenDriver ``-M 0`` command) only means
+    # something over verified kernels: a fast kernel that silently computes at
+    # lower precision would otherwise rank.
+    if not args.verify and any(c[1] == "tf32" for c in cases):
+        print("tf32 cases imply --verify")
+        args.verify = True
 
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)
