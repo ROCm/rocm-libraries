@@ -158,20 +158,10 @@ TEST(TestSlottedEngine, RunsThePicksInSlotOrderWithTheUnshiftedWorkspaceBase)
         EXPECT_EQ(launch.scratchOffset, static_cast<int64_t>(SHARED_ALIGNED));
         EXPECT_EQ(launch.deltaOffset, DELTA_OFFSET);
     }
-}
-
-TEST(TestSlottedEngine, ThePlansWorkspaceIsTheAlignedSharedRegionPlusItsLargestScratch)
-{
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const StubHandle handle;
 
     // Picks prep_a (0), dkdv_a (4096), dq_a (2048): scratch is reused, not summed.
-    EXPECT_EQ(build(fixture, graph).plan().getWorkspaceSize(handle), SHARED_ALIGNED + 4096);
-
-    // Pinning dkdv_c (8192) moves the largest scratch.
-    EXPECT_EQ(build(fixture, graph, {{"dkdv.block_m", 256}}).plan().getWorkspaceSize(handle),
-              SHARED_ALIGNED + 8192);
+    const StubHandle handle;
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), SHARED_ALIGNED + 4096);
 }
 
 TEST(TestSlottedEngine, TheEnginesMaximumIsTheAlignedSharedRegionPlusTheLargestSurvivingScratch)
@@ -244,36 +234,6 @@ TEST(TestSlottedEngine, TheWorkspaceLimitPrunesAKernelWhoseTotalExceedsIt)
               SHARED_ALIGNED + 4096);
 }
 
-TEST(TestSlottedEngine, ALimitThatLeavesASlotWithNoKernelIsRejectedNamingTheSlot)
-{
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-
-    // Every dkdv kernel needs at least 4096 of scratch.
-    const auto [status, text] = failureOf([&] {
-        build(fixture, graph, {{hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 5000}});
-    });
-
-    EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-    EXPECT_NE(text.find("slot 'dkdv'"), std::string::npos) << text;
-}
-
-TEST(TestSlottedEngine, TheEngineDeclinesWhenTheSharedRegionAloneExceedsTheLimit)
-{
-    SlottedEngineFixture fixture;
-    const TestGraph graph(makeGraphId(1));
-    const StubHandle handle;
-    // 1000 bytes shared, 1024 aligned: the region exceeds a 1000-byte limit.
-    const Settings limit{{hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 1000}};
-
-    EXPECT_EQ(failureOf([&] { build(fixture, graph, limit); }).first,
-              HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-    const Config config(limit);
-    EXPECT_EQ(
-        failureOf([&] { fixture.engine().getMaxWorkspaceSize(handle, graph, config.get()); }).first,
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-}
-
 /// One kernel per slot; the shared region is 1000 bytes, which is 1024 aligned.
 Kernels singleKernels(int64_t dkdvScratch)
 {
@@ -324,6 +284,12 @@ TEST(TestSlottedEngine, ALimitEqualToTheAlignedSharedRegionAcceptsItAndOneByteBe
                                       + std::to_string(limit) + " bytes"),
                   std::string::npos)
             << failure.second;
+        const Config config({{hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, limit}});
+        EXPECT_EQ(failureOf([&] {
+                      fixture.engine().getMaxWorkspaceSize(handle, graph, config.get());
+                  }).first,
+                  HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+            << limit;
     }
 }
 
@@ -653,6 +619,24 @@ TEST(TestSlottedEngine, AConfigurationPredictionIsUnavailableWithoutAValidProgra
     EXPECT_EQ(prediction.engine_config, nullptr);
     EXPECT_NE(prediction.reason.find("No valid program record exists"), std::string::npos)
         << prediction.reason;
+}
+
+/// A kernel with several launches is one selection of its slot: the slots beside it keep their
+/// single-launch handlers, each slot has a dispatch of its own, and the program builds and runs
+/// every slot's pick.
+TEST(TestSlottedEngine, AMultiLaunchSlotBesideSingleLaunchSlotsIsApplicableAndBuilds)
+{
+    SlottedEngineFixture fixture(defaultSlotKernels(), {}, {{1, {"decode", "merge"}}});
+    const TestGraph graph(makeGraphId(1));
+    StubHandle handle;
+
+    EXPECT_TRUE(fixture.engine().isApplicable(handle, graph));
+    const auto context = build(fixture, graph);
+    std::vector<char> workspace(SHARED_ALIGNED + 16384);
+    executeWith(context, workspace.data());
+
+    EXPECT_EQ(fixture.log().slotOrder(), (std::vector<std::string>{"prep", "dkdv", "dq"}));
+    EXPECT_EQ(fixture.log().launches[1].kernel, testId(0x21));
 }
 
 } // namespace

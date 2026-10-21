@@ -2202,29 +2202,37 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
 
 
 def _check_launch_names_agree(config: IngestorConfig) -> None:
-    """Every kernel of the engine names the same set of launches.
+    """Every kernel of an engine, or of a slot for a slotted engine, names the
+    same set of launches.
 
-    The engine has one dispatch handler, and the handler declares the one set of
-    launch names it launches (``launchNames()``, which the generated native stub
-    emits). The state manager drops a kernel whose set differs from it, so a
-    config mixing single-launch and multi-launch kernels, or two different sets,
-    would generate cleanly and ship kernels that are dropped at load.
+    The engine (a slot, when slotted) has one dispatch handler, and the handler
+    declares the one set of launch names it launches (``launchNames()``, which
+    the generated native stub emits). The state manager drops a kernel whose set
+    differs from it, so a config mixing single-launch and multi-launch kernels,
+    or two different sets, would generate cleanly and ship kernels that are
+    dropped at load. Slots have separate handlers, so they may differ from one
+    another (RFC 0021 §4).
     """
-    expected = None
-    first = ""
+    scopes: dict = {}
     for pack in config.packs:
+        scope = pack.slot if config.is_slotted else None
         for kernel in pack.kernels:
             names = frozenset(kernel.kernel_source.launches)
             where = f"pack '{pack.name}' kernel '{kernel.name}'"
-            if expected is None:
-                expected, first = names, where
-            elif names != expected:
+            expected, first = scopes.setdefault(scope, (names, where))
+            if names != expected:
+                owner = (
+                    f"One slot ('{scope}') has one dispatch handler"
+                    if config.is_slotted
+                    else "One engine has one dispatch handler"
+                )
                 raise ConfigError(
                     f"{where} names launches {sorted(names) or 'none'}, but "
-                    f"{first} names {sorted(expected) or 'none'}. One engine has "
-                    f"one dispatch handler, which declares one set of launch "
-                    f"names, and a kernel whose set differs is dropped when the "
-                    f"catalog loads. Split the kernels into engines by launch "
+                    f"{first} names {sorted(expected) or 'none'}. {owner}, which "
+                    f"declares one set of launch names, and a kernel whose set "
+                    f"differs is dropped when the catalog loads. Split the "
+                    f"kernels into "
+                    f"{'slots' if config.is_slotted else 'engines'} by launch "
                     f"set."
                 )
 

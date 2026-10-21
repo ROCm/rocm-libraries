@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -137,22 +138,25 @@ std::vector<const hipdnn_plugin_sdk::ingestor::KernelSource*>
     return sources;
 }
 
-// PORT(H): C4-01 slotted fixture shard helpers, kept beside develop's launchSources
-/// The packed slotted fixture's arch shards (RFC 0021): the packer's output for
-/// `descriptor-packaging/tests/fixtures/slotted`, staged as a sibling of the unit and
+/// The arch shards of a packed fixture root (RFC 0021): the packer's output for
+/// `descriptor-packaging/tests/fixtures/<fixture>`, staged as a sibling of the unit and
 /// integration trees so that the embedded-source verification of the unit tree does not
 /// walk it.
 ///
 /// Reached from the unit kpack root because a binary that finds one finds both. Absent
-/// when the unit shards exist, the slotted pack did not run: that fails, since a shard
+/// when the unit shards exist, the fixture's pack did not run: that fails, since a shard
 /// that was never produced is exactly what these cases must not pass over.
-std::vector<std::filesystem::path> packedSlottedShards()
+std::filesystem::path packedFixtureRoot(const char* fixture)
+{
+    return unitKpackRoot().parent_path().parent_path() / fixture;
+}
+
+std::vector<std::filesystem::path> packedFixtureShards(const char* fixture)
 {
     std::vector<std::filesystem::path> shards;
 
     std::error_code ec;
-    const std::filesystem::path root = unitKpackRoot().parent_path().parent_path() / "slotted";
-    for(const auto& entry : std::filesystem::directory_iterator(root, ec))
+    for(const auto& entry : std::filesystem::directory_iterator(packedFixtureRoot(fixture), ec))
     {
         std::error_code inner;
         if(entry.is_directory(inner))
@@ -165,20 +169,144 @@ std::vector<std::filesystem::path> packedSlottedShards()
     return shards;
 }
 
-/// The slotted shards, a skip when nothing was packed at all, or a failure when the unit
-/// pack ran and the slotted one did not.
-#define REQUIRE_PACKED_SLOTTED_SHARDS(slottedShards)                                    \
-    REQUIRE_PACKED_SHARDS(unitShards);                                                  \
-    /* NOLINTNEXTLINE(bugprone-macro-parentheses) declarator name, not an expression */ \
-    const auto slottedShards = packedSlottedShards();                                   \
-    ASSERT_FALSE((slottedShards).empty())                                               \
-        << "the unit shards exist but the slotted fixture was not packed under "        \
-        << (unitKpackRoot().parent_path().parent_path() / "slotted")                    \
-        << ". Its packing root (hkp_packaging_slotted) did not run or is not a "        \
-           "dependency of this binary.";                                                \
+/// Calls `visit(shard, kernel)` for every kernel of every pack of every descriptor set
+/// that resolves from each shard's loaded catalog: the engine's own packs and, for a
+/// slotted engine, each slot's packs. Stops at the first fatal (ASSERT_) failure inside
+/// `visit`, as the test would have aborted.
+template <typename Visit>
+void forEachPackedKernel(const std::vector<std::filesystem::path>& shards, Visit&& visit)
+{
+    const auto visitPack = [&visit](const auto& shard, const auto& pack) {
+        for(const auto& kernel : pack.kernels)
+        {
+            visit(shard, kernel);
+            if(::testing::Test::HasFatalFailure())
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    for(const auto& shard : shards)
+    {
+        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+        {
+            for(const auto& pack : set.packs)
+            {
+                if(!visitPack(shard, pack))
+                {
+                    return;
+                }
+            }
+            for(const auto& slot : set.slots)
+            {
+                for(const auto& pack : slot.packs)
+                {
+                    if(!visitPack(shard, pack))
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The shards of @p fixture, a skip when nothing was packed at all, or a failure when the
+/// unit pack ran and the fixture's did not.
+#define REQUIRE_PACKED_FIXTURE_SHARDS(fixtureShards, fixture, packingTarget)                   \
+    REQUIRE_PACKED_SHARDS(unitShards);                                                         \
+    /* NOLINTNEXTLINE(bugprone-macro-parentheses) declarator name, not an expression */        \
+    const auto fixtureShards = packedFixtureShards(fixture);                                   \
+    ASSERT_FALSE((fixtureShards).empty())                                                      \
+        << "the unit shards exist but the fixture '" << (fixture) << "' was not packed under " \
+        << packedFixtureRoot(fixture) << ". Its packing root (" << (packingTarget)             \
+        << ") did not run or is not a dependency of this binary.";                             \
     static_assert(true, "swallow the trailing semicolon")
 
+#define REQUIRE_PACKED_SLOTTED_SHARDS(slottedShards) \
+    REQUIRE_PACKED_FIXTURE_SHARDS(slottedShards, "slotted", "hkp_packaging_slotted")
+
+#define REQUIRE_PACKED_SLOTTED_HSACO_SHARDS(hsacoShards) \
+    REQUIRE_PACKED_FIXTURE_SHARDS(hsacoShards, "slotted_hsaco", "hkp_packaging_slotted_hsaco")
+
+// The multi-launch fixture is rocKE content: it packs only in a build with rocKE on.
+#ifdef HIPKERNELPROVIDER_PACKED_SLOTTED_MULTI_LAUNCH
+#define REQUIRE_PACKED_SLOTTED_MULTI_LAUNCH_SHARDS(multiLaunchShards) \
+    REQUIRE_PACKED_FIXTURE_SHARDS(                                    \
+        multiLaunchShards, "slotted_multi_launch", "hkp_packaging_slotted_multi_launch")
+#else
+#define REQUIRE_PACKED_SLOTTED_MULTI_LAUNCH_SHARDS(multiLaunchShards)             \
+    const std::vector<std::filesystem::path> multiLaunchShards;                   \
+    GTEST_SKIP() << "the slotted multi-launch fixture is rocKE content and this " \
+                    "build packs without rocKE (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF)"
+#endif
+
 constexpr const char* SLOTTED_ENGINE = "hipkernel:SlottedFixture";
+constexpr const char* SLOTTED_HSACO_ENGINE = "hipkernel:SlottedHsaco";
+constexpr const char* SLOTTED_MULTI_LAUNCH_ENGINE = "hipkernel:SlottedMultiLaunch";
+
+/// The engine named @p name in @p shard's resolved sets, or nullptr. @p sets owns it.
+const hipdnn_plugin_sdk::ingestor::DescriptorSet*
+    findEngine(const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& sets,
+               const std::string& name)
+{
+    const auto found = std::find_if(
+        sets.begin(), sets.end(), [&name](const auto& set) { return set.engine.name == name; });
+    return found == sets.end() ? nullptr : &*found;
+}
+
+/// Every launch of every packed kernel in @p shards, slot packs included, names a code
+/// object that is on disk and carries the coordinates the kpack adapter needs.
+void expectPackedLaunchesAreUsable(const std::vector<std::filesystem::path>& shards)
+{
+    size_t launches = 0;
+    forEachPackedKernel(shards, [&launches](const auto& shard, const auto& kernel) {
+        for(const auto* source : launchSources(kernel))
+        {
+            EXPECT_EQ(source->kind, KernelSourceKind::KPACK) << kernel.name << " in " << shard;
+            EXPECT_FALSE(source->tocKey.empty()) << kernel.name;
+            EXPECT_FALSE(source->symbol.empty()) << kernel.name;
+            EXPECT_FALSE(source->sha256.empty()) << kernel.name;
+            EXPECT_FALSE(source->signature.empty()) << kernel.name;
+            EXPECT_TRUE(std::filesystem::exists(
+                std::filesystem::weakly_canonical(kernel.originDirectory / source->library)))
+                << "kernel '" << kernel.name << "' names an archive that is not there: "
+                << (kernel.originDirectory / source->library);
+            ++launches;
+        }
+    });
+    EXPECT_GT(launches, 0U);
+}
+
+/// The `.ued.json`, `.kdp.json` and `.uhd.json` files under @p shard, to be compared with
+/// what the loader accepted: it skips a file it cannot parse, so only a count notices one
+/// that vanished.
+struct DescriptorFileCounts
+{
+    size_t engines = 0;
+    size_t packs = 0;
+    size_t models = 0;
+};
+
+DescriptorFileCounts countDescriptorFiles(const std::filesystem::path& shard)
+{
+    DescriptorFileCounts counts;
+    std::error_code ec;
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(shard, ec))
+    {
+        const auto name = entry.path().filename().string();
+        const auto endsWith = [&name](const std::string& suffix) {
+            return name.size() > suffix.size()
+                   && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
+        counts.engines += endsWith(".ued.json") ? 1U : 0U;
+        counts.packs += endsWith(".kdp.json") ? 1U : 0U;
+        counts.models += endsWith(".uhd.json") ? 1U : 0U;
+    }
+    return counts;
+}
 
 } // namespace
 
@@ -286,48 +414,42 @@ TEST(TestPackedDescriptorLoad, LibraryResolvesFromTheDescriptorThatDeclaredIt)
 
     size_t kpackKernelsChecked = 0;
 
-    for(const auto& shard : shards)
-    {
-        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+    forEachPackedKernel(shards, [&kpackKernelsChecked](const auto& /*shard*/, const auto& kernel) {
+        for(const auto* source : launchSources(kernel))
         {
-            for(const auto& pack : set.packs)
+            if(source->kind != KernelSourceKind::KPACK)
             {
-                for(const auto& kernel : pack.kernels)
-                {
-                    for(const auto* source : launchSources(kernel))
-                    {
-                        if(source->kind != KernelSourceKind::KPACK)
-                        {
-                            continue;
-                        }
-
-                        ASSERT_FALSE(kernel.originDirectory.empty())
-                            << "kernel '" << kernel.name
-                            << "' came from a file but carries no originDirectory, so nothing can "
-                               "anchor its library.";
-                        ASSERT_FALSE(source->library.empty())
-                            << "packed kernel '" << kernel.name << "' names no archive.";
-
-                        std::error_code ec;
-                        const auto resolved = std::filesystem::weakly_canonical(
-                            kernel.originDirectory / source->library, ec);
-
-                        EXPECT_TRUE(std::filesystem::exists(resolved))
-                            << "kernel '" << kernel.name
-                            << "' names an archive that is not there.\n"
-                            << "  originDirectory : " << kernel.originDirectory << "\n"
-                            << "  library         : " << source->library << "\n"
-                            << "  resolves to     : " << resolved << "\n"
-                            << "This is the runtime's own join (IngestorKernelCode.hpp, KPACK "
-                               "branch). A library written relative to the arch root instead of to "
-                               "this descriptor's own directory fails exactly here, and only for "
-                               "nested descriptors.";
-
-                        ++kpackKernelsChecked;
-                    }
-                }
+                continue;
             }
+
+            ASSERT_FALSE(kernel.originDirectory.empty())
+                << "kernel '" << kernel.name
+                << "' came from a file but carries no originDirectory, so nothing can "
+                   "anchor its library.";
+            ASSERT_FALSE(source->library.empty())
+                << "packed kernel '" << kernel.name << "' names no archive.";
+
+            std::error_code ec;
+            const auto resolved
+                = std::filesystem::weakly_canonical(kernel.originDirectory / source->library, ec);
+
+            EXPECT_TRUE(std::filesystem::exists(resolved))
+                << "kernel '" << kernel.name << "' names an archive that is not there.\n"
+                << "  originDirectory : " << kernel.originDirectory << "\n"
+                << "  library         : " << source->library << "\n"
+                << "  resolves to     : " << resolved << "\n"
+                << "This is the runtime's own join (IngestorKernelCode.hpp, KPACK "
+                   "branch). A library written relative to the arch root instead of to "
+                   "this descriptor's own directory fails exactly here, and only for "
+                   "nested descriptors.";
+
+            ++kpackKernelsChecked;
         }
+    });
+
+    if(HasFatalFailure())
+    {
+        return;
     }
 
     // Without this the test passes vacuously on a tree that packed no kpack kernel at all
@@ -365,56 +487,46 @@ TEST(TestPackedDescriptorLoad, PackedKernelsSatisfyTheRuntimeContainmentGuard)
 
     size_t nestedChecked = 0;
 
-    for(const auto& shard : shards)
-    {
-        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+    forEachPackedKernel(shards, [&nestedChecked](const auto& /*shard*/, const auto& kernel) {
+        for(const auto* source : launchSources(kernel))
         {
-            for(const auto& pack : set.packs)
+            if(source->kind != KernelSourceKind::KPACK)
             {
-                for(const auto& kernel : pack.kernels)
-                {
-                    for(const auto* source : launchSources(kernel))
-                    {
-                        if(source->kind != KernelSourceKind::KPACK)
-                        {
-                            continue;
-                        }
+                continue;
+            }
 
-                        ASSERT_FALSE(kernel.treeRoot.empty())
-                            << "kernel '" << kernel.name
-                            << "' carries no treeRoot, so the guard has nothing to anchor "
-                               "containment on and would fall back to its own directory.";
+            ASSERT_FALSE(kernel.treeRoot.empty())
+                << "kernel '" << kernel.name
+                << "' carries no treeRoot, so the guard has nothing to anchor "
+                   "containment on and would fall back to its own directory.";
 
-                        std::error_code ec;
-                        const auto origin
-                            = std::filesystem::weakly_canonical(kernel.originDirectory, ec);
-                        const auto boundary
-                            = std::filesystem::weakly_canonical(kernel.treeRoot, ec);
-                        const auto resolved
-                            = std::filesystem::weakly_canonical(origin / source->library, ec);
+            std::error_code ec;
+            const auto origin = std::filesystem::weakly_canonical(kernel.originDirectory, ec);
+            const auto boundary = std::filesystem::weakly_canonical(kernel.treeRoot, ec);
+            const auto resolved = std::filesystem::weakly_canonical(origin / source->library, ec);
 
-                        // IngestorKernelCode.hpp, KPACK branch, verbatim.
-                        const std::string relative
-                            = resolved.lexically_relative(boundary).generic_string();
-                        const bool escapes = resolved != boundary
-                                             && (relative.empty() || relative.rfind("..", 0) == 0);
+            // IngestorKernelCode.hpp, KPACK branch, verbatim.
+            const std::string relative = resolved.lexically_relative(boundary).generic_string();
+            const bool escapes
+                = resolved != boundary && (relative.empty() || relative.rfind("..", 0) == 0);
 
-                        EXPECT_FALSE(escapes)
-                            << "kernel '" << kernel.name
-                            << "' would be REFUSED by the runtime containment guard.\n"
-                            << "  originDirectory : " << origin << "\n"
-                            << "  treeRoot        : " << boundary << "\n"
-                            << "  library         : " << source->library << "\n"
-                            << "  resolves to     : " << resolved;
+            EXPECT_FALSE(escapes) << "kernel '" << kernel.name
+                                  << "' would be REFUSED by the runtime containment guard.\n"
+                                  << "  originDirectory : " << origin << "\n"
+                                  << "  treeRoot        : " << boundary << "\n"
+                                  << "  library         : " << source->library << "\n"
+                                  << "  resolves to     : " << resolved;
 
-                        if(origin != boundary)
-                        {
-                            ++nestedChecked;
-                        }
-                    }
-                }
+            if(origin != boundary)
+            {
+                ++nestedChecked;
             }
         }
+    });
+
+    if(HasFatalFailure())
+    {
+        return;
     }
 
     EXPECT_GT(nestedChecked, 0U)
@@ -434,40 +546,30 @@ TEST(TestPackedDescriptorLoad, PackedKernelsCarryCompleteKpackCoordinates)
 {
     REQUIRE_PACKED_SHARDS(shards);
 
-    for(const auto& shard : shards)
-    {
-        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+    forEachPackedKernel(shards, [](const auto& /*shard*/, const auto& kernel) {
+        for(const auto* source : launchSources(kernel))
         {
-            for(const auto& pack : set.packs)
+            if(source->kind != KernelSourceKind::KPACK)
             {
-                for(const auto& kernel : pack.kernels)
-                {
-                    for(const auto* source : launchSources(kernel))
-                    {
-                        if(source->kind != KernelSourceKind::KPACK)
-                        {
-                            continue;
-                        }
-
-                        EXPECT_FALSE(source->tocKey.empty())
-                            << "packed kernel '" << kernel.name
-                            << "' has an empty toc_key; the archive cannot be indexed.";
-                        EXPECT_FALSE(source->symbol.empty())
-                            << "packed kernel '" << kernel.name
-                            << "' has an empty symbol; no entry point can be resolved.";
-                        EXPECT_FALSE(source->sha256.empty())
-                            << "packed kernel '" << kernel.name << "' has an empty sha256.";
-                        // Every kernel this tree packs takes arguments, so an empty list here is
-                        // the extractor having found nothing rather than a nullary kernel -- the
-                        // failure that would otherwise read as a signature agreeing with anything.
-                        EXPECT_FALSE(source->signature.empty())
-                            << "packed kernel '" << kernel.name
-                            << "' has an empty signature; nothing would be compared at dispatch.";
-                    }
-                }
+                continue;
             }
+
+            EXPECT_FALSE(source->tocKey.empty())
+                << "packed kernel '" << kernel.name
+                << "' has an empty toc_key; the archive cannot be indexed.";
+            EXPECT_FALSE(source->symbol.empty())
+                << "packed kernel '" << kernel.name
+                << "' has an empty symbol; no entry point can be resolved.";
+            EXPECT_FALSE(source->sha256.empty())
+                << "packed kernel '" << kernel.name << "' has an empty sha256.";
+            // Every kernel this tree packs takes arguments, so an empty list here is
+            // the extractor having found nothing rather than a nullary kernel -- the
+            // failure that would otherwise read as a signature agreeing with anything.
+            EXPECT_FALSE(source->signature.empty())
+                << "packed kernel '" << kernel.name
+                << "' has an empty signature; nothing would be compared at dispatch.";
         }
-    }
+    });
 }
 
 /// Nothing in this root reaches the staged tree still claiming a producer-side source kind.
@@ -488,25 +590,15 @@ TEST(TestPackedDescriptorLoad, PackedKernelsWereRewrittenToKpackForm)
 {
     REQUIRE_PACKED_SHARDS(shards);
 
-    for(const auto& shard : shards)
-    {
-        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+    forEachPackedKernel(shards, [](const auto& shard, const auto& kernel) {
+        for(const auto* source : launchSources(kernel))
         {
-            for(const auto& pack : set.packs)
-            {
-                for(const auto& kernel : pack.kernels)
-                {
-                    for(const auto* source : launchSources(kernel))
-                    {
-                        EXPECT_EQ(source->kind, KernelSourceKind::KPACK)
-                            << "kernel '" << kernel.name << "' in " << shard
-                            << " reached the staged tree without being rewritten to kpack form; it "
-                               "still names a producer-side source the tree does not carry.";
-                    }
-                }
-            }
+            EXPECT_EQ(source->kind, KernelSourceKind::KPACK)
+                << "kernel '" << kernel.name << "' in " << shard
+                << " reached the staged tree without being rewritten to kpack form; it "
+                   "still names a producer-side source the tree does not carry.";
         }
-    }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +741,121 @@ TEST(TestPackedDescriptorLoad, PackedSlottedModelsAreBoundToTheirSlots)
             EXPECT_EQ(trained->kmds[index].kmd.id, engine->slots[index].schema.id) << shard;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Consumer-shaped slotted fixtures: authored hsaco slots, and multi-launch rocKE slots
+// ---------------------------------------------------------------------------
+
+/// The hsaco fixture loads whole: every slot keeps its pack and its own dispatch, `dq`
+/// ships its gfx950 pack alone (its generic-target pack belongs to the generic's members),
+/// and `dq`'s kernel carries the field naming a second symbol of its code object.
+TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulated)
+{
+    REQUIRE_PACKED_SLOTTED_HSACO_SHARDS(shards);
+
+    for(const auto& shard : shards)
+    {
+        const auto counts = countDescriptorFiles(shard);
+        const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
+        EXPECT_EQ(catalog.engines.size(), counts.engines) << shard;
+        EXPECT_EQ(catalog.packs.size(), counts.packs) << shard;
+        EXPECT_EQ(counts.packs, 3U) << shard;
+
+        const auto sets = resolveDescriptorSets(catalog);
+        const auto* engine = findEngine(sets, SLOTTED_HSACO_ENGINE);
+        ASSERT_NE(engine, nullptr) << shard << " resolved no engine named " << SLOTTED_HSACO_ENGINE;
+        ASSERT_EQ(engine->slots.size(), 3U) << shard;
+
+        const std::vector<std::string> names{"prep", "dkdv", "dq"};
+        const std::vector<std::string> symbols{
+            "HsacoFixtureScale", "HsacoFixtureAdd", "HsacoFixtureAdd"};
+        std::vector<std::string> dispatches;
+        for(size_t index = 0; index < names.size(); ++index)
+        {
+            const auto& slot = engine->slots[index];
+            EXPECT_EQ(slot.name, names[index]) << shard;
+            ASSERT_EQ(slot.packs.size(), 1U) << shard << ": slot '" << slot.name << "'";
+            ASSERT_EQ(slot.packs.front().kernels.size(), 1U) << shard;
+            const auto& kernel = slot.packs.front().kernels.front();
+            EXPECT_TRUE(kernel.sources.empty()) << "an authored hsaco kernel is one launch";
+            EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << shard;
+            EXPECT_EQ(kernel.source.symbol, symbols[index]) << shard;
+            dispatches.push_back(
+                hipdnn_plugin_sdk::ingestor::toString(slot.packs.front().dispatchId));
+        }
+        std::sort(dispatches.begin(), dispatches.end());
+        EXPECT_EQ(std::unique(dispatches.begin(), dispatches.end()), dispatches.end())
+            << shard << ": two slots share a dispatch descriptor";
+
+        // The second symbol is named by the dq kernel's metadata and is a different kernel
+        // of the same object, launched by the handler by symbol.
+        const auto& dq = engine->slots[2];
+        EXPECT_TRUE(std::any_of(dq.schema.fields.begin(),
+                                dq.schema.fields.end(),
+                                [](const auto& field) { return field.name == "reduce_symbol"; }))
+            << shard;
+        const auto& dqKernel = dq.packs.front().kernels.front();
+        const auto second = dqKernel.metadata.find("reduce_symbol");
+        ASSERT_NE(second, dqKernel.metadata.end()) << shard;
+        ASSERT_TRUE(std::holds_alternative<std::string>(second->second)) << shard;
+        EXPECT_EQ(std::get<std::string>(second->second), "HsacoFixtureScale") << shard;
+        EXPECT_NE(std::get<std::string>(second->second), dqKernel.source.symbol) << shard;
+    }
+
+    expectPackedLaunchesAreUsable(shards);
+}
+
+/// The multi-launch fixture loads whole: the `dkdv` slot's kernel keeps both launches as
+/// KPACK `sources` with their own symbols, `prep` and `dq` stay single-launch, and every
+/// slot has its own dispatch descriptor.
+TEST(TestPackedDescriptorLoad, PackedSlottedMultiLaunchEngineKeepsEachSlotsLaunches)
+{
+    REQUIRE_PACKED_SLOTTED_MULTI_LAUNCH_SHARDS(shards);
+
+    for(const auto& shard : shards)
+    {
+        const auto counts = countDescriptorFiles(shard);
+        const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
+        EXPECT_EQ(catalog.engines.size(), counts.engines) << shard;
+        EXPECT_EQ(catalog.packs.size(), counts.packs) << shard;
+        EXPECT_EQ(counts.packs, 3U) << shard;
+
+        const auto sets = resolveDescriptorSets(catalog);
+        const auto* engine = findEngine(sets, SLOTTED_MULTI_LAUNCH_ENGINE);
+        ASSERT_NE(engine, nullptr)
+            << shard << " resolved no engine named " << SLOTTED_MULTI_LAUNCH_ENGINE;
+        ASSERT_EQ(engine->slots.size(), 3U) << shard;
+
+        std::vector<std::string> dispatches;
+        for(const auto& slot : engine->slots)
+        {
+            ASSERT_EQ(slot.packs.size(), 1U) << shard << ": slot '" << slot.name << "'";
+            ASSERT_EQ(slot.packs.front().kernels.size(), 1U) << shard;
+            dispatches.push_back(
+                hipdnn_plugin_sdk::ingestor::toString(slot.packs.front().dispatchId));
+
+            const auto& kernel = slot.packs.front().kernels.front();
+            if(slot.name == "dkdv")
+            {
+                ASSERT_EQ(kernel.sources.size(), 2U) << shard;
+                ASSERT_EQ(kernel.sources.count("decode"), 1U) << shard;
+                ASSERT_EQ(kernel.sources.count("merge"), 1U) << shard;
+                EXPECT_NE(kernel.sources.at("decode").symbol, kernel.sources.at("merge").symbol)
+                    << shard;
+            }
+            else
+            {
+                EXPECT_TRUE(kernel.sources.empty()) << shard << ": slot '" << slot.name << "'";
+                EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << shard;
+            }
+        }
+        std::sort(dispatches.begin(), dispatches.end());
+        EXPECT_EQ(std::unique(dispatches.begin(), dispatches.end()), dispatches.end())
+            << shard << ": two slots share a dispatch descriptor";
+    }
+
+    expectPackedLaunchesAreUsable(shards);
 }
 
 } // namespace hip_kernel_provider::ingestor_seam

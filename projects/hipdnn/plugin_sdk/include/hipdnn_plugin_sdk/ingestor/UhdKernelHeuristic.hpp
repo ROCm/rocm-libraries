@@ -94,6 +94,18 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
     return vars;
 }
 
+/// True when @p name, after an optional leading `$`, is under the `ws.` root that names the
+/// shared-workspace tokens (RFC 0021 §6).
+inline bool isWorkspaceToken(std::string_view name)
+{
+    constexpr std::string_view WORKSPACE_ROOT = "ws.";
+    if(!name.empty() && name.front() == '$')
+    {
+        name.remove_prefix(1);
+    }
+    return name.substr(0, WORKSPACE_ROOT.size()) == WORKSPACE_ROOT;
+}
+
 /// True for a name in a namespace the engine publishes itself: `graph.*` and `device.*`
 /// (problemFeatures), `constraint.*` (engineFeatures) and `kernel.*` (kernel metadata).
 /// @param reserveWorkspace Also reserves the `ws.*` root, the shared-workspace tokens of a
@@ -110,8 +122,7 @@ inline bool isReservedFeatureName(const std::string& name, bool reserveWorkspace
             return true;
         }
     }
-    constexpr std::string_view WORKSPACE_ROOT = "ws.";
-    return reserveWorkspace && bare.substr(0, WORKSPACE_ROOT.size()) == WORKSPACE_ROOT;
+    return reserveWorkspace && isWorkspaceToken(name);
 }
 
 /// Binds graph-match tokens as features. Reserved names are skipped so a matcher cannot

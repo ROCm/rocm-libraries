@@ -92,12 +92,12 @@ def _many_problems(tmp_path: Path, count: int = 12) -> Path:
     return path
 
 
-def test_a_slot_ranker_trained_from_a_sweep_installs_into_its_slot(tmp_path, evaluator):
+def _add_sweep(tmp_path: Path, sweep: Path) -> Path:
     dataset = tmp_path / "ds"
     store.add(
         dataset,
         *store.from_csv(
-            [_many_problems(tmp_path)],
+            [sweep],
             engine="SLOTTED_FIXTURE",
             engine_id=7,
             role="sort_kernel_catalog",
@@ -107,43 +107,59 @@ def test_a_slot_ranker_trained_from_a_sweep_installs_into_its_slot(tmp_path, eva
             label="slotted-sweep",
         ),
     )
+    return dataset
+
+
+def _generate(dataset, tree, evaluator, output, *objective) -> int:
+    """`generate --slot dkdv` over the sweep; `objective` is the target or the metric."""
+    return main(
+        [
+            "generate",
+            "--dataset",
+            str(dataset),
+            "--slot",
+            "dkdv",
+            "--descriptor-tree",
+            str(tree),
+            "--engine",
+            "test:slotted",
+            "--arch",
+            "gfx942",
+            "--role",
+            "sort_kernel_catalog",
+            "--no-promote",
+            *objective,
+            "--features",
+            "q.seqlen",
+            "kernel.tile",
+            "--num-boost-round",
+            "10",
+            "--early-stopping",
+            "3",
+            "--eval-fraction",
+            "0.25",
+            "--feature-evaluator",
+            evaluator,
+            "--output-dir",
+            str(output),
+        ]
+    )
+
+
+def test_a_slot_ranker_trained_from_a_sweep_installs_into_its_slot(tmp_path, evaluator):
+    dataset = _add_sweep(tmp_path, _many_problems(tmp_path))
     tree = _tree(tmp_path / "tree")
     output = tmp_path / "out"
     assert (
-        main(
-            [
-                "generate",
-                "--dataset",
-                str(dataset),
-                "--slot",
-                "dkdv",
-                "--descriptor-tree",
-                str(tree),
-                "--engine",
-                "test:slotted",
-                "--arch",
-                "gfx942",
-                "--role",
-                "sort_kernel_catalog",
-                "--no-promote",
-                "--target",
-                "avgTimeMs",
-                "--objective",
-                "min",
-                "--features",
-                "q.seqlen",
-                "kernel.tile",
-                "--num-boost-round",
-                "10",
-                "--early-stopping",
-                "3",
-                "--eval-fraction",
-                "0.25",
-                "--feature-evaluator",
-                evaluator,
-                "--output-dir",
-                str(output),
-            ]
+        _generate(
+            dataset,
+            tree,
+            evaluator,
+            output,
+            "--target",
+            "avgTimeMs",
+            "--objective",
+            "min",
         )
         == 0
     )
@@ -197,55 +213,48 @@ def test_a_slot_ranker_that_declares_a_metric_is_refused(tmp_path, evaluator, ca
     frame = pd.read_csv(sweep)
     frame["graph.flops"] = 4e12
     frame.to_csv(sweep, index=False)
-    dataset = tmp_path / "ds"
-    store.add(
-        dataset,
-        *store.from_csv(
-            [sweep],
-            engine="SLOTTED_FIXTURE",
-            engine_id=7,
-            role="sort_kernel_catalog",
-            arch="gfx942",
-            selector_revision="fixture/1",
-            collected_at="2026-10-18T00:00:00+00:00",
-            label="slotted-sweep",
-        ),
-    )
+    dataset = _add_sweep(tmp_path, sweep)
     output = tmp_path / "out"
     assert (
-        main(
-            [
-                "generate",
-                "--dataset",
-                str(dataset),
-                "--slot",
-                "dkdv",
-                "--descriptor-tree",
-                str(_tree(tmp_path / "tree")),
-                "--engine",
-                "test:slotted",
-                "--arch",
-                "gfx942",
-                "--role",
-                "sort_kernel_catalog",
-                "--no-promote",
-                "--metric",
-                "tflops",
-                "--features",
-                "q.seqlen",
-                "kernel.tile",
-                "--num-boost-round",
-                "10",
-                "--early-stopping",
-                "3",
-                "--eval-fraction",
-                "0.25",
-                "--feature-evaluator",
-                evaluator,
-                "--output-dir",
-                str(output),
-            ]
+        _generate(
+            dataset, _tree(tmp_path / "tree"), evaluator, output, "--metric", "tflops"
         )
         != 0
     )
     assert "a slot ranker must be metric-less" in caplog.text
+
+
+def test_generate_refuses_to_measure_a_slotted_engine(
+    monkeypatch, tmp_path, evaluator, caplog
+):
+    """A slotted engine is swept with `hipdnn_bench --sweep`, not measured by `generate`."""
+    from uhd_gen.tests.bench_stub import find_any_bench
+
+    find_any_bench(monkeypatch)
+    graph = tmp_path / "graph.json"
+    graph.write_text("{}", encoding="utf-8")
+    assert (
+        main(
+            [
+                "generate",
+                "--graphs",
+                str(graph),
+                "--descriptor-tree",
+                str(_tree(tmp_path / "tree")),
+                "--engine",
+                "test:slotted",
+                "--engine-id",
+                "7",
+                "--arch",
+                "gfx942",
+                "--role",
+                "sort_kernel_catalog",
+                "--feature-evaluator",
+                evaluator,
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
+        != 0
+    )
+    assert "generate measures an engine that declares no slots" in caplog.text

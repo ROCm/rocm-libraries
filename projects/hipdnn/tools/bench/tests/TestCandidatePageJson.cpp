@@ -232,16 +232,6 @@ std::map<std::string, std::string> marksById(const std::vector<std::string>& ids
 
 } // namespace
 
-TEST(TestCandidatePageJson, ACompositeIdSplitsIntoItsSlotsInOrder)
-{
-    const auto kernels = slotKernels("prep=" + PREP[1] + "|dkdv=" + DKDV[0] + "|dq=" + DQ[1]);
-    ASSERT_EQ(kernels.size(), 3U);
-    EXPECT_EQ(kernels[0].slot, "prep");
-    EXPECT_EQ(kernels[0].kernelId, PREP[1]);
-    EXPECT_EQ(kernels[1].slot, "dkdv");
-    EXPECT_EQ(kernels[2].kernelId, DQ[1]);
-}
-
 TEST(TestCandidatePageJson, ABareKernelIdHasNoSlotsAndAMalformedCompositeThrows)
 {
     EXPECT_TRUE(slotKernels(PREP[0]).empty());

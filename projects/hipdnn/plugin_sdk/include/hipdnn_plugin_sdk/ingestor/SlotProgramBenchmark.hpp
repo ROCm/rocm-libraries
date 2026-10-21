@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,27 @@
 
 namespace hipdnn_plugin_sdk::ingestor
 {
+
+namespace detail
+{
+
+/// The id of a slotted program as an enumerated candidate names it: `<slot>=<kernel id>` for
+/// every slot, in slot order, joined by `|`.
+/// @param part Called with each slot index; returns that slot's name and kernel id as a tuple of
+///        references.
+template <typename TPart>
+std::string compositeCandidateId(size_t slotCount, const TPart& part)
+{
+    std::string id;
+    for(size_t slot = 0; slot < slotCount; ++slot)
+    {
+        const auto& [name, kernelId] = part(slot);
+        id += (slot == 0 ? "" : "|") + name + "=" + toString(kernelId);
+    }
+    return id;
+}
+
+} // namespace detail
 
 /// The IPlan of a slotted engine with benchmarking enabled (RFC 0021 §7). Slots share one stream
 /// and have no time of their own, so it times whole programs, varying one slot at a time, on the
@@ -210,13 +232,10 @@ private:
     /// The composite id of @p picks, as an enumerated candidate names it.
     std::string describe(const std::vector<size_t>& picks) const
     {
-        std::string text;
-        for(size_t slot = 0; slot < _slots.size(); ++slot)
-        {
-            text += (slot == 0 ? "" : "|") + _slots[slot].name + "="
-                    + toString(_slots[slot].kernels[picks[slot]].kernelId);
-        }
-        return text;
+        return detail::compositeCandidateId(_slots.size(), [this, &picks](size_t slot) {
+            return std::forward_as_tuple(_slots[slot].name,
+                                         _slots[slot].kernels[picks[slot]].kernelId);
+        });
     }
 
     /// Times the program of @p picks; empty when the sample asked for the comparison to restart

@@ -69,19 +69,26 @@ struct ResolvedDispatch
 };
 
 /// The graph-level half of a catalog build, run up to and including graph_match: what
-/// the per-variant half needs to finish it. Packs before `firstPack` were declined at
+/// the per-variant half needs to finish it. Packs before a slot's `firstPack` were declined at
 /// the arch gate and logged as such.
 struct CatalogGraphStage
 {
-    /// The first pack whose arch supports the device; the pack count when none does.
-    size_t firstPack = 0;
-    /// graph_match's tokens; nullopt when it declined or never ran (no pack supports the
-    /// device).
+    /// Per slot, in slot order (one entry for an unslotted engine): the first pack whose arch
+    /// supports the device; the slot's pack count when none does.
+    std::vector<size_t> firstPack;
+    /// graph_match's tokens; nullopt when it declined or never ran (no pack of any slot
+    /// supports the device).
     std::optional<BoundTokens> bound;
-    /// Kernels the per-variant half will examine: every kernel, in a pack from
-    /// `firstPack` on, whose own arch and whose pack's arch both support the device.
+    /// Kernels the per-variant half will examine: over every slot, every kernel in a pack from
+    /// that slot's `firstPack` on whose own arch and whose pack's arch both support the device.
     /// Graph-scoped criteria may still decline some of those packs.
     size_t predictedVariants = 0;
+    /// Why a slotted engine declines the graph before any variant is examined: graph_match
+    /// declined, or the `shared_workspace` token is invalid. Empty otherwise, and always empty
+    /// for an unslotted engine.
+    std::string declineReason;
+    /// The validated `shared_workspace` token value in bytes; 0 without a token.
+    size_t sharedWorkspaceBytes = 0;
 };
 
 /// A completed metadata tuple reduced to its values, in the tuple's own (name-sorted)
@@ -174,6 +181,9 @@ inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 /// serves a catalog build for every slot, and the engine applies only if every slot's catalog is
 /// non-empty and its `shared_workspace` token is valid (slotProgramVerdict).
 ///
+/// Pinned in place. Catalogs hold pointers into each slot's definitions, which are built once at
+/// construction and never mutated, so the manager can be neither copied nor moved.
+///
 /// Thread safety. `_catalogCache`, `_calibratedCache`, `_verdictCache`, `_winnerCache`,
 /// `_programCache` and `_slotCatalogIds` are `LruCache`s that synchronize internally;
 /// `_winnerCacheMutex` guards the per-shard "loaded" set and the one-shot failure-log set.
@@ -186,7 +196,10 @@ inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 /// thread, concurrently with other engines' `finishCatalog` calls and with the caller
 /// thread. A matcher or graph criterion is a plain function of its const arguments and
 /// must stay callable from any thread at once: any state it reaches beyond those
-/// arguments needs its own synchronization.
+/// arguments needs its own synchronization. For a slotted engine the finish builds every
+/// slot's catalog and the engine's verdict, and touches only `_catalogCache`, `_verdictCache`,
+/// `_slotCatalogIds` and the matchers. It never calls a slot's `rank`, `winnerFor` or
+/// `adoptCoveringRecord`, which read the winner cache and may read a shard from disk.
 ///
 /// Everything between a lookup and a store is thread-local: `catalogFor` returns a
 /// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
@@ -200,6 +213,13 @@ inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 template <typename THandle>
 class KernelIngestorStateManager
 {
+    /// How many kernels a pack holds under one resolved arch list.
+    struct ArchKernelCount
+    {
+        std::vector<std::string> arch;
+        size_t kernels = 0;
+    };
+
     /// One slot's selection state; an unslotted engine has exactly one, unnamed.
     struct SlotState
     {
@@ -207,12 +227,16 @@ class KernelIngestorStateManager
         MetadataSchema schema;
         std::vector<KernelDescriptorPack> packs;
         /// One entry per pack, parallel to `packs`: its kernels' context-independent
-        /// definitions, completed once at construction.
+        /// definitions, completed once at construction and never mutated after, so the
+        /// pointers every Catalog holds into it stay valid for this manager's lifetime.
         std::vector<std::vector<KernelDefinition>> definitions;
         /// Per non-integer metadata field, its value set in index order, so the field is
         /// addressable by an int64 knob. Fixed at construction.
         std::map<std::string, std::vector<MetadataValue>> ordinalDomains;
         std::shared_ptr<IKernelHeuristic> heuristic;
+        /// Parallel to `packs`: each pack's kernels counted by distinct arch list, so
+        /// predicting a catalog build's work tests each list once rather than each kernel.
+        std::vector<std::vector<ArchKernelCount>> kernelsByArch;
     };
 
 public:
@@ -263,13 +287,12 @@ public:
     {
     }
 
-    // Pinned in place: catalog pointers into `_definitions` rely on a stable address.
+    // Pinned in place: catalog pointers into each slot's `definitions` rely on a stable address.
     KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
     KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;
     KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
     KernelIngestorStateManager& operator=(KernelIngestorStateManager&&) = delete;
 
-    // PORT(S): C1-07 slotted constructor and slot accessors after develop's deleted copy/move
     /// A slotted engine: @p slots in launch order. As the unslotted constructor, except that a
     /// pack breaking a per-slot uniqueness rule (a metadata tuple repeated within a slot, a
     /// kernel id repeated on overlapping arches within a slot) is dropped with an ERROR instead
@@ -410,17 +433,19 @@ public:
         {
             return {false, "no device resolved or the device reports no gcnArchName", 0};
         }
-        const auto key = cacheKey(context, {});
+        const auto key = cacheKey(context);
         if(key.has_value())
         {
             if(auto cached = _verdictCache.get(*key); cached.has_value())
             {
+                HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device "
+                                        << context.deviceId);
                 return std::move(*cached);
             }
         }
         auto built = buildSlotted(context);
         auto verdict = built.verdict;
-        storeSlotted(context, std::move(built));
+        storeSlotted(context, key, std::move(built));
         return verdict;
     }
 
@@ -431,7 +456,6 @@ public:
         return slotProgramVerdict(context).applicable;
     }
 
-    /// Every kernel that applies to the graph and device @p context names, unordered.
     std::vector<const KernelDefinition*> unsortedDefinitions(const MatchContext& context) const
     {
         requireUnslotted("unsortedDefinitions");
@@ -459,8 +483,11 @@ public:
     /// context, not a separate argument, so one device's catalog never caches under
     /// another's key. The engine version comes from this manager. The ranking metric is
     /// part of the key because both orders depend on it (RFC 0019 §11.4); the registry's
-    /// own name is stored because the key outlives the request.
-    std::optional<CatalogKey> cacheKey(const MatchContext& context) const
+    /// own name is stored because the key outlives the request. @p slot names the slot a
+    /// catalog belongs to; empty for an unslotted engine and for a slotted engine's
+    /// engine-wide entries, its verdict.
+    std::optional<CatalogKey> cacheKey(const MatchContext& context,
+                                       std::string_view slot = {}) const
     {
         hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph{context.graph};
         const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
@@ -484,19 +511,26 @@ public:
                           std::move(tensorUids),
                           context.deviceId,
                           _engine.version,
-                          metric->name};
+                          metric->name,
+                          std::string(slot)};
     }
 
-    // The staged entry points below answer what `!unsortedDefinitions(context).empty()`
-    // answers, in pieces a caller can spread across threads. Each expects a context that
-    // already passed catalogFor's device guard, and @p key built by cacheKey() from it.
+    // The staged entry points below answer what `isApplicable(context)` answers, in pieces a
+    // caller can spread across threads. Each expects a context that already passed catalogFor's
+    // device guard, and @p key built by cacheKey() from it, with no slot.
 
-    /// The cached verdict for @p key, read in place without copying the catalog;
-    /// nullopt on a miss.
+    /// The cached verdict for @p key, read in place without copying the catalog; nullopt on a
+    /// miss. A slotted engine's verdict cache holds the engine's verdict, an unslotted engine's
+    /// catalog cache its catalog.
     std::optional<bool> cachedVerdict(const MatchContext& context, const CatalogKey& key) const
     {
-        auto verdict = _catalogCache.visit(
-            key, [](const Catalog& catalog) { return !catalog.entries.empty(); });
+        const auto verdict = _slotted ? _verdictCache.visit(key,
+                                                            [](const SlotProgramVerdict& cached) {
+                                                                return cached.applicable;
+                                                            })
+                                      : _catalogCache.visit(key, [](const Catalog& catalog) {
+                                            return !catalog.entries.empty();
+                                        });
         if(verdict.has_value())
         {
             HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device " << context.deviceId);
@@ -504,32 +538,49 @@ public:
         return verdict;
     }
 
-    /// The graph-level half of a miss. nullopt when it alone settles the catalog as
-    /// empty -- no pack supports the device, or graph_match declined -- which is then
-    /// cached exactly as catalogFor would cache it; otherwise what finishCatalog needs.
+    /// The graph-level half of a miss: the arch gate of every slot's packs, graph_match and, for
+    /// a slotted engine, the `shared_workspace` token check, each run once. nullopt when that
+    /// alone settles the engine as declining -- no pack of any slot supports the device,
+    /// graph_match declined, or the token is invalid -- which is then cached exactly as
+    /// isApplicable() would cache it; otherwise what finishCatalog needs.
     std::optional<CatalogGraphStage> beginCatalog(const MatchContext& context,
                                                   const CatalogKey& key) const
     {
         CatalogGraphStage stage = matchGraph(context);
-        if(stage.firstPack == _packs.size())
+        if(!anyPackSupportsDevice(stage))
         {
             finishCatalog(context, key, std::move(stage));
             return std::nullopt;
         }
-        if(!stage.bound.has_value())
+        if(!stage.bound.has_value() || !stage.declineReason.empty())
         {
-            _catalogCache.putIfAbsent(key, Catalog{});
+            if(_slotted)
+            {
+                finishCatalog(context, key, std::move(stage));
+            }
+            else
+            {
+                _catalogCache.putIfAbsent(key, Catalog{});
+            }
             return std::nullopt;
         }
         return stage;
     }
 
-    /// The per-variant half of a miss: completes @p stage's catalog, caches it as
-    /// catalogFor would, and returns whether any kernel applies. Makes no HIP calls.
+    /// The per-variant half of a miss: completes @p stage's catalogs, caches them as catalogFor
+    /// would, and returns whether the engine applies. Makes no HIP calls.
     bool finishCatalog(const MatchContext& context,
                        const CatalogKey& key,
                        CatalogGraphStage stage) const
     {
+        if(_slotted)
+        {
+            auto built = finishSlotted(context, std::move(stage));
+            const bool applicable = built.verdict.applicable;
+            storeSlotted(context, key, std::move(built));
+            return applicable;
+        }
+
         Catalog catalog = matchVariants(context, std::move(stage));
         const bool applicable = !catalog.entries.empty();
         // putIfAbsent, as in catalogFor: a racing writer may already hold a sorted one.
@@ -537,11 +588,18 @@ public:
         return applicable;
     }
 
-    /// Whether any kernel applies to a graph that yields no usable key; matched in full
-    /// and never cached, as catalogFor does for such a graph.
+    /// Whether the engine applies to a graph that yields no usable key; matched in full and
+    /// never cached, as catalogFor does for such a graph.
     bool applicableUncached(const MatchContext& context) const
     {
-        return !catalogFor(context, std::nullopt).entries.empty();
+        if(_slotted)
+        {
+            auto built = buildSlotted(context);
+            const bool applicable = built.verdict.applicable;
+            storeSlotted(context, std::nullopt, std::move(built));
+            return applicable;
+        }
+        return !catalogFor(0, context, std::nullopt).entries.empty();
     }
 
     /// Matching only, in descriptor-ID order, independent of heuristic/winner state, so a
@@ -549,14 +607,6 @@ public:
     /// within one device's catalog (validateAndIndexPacks).
     Catalog enumerableCatalog(const MatchContext& context) const
     {
-        auto catalog = catalogFor(context);
-        std::sort(catalog.entries.begin(),
-                  catalog.entries.end(),
-                  [](const KernelDefinition* lhs, const KernelDefinition* rhs) {
-                      return lhs->kernelId < rhs->kernelId;
-                  });
-        return catalog;
-        // PORT(S): C1-08 enumerableCatalog: unslotted guard and per-slot overload (body moved to enumerableCatalogOf)
         requireUnslotted("enumerableCatalog");
         return enumerableCatalogOf(0, context);
     }
@@ -580,35 +630,10 @@ public:
     /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
-        // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
-        // and device ordinal, not arch, so without this an unresolved-arch context would
-        // cache an empty catalog under the SAME key a later, resolved call for this
-        // device reuses -- permanently hiding that device's real catalog.
-        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
-        {
-            return catalogFor(context);
-        }
-        // PORT(S): C1-09 sortedCatalog: unslotted guard
         requireUnslotted("sortedCatalog");
         return sortedCatalogOf(0, context);
     }
 
-        const auto key = cacheKey(context);
-        Catalog catalog = measuredCatalogFor(context, key);
-        if(catalog.isSorted)
-        {
-            return catalog;
-        }
-
-        catalog.entries = _heuristic->rank(catalog, context);
-        catalog.isSorted = true;
-        if(key.has_value())
-        {
-            // put, not putIfAbsent: sorted is strictly better than whatever is cached.
-            _catalogCache.put(*key, catalog);
-        }
-        return catalog;
-    // PORT(S): C1-10 sortedCatalog(slot) overload beside develop's key-reusing body
     /// Slot @p slot's catalog ordered by that slot's ranker, or by declared order without one.
     /// A benchmarked slot record, when one covers the catalog, reorders it (see sortedCatalogOf).
     Catalog sortedCatalog(size_t slot, const MatchContext& context) const
@@ -625,19 +650,8 @@ public:
     /// later callers do not depend on the winner cache still holding it.
     Catalog measuredCatalog(const MatchContext& context) const
     {
-        // Same guard as sortedCatalog: an unresolved device must not cache under a key a
-        // later, resolved call for this device reuses.
-        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
-        // PORT(S): C1-11 measuredCatalog: unslotted guard over catalogFor(slot, 0, context)
         requireUnslotted("measuredCatalog");
-        Catalog catalog = catalogFor(_slots.front(), 0, context);
-        // A heuristic order is provisional (a sweep can postdate it), so look up a record
-        // even when already sorted. An unresolved device's empty catalog is never covered.
-        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context))
-        {
-            return catalogFor(context);
-        }
-        return measuredCatalogFor(context, cacheKey(context));
+        return measuredCatalogOf(0, context);
     }
 
     /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
@@ -1069,7 +1083,7 @@ private:
     {
         std::vector<SlotState> slots;
         slots.push_back(
-            SlotState{{}, std::move(schema), std::move(packs), {}, {}, std::move(heuristic)});
+            SlotState{{}, std::move(schema), std::move(packs), {}, {}, std::move(heuristic), {}});
         return slots;
     }
 
@@ -1084,7 +1098,8 @@ private:
                                       std::move(input.packs),
                                       {},
                                       {},
-                                      std::move(input.heuristic)});
+                                      std::move(input.heuristic),
+                                      {}});
         }
         return slots;
     }
@@ -1111,7 +1126,8 @@ private:
 
     /// Orders @p catalog by the record for @p context's graph and device and attaches that
     /// record, when the record fully covers @p catalog; false, leaving @p catalog untouched,
-    /// otherwise.
+    /// otherwise. @p slot names the slot record to adopt; empty for the whole-graph record of
+    /// an unslotted engine.
     ///
     /// @p catalogKey is the catalog key built from @p context. Its graph content is the
     /// winner key's too, so reusing it spares a second verified copy and hash of the graph.
@@ -1119,12 +1135,7 @@ private:
     /// each other either.
     bool adoptCoveringRecord(Catalog& catalog,
                              const MatchContext& context,
-                             const std::optional<CatalogKey>& catalogKey) const
-    // PORT(S): C1-12 adoptCoveringRecord signature: slot parameter beside develop's catalogKey parameter
-    /// otherwise. @p slot names the slot record to adopt; empty for the whole-graph record of
-    /// an unslotted engine.
-    bool adoptCoveringRecord(Catalog& catalog,
-                             const MatchContext& context,
+                             const std::optional<CatalogKey>& catalogKey,
                              std::string_view slot = {}) const
     {
         const auto& entries = catalog.entries;
@@ -1136,17 +1147,8 @@ private:
             return false;
         }
 
-        const WinnerKey key{catalogKey->graph, DeviceKey{context.deviceProperties}};
-        // PORT(S): C1-13 adoptCoveringRecord winner key: slot-keyed WinnerKey beside develop's catalogKey->graph
         const WinnerKey key{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
-            DeviceKey{context.deviceProperties},
-            std::string(slot)};
-        if(!key.graph.isUsable())
-        {
-            // No bytes to key on; such graphs never match each other either.
-            return false;
-        }
+            catalogKey->graph, DeviceKey{context.deviceProperties}, std::string(slot)};
 
         auto record = winnerFor(key);
         if(!record.has_value())
@@ -1168,49 +1170,55 @@ private:
         return true;
     }
 
-    /// measuredCatalog() for a caller that already built @p key from @p context.
-    Catalog measuredCatalogFor(const MatchContext& context,
-                               const std::optional<CatalogKey>& key) const
-    {
-        Catalog catalog = catalogFor(context, key);
-        // A heuristic order is provisional (a sweep can postdate it), so look up a record
-        // even when already sorted. An unresolved device's empty catalog is never covered.
-        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context, key))
-        {
-            if(key.has_value())
-            {
-                // put, not putIfAbsent: a measured order replaces a provisional one.
-                _catalogCache.put(*key, catalog);
-            }
-        }
-        return catalog;
-    // PORT(S): C1-14 noteSlotCatalog, requireSlotted, hasSlot beside develop's measuredCatalogFor
     /// Remembers which kernels @p slot's @p catalog holds for @p context's graph and device,
     /// so programFor() can compare a program record with the catalogs it is asked about without
     /// a MatchContext. A catalog is a function of (graph, device) for the life of the manager.
+    /// @p key is the catalog key built from @p context, when there is one; its graph content
+    /// is the record key's too.
     void noteSlotCatalog(const SlotState& slot,
                          const MatchContext& context,
+                         const std::optional<CatalogKey>& key,
                          const Catalog& catalog) const
+    {
+        auto recordKey = slotCatalogKey(context, key);
+        if(!recordKey.has_value())
+        {
+            return;
+        }
+        recordKey->slot = slot.name;
+        putSlotCatalogIds(*recordKey, catalog);
+    }
+
+    /// The key every slot's catalog ids are remembered under, before the slot is set; nullopt
+    /// when the device is unresolved or the graph carries no usable content key.
+    std::optional<WinnerKey> slotCatalogKey(const MatchContext& context,
+                                            const std::optional<CatalogKey>& key) const
     {
         if(!deviceResolved(context))
         {
-            return;
+            return std::nullopt;
         }
-        const WinnerKey key{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
-            DeviceKey{context.deviceProperties},
-            slot.name};
-        if(!key.graph.isUsable())
+        WinnerKey recordKey{
+            key.has_value()
+                ? key->graph
+                : hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties}};
+        if(!recordKey.graph.isUsable())
         {
-            return;
+            return std::nullopt;
         }
+        return recordKey;
+    }
+
+    void putSlotCatalogIds(const WinnerKey& recordKey, const Catalog& catalog) const
+    {
         std::vector<DescriptorId> ids;
         ids.reserve(catalog.entries.size());
-        for(const auto& entry : catalog.entries)
+        for(const KernelDefinition* entry : catalog.entries)
         {
-            ids.push_back(entry.kernelId);
+            ids.push_back(entry->kernelId);
         }
-        _slotCatalogIds.put(key, std::move(ids));
+        _slotCatalogIds.put(recordKey, std::move(ids));
     }
 
     void requireSlotted(const char* accessor) const
@@ -1259,13 +1267,9 @@ private:
         return restricted;
     }
 
-    /// Validates every pack's references and builds the KernelDefinition for each of
-    /// its kernels. Every field of a definition is context-independent, so this is the
-    /// only place they are ever computed: buildCatalog references them per query rather
-    // PORT(S): C1-15 indexSlot doc comment, per slot
     /// Indexes every pack of @p slot: validates its references and builds the KernelDefinition
     /// for each of its kernels. Every field of a definition is context-independent, so this is
-    /// the only place they are ever computed: buildCatalog copies them per query rather
+    /// the only place they are ever computed: catalogs reference them per query rather
     /// than completing each kernel's metadata again on every graph.
     ///
     /// Uniqueness is per slot. A pack that breaks it is dropped whole, with an ERROR, in a
@@ -1307,11 +1311,8 @@ private:
             return !taken;
         };
 
-        _definitions.reserve(_packs.size());
-        _kernelsByArch.reserve(_packs.size());
-        for(const auto& pack : _packs)
-        // PORT(S): C1-16 indexSlot: loop over slot.packs/definitions beside develop's _definitions/_kernelsByArch reserve
         slot.definitions.reserve(slot.packs.size());
+        slot.kernelsByArch.reserve(slot.packs.size());
         for(const auto& pack : slot.packs)
         {
             for(const auto& matcherId : pack.matcherIds)
@@ -1336,7 +1337,6 @@ private:
             // a single-launch handler, which reads `kernel_source`.
             const std::set<std::string> handlerLaunches
                 = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
-            // PORT(S): C1-17 indexSlot: claim/refusal bookkeeping beside develop's handlerLaunches
             // What this pack has claimed so far, so a slotted engine can release it when a
             // later kernel of the pack is refused. Left empty for an unslotted engine, which
             // throws instead.
@@ -1381,7 +1381,8 @@ private:
                 // RFC 0017 §8.6: an accepted kernel is always launchable. A handler launches
                 // exactly the launches it declares, so a kernel carrying any other set --
                 // fewer, more, or the same number under other names -- is dropped here,
-                // before applicability, rather than failing at plan build.
+                // before applicability, rather than failing at plan build. It claims no
+                // metadata tuple, so it cannot hide a sibling that can launch.
                 std::set<std::string> kernelLaunches;
                 for(const auto& launch : kernel.sources)
                 {
@@ -1412,8 +1413,6 @@ private:
                     continue;
                 }
 
-                auto key = completeMetadata(kernel);
-                // PORT(S): C1-18 indexSlot: completeMetadata(slot.schema, kernel) beside develop's launch-set check
                 auto key = completeMetadata(slot.schema, kernel);
                 // A kernel that declared no arch of its own runs wherever its pack does;
                 // one that declared a narrower list claims only that. Claiming by the
@@ -1496,10 +1495,10 @@ private:
             // Pushed even when every kernel was dropped: `definitions` is indexed by pack
             // position, so skipping one entry would bind every later pack's definitions to
             // the wrong pack and run the last index out of range.
-            _definitions.push_back(std::move(packDefinitions));
+            slot.definitions.push_back(std::move(packDefinitions));
 
             std::vector<ArchKernelCount> counts;
-            for(const auto& definition : _definitions.back())
+            for(const auto& definition : slot.definitions.back())
             {
                 const auto group
                     = std::find_if(counts.begin(), counts.end(), [&definition](const auto& count) {
@@ -1514,9 +1513,7 @@ private:
                     ++group->kernels;
                 }
             }
-            _kernelsByArch.push_back(std::move(counts));
-            // PORT(S): C1-19 indexSlot: slot.definitions.push_back beside develop's _definitions push and _kernelsByArch counts
-            slot.definitions.push_back(std::move(packDefinitions));
+            slot.kernelsByArch.push_back(std::move(counts));
         }
 
         buildOrdinalDomains(slot);
@@ -1603,28 +1600,6 @@ private:
         return complete;
     }
 
-    Catalog catalogFor(const MatchContext& context) const
-    // PORT(S): C1-20 cacheKey with slot parameter and deviceResolved beside develop's catalogFor(context) signature
-    /// Device comes from the context, not a separate argument, so one device's catalog
-    /// never caches under another's key. The engine version comes from this manager. The
-    /// ranking metric is part of the key because both orders depend on it (RFC 0019 §11.4);
-    /// the registry's own name is stored because the key outlives the request. @p slot names
-    /// the slot a catalog belongs to; empty for an unslotted engine and for a slotted engine's
-    /// engine-wide entries.
-    std::optional<CatalogKey> cacheKey(const MatchContext& context,
-                                       std::string_view slot = {}) const
-    {
-        // PORT(S): C1-28 semantic: tryGetGraphId no longer exists; develop keys the catalog on graph content, not Graph.id
-        const auto graphId = tryGetGraphId(context.graph);
-        const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
-        if(!graphId.has_value() || metric == nullptr)
-        {
-            return std::nullopt;
-        }
-        return CatalogKey{
-            *graphId, context.deviceId, _engine.version, metric->name, std::string(slot)};
-    }
-
     /// Pack pruning and matchers both read the device, so nothing can be answered without one.
     /// Checked once here rather than in every provider's matchers, where an omission is
     /// invisible.
@@ -1637,6 +1612,8 @@ private:
     /// catalog on a miss, with one graph match, and caches them together.
     Catalog catalogFor(const SlotState& slot, size_t slotIndex, const MatchContext& context) const
     {
+        // Pack pruning and matchers both read the device, so nothing below can be
+        // answered without one.
         if(!deviceResolved(context))
         {
             const auto* reason = context.deviceId == NO_DEVICE
@@ -1646,15 +1623,15 @@ private:
             return Catalog{};
         }
 
-        return catalogFor(context, cacheKey(context));
+        return catalogFor(slotIndex, context, cacheKey(context, slot.name));
     }
 
-    /// The lookup-or-build half of catalogFor, for a caller that already passed its
-    /// device guard and built @p key from the same @p context.
-    Catalog catalogFor(const MatchContext& context, const std::optional<CatalogKey>& key) const
+    /// The lookup-or-build half of catalogFor, for a caller that already passed its device
+    /// guard and built @p key, naming slot @p slotIndex's name, from the same @p context.
+    Catalog catalogFor(size_t slotIndex,
+                       const MatchContext& context,
+                       const std::optional<CatalogKey>& key) const
     {
-        // PORT(S): C1-21 catalogFor(slot...): slot-keyed lookup beside develop's key-taking catalogFor split
-        const auto key = cacheKey(context, slot.name);
         if(key.has_value())
         {
             if(auto cached = _catalogCache.get(*key); cached.has_value())
@@ -1676,17 +1653,11 @@ private:
         {
             auto built = buildSlotted(context);
             auto catalog = built.catalogs[slotIndex];
-            storeSlotted(context, std::move(built));
+            storeSlotted(context, key, std::move(built));
             return catalog;
         }
 
-        GraphMatchState match;
-        Catalog catalog = buildCatalog(slot, context, match);
-        if(match.bound.has_value())
-        {
-            catalog.bound = std::move(*match.bound);
-        }
-
+        Catalog catalog = buildCatalog(context);
         if(key.has_value())
         {
             // putIfAbsent: another thread may already have installed a sorted catalog
@@ -1702,25 +1673,49 @@ private:
         auto catalog = catalogFor(_slots[slot], slot, context);
         if(_slotted)
         {
-            noteSlotCatalog(_slots[slot], context, catalog);
+            noteSlotCatalog(_slots[slot], context, std::nullopt, catalog);
         }
         std::sort(catalog.entries.begin(),
                   catalog.entries.end(),
-                  [](const auto& lhs, const auto& rhs) { return lhs.kernelId < rhs.kernelId; });
+                  [](const KernelDefinition* lhs, const KernelDefinition* rhs) {
+                      return lhs->kernelId < rhs->kernelId;
+                  });
         return catalog;
     }
 
-    /// Slot @p slotIndex's catalog with its slot record adopted when one covers it. A
-    /// benchmarked record outranks the slot's ranker, and may postdate a cached ranker order,
-    /// so it is looked up even when the cached catalog is already sorted.
-    Catalog measuredSlotCatalog(size_t slotIndex, const MatchContext& context) const
+    /// Slot @p slotIndex's catalog with its record adopted when one covers it: the slot's own
+    /// record for a slotted engine, the whole-graph record for an unslotted one. A benchmarked
+    /// record outranks the slot's ranker, and may postdate a cached ranker order (a heuristic
+    /// order is provisional, since a sweep can postdate it), so it is looked up even when the
+    /// cached catalog is already sorted. An unresolved device's empty catalog is never covered.
+    Catalog measuredCatalogOf(size_t slotIndex, const MatchContext& context) const
     {
         const auto& slot = _slots[slotIndex];
-        Catalog catalog = catalogFor(slot, slotIndex, context);
-        noteSlotCatalog(slot, context, catalog);
-        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context, slot.name))
+        // Same guard as sortedCatalogOf: an unresolved device must not cache under a key a
+        // later, resolved call for this device reuses.
+        if(!deviceResolved(context))
         {
-            if(const auto key = cacheKey(context, slot.name); key.has_value())
+            return catalogFor(slot, slotIndex, context);
+        }
+        return measuredCatalogFor(slotIndex, context, cacheKey(context, slot.name));
+    }
+
+    /// measuredCatalogOf() for a caller that already built @p key, naming the slot, from
+    /// @p context.
+    Catalog measuredCatalogFor(size_t slotIndex,
+                               const MatchContext& context,
+                               const std::optional<CatalogKey>& key) const
+    {
+        const auto& slot = _slots[slotIndex];
+        Catalog catalog = catalogFor(slotIndex, context, key);
+        if(_slotted)
+        {
+            noteSlotCatalog(slot, context, key, catalog);
+        }
+        if(catalog.measuredRecord == nullptr
+           && adoptCoveringRecord(catalog, context, key, slot.name))
+        {
+            if(key.has_value())
             {
                 // put, not putIfAbsent: a measured order replaces a provisional one.
                 _catalogCache.put(*key, catalog);
@@ -1732,8 +1727,8 @@ private:
     Catalog sortedCatalogOf(size_t slotIndex, const MatchContext& context) const
     {
         const auto& slot = _slots[slotIndex];
-        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
-        // device ordinal, not arch, so without this an unresolved-arch context would
+        // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
+        // and device ordinal, not arch, so without this an unresolved-arch context would
         // cache an empty catalog under the SAME key a later, resolved call for this
         // device reuses -- permanently hiding that device's real catalog.
         if(!deviceResolved(context))
@@ -1742,8 +1737,8 @@ private:
         }
 
         // A benchmarked record (whole-graph, or the slot's own) outranks the ranker.
-        Catalog catalog
-            = _slotted ? measuredSlotCatalog(slotIndex, context) : measuredCatalog(context);
+        const auto key = cacheKey(context, slot.name);
+        Catalog catalog = measuredCatalogFor(slotIndex, context, key);
         if(catalog.isSorted)
         {
             return catalog;
@@ -1751,14 +1746,13 @@ private:
 
         catalog.entries = slot.heuristic->rank(catalog, context);
         catalog.isSorted = true;
-        if(const auto key = cacheKey(context, slot.name); key.has_value())
+        if(key.has_value())
         {
             // put, not putIfAbsent: sorted is strictly better than whatever is cached.
             _catalogCache.put(*key, catalog);
         }
         return catalog;
     }
-
     /// One graph-scoped criterion's verdict for one (graph, device); memoized per
     /// matcher so a pack's matchers are evaluated only once each.
     struct GraphMatcherVerdict
@@ -1767,36 +1761,6 @@ private:
     };
     using GraphMatcherMemo
         = std::unordered_map<DescriptorId, GraphMatcherVerdict, DescriptorIdHash>;
-
-    /// Runs @p context's graph_match once (absent means the engine binds nothing and
-    /// always proceeds with an empty map) and every pack's UMDs: graph-scoped criteria
-    /// (memoized across packs), then kernel-scoped ones. The two stages it composes are
-    /// one pass over the packs, split where graph_match has run.
-    Catalog buildCatalog(const MatchContext& context) const
-    // PORT(S): C1-22 buildCatalog(slot, context, GraphMatchState) beside develop's buildCatalog
-    /// What one catalog build shares across its slots: the engine's graph match, run lazily
-    /// and at most once, and the graph-scoped criteria's verdicts.
-    struct GraphMatchState
-    {
-        /// Whether the graph match has run.
-        bool ran = false;
-        /// What it bound; nullopt until it runs, and after it declines the graph.
-        std::optional<BoundTokens> bound;
-        GraphMatcherMemo verdicts;
-    };
-
-    /// Runs the engine's graph match, once per @p match. Absent means the engine binds nothing
-    /// and always proceeds with an empty map.
-    void runGraphMatch(const MatchContext& context, GraphMatchState& match) const
-    {
-        if(match.ran)
-        {
-            return;
-        }
-        match.ran = true;
-        match.bound = _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
-                                               : _graphMatchFn(context);
-    }
 
     /// The catalogs of every slot and whether the engine accepts the graph.
     struct SlottedBuild
@@ -1811,35 +1775,28 @@ private:
     /// catalogs populated, so the verdict, not a catalog, says whether the engine applies.
     SlottedBuild buildSlotted(const MatchContext& context) const
     {
-        SlottedBuild built;
-        built.catalogs.reserve(_slots.size());
-        GraphMatchState match;
-        for(const auto& slot : _slots)
-        {
-            built.catalogs.push_back(buildCatalog(slot, context, match));
-        }
+        return finishSlotted(context, matchGraph(context));
+    }
 
+    /// The per-variant half of buildSlotted(), from @p stage: every slot's catalogs and the
+    /// verdict. Reads and writes no winner or ranker state, so it may run on a worker thread.
+    SlottedBuild finishSlotted(const MatchContext& context, CatalogGraphStage stage) const
+    {
+        SlottedBuild built;
+        built.catalogs.resize(_slots.size());
         auto& verdict = built.verdict;
-        if(match.ran && !match.bound.has_value())
-        {
-            verdict.declineReason = "graph_match declined the graph";
-        }
-        else if(match.ran && !_sharedWorkspaceToken.empty())
-        {
-            verdict.declineReason
-                = checkSharedWorkspace(*match.bound, verdict.sharedWorkspaceBytes);
-            if(!verdict.declineReason.empty())
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine declined the graph on device "
-                                        << context.deviceId << ": " << verdict.declineReason);
-                for(auto& catalog : built.catalogs)
-                {
-                    catalog.entries.clear();
-                }
-            }
-        }
+        verdict.declineReason = std::move(stage.declineReason);
+        const BoundTokens noTokens;
+        const BoundTokens& bound = stage.bound.has_value() ? *stage.bound : noTokens;
+
         if(verdict.declineReason.empty())
         {
+            GraphMatcherMemo graphVerdicts;
+            for(size_t i = 0; i < _slots.size(); ++i)
+            {
+                built.catalogs[i]
+                    = matchVariants(_slots[i], stage.firstPack[i], context, bound, graphVerdicts);
+            }
             for(size_t i = 0; i < _slots.size(); ++i)
             {
                 if(built.catalogs[i].entries.empty())
@@ -1853,43 +1810,47 @@ private:
             }
         }
         verdict.applicable = verdict.declineReason.empty();
-        if(!verdict.applicable)
-        {
-            verdict.sharedWorkspaceBytes = 0;
-        }
+        verdict.sharedWorkspaceBytes = verdict.applicable ? stage.sharedWorkspaceBytes : 0;
 
-        if(match.bound.has_value())
+        if(stage.bound.has_value())
         {
             // The slots share one binding; the last takes it, the others copy.
             for(size_t i = 0; i + 1 < built.catalogs.size(); ++i)
             {
-                built.catalogs[i].bound = *match.bound;
+                built.catalogs[i].bound = *stage.bound;
             }
-            built.catalogs.back().bound = std::move(*match.bound);
+            built.catalogs.back().bound = std::move(*stage.bound);
         }
         return built;
     }
 
-    /// Caches @p built under @p context's key: each slot's catalog and the engine's verdict.
-    void storeSlotted(const MatchContext& context, SlottedBuild built) const
+    /// Caches @p built: each slot's catalog and the engine's verdict, under @p key (any slot's;
+    /// nullopt for a graph with no key, which caches nothing), and remembers each slot's kernel
+    /// ids for programFor().
+    void storeSlotted(const MatchContext& context,
+                      std::optional<CatalogKey> key,
+                      SlottedBuild built) const
     {
-        for(size_t i = 0; i < _slots.size(); ++i)
+        if(auto recordKey = slotCatalogKey(context, key); recordKey.has_value())
         {
-            noteSlotCatalog(_slots[i], context, built.catalogs[i]);
+            for(size_t i = 0; i < _slots.size(); ++i)
+            {
+                recordKey->slot = _slots[i].name;
+                putSlotCatalogIds(*recordKey, built.catalogs[i]);
+            }
         }
-        const auto engineKey = cacheKey(context, {});
-        if(!engineKey.has_value())
+        if(!key.has_value())
         {
             return;
         }
         for(size_t i = 0; i < _slots.size(); ++i)
         {
-            auto slotKey = *engineKey;
-            slotKey.slot = _slots[i].name;
+            key->slot = _slots[i].name;
             // putIfAbsent, as for an unslotted catalog: a ranked catalog may already be there.
-            _catalogCache.putIfAbsent(slotKey, std::move(built.catalogs[i]));
+            _catalogCache.putIfAbsent(*key, std::move(built.catalogs[i]));
         }
-        _verdictCache.putIfAbsent(*engineKey, std::move(built.verdict));
+        key->slot.clear();
+        _verdictCache.putIfAbsent(*key, std::move(built.verdict));
     }
 
     /// Why the shared region @p bound describes is unusable, or empty when it is usable: the
@@ -1963,34 +1924,66 @@ private:
         return {};
     }
 
-    /// Runs @p match's graph match (lazily, on the first pack that clears the arch gate) and
-    /// every pack's UMDs of @p slot: graph-scoped criteria (memoized across packs and slots),
-    /// then kernel-scoped ones. The catalog's `bound` is left to the caller; it is
-    /// `match.bound`, shared by every slot of a build.
-    Catalog buildCatalog(const SlotState& slot,
-                         const MatchContext& context,
-                         GraphMatchState& match) const
+    /// The arch gate of one slot's @p packIndex-th pack, logging a decline.
+    bool packSupportsDevice(const SlotState& slot,
+                            size_t packIndex,
+                            const MatchContext& context) const
+    {
+        const auto& pack = slot.packs[packIndex];
+        if(archSupports(pack.arch, context.deviceProperties.gcnArchName))
+        {
+            return true;
+        }
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
+                                                 << " does not support device arch '"
+                                                 << context.deviceProperties.gcnArchName << "'");
+        return false;
+    }
+
+    /// Whether some pack of some slot clears the arch gate, which is what graph_match waits for.
+    bool anyPackSupportsDevice(const CatalogGraphStage& stage) const
+    {
+        for(size_t i = 0; i < _slots.size(); ++i)
+        {
+            if(stage.firstPack[i] < _slots[i].packs.size())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// An unslotted engine's whole catalog: graph_match once and every pack's UMDs, graph-scoped
+    /// criteria (memoized across packs) then kernel-scoped ones. The two stages it composes are
+    /// one pass over the packs, split where graph_match has run.
+    Catalog buildCatalog(const MatchContext& context) const
     {
         CatalogGraphStage stage = matchGraph(context);
-        if(stage.firstPack < _packs.size() && !stage.bound.has_value())
+        if(anyPackSupportsDevice(stage) && !stage.bound.has_value())
         {
             return Catalog{};
         }
         return matchVariants(context, std::move(stage));
     }
-        // PORT(S): C1-23 buildCatalog body start beside develop's matchGraph call
-        Catalog catalog;
 
-    /// The pack-level arch gate up to the first pack that clears it, then graph_match,
-    /// run lazily there so an engine no pack of which supports the device never runs it.
+    /// The pack-level arch gate of every slot up to its first pack that clears it, then
+    /// graph_match, run lazily there so an engine no pack of which supports the device never
+    /// runs it, and for a slotted engine the `shared_workspace` token check. Runs once for the
+    /// whole engine, however many slots it has.
     CatalogGraphStage matchGraph(const MatchContext& context) const
     {
         CatalogGraphStage stage;
-        while(stage.firstPack < _packs.size() && !packSupportsDevice(stage.firstPack, context))
+        stage.firstPack.reserve(_slots.size());
+        for(const auto& slot : _slots)
         {
-            ++stage.firstPack;
+            size_t first = 0;
+            while(first < slot.packs.size() && !packSupportsDevice(slot, first, context))
+            {
+                ++first;
+            }
+            stage.firstPack.push_back(first);
         }
-        if(stage.firstPack == _packs.size())
+        if(!anyPackSupportsDevice(stage))
         {
             return stage;
         }
@@ -2001,63 +1994,87 @@ private:
         {
             HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined graph_match for device "
                                    << context.deviceId);
+            if(_slotted)
+            {
+                stage.declineReason = "graph_match declined the graph";
+            }
             return stage;
+        }
+        if(_slotted && !_sharedWorkspaceToken.empty())
+        {
+            stage.declineReason = checkSharedWorkspace(*stage.bound, stage.sharedWorkspaceBytes);
+            if(!stage.declineReason.empty())
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine declined the graph on device "
+                                        << context.deviceId << ": " << stage.declineReason);
+                return stage;
+            }
         }
 
         const auto& deviceArch = context.deviceProperties.gcnArchName;
-        for(size_t packIndex = stage.firstPack; packIndex < _packs.size(); ++packIndex)
+        for(size_t i = 0; i < _slots.size(); ++i)
         {
-            if(packIndex != stage.firstPack && !archSupports(_packs[packIndex].arch, deviceArch))
+            const auto& slot = _slots[i];
+            for(size_t packIndex = stage.firstPack[i]; packIndex < slot.packs.size(); ++packIndex)
             {
-                continue;
-            }
-            for(const auto& group : _kernelsByArch[packIndex])
-            {
-                if(archSupports(group.arch, deviceArch))
+                if(packIndex != stage.firstPack[i]
+                   && !archSupports(slot.packs[packIndex].arch, deviceArch))
                 {
-                    stage.predictedVariants += group.kernels;
+                    continue;
+                }
+                for(const auto& group : slot.kernelsByArch[packIndex])
+                {
+                    if(archSupports(group.arch, deviceArch))
+                    {
+                        stage.predictedVariants += group.kernels;
+                    }
                 }
             }
         }
         return stage;
     }
 
-    /// The rest of the pass matchGraph began: from @p stage's first pack on, every pack's
-    /// graph-scoped criteria and its kernels' arch and kernel-scoped matchers. With no
-    /// pack supporting the device this only reports the empty catalog.
+    /// An unslotted engine's rest of the pass matchGraph began, from @p stage. With no pack
+    /// supporting the device this only reports the empty catalog.
     Catalog matchVariants(const MatchContext& context, CatalogGraphStage stage) const
     {
-        Catalog catalog;
+        const BoundTokens noTokens;
+        GraphMatcherMemo graphVerdicts;
+        Catalog catalog = matchVariants(_slots.front(),
+                                        stage.firstPack.front(),
+                                        context,
+                                        stage.bound.has_value() ? *stage.bound : noTokens,
+                                        graphVerdicts);
         if(stage.bound.has_value())
         {
             catalog.bound = std::move(*stage.bound);
         }
-        GraphMatcherMemo graphVerdicts;
+        return catalog;
+    }
 
-        for(size_t packIndex = stage.firstPack; packIndex < _packs.size(); ++packIndex)
-        // PORT(S): C1-24 slot.packs loop beside develop's matchGraph and matchVariants
-        for(size_t packIndex = 0; packIndex < slot.packs.size(); ++packIndex)
+    /// One slot's share of the pass matchGraph began: from @p firstPack on, every pack's
+    /// graph-scoped criteria (memoized in @p graphVerdicts, which the slots of one build
+    /// share) and its kernels' arch and kernel-scoped matchers. The catalog's `bound` is left
+    /// to the caller.
+    Catalog matchVariants(const SlotState& slot,
+                          size_t firstPack,
+                          const MatchContext& context,
+                          const BoundTokens& bound,
+                          GraphMatcherMemo& graphVerdicts) const
+    {
+        Catalog catalog;
+
+        for(size_t packIndex = firstPack; packIndex < slot.packs.size(); ++packIndex)
         {
             const auto& pack = slot.packs[packIndex];
 
             // matchGraph already cleared the first pack.
-            if(packIndex != stage.firstPack && !packSupportsDevice(packIndex, context))
+            if(packIndex != firstPack && !packSupportsDevice(slot, packIndex, context))
             {
                 continue;
             }
 
-            if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
-            // PORT(S): C1-25 runGraphMatch call and match.verdicts beside develop's graphLevelMatchersPass call
-            runGraphMatch(context, match);
-
-            if(!match.bound.has_value())
-            {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined graph_match for device "
-                                       << context.deviceId);
-                return catalog;
-            }
-
-            if(!graphLevelMatchersPass(pack, context, match.verdicts, *match.bound))
+            if(!graphLevelMatchersPass(pack, context, graphVerdicts, bound))
             {
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
                                                          << " declined at a graph-scoped matcher");
@@ -2082,12 +2099,8 @@ private:
                 }
 
                 // Referenced, not rebuilt or copied: every field was settled at
-                // construction, and `_definitions` never changes after it.
-                if(kernelLevelMatchersPass(pack, context, catalog.bound, precomputed))
-                // PORT(S): C1-26 kernelLevelMatchersPass with match.bound beside develop's referenced definitions
-                // Copied only when admitted: matchers take it by const reference, and most
-                // kernels are rejected.
-                if(kernelLevelMatchersPass(pack, context, *match.bound, precomputed))
+                // construction, and `definitions` never changes after it.
+                if(kernelLevelMatchersPass(pack, context, bound, precomputed))
                 {
                     catalog.entries.push_back(&precomputed);
                     ++admitted;
@@ -2117,20 +2130,6 @@ private:
                                << catalog.entries.size() << " kernel(s) from " << slot.packs.size()
                                << " pack(s)");
         return catalog;
-    }
-
-    /// The pack-level arch gate, logging a decline.
-    bool packSupportsDevice(size_t packIndex, const MatchContext& context) const
-    {
-        const auto& pack = _packs[packIndex];
-        if(archSupports(pack.arch, context.deviceProperties.gcnArchName))
-        {
-            return true;
-        }
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
-                                                 << " does not support device arch '"
-                                                 << context.deviceProperties.gcnArchName << "'");
-        return false;
     }
 
     /// Per metadata tuple, keeps only the entries with the best arch tier for the device.
@@ -2354,6 +2353,57 @@ private:
         _programCache.mergeAbsent(std::move(newestFirstPrograms));
     }
 
+    /// A winner-cache shard held under its exclusive lock, with every line it held.
+    template <typename TLine>
+    struct LockedShard
+    {
+        hipdnn_data_sdk::utilities::LineStoreShard shard;
+        std::vector<TLine> lines;
+    };
+
+    /// Opens, locks and reads the on-disk shard of @p gcnArchName, decoding each line with
+    /// @p decode. Empty when the engine has no disk cache or any step fails, after logging the
+    /// failure once; the caller then keeps its in-memory result. On success the lock is held:
+    /// the caller releases it with `unlockLineStore(shard)` once it has appended.
+    template <typename TDecode,
+              typename TLine = typename std::invoke_result_t<TDecode, std::string_view>::value_type>
+    std::optional<LockedShard<TLine>> lockShard(const std::string& gcnArchName,
+                                                TDecode decode) const
+    {
+        if(_engine.name.empty() || !_engine.contentIdentified)
+        {
+            return std::nullopt;
+        }
+
+        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
+        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
+            return std::nullopt;
+        }
+        if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
+        {
+            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
+            return std::nullopt;
+        }
+
+        if(hipdnn_data_sdk::utilities::lockLineStore(*shard)
+           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::LOCK, gcnArchName);
+            return std::nullopt;
+        }
+
+        auto [lines, readStatus] = hipdnn_data_sdk::utilities::readAllLines(*shard, decode);
+        if(readStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+            logShardFailureOnce(WinnerShardFailureKind::READ, gcnArchName);
+            return std::nullopt;
+        }
+        return LockedShard<TLine>{std::move(*shard), std::move(lines)};
+    }
+
     /// Write-back: re-reads @p key's shard under its LineStore lock, then applies
     /// @p cause's rule, as one critical section under the shard's own lock (mirrors
     /// `LineStoreLockHelper.cpp`). A fresh miss adopts any existing on-disk record for
@@ -2376,37 +2426,10 @@ private:
     WinnerRecord
         writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
     {
-        if(_engine.name.empty() || !_engine.contentIdentified)
-        {
-            return record;
-        }
-
         const auto& gcnArchName = key.device.properties().gcnArchName;
-        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
-        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        auto locked = lockShard(gcnArchName, &decodeWinnerRecordLine);
+        if(!locked.has_value())
         {
-            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
-            return record;
-        }
-        if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
-        {
-            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
-            return record;
-        }
-
-        if(hipdnn_data_sdk::utilities::lockLineStore(*shard)
-           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
-        {
-            logShardFailureOnce(WinnerShardFailureKind::LOCK, gcnArchName);
-            return record;
-        }
-
-        const auto [existing, readStatus]
-            = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerRecordLine);
-        if(readStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
-        {
-            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
-            logShardFailureOnce(WinnerShardFailureKind::READ, gcnArchName);
             return record;
         }
 
@@ -2414,7 +2437,7 @@ private:
         // line for this key, not the first. Once a shard can hold a superseded line, the
         // first match is stale and comparing against it would wrongly adopt it.
         const WinnerRecord* onDiskWinner = nullptr;
-        for(const auto& [existingKey, existingRecord] : existing)
+        for(const auto& [existingKey, existingRecord] : locked->lines)
         {
             if(existingKey == key)
             {
@@ -2428,13 +2451,13 @@ private:
             // candidates and rank them the same way up to noise, so comparing rankings let both
             // append and the shard kept two lines for one graph. A re-benchmark forced by a record
             // that no longer covers the candidate set is the only writer that supersedes.
-            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+            hipdnn_data_sdk::utilities::unlockLineStore(locked->shard);
             return *onDiskWinner;
         }
 
-        const auto appendStatus
-            = hipdnn_data_sdk::utilities::appendLine(*shard, encodeWinnerRecordLine(key, record));
-        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        const auto appendStatus = hipdnn_data_sdk::utilities::appendLine(
+            locked->shard, encodeWinnerRecordLine(key, record));
+        hipdnn_data_sdk::utilities::unlockLineStore(locked->shard);
         if(appendStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
         {
             logShardFailureOnce(WinnerShardFailureKind::APPEND, gcnArchName);
@@ -2574,56 +2597,26 @@ private:
                             WinnerWriteCause slotCause,
                             WinnerWriteCause programCause) const
     {
-        if(_engine.name.empty() || !_engine.contentIdentified)
-        {
-            return planSlottedWrite(
-                baseKey, slotRecords, program, slotCause, programCause, nullptr);
-        }
-
         const auto& gcnArchName = baseKey.device.properties().gcnArchName;
-        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
-        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        auto locked = lockShard(gcnArchName, &decodeWinnerLine);
+        if(!locked.has_value())
         {
-            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
-            return planSlottedWrite(
-                baseKey, slotRecords, program, slotCause, programCause, nullptr);
-        }
-        if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
-        {
-            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
-            return planSlottedWrite(
-                baseKey, slotRecords, program, slotCause, programCause, nullptr);
-        }
-        if(hipdnn_data_sdk::utilities::lockLineStore(*shard)
-           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
-        {
-            logShardFailureOnce(WinnerShardFailureKind::LOCK, gcnArchName);
             return planSlottedWrite(
                 baseKey, slotRecords, program, slotCause, programCause, nullptr);
         }
 
-        const auto [existing, readStatus]
-            = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerLine);
-        if(readStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
-        {
-            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
-            logShardFailureOnce(WinnerShardFailureKind::READ, gcnArchName);
-            return planSlottedWrite(
-                baseKey, slotRecords, program, slotCause, programCause, nullptr);
-        }
-
-        auto plan
-            = planSlottedWrite(baseKey, slotRecords, program, slotCause, programCause, &existing);
+        auto plan = planSlottedWrite(
+            baseKey, slotRecords, program, slotCause, programCause, &locked->lines);
         for(const auto& line : plan.lines)
         {
-            if(hipdnn_data_sdk::utilities::appendLine(*shard, line)
+            if(hipdnn_data_sdk::utilities::appendLine(locked->shard, line)
                != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
             {
                 logShardFailureOnce(WinnerShardFailureKind::APPEND, gcnArchName);
                 break;
             }
         }
-        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        hipdnn_data_sdk::utilities::unlockLineStore(locked->shard);
         return plan;
     }
 
@@ -2692,25 +2685,6 @@ private:
     std::string _sharedWorkspaceToken;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
-    std::vector<KernelDescriptorPack> _packs;
-    /// One entry per pack, parallel to _packs: its kernels' context-independent
-    /// definitions, completed once at construction and never mutated after, so the
-    /// pointers every Catalog holds into it stay valid for this manager's lifetime.
-    std::vector<std::vector<KernelDefinition>> _definitions;
-    /// How many kernels a pack holds under one resolved arch list.
-    struct ArchKernelCount
-    {
-        std::vector<std::string> arch;
-        size_t kernels = 0;
-    };
-    /// Parallel to _packs: each pack's kernels counted by distinct arch list, so
-    /// predicting a catalog build's work tests each list once rather than each kernel.
-    std::vector<std::vector<ArchKernelCount>> _kernelsByArch;
-    /// Per non-integer metadata field, its value set in index order, so the field is
-    /// addressable by an int64 knob. Fixed at construction.
-    std::map<std::string, std::vector<MetadataValue>> _ordinalDomains;
-    std::shared_ptr<IKernelHeuristic> _heuristic;
-    // PORT(S): C1-27 develop's per-engine member list kept; slotted model keeps per-slot state instead (nothing re-inserted)
     GraphMatchFn _graphMatchFn = nullptr;
     /// Keyed by slot: an unslotted engine's catalogs under the empty slot, a slotted engine's
     /// one entry per slot name.

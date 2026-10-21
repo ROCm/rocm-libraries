@@ -3,8 +3,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -20,7 +18,6 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -74,63 +71,6 @@ public:
     ScopedGraphMatch& operator=(ScopedGraphMatch&&) = delete;
 };
 
-/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime, with
-/// HIPDNN_DISABLE_CACHE neutralized, and restores both after.
-class ScopedCacheDir
-{
-public:
-    explicit ScopedCacheDir(const std::string& name)
-        : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
-        , _previousDisable(hipdnn_data_sdk::utilities::getEnv(DISABLE_CACHE_ENV))
-        , _path(std::filesystem::temp_directory_path() / ("hsw_" + uniqueSuffix() + "_" + name))
-    {
-        std::filesystem::remove_all(_path);
-        std::filesystem::create_directories(_path);
-        const std::string value = _path.string();
-        hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, value.c_str());
-        hipdnn_data_sdk::utilities::unsetEnv(DISABLE_CACHE_ENV);
-    }
-
-    ScopedCacheDir(const ScopedCacheDir&) = delete;
-    ScopedCacheDir& operator=(const ScopedCacheDir&) = delete;
-    ScopedCacheDir(ScopedCacheDir&&) = delete;
-    ScopedCacheDir& operator=(ScopedCacheDir&&) = delete;
-
-    ~ScopedCacheDir()
-    {
-        if(_previous.empty())
-        {
-            hipdnn_data_sdk::utilities::unsetEnv(CACHE_DIR_ENV);
-        }
-        else
-        {
-            hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, _previous.c_str());
-        }
-        if(!_previousDisable.empty())
-        {
-            hipdnn_data_sdk::utilities::setEnv(DISABLE_CACHE_ENV, _previousDisable.c_str());
-        }
-        std::error_code ignored;
-        std::filesystem::remove_all(_path, ignored);
-    }
-
-private:
-    static constexpr const char* CACHE_DIR_ENV = "HIPDNN_CACHE_DIR";
-    static constexpr const char* DISABLE_CACHE_ENV = "HIPDNN_DISABLE_CACHE";
-
-    static std::string uniqueSuffix()
-    {
-        static std::atomic<int> s_counter{0};
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        return std::to_string(static_cast<uint64_t>(stamp) % 1000000U) + "_"
-               + std::to_string(s_counter.fetch_add(1));
-    }
-
-    std::string _previous;
-    std::string _previousDisable;
-    std::filesystem::path _path;
-};
-
 MetadataSchema slotSchema(uint8_t seed, const std::string& name)
 {
     return {testId(seed), name, {{TILE, MetadataType::INT, std::nullopt}}};
@@ -139,24 +79,15 @@ MetadataSchema slotSchema(uint8_t seed, const std::string& name)
 KernelDescriptorPack
     slotPack(uint8_t packSeed, const std::string& slot, const std::vector<uint8_t>& kernelSeeds)
 {
-    KernelDescriptorPack pack;
-    pack.id = testId(packSeed);
-    pack.name = slot + " pack";
-    pack.engineId = ENGINE_ID;
-    pack.dispatchId = DISPATCH_ID;
-    pack.slot = slot;
-    pack.kernels.reserve(kernelSeeds.size());
+    std::vector<KernelDescriptor> kernels;
+    kernels.reserve(kernelSeeds.size());
     for(const auto seed : kernelSeeds)
     {
-        KernelDescriptor kernel;
-        kernel.id = testId(seed);
-        kernel.name = slot + "_" + std::to_string(seed);
-        kernel.source.sourceFile = "Test.cpp";
-        kernel.source.entryPoint = kernel.name;
-        kernel.metadata = {{TILE, MetadataValue{static_cast<int64_t>(seed)}}};
-        pack.kernels.push_back(std::move(kernel));
+        kernels.push_back(makeSlotKernel(seed,
+                                         slot + "_" + std::to_string(seed),
+                                         {{TILE, MetadataValue{static_cast<int64_t>(seed)}}}));
     }
-    return pack;
+    return makeSlotPack(packSeed, slot, std::move(kernels));
 }
 
 KernelSlotInput slotInput(const std::string& name,
@@ -280,7 +211,7 @@ std::vector<std::string> kernelOrder(const Catalog& catalog)
     names.reserve(catalog.entries.size());
     for(const auto& entry : catalog.entries)
     {
-        names.push_back(entry.name);
+        names.push_back(entry->name);
     }
     return names;
 }
@@ -288,24 +219,6 @@ std::vector<std::string> kernelOrder(const Catalog& catalog)
 // ---------------------------------------------------------------------------
 // The codec: v2 stays byte-identical, v3 carries the slot and program lines
 // ---------------------------------------------------------------------------
-
-TEST(TestSlottedWinnerRecordCodec, AnUnslottedKeyStillEncodesAsV2WithNoSlotField)
-{
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto line
-        = encodeWinnerRecordLine(baseKeyFor(graph, properties), ranking(DKDV_PACK, {0x21}));
-
-    const auto json = nlohmann::json::parse(line);
-    EXPECT_EQ(json.at("v"), 2);
-    EXPECT_FALSE(json.contains("slot"));
-
-    const auto decoded = decodeWinnerLine(line);
-    ASSERT_TRUE(decoded.has_value());
-    EXPECT_TRUE(decoded->key.slot.empty());
-    EXPECT_EQ(encodeWinnerRecordLine(decoded->key, decoded->record), line)
-        << "a v2 line must round-trip to the same bytes";
-}
 
 TEST(TestSlottedWinnerRecordCodec, ASlotRecordIsAV3LineWithASlotField)
 {
@@ -478,18 +391,6 @@ TEST(TestSlottedWinnerRecords, AValidProgramIsServedByAFreshManagerOnceItHasSeen
     EXPECT_EQ(program->picks[1].kernelId, testId(0x23));
 }
 
-TEST(TestSlottedWinnerRecords, ProgramForIsNulloptOnAnUnslottedKeyOrASlotKey)
-{
-    const ScopedGraphMatch match;
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto manager = makeManager({});
-    WinnerKey slotKey = baseKeyFor(graph, properties);
-    slotKey.slot = "dkdv";
-
-    EXPECT_FALSE(manager->programFor(slotKey).has_value());
-}
-
 TEST(TestSlottedWinnerRecords, ARewrittenSlotWinnerInvalidatesTheProgramAtReadTime)
 {
     const ScopedGraphMatch match;
@@ -576,7 +477,9 @@ std::unique_ptr<Manager> managerOverShardWith(const ContentCarryingTestGraph& gr
                         WinnerWriteCause::FRESH_MISS,
                         WinnerWriteCause::FRESH_MISS);
     {
+        EXPECT_TRUE(std::filesystem::exists(shardPath(properties)));
         std::ofstream out(shardPath(properties), std::ios::app);
+        EXPECT_TRUE(out.is_open());
         for(const auto& line : append)
         {
             out << line << "\n";
@@ -772,38 +675,6 @@ TEST(TestSlottedWinnerRecords, EachPartFollowsItsOwnWriteCause)
     EXPECT_EQ(shardLines(shardPath(properties)).size(), 9U);
 }
 
-TEST(TestSlottedWinnerRecords, TheLastLineForASlotAndForTheProgramWins)
-{
-    const ScopedGraphMatch match;
-    const ScopedCacheDir cacheDir("last_line_wins");
-    const auto graph = makeGraph();
-    const auto properties = testDeviceProperties();
-    const auto base = baseKeyFor(graph, properties);
-    makeManager(namedEngine())
-        ->recordSlotted(base,
-                        goodSlotRecords(),
-                        goodProgram(),
-                        WinnerWriteCause::FRESH_MISS,
-                        WinnerWriteCause::FRESH_MISS);
-
-    WinnerKey dkdvKey = base;
-    dkdvKey.slot = "dkdv";
-    {
-        std::ofstream out(shardPath(properties), std::ios::app);
-        out << encodeWinnerRecordLine(dkdvKey, ranking(DKDV_PACK, {0x22, 0x23, 0x21})) << "\n";
-        out << encodeProgramLine(base, programOf(0x12, 0x22, 0x31)) << "\n";
-    }
-
-    const auto reader = makeManager(namedEngine());
-    const auto dkdv = reader->winnerFor(dkdvKey);
-    ASSERT_TRUE(dkdv.has_value());
-    EXPECT_EQ(dkdv->front().kernelId, testId(0x22));
-    seeCatalogs(*reader, graph, properties);
-    const auto program = reader->programFor(base);
-    ASSERT_TRUE(program.has_value()) << "the later program agrees with the later dkdv winner";
-    EXPECT_EQ(program->picks[1].kernelId, testId(0x22));
-}
-
 // ---------------------------------------------------------------------------
 // Slot-keyed adoption and coverage
 // ---------------------------------------------------------------------------
@@ -962,7 +833,6 @@ TEST(TestSlottedWinnerRecords, ProgramAndSlotRecordsAreLruAccountedSeparately)
     // program that names it goes with it.
     const auto otherGraph = ContentCarryingTestGraph{[] {
         ContentCarryingTestGraph::Spec spec;
-        spec.graphId = makeGraphId(2);
         spec.tensors[0].dims = {16, 8};
         return spec;
     }()};

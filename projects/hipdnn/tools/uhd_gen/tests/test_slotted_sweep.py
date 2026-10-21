@@ -29,7 +29,6 @@ from uhd_gen.dataset.training_table import (  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SWEEP = FIXTURES / "slotted_sweep.csv"
-EXPECTED = FIXTURES / "slotted_sweep_slot_tables.json"
 
 #: slot -> kernel ids in kernel-id order; the first is the training reference pick.
 KERNELS = {
@@ -65,10 +64,43 @@ def _tables(directory, **options):
     }
 
 
-def test_each_slots_table_matches_the_golden_tables(tmp_path):
-    tables = _tables(_dataset(tmp_path))
-    golden = json.loads(EXPECTED.read_text(encoding="utf-8"))
-    assert json.loads(json.dumps(tables)) == golden
+#: slot -> {(problem seqlen, position in KERNELS[slot]): (kernel.tile, avgTimeMs)}. The run
+#: that failed has no time.
+TILE_AND_TIME = {
+    "prep": {
+        (512, 0): (64, 0.8),
+        (512, 1): (128, 0.84),
+        (1024, 0): (64, 1.6),
+        (1024, 1): (128, 1.52),
+    },
+    "dkdv": {
+        (512, 0): (32, 0.8),
+        (512, 1): (64, 0.7),
+        (512, 2): (128, 0.9),
+        (1024, 0): (32, 1.6),
+        (1024, 1): (64, 1.8),
+        (1024, 2): (128, None),
+    },
+    "dq": {
+        (512, 0): (16, 0.8),
+        (512, 1): (32, 0.9),
+        (1024, 0): (16, 1.6),
+        (1024, 1): (32, 1.45),
+    },
+}
+
+
+def test_each_slots_table_carries_the_slots_own_tile_and_time(tmp_path):
+    for slot, table in _tables(_dataset(tmp_path)).items():
+        for row in table:
+            assert {"q.seqlen", "device.cu_count", "avgTimeMs"} <= set(row)
+        assert {
+            (row["q.seqlen"], KERNELS[slot].index(row["kernel"])): (
+                row["kernel.tile"],
+                row["avgTimeMs"],
+            )
+            for row in table
+        } == TILE_AND_TIME[slot]
 
 
 def test_a_slots_table_holds_each_of_its_kernels_once_per_problem_and_no_other_slots(
@@ -335,3 +367,40 @@ def test_slot_requires_a_dataset():
     )
     with pytest.raises(ValueError, match="--slot.*--dataset"):
         _check_generate_arguments(args, False, Path("o"), Path("t"))
+
+
+def test_the_export_command_reports_an_unknown_slot_instead_of_a_traceback(
+    tmp_path, capsys
+):
+    out = tmp_path / "rows.json"
+    status = store.export_main(
+        [
+            "--from",
+            str(_dataset(tmp_path)),
+            "--out",
+            str(out),
+            "--purpose",
+            "training",
+            "--slot",
+            "nope",
+        ]
+    )
+    assert status == 1
+    assert "no slot 'nope'" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_knobs_judges_one_slots_knobs_on_its_reference_rows(tmp_path, capsys):
+    from uhd_gen.__main__ import main
+
+    corpus = tmp_path / "corpus.json"
+    corpus.write_text(
+        json.dumps(store.export_rows(_dataset(tmp_path), purposes=["training"])),
+        encoding="utf-8",
+    )
+    assert main(["knobs", "--input", str(corpus), "--slot", "dkdv"]) == 0
+    report = capsys.readouterr().out
+    # The slot's reference rows only (two problems, minus the failed run), and the slot's own
+    # knob under its bare field name.
+    assert "5 measurement(s)" in report
+    assert "dkdv.tile" not in report and "dq.tile" not in report

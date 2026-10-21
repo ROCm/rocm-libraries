@@ -215,8 +215,9 @@ def _compare_kmds(trained: dict, actual: dict) -> None:
     """The KMD half of the comparison, in the unslotted, slot-ranker and engine-level forms.
 
     Mirrors `slottedProvenanceError` (DescriptorLoader.hpp): a slot ranker names its own
-    slot's KMD (`slot` optional); an engine-level model of a slotted engine names every
-    slot's KMD in `kmds`; an unslotted engine satisfies neither slot form.
+    slot's KMD and the `slot` it was trained for (required); an engine-level model of a
+    slotted engine names every slot's KMD in `kmds`; an unslotted engine satisfies neither
+    slot form.
     """
     if "kmds" in trained:
         if "kmds" not in actual:
@@ -254,6 +255,11 @@ def _compare_kmds(trained: dict, actual: dict) -> None:
         raise ProvenanceError(
             "trained_against names kmd, but a slotted engine's predict_engine model must "
             "name every slot's KMD in kmds"
+        )
+    if "slot" in actual and "slot" not in trained:
+        raise ProvenanceError(
+            f"trained_against names no slot, but the ranker of slot {actual['slot']!r} "
+            "must name the slot it was trained for"
         )
     if "slot" in trained:
         if "slot" not in actual:

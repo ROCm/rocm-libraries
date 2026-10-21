@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -205,6 +206,16 @@ public:
         const auto context = _fixture.planFor(_graph, config);
         const StubHandle handle;
         return context.plan().getWorkspaceSize(handle);
+    }
+
+    /// The engine's workspace estimate with benchmarking on (RFC 0021 §6, #14105).
+    size_t benchmarkingWorkspaceEstimate()
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto config = makeIntKnobsEngineConfig(
+            builder, Settings{{hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1}});
+        const StubHandle handle;
+        return _fixture.engine().getMaxWorkspaceSize(handle, _graph, config);
     }
 
     WinnerKey baseKey() const
@@ -539,6 +550,22 @@ TEST(TestSlotProgramBenchmark, AWorkspaceLimitTimesThePrunedCatalogsAndWritesNoR
     EXPECT_FALSE(bench.programRecord().has_value());
 }
 
+TEST(TestSlotProgramBenchmark, ANarrowedPlanWhoseSlotsAreAllCoveredIsServedWithoutTiming)
+{
+    Bench bench;
+    bench.seedSlotRecord(0, {0x12, 0x11});
+    bench.seedSlotRecord(1, {0x23, 0x21, 0x22});
+    bench.seedSlotRecord(2, {0x31, 0x32});
+    ASSERT_FALSE(bench.programRecord().has_value());
+
+    // No program record exists, so only the narrowing keeps the benchmark from running.
+    const auto served = bench.benchmarkAndServe({{"dkdv.block_m", 64}});
+
+    EXPECT_EQ(bench.clock().sampleCount(), 0U);
+    EXPECT_EQ(served, (Program{0x12, 0x21, 0x31}));
+    EXPECT_FALSE(bench.programRecord().has_value());
+}
+
 TEST(TestSlotProgramBenchmark, ACandidateWhoseBuildRejectsTheProblemEndsTheBenchmarkPlanBuild)
 {
     Bench bench;
@@ -629,6 +656,21 @@ TEST(TestSlotProgramBenchmark, ACoveredSlotWhoseWinnerFailsToBuildIsTimedAgain)
     EXPECT_EQ(seedsOf(*bench.slotRecord("dkdv")), (std::vector<uint8_t>{0x21, 0x22}));
 }
 
+/// IEngine::getMaxWorkspaceSize with `global.benchmarking` SHOULD cover the priming plan, so a
+/// caller that sizes its workspace from the estimate can run the benchmark. The slotted estimate
+/// is the aligned shared region plus the largest scratch of every surviving kernel of every slot,
+/// which the benchmark's own plan can only equal or undercut.
+TEST(TestSlotProgramBenchmark, TheBenchmarkingWorkspaceEstimateCoversThePrimingPlan)
+{
+    Bench bench;
+
+    const auto primingPlan = bench.benchmarkingWorkspaceSize();
+    const auto estimate = bench.benchmarkingWorkspaceEstimate();
+
+    EXPECT_GT(primingPlan, 0U);
+    EXPECT_GE(estimate, primingPlan);
+}
+
 #ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
 /// The real default timer arms a stall gate on every sample of a stalled pass. A fault injected
 /// at the HIP boundary makes one sample unstallable, which must discard the whole stalled pass
@@ -715,6 +757,49 @@ TEST_F(TestSlotProgramBenchmarkStallRestart,
     EXPECT_EQ(gStreamWaitFaults.rejectedArms, 1);
     EXPECT_EQ(gStreamWaitFaults.armCalls, SAMPLES_PER_RUN + 1);
     expectCompleteComparison(bench, served);
+}
+
+TEST_F(TestSlotProgramBenchmarkStallRestart,
+       AnUnstallableWinnersProgramRestartsTheComparisonUnstalled)
+{
+    // The reference and the four one-slot variations are timed stalled; the winners program's
+    // first sample cannot arm.
+    gStreamWaitFaults.failFromArm = 5 * SAMPLES_PER_RUN + 1;
+    Bench bench(/*defaultTimer=*/true);
+
+    const auto served = bench.benchmarkAndServe();
+
+    // The stalled pass stops at that arm and the unstalled restart never arms again.
+    EXPECT_EQ(gStreamWaitFaults.rejectedArms, 1);
+    EXPECT_EQ(gStreamWaitFaults.armCalls, 5 * SAMPLES_PER_RUN + 1);
+    expectCompleteComparison(bench, served);
+}
+
+/// Every stalled reading is negative, the shape the Windows HIP runtime reports for short stalled
+/// work. A candidate that spends its retry budget on negative stalled readings must restart the
+/// comparison unstalled rather than be dropped, so every slot's ranking is still recorded and
+/// the served program is the recorded one.
+TEST_F(TestSlotProgramBenchmarkStallRestart,
+       APersistentlyNegativeStalledComparisonRestartsTheComparisonUnstalled)
+{
+    gStreamWaitFaults.negativeStalledReadings = std::numeric_limits<int>::max();
+    Bench bench(/*defaultTimer=*/true);
+
+    const auto served = bench.benchmarkAndServe();
+
+    // The first reference sample spends its retries, then the stalled pass stops: nothing later
+    // is timed stalled, and the restart arms no more gates.
+    EXPECT_EQ(gStreamWaitFaults.stalledReadings, 1 + MAX_NEGATIVE_SAMPLE_RETRIES);
+    expectCompleteComparison(bench, served);
+    for(const std::string slot : {"prep", "dkdv", "dq"})
+    {
+        const auto record = bench.slotRecord(slot);
+        ASSERT_TRUE(record.has_value()) << slot;
+        for(const auto& entry : *record)
+        {
+            EXPECT_GE(entry.timeMs, 0.0) << slot;
+        }
+    }
 }
 #endif
 

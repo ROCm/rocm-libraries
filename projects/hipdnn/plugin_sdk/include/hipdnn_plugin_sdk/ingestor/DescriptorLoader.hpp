@@ -44,6 +44,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/detail/TopLevelArraySax.hpp>
 
 /**
@@ -2703,7 +2704,6 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
  */
 inline std::string workspaceTokenRead(const HeuristicDescriptor& model)
 {
-    constexpr std::string_view WORKSPACE_ROOT = "ws.";
     if(model.featuresSignature.empty())
     {
         return {};
@@ -2714,10 +2714,7 @@ inline std::string workspaceTokenRead(const HeuristicDescriptor& model)
         std::string first;
         for(const auto& reference : extractor.getVariableRefs())
         {
-            const bool dollar = !reference.empty() && reference.front() == '$';
-            const std::string_view bare = std::string_view(reference).substr(dollar ? 1 : 0);
-            if(bare.substr(0, WORKSPACE_ROOT.size()) == WORKSPACE_ROOT
-               && (first.empty() || reference < first))
+            if(isWorkspaceToken(reference) && (first.empty() || reference < first))
             {
                 first = reference;
             }
