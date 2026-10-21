@@ -70,11 +70,20 @@
 // The C=K=256 case is the 2 GiB shape that failed GPU verification. With N=4 and a 1024x1024
 // image there are no padding rows and every read stays below 4 GiB.
 //
+// The last two fp32 NCHW cases are the fp32 half of the same hazard, where one batch row of the
+// last gemm-k split is read past N. A row counts as safe when it ends at or below 4 GiB.
+//
 // GetFp32NchwBatchPaddingWrapsConvCase() keeps both tensors inside the window and still has to
-// be declined, which is the fp32 half of the same hazard. It is another restored shape,
-// x = 512x127x127 with a 1024x512x1x1 stride-2 filter, with N raised from 128 to 130: its larger
-// activation is 4,294,184,960 bytes, 782,336 under the window, but the tail of the last gemm-k
-// split reads one batch row past N, and that row starts at 4,327,217,152.
+// be declined. It is x = 512x127x127 with a 1024x512x1x1 stride-1 filter at N=65, so ho*wo is
+// 16,129 and the gemm-k length is never a whole number of nb_per_block blocks: every config
+// reads batch row 65 of dy, which starts at 4,294,184,960 and ends at 4,360,249,344.
+//
+// GetFp32NchwPaddingFallbackConvCase() covers HeuristicInit()'s fallback. It is a restored
+// shape, x = 512x127x127 with a 1024x512x1x1 stride-2 filter, with N raised from 128 to 130: dy
+// is 4,294,184,960 bytes, 782,336 under the window. The config the usual heuristic picks splits
+// gemm-k unevenly and reads dy row 130, which starts at 4,294,184,960 and ends at
+// 4,327,217,152; the fallback finds a config whose splits are exact and that reads rows 0 to
+// 129 only, so gfx950 keeps the solver.
 
 namespace {
 
@@ -160,6 +169,15 @@ auto GetBatchPaddingWrapsInWindowConvCase()
 }
 
 auto GetFp32NchwBatchPaddingWrapsConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNCHW, {65, 512, 127, 127}},
+                        {miopenFloat, miopenTensorNCHW, {1024, 512, 1, 1}},
+                        miopenFloat,
+                        {{0, 0}, {1, 1}, {1, 1}}};
+}
+
+auto GetFp32NchwPaddingFallbackConvCase()
 {
     using miopen::unit_tests::ConvTestCase;
     return ConvTestCase{{miopenFloat, miopenTensorNCHW, {130, 512, 127, 127}},
@@ -312,6 +330,11 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwBatchPaddingWraps,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32NchwBatchPaddingWrapsConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwPaddingFallback,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetGfx950WindowParams()),
+                                          testing::Values(GetFp32NchwPaddingFallbackConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(SmokeBatchPaddingFits,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
