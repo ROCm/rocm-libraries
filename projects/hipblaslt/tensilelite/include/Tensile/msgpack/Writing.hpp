@@ -25,9 +25,14 @@ namespace TensileLite
     ///
     /// The caller must be the only user of `library` for the duration of the
     /// call. The writer copies `solutions` under its lock, then reads the
-    /// library tree and any blob cache without a further lock. It does not
-    /// modify the library; the serialization traits take a mutable reference,
-    /// which is why the implementation casts away const.
+    /// library tree and any blob cache without a further lock. The serialization
+    /// traits take a mutable reference, which is why the implementation casts
+    /// away const.
+    ///
+    /// The eager layout has nowhere to put unparsed bytes, so writing a lazily
+    /// loaded library parses every solution in its blob cache and leaves them
+    /// there. That is an observable change in the library's memory footprint.
+    /// MessagePackWriteIndexedLibraryData does not do it.
     /// Throws std::runtime_error naming every node that cannot be written.
     TENSILELITEHOST_EXPORT std::vector<uint8_t> MessagePackWriteLibraryData(
         SolutionLibrary<ContractionProblemGemm, ContractionSolution> const& library);
@@ -35,8 +40,11 @@ namespace TensileLite
     /// Encodes an in-memory library as the indexed document (format_version 2):
     /// `format_version`, optional `version`, `solutions_index` as a flat
     /// [index, offset, length, ...] array, `solutions_blob` as the concatenation
-    /// of each solution's bytes, and `library`. Each solution's bytes come from
-    /// MessagePackWriteSolutionData. `library` must be a MasterSolutionLibrary.
+    /// of each solution's bytes, and `library`. A solution the caller holds as
+    /// an object is encoded with MessagePackWriteSolutionData; one that is
+    /// still only bytes in a blob cache is copied through unparsed, so a lazily
+    /// loaded library is not materialized. `library` must be a
+    /// MasterSolutionLibrary.
     /// The same exclusive-use rule as MessagePackWriteLibraryData applies.
     /// writeMsgPackIndexed stores this layout with msgpack.packb.
     TENSILELITEHOST_EXPORT std::vector<uint8_t> MessagePackWriteIndexedLibraryData(
