@@ -13,7 +13,7 @@ GlobalParameters:
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   PruneSparseMode: 0
-  MXDataGenerator: False
+  MXDataGenerator: True
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 2
@@ -44,10 +44,10 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      MXBlockA: 32
-      MXBlockB: 32
-      DataTypeMXSA: e8
-      DataTypeMXSB: e8
+      MXBlockA: 16
+      MXBlockB: 16
+      DataTypeMXSA: F8
+      DataTypeMXSB: F8
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
