@@ -62,12 +62,12 @@ from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToA
 from math import ceil, log2, gcd
 
 
-# AITER-style store optimization: replace `ds_bpermute x4 + s_waitcnt +
+# Store optimization: replace `ds_bpermute x4 + s_waitcnt +
 # v_permlane32_swap x2` with a two-`v_permlane16_swap` shuffle on eligible gfx950
 # paired dwordx4 stores. This changes the cross-lane assembly AND the per-lane store
 # row address. Orphan/scalar stores use a separate, already LDS-free path.
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
-    """Whether this store emission uses the AITER ``v_permlane16_swap`` shuffle.
+    """Whether this store emission uses the ``v_permlane16_swap`` shuffle.
 
     gfx950 wave64 MI16 paired stores use permlane16 by default. MT320x256 is
     the exception: its serial store (plain NLL / post-loop / Lend fused) has
@@ -1930,7 +1930,7 @@ class GlobalWriteBatchWriter:
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
         "UseSubtileImpl 16bit optimized store requires BufferStore=1"
-      # The AITER mapping is specific to the gfx950 wave64 MI16 paired-store
+      # The permlane16 mapping is specific to the gfx950 wave64 MI16 paired-store
       # geometry.  Keep the established ds_bpermute implementation everywhere
       # else; those kernels may not have v_permlane16_swap or the same lane layout.
       # MT320x256 (MIWaveTile [10,8]): the serial store (plain NLL / post-loop /
@@ -1952,7 +1952,7 @@ class GlobalWriteBatchWriter:
       if self._permlane16Active and self.parentWriter.states.subtileHoistedPermAddr:
         module.addComment1("permlane16 row-byte delta already hoisted out of the batch preamble")
       elif self._permlane16Active:
-        # The AITER two-`v_permlane16_swap` shuffle needs no ds_bpermute,
+        # The two-`v_permlane16_swap` shuffle needs no ds_bpermute,
         # so the partner-lane address is dead.  Repurpose the vPermAddr slot to hold
         # the per-lane-group row-byte delta that compensates the permlane16 lane
         # reordering.  With permlane16 swap(0<->2),(1<->3), destination lane-group
@@ -4374,7 +4374,7 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    # The AITER shuffle assembles the eight rows with two
+    # The permlane16 shuffle assembles the eight rows with two
     # v_permlane16_swap instructions in Phase2 and needs no LDS round-trip.
     # The align8 mask is computed from output geometry and applied after the
     # shuffle, so guarded partial paired stores use the same mask machinery.
@@ -4483,11 +4483,11 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    # AITER two-permlane16 shuffle in place of
+    # Two-permlane16 shuffle in place of
     # the LDS round-trip.  No ds_bpermute was issued in Phase1, so there is no lgkmcnt
     # to drain; two v_permlane16_swap assemble the eight rows directly.
     if getattr(self, "_permlane16Active", False):
-      module.addComment1("v_permlane16_swap_b32: AITER cross-lane assembly (no ds_bpermute)")
+      module.addComment1("v_permlane16_swap_b32: cross-lane assembly (no ds_bpermute)")
       module.add(VPermlane16SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
       module.add(VPermlane16SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
     else:
