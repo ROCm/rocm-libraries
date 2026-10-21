@@ -585,7 +585,8 @@ class ReferenceOperation:
         a qualified candidate. ``stale`` asks for the directory's removal first,
         since neither unpack nor installation replaces an existing bundle.
         ``option`` names the setting that selects a bundle. ``variant`` selects
-        the committed lock.
+        the committed lock and the default bundle, and defaults to the
+        architecture's only variant.
         """
         committed = self.architectures.baseline_lock(architecture, variant)
         lock = lock or committed
@@ -596,9 +597,8 @@ class ReferenceOperation:
                 "pass a candidate bundle directory together with the "
                 "qualification-lock.json that qualification wrote with it"
             )
-        tests = self._package.parent
-        published = default_bundle_path(tests, architecture, operation=self.name)
-        if installed_test_root(tests) is not None:
+        published = self._default_bundle(architecture, variant)
+        if installed_test_root(self._package.parent) is not None:
             if not committed.is_file():
                 return (
                     f"no published {architecture} {self.label} bundle is pinned at "
@@ -746,7 +746,7 @@ class ReferenceOperation:
                     unpack(bundle, staged, lock, operation=self.name)
                 except _ARCHIVE_ERRORS as error:
                     raise ValueError(
-                        self._unreadable_archive(bundle, architecture, error)
+                        self._unreadable_archive(bundle, architecture, variant, error)
                     ) from None
                 manifest = self._authenticated_manifest(
                     staged, lock, architecture, variant
@@ -754,12 +754,14 @@ class ReferenceOperation:
         return self.cohort_differences(manifest, architecture, variant)
 
     def _unreadable_archive(
-        self, archive: Path, architecture: str, error: Exception
+        self,
+        archive: Path,
+        architecture: str,
+        variant: str | None,
+        error: Exception,
     ) -> str:
         """Explain an archive that cannot be read and how to replace it."""
-        directory = default_bundle_path(
-            self._package.parent, architecture, operation=self.name
-        )
+        directory = self._default_bundle(architecture, variant)
         published = directory.with_name(f"{directory.name}.tar.gz")
         pointer = published.with_name(f"{published.name}.dvc")
         if archive.resolve() == published.resolve() and pointer.is_file():
@@ -783,16 +785,26 @@ class ReferenceOperation:
             step,
         )
 
-    def published_bundle(self, architecture: str) -> Path:
+    def _default_bundle(self, architecture: str, variant: str | None) -> Path:
+        """Locate a variant's bundle in this tree's layout; it need not exist.
+
+        ``variant`` defaults to the architecture's only variant.
+        """
+        return default_bundle_path(
+            self._package.parent,
+            architecture,
+            operation=self.name,
+            variant=self.architectures.resolve_variant(architecture, variant),
+        )
+
+    def published_bundle(self, architecture: str, variant: str | None = None) -> Path:
         """Locate the published bundle data that this tree provides by default.
 
-        A source checkout provides the DVC archive, else a bundle extracted
-        beside it; an installed tree provides the bundle that CMake staged. The
-        path need not exist.
+        A source checkout provides the variant's DVC archive, else a bundle
+        extracted beside it; an installed tree provides the bundle that CMake
+        staged. The path need not exist.
         """
-        directory = default_bundle_path(
-            self._package.parent, architecture, operation=self.name
-        )
+        directory = self._default_bundle(architecture, variant)
         archive = directory.with_name(f"{directory.name}.tar.gz")
         return archive if archive.is_file() else directory
 

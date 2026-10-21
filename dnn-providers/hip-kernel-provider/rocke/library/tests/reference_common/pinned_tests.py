@@ -89,7 +89,9 @@ def select_bundle(
         bundle = (
             Path(configured).resolve()
             if configured
-            else default_bundle_path(_TESTS, arch, operation=operation.name)
+            else default_bundle_path(
+                _TESTS, arch, operation=operation.name, variant=variant
+            )
         )
         if not bundle.is_dir():
             hint = operation.bundle_hint(

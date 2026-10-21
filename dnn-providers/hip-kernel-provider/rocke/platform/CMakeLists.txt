@@ -634,8 +634,11 @@ if(ROCKE_INSTALL_TESTS)
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
              "  TIMEOUT 180)\n")
 
-      # Each installed architecture retains its own GPU CTest result.
+      # Each installed architecture retains its own GPU CTest result, which
+      # covers every variant installed for it, so its timeout scales with them.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
+        list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
+        math(EXPR _timeout "300 * ${_variant_count}")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -643,7 +646,7 @@ if(ROCKE_INSTALL_TESTS)
                "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
-               "  TIMEOUT 300)\n")
+               "  TIMEOUT ${_timeout})\n")
       endforeach()
     endforeach()
 

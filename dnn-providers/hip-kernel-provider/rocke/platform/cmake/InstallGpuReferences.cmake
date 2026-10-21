@@ -3,7 +3,8 @@
 
 # Called with _ROCKE_LIBRARY_DIR and ROCKE_TEST_INSTALL_DIR from the test install.
 # The test tree installs the committed locks; this stages only published payloads.
-# Installed architecture lists below also control the GPU CTest registrations.
+# Installed architecture lists below also control the GPU CTest registrations,
+# and each architecture's installed variants scale its CTest timeout.
 # Each tests/<operation>_reference package with an architecture registry is a
 # reference operation; reference_common/artifact.py discovers the same set.
 file(GLOB _ROCKE_REFERENCE_REGISTRIES RELATIVE "${_ROCKE_LIBRARY_DIR}/tests"
@@ -58,44 +59,48 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
             "manifest_operation its bundles declare.")
   endif()
   foreach(_arch IN LISTS ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
-    # A variant's committed lock publishes it. An architecture has one archive
-    # and installed bundle, so it may publish only one variant.
+    # A variant's committed lock publishes it, with its own archive and bundle.
+    # The architecture's GPU CTest runs every variant installed here.
     set(_variants "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}")
-    file(GLOB _lock "${_variants}/*/baseline_lock.json")
-    list(LENGTH _lock _lock_count)
+    file(GLOB _locks RELATIVE "${_variants}" "${_variants}/*/baseline_lock.json")
+    list(LENGTH _locks _lock_count)
     if(_lock_count EQUAL 0)
       message(FATAL_ERROR
               "No qualified ${_operation} baseline lock for ${_arch}: "
               "${_variants}/<variant>/baseline_lock.json")
-    elseif(_lock_count GREATER 1)
-      string(REPLACE ";" ", " _lock "${_lock}")
-      message(FATAL_ERROR
-              "${_operation_upper} architecture ${_arch} has ${_lock_count} variant "
-              "baseline locks, but its reference archive holds one variant: ${_lock}")
     endif()
-    set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_operation}/${_arch}.tar.gz")
-    if(NOT EXISTS "${_archive}")
-      message(FATAL_ERROR
-              "${_operation_upper} reference archive missing. Run dvc pull for "
-              "${_archive}.dvc or configure with "
-              "ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
-    endif()
-    file(SHA256 "${_archive}" _archive_sha256)
-    set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/${_operation}-reference/${_arch}/${_archive_sha256}")
-    # Unpack authenticates the manifest and payload against the committed lock.
-    execute_process(
-      COMMAND "${Python3_EXECUTABLE}" -I
-              "${_ROCKE_LIBRARY_DIR}/tests/reference_common/artifact.py" unpack
-              --operation "${_operation}"
-              --archive "${_archive}" --bundle "${_bundle}" --lock "${_lock}"
-      RESULT_VARIABLE _result ERROR_VARIABLE _error)
-    if(NOT _result EQUAL 0)
-      message(FATAL_ERROR "${_operation_upper} reference staging failed for ${_arch}: ${_error}")
-    endif()
-    # The engines/test_arch_content layout lets TheRock split test payloads by GPU.
-    install(DIRECTORY "${_bundle}/"
-            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/engines/test_arch_content/rocke/${_operation}/${_arch}"
-            PATTERN "__pycache__" EXCLUDE REGEX "\\.pyc$" EXCLUDE)
+    list(SORT _locks)
+    set(_ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS "")
+    foreach(_lock IN LISTS _locks)
+      get_filename_component(_variant "${_lock}" DIRECTORY)
+      set(_lock "${_variants}/${_lock}")
+      set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_operation}/${_arch}/${_variant}.tar.gz")
+      if(NOT EXISTS "${_archive}")
+        message(FATAL_ERROR
+                "${_operation_upper} reference archive missing. Run dvc pull for "
+                "${_archive}.dvc or configure with "
+                "ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
+      endif()
+      file(SHA256 "${_archive}" _archive_sha256)
+      set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/${_operation}-reference/${_arch}/${_variant}/${_archive_sha256}")
+      # Unpack authenticates the manifest and payload against the committed lock.
+      execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -I
+                "${_ROCKE_LIBRARY_DIR}/tests/reference_common/artifact.py" unpack
+                --operation "${_operation}" --variant "${_variant}"
+                --archive "${_archive}" --bundle "${_bundle}" --lock "${_lock}"
+        RESULT_VARIABLE _result ERROR_VARIABLE _error)
+      if(NOT _result EQUAL 0)
+        message(FATAL_ERROR
+                "${_operation_upper} reference staging failed for ${_arch} ${_variant}: ${_error}")
+      endif()
+      # The engines/test_arch_content layout lets TheRock split test payloads by
+      # GPU. It keys on the first processor-named directory, so variants go below.
+      install(DIRECTORY "${_bundle}/"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/engines/test_arch_content/rocke/${_operation}/${_arch}/${_variant}"
+              PATTERN "__pycache__" EXCLUDE REGEX "\\.pyc$" EXCLUDE)
+      list(APPEND _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS "${_variant}")
+    endforeach()
     list(APPEND _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES "${_arch}")
   endforeach()
 endforeach()

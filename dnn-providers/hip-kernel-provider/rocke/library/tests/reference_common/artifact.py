@@ -101,8 +101,14 @@ class InconsistentLockError(ValueError):
     """A lock whose fields disagree with each other, so no archive satisfies it."""
 
 
-def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
-    """Authenticate the manifest and every payload file before installation."""
+def validate_bundle(
+    bundle: Path, lock: Path, *, operation: str, variant: str | None = None
+) -> None:
+    """Authenticate the manifest and every payload file before installation.
+
+    ``variant`` names the variant whose lock ``lock`` is; a manifest that
+    declares its variant must declare that one.
+    """
     _check_operation(operation)
     expected = json.loads(lock.read_text())
     if not (bundle / "manifest.json").is_file():
@@ -126,6 +132,12 @@ def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
     declared = manifest.get("operation", "sdpa")
     if declared != manifest_operation(operation):
         raise ValueError(f"bundle operation {declared!r} does not match {operation!r}")
+    # Manifests qualified before variants predate the variant field and are
+    # likewise identified through the selected lock, which is the variant's.
+    if variant is not None and manifest.get("variant", variant) != variant:
+        raise ValueError(
+            f"bundle variant {manifest['variant']!r} does not match {variant!r}"
+        )
     if manifest["schema"] != 2:
         raise ValueError("only tensor-free schema-2 reference bundles are supported")
     # A candidate lock from an earlier qualification may lack the digest; host
@@ -157,9 +169,16 @@ def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
         )
 
 
-def pack(bundle: Path, archive: Path, lock: Path, *, operation: str) -> None:
+def pack(
+    bundle: Path,
+    archive: Path,
+    lock: Path,
+    *,
+    operation: str,
+    variant: str | None = None,
+) -> None:
     """Create a reproducible archive without host paths, users, or timestamps."""
-    validate_bundle(bundle, lock, operation=operation)
+    validate_bundle(bundle, lock, operation=operation, variant=variant)
     with archive.open("wb") as raw:
         with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as zipped:
             with tarfile.open(
@@ -186,23 +205,37 @@ def _is_published_pair(archive: Path, lock: Path, *, operation: str) -> bool:
     """Whether ``archive`` is a DVC-tracked archive and ``lock`` is its committed lock.
 
     Fetching the archive again repairs only that pairing. A candidate archive,
-    a candidate lock, or another architecture's lock does not belong with the
-    archive, and no fetch makes them agree. An architecture's archive holds its
-    one published variant, whose lock is ``<arch>/<variant>/baseline_lock.json``.
+    a candidate lock, or another variant's lock does not belong with the
+    archive, and no fetch makes them agree. A variant's archive is
+    ``<arch>/<variant>.tar.gz`` and its lock ``<arch>/<variant>/baseline_lock.json``.
     """
-    architecture = archive.name.removesuffix(".tar.gz")
-    tracked = _TESTS / "reference_bundles" / operation / f"{architecture}.tar.gz"
-    adapters = _TESTS / f"{operation}_reference" / "architectures" / architecture
-    lock = lock.resolve()
+    archive = archive.resolve()
+    architecture = archive.parent.name
+    variant = archive.name.removesuffix(".tar.gz")
+    tracked = _TESTS / "reference_bundles" / operation / architecture / archive.name
+    committed = (
+        _TESTS
+        / f"{operation}_reference"
+        / "architectures"
+        / architecture
+        / variant
+        / "baseline_lock.json"
+    )
     return (
         tracked.with_name(f"{tracked.name}.dvc").is_file()
-        and archive.resolve() == tracked.resolve()
-        and lock.name == "baseline_lock.json"
-        and lock.parent.parent == adapters.resolve()
+        and archive == tracked.resolve()
+        and lock.resolve() == committed.resolve()
     )
 
 
-def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
+def unpack(
+    archive: Path,
+    output: Path,
+    lock: Path,
+    *,
+    operation: str,
+    variant: str | None = None,
+) -> None:
     """Extract only regular bundle files, verify them, then expose the result."""
     _check_operation(operation)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -234,7 +267,7 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
                     shutil.copyfileobj(source, dest)
         bundle = staged / f"{operation}_reference_bundle"
         try:
-            validate_bundle(bundle, lock, operation=operation)
+            validate_bundle(bundle, lock, operation=operation, variant=variant)
         except InconsistentLockError:
             # The archive has the manifest that the lock pins; no fetch can help.
             raise
@@ -247,7 +280,7 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
         if output.exists():
             # Unpack never replaces an existing bundle; it must already match.
             try:
-                validate_bundle(output, lock, operation=operation)
+                validate_bundle(output, lock, operation=operation, variant=variant)
             except (OSError, ValueError) as error:
                 raise ValueError(
                     f"{error}\n  {output} is a stale or modified extracted bundle; "
@@ -267,6 +300,11 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="reference operation (required for the common command)",
     )
+    parser.add_argument(
+        "--variant",
+        help="variant that the lock belongs to; a manifest that declares its "
+        "variant must declare this one",
+    )
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--lock", required=True, type=Path)
     parser.add_argument("--archive", type=Path)
@@ -276,16 +314,28 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _parser()
     args = parser.parse_args()
-    operation = args.operation
+    operation, variant = args.operation, args.variant
     if args.command == "validate":
-        validate_bundle(args.bundle, args.lock, operation=operation)
+        validate_bundle(args.bundle, args.lock, operation=operation, variant=variant)
     else:
         if args.archive is None:
             parser.error("--archive is required for pack/unpack")
         if args.command == "pack":
-            pack(args.bundle, args.archive, args.lock, operation=operation)
+            pack(
+                args.bundle,
+                args.archive,
+                args.lock,
+                operation=operation,
+                variant=variant,
+            )
         else:
-            unpack(args.archive, args.bundle, args.lock, operation=operation)
+            unpack(
+                args.archive,
+                args.bundle,
+                args.lock,
+                operation=operation,
+                variant=variant,
+            )
 
 
 if __name__ == "__main__":

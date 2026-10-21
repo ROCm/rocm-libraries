@@ -313,6 +313,40 @@ def test_common_cli_rejects_wrong_operation_even_with_matching_lock(
     assert not archive.exists()
 
 
+@pytest.mark.parametrize("declared", [None, "family", "other"])
+def test_common_cli_accepts_only_the_selected_declared_variant(
+    tmp_path, operation, declared
+):
+    """A manifest from before variants declares none; its lock identifies it."""
+    bundle, lock = _fixture(tmp_path, operation)
+    if declared is not None:
+        manifest = json.loads((bundle / "manifest.json").read_text())
+        _relock(bundle, dict(manifest, variant=declared), lock)
+    archive = tmp_path / "bundle.tar.gz"
+    # Without a selected variant, any declared one is accepted.
+    pack(bundle, archive, lock, operation=operation)
+    for command, paths in (
+        ("validate", ["--bundle", bundle]),
+        ("unpack", ["--archive", archive, "--bundle", tmp_path / "extracted"]),
+    ):
+        result = _run(
+            command,
+            "--operation",
+            operation,
+            "--variant",
+            "family",
+            *paths,
+            "--lock",
+            lock,
+        )
+        if declared == "other":
+            assert result.returncode != 0
+            assert "bundle variant 'other' does not match 'family'" in result.stderr
+        else:
+            assert result.returncode == 0, result.stderr
+    assert (tmp_path / "extracted").exists() == (declared != "other")
+
+
 def test_archive_cannot_be_unpacked_as_another_operation(tmp_path):
     bundle, lock = _fixture(tmp_path, "conv")
     archive = tmp_path / "conv.tar.gz"
@@ -544,6 +578,7 @@ def test_unsupported_storage_schema_is_rejected(tmp_path, schema):
 def test_bundle_lookup_stays_in_operation_and_architecture_domain(
     tmp_path, operation, layout
 ):
+    """Each variant has its own bundle below its processor's directory."""
     from reference_common.paths import default_bundle_path
 
     if layout == "source":
@@ -552,14 +587,14 @@ def test_bundle_lookup_stays_in_operation_and_architecture_domain(
     else:
         root = tmp_path / layout
         tests = root / "tests/library/tests"
-        (tests / "reference_bundles" / operation / "gfx942").mkdir(parents=True)
+        (tests / "reference_bundles" / operation / "gfx942/first").mkdir(parents=True)
         expected = root / "engines/test_arch_content/rocke" / operation
-    assert (
-        default_bundle_path(tests, "gfx942", operation=operation) == expected / "gfx942"
-    )
-    assert (
-        default_bundle_path(tests, "gfx950", operation=operation) == expected / "gfx950"
-    )
+    slots = [("gfx942", "first"), ("gfx942", "second"), ("gfx950", "first")]
+    for architecture, variant in slots:
+        path = default_bundle_path(
+            tests, architecture, operation=operation, variant=variant
+        )
+        assert path == expected / architecture / variant
 
 
 @pytest.mark.parametrize("persistent", [False, True])
@@ -1015,9 +1050,10 @@ def _relocate(monkeypatch, tmp_path, operation, layout):
     return tests.resolve()
 
 
-def _track(tests, operation, architecture):
+def _track(tests, operation, architecture, variant):
     """Add the DVC pointer that a source checkout keeps for a published archive."""
-    pointer = tests / f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
+    archives = tests / "reference_bundles" / operation / architecture
+    pointer = archives / f"{variant}.tar.gz.dvc"
     pointer.parent.mkdir(parents=True)
     pointer.write_text("outs:\n")
     return pointer
@@ -1051,6 +1087,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: missing
     )
     tests = _relocate(monkeypatch, tmp_path, operation, layout)
+    variant = spec.architectures.resolve_variant(architecture)
     # A published pair has a committed lock and, in a source checkout, a DVC
     # pointer beside the default bundle. The test decides which pairs those
     # are, so publishing another architecture cannot remove a case.
@@ -1060,16 +1097,16 @@ def test_reference_missing_bundle_fails_only_when_selected(
         "baseline_lock",
         lambda name, variant=None: locks / name / "baseline_lock.json",
     )
-    lock = spec.architectures.baseline_lock(architecture)
-    pointer = tests / f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
+    lock = spec.architectures.baseline_lock(architecture, variant)
+    archives = tests / "reference_bundles" / operation / architecture
+    pointer = archives / f"{variant}.tar.gz.dvc"
     if published:
         lock.parent.mkdir(parents=True)
         lock.write_text("{}\n")
         if layout == "source":
-            _track(tests, operation, architecture)
+            _track(tests, operation, architecture, variant)
     options = {"--rocke-reference-operation": operation if selected else None}
     config = SimpleNamespace(getoption=options.get)
-    variant = spec.architectures.resolve_variant(architecture)
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
         open_slot = next(fixture)
         outcome, message = _outcome(lambda: open_slot(architecture, variant))
@@ -1083,7 +1120,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
     assert _mentions(first, missing)
     commands = _commands(message)
     installed = tmp_path / "bin/hip_kernel_provider/engines/test_arch_content/rocke"
-    installed /= f"{operation}/{architecture}"
+    installed /= f"{operation}/{architecture}/{variant}"
     if not published:
         # Nothing is fetched or staged; qualification makes the bundle.
         assert commands == [] and "dvc pull" not in message
@@ -1186,7 +1223,8 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     tests = _relocate(monkeypatch, tmp_path, operation, "source")
-    _track(tests, operation, "gfx942")
+    variant = spec.architectures.resolve_variant("gfx942")
+    _track(tests, operation, "gfx942", variant)
     here = Path(__file__).parent.resolve()
     root = PureWindowsPath("D:/build root/rocke $1")
     installed = PureWindowsPath("tests/library/tests")
@@ -1200,9 +1238,9 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
     monkeypatch.setattr(common_cli, "_shown", shown)
     hint = spec.bundle_hint("gfx942", tmp_path / "missing")
     archive = root / "rocke/library/tests/reference_bundles" / operation
-    archive /= "gfx942.tar.gz"
+    archive /= f"gfx942/{variant}.tar.gz"
     lock = installed / f"{operation}_reference/architectures/gfx942"
-    lock /= f"{spec.architectures.resolve_variant('gfx942')}/baseline_lock.json"
+    lock /= f"{variant}/baseline_lock.json"
     assert hint == (
         "fetch and extract it with dvc pull and artifact.py unpack:\n"
         f'    dvc pull "{archive}.dvc"\n'
@@ -2108,14 +2146,14 @@ def _published_variants():
     return published
 
 
-def _published_bundle_data(spec, architecture):
+def _published_bundle_data(spec, architecture, variant):
     """Return the bundle data that ``diff`` reads by default, or skip without it.
 
     The skip says what the tree lacks: a fetched archive or extracted bundle in
     a source checkout, or a staged bundle in an installed tree.
     """
-    name = f"{spec.label} {architecture}"
-    bundle = spec.published_bundle(architecture)
+    name = f"{spec.label} {architecture} {variant}"
+    bundle = spec.published_bundle(architecture, variant)
     if not bundle.exists():
         archive = bundle.with_name(f"{bundle.name}.tar.gz")
         pointer = archive.with_name(f"{archive.name}.dvc")
@@ -2145,7 +2183,7 @@ def _check_published_cohort(operation, architecture, variant):
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     name = f"{spec.label} {architecture} {variant}"
-    bundle = _published_bundle_data(spec, architecture)
+    bundle = _published_bundle_data(spec, architecture, variant)
     unusable = None
     try:
         differences = spec.diff_bundle(
@@ -2327,8 +2365,8 @@ def test_published_cohort_check_names_unqualified_cases(
     monkeypatch.setattr(
         common_cli,
         "default_bundle_path",
-        lambda _, name, *, operation: default_bundle_path(
-            tests, name, operation=operation
+        lambda _, name, *, operation, variant: default_bundle_path(
+            tests, name, operation=operation, variant=variant
         ),
     )
     # Where each layout keeps the bundle, written out rather than looked up,
@@ -2338,9 +2376,9 @@ def test_published_cohort_check_names_unqualified_cases(
         if layout == "installed"
         else "rocke/library/tests/reference_bundles"
     )
-    published /= f"{operation}/{architecture}"
+    published /= f"{operation}/{architecture}/{variant}"
     published.parent.mkdir(parents=True)
-    archive = published.with_name(f"{architecture}.tar.gz")
+    archive = published.with_name(f"{variant}.tar.gz")
     pointer = archive.with_name(f"{archive.name}.dvc")
     if layout != "installed":
         pointer.write_text("outs:\n")
@@ -2534,7 +2572,7 @@ def test_published_runners_replay_the_current_request(
     from reference_common.session import reuse_workers
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    bundle = _published_bundle_data(spec, architecture)
+    bundle = _published_bundle_data(spec, architecture, variant)
     if bundle.is_file():
         lock = spec.architectures.baseline_lock(architecture, variant)
         unpack(bundle, tmp_path / "bundle", lock, operation=operation)
@@ -3324,9 +3362,10 @@ def test_rejected_bundles_say_how_to_replace_them(
     tmp_path, monkeypatch, operation, index, layout, problem
 ):
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation, index)
+    variant = spec.architectures.resolve_variant(architecture)
     tests = _relocate(monkeypatch, tmp_path, operation, layout)
     if layout == "source":
-        pointer = _track(tests, operation, architecture)
+        pointer = _track(tests, operation, architecture, variant)
     candidate = problem.startswith("candidate")
     if not candidate:
         # The committed lock authenticates the published bundle; other
@@ -3403,7 +3442,7 @@ def test_rejected_bundles_say_how_to_replace_them(
         # Installation does not replace a directory either, and needs no fetch.
         assert commands == [] and "dvc pull" not in message
         installed = tmp_path / "bin/hip_kernel_provider/engines/test_arch_content"
-        installed /= f"rocke/{operation}/{architecture}"
+        installed /= f"rocke/{operation}/{architecture}/{variant}"
         step = _step(message)
         assert _deletes(step, bundle)
         assert "install" in step and _mentions(step, installed)
@@ -3464,7 +3503,13 @@ def test_unpack_explains_a_stale_archive_or_extracted_bundle(tmp_path, operation
 @pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize(
     "pairing",
-    ["published", "another-architecture", "candidate-archive", "candidate-lock"],
+    [
+        "published",
+        "another-variant",
+        "another-architecture",
+        "candidate-archive",
+        "candidate-lock",
+    ],
 )
 def test_unpack_suggests_a_fetch_only_for_a_published_pair(
     tmp_path, operation, pairing
@@ -3487,12 +3532,13 @@ def test_unpack_suggests_a_fetch_only_for_a_published_pair(
     bundle, lock = _fixture(tmp_path, operation)
     newer = json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
     archives = tests / "reference_bundles" / operation
-    archives.mkdir(parents=True)
-    for architecture in ("gfx942", "gfx950"):
-        pack(bundle, archives / f"{architecture}.tar.gz", lock, operation=operation)
-        (archives / f"{architecture}.tar.gz.dvc").write_text("outs:\n")
-        # The architecture's archive holds its one published variant.
-        committed = package / f"architectures/{architecture}/family/baseline_lock.json"
+    # Each published variant has its own tracked archive and committed lock.
+    for slot in ("gfx942/family", "gfx942/second", "gfx950/family"):
+        archive = archives / f"{slot}.tar.gz"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        pack(bundle, archive, lock, operation=operation)
+        archive.with_name(f"{archive.name}.dvc").write_text("outs:\n")
+        committed = package / f"architectures/{slot}/baseline_lock.json"
         committed.parent.mkdir(parents=True)
         committed.write_text(newer)
     candidate = tmp_path / "candidate.tar.gz"
@@ -3501,10 +3547,11 @@ def test_unpack_suggests_a_fetch_only_for_a_published_pair(
     candidate_lock.write_text(newer)
     gfx942_lock = package / "architectures/gfx942/family/baseline_lock.json"
     archive, selected = {
-        "published": (archives / "gfx942.tar.gz", gfx942_lock),
-        "another-architecture": (archives / "gfx950.tar.gz", gfx942_lock),
+        "published": (archives / "gfx942/family.tar.gz", gfx942_lock),
+        "another-variant": (archives / "gfx942/second.tar.gz", gfx942_lock),
+        "another-architecture": (archives / "gfx950/family.tar.gz", gfx942_lock),
         "candidate-archive": (candidate, candidate_lock),
-        "candidate-lock": (archives / "gfx942.tar.gz", candidate_lock),
+        "candidate-lock": (archives / "gfx942/family.tar.gz", candidate_lock),
     }[pairing]
     output = tmp_path / "extracted"
     result = _run(
