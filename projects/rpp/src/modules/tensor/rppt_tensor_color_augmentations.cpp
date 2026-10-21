@@ -803,6 +803,13 @@ RppStatus rppt_color_cast(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
         return RPP_ERROR_INVALID_SRC_LAYOUT;
     if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_DST_LAYOUT;
+    // PLN1 (c == 1) is only implemented for NCHW on both HOST kernel branches; NHWC with c == 1
+    // would otherwise silently no-op on HOST while technically working on HIP, so reject it
+    // explicitly here to keep behavior consistent across backends.
+    if ((srcDescPtr->c == 1) && (srcDescPtr->layout != RpptLayout::NCHW))
+        return RPP_ERROR_INVALID_SRC_LAYOUT;
+    if ((dstDescPtr->c == 1) && (dstDescPtr->layout != RpptLayout::NCHW))
+        return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
