@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
@@ -64,6 +65,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
@@ -1427,6 +1429,27 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return BackendRegistry::getArchPipeline(archArray) != nullptr;
         },
         nb::arg("arch"), "Check if the architecture is supported by StinkyTofu");
+    m.def(
+        "parseRegisterAllocationConfig",
+        [](nb::object value) -> std::pair<std::string, int> {
+            std::string text;
+            if (nb::isinstance<nb::str>(value))
+                text = nb::cast<std::string>(value);
+            else if (nb::isinstance<nb::int_>(value))
+                text = std::to_string(nb::cast<long long>(value));
+            else
+                throw nb::type_error(
+                    "a register allocation config is a mode 0..3 or a comma-separated string");
+            Expected<RegisterAllocationConfig> config =
+                parseRegisterAllocationConfig(text, RegisterAllocationDialect::Kernel);
+            if (config.hasError()) throw nb::value_error(config.getError().c_str());
+            return {canonicalRegisterAllocationConfig(*config), static_cast<int>(config->mode)};
+        },
+        nb::arg("value"),
+        "Parse a StinkyTofuRegisterAllocation value: a mode 0..3, or a comma-separated "
+        "string such as 'apply,classes=vs'. Returns (canonical, mode), where canonical is the "
+        "shortest spelling of the same configuration -- the mode alone for a mode-only "
+        "config, '0' for mode off. Raises ValueError naming what does not parse.");
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");

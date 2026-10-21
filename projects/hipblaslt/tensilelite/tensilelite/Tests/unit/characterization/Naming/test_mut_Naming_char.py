@@ -3,6 +3,7 @@
 
 """Mutation-focused assertions for the canonical solution naming helpers."""
 
+import re
 from copy import deepcopy
 
 import pytest
@@ -220,6 +221,27 @@ def test_register_allocation_is_named_only_off_the_default(make_state):
     assert "STRA2" in names[2]
     assert "STRA3" in names[3]
     assert len(set(names.values())) == 4
+
+
+def test_register_allocation_config_strings_are_named_by_their_mode(make_state):
+    def name(value):
+        return N.getKernelNameMin(
+            make_state(StinkyTofuRegisterAllocation=value), splitGSU=False)
+
+    assert name("apply") == name(2) == name("2,classes=s") == name("apply,classes=vs")
+    assert re.search(r"_STRA2(_|$)", name("apply,classes=vs"))
+    assert "STRA" not in name("off,classes=vs")
+
+
+def test_two_register_allocation_configs_cannot_share_a_name(make_state):
+    # Spellings of one config agree; different configs with one mode do not.
+    N.checkRegisterAllocationAgrees(
+        make_state(StinkyTofuRegisterAllocation="apply"),
+        make_state(StinkyTofuRegisterAllocation=2), "kernel")
+    with pytest.raises(RuntimeError, match="records only the mode"):
+        N.checkRegisterAllocationAgrees(
+            make_state(StinkyTofuRegisterAllocation="apply,classes=s"),
+            make_state(StinkyTofuRegisterAllocation="apply,classes=vs"), "kernel")
 
 
 def test_empty_custom_kernel_name_is_not_emitted_as_parameter(make_state):

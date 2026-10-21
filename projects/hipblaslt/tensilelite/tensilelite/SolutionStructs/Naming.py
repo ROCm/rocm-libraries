@@ -26,6 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
 
@@ -40,6 +41,25 @@ def getKernelCompileKey(state, splitGSU: bool) -> str:
   """
   s = state._state if hasattr(state, '_state') else state
   return getKernelNameMin(s, splitGSU)
+
+
+def checkRegisterAllocationAgrees(first, second, name: str) -> None:
+  """Refuse two kernels that share a name but not a register allocation config.
+
+  The name records only the StinkyTofuRegisterAllocation mode, so two configs
+  with one mode would be merged into one kernel, and one of them would run as
+  the other. Spellings of the same config agree.
+  """
+  configs = []
+  for kernel in (first, second):
+    state = kernel._state if hasattr(kernel, '_state') else kernel
+    configs.append(parseStinkyTofuRegisterAllocation(
+        state.get("StinkyTofuRegisterAllocation", 0))[0])
+  if configs[0] != configs[1]:
+    raise RuntimeError(
+        f"{name}: StinkyTofuRegisterAllocation {configs[0]!r} and {configs[1]!r} share this "
+        "kernel name, which records only the mode, so one would run as the other. "
+        "Benchmark them in separate runs.")
 
 
 # Parameters that are "internal args" — runtime dispatch parameters that don't
@@ -131,9 +151,17 @@ def getPrimitiveParameterValueAbbreviation(key, value):
     return s
 
 
+def _registerAllocationAbbreviation(value) -> str:
+  """STRA's value: the mode alone. The rest of the config lives in the solution,
+  and checkRegisterAllocationAgrees refuses two configs that would share a name."""
+  return "%u" % parseStinkyTofuRegisterAllocation(value)[1]
+
+
 def getParameterValueAbbreviation(key, value):
   if key == "ISA":
     return f"{value[0]}{value[1]}{value[2]:x}"
+  if key == "StinkyTofuRegisterAllocation":
+    return _registerAllocationAbbreviation(value)
   compositieTypes = (dict, list, tuple,)
   if not isinstance(value, compositieTypes):
     return getPrimitiveParameterValueAbbreviation(key, value)
@@ -251,10 +279,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("TDMFuse")
 
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
-    # would rename every kernel that does not opt in. Modes 1, 2, and 3 change
-    # the colouring (and mode 3 changes which kernels are accepted), so those
-    # stay in the name.
-    if state.get("StinkyTofuRegisterAllocation", 0) != 0:
+    # would rename every kernel that does not opt in. Any other value changes
+    # the colouring (and mode 3 changes which kernels are accepted), so it
+    # stays in the name. Mode off is 0 whatever else the string says.
+    if parseStinkyTofuRegisterAllocation(state.get("StinkyTofuRegisterAllocation", 0))[1] != 0:
       requiredParametersTemp.add("StinkyTofuRegisterAllocation")
     else:
       requiredParametersTemp.discard("StinkyTofuRegisterAllocation")

@@ -29,15 +29,22 @@
 /// picks it up for modules with arch {12, 5, 0}.
 
 #include <algorithm>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <utility>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/ModuleAdaptors.hpp"
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
@@ -76,6 +83,7 @@
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/TieExecMaskedWritesPass.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
@@ -118,25 +126,72 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     }
 }
 
-/// Register allocation from ModuleOptions::RegisterAllocation: 0 off, 1 shadow,
-/// 2 and above apply, as Mode below describes.
+/// Reports, when it runs, why register allocation was left out of the pipeline.
+/// The pipeline is built before any pass has a PassContext to emit through.
+class RegisterAllocationNotRunPass : public Pass {
+   public:
+    static char ID;
+
+    explicit RegisterAllocationNotRunPass(std::string message) : message_(std::move(message)) {}
+
+    const char* getName() const override {
+        return "Register Allocation Not Run";
+    }
+
+    PassID getPassID() const override {
+        return &RegisterAllocationNotRunPass::ID;
+    }
+
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager&) override {
+        emitRemark(passCtx, {OptimizationRemark::Kind::Missed, "RegisterAllocation", "NotAllocated",
+                             "@" + func.getName() + ": " + message_});
+        return PreservedAnalyses::all();
+    }
+
+   private:
+    std::string message_;
+};
+
+char RegisterAllocationNotRunPass::ID = 0;
+
+/// Where RegisterAllocationDump writes: <outputDir>/<kernel>/ra/, or
+/// ./<kernel>/ra/ when the module has no output directory.
+std::filesystem::path registerAllocationDumpDir(const StinkyAsmModule& module) {
+    const std::string kernel =
+        module.getOutputName().empty() ? module.getName() : module.getOutputName();
+    const std::string outputDir = module.getOutputDir();
+    const std::filesystem::path root =
+        outputDir.empty() ? std::filesystem::path(".") : std::filesystem::path(outputDir);
+    std::filesystem::path dir = root / kernel / "ra";
+    std::error_code ignored;
+    std::filesystem::create_directories(dir, ignored);
+    return dir;
+}
+
+/// Register allocation as the kernel's configuration asks for it: the mode
+/// from ModuleOptions::RegisterAllocation, every other setting from
+/// ModuleOptions::RegisterAllocationConfig (see RegisterAllocationConfig.hpp).
 ///
-/// The producer reads 3 as "let an over-budget kernel reach allocation and
-/// re-judge afterwards", a policy that changes nothing about this pipeline.
-/// Clamping, rather than switching on the value, is what keeps it that way.
+/// The producer reads mode 3 as "let an over-budget kernel reach allocation and
+/// re-judge afterwards", a policy that changes nothing about this pipeline, so
+/// 3 builds what 2 builds. A configuration that does not parse adds no
+/// allocation, so the kernel keeps the producer's registers, and a missed
+/// remark says why.
 void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module) {
-    enum class Mode : int {
-        Off = 0,     ///< Keep the producer's numbering; add no passes.
-        Shadow = 1,  ///< Colour and report, rewrite nothing. Code is unchanged.
-        Apply = 2,   ///< Write the colouring through to the emitted operands.
-    };
-    const int configured = module.getModuleOptions().RegisterAllocation;
-    Mode mode = Mode::Apply;
-    if (configured <= static_cast<int>(Mode::Off))
-        mode = Mode::Off;
-    else if (configured == static_cast<int>(Mode::Shadow))
-        mode = Mode::Shadow;
-    if (mode == Mode::Off) return;
+    const StinkyAsmModule::ModuleOptions& moduleOptions = module.getModuleOptions();
+    Expected<RegisterAllocationConfig> config = kernelRegisterAllocationConfig(
+        moduleOptions.RegisterAllocation, moduleOptions.RegisterAllocationConfig);
+    if (config.hasError()) {
+        pm.addPass(std::make_unique<RegisterAllocationNotRunPass>(
+            "register allocation config '" + moduleOptions.RegisterAllocationConfig +
+            "' does not parse: " + config.getError()));
+        return;
+    }
+    if (config->mode == RegisterAllocationMode::Off) return;
+
+    RegisterAllocationOptions options = std::move(config->options);
+    options.report = true;
+    options.emitSymbolBreadcrumbs = true;
 
     // Rebuild the CFG in case a label was left inside a block, where it is a
     // branch target with no edges. Building only runs on a flat function.
@@ -151,17 +206,30 @@ void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module)
     // destination, and the allocator moves it off the value those lanes keep.
     pm.addPass(createTieExecMaskedWritesPass());
 
+    std::optional<std::filesystem::path> dumpDir;
+    if (moduleOptions.RegisterAllocationDump) dumpDir = registerAllocationDumpDir(module);
+    if (dumpDir.has_value()) {
+        DumpStinkyModulePassConfig before;
+        before.stirPath = (*dumpDir / "before_lift.stir").string();
+        pm.addPass(createDumpStinkyModulePass(std::move(before)));
+    }
+
+    // Lift only the classes allocation may move. A class left physical keeps
+    // the producer's registers.
     LiftAsmRegistersToSSAOptions liftOptions;
-    liftOptions.classes = RegClassSet::only(RegType::S);
+    liftOptions.classes = options.allocate;
     pm.addPass(createLiftAsmRegistersToSSAPass(liftOptions));
 
-    pm.addPass(createRegisterAllocationPass(RegisterAllocationOptions{
-        .allocator = "greedy-compact",
-        .allocate = RegClassSet::only(RegType::S),
-        .applyToOperands = (mode == Mode::Apply),
-        .report = true,
-        .emitSymbolBreadcrumbs = true,
-    }));
+    if (dumpDir.has_value()) {
+        DumpStinkyModulePassConfig ssa;
+        ssa.stirPath = (*dumpDir / "ssa.stir").string();
+        ssa.printerOptions.ssaForm = true;
+        ssa.ssaLiveOut = (*dumpDir / "live_ranges.txt").string();
+        pm.addPass(createDumpStinkyModulePass(std::move(ssa)));
+        options.blockDumpPrefix = (*dumpDir / "blocks.").string();
+    }
+
+    pm.addPass(createRegisterAllocationPass(std::move(options)));
 }
 
 /// A fresh entry-scoped PassManager with analyses + standard instrumentation.
@@ -423,7 +491,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // Runs after flatten, so the entry's first instruction really is the
         // kernel's, and before SW prefetch, so that pass lays out its bytes over the
         // final entry and its CP-boundary coverage stays gap-free.
-        pm.addPass(createInsertInitialUnclausedVmemPass(moduleOptions.RegisterAllocation >= 2));
+        pm.addPass(createInsertInitialUnclausedVmemPass(moduleOptions.sgprsCompacted()));
 
         // SW instruction prefetch — abs and PC-rel are mutually exclusive.
         // Priority: abs (EnableSwInstructionPrefetchAbs) > PC-rel

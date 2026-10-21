@@ -112,13 +112,16 @@ void pairMatrixAccumulator(const StinkyInstruction& inst, const OperandValues& v
     }
 }
 
-/// Pin every VGPR operand of a matrix instruction to the register the producer
-/// assigned it.
+/// Pin every VGPR operand of a matrix instruction that has an MSB slot to the
+/// register the producer assigned it.
 ///
 /// Dest and sources both: compacting otherwise packs the whole tuple, which is
-/// what changes the packed MSB word. Slotless scale fields stay in too — they
-/// already live under a bank-0 ceiling, and pinning them still keeps the
-/// producer index rather than a compacted one.
+/// what changes the packed MSB word. Slotless scale fields are left out. They
+/// cost no s_set_vgpr_msb, and the unbankableOperands policy decides where they
+/// sit: Allocate places them under the bank-0 ceiling, Hold keeps the producer's
+/// register, and Auto tries one and then the other. These pins are placed
+/// first and fill much of bank 0, which is how Allocate alone can run out of
+/// room under the ceiling.
 void pinMatrixProducerRegisters(const StinkyInstruction& inst, const OperandValues& values,
                                 std::vector<SSAValueID>& pinned) {
     if (!isMatrixInstruction(inst)) return;

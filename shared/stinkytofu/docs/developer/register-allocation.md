@@ -179,17 +179,21 @@ Where all of it lives, under both `include/stinkytofu/` and `src/`:
 --RegisterAllocationPass=allocator=greedy-compact,classes=v,regionEnd=C,apply,report
 ```
 
+The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by the same parser; section 12.2 covers the grammar and how the two callers differ. Three defaults differ between them. The tool keeps the ones it always had, `shadow`, `classes=v` and `allocator=greedy`; a kernel's configuration (TensileLite and the pipeline) defaults to `off`, `classes=s` and `allocator=greedy-compact`. The table gives both where they differ.
+
 | Option | Meaning |
 |---|---|
-| `allocator=<name>` | `greedy` (default), `greedy-compact`, `greedy-compact-freedom`, `legacy` |
-| `classes=<vs>` | class axis of allocation scope; see section 3 |
+| `shadow`, `apply`, `force`, or `0`..`3` | the mode, also spelled `mode=<word>`. `apply` and `force` write the colouring through `destroyAttachedSSA`; `shadow` colours without writing. Default: `shadow` in the tool, `off` in a kernel |
+| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact` in a kernel |
+| `classes=<vs>` | class axis of allocation scope; see section 3. Default: `v` in the tool, `s` in a kernel |
 | `regionEnd=<label>` | region axis: only values whose live range ends at or before this block may move (`^` prefix optional). Empty = whole function. See section 3.2 |
-| `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key for disjoint runs |
-| `unbankable=hold\|allocate` | what to do about an operand whose field cannot select a VGPR bank. `allocate` (default) places it under a ceiling, ahead of the free blocks; `hold` keeps the register the producer chose |
-| `apply` | write the colouring through `destroyAttachedSSA`; without it the pass is a shadow colouring |
-| `report` | emit peak / highest / `regionPeak` / rules / preferences as an analysis remark (`--remarks`) |
+| `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key, or join with `+`, for disjoint runs |
+| `unbankable=auto\|hold\|allocate` | what to do about an operand whose field cannot select a VGPR bank. `allocate` places it under a ceiling, ahead of the free blocks; `hold` keeps the register the producer chose; `auto` (default) tries `allocate`, then `hold`. Section 12.2 says why |
+| `quadrant=any\|prefer` | where a free block may start. `prefer` searches the 256-register bank the producer used for the block before the rest of the file; `any` (default) takes the lowest legal base |
+| `report` | emit peak / highest / `regionPeak` / rules / preferences as an analysis remark (`--remarks`). Tool only, like the next two: the pipeline chooses a kernel's diagnostics itself |
 | `emitRegisterMap` | with `apply`, insert a producer→allocated map as a TEXTBLOCK at the entry block; see section 11.3 |
 | `emitSymbolBreadcrumbs` | with `apply`, note on each instruction whose operand lost a symbolic name; see section 11.3 |
+| `dumpBlocks=<prefix>` | write each attempt's placement table to `<prefix><allocator>.<allocate\|hold>.tsv`, creating the directory. Only the greedy allocators write one; [the greedy allocator](register-allocation-GreedyAllocator.md) section 10 lists the columns. Tool only: a kernel gets the same tables from `StinkyTofuRegisterAllocationDump` |
 | `noVerify` | skip the verifier — a testing hatch, not a production switch |
 | `rules=<name>` | force this architecture rule `Active`, ignoring the chip's capability gate. Repeat the key (`rules=A,rules=B`) or join with `+` (`rules=A+B`) — a comma already separates pass arguments |
 | `rules=all` | force every rule the triple declares |
@@ -263,9 +267,10 @@ no values is reported rather than silently colouring nothing:
 @kernel: asked to allocate v but this function was lifted for s
 ```
 
-The default is VGPRs alone. No ABI range is reserved, and scalar allocation
-is still an explicit opt-in even when a placement rule forbids some bases
-(section 14.5):
+`RegisterAllocationOptions` and `stinkytofu-opt` default to VGPRs alone. No ABI
+range is reserved, and scalar allocation is still an explicit opt-in there even
+when a placement rule forbids some bases (section 14.5). A kernel's configuration
+is the exception: it defaults to `classes=s` (section 12.2).
 
 ```bash
 --LiftAsmRegistersToSSAPass=classes=s \
@@ -352,24 +357,29 @@ pm.addPass(createRegisterAllocationPass(RegisterAllocationOptions{
 ```
 
 A production pipeline that opts in via `ModuleOptions::RegisterAllocation`
-(TensileLite's `StinkyTofuRegisterAllocation`) lifts and colours SGPRs:
-0 off, 1 shadow, 2 apply. TensileLite reads a fourth value, 3, as "apply, and
-let a kernel the pool estimate called over-budget reach allocation so the
-emitted counts decide"; the pipeline clamps it to apply, since nothing here
-changes. That fourth value covers the VGPR budget as well as the SGPR one even
-though the backend colours only SGPRs, because the count a deferred verdict is
-re-judged on comes from `refreshVgprCount` — which runs as part of emitting,
-whatever was coloured — and not from the colouring. The backend runs
-`greedy-compact` over the whole function after schedule and waitcnt. SSA / before / after dumps stay commented
-so a multi-kernel build does not overwrite a single fixed path. When reproducing
-one kernel, uncomment them:
+(TensileLite's `StinkyTofuRegisterAllocation`) lifts and colours what that
+kernel's configuration names, SGPRs unless it says otherwise: 0 off,
+1 shadow, 2 apply, with the rest of the configuration in
+`ModuleOptions::RegisterAllocationConfig` (section 12.2). TensileLite reads a
+fourth mode, 3, as "apply, and let a kernel the pool estimate called
+over-budget reach allocation so the emitted counts decide"; the pipeline builds
+the same passes for it as for apply, since nothing here changes. That fourth
+mode covers the VGPR budget as well as the SGPR one even when the backend
+colours only SGPRs, because the count a deferred verdict is re-judged on comes
+from `refreshVgprCount` — which runs as part of emitting, whatever was coloured
+— and not from the colouring. The backend runs over the whole function after
+schedule and waitcnt. With `ModuleOptions::RegisterAllocationDump` (TensileLite's
+`StinkyTofuRegisterAllocationDump`) each kernel writes what allocation saw to
+`<outputDir>/<kernel>/ra/`, or `./<kernel>/ra/` without an output directory:
 
 | File | What to check |
 |---|---|
-| `<module>_kernel_ssa.stir` | SSA form; pick `regionEnd` from `^label:` |
-| `ssa_live_out.txt` | live ranges and function peak |
-| `kernel_before_replay.stir` | physical IR before colouring |
-| `kernel_after_replay.stir` | physical IR after `apply` |
+| `before_lift.stir` | physical IR before colouring |
+| `ssa.stir` | SSA form; pick `regionEnd` from `^label:` |
+| `live_ranges.txt` | live ranges and function peak |
+| `blocks.<allocator>.<allocate\|hold>.tsv` | one row per block and attempt: width, live span, weight, legal bases, placement rank, base, and which block the colouring was refused on |
+
+The physical IR after `apply` is the kernel's own output.
 
 Diff before vs after: blocks after the cut must be identical; blocks in the
 region may change under `greedy-compact`. A miss names the reason (unknown
@@ -619,14 +629,16 @@ They constrain each other only when they appear together in one operand.
 
 | Name | Class | Summary |
 |---|---|---|
-| `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default |
+| `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default of `RegisterAllocationOptions` and `stinkytofu-opt`; a kernel's configuration defaults to `greedy-compact` |
 | `greedy-compact` | `CompactingGreedyAllocator` | the same, with hints off, so placement packs from the bottom |
 | `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | the same again, but ordering blocks by how few legal bases they have rather than by how hot they are |
+| `greedy-compact-program` | `ProgramOrderedGreedyAllocator` | packing from the bottom in program order: the block that becomes live first goes first |
+| `greedy-compact-largest` | `LargestFirstGreedyAllocator` | packing from the bottom, the block needing the most register-time (width × live span) first |
 | `legacy` | `LegacyIdentityAllocator` | hands every value straight back the producer's register, via `createLegacyColoring()` |
 
-All four report empty `AllocatorCapabilities`, so none is refused by the gate in section 2.
+All six report empty `AllocatorCapabilities`, so none is refused by the gate in section 2.
 
-[The greedy allocator](register-allocation-GreedyAllocator.md) covers the three greedy policies in full: how tuple runs and affinity sets fold into placeable blocks, how a pairing rule can fold two blocks into one, how weight and freedom order placement, the eviction rule and why it terminates, why hint-following reproduces the input, and how `reachableAt` / `pickBase` honour the rules table.
+[The greedy allocator](register-allocation-GreedyAllocator.md) covers the five greedy policies in full: how tuple runs and affinity sets fold into placeable blocks, how a pairing rule can fold two blocks into one, how each order places, the eviction rule and why it terminates, why hint-following reproduces the input, and how `reachableAt` / `pickBase` honour the rules table.
 
 ## 10. Verifier
 
@@ -953,7 +965,7 @@ It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `Insert
 @kernel: greedy-compact shadow: values=24159 v[peak=643 highest=679->722 waves=1->1] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active] rule[VectorTupleAlignment=active] rule[WmmaAccumulatorReuse=active] pref[WmmaAccumulatorReuse=active 2416/2560 unmet 51 blocked 93 missed]
 ```
 
-`peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]`, and a pairing rule adds `pref[...]` with its satisfaction, so a report is interpretable without knowing the triple or the caps.
+`peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]`, and a pairing rule adds `pref[...]` with its satisfaction, so a report is interpretable without knowing the triple or the caps. `unbankable[...]` says what was done about operands that cannot name a VGPR bank — `held <registers>` or `allocated <n> value(s) max <ceiling>`, prefixed `auto` when the treatment was found by trying — and when `auto` held them because allocating them was refused, a second line, `held them because the allocate attempt was refused: ...`, quotes that refusal (section 12.2). It explains the treatment; it is not a refusal of the kernel, which only a `missed` remark is.
 
 Three cautions on reading it, all of which have caught someone out.
 
@@ -969,6 +981,43 @@ Two ordering hazards:
 
 - **Waitcnt.** Recolouring after wait insertion is unsound — a value moved into a register an outstanding load will land in has no wait. Rewriting therefore requires waitcnt insertion to run after destruction. Shadow mode is unaffected, because it never rewrites.
 - **Calls.** `kernelHasCallSites()` keeps a call-connected kernel off this path: caller and callee agree on registers only through the convention the producer used, and nothing records it.
+
+### 12.2. Configuring allocation
+
+One comma-separated list configures a run, wherever it comes from. TensileLite's `StinkyTofuRegisterAllocation` kernel parameter, `ModuleOptions::RegisterAllocationConfig` in the pipeline, and `stinkytofu-opt --RegisterAllocationPass=...` all go through `parseRegisterAllocationConfig` (`RegisterAllocationConfig.hpp`), so a configuration found in a replay runs unchanged in a kernel:
+
+```yaml
+- StinkyTofuRegisterAllocation: ["apply,classes=vs,allocator=greedy-compact-program+greedy-compact"]
+```
+
+The words may come in any order:
+
+| Key | Values | Kernel default | Meaning |
+|---|---|---|---|
+| mode | `off`, `shadow`, `apply`, `force`, or `0`..`3`, bare or as `mode=` | `off` | 1 colours and reports; 2 and 3 also rewrite. TensileLite reads 3 as apply that may re-judge an over-budget kernel |
+| `classes=` | `s`, `v`, `vs` | `s` | what to lift and allocate; any other class keeps the producer's registers |
+| `allocator=` | a registered name, or several joined with `+` | `greedy-compact` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
+| `unbankable=` | `auto`, `allocate`, `hold` | `auto` | operands that cannot name a VGPR bank; see below |
+| `quadrant=` | `any`, `prefer` | `any` | `prefer` searches the producer's 256-register bank for each block before the rest of the file |
+| `rules=`, `noRule=`, `noRules`, `ruleAudit` | as in section 2.1 | none | force rule statuses (section 14) |
+| `pinReg=`, `regionEnd=`, `noVerify` | as in section 2.1 | none | scope, and a testing hatch |
+
+Two dialects read the list. A kernel's configuration, which is what TensileLite and the pipeline read, has the defaults above and refuses `report`, `emitRegisterMap`, `emitSymbolBreadcrumbs` and `dumpBlocks`: those only shape diagnostics, and the pipeline always reports, always writes breadcrumbs, and writes placement tables under `StinkyTofuRegisterAllocationDump`. The tool's dialect accepts them, and defaults to `shadow`, `classes=v` and `allocator=greedy`, as `stinkytofu-opt` always has. A word the dialect does not know, a value a key does not take, two different modes, or an unregistered allocator is an error that names the word. TensileLite reports it when it validates the YAML.
+
+**Canonical spelling and kernel names.** `canonicalRegisterAllocationConfig` writes a configuration back out as the shortest list that means the same thing: the mode as a digit, then only the settings that differ from the kernel defaults, in the order of the table above, with lists sorted. A configuration that is only a mode is just the digit, and mode off is `0` whatever else it sets. TensileLite keeps that spelling in the solution, so `"apply"`, `"2,classes=s"` and `2` are one kernel, and the solution (in the benchmark data and the library logic) is where a kernel's full configuration is recorded.
+
+The kernel name records only the mode: no tag for mode 0, so a kernel that does not opt in keeps its name, and `STRA1`, `STRA2` or `STRA3` otherwise. Since the name is what Tensile compiles and deduplicates kernels by, two configurations with one mode in one run would become one kernel, and one of them would run as the other. Tensile refuses that instead (`checkRegisterAllocationAgrees`, when solutions are deduplicated and when kernels are grouped), so compare such configurations in separate runs.
+
+`rocisa.parseRegisterAllocationConfig(value)` returns `(canonical, mode)` and raises `ValueError` for a value that does not parse. TensileLite's validator, solution, naming and kernel writer all go through it.
+
+**Operands that cannot name a bank.** On gfx1250 a WMMA scale field selects no `s_set_vgpr_msb` slot, so the register it names must sit at or below `v255`. `ProducerPinMatrix` keeps every matrix operand that does have a slot where the producer put it, and those pins can fill most of bank 0. The scale operands can be treated two ways, and each refuses kernels the other colours:
+
+- `allocate` re-places them under the ceiling, ahead of the free blocks. It owes the producer nothing, so it can bring an out-of-reach operand back into the bank. But it can also run out of room among the pins, because it does not reuse the arrangement the producer found.
+- `hold` keeps the producer's registers, which fit alongside the pins by construction. It cannot help an operand the producer left out of reach.
+
+`auto` tries `allocate` and, when that colouring is refused, `hold`. With no such operand in the kernel it is a single attempt. Constraints and live ranges are built once, only the scope differs between attempts, and only the colouring that succeeds is applied. The report names the treatment that won and, after a fallback, quotes the refusal; when both refuse, the missed remark gives each reason. `tests/filecheck/allocation_unbankable_bank0_conflict_test.stir` is the conflict in miniature. In an allocator chain, each allocator makes its own attempts before the next one is tried.
+
+**Dumps.** `StinkyTofuRegisterAllocationDump` (`ModuleOptions::RegisterAllocationDump`) writes the files listed in section 3.3. It is a global switch rather than part of the configuration, so turning it on renames no kernel.
 
 ## 13. Vocabulary, for a reader arriving from LLVM
 

@@ -506,10 +506,10 @@ std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(int baseSgpr,
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(StinkyAsmModule& module) {
     auto p = std::make_unique<SwInstructionPrefetchAbsStaticPass>();
     // Tensile reserves a 3-SGPR triple and passes the base here (-1 = off).
-    // After SGPR compact that triple may already hold other values, so Apply
-    // mode takes an entry block from the final numbering instead.
+    // After SGPR compact that triple may already hold other values, so the pass
+    // then takes an entry block from the final numbering instead.
     p->setBaseSgpr(module.getModuleOptions().SwInstructionPrefetchAbsBaseSgpr);
-    p->setAfterSgprCompact(module.getModuleOptions().RegisterAllocation >= 2);
+    p->setAfterSgprCompact(module.getModuleOptions().sgprsCompacted());
     if (!module.getOutputDir().empty()) {
         const std::string costBasename =
             module.getOutputName().empty() ? module.getName() : module.getOutputName();

@@ -33,6 +33,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
@@ -660,4 +661,220 @@ TEST_F(RegisterAllocationPassTest, OnlyAllocateBringsAnOutOfReachScaleOperandBac
     Expected<AllocationResult> allocated = allocateRegisters(*func, allocator, options);
     ASSERT_TRUE(allocated.hasValue()) << allocated.getError();
     EXPECT_LT(allocated->assignmentOf(outOfReach).idx, kVgprBankSize) << allocated->toString();
+}
+
+TEST_F(RegisterAllocationPassTest, AutoAllocatesAnOutOfReachScaleOperandBeforeTryingToHoldIt) {
+    // Hold refuses this kernel, so Auto has to reach the colouring through
+    // its first attempt, and the report says the treatment was found by trying.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = outOfReachScaleOperand(*func, entry);
+    ASSERT_TRUE(liftForAllocation(*func));
+    const SSAValueID outOfReach = ssaSourceUnits(*wmma, 3)[0]->valueId();
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.report = true;
+    ASSERT_EQ(options.unbankableOperands, RegisterAllocationOptions::UnbankableOperands::Auto);
+    CompactingGreedyAllocator allocator;
+    std::string report;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options, &report);
+
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+    EXPECT_LT(result->assignmentOf(outOfReach).idx, kVgprBankSize) << result->toString();
+    EXPECT_TRUE(contains(report, "unbankable[auto allocated")) << report;
+    EXPECT_FALSE(contains(report, "was refused")) << report;
+}
+
+namespace {
+
+/// A scale operand at v140, which its field can reach, defined in the function
+/// so a policy is free to move it. The other scale field reads v130.
+void inReachScaleOperand(Function& func, BasicBlock* entry) {
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    for (int i = 0; i < 2; ++i) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 140 + i, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
+    createWmmaScale16(entry, /*dst=*/100, /*a=*/110, /*b=*/120, /*scaleA=*/140, /*scaleB=*/130);
+}
+
+/// Colours only while \p heldRegister is held, as the unbankable operands are
+/// under Hold, and refuses otherwise. The shape of the bank-0 conflict: the
+/// matrix pins leave Allocate no room under the ceiling, while the producer's
+/// own registers for the scale operands still fit.
+class ColoursOnlyWhenHeld : public RegisterAllocator {
+   public:
+    explicit ColoursOnlyWhenHeld(uint32_t heldRegister) : heldRegister_(heldRegister) {}
+    const char* name() const override {
+        return "colours-only-when-held";
+    }
+    AllocatorCapabilities capabilities() const override {
+        return {};
+    }
+    Expected<AllocationResult> allocate(const AllocationContext& context) override {
+        ++attempts;
+        if (!context.scope.isPinnedRegister(RegType::V, heldRegister_)) {
+            return Expected<AllocationResult>::Error("@" + context.function.getName() +
+                                                     ": no room under the ceiling");
+        }
+        return createLegacyColoring(context.function);
+    }
+    int attempts = 0;
+
+   private:
+    uint32_t heldRegister_;
+};
+
+class AlwaysRefuses : public RegisterAllocator {
+   public:
+    const char* name() const override {
+        return "always-refuses";
+    }
+    AllocatorCapabilities capabilities() const override {
+        return {};
+    }
+    Expected<AllocationResult> allocate(const AllocationContext& context) override {
+        ++attempts;
+        dumpPaths.push_back(context.blockDumpPath);
+        return Expected<AllocationResult>::Error("@" + context.function.getName() + ": refused");
+    }
+    int attempts = 0;
+    std::vector<std::string> dumpPaths;
+};
+
+std::string runPassCapturingRemarks(Function& func, RegisterAllocationOptions options) {
+    PassContext passCtx;
+    passCtx.setRemarksEnabled(true);
+    AnalysisManager am;
+    registerAllAnalyses(am);
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    createRegisterAllocationPass(std::move(options))->run(func, passCtx, am);
+    std::cerr.rdbuf(previous);
+    return captured.str();
+}
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, AutoHoldsTheScaleOperandsWhenAllocatingThemIsRefused) {
+    BasicBlock* entry = block("entry");
+    inReachScaleOperand(*func, entry);
+    const std::string before = physicalIR(*func);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.applyToOperands = true;
+    options.report = true;
+    ColoursOnlyWhenHeld allocator(/*heldRegister=*/140);
+    std::string report;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options, &report);
+
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+    EXPECT_EQ(allocator.attempts, 2);
+    EXPECT_TRUE(contains(report, "unbankable[auto held v130:131 v140:141]")) << report;
+    EXPECT_TRUE(contains(report,
+                         "held them because the allocate attempt was refused: no room under the "
+                         "ceiling"))
+        << report;
+    // The refused attempt changed nothing; the identity colouring that won
+    // was applied once.
+    EXPECT_FALSE(func->hasAttachedSSA());
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
+TEST_F(RegisterAllocationPassTest, AnExplicitPolicyIsTheOnlyAttempt) {
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Allocate;
+    ColoursOnlyWhenHeld allocator(/*heldRegister=*/140);
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(result.getError(), "@kernel: no room under the ceiling");
+    EXPECT_EQ(allocator.attempts, 1);
+}
+
+TEST_F(RegisterAllocationPassTest, AutoNamesBothRefusalsWhenNeitherColours) {
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    AlwaysRefuses allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(allocator.attempts, 2);
+    EXPECT_EQ(result.getError(),
+              "@kernel: refused whether the operands that cannot name a bank are allocated or "
+              "held\n  allocate: refused\n  hold: refused");
+}
+
+TEST_F(RegisterAllocationPassTest, EachAttemptWritesItsOwnPlacementTable) {
+    inReachScaleOperand(*func, block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.allocate = RegClassSet::only(RegType::V);
+    options.blockDumpPrefix = "dump/blocks.";
+    AlwaysRefuses allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options).hasError());
+
+    EXPECT_EQ(allocator.dumpPaths,
+              (std::vector<std::string>{"dump/blocks.always-refuses.allocate.tsv",
+                                        "dump/blocks.always-refuses.hold.tsv"}));
+}
+
+TEST_F(RegisterAllocationPassTest, AutoIsOneAttemptWhenNoOperandIsUnbankable) {
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    AlwaysRefuses allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_EQ(allocator.attempts, 1) << "holding nothing is the same attempt again";
+    EXPECT_EQ(result.getError(), "@kernel: refused");
+}
+
+TEST_F(RegisterAllocationPassTest, AChainAppliesTheFirstAllocatorThatColours) {
+    // Registered for the rest of the run. The conformance suite took its list
+    // of allocators before any test ran, so it never sees this one.
+    AllocatorRegistry::registerAllocator("test-always-refuses",
+                                         [] { return std::make_unique<AlwaysRefuses>(); });
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    const std::string before = physicalIR(*func);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.allocator = "test-always-refuses+legacy";
+    const std::string text = runPassCapturingRemarks(*func, options);
+
+    EXPECT_TRUE(contains(text, "with legacy after always-refuses refused")) << text;
+    EXPECT_FALSE(contains(text, "NotAllocated")) << text;
+    EXPECT_FALSE(func->hasAttachedSSA());
+    EXPECT_EQ(physicalIR(*func), before);
+}
+
+TEST_F(RegisterAllocationPassTest, AChainThatEveryAllocatorRefusesNamesEachRefusal) {
+    AllocatorRegistry::registerAllocator("test-always-refuses",
+                                         [] { return std::make_unique<AlwaysRefuses>(); });
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.allocator = "test-always-refuses+test-always-refuses";
+    const std::string text = runPassCapturingRemarks(*func, options);
+
+    EXPECT_TRUE(contains(text,
+                         "every allocator in test-always-refuses+test-always-refuses "
+                         "refused\n  always-refuses: refused\n  always-refuses: refused"))
+        << text;
+    EXPECT_TRUE(func->hasAttachedSSA()) << "nothing was applied";
 }

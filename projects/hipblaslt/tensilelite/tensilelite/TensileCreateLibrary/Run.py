@@ -62,7 +62,8 @@ from ..Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architect
 from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
-from ..SolutionStructs.Naming import getKernelCompileKey, getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..SolutionStructs.Naming import checkRegisterAllocationAgrees, getKernelCompileKey, \
+    getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -264,6 +265,7 @@ def groupKernelRecords(kernels, splitGSU: bool):
         group = groups[key]
         if group["symbol"] != symbol or group["base"] != base:
             raise RuntimeError(f"Compile key {key!r} maps to inconsistent kernel names")
+        checkRegisterAllocationAgrees(group["representative"], kernel, symbol)
         if all(alias is not kernel for alias in group["aliases"]):
             group["aliases"].append(kernel)
     return [

@@ -829,10 +829,10 @@ std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(int baseSgpr,
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(StinkyAsmModule& module) {
     auto p = std::make_unique<SwInstructionPrefetchAbsDynamicPass>();
     // Tensile reserves a 3-SGPR triple and passes the base here (-1 = off).
-    // After SGPR compact that triple may already hold other values, so Apply
-    // mode picks its own blocks per emit site.
+    // After SGPR compact that triple may already hold other values, so the pass
+    // then picks its own blocks per emit site.
     p->setBaseSgpr(module.getModuleOptions().SwInstructionPrefetchAbsBaseSgpr);
-    p->setAfterSgprCompact(module.getModuleOptions().RegisterAllocation >= 2);
+    p->setAfterSgprCompact(module.getModuleOptions().sgprsCompacted());
     // CP-range-extend cover: ENABLED in production for the dynamic regime (unconditional
     // near-boundary burst of DYNAMIC width coverN, sized to the fast-path boundary and clamped to
     // coverN <= 4 via armFloor=4). Covers [P(0), P(0)+coverN*4096) — the once-through fast path the

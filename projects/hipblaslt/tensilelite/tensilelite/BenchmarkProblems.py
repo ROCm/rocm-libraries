@@ -46,7 +46,8 @@ from .SolutionStructs.Solution import Solution
 from .Common.TypeValidationErrors import ConfigTypeError
 from .SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
-from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Naming import checkRegisterAllocationAgrees, getSolutionNameMin, \
+    getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
@@ -292,13 +293,18 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
     )
     raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
 
-    # Filter out None and duplicates
-    solutionSet = set()
+    # Filter out None and duplicates. Solutions compare by name, so a duplicate
+    # whose register allocation config differs would be dropped unseen.
+    firstByName = {}
     solutions = []
     for sol in tqdm(raw_solutions, "Remove duplicate solutions"):
-        if sol is not None and sol not in solutionSet:
-            solutionSet.add(sol)
+        if sol is None:
+            continue
+        first = firstByName.setdefault(sol, sol)
+        if first is sol:
             solutions.append(sol)
+        else:
+            checkRegisterAllocationAgrees(first, sol, str(sol))
 
     return solutions
 

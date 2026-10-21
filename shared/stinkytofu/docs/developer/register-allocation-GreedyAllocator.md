@@ -1,20 +1,22 @@
 # The greedy allocator
 
-Weighted first-fit with eviction. Three registered names share one implementation, differing only in two flags and a placement policy.
+Weighted first-fit with eviction. Five registered names share one implementation, differing only in two flags and a placement policy.
 
 - [Register allocation](register-allocation.md) — the framework this plugs into, including the scope axes of `AllocationScope` (section 3) and the rules table (section 14)
 - [SSA representation](ssa-representation.md) — values, use lists, `AllocationResult`
 - [Lift Asm registers to SSA](lift-asm-registers-to-ssa-pass.md) — where the `PhysicalBinding` hints come from
 
-## 1. Three names, one implementation
+## 1. Five names, one implementation
 
 | Registered name | Class | Hints | Policy | Purpose |
 |---|---|---|---|---|
 | `greedy` | `GreedyAllocator` | follow | weight | prefer the register the producer chose; reproduces the input |
 | `greedy-compact` | `CompactingGreedyAllocator` | ignore | weight | pack from the bottom, which is how the high-water mark comes down |
 | `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | ignore | freedom | the same, ordered by how boxed-in a block is rather than how hot |
+| `greedy-compact-program` | `ProgramOrderedGreedyAllocator` | ignore | program | the same, in the order blocks become live |
+| `greedy-compact-largest` | `LargestFirstGreedyAllocator` | ignore | largest | the same, the block needing the most register-time first |
 
-All three are thin wrappers over one file-private `Greedy` class, reached through `runGreedyPlacement(context, followHints, policy)`. All three report an empty `AllocatorCapabilities`:
+All five are thin wrappers over one file-private `Greedy` class, reached through `runGreedyPlacement(context, followHints, policy)`. All five report an empty `AllocatorCapabilities`:
 
 - `mayRecolourMerges = false` — an affinity set keeps a merge and its incoming values on one register, so lowering never needs a copy on a merge edge;
 - `maySpill = false` — no range is ever split, so there is nothing for scratch or waitcnt to integrate.
@@ -134,7 +136,7 @@ That first row is the neat part: because folding means "one register", asking a 
 
 Folding cannot produce a wrong colouring — two values are folded only when their ranges are disjoint at every register they would share. It can only ask more of placement, which is what the retry in section 2 is for.
 
-## 5. Order: weight and freedom
+## 5. Order
 
 Order is most of the policy, and a policy is three small decisions:
 
@@ -149,7 +151,7 @@ struct PlacementPolicy {
 
 Function pointers rather than virtuals: a policy is three stateless decisions, and this way each lives entirely in its own file while the engine branches on none of it. Invariants that are *not* a matter of policy stay in the engine — it decides that a pinned block never moves and that nothing is evicted past `kMaxEvictionsPerBlock`; the policy only answers which of two blocks has the stronger claim.
 
-Weight itself is the same in both policies:
+Weight itself is the same in every policy, whether it orders the queue or only settles evictions:
 
 ```text
 weight(block) = Σ over members:  useCount × 10^min(depth, 4) / max(1, length)
@@ -169,17 +171,24 @@ weight(block) = Σ over members:  useCount × 10^min(depth, 4) / max(1, length)
 
 Depth enters as a *multiplier*, not a factor. Written literally as `useCount × depth / length` it would zero every value outside a loop. As it stands, a short range read often inside a loop outranks a long-lived value read once, which is the usual block-frequency intuition without a frequency analysis to draw on.
 
-### 5.1. The two policies compared
+### 5.1. The policies compared
 
-| | `weight` | `freedom` |
-|---|---|---|
-| `placesEarly` | blocks with a ceiling, in a phase ahead of the queue | nothing; the order already says it |
-| `placesBefore` | heaviest first, ties by leader | fewest legal bases first, then weight among equals |
-| `mayEvict` | a strictly heavier block, and never a capped occupant | a block with fewer places to go displaces one with more |
+| | `weight` | `freedom` | `program` | `largest` |
+|---|---|---|---|---|
+| `placesEarly` | blocks with a ceiling, in a phase ahead of the queue | nothing; the order already says it | as `weight` | as `weight` |
+| `placesBefore` | heaviest first, ties by leader | fewest legal bases first, then weight among equals | earliest first live slot first, the wider block among equal starts | most width × live span first |
+| `mayEvict` | a strictly heavier block, and never a capped occupant | a block with fewer places to go displaces one with more | as `freedom` | as `weight` |
 
 The difference is a special case versus a principle. A capped block is confined to one bank that every low-packing block competes for, and weight order reaches it far too late — so the weight policy needs a phase ahead of the queue, and has to refuse to evict a capped occupant as well, since evicting one returns it to the worklist where the same ordering failure happens again one block at a time.
 
 The freedom policy needs neither. A ceiling is simply a small `placementFreedom`, so ordering by freedom says what the phase was saying. Weight still decides between blocks that are equally free, which is most of them: an unconstrained single register has the whole file, so singles tie and sort exactly as before.
+
+The program and largest-first policies reuse those decisions and change only the queue order (`OrderedGreedyAllocators.cpp`). Each block records `start`, the first slot any member is live, and `span`, the slots from there to where the last member's range ends; a block that is never live starts after everything.
+
+- **Program order** is the linear-scan idea. A register comes free when the range in it ends, and the next range to start takes the lowest free one, so for single registers in straight-line code it needs no more registers than are live at the peak. Weight order can need more: placing a heavy late value first can split the registers early values would have shared. Wide blocks, alignment and ceilings are where program order can still need more, or refuse. It evicts as `freedom` does, so a late, boxed-in block can still reclaim a register an earlier, more mobile block took.
+- **Largest first** is the order LLVM's greedy allocator assigns in: a long or wide block needs the same registers free for all of its life, so it is the hardest to place late. It evicts by weight, as LLVM evicts by spill weight.
+
+Neither is the default. On the 39-kernel corpus that motivated them, program order with held scale operands coloured every kernel, but packing late values into low registers can add `s_set_vgpr_msb` switches inside a loop, so the choice is per kernel, through an allocator chain if need be (register-allocation.md section 12.2).
 
 ## 6. Placement and candidates
 
@@ -203,7 +212,7 @@ Pinned blocks go first, so a freely placed block sees the registers it cannot mo
 | `in a class this run is not colouring` | class outside `AllocationScope::classes()` | this is how one class moves while the rest stay put |
 | `outside the region this run is colouring` | live range not contained in `AllocationScope::regionCut()` | this is how `regionEnd` keeps the remainder byte-identical |
 | `in a register this run is holding` | a register named by `pinRegisters` | keeps the value lifted into it and takes no other |
-| `in a register an operand with no VGPR bank selector names` | `holdUnbankableOperands`, under `unbankable=hold` | the producer's choice is known reachable; under `unbankable=allocate` these are placed under a ceiling instead |
+| `in a register an operand with no VGPR bank selector names` | `holdUnbankableOperands`, under `unbankable=hold` or the second attempt of `unbankable=auto` | the producer's choice is known reachable; under `unbankable=allocate` these are placed under a ceiling instead |
 
 One pinned member fixes the whole block, since members sit at fixed offsets from each other. A pinned block that cannot take its base refuses the function, and the message says which case it is:
 
@@ -252,6 +261,8 @@ Without an Active price and with no open pairing, `pickBase` is plain ascending 
 
 The scan stops as soon as a base costs nothing, since penalties are never negative and zero is the best any base can do. That early exit is why a preference's `benefit` must never be negative.
 
+Under `quadrant=prefer` (`AllocationContext::preferProducerQuadrant`), `pickBase` first scans the 256-register VGPR bank that holds the block's hint base, lowest base first, and takes the first acceptable one without scoring; only when that bank has no room does it fall through to the whole-file search above. An operand's bank is what its `s_set_vgpr_msb` slot selects, so a block that stays in the producer's bank needs no switch the producer did not already pay for. It is a preference rather than a rule, which is why it sits here and not in `reachableAt`: a block always falls back to wherever it fits.
+
 Two things deliberately *not* priced. A hint still wins outright when it is available and hints are on: following it reproduces the producer's numbering, which the whole shadow-comparison workflow rests on. And a price where the hardware wants a veto is the wrong channel: the compacting policies run with `followHints=false`, and a price binds only policies that ask; the policy most likely to break a placement rule is the one most likely to ignore a preference.
 
 `forbidsBase` sees no instruction. Placement is decided per block of tied values, so a placement rule over-constrains every block of that class and width. [Register allocation](register-allocation.md) section 14.4 is why that is structural rather than an omission.
@@ -283,7 +294,7 @@ With no evictable base the function is refused — there is no splitting and no 
 
 A difference therefore means a hint was *unreachable*: an index past `indexCount`, reserved, or past a ceiling. It never means the hint was contended.
 
-That is the point of the default — a shadow comparison shows genuine pressure rather than churn. The compacting variants skip step 1 of `tryPlace` and pack from the bottom, which is the only way the number comes down, at the cost of renumbering everything: that obscures a shadow diff and hands the post-RA hazard passes a denser schedule.
+That is why `greedy` is the default of `RegisterAllocationOptions` and `stinkytofu-opt` — a shadow comparison shows genuine pressure rather than churn. The compacting variants skip step 1 of `tryPlace` and pack from the bottom, which is the only way the number comes down, at the cost of renumbering everything: that obscures a shadow diff and hands the post-RA hazard passes a denser schedule. A kernel's configuration defaults to `greedy-compact` anyway, because lowering the number is what the pipeline runs allocation for.
 
 Pinned blocks treat the hint as a requirement in **every** policy, since that is what pinned means.
 
@@ -297,4 +308,19 @@ The same input yields the same colouring. Five things guarantee it:
 - folding walks preferences in table order;
 - first fit and the evictable-base search both scan up from index 0.
 
-`GreedyAllocatorTest.ColouringIsDeterministic` covers this, and `HintIsHonouredSoASimpleFunctionMatchesLegacy` covers section 8. `AllocationRulesTest.APreferenceChangesPlacementWithoutForbiddingAnything` covers a `baseCost` that is not a mere function of the index, `PlacementBlocksEvictionToo` covers a veto that `reachableAt` applies to eviction as well as placement, and the folding tests cover a fold that widens a block, a fold that gives way rather than refusing, and the same chain folding under `greedy-compact-freedom`.
+`GreedyAllocatorTest.ColouringIsDeterministic` covers this, and `HintIsHonouredSoASimpleFunctionMatchesLegacy` covers section 8. `AllocationRulesTest.APreferenceChangesPlacementWithoutForbiddingAnything` covers a `baseCost` that is not a mere function of the index, `PlacementBlocksEvictionToo` covers a veto that `reachableAt` applies to eviction as well as placement, and the folding tests cover a fold that widens a block, a fold that gives way rather than refusing, and the same chain folding under `greedy-compact-freedom`. `ProgramOrderColoursAPathThatWeightOrderCannot` is the case section 5.1 describes, and the two `PreferringTheProducerQuadrant` tests cover section 6.1's bank preference and its fallback.
+
+## 10. The placement table
+
+When `AllocationContext::blockDumpPath` is set (the pipeline sets it under `StinkyTofuRegisterAllocationDump`, `stinkytofu-opt` under `--RegisterAllocationPass=...,dumpBlocks=<prefix>`), the engine writes one row per block after `place()` — whether it finished or refused — to that file:
+
+| Column | Meaning |
+|---|---|
+| `class`, `leader`, `width`, `members` | what the block is |
+| `start`, `span` | the first slot any member is live, and the slots from there to the end of the last range |
+| `weight`, `freedom` | the two orderings' keys (section 5) |
+| `capped`, `pinned`, `hint` | whether a ceiling limits it, whether it may not move, and its hint base (`-1` for none) |
+| `placed`, `base`, `evictions`, `rank` | where it went, how often it was evicted, and its position in placement order (`0` for pinned blocks) |
+| `refused` | `1` on the block the colouring stopped at |
+
+The allocation driver names the file after the allocator and the attempt, `<prefix><allocator>.<allocate|hold>.tsv` (the pipeline's prefix is `<kernel>/ra/blocks.`), so both attempts of `unbankable=auto` leave a table. When folding is retried without folds, the table is from the retry.

@@ -32,6 +32,7 @@ namespace stinkytofu {
 void anchorLegacyIdentityAllocator();
 void anchorGreedyAllocator();
 void anchorFreedomOrderedGreedyAllocator();
+void anchorOrderedGreedyAllocators();
 
 struct AllocatorRegistry::Registry {
     std::unordered_map<std::string, Factory> factories;
@@ -69,6 +70,7 @@ void AllocatorRegistry::registerAllAllocators() {
     anchorLegacyIdentityAllocator();
     anchorGreedyAllocator();
     anchorFreedomOrderedGreedyAllocator();
+    anchorOrderedGreedyAllocators();
 }
 
 }  // namespace stinkytofu
