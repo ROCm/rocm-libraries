@@ -194,6 +194,21 @@ TEST(ShapeCpp, DimensionAccess) {
     EXPECT_THROW(shape.extent(shape.rank()), std::runtime_error);
 }
 
+TEST(ShapeCpp, ArrayArguments) {
+    const Shape shape{2, 3, 5};
+    // C++20 span parameters accept std::array, but not braced initializer lists.
+    const std::array<size_t, 3> axes{2, 0, 2};
+    EXPECT_EQ(shape.fromDimensions(axes), (Shape{5, 2, 5}));
+
+    const std::array<size_t, 3> indices{1, 2, 3};
+    const std::array<size_t, 3> order{1, 2, 0};
+    const std::vector<size_t> expected(indices.begin(), indices.end());
+    EXPECT_EQ(shape.linearIndex(indices), 28);
+    EXPECT_EQ(shape.coordinates(28), expected);
+    EXPECT_EQ(shape.linearIndex(indices, order), 27);
+    EXPECT_EQ(shape.coordinates(27, order), expected);
+}
+
 TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
     for (const Shape original :
          {Shape{}, Shape{2, 3, 5}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
