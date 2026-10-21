@@ -27,6 +27,7 @@ extent. Raw prep always keeps the 256-thread builder regardless of the split.
 from __future__ import annotations
 
 import dataclasses
+from numbers import Integral
 from typing import Tuple
 
 from kernels.gfx950.kda_chunkwise import (
@@ -110,7 +111,14 @@ def _scan_tile(req: GdnPrefillRequest, value_splits: int) -> KdaTileSpec:
             f"aligned_split_specs and add an on-device numeric case for it "
             f"before shipping a table that selects it."
         )
-    return KdaTileSpec(chunk=req.effective_chunk_size, **tile)
+    # KdaTileSpec.chunk is JSON-hashed through the scan spec's asdict, and
+    # effective_chunk_size passes an Integral (e.g. np.int64) through raw,
+    # so canonicalize it exactly like _scan_spec's head dims.
+    chunk = req.effective_chunk_size
+    return KdaTileSpec(
+        chunk=int(chunk) if isinstance(chunk, Integral) and not isinstance(chunk, bool) else chunk,
+        **tile
+    )
 
 
 def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
@@ -118,9 +126,12 @@ def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
     value_splits = value_splits_for(req.batch_heads)
     # Request fields are copied as given: prefill_request_errors rejects a
     # non-int dim and a non-bool flag rather than letting them be coerced.
+    # By the time a spec is built the request has passed that check, so the
+    # int() here only canonicalizes numpy integers for the JSON-hashed
+    # identity payload; a rejected value never reaches this line.
     return KdaChunkScanSpec(
-        head_k=req.head_k_dim,
-        head_v=req.head_v_dim,
+        head_k=int(req.head_k_dim),
+        head_v=int(req.head_v_dim),
         dtype=normalize_dtype(req.dtype),
         tile=_scan_tile(req, value_splits),
         value_splits=value_splits,
@@ -138,8 +149,8 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
     scan = _scan_spec(req)
     prep_tile = dataclasses.replace(scan.tile, block_size=256)
     return KdaChunkPrepSpec(
-        head_k=req.head_k_dim,
-        head_v=req.head_v_dim,
+        head_k=int(req.head_k_dim),
+        head_v=int(req.head_v_dim),
         dtype=normalize_dtype(req.dtype),
         tile=prep_tile,
         raw_inputs=True,
@@ -149,7 +160,15 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
         has_dt_bias=True,
         lower_bound=-5.0,
         gate_kind="gdn",
-        kv_group=req.kv_group,
+        # Canonicalized like the head dims: a numpy pair of head counts
+        # leaves kv_group as np.int64, which the prep spec's JSON-hashed
+        # identity cannot serialize.
+        kv_group=(
+            int(req.kv_group)
+            if isinstance(req.kv_group, Integral)
+            and not isinstance(req.kv_group, bool)
+            else req.kv_group
+        ),
     )
 
 

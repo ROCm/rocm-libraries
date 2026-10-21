@@ -14,6 +14,8 @@ from __future__ import annotations
 import unittest
 from dataclasses import asdict
 
+import numpy as np
+
 from dispatch.gdn import (
     GDN_REGISTRY,
     GdnDecodeRequest,
@@ -826,3 +828,75 @@ class TestRequestFieldTypes(unittest.TestCase):
                     ),
                     [],
                 )
+
+
+class TestNumpyIntegralFields(unittest.TestCase):
+    """A numpy integer is an integer: ``batch=np.int64(4)`` must pass the
+    request check, dispatch end to end (the identity payload is JSON-hashed,
+    so a raw np.int64 would raise ``TypeError`` there), and produce the same
+    identity as the same value as a plain ``int``. ``np.bool_`` stays a
+    non-bool: it is not a flag."""
+
+    _INT_FIELDS = (
+        "batch",
+        "num_k_heads",
+        "num_v_heads",
+        "head_k_dim",
+        "head_v_dim",
+    )
+
+    def test_numpy_ints_dispatch_and_hash_like_plain_ints(self):
+        plain_defaults = dict(
+            batch=4,
+            num_k_heads=16,
+            num_v_heads=32,
+            head_k_dim=128,
+            head_v_dim=128,
+        )
+        for npint in (np.int32, np.int64):
+            for field in self._INT_FIELDS:
+                # Independent all-Python reference; the numpy request replaces
+                # one field with a np scalar, the reference stays plain end to
+                # end.
+                ref = dispatch_gdn_decode(_req(**plain_defaults))
+                np_defaults = dict(plain_defaults)
+                np_defaults[field] = npint(plain_defaults[field])
+                with self.subTest(field=field, npint=npint.__name__):
+                    req = GdnDecodeRequest(arch=ARCH, **np_defaults)
+                    self.assertEqual(request_errors(req), [])
+                    got = dispatch_gdn_decode(req)
+                    self.assertEqual(
+                        got.kernel_id.request_hash, ref.kernel_id.request_hash
+                    )
+                    self.assertEqual(
+                        got.kernel_id.spec_hash, ref.kernel_id.spec_hash
+                    )
+                    self.assertEqual(got.grid, ref.grid)
+
+    def test_numpy_ints_reach_the_spec_as_plain_ints(self):
+        req = GdnDecodeRequest(
+            arch=ARCH,
+            batch=np.int64(3),
+            num_k_heads=np.int64(16),
+            num_v_heads=np.int64(16),
+            head_k_dim=np.int64(128),
+            head_v_dim=np.int64(64),
+        )
+        self.assertEqual(request_errors(req), [])
+        got = dispatch_gdn_decode(req)
+        for value in (
+            got.spec.num_k_heads,
+            got.spec.num_v_heads,
+            got.spec.head_k_dim,
+            got.spec.head_v_dim,
+        ):
+            self.assertIs(type(value), int)
+
+    def test_np_bool_flag_is_not_a_bool(self):
+        req = _fused_req(use_qk_l2norm=np.bool_(True))
+        self.assertTrue(
+            any(
+                e.startswith("use_qk_l2norm must be a bool")
+                for e in request_errors(req)
+            )
+        )

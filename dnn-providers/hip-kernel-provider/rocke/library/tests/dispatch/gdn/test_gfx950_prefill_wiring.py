@@ -11,6 +11,7 @@ GPU here -- this asserts the request maps onto the right spec, tile and grid.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from dispatch.gdn import (
@@ -299,3 +300,27 @@ def test_split_tile_agrees_with_the_builder_it_mirrors():
             f"value_splits={vs}: dispatch says scan_atom_m={want_atom}, "
             f"builder says {scan.tile.scan_atom_m}"
         )
+
+
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize("field", ["batch", "seqlen", "num_k_heads", "num_v_heads", "head_k_dim", "head_v_dim", "chunk_size"])
+@pytest.mark.parametrize("npint", [np.int32, np.int64], ids=["int32", "int64"])
+def test_numpy_integral_fields_dispatch(algorithm, field, npint):
+    """A numpy integer is an integer: every int field must dispatch end to end
+    (the spec identity is JSON-hashed, so a raw np scalar would raise
+    ``TypeError`` there) and give the same identity as a plain ``int``."""
+    defaults = dict(
+        batch=8,
+        seqlen=1024,
+        num_k_heads=8,
+        num_v_heads=8,
+        head_k_dim=128,
+        head_v_dim=128,
+        chunk_size=32,
+    )
+    plain = dict(defaults, algorithm=algorithm, arch=ARCH)
+    req = _req(algorithm=algorithm, **{field: npint(defaults[field])})
+    got = dispatch_gdn_prefill(req)
+    ref = dispatch_gdn_prefill(_req(**plain))
+    assert got.kernel_id.request_hash == ref.kernel_id.request_hash
+    assert got.kernel_id.spec_hash == ref.kernel_id.spec_hash

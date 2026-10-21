@@ -25,6 +25,7 @@ validation. Arch-specific capability, spec construction and the tuned
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from numbers import Integral
 from typing import Tuple
 
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
@@ -81,6 +82,26 @@ class GdnPrefillRequest(OperatorRequest):
         d = asdict(self)
         d["dtype"] = normalize_dtype(self.dtype)
         d["chunk_size"] = self.effective_chunk_size
+        # Canonicalize int fields for the identity payload: a validated request
+        # may carry numpy integers (Integral), which are real ints but do not
+        # serialize to JSON. Only an Integral that is not a bool converts, so
+        # malformed values (``seqlen="256"``, ``seqlen=2.5``, ``batch=None``)
+        # survive raw for request_errors to name -- Capability.check() calls
+        # this before request_errors, and the identity hash only runs on a
+        # request that passed it.
+        for name in (
+            "batch",
+            "seqlen",
+            "num_k_heads",
+            "num_v_heads",
+            "head_k_dim",
+            "head_v_dim",
+            "chunk_size",
+        ):
+            value = d.get(name)
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                continue
+            d[name] = int(value)
         return d
 
     def dims(self) -> dict:
@@ -134,7 +155,8 @@ class GdnPrefillRequest(OperatorRequest):
         """
         chunk = self.effective_chunk_size
         for v in (chunk, self.seqlen):
-            if isinstance(v, bool) or not isinstance(v, int):
+            # Same rule as prefill_request_errors: Integral, not int.
+            if isinstance(v, bool) or not isinstance(v, Integral):
                 return 0
         if chunk <= 0 or self.seqlen % chunk:
             return 0
@@ -186,14 +208,17 @@ def prefill_request_errors(req: OperatorRequest) -> list:
         "head_v_dim",
     ):
         value = getattr(req, name)
-        if isinstance(value, bool) or not isinstance(value, int):
+        # Integral, not int: an ``np.int64(4)`` is an integer and the old
+        # ``int()`` coercion accepted it. ``bool`` is an Integral subclass but
+        # a flag, never a count or a dim.
+        if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{name} must be an int, got {type(value).__name__}")
     for name in ("has_initial_state", "store_final_state"):
         value = getattr(req, name)
         if type(value) is not bool:
             errors.append(f"{name} must be a bool, got {value!r}")
     if req.chunk_size is not None and (
-        isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, int)
+        isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, Integral)
     ):
         errors.append(f"chunk_size must be an int, got {type(req.chunk_size).__name__}")
     if errors:

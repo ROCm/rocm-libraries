@@ -13,6 +13,7 @@ arch does not touch this file.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from numbers import Integral
 
 from kernels.gfx950.gdn_decode import (
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
@@ -111,6 +112,18 @@ class GdnDecodeRequest(OperatorRequest):
         d = asdict(self)
         d["dtype"] = normalize_dtype(self.dtype)
         d["state_dtype"] = normalize_dtype(self.state_dtype)
+        # Canonicalize the dims for the identity payload: a validated request
+        # may carry numpy integers (Integral), which are real ints but do not
+        # serialize to JSON. Only an Integral that is not a bool converts, so
+        # malformed values (``batch=None``, ``batch=2.5``) survive raw for
+        # request_errors to name -- Capability.check() calls this before
+        # request_errors, and the identity hash only runs on a request that
+        # passed it.
+        for name in GDN_DIM_VOCABULARY:
+            value = d.get(name)
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                continue
+            d[name] = int(value)
         return d
 
     def dims(self) -> dict:
@@ -139,7 +152,10 @@ def request_errors(req: OperatorRequest) -> list:
     # non-bool (``fuse_conv="false"``) would select a different kernel ABI.
     for field in GDN_DIM_VOCABULARY:
         value = getattr(req, field)
-        if type(value) is not int:
+        # Integral, not int: an ``np.int64(4)`` is an integer and the old
+        # ``int()`` coercion accepted it. ``bool`` is an Integral subclass but
+        # a flag, never a count or a dim.
+        if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{field} must be an int, got {value!r}")
     for field in ("use_qk_l2norm", "fuse_conv", "fuse_out_norm"):
         value = getattr(req, field)

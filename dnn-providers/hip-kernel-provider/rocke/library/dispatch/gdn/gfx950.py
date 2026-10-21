@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 from itertools import product
+from numbers import Integral
 from typing import Tuple
 
 from kernels.gfx950.gdn_decode import (
@@ -142,15 +143,20 @@ def make_spec(req: GdnDecodeRequest, tile: Tuple[int, int, int]) -> GdnDecodeSpe
     Fields that ``is_valid_spec`` type-checks pass through unconverted, so a
     malformed request (``use_qk_l2norm="false"``, ``num_k_heads=True``) is
     rejected by that validator instead of being coerced into a different valid
-    spec. ``normalize_dtype`` stays: it maps documented dtype aliases.
+    spec. ``normalize_dtype`` stays: it maps documented dtype aliases. A copied
+    dim is cast only when it is an Integral that is not a bool -- a numpy
+    integer canonicalizes to plain ``int`` for the JSON-hashed identity
+    payload, while a malformed one (``True``, ``4.0``) passes through raw so
+    ``is_valid_spec`` still rejects it.
     """
     num_warps, warp_threads_k, blocks_per_v_dim = tile
+    cast_dim = lambda v: int(v) if isinstance(v, Integral) and not isinstance(v, bool) else v
     return dc.replace(
         GdnDecodeSpec(),
-        num_k_heads=req.num_k_heads,
-        num_v_heads=req.num_v_heads,
-        head_k_dim=req.head_k_dim,
-        head_v_dim=req.head_v_dim,
+        num_k_heads=cast_dim(req.num_k_heads),
+        num_v_heads=cast_dim(req.num_v_heads),
+        head_k_dim=cast_dim(req.head_k_dim),
+        head_v_dim=cast_dim(req.head_v_dim),
         dtype=normalize_dtype(req.dtype),
         state_dtype=normalize_dtype(req.state_dtype),
         use_qk_l2norm=req.use_qk_l2norm,
