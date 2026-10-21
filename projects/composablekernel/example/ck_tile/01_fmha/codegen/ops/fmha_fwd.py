@@ -1888,8 +1888,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx125 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
-            # NOTE: dropout is not yet implemented in qr_tdm - only emit
-            # dropout="f" so dropout workloads fall through to qr.
+            # Dropout runs on qr_tdm only (not on qr_tdm_sched/qr_tdm_pingpong),
+            # without logits soft cap or sink.
             # Logits soft cap (qr_tdm and qr_tdm_pingpong, not qr_tdm_sched) comes
             # without a bias, as everywhere.
             if (hdim, hdim_v) in {
@@ -1942,6 +1942,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                         pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
                         pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
                         pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                for mask, bias, lse in itertools.product(
+                    get_mask_map(mask_impl).keys(), BIAS_MAP.keys(), ["t", "f"]
+                ):
+                    for spad, dpad in itertools.product(["f", "t"], ["f", "t"]):
+                        pipelines.append(FmhaFwdPipeline("qr_tdm", "row", spad, spad, dpad, dpad, "f", bias, lse, "t", qscale, mask, "f", "f", "f", F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
 
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.

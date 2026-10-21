@@ -2148,5 +2148,39 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
                 )
 
 
+class TestGfx125TdmDropoutCodegen(unittest.TestCase):
+    """Dropout on gfx1250 runs on fp16/bf16 qr_tdm (fmha_fwd, and batch_prefill below
+    d256), without sink or logits soft cap, and never on qr_tdm_sched/qr_tdm_pingpong.
+    """
+
+    def _check(self, kernels, hdims):
+        tdm_dropout = [
+            k
+            for k in kernels
+            if k.F_pipeline.F_dropout == "t" and k.F_pipeline.tag.startswith("qr_tdm")
+        ]
+        self.assertEqual({k.F_pipeline.tag for k in tdm_dropout}, {"qr_tdm"})
+        self.assertEqual({k.F_tile.F_bn1 for k in tdm_dropout}, hdims)
+        for kernel in tdm_dropout:
+            with self.subTest(kernel=kernel.name):
+                self.assertEqual(kernel.F_pipeline.F_sink, "f")
+                self.assertEqual(kernel.F_pipeline.F_logits, "f")
+                self.assertEqual(kernel.F_pipeline.F_qscale, "no")
+
+    def test_fwd(self):
+        _, kernels = get_fwd_blobs(
+            ["gfx1250"], "*_bf16_*", 0, [64, 128, 256], "simplified"
+        )
+        self._check(kernels, {64, 128, 256})
+
+    def test_batch_prefill(self):
+        from codegen.ops.fmha_batch_prefill import get_fwd_blobs as get_bp_blobs
+
+        _, kernels = get_bp_blobs(
+            "*_bf16_*", 0, [64, 128, 256], "simplified", ["gfx1250"]
+        )
+        self._check(kernels, {64, 128})
+
+
 if __name__ == "__main__":
     unittest.main()

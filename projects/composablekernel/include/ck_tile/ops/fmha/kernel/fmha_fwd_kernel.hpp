@@ -2812,6 +2812,7 @@ struct FmhaFwdKernel
             // index_t kv_l2p_offset =
             //     0; // logical-to-physical offset of seqlen_k coordinate. only used for
             //     paged-kvcache
+            [[maybe_unused]] long_index_t batch_offset_randval = 0;
 
             if constexpr(kIsGroupMode)
             {
@@ -2839,6 +2840,10 @@ struct FmhaFwdKernel
                 // LSE layout is [nhead, total_seqlen] following the physical layout for Q/O
                 batch_offset_lse = query_start;
                 batch_offset_o   = query_start * kargs.stride_o;
+                if constexpr(kHasDropout)
+                {
+                    batch_offset_randval = query_start * kargs.stride_randval;
+                }
 
                 // get real # queries & # keys under group mode
                 if(kargs.seqlen_q_ptr != nullptr)
@@ -2893,6 +2898,11 @@ struct FmhaFwdKernel
                 {
                     batch_offset_bias =
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_bias;
+                }
+                if constexpr(kHasDropout)
+                {
+                    batch_offset_randval =
+                        static_cast<long_index_t>(i_batch) * kargs.batch_stride_randval;
                 }
 
                 // If cumulative seqlen pointers are provided, override per-batch effective lengths
@@ -3562,6 +3572,52 @@ struct FmhaFwdKernel
                     ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
                     : -numeric<float>::infinity();
 
+            // Dropout (qr_tdm): the BlockDropout of the block and its randval window, as the
+            // generic path builds them.
+            [[maybe_unused]] const auto dropout = [&, i_nhead_ = i_nhead, i_batch_ = i_batch]() {
+                if constexpr(kHasDropout)
+                {
+                    const auto num_head_q_total =
+                        (kargs.num_head_q_total > 0 ? kargs.num_head_q_total : kargs.num_head_q);
+                    return BlockDropout{i_batch_,
+                                        kargs.head_start + i_nhead_,
+                                        num_head_q_total,
+                                        kargs.is_drop_seed_offset_from_host ? kargs.drop_seed.val
+                                                                            : *kargs.drop_seed.ptr,
+                                        kargs.is_drop_seed_offset_from_host
+                                            ? kargs.drop_offset.val
+                                            : *kargs.drop_offset.ptr,
+                                        kargs.rp_undrop,
+                                        kargs.p_undrop_in_uint8_t,
+                                        kargs.is_store_randval};
+                }
+                else
+                    return NullBlockDropout{};
+            }();
+            [[maybe_unused]] const auto randval_dram_window = [&, i_nhead_ = i_nhead]() {
+                constexpr auto lengths =
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{});
+                if constexpr(kHasDropout)
+                {
+                    RandValOutputDataType* rand_val_ptr =
+                        reinterpret_cast<RandValOutputDataType*>(kargs.rand_val_ptr) +
+                        static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_randval +
+                        batch_offset_randval;
+                    const auto randval_dram =
+                        pad_tensor_view(make_naive_tensor_view<address_space_enum::global>(
+                                            rand_val_ptr,
+                                            make_tuple(kargs.seqlen_q, kargs.seqlen_k),
+                                            make_tuple(kargs.stride_randval, 1),
+                                            number<FmhaPipeline::kAlignmentRandVal>{},
+                                            number<1>{}),
+                                        lengths,
+                                        sequence<kPadSeqLenQ, kPadSeqLenK>{});
+                    return make_tile_window(randval_dram, lengths, {i_m0, 0});
+                }
+                else
+                    return make_null_tile_window(lengths);
+            }();
+
             // A logits soft cap reaches the TDM pipelines in place of their position encoding
             // (a soft cap comes without a bias; see LogitsSoftCapTransform).
             const auto score_transform = [&]() {
@@ -3632,6 +3688,21 @@ struct FmhaFwdKernel
                                                     smem_arena + Policy::GetLdsOffsetV0(),
                                                     smem_arena + Policy::GetLdsOffsetV1());
                     }
+                    else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> && kHasDropout)
+                    {
+                        return FmhaPipeline{}(q_dram_window,
+                                              k_dram_window,
+                                              v_dram_window,
+                                              bias_dram_window,
+                                              randval_dram_window,
+                                              lse_dram_window,
+                                              mask,
+                                              score_transform,
+                                              scale_s,
+                                              sink_value,
+                                              smem_ptr,
+                                              dropout);
+                    }
                     else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
                     {
                         return invoke_fmha_pipeline(q_dram_window,
@@ -3679,16 +3750,30 @@ struct FmhaFwdKernel
                 {
                     // The arena pipeline and the single-buffer ones both take
                     // one LDS block here: the hoisted smem_ptr.
-                    return invoke_fmha_pipeline(q_dram_window,
-                                                k_dram_window,
-                                                v_dram_window,
-                                                bias_dram_window,
-                                                lse_dram_window,
-                                                mask,
-                                                score_transform,
-                                                scale_s,
-                                                smem_ptr,
-                                                sink_value);
+                    if constexpr(kHasDropout)
+                        return FmhaPipeline{}(q_dram_window,
+                                              k_dram_window,
+                                              v_dram_window,
+                                              bias_dram_window,
+                                              randval_dram_window,
+                                              lse_dram_window,
+                                              mask,
+                                              score_transform,
+                                              scale_s,
+                                              sink_value,
+                                              smem_ptr,
+                                              dropout);
+                    else
+                        return invoke_fmha_pipeline(q_dram_window,
+                                                    k_dram_window,
+                                                    v_dram_window,
+                                                    bias_dram_window,
+                                                    lse_dram_window,
+                                                    mask,
+                                                    score_transform,
+                                                    scale_s,
+                                                    smem_ptr,
+                                                    sink_value);
                 }
             }();
 

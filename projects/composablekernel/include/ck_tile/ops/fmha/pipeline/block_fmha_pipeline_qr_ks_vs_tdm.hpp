@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/block/block_fmha_kv_rows.hpp"
 #include "ck_tile/ops/fmha/block/cast_tile_mx.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
@@ -22,6 +23,18 @@ namespace ck_tile {
 #ifndef CK_TILE_FMHA_TDM_IGLP_BULK
 #define CK_TILE_FMHA_TDM_IGLP_BULK 1
 #endif
+
+// Dropout of P for the qr_tdm bodies: the BlockDropout of the block, and its randval window
+// (kM0 x kN0 at the block's first query row; each K tile's step is cut from it).
+struct BlockFmhaTdmNoDropout
+{
+};
+template <typename Dropout, typename RandValWindow>
+struct BlockFmhaTdmDropout
+{
+    Dropout dropout;
+    RandValWindow randval_window;
+};
 
 // This pipeline is qkv all located in LDS, targeting gfx1250
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaultPolicy>
@@ -320,10 +333,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "qr_tdm pipeline: a logits soft cap comes without a bias");
 
-    // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
-    // Dropout requires kernel dispatch interface expansion (dropout object +
-    // randval window) and is deferred to a follow-up task.
-    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
+    // Dropout (BlockDropout on P, as qr) takes P in gemm_0's C distribution: one warp along N.
+    static_assert(!kHasDropout || kNWarp == 1, "qr_tdm pipeline: dropout needs one N warp");
 
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
@@ -616,7 +627,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding,
-              typename KVRows = BlockFmhaDenseKVRows>
+              typename KVRows      = BlockFmhaDenseKVRows,
+              typename DropoutArgs = BlockFmhaTdmNoDropout>
     CK_TILE_HOST_DEVICE auto run_single_v_double_k_lds_buffer(
         const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
@@ -632,7 +644,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
         float v_descale,
-        const KVRows& kv_rows = {}) const
+        const KVRows& kv_rows           = {},
+        const DropoutArgs& dropout_args = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -1292,6 +1305,26 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
+            if constexpr(kHasDropout)
+            {
+                // As qr: drop P after its row sum went into l; the random values of this
+                // K tile's columns are those of the kN0 x kM0 step at kv_tile_start.
+                auto randval_block_window = dropout_args.randval_window;
+                auto randval_window =
+                    dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
+                        randval_block_window, kv_tile_start);
+                dropout_args.dropout
+                    .template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
+                        static_cast<char*>(smem_arena) + Layout::kRandValOffset,
+                        kv_tile_start,
+                        p_compute,
+                        randval_window);
+            }
+            else
+            {
+                ignore = dropout_args;
+            }
+
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
 
@@ -1489,7 +1522,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding,
-              typename KVRows = BlockFmhaDenseKVRows>
+              typename KVRows      = BlockFmhaDenseKVRows,
+              typename DropoutArgs = BlockFmhaTdmNoDropout>
     CK_TILE_HOST_DEVICE auto run_double_kv_lds_buffer(
         const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
@@ -1505,7 +1539,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
         float v_descale,
-        const KVRows& kv_rows = {}) const
+        const KVRows& kv_rows           = {},
+        const DropoutArgs& dropout_args = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -2260,7 +2295,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             // The current PV consumes P and corrected O, not the denominator.
             // Keep whole-P production unchanged and defer only l's reduction
             // in the guarded path. The original left-fold and row sync remain.
-            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking;
+            // Dropout changes P after its row sum, so it keeps the sum up front.
+            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking && !kHasDropout;
             auto rowsum_p                    = [&]() {
                 if constexpr(kDeferDenominator)
                 {
@@ -2275,6 +2311,26 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
             auto l_correction = m;
+
+            if constexpr(kHasDropout)
+            {
+                // As qr: drop P after its row sum went into l; the random values of this
+                // K tile's columns are those of the kN0 x kM0 step at kv_tile_start.
+                auto randval_block_window = dropout_args.randval_window;
+                auto randval_window =
+                    dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
+                        randval_block_window, kv_tile_start);
+                dropout_args.dropout
+                    .template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
+                        static_cast<char*>(smem_arena) + Layout::kRandValOffset,
+                        kv_tile_start,
+                        p_compute,
+                        randval_window);
+            }
+            else
+            {
+                ignore = dropout_args;
+            }
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
@@ -2740,6 +2796,71 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                     nullptr,
                                                     1,
                                                     1.0f);
+    }
+
+    // Dropout: the BlockDropout of the block and its randval window (kM0 x kN0 at
+    // the block's first query row); paged K/V (batch_prefill) pass their kv_rows.
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename Dropout,
+              typename KVRows = BlockFmhaDenseKVRows>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+               const RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
+               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               float sink_v,
+               void* smem_arena,
+               const Dropout& dropout,
+               const KVRows& kv_rows = {}) const
+    {
+        static_assert(kHasDropout && !kQuantized);
+        const auto dropout_args = BlockFmhaTdmDropout<Dropout, RandValDramBlockWindowTmp>{
+            dropout, randval_dram_block_window_tmp};
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
+            return run_double_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_arena,
+                                            sink_v,
+                                            nullptr,
+                                            nullptr,
+                                            1,
+                                            1.0f,
+                                            kv_rows,
+                                            dropout_args);
+        else
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_arena,
+                                                    sink_v,
+                                                    nullptr,
+                                                    nullptr,
+                                                    1,
+                                                    1.0f,
+                                                    kv_rows,
+                                                    dropout_args);
     }
 
     template <typename QDramBlockWindowTmp,

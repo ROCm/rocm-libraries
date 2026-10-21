@@ -1326,9 +1326,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                         return position_encoding;
                 }();
                 static_assert(kKVMemoryLayout ==
-                                      BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
-                                  !kHasDropout,
-                              "TDM batch_prefill supports linear KV without dropout");
+                                  BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
+                              "TDM batch_prefill supports linear KV");
                 // TDM needs affine views and clamps each box to the real lengths: each K/V
                 // tile is read through a view of its page that ends at seqlen_k.
                 const auto q_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
@@ -1427,6 +1426,22 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                           smem_ptr + Policy::GetLdsOffsetK1(),
                                           smem_ptr + Policy::GetLdsOffsetV0(),
                                           smem_ptr + Policy::GetLdsOffsetV1(),
+                                          kv_rows);
+                }
+                else if constexpr(kHasDropout)
+                {
+                    return FmhaPipeline{}(q_window_tdm,
+                                          k_window_tdm,
+                                          v_window_tdm,
+                                          bias_dram_window,
+                                          randval_dram_window,
+                                          lse_dram_window,
+                                          mask,
+                                          score_transform,
+                                          variant_params.sm_scale,
+                                          sink_value,
+                                          static_cast<void*>(smem_ptr),
+                                          dropout,
                                           kv_rows);
                 }
                 else

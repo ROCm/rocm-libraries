@@ -1074,6 +1074,83 @@ TEST_P(TdmLogitsSoftCap, DataTypeConfig)
     }
 }
 
+// Dropout on qr_tdm (fwd and batch_prefill). Validation also compares the stored random values.
+// The 1024-row causal case takes the staged M128 traversal.
+// api, mode, seqlen_q, seqlen_k, page_block_size, mask
+using TdmDropoutCase = std::tuple<const char*, mode_enum, int, int, int, const char*>;
+
+class TdmDropout : public TestWithParam<TdmDropoutCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         TdmDropout,
+                         Values(TdmDropoutCase{"fwd", mode_enum::batch, 300, 531, 0, "0"},
+                                TdmDropoutCase{"fwd", mode_enum::batch, 300, 531, 0, "b"},
+                                TdmDropoutCase{"fwd", mode_enum::batch, 1024, 1024, 0, "t"},
+                                TdmDropoutCase{"fwd", mode_enum::group, 100, 500, 0, "t:64,32"}));
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+INSTANTIATE_TEST_SUITE_P(
+    BatchPrefill,
+    TdmDropout,
+    Values(TdmDropoutCase{"batch_prefill", mode_enum::group, 100, 500, 16, "0"},
+           TdmDropoutCase{"batch_prefill", mode_enum::group, 300, 500, 1, "b"}));
+#endif
+
+TEST_P(TdmDropout, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
+
+        const auto [api, mode, seqlen_q, seqlen_k, page_block_size, mask_str] = GetParam();
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   3,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(3, seqlen_q),
+                                                   std::vector<int>(3, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0.0f,
+                                                   true,
+                                                   true, // lse
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.2f, // p_drop
+                                                   7,
+                                                   123,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "linear",
+                                                   "vllm",
+                                                   api,
+                                                   "qr_tdm");
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_v"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_dropout_"), std::string::npos) << selected_kernel;
+    }
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts

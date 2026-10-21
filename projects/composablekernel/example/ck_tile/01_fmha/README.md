@@ -247,7 +247,11 @@ Since FA/xformer style with window_size_left/right is more popular, we accept wi
 Note FA use bottom-right by default to express swa case, here we require you explicitly specify top-left/bottom-right.
 
 ### dropout
-TBD
+`-p_drop` sets the dropout probability, `-drop_seed`/`-drop_offset` the Philox seed and offset
+(`-drop_prefs=1` reads them from device memory). With validation on, the kernel also stores its
+random values and the check compares them with the reference. On gfx1250 fp16/bf16 dropout runs
+on `qr_tdm` for fmha_fwd and batch_prefill (not `qr_tdm_sched`/`qr_tdm_pingpong`); split-KV and
+pagedkv_prefill take no dropout.
 
 ### sequence padding and variable length support
 We support sequence padding and variable-length processing in both batch and group modes fmha forward to handle real-world scenarios where sequences have different lengths.
@@ -287,7 +291,7 @@ Use comma-separated `-s`/`-s_k` lists for fixed per-sequence lengths. For exampl
 ./bin/tile_example_fmha_fwd -prec=bf16 -mode=1 -b=3 -h=8 -h_k=2 -d=128 -s=300,300,300 -s_k=1000,1000,1000 \
     -page_block_size=1024 -kv_layout=linear -kv_lookup=sglang -iperm=0 -mask=b
 ```
-On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), both for linear KV without dropout or logits soft cap, and otherwise the async pipeline (the only one on gfx9). Pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
+On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), all for linear KV, and otherwise the async pipeline (the only one on gfx9). Logits soft cap runs on `qr_tdm` and `qr_tdm_pingpong`; dropout on fp16/bf16 `qr_tdm` below hdim 256. Pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
 
 ## FP8 support
 FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:

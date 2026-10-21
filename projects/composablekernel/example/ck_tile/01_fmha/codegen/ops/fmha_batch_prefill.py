@@ -1013,11 +1013,22 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
                 if sink == "t" and mask in ("no", "s_no"):
                     continue
                 pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "f", "f", qscale, mask, sink, "linear", kv_lookup_table))  # fmt: skip
+        # dropout on fp16/bf16 qr_tdm (not qr_tdm_sched/qr_tdm_pingpong), without sink.
+        # At d256 the random-value LDS would not fit beside the double K/V buffers.
+        if hdim != 256:
+            pipelines += [
+                replace(p, F_dropout="t")
+                for p in pipelines
+                if p.tag == "qr_tdm" and p.F_qscale == "no" and p.F_sink == "f"
+            ]
         # logits soft cap on qr_tdm and qr_tdm_pingpong (not qr_tdm_sched), without a bias
         pipelines += [
             replace(p, F_logits="t")
             for p in pipelines
-            if p.tag in ("qr_tdm", "qr_tdm_pingpong") and p.F_bias == "no" and p.F_qscale == "no"
+            if p.tag in ("qr_tdm", "qr_tdm_pingpong")
+            and p.F_bias == "no"
+            and p.F_qscale == "no"
+            and p.F_dropout == "f"
         ]
         return pipelines + KernelComponentFactory.get_pipelines(
             dtype, hdim, receipt, mask_impl

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
@@ -961,7 +962,7 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kV1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
-    static constexpr index_t kArenaBytes = [] {
+    static constexpr index_t kKVArenaBytes = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
         {
             return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
@@ -971,6 +972,22 @@ struct QrTdmLdsArenaLayout
             return integer_least_multiple(max(kQBytes, kV0Offset + kVBytes), kArenaAlignment);
         }
     }();
+    // Dropout: the random values of a P step go through LDS (BlockDropout::Run) while K/V
+    // tiles are in flight, so they get their own region past the K/V buffers.
+    static constexpr index_t kRandValOffset = kKVArenaBytes;
+    static constexpr index_t kRandValBytes  = [] {
+        if constexpr(Problem::kHasDropout)
+        {
+            using BlockGemm = remove_cvref_t<decltype(BlockFmhaPipelineQRKSVSTdmDefaultPolicy::
+                                                          template GetQKBlockGemm<Problem>())>;
+            return BlockDropout::template MakeRandValLdsBlockDescriptor<BlockGemm>()
+                .get_element_space_size();
+        }
+        else
+            return 0;
+    }();
+    static constexpr index_t kArenaBytes =
+        integer_least_multiple(kRandValOffset + kRandValBytes, kArenaAlignment);
 
     static constexpr bool kHasProductionAlignment =
         kQOffset % kRegionAlignment == 0 && kK0Offset % kRegionAlignment == 0 &&

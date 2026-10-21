@@ -767,7 +767,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
         return fwd_result::invalid_args;
     }
 #if CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API
-    if(0 < p_drop && (1 < num_splits || use_kvcache))
+    // batch_prefill takes dropout on its paged KV cache.
+    if(0 < p_drop && (1 < num_splits || use_kvcache) &&
+       !(num_splits == 1 && (api == "batch_prefill" || auto_runs_batch_prefill)))
     {
         std::cerr << "dropout is not supported by split-kv kernels. ignoring the 'p_drop' option"
                   << std::endl;
@@ -2018,8 +2020,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
             init_args(bp_args);
 
             const float ave_time = fmha_batch_prefill(bp_traits, bp_args, sc);
-            // the other APIs read neither the vectorized layout nor the SGLang page table
-            if(ave_time >= 0.0f || !api_auto || kv_vectorized || kv_sglang)
+            // the other APIs read neither the vectorized layout, the SGLang page table nor
+            // dropout
+            if(ave_time >= 0.0f || !api_auto || kv_vectorized || kv_sglang || 0 < p_drop)
                 return ave_time;
         }
 #endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API

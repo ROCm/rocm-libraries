@@ -65,6 +65,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     static_assert(!Problem::kUseDoubleKVLdsBuffer && !Problem::kProgressiveDsLoadK,
                   "qr_tdm_pingpong has its own K/V buffering");
     static_assert(kSubQKHeaddim == kQKHeaddim, "qr_tdm_pingpong stages whole K rows");
+    static_assert(!Problem::kHasDropout, "qr_tdm_pingpong has no dropout");
 
     // P is summed on the matrix unit when one gemm_1 warp tile of columns spans a row,
     // i.e. the gemm_1 warps are all on M; the short-query tile spends them on N and
