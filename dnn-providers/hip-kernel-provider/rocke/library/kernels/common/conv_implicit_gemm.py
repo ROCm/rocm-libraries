@@ -59,7 +59,6 @@ from dataclasses import dataclass, field, replace as dc_replace
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
-    BF16,
     F32,
     I32,
     IRBuilder,
@@ -97,6 +96,12 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
+    _smem_dtype_for,
+    _TF32_LDS_LOAD_MAX,
+    _load_mma_operand,
+    _mfma_issues_per_mma,
+    _tf32_lds_stride_reason,
+    _tf32_reason,
     _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_param_block,
@@ -357,8 +362,10 @@ class ImplicitGemmConvSpec:
 
     @property
     def atom(self) -> MfmaAtom:
+        # Keyed on the MMA dtype: a TF32 spec stores fp32 but issues an XF32
+        # atom, whose fragment lengths differ from the fp32 atom's.
         return mfma_atom(
-            self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
+            self.data.mma_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
         )
 
     # ---- group merging (Gm) ----
@@ -424,6 +431,10 @@ class ImplicitGemmConvSpec:
                 # without it two degrees collide on one name and the compile
                 # cache hands the second the first's binary.
                 f"gm{self.group_merge}": self.group_merge > 1,
+                # TF32 compute keeps fp32 storage, so nothing else in the name
+                # tells it from an fp32 kernel with the same atom shape. Last,
+                # and only when set, so every existing name is unchanged.
+                "tf32": self.data.is_tf32,
             },
         )
 
@@ -454,6 +465,9 @@ class ImplicitGemmConvSpec:
             )
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
+        _mma_why = self.data.mma_dtype_reason()
+        if _mma_why is not None:
+            raise ValueError(_mma_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -697,6 +711,10 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     except KeyError as e:
         return False, str(e)
 
+    _mma_why = spec.data.mma_dtype_reason()
+    if _mma_why is not None:
+        return False, _mma_why
+
     # Geometry divisibility (mirrors ``spec.validate``).
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
@@ -757,18 +775,28 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
-    # MMA atom must be in the target's catalog for the requested dtype.
+    # MMA atom must be in the target's catalog for the requested dtype. The
+    # catalog is asked for the MMA dtype, which differs from the storage dtype
+    # only under TF32 compute.
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
+    if spec.data.is_tf32:
+        _tf32_why = _tf32_reason(spec, target, family, arch)
+        if _tf32_why is not None:
+            return False, _tf32_why
     if not target.mma.has_shape(
         family=family,
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
     ):
-        return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
+        return False, f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}"
+    if spec.data.is_tf32:
+        _tf32_why = _fwd_tf32_lds_stride_reason(spec, target, arch)
+        if _tf32_why is not None:
+            return False, _tf32_why
 
     _total_lds, _ab_bytes, _c_lds, _double = implicit_gemm_lds_bytes(spec)
     if not target.fits_lds(_total_lds):
@@ -893,6 +921,23 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     return True, "ok"
 
 
+def _fwd_tf32_lds_stride_reason(spec: ImplicitGemmConvSpec, target, arch: str):
+    """The shared TF32 row-stride rule for this spec's TF32 atom on ``arch``."""
+    op = target.mma.op_for_shape(
+        family="mma",
+        a_dtype="tf32",
+        b_dtype="tf32",
+        c_dtype="fp32",
+        m=spec.warp_tile_m,
+        n=spec.warp_tile_n,
+        k=spec.warp_tile_k,
+    )
+    if op is None:
+        return None
+    _row = spec.effective_lds_layout().storage_shape(spec.tile_m)[1]
+    return _tf32_lds_stride_reason(_row, op.a_frag_len, arch)
+
+
 def _conv_mma_family(arch: str) -> str:
     from rocke.core.arch import ArchTarget
 
@@ -913,8 +958,8 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
         family=_conv_mma_family(arch),
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
@@ -1109,6 +1154,13 @@ def _build_implicit_gemm_conv_impl(
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid conv_igemm spec for {arch}: {why}")
+    if spec.data.is_tf32 and a_operand_override is not None:
+        # The override hands the MFMA its A operand directly, bypassing the
+        # LDS fragment read where the fp32 -> tf32 reinterpretation happens.
+        raise ValueError(
+            "mma_dtype='tf32' does not support a_operand_override: the override "
+            "supplies the A operand in its own type, not as a TF32 fragment"
+        )
     p = spec.problem
     # Group merging (Gm). The kernargs describe the TRUE problem -- the host
     # packs them from the tensors, which do not merge -- so every merged extent
@@ -1223,11 +1275,21 @@ def _build_implicit_gemm_conv_impl(
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
-    # LDS operand element type must match the MFMA operand type.
-    # bf16 → BF16, fp32 → F32; fp16 and fp8 go through the default f16 path.
-    _smem_dtype: Optional[Type] = (
-        BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
-    )
+    # LDS operand element type follows the *storage* dtype the tiles were
+    # written in: bf16 → BF16, fp32 → F32; fp16 goes through the default f16
+    # path. Equal to the MMA operand type except under TF32 compute, where the
+    # fp32 fragment is reinterpreted after the read (``_load_mma_operand``).
+    _smem_dtype: Optional[Type] = _smem_dtype_for(spec.data.dtype_a)
+    # Instruction-stream shape of one logical MMA step, for the compv3/compv4
+    # scheduling hints. 1/1 for every non-TF32 atom so their hints are
+    # unchanged; under TF32 an 8-wide fp32 fragment is two ds_read_b128 and a
+    # BF16x3-emulated atom issues three physical MFMAs.
+    if spec.data.is_tf32:
+        _ds_reads_per_frag = -(-a_per_lane // _TF32_LDS_LOAD_MAX)
+        _mfmas_per_mma = _mfma_issues_per_mma(op)
+    else:
+        _ds_reads_per_frag = 1
+        _mfmas_per_mma = 1
     c_per_lane = op.c_frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
@@ -1883,13 +1945,14 @@ def _build_implicit_gemm_conv_impl(
                     )
                 else:
                     a_rows.append(
-                        _emit_smem_load(
+                        _load_mma_operand(
                             b,
                             A_src,
                             a_row,
                             col_base,
                             a_per_lane,
                             smem_dtype=_smem_dtype,
+                            data=spec.data,
                         )
                     )
 
@@ -1899,8 +1962,14 @@ def _build_implicit_gemm_conv_impl(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
                 b_cols.append(
-                    _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                    _load_mma_operand(
+                        b,
+                        B_src,
+                        b_row,
+                        col_base,
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
+                        data=spec.data,
                     )
                 )
 
@@ -1928,8 +1997,8 @@ def _build_implicit_gemm_conv_impl(
             # - 1 DS group + 1 MFMA group:       186 TFLOPS (best).
             schedule.emit_after_mfma_step(
                 b,
-                ds_read_count=mfmas_m + mfmas_n,
-                mfma_count=mfmas_m * mfmas_n,
+                ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+                mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma,
             )
 
         return new_accs

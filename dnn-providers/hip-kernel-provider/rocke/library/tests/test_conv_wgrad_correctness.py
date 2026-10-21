@@ -20,7 +20,9 @@ Coverage:
   - Split-K: 1 (direct store) and >1 (atomic accumulation)
   - Shapes: regular 3x3, pointwise 1x1, strided, C=24 (mult-8 not-16 edge),
     asymmetric HW, small channel
-  - Dtypes: fp16, bf16
+  - Dtypes: fp16, bf16; tf32 compute over fp32 storage (``TestConvWgradTf32``:
+    default/cshuffle, split-K atomic, two-stage, stream-K, grouped and 3-D,
+    against an IEEE fp32 reference)
 
 The vector-load path is enabled for every sync MMA family (MFMA and WMMA); only
 the async-DMA path is excluded. The sweep runs on MFMA (gfx942/gfx950) and, for
@@ -2447,6 +2449,417 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                     prefetch_addr=True,
                 )
                 _assert_case_ran(self, ok, why)
+
+
+# ---------------------------------------------------------------------------
+# TF32 compute over fp32 storage
+# ---------------------------------------------------------------------------
+#
+# A TF32 spec stores fp32 and reinterprets each LDS fragment as vec<tf32xN>:
+# gfx950 runs it as three BF16 MFMAs over a hi/lo split of the full fp32
+# payload, gfx942 as the native xf32 MFMA, which ignores the low 13 mantissa
+# bits. So the reference is fp32 computed with TF32 *disabled* (torch 2.10
+# defaults conv to tf32), and on gfx942 it is computed from inputs truncated
+# the way the hardware truncates them.
+#
+# Bounds are relative to the reference's peak |dW|. gfx950: 1e-4, which a
+# single BF16 pass misses by more than an order of magnitude
+# (TestConvWgradTf32Bound pins that on the CPU). gfx942: 1e-3 against the
+# truncated-input reference -- a global bound cannot separate truncated TF32
+# from one BF16 pass on raw inputs.
+
+_TF32_TOL = {"gfx950": 1e-4, "gfx942": 1e-3}
+
+# Per arch, the two TF32 atoms as (warp_tile_mn, warp_tile_k).
+_TF32_ATOMS = {"gfx950": ((32, 16), (16, 32)), "gfx942": ((32, 4), (16, 8))}
+
+_TF32_GROUPED = _Shape(
+    "3x3_g3_N2H10W10C48K120", N=2, Hi=10, Wi=10, C=48, K=120, Y=3, X=3, pH=1, pW=1,
+    groups=3,
+)  # fmt: skip
+
+
+def _tf32_problem_3d(groups: int = 1):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=1, Di=5, Hi=6, Wi=6, C=16 * groups, K=32 * groups, Z=3, Y=3, X=3,
+        sD=1, pD=1, dD=1, pH=1, pW=1, groups=groups,
+    )  # fmt: skip
+
+
+def _tf32_problem(shape: _Shape):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=shape.N, Hi=shape.Hi, Wi=shape.Wi, C=shape.C, K=shape.K, Y=shape.Y,
+        X=shape.X, sH=shape.sH, sW=shape.sW, pH=shape.pH, pW=shape.pW,
+        dH=shape.dH, dW=shape.dW, groups=shape.groups,
+    )  # fmt: skip
+
+
+def _tf32_spec(problem, atom, **kw):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    edge, k = atom
+    base = dict(
+        problem=problem,
+        data=ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32"),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=edge,
+        warp_tile_n=edge,
+        warp_tile_k=k,
+    )
+    base.update(kw)
+    return WgradConvSpec(**base)
+
+
+class _ieee_fp32:
+    """Pin torch's fp32 convolutions to IEEE for the reference, then restore."""
+
+    _KNOBS = (
+        ("cudnn", "allow_tf32", False),
+        ("cudnn.conv", "fp32_precision", "ieee"),
+        ("mkldnn.conv", "fp32_precision", "ieee"),
+    )
+
+    def __enter__(self):
+        import torch
+
+        self._saved = []
+        for path, attr, value in self._KNOBS:
+            obj = torch.backends
+            for part in path.split("."):
+                obj = getattr(obj, part, None)
+            if obj is None or not hasattr(obj, attr):
+                continue
+            self._saved.append((obj, attr, getattr(obj, attr)))
+            setattr(obj, attr, value)
+        return self
+
+    def __exit__(self, *exc):
+        for obj, attr, value in reversed(self._saved):
+            setattr(obj, attr, value)
+        return False
+
+
+def _tf32_truncate(t):
+    """What gfx942's xf32 MFMA reads of an fp32 value: the low 13 bits dropped."""
+    import torch
+
+    return (t.view(torch.int32) & 0xFFFFE000).view(torch.float32)
+
+
+def _wgrad_reference_nd(X, dY, p):
+    """fp32 dW (KYXC / KZYXC) from channel-last X / dY, 2-D or 3-D, IEEE."""
+    import torch
+
+    with _ieee_fp32():
+        if p.is_3d:
+            w = torch.nn.grad.conv3d_weight(
+                X.permute(0, 4, 1, 2, 3).contiguous(),
+                weight_size=(p.K, p.C // p.groups, p.Z, p.Y, p.X),
+                grad_output=dY.permute(0, 4, 1, 2, 3).contiguous(),
+                stride=(p.sD, p.sH, p.sW),
+                padding=(p.pD, p.pH, p.pW),
+                dilation=(p.dD, p.dH, p.dW),
+                groups=p.groups,
+            )
+            return w.permute(0, 2, 3, 4, 1).contiguous()
+        w = torch.nn.grad.conv2d_weight(
+            X.permute(0, 3, 1, 2).contiguous(),
+            weight_size=(p.K, p.C // p.groups, p.Y, p.X),
+            grad_output=dY.permute(0, 3, 1, 2).contiguous(),
+            stride=(p.sH, p.sW),
+            padding=(p.pH, p.pW),
+            dilation=(p.dH, p.dW),
+            groups=p.groups,
+        )
+        return w.permute(0, 2, 3, 1).contiguous()
+
+
+def _tf32_tensors(p, seed: int = 0):
+    import torch
+
+    torch.manual_seed(seed)
+    sp_in = (p.Di, p.Hi, p.Wi) if p.is_3d else (p.Hi, p.Wi)
+    sp_out = (p.Do, p.Ho, p.Wo) if p.is_3d else (p.Ho, p.Wo)
+    sp_w = (p.Z, p.Y, p.X) if p.is_3d else (p.Y, p.X)
+    X = torch.empty(p.N, *sp_in, p.C).uniform_(-1.0, 1.0)
+    dY = torch.empty(p.N, *sp_out, p.K).uniform_(-1.0, 1.0)
+    dW = torch.empty(p.K, *sp_w, p.C // p.groups, dtype=torch.float32)
+    return X, dY, dW
+
+
+def _run_tf32(spec, arch: str):
+    """Build, launch and return ``(dW, reference)`` for one TF32 wgrad spec.
+
+    One runner for every epilogue mode: the plain / split-K-atomic launch, the
+    two-stage pipeline (Stage 1 into the f32 scratch, then the Stage 2 reduce),
+    and the stream-K launch with its flags / partials workspace.
+    """
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        build_implicit_gemm_conv_wgrad,
+        wgrad_streamk_grid,
+        wgrad_streamk_launch_values,
+        wgrad_streamk_signature,
+        wgrad_streamk_workspace_layout,
+        wgrad_streamk_workspace_nbytes,
+    )
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        wgrad_stage1_launch_values,
+        wgrad_two_stage_workspace_nbytes,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        build_conv_wgrad_workspace_reduce,
+        wgrad_reduce_grid,
+        wgrad_reduce_signature,
+    )
+
+    p = spec.problem
+    X, dY, dW = _tf32_tensors(p)
+    if arch == "gfx942":
+        ref = _wgrad_reference_nd(_tf32_truncate(X), _tf32_truncate(dY), p)
+    else:
+        ref = _wgrad_reference_nd(X, dY, p)
+
+    art = compile_kernel(build_implicit_gemm_conv_wgrad(spec, arch=arch), arch=arch)
+    streamk = spec.streamk != "off"
+    two_stage = spec.two_stage and spec.split_k > 1
+    if streamk:
+        sig = wgrad_streamk_signature(spec)
+    else:
+        sig = conv_args_signature(
+            "fp32", direction="wgrad", is_3d=p.is_3d, two_stage=two_stage
+        )
+    launcher = KernelLauncher(
+        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
+    )
+
+    rt = Runtime()
+    bufs = [rt.alloc(dY.nbytes), rt.alloc(X.nbytes), rt.alloc(dW.nbytes)]
+    try:
+        rt.memcpy_h2d(bufs[0], _u8(dY), dY.nbytes)
+        rt.memcpy_h2d(bufs[1], _u8(X), X.nbytes)
+        rt.memset(bufs[2], 0, dW.nbytes)
+        block = (spec.block_size, 1, 1)
+        if streamk:
+            ws_bytes = wgrad_streamk_workspace_nbytes(spec, arch=arch)
+            ws = rt.alloc(max(ws_bytes, 4))
+            bufs.append(ws)
+            rt.memset(ws, 0, max(ws_bytes, 4))
+            flags_bytes, _ = wgrad_streamk_workspace_layout(spec, arch=arch)
+            extra = {}
+            if spec.streamk_reduction in ("linear", "tree"):
+                extra = dict(sk_flags=ws, sk_partials=ws + flags_bytes)
+            values = wgrad_streamk_launch_values(
+                spec, bufs[0], bufs[1], bufs[2], dY.nbytes, X.nbytes, dW.nbytes,
+                arch=arch, **extra,
+            )  # fmt: skip
+            grid = wgrad_streamk_grid(spec, arch=arch)
+            launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        else:
+            grid = (
+                (spec.grid_N + spec.tile_n - 1) // spec.tile_n,
+                (spec.grid_M + spec.tile_m - 1) // spec.tile_m,
+                spec.grid_groups * max(1, spec.split_k),
+            )
+            if two_stage:
+                ws_bytes = wgrad_two_stage_workspace_nbytes(spec)
+                ws = rt.alloc(ws_bytes)
+                bufs.append(ws)
+                rt.memset(ws, 0, ws_bytes)
+                values = wgrad_stage1_launch_values(
+                    spec, dY_ptr=int(bufs[0]), X_ptr=int(bufs[1]),
+                    dW_ptr=int(bufs[2]), dY_bytes=dY.nbytes, X_bytes=X.nbytes,
+                    dW_bytes=dW.nbytes, ws_ptr=int(ws), ws_bytes=ws_bytes,
+                )  # fmt: skip
+            else:
+                values = ConvArgs.from_problem(
+                    p,
+                    direction="wgrad",
+                    tile_m=spec.tile_m,
+                    tile_n=spec.tile_n,
+                    tile_k=spec.tile_k,
+                ).to_launch_values(
+                    int(bufs[0]), int(bufs[1]), int(bufs[2]),
+                    dY.nbytes, X.nbytes, dW.nbytes,
+                    split_k=max(1, spec.split_k),
+                )  # fmt: skip
+            launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+            if two_stage:
+                rspec = WgradReduceSpec(
+                    problem=p,
+                    dtype_d="fp32",
+                    groups=p.groups,
+                    ws_replicas=spec.ws_replicas,
+                )
+                rart = compile_kernel(
+                    build_conv_wgrad_workspace_reduce(rspec, arch=arch), arch=arch
+                )
+                reducer = KernelLauncher(
+                    hsaco=rart.hsaco,
+                    kernel_name=rart.kernel_name,
+                    signature=wgrad_reduce_signature(rspec),
+                )
+                rvalues = {
+                    "ws_ptr": ws,
+                    "dw_ptr": bufs[2],
+                    "wg_M": spec.wg_M,
+                    "wg_N": spec.wg_N,
+                    "ws_bytes": ws_bytes,
+                    "dw_bytes": dW.nbytes,
+                    "groups": p.groups,
+                }
+                reducer(
+                    rvalues,
+                    config=LaunchConfig(
+                        grid=wgrad_reduce_grid(rspec),
+                        block=(rspec.block_size, 1, 1),
+                        fence=True,
+                    ),
+                )
+        out = torch.empty_like(dW)
+        rt.memcpy_d2h(_u8(out), bufs[2], dW.nbytes)
+    finally:
+        for buf in bufs:
+            rt.free(buf)
+    return out, ref
+
+
+def _tf32_rel_err(out, ref) -> float:
+    """max |out - ref| relative to the reference's peak |dW|."""
+    return float((out - ref).abs().max() / ref.abs().max())
+
+
+class TestConvWgradTf32Bound(unittest.TestCase):
+    """The gfx950 bound rejects what a broken TF32 path would produce. CPU only."""
+
+    def test_one_bf16_pass_fails_the_bound(self):
+        if not _HAS_TORCH:
+            self.skipTest("torch not importable")
+        import torch
+
+        p = _tf32_problem(_SHAPES[0])
+        X, dY, _ = _tf32_tensors(p)
+        ref = _wgrad_reference_nd(X, dY, p)
+        bf16 = _wgrad_reference_nd(
+            X.to(torch.bfloat16).float(), dY.to(torch.bfloat16).float(), p
+        )
+        # More than 10x over the bound: a single BF16 pass cannot pass it.
+        self.assertGreater(_tf32_rel_err(bf16, ref), 10 * _TF32_TOL["gfx950"])
+
+
+@unittest.skipUnless(
+    not _SKIP_REASON and GPU_ARCH in _TF32_ATOMS,
+    _SKIP_REASON or f"tf32 wgrad is gfx942/gfx950 only (got {GPU_ARCH})",
+)
+class TestConvWgradTf32(unittest.TestCase):
+    """GPU numerics for TF32 wgrad: every epilogue mode, both atoms of the arch."""
+
+    def _check(self, problem, label: str, **kw) -> None:
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for atom in _TF32_ATOMS[GPU_ARCH]:
+            spec = _tf32_spec(problem, atom, **kw)
+            with self.subTest(case=label, atom=f"{atom[0]}x{atom[0]}x{atom[1]}"):
+                ok, why = is_valid_wgrad_spec(spec, GPU_ARCH)
+                self.assertTrue(ok, f"{label}: {why}")
+                out, ref = _run_tf32(spec, GPU_ARCH)
+                written = out.reshape(problem.K, -1).abs().sum(dim=1) > 0
+                expected = ref.reshape(problem.K, -1).abs().sum(dim=1) > 0
+                missing = int((expected & ~written).sum())
+                self.assertEqual(missing, 0, f"{label}: {missing} dW rows unwritten")
+                rel = _tf32_rel_err(out, ref)
+                tol = _TF32_TOL[GPU_ARCH]
+                self.assertLess(rel, tol, f"{label}: rel_err={rel:.3e} >= {tol:.0e}")
+                print(f"  PASS  tf32 {label} {atom}  rel_err={rel:.2e}", flush=True)
+
+    def test_epilogues_and_pipelines(self):
+        for shape in _SHAPES:
+            p = _tf32_problem(shape)
+            for pipe in ("mem", "compv4", "basic"):
+                for epi in _EPILOGUES:
+                    self._check(
+                        p, f"{shape.id}/{pipe}/{epi}", pipeline=pipe, epilogue=epi
+                    )
+
+    def test_unroll_k(self):
+        self._check(
+            _tf32_problem(_SHAPES[0]), "unroll_k", pipeline="compv4", unroll_k=True
+        )
+
+    def test_lds_k_pad_4(self):
+        # Row stride tile_k + 4: aligned for the <=4-wide fragment loads but not
+        # a multiple of gfx950's 8-wide fragment, so its two halves straddle a
+        # 32-byte boundary on odd rows.
+        for shape in (_SHAPES[0], _SHAPES[2]):
+            p = _tf32_problem(shape)
+            for epi in _EPILOGUES:
+                self._check(p, f"{shape.id}/pad4/{epi}", lds_k_pad=4, epilogue=epi)
+        self._check(_tf32_problem(_SHAPES[0]), "pad4/spk4", lds_k_pad=4, split_k=4)
+
+    def test_split_k_atomic(self):
+        for shape in _SHAPES:
+            p = _tf32_problem(shape)
+            for epi in _EPILOGUES:
+                self._check(p, f"{shape.id}/spk4/{epi}", split_k=4, epilogue=epi)
+
+    def test_two_stage(self):
+        for shape in _SHAPES:
+            p = _tf32_problem(shape)
+            self._check(p, f"{shape.id}/two_stage", split_k=4, two_stage=True)
+
+    def test_streamk(self):
+        for shape in (_SHAPES[0], _SHAPES[2]):
+            p = _tf32_problem(shape)
+            for red in ("linear", "tree", "atomic"):
+                self._check(
+                    p, f"{shape.id}/sk_{red}", streamk="dp_sk", streamk_ctas=6,
+                    streamk_reduction=red,
+                )  # fmt: skip
+        self._check(
+            _tf32_problem(_SHAPES[0]), "sk_persistent", streamk="persistent",
+            streamk_ctas=6,
+        )  # fmt: skip
+
+    def test_grouped(self):
+        p = _tf32_problem(_TF32_GROUPED)
+        self._check(p, "grouped/default")
+        self._check(p, "grouped/cshuffle", epilogue="cshuffle")
+        self._check(p, "grouped/spk4", split_k=4)
+        self._check(p, "grouped/two_stage", split_k=4, two_stage=True)
+        self._check(
+            p, "grouped/sk_atomic", streamk="dp_sk", streamk_ctas=6,
+            streamk_reduction="atomic",
+        )  # fmt: skip
+
+    def test_3d(self):
+        for g in (1, 2):
+            p = _tf32_problem_3d(g)
+            self._check(p, f"3d_g{g}/default")
+            self._check(p, f"3d_g{g}/cshuffle", epilogue="cshuffle")
+            self._check(p, f"3d_g{g}/spk4", split_k=4)
+            self._check(p, f"3d_g{g}/two_stage", split_k=4, two_stage=True)
+        p = _tf32_problem_3d()
+        for red in ("linear", "tree", "atomic"):
+            self._check(
+                p, f"3d/sk_{red}", streamk="dp_sk", streamk_ctas=6,
+                streamk_reduction=red,
+            )  # fmt: skip
 
 
 if __name__ == "__main__":

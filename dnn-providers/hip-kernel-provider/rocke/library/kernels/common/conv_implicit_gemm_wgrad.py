@@ -87,7 +87,6 @@ from dataclasses import dataclass, field, replace as dc_replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
-    BF16,
     F16,
     F32,
     I32,
@@ -114,6 +113,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
 )
 from kernels.common.conv_abi import conv_arg_names
+
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -121,8 +121,13 @@ from kernels.common._conv_implicit_gemm_common import (
     _apply_accumulator_epilogue,
     _emit_frag_smem_load,
     _emit_mfma,
-    _emit_smem_load,
     _ir_dtype,
+    _smem_dtype_for,
+    _TF32_LDS_LOAD_MAX,
+    _load_mma_operand,
+    _mfma_issues_per_mma,
+    _tf32_lds_stride_reason,
+    _tf32_register_reason,
     emit_param_block,
     make_a_descriptor,
     make_a_descriptor_dynamic,
@@ -642,8 +647,10 @@ class WgradConvSpec:
 
     @property
     def atom(self) -> MfmaAtom:
+        # Keyed on the MMA dtype, not storage: a TF32 spec stores fp32 and
+        # issues a tf32 atom. Equal to dtype_a for every other spec.
         return mfma_atom(
-            self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
+            self.data.mma_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
         )
 
     # ---- wgrad GEMM dimensions ----
@@ -767,10 +774,18 @@ class WgradConvSpec:
                 "skpers": self.streamk == "persistent",
                 f"skr{self.streamk_reduction}": self.streamk != "off"
                 and self.streamk_reduction != "linear",
+                # The name carries no dtype, and on gfx950 the TF32 and BF16
+                # atoms share a shape tag (a32x32x16), so without this a TF32
+                # kernel could collide with a BF16 one in the compile cache.
+                # Last, and only when set, so every other name is unchanged.
+                "tf32": self.data.is_tf32,
             },
         )
 
     def validate(self) -> None:
+        _tf32_why = _wgrad_tf32_reason(self)
+        if _tf32_why:
+            raise ValueError(_tf32_why)
         if self.tile_m % (self.warp_m * self.warp_tile_m) != 0:
             raise ValueError(
                 f"tile_m {self.tile_m} not divisible by warp_m * warp_tile_m "
@@ -976,7 +991,10 @@ class WgradConvSpec:
           B (X):   NHWC → last dim C → vec_b
           D (dW):  KYXC → last dim C → vec_c
 
-        ``dtype`` is the compute (A/B) dtype and sizes vec_a/vec_b only.
+        ``dtype`` is the A/B *storage* dtype and sizes vec_a/vec_b only. For a
+        TF32 spec pass ``"fp32"`` (``spec.data.dtype_a``), never ``"tf32"``:
+        the ladder keys on element width, and ``"tf32"`` would select 8-wide
+        loads of a 4-byte type.
         ``dtype_d`` is the dW dtype and sizes vec_c only; it defaults to
         ``dtype``. They are separate because the element width sets the
         candidate ladder, so folding an fp32 dW into ``dtype`` would clamp the
@@ -1023,6 +1041,10 @@ class WgradConvSpec:
         selection point: there is no benchmark flag and no env override, and
         both the sweep driver and dispatch call this rather than keeping their
         own copies.
+
+        ``dtype_a`` / ``dtype_b`` are the *storage* dtypes
+        (``spec.data.dtype_a``), not the MMA dtype. A TF32 spec stores fp32,
+        so it gets ``False`` -- which is also the only layout it can build.
         """
         # Mirrors the validate() gate: a 16-bit wave64 transpose read over a
         # 16- or 32-wide atom edge, which today is gfx950 only.
@@ -1119,6 +1141,11 @@ class WgradConvSpec:
           carries over unexamined -- and no RDNA wgrad was measured here.
         * An fp32 tile puts one element per dword, which changes both
           constraints, and no fp32 wgrad was measured either.
+
+        ``dtype_a`` / ``dtype_b`` are the *storage* dtypes
+        (``spec.data.dtype_a``). A TF32 spec stores fp32 and so takes the fp32
+        answer, ``None``; the default pad of 8 also meets its fragment
+        alignment rule.
         """
         if arch not in _LDS_B64_CONFLICT_PERIOD_32:
             return None
@@ -1165,7 +1192,8 @@ class WgradConvSpec:
 
         Gated to the measured regime -- gfx950 wave64 with the K-outer LDS
         tile -- and to the loop the flag rewrites. Elsewhere it stays off
-        until measured.
+        until measured. Takes no dtype; a TF32 spec cannot use the K-outer
+        tile, so it always gets ``False``.
         """
         if arch != "gfx950" or wave_size != 64:
             return False
@@ -1206,6 +1234,86 @@ _LDS_K_OUTER_ARCH = "gfx950"  # retained: the wave64 regime's arch
 # is not conflict-free there. Per dsl_docs/optimization/arch/{gfx942,gfx950}.md.
 # Restrict the derived pad policy to gfx942, where the pad ordering was swept.
 _LDS_B64_CONFLICT_PERIOD_32 = frozenset({"gfx942"})
+
+
+def _wgrad_tf32_reason(spec: "WgradConvSpec", arch: Optional[str] = None) -> str:
+    """Why ``spec``'s dtypes cannot build, or ``""`` if they can.
+
+    Shared by ``validate`` (``arch=None``) and ``is_valid_wgrad_spec`` so the
+    hard and soft gates cannot drift apart. Every non-TF32 spec returns ``""``
+    here unless it spells TF32 as a storage dtype, which the byte-sizing gates
+    below would otherwise size as a 2-byte type.
+
+    TF32 keeps fp32 in memory and in an M-outer LDS tile, and reinterprets each
+    fragment it reads from LDS as ``vec<tf32xN>``. What that rules out:
+
+    * ``lds_k_outer``: its operand fetch is the 16-bit transpose read
+      (``ds_read_b64_tr_b16``); there is no 32-bit form and its pad is derived
+      from a 16-bit bank analysis.
+    * ``async_dma``: wgrad's direct global->LDS load needs the K-outer tile.
+    * WMMA (wave32): no target's WMMA catalog has a TF32 atom.
+    * a non-fp32 dW: not wired; TF32 is an fp32-convolution compute mode.
+
+    and what it requires: an LDS row stride the fragment read stays aligned on.
+    The fragment is read as loads of at most four fp32 (``_load_mma_operand``:
+    gfx950's 8-wide fragment is two ``<4 x float>`` halves, gfx942's 2-wide one
+    a single ``<2 x float>``), each claiming ``min(N, 4) * 4`` bytes -- at most
+    16, the pool's own alignment. The column is a multiple of
+    N, so every row honours the claim when the stride is a multiple of
+    ``min(N, 4)`` elements (the forward kernel's ``_tf32_lds_stride_reason``
+    rule). The default pad of 8 satisfies it for every TF32 atom.
+    """
+    data = spec.data
+    why = data.mma_dtype_reason()
+    if why:
+        return why
+    if not data.is_tf32:
+        return ""
+    if data.dtype_d != "fp32":
+        return (
+            f"tf32 wgrad requires an fp32 dW (dtype_d='fp32'); got "
+            f"dtype_d={data.dtype_d!r}"
+        )
+    if spec.lds_k_outer:
+        return (
+            "tf32 wgrad does not support lds_k_outer: the K-outer operand fetch "
+            "is a 16-bit transpose read (ds_read_b64_tr_b16) with no 32-bit "
+            "form; tf32 uses the M-outer fp32 tile"
+        )
+    if spec.async_dma:
+        return (
+            "tf32 wgrad does not support async_dma: the wgrad direct "
+            "global->LDS load requires the K-outer tile, which tf32 cannot use"
+        )
+    if spec.wave_size != 64 or (arch is not None and _wgrad_mma_family(arch) == "wmma"):
+        return (
+            "tf32 wgrad is MFMA-only (gfx942 native xf32, gfx950 bf16x3): no "
+            f"WMMA target has a tf32 atom (wave_size={spec.wave_size}"
+            + (f", arch={arch}" if arch is not None else "")
+            + ")"
+        )
+    try:
+        atom = spec.atom
+    except (KeyError, ValueError):
+        return (
+            f"no tf32 MFMA atom {spec.warp_tile_m}x{spec.warp_tile_n}x"
+            f"{spec.warp_tile_k}: gfx942 has 16x16x8 and 32x32x4, gfx950 "
+            "16x16x32 and 32x32x16"
+        )
+    if arch is not None and _wgrad_mma_family(arch) == "mma":
+        try:
+            op = _resolve_wgrad_op(spec, arch)
+        except ValueError:
+            op = None  # an atom of another arch: the catalog check rejects it
+        why = _tf32_register_reason(spec, op)
+        if why:
+            return why
+    try:
+        layout = spec.effective_lds_layout()
+    except ValueError as e:
+        return str(e)
+    # A and B share the layout, so one stride covers both tiles.
+    return _tf32_lds_stride_reason(layout.row_stride, atom.a_per_lane) or ""
 
 
 def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
@@ -1719,6 +1827,12 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     except KeyError as e:
         return False, str(e)
 
+    # First: a TF32 spelling mix-up would otherwise be sized as a 2-byte dtype
+    # by the vector-width and LDS gates below.
+    _tf32_why = _wgrad_tf32_reason(spec, arch)
+    if _tf32_why:
+        return False, _tf32_why
+
     _gm_ok, _gm_why = wgrad_group_merge_available(spec, arch)
     if not _gm_ok:
         return False, _gm_why
@@ -1923,16 +2037,18 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
+    # The MMA dtypes, not storage: a TF32 spec stores fp32 and asks the
+    # catalog for its (tf32, tf32, fp32) atom.
     if not target.mma.has_shape(
         family=family,
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
     ):
-        return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
+        return False, f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}"
 
     # Grouped wgrad (groups>1): grid-per-group, the group index on block_id_z.
     # Grouping is orthogonal to the epilogue/vec/split_k -- it only shifts the dW
@@ -2036,8 +2152,8 @@ def _resolve_wgrad_op(spec: WgradConvSpec, arch: str):
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
         family=_wgrad_mma_family(arch),
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
@@ -2265,10 +2381,22 @@ def build_implicit_gemm_conv_wgrad(
                     f"{_side.lower()}_per_lane={_n} for atom "
                     f"{spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k}"
                 )
-    _smem_dtype: Optional[Type] = (
-        BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
-    )
+    # The LDS element type follows STORAGE: a TF32 kernel keeps fp32 tiles and
+    # reinterprets each fragment it reads (_to_mma_operand). Keying it on
+    # op.a_dtype sent tf32 down the f16 path. Identical for every other spec,
+    # whose op.a_dtype is its dtype_a.
+    _smem_dtype: Optional[Type] = _smem_dtype_for(spec.data.dtype_a)
     c_per_lane = op.c_frag_len
+    # Scheduling-hint multipliers: what one fragment read and one logical MMA
+    # become in the ISA. 1 and 1 for every non-TF32 spec, so its hints (and
+    # IR) are unchanged. Under TF32 a fragment is N fp32 -- 8 on gfx950, two
+    # ds_read_b128; 2 on gfx942, one ds_read_b64 -- and an emulated atom
+    # issues three BF16 MFMAs (bf16x3); a native xf32 atom issues one.
+    _ds_reads_per_frag = 1
+    _mfma_issues_per_atom = 1
+    if spec.data.is_tf32:
+        _ds_reads_per_frag = -(-a_per_lane // _TF32_LDS_LOAD_MAX)
+        _mfma_issues_per_atom = _mfma_issues_per_mma(op)
 
     # Wgrad GEMM dims (per group): kpg × Y*X*cpg, reduction N*Ho*Wo.
     wg_M = _wg_M(p_load)  # kpg  (K when groups==1)
@@ -2852,9 +2980,19 @@ def build_implicit_gemm_conv_wgrad(
                 a_row = b.add(
                     warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom)
                 )
+                # Once per fragment, outside the (mi, ni) MMA loop: the TF32
+                # reinterpret is free, and the gfx950 split it feeds is shared
+                # by every MMA that reuses the fragment. Exactly the old
+                # _emit_smem_load unless tf32.
                 a_rows.append(
-                    _emit_smem_load(
-                        b, A_src, a_row, col_base, a_per_lane, smem_dtype=_smem_dtype
+                    _load_mma_operand(
+                        b,
+                        A_src,
+                        a_row,
+                        col_base,
+                        a_per_lane,
+                        smem_dtype=_smem_dtype,
+                        data=spec.data,
                     )
                 )
 
@@ -2875,8 +3013,14 @@ def build_implicit_gemm_conv_wgrad(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
                 b_cols.append(
-                    _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                    _load_mma_operand(
+                        b,
+                        B_src,
+                        b_row,
+                        col_base,
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
+                        data=spec.data,
                     )
                 )
 
@@ -2889,8 +3033,8 @@ def build_implicit_gemm_conv_wgrad(
 
             schedule.emit_after_mfma_step(
                 b,
-                ds_read_count=mfmas_m + mfmas_n,
-                mfma_count=mfmas_m * mfmas_n,
+                ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+                mfma_count=mfmas_m * mfmas_n * _mfma_issues_per_atom,
             )
 
         return new_accs
