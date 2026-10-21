@@ -94,22 +94,6 @@ namespace hipsparse_test
         PRINT_IF_HIP_ERROR(hipFree(ptr));
     }
 
-    struct handle_struct
-    {
-        hipsparseHandle_t handle;
-        handle_struct()
-        {
-            hipsparseStatus_t status = hipsparseCreate(&handle);
-            verify_hipsparse_status_success(status, "ERROR: handle_struct constructor");
-        }
-
-        ~handle_struct()
-        {
-            hipsparseStatus_t status = hipsparseDestroy(handle);
-            verify_hipsparse_status_success(status, "ERROR: handle_struct destructor");
-        }
-    };
-
     struct descr_struct
     {
         hipsparseMatDescr_t descr;
