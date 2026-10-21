@@ -37,8 +37,8 @@ _K_XF32 = 32    # XF32       ds_load_b32, MatrixInstruction [16,16,32,1]
 _TDM = True
 
 
-import Tensile.SolutionStructs.LdsPadding as _L
-from Tensile.SolutionStructs.LdsPadding import (
+import tensilelite.SolutionStructs.LdsPadding as _L
+from tensilelite.SolutionStructs.LdsPadding import (
     get_fp4_mt_config,
     get_fp8_mt_config,
     get_fp16_mt_config,

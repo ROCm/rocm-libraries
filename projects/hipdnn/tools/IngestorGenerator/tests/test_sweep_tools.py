@@ -821,13 +821,15 @@ class TestTheDriverRefusesAnUnsafeConfig:
 
     def test_a_config_may_not_redirect_a_driver_owned_option(self, sweep):
         """`--engine` in the config would let the evidence come from a different engine
-        than the ledger attributes it to."""
-        config = json.loads(sweep.config_path.read_text())
-        config["benchmark"]["argv"] = [str(sweep.bin / "python3"), "--engine", "1"]
-        sweep.config_path.write_text(json.dumps(config))
-        result = sweep.run()
-        assert result.returncode == 2
-        assert "phase-owned options" in result.stderr
+        than the ledger attributes it to; `--autotune` or `--hipdnn-cache-dir` would move
+        the cache the rankings are read from."""
+        for extra in (["--engine", "1"], ["--autotune"], ["--hipdnn-cache-dir=/x"]):
+            config = json.loads(sweep.config_path.read_text())
+            config["benchmark"]["argv"] = [str(sweep.bin / "python3"), *extra]
+            sweep.config_path.write_text(json.dumps(config))
+            result = sweep.run()
+            assert result.returncode == 2, extra
+            assert "phase-owned options" in result.stderr
 
     def test_an_unknown_key_is_refused_rather_than_ignored(self, sweep):
         config = json.loads(sweep.config_path.read_text())
@@ -1005,7 +1007,7 @@ class TestCorpusGraphIdentity:
         return _sweep_module().corpus_inventory(corpus, "none")
 
     def test_two_sources_sharing_a_graph_name_are_two_graphs(self, tmp_path):
-        """942:S6-10: hipkittens and pytorch both ship
+        """hipkittens and pytorch both ship
         bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal."""
         shared = "bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal"
         self.stage(

@@ -46,6 +46,8 @@ Both copies are invoked through Python and do not require executable permissions
 - Read [gfx942.md](gfx942.md) for the explicit `gfx942` profile scope.
 - Read [gfx950.md](gfx950.md) for the width- and direction-sensitive `gfx950`
   profile scope.
+- Read [gfx1201.md](gfx1201.md) for wave32 single-address active-pair scope,
+  including its stricter alignment and unsupported broadcast cases.
 - Read [comparison.md](comparison.md) before comparing target profiles.
 - Read [validation-boundaries.md](validation-boundaries.md) before describing what
   a prediction proves.

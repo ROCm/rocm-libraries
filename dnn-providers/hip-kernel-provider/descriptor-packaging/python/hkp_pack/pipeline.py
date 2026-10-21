@@ -14,9 +14,15 @@ from .hip_compile import (
     hip_variant_key,
 )
 from .hsaco_source import hsaco_file_identity, hsaco_variant_key, resolve_hsaco_file
-from .rocke_compile import compile_rocke_variant, rocke_variant_key
+from .rocke_compile import (
+    ROCKE_TARGET_NATIVE,
+    compile_rocke_variant,
+    rocke_compile_arch,
+    rocke_variant_key,
+)
 from .descriptors import (
     KPACK_DIR_NAME,
+    canonical_id,
     _selected_entries,
     kdp_arch_matches,
     kdp_survives,
@@ -60,6 +66,9 @@ class InlineUKD:
     consumers: list = field(default_factory=list)
     # hsaco only: the authored file's resolved root-relative identity.
     rel_file: object = None
+    # rocke only: the processor the code object was compiled for -- the shard
+    # arch for target "native", its LLVM generic processor for "generic".
+    compile_target: object = None
 
 
 @dataclass
@@ -269,6 +278,7 @@ def _compile_ukd_variant(
         source = ks["source"]
         builder = ks["builder"]
         spec = ks["spec"]
+        target = ks.get("target", ROCKE_TARGET_NATIVE)
         vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
             co_path, captured, observations = compile_rocke_variant(
@@ -279,6 +289,7 @@ def _compile_ukd_variant(
                 inter_arch_dir,
                 observation_requests.get(vk, {}),
                 origins,
+                target,
             )
             variant_co[vk] = co_path
             variant_symbol[vk] = captured
@@ -288,10 +299,19 @@ def _compile_ukd_variant(
         # A reused compile result is checked as hard as a fresh one, for EVERY
         # consumer: the first's agreement says nothing about a second completing
         # different metadata from the same decisions.
+        # The shard binding stays the shard arch even for a generic compile: the
+        # object is packed for, and its evidence bound to, this shard alone.
         if observations.get("arch") != arch:
             raise HkpPackError(
                 f"{where}: compile observations were taken for "
                 f"'{observations.get('arch')}', not '{arch}'"
+            )
+        compile_target = rocke_compile_arch(arch, target)
+        if observations.get("compile_target") != compile_target:
+            raise HkpPackError(
+                f"{where}: compile observations were compiled for "
+                f"'{observations.get('compile_target')}', not '{compile_target}' "
+                f"(kernel_source.target '{target}' on shard '{arch}')"
             )
         if observations.get("symbol") != symbol:
             raise HkpPackError(
@@ -313,6 +333,7 @@ def _compile_ukd_variant(
             "builder": builder,
             "spec": spec,
             "observations": observations,
+            "compile_target": compile_target,
             "consumers": consumers,
         }
     elif kind == "hsaco":
@@ -491,8 +512,9 @@ def _agreement_inputs(flat, arch):
     authoring `engine` as null leaves an EMPTY obligation, not a waived one, so a
     contract declared under it is rejected.
     """
-    generics = {d.id: d.doc for d in flat.generics()}
-    schemas = {d.id: d.doc for d in flat.generics() if d.type == "kmd"}
+    generics = flat.generic_by_id()
+    # Keyed as authored: specialization consumers name their KMD by that spelling.
+    schemas = {d.id: d.doc for d in generics.values() if d.type == "kmd"}
     ukd_by_id = flat.ukd_by_id()
     records, requests = {}, {}
     for kdp in flat.kdps():
@@ -514,17 +536,18 @@ def _agreement_inputs(flat, arch):
                         "contract names an engine, and this KDP authors none"
                     )
             continue
-        if engine_id not in generics:
+        if canonical_id(engine_id) not in generics:
             raise HkpPackError(
                 f"KDP {kdp.path.name}: engine '{engine_id}' resolves to no descriptor"
             )
-        engine = generics[engine_id]
+        engine = generics[canonical_id(engine_id)].doc
         kmd_id = engine.get("metadata")
-        if kmd_id not in schemas:
+        kmd_desc = generics.get(canonical_id(kmd_id))
+        if kmd_desc is None or kmd_desc.type != "kmd":
             raise HkpPackError(
                 f"engine '{engine_id}': metadata '{kmd_id}' resolves to no KMD"
             )
-        kmd = schemas[kmd_id]
+        kmd = kmd_desc.doc
         header = _kdp_header(kdp.doc)
         header["arch"] = [arch]
         for sid, ukd, sdesc in _selected_entries(
@@ -647,6 +670,7 @@ def _compile_one_variant(job):
                 job.out_dir,
                 job.requests,
                 origins,
+                ks.get("target", ROCKE_TARGET_NATIVE),
             )
         else:
             # Unreachable while `_variant_key_for` keys only these two kinds. A
@@ -807,7 +831,12 @@ def _variant_key_for(ukd, rel_dir):
     if kind == "hip":
         return hip_variant_key(hip_source_relpath(rel_dir, ks["source"]), ks["build"])
     if kind == "rocke":
-        return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
+        return rocke_variant_key(
+            ks["source"],
+            ks["builder"],
+            ks["spec"],
+            ks.get("target", ROCKE_TARGET_NATIVE),
+        )
     return None
 
 
@@ -977,14 +1006,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 # reference appears in both and is compiled for the first only.
                 entries.append(sid)
                 new_kds.append(sid)
-                if sid in passthrough_standalone_ukds:
+                key = canonical_id(sid)
+                if key in passthrough_standalone_ukds:
                     continue
                 sukd = entry
                 where = f"standalone UKD {sdesc.path.name}"
                 if _is_passthrough(sukd):
                     kind = sukd["kernel_source"]["kind"]
                     log(f"{where}: emitting kind '{kind}' as authored")
-                    passthrough_standalone_ukds[sid] = PassthroughUKD(
+                    passthrough_standalone_ukds[key] = PassthroughUKD(
                         doc=copy.deepcopy(sukd),
                         filename=sdesc.path.name,
                         rel_dir=sdesc.rel_dir,
@@ -1005,9 +1035,9 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     variant_observations,
                     origins,
                 )
-                if sid in standalone_ukds:
+                if key in standalone_ukds:
                     continue
-                standalone_ukds[sid] = StandaloneUKD(
+                standalone_ukds[key] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
                     metadata=sukd.get("metadata"),
@@ -1097,6 +1127,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.path.read_bytes(),
         )
 
+    # Sidecars are copied unpruned like their generics; pruning happens in pack_arch.
+    for sidecar in flat.sidecars_for(flat.generics()):
+        _write_bytes_at(
+            inter_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
+
     origins.stable()
     return IntermediateArch(
         arch=arch,
@@ -1156,6 +1195,9 @@ def _rewrite_ukd_kpack(
             "source": ukd.source,
             "builder": ukd.builder,
             "spec": ukd.spec,
+            # The processor the shipped object was built for: the shard arch for a
+            # native compile, the family's generic processor for a generic one.
+            "compile_target": ukd.compile_target,
         }
     elif ukd.origin_kind == "hsaco":
         provenance = {
@@ -1331,6 +1373,7 @@ def pack_arch(
                 ukd.source,
                 ukd.builder,
                 json.dumps(ukd.spec, sort_keys=True),
+                ukd.compile_target,
             )
         elif ukd.origin_kind == "hsaco":
             sig = ("hsaco", ukd.rel_file)
@@ -1478,14 +1521,28 @@ def pack_arch(
         _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc)
 
     prune_result = prune(flat, arch)
-    for generic in flat.generics():
-        if generic.id in prune_result.reachable_generic_ids:
-            _write_bytes_at(
-                out_arch_dir,
-                generic.rel_dir,
-                generic.path.name,
-                generic.path.read_bytes(),
-            )
+    surviving_generics = [
+        generic
+        for generic in flat.generics()
+        if canonical_id(generic.id) in prune_result.reachable_generic_ids
+    ]
+    for generic in surviving_generics:
+        _write_bytes_at(
+            out_arch_dir,
+            generic.rel_dir,
+            generic.path.name,
+            generic.path.read_bytes(),
+        )
+
+    # Derived from the surviving descriptors: reachable_generic_ids holds ids only, so a
+    # sidecar's fate is exactly its descriptor's.
+    for sidecar in flat.sidecars_for(surviving_generics):
+        _write_bytes_at(
+            out_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
 
     return ArchResult(arch=arch, out_dir=out_arch_dir, kpack_path=kpack_path)
 
