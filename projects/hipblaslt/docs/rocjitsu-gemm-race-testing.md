@@ -1,100 +1,90 @@
-# GEMM race testing with rocJITsu
+# Random matrix multiplication tests with rocJITsu
 
-This prototype [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py)
-tests GEMMs through rocJITsu on CPUs, checking numerics and detecting races.
-No physical GPU is required. The benchmark chooses its kernel through the
-ordinary heuristic (i.e. no explicit solution index is used).
+hipBLASLt is a library for matrix multiplication on AMD GPUs. It can scale the
+product, add another matrix or a bias, and apply a function to the result.
+The matrix multiplication is commonly called a GEMM. Different sizes and number formats
+can use different GPU functions, so checking a range of inputs exercises more
+of the library.
 
-The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) has separate
-functions for numerics, shapes, layouts, scalars and epilogues. M, N and K are
-independent uniform draws from `{32, 64, ..., 480}`. Six equally likely families
-cover FP32, FP16, BF16, FP8, MXFP8 and MXFP4, with FP32 computation and one batch.
-Ordinary families sample all four transposes; MX uses TN and preswizzled E8M0
-block scales. Outputs are chosen from each family's supported types.
+This test samples GEMMs and runs them through rocJITsu, which executes GPU
+instructions on CPUs. Its race detector checks whether threads can access the
+same memory without the ordering needed to avoid a conflict. The benchmark also
+compares the computed output with a separate CPU calculation. No physical GPU
+is required.
 
-| Family | A and B | C and D | Block scales |
-| --- | --- | --- | --- |
-| FP32 | FP32 | FP32 | None |
-| FP16 | FP16 | FP16 or FP32 | None |
-| BF16 | BF16 | BF16 | None |
-| FP8 | E4M3 FP8 | BF16 | None |
-| MXFP8 | E4M3 FP8 | FP32, FP16 or BF16 | E8M0 per 32 elements |
-| MXFP4 | E2M1 FP4 | FP32, FP16 or BF16 | E8M0 per 32 elements |
+## Design
 
-The MX mode is `1001` (`HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT`),
-using gfx950's preswizzled scale layout. All dimensions are aligned to 32.
-These profiles follow the project's [type tables](reference/api-reference.rst)
-and gfx950 MX tests; they cover a useful subset of supported combinations.
+The test repeats three steps for each sample:
 
-Alpha is sampled from `{-2, -1, 0.5, 1, 2}` and beta from
-`{-2, -1, 0, 0.5, 1, 2}`. Epilogues sample none, bias, ReLU, bias+ReLU, GELU
-and bias+GELU, with FP32 bias. Alpha stays nonzero so every case exercises
-multiplication. For a given seed and sample number, the GEMM input is the same
-regardless of `--threads`. Workers take cases from a shared sequence; worker
-assignment and completion order can vary.
+1. The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) chooses the
+   matrix dimensions, number formats and operation options.
+2. The [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py) sends
+   that input to `hipblaslt-bench` under rocJITsu. The library chooses the GPU
+   function, or kernel, as it normally would. No explicit solution index is used
+   to force a particular kernel.
+3. The runner checks the numerical result and race report, then saves the input,
+   selected kernel, commands, logs and outcome.
 
-If the heuristic returns `error: NO solution found!`, the runner records the
-case as `unsupported`, retains its input and logs, and fails the run. This means
-heuristic selection found no solution for that input; it does not establish
-that the input is forbidden or that no suitable kernel exists. The summary
-reports the missing-solution rate, and cases are never replaced.
+Every sample must complete numerical validation and execute with race detection.
+A race, numerical failure, emulator warning or error, timeout or missing
+solution fails the run. A missing solution is reported as `unsupported`: the
+library did not find a kernel for that input. Samples are never replaced, so the
+reports show how much of the workload actually ran.
 
-## Running
+The seed fixes the sequence of GEMM configurations. A given sample has the same input
+regardless of how many workers run concurrently; worker assignment and completion
+order can vary. Each GEMM runs in its own process and has its own report directory.
+Sampling and execution are separate, so the distribution can be extended without
+changing the runner.
 
-Supply the matching ROCm library, bench client and rocJITsu CPU-emulation config.
-The config must emulate gfx950. The Python environment needs PyYAML for bench
-input conversion, and the bench build must enable MX data generation.
+## Current sampling
+
+For a product of an M×K matrix and a K×N matrix, the output is M×N. M, N and K
+are independent uniform draws from `{32, 64, ..., 480}`. These dimensions are
+aligned to 32 to accommodate the low-precision formats used by this test.
+Each sample contains one matrix multiplication, with no batching.
+
+The six equally likely number-format families are FP32, FP16, BF16, FP8, MXFP8
+and MXFP4. The MX formats store values in 8 or 4 bits and share a scale across
+blocks of 32 elements. All families add intermediate products in FP32. The
+sampler chooses input and output pairings based on the project's
+[supported types](reference/api-reference.rst) and gfx950 tests; it covers a
+subset of supported combinations.
+
+Transposing swaps a matrix's rows and columns. The ordinary families sample all
+four combinations of transposing the two input matrices. MX samples transpose
+the first input only. Alpha, the product's scale, is chosen from
+`{-2, -1, 0.5, 1, 2}`. Beta, the added matrix's scale, is chosen
+from `{-2, -1, 0, 0.5, 1, 2}`. Alpha stays nonzero to exercise multiplication.
+The optional operations after multiplication are chosen equally from none, bias,
+ReLU, bias+ReLU, GELU and bias+GELU. A bias adds a vector to the result; ReLU and
+GELU apply a function to each output value.
+
+## Automated runs and reproduction
+
+The existing Multi-Arch workflows run 100 samples per relevant PR and 1,000
+nightly, using seed 0 and eight concurrent GEMMs. Both emulate gfx950, the
+GPU instruction set used by the MI350 family. The PR workload is the first
+100 samples of the nightly workload.
+
+The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
+uses the library and benchmark built by the same workflow, then builds a fixed
+version of rocJITsu. It attempts every sample and uploads reports even after a
+failure. The job is advisory: its failure is visible, but does not fail the
+required Multi-Arch summary.
+
+To run locally, provide a matching library and benchmark, rocJITsu, and its
+gfx950 configuration. The Python environment needs PyYAML, and the benchmark
+build must enable MX data generation.
 
 ```sh
-HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python .github/scripts/run_random_hipblaslt_gemms.py \
+HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python3 .github/scripts/run_random_hipblaslt_gemms.py \
     --bench /path/to/hipblaslt-bench --rocjitsu /path/to/rocjitsu \
     --config /path/to/gfx950_mi355x_kmd.json --count 100 --threads 8 \
-    --output /path/to/results
+    --output /path/to/new-results
 ```
 
-`--threads` controls the number of concurrent GEMMs; each rocJITsu process uses
-one emulator worker. Each GEMM has one YAML record and its own logs, so a failure
-has a separate reproduction. `--stop-on-failure` stops workers from taking new
-cases after a failure, including a missing solution; cases already running
-finish. The CI callers attempt the full loop without early stopping.
-
-A pass requires successful benchmark numerical validation and evidence that
-the selected GEMM ran with race detection. Races, numerical failures, missing
-solutions and emulator diagnostics fail the run. There are no exclusions or
-expected-failure exemptions; `known_failures` is reserved and stays zero.
-
-Reports contain sampled types, transposes, epilogues and elapsed time. Each
-case retains its input, commands, logs and result; `cases.md` and `cases.json`
-collect the inputs and outcomes for the whole run. Use `--case N` with the same
-seed to replay the Nth sampled GEMM.
-
-## CI and pre-merge validation
-
-The existing Multi-Arch workflows call the CPU
-[race-check workflow](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
-after the Linux build publishes its artifacts. The per-PR run samples 100 GEMMs;
-nightly samples 1,000. Both use gfx950, seed 0 and eight concurrent GEMMs, so
-the per-PR inputs are the first 100 nightly inputs. The job fetches the matching
-BLAS runtime, device library and bench test payload from that workflow run.
-The emulator is pinned independently to a revision validated with these types.
-
-These GEMM jobs are advisory: a failed test step and its reports remain visible,
-but they do not change the required Multi-Arch summary. Every sample is
-attempted. Runner unit tests execute on a small GitHub-hosted runner when
-the runner or its workflows change. See [test results](rocjitsu-gemm-race-results.md)
-for validation of the current workload.
-
-For local validation of the CI driver, fetch the BLAS and test artifacts with
-TheRock's `install_rocm_from_artifacts.py --blas --tests`. Use the workflow's
-pinned rocm-systems revision and set `ROCM_PATH`, `ROCJITSU_SOURCE_DIR`,
-`ROCJITSU_BUILD_DIR`, `RACE_REPORT_DIR`, `AMDGPU_FAMILIES=gfx950-dcgpu`,
-`RANDOM_GEMM_COUNT`, `RANDOM_GEMM_SEED` and `RANDOM_GEMM_THREADS`. Run
-`.github/scripts/run_rocjitsu_hipblaslt_race_check.sh`; it builds the emulator and
-plugins, then invokes the same Python runner. Build and report paths belong
-outside the source checkout.
-
-The reusable workflow also accepts manual dispatch with `artifact_run_id` and
-the sampling settings. It tests the selected scripts against an existing
-gfx950 artifact run without rebuilding hipBLASLt. GitHub exposes manual
-dispatch only after a workflow exists on the default branch; the per-PR caller
-provides the hosted check before merge.
+Use `--case N` with the same seed to replay one sample. `--dry-run` writes
+inputs without executing them. `--stop-on-failure` stops starting new samples
+after a failure; already running samples finish. Each run creates a new output
+directory, with `summary.json` for totals and `cases.md` for individual results.

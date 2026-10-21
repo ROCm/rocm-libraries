@@ -274,9 +274,8 @@ class RandomGemmTests(unittest.TestCase):
                     summary["sampled"],
                     summary["passed"],
                     summary["failed"],
-                    summary["known_failures"],
                 ),
-                (3, 2, 1, 0),
+                (3, 2, 1),
             )
             self.assertIn(
                 "race reported", (output / "case-0002/result.json").read_text()
@@ -374,7 +373,6 @@ class RandomGemmTests(unittest.TestCase):
                         self.assertEqual(summary["passed"], 1 if stopped else 2)
                         self.assertEqual(summary["sampled"], 2 if stopped else 3)
                         self.assertEqual(summary["complete"], not stopped)
-                        self.assertEqual(summary["known_failures"], 0)
                         result = json.loads(
                             (output / "case-0002/result.json").read_text()
                         )
