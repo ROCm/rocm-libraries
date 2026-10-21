@@ -200,8 +200,7 @@ A convolution forward through the builders:
         return cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc());
     }
 
-``samples/cudnn_shim/ConvFpropV8.cpp`` in the hipDNN source tree runs this graph end to end, and
-``samples/cudnn_shim/RawBackendApiV8.cpp`` builds the same convolution with the C API alone.
+``samples/cudnn_shim/ConvFpropV8.cpp`` in the hipDNN source tree runs this graph end to end.
 
 The main differences from cuDNN on the v8 API follow, each with a link to its known-divergences
 section.

@@ -12,6 +12,7 @@
 
 #include "fake_backend/ShimV8PlanFixture.hpp"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -46,6 +47,37 @@ json rule(const std::string& operation, std::int64_t engine)
 
 class TestCudnnShimV8Errata : public hipdnn_shim_test::ShimV8PlanFixture
 {
+protected:
+    // A 3-D backward convolution without padding: X/DX {1,4,5,6,8}, W/DW {8,4,3,3,3},
+    // DY {1,8,3,4,6}. Every slot has its own last dimension (8, 3, 6).
+    fe::OperationGraph_v8 backwardGraph(fe::DescriptorType_t kind)
+    {
+        const std::array<std::int64_t, 3> zeros = {0, 0, 0};
+        const std::array<std::int64_t, 3> ones = {1, 1, 1};
+        const fe::ConvDesc_v8 conv = fe::ConvDescBuilder_v8()
+                                         .setComputeType(fe::DataType_t::FLOAT)
+                                         .setMathMode(CUDNN_CROSS_CORRELATION)
+                                         .setSpatialDimCount(3)
+                                         .setPrePadding(3, zeros.data())
+                                         .setPostPadding(3, zeros.data())
+                                         .setDilation(3, ones.data())
+                                         .setSpatialStride(3, ones.data())
+                                         .build();
+        const fe::Tensor_v8 image = tensor(1, {1, 4, 5, 6, 8});
+        const fe::Tensor_v8 filter = tensor(2, {8, 4, 3, 3, 3});
+        const fe::Tensor_v8 gradient = tensor(3, {1, 8, 3, 4, 6});
+        fe::OperationBuilder_v8 builder(kind);
+        if(kind == fe::DescriptorType_t::OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR)
+        {
+            builder.setxDesc(image).setdwDesc(filter);
+        }
+        else
+        {
+            builder.setdxDesc(image).setwDesc(filter);
+        }
+        const fe::Operation_v8 op = builder.setdyDesc(gradient).setcDesc(conv).build();
+        return graphOf(op);
+    }
 };
 
 // A rule names "<op>_eng<N>_" so engine 1 never blocks engine 10.
@@ -189,6 +221,34 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsMissingDimensionAsZero)
     EXPECT_TRUE(fe::check_errata(rules({zeroWidth}), "ConvFwd_eng0", _handle, graph, always));
     EXPECT_FALSE(fe::check_errata(rules({realWidth}), "ConvFwd_eng0", _handle, graph, always));
     EXPECT_TRUE(fe::check_errata(rules({filterWidth}), "ConvFwd_eng0", _handle, graph, always));
+}
+
+// ConvBwdFilter reads input X and filter DW; ConvBwdData reads input DX and filter W. Only
+// the width decides (see above), and DY's width 6 would unblock a rule written for 8.
+TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsBackwardSlots)
+{
+    const std::array<std::pair<const char*, fe::DescriptorType_t>, 2> kinds = {{
+        {"ConvBwdFilter", fe::DescriptorType_t::OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR},
+        {"ConvBwdData", fe::DescriptorType_t::OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR},
+    }};
+    for(const auto& [name, kind] : kinds)
+    {
+        const std::string operation = name;
+        SCOPED_TRACE(operation);
+        const fe::OperationGraph_v8 graph = backwardGraph(kind);
+        const std::string tag = operation + "_eng0";
+        const auto blocks = [&](const char* key, std::int64_t width) {
+            json shaped = rule(operation, 0);
+            shaped["shape_format"] = "NCHW";
+            shaped[key] = json::array({-1, -1, -1, width});
+            return fe::check_errata(rules({shaped}), tag, _handle, graph, always);
+        };
+
+        EXPECT_TRUE(blocks("input_shape", 8));
+        EXPECT_FALSE(blocks("input_shape", 6));
+        EXPECT_TRUE(blocks("filter_shape", 3));
+        EXPECT_FALSE(blocks("filter_shape", 8));
+    }
 }
 
 } // namespace

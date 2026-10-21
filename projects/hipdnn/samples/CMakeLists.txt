@@ -171,13 +171,12 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_hipify_conv_fprop cudnn_shim/HipifyConvFprop.cpp)
 endif()
 
-# GPU samples written against the cuDNN v8 API: the v0.x frontend builders and the raw backend API.
+# GPU samples written against the cuDNN v8 API through the v0.x frontend builders.
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_fprop_v8 cudnn_shim/ConvFpropV8.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_bias_relu_v8 cudnn_shim/ConvBiasReluV8.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_matmul_bias_act_v8 cudnn_shim/MatmulBiasActV8.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_pointwise_relu_v8 cudnn_shim/PointwiseReluV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_raw_backend_api_v8 cudnn_shim/RawBackendApiV8.cpp)
 endif()
 
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
@@ -381,7 +380,6 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_conv_fprop_v8)
     add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_matmul_bias_act_v8)
     add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_pointwise_relu_v8)
-    add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_raw_backend_api_v8)
     add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_conv_bias_relu_v8)
 
     # Timing gate: build tree only (not installed), serial, never under sanitizers.
