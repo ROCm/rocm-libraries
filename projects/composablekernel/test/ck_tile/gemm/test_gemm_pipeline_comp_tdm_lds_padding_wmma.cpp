@@ -45,6 +45,15 @@ using KernelTypesCompTDMLdsPadding = ::testing::Types<
     // K-contiguous operands whose LDS row (tile_k) is not a power of two
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I64,         I64,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<4, 4>>,
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I64,         I64,         I96,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // K-contiguous tile_k 192 with two block-gemm K sub-tiles of 96 elements: the pad interval
+    // divides the 48-dword sub-tile (16 dwords), not only the 96-dword row (32 dwords)
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // K-contiguous tile_k 96, one sub-tile, 16-dword interval
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I96,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I96,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
     // K-contiguous tile_k 1024: the pad interval does not fit the TDM descriptor's 3-bit field
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I32,         I32,       I1024,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<7, 7>>,
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I32,         I32,       I1024,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<7, 7>>,

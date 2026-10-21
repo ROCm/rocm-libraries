@@ -445,6 +445,12 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
      * per row for power-of-two rows of up to 256 dwords, several times per row otherwise (rows
      * of 96 or 192 elements, bf16 tile_k 1024). -1 when the row is not a whole number of
      * 16-byte LDS vectors.
+     *
+     * With several pads per K-contiguous row, the interval also divides the K extent of one
+     * block-gemm sub-tile (GetPipelineSubTileNum): the gfx125 LDS load fast path
+     * (tile_window::load_with_offset) takes the LDS offset of the window origin plus that of
+     * each element's distance from it, which holds only if the pads repeat at the same offsets
+     * in every sub-tile (128x128x192 fp16: 96-dword rows, two 48-dword sub-tiles, 16 dwords).
      */
     template <typename Problem, bool IsA>
     CK_TILE_DEVICE static constexpr index_t GetTDMRowAlignedPadInterval()
@@ -465,8 +471,16 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         else
         {
             constexpr index_t row_dwords = row_bytes / static_cast<index_t>(sizeof(int32_t));
-            constexpr index_t interval_dwords =
+            constexpr index_t row_interval_dwords =
                 min(row_dwords & -row_dwords, index_t{1} << (TDMPadIntervalMax + 1));
+            constexpr index_t sub_tile_dwords =
+                Problem::BlockGemmShape::kK / GetPipelineSubTileNum<Problem>().value *
+                DataTypeSize / numeric_traits<DataType>::PackedSize /
+                static_cast<index_t>(sizeof(int32_t));
+            constexpr index_t interval_dwords =
+                !is_tr_load && row_interval_dwords < row_dwords
+                    ? min(row_interval_dwords, sub_tile_dwords & -sub_tile_dwords)
+                    : row_interval_dwords;
             index_t log2 = 0;
             while((index_t{1} << (log2 + 1)) < interval_dwords)
             {
