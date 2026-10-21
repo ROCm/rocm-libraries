@@ -45,8 +45,10 @@ Examples:
     >>> len(shape)
     3
 
-Shape() has rank zero and represents one scalar. A zero extent describes a shape
-with no elements, so both index conversions reject it. Otherwise the product of
+Shape() has rank zero and represents one scalar. Truthiness follows rank, not
+element_count: bool(Shape()) is False, while bool(Shape([0])) is True. Use
+element_count to check whether a shape has elements. A zero extent describes a
+shape with no elements, so both index conversions reject it. Otherwise the product of
 extents must fit size_t. If SIZE_MAX denotes the maximum size_t value,
 [SIZE_MAX, 2] fails construction, while [SIZE_MAX, 2, 0] has zero elements.
 Selecting dimensions can fail if the resulting nonempty shape is too
