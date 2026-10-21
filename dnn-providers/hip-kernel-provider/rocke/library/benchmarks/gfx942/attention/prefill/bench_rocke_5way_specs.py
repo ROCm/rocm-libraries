@@ -9,6 +9,11 @@ chunked-FP32 reference, pre-timing correctness for all 5, round-robin warmup,
 5 randomized rounds x 50 launches, post-batch correctness of the last launch
 in every timed batch, median-of-rounds, same-session ratios.
 
+Absolute latency CSVs are local-only. Only relative results belong in qualifying
+public case studies (subject to platform/AGENTS.md compliance review).
+Static HSACO/ISA counts can be extracted separately with
+bench_rocke_5way_static.py.
+
 Default cohort: the twelve BF16 D128 causal shapes from the case-study table
 (B=1/16, S=1024/2048/4096/8192/16384 where listed, Hq=32, Hkv=8/16),
 with production dispatch resolving persistent mode and all non-ablation knobs.
@@ -17,17 +22,18 @@ with production dispatch resolving persistent mode and all non-ablation knobs.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import csv
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
-import shlex
-import json
 import hashlib
+import json
 import math
-import os
 from pathlib import Path
 import random
+import re
+import shlex
 import statistics
 import subprocess
 import sys
@@ -184,15 +190,6 @@ def write_csv(path: Path, columns: tuple[str, ...], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def git_head(root: Path) -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=root, text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except (subprocess.CalledProcessError, OSError):
-        return "unknown"
-
-
 def _command_output(cmd: list[str], *, cwd: Path | None = None) -> str | None:
     try:
         return subprocess.check_output(
@@ -213,33 +210,33 @@ def _git_provenance(root: Path) -> dict:
     repo = _command_output(["git", "rev-parse", "--show-toplevel"], cwd=root)
     head = _command_output(["git", "rev-parse", "HEAD"], cwd=root)
     branch = _command_output(["git", "branch", "--show-current"], cwd=root)
-    # Untracked scripts are deliberately identified as a count, not silently
-    # treated as part of the recorded SHA. Source hashes below identify their bytes.
     status = _command_output(
-        ["git", "status", "--porcelain=v1", "--untracked-files=normal"], cwd=root
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=root
     )
-    status_lines = (status or "").splitlines()
-    tracked_status = _command_output(
-        ["git", "status", "--porcelain=v1", "--untracked-files=no"], cwd=root
-    )
-    dirty = None if status is None else bool(status_lines)
     return {
         "repository_root": repo,
         "head_sha": head,
         "branch": branch,
-        "working_tree_dirty": dirty,
-        "tracked_files_dirty": (
-            bool(tracked_status) if tracked_status is not None else None
-        ),
-        "untracked_entry_count": sum(1 for x in status_lines if x.startswith("??")),
-        "changed_or_untracked_paths_count": (
-            len(status_lines) if status is not None else None
-        ),
-        "note": (
-            "If working_tree_dirty, the HEAD SHA alone does not reproduce this run; "
-            "use the recorded source hashes and preserve the changes."
-        ),
+        "working_tree_dirty": None if status is None else bool(status),
     }
+
+
+def _require_clean_checkout(root: Path) -> dict:
+    """Capture the measured Git state before creating outputs or compiling."""
+    state = _git_provenance(root)
+    if not state["repository_root"] or not state["head_sha"] or state["working_tree_dirty"] is None:
+        raise SystemExit("Cannot verify Git HEAD/worktree; refusing benchmark")
+    if state["working_tree_dirty"]:
+        status = _command_output(
+            ["git", "status", "--short", "--untracked-files=all"], cwd=root
+        )
+        raise SystemExit(
+            "Benchmark requires a clean committed checkout. "
+            "Commit/stash changes and remove untracked inputs first.\n"
+            + (status or "Git status unavailable")
+        )
+    print(f"VERIFIED CLEAN checkout: {state['head_sha']}", flush=True)
+    return state
 
 
 def _file_sha256(path: Path) -> str:
@@ -250,21 +247,140 @@ def _file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _artifact_digest(hsaco) -> str | None:
-    """Record HSACO identity when the compiler exposes bytes or a real filename."""
-    if isinstance(hsaco, (bytes, bytearray, memoryview)):
-        return hashlib.sha256(hsaco).hexdigest()
-    if isinstance(hsaco, (str, Path)):
-        try:
-            path = Path(hsaco)
-            return _file_sha256(path) if path.is_file() else None
-        except (OSError, ValueError):
-            return None
-    return None
+def _loaded_hip_runtime_info() -> dict:
+    """Identify the HIP runtime actually used by rocKE, without loading another.
+
+    rocKE caches the ctypes handle in hip_module._resolve_hip(). Resolve the
+    version symbol on THAT handle. Linux /proc/self/maps identifies the file
+    backing the symbol's executable mapping, not a second libamdhip64 found
+    via LD_LIBRARY_PATH or an arbitrary package version.
+    """
+    from rocke.runtime import hip_module
+
+    hip = hip_module._resolve_hip()
+    version_fn = hip.hipRuntimeGetVersion
+    version_fn.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    version_fn.restype = ctypes.c_int
+    encoded_version = ctypes.c_int(-1)
+    status = version_fn(ctypes.byref(encoded_version))
+    if status != 0 or encoded_version.value <= 0:
+        raise RuntimeError(
+            "hipRuntimeGetVersion on rocKE's loaded HIP library failed: "
+            f"status={status}, version={encoded_version.value}"
+        )
+
+    symbol_ptr = ctypes.cast(version_fn, ctypes.c_void_p).value
+    if not symbol_ptr:
+        raise RuntimeError("Cannot resolve hipRuntimeGetVersion function address")
+
+    # Resolve the actual mapped shared object from the symbol's instruction
+    # address. /proc/self/maps is available on the Linux ROCm benchmark host.
+    mapped_path = None
+    try:
+        with Path("/proc/self/maps").open(encoding="utf-8") as maps:
+            for line in maps:
+                fields = line.rstrip("\n").split(maxsplit=5)
+                if len(fields) < 6:
+                    continue
+                lo, hi = (int(x, 16) for x in fields[0].split("-", 1))
+                if lo <= symbol_ptr < hi:
+                    if fields[5].startswith("/"):
+                        mapped_path = fields[5]
+                    break
+    except OSError as exc:
+        raise RuntimeError("Cannot inspect /proc/self/maps for HIP library") from exc
+    if mapped_path is None:
+        raise RuntimeError(
+            "Cannot identify the mapped HIP shared object containing "
+            "hipRuntimeGetVersion; refusing ambiguous runtime provenance"
+        )
+
+    # HIP_VERSION encoding, not CUDA's encoding:
+    # major*10_000_000 + minor*100_000 + patch.
+    raw = encoded_version.value
+    major = raw // 10_000_000
+    minor = (raw // 100_000) % 100
+    patch = raw % 100_000
+    return {
+        "version": f"{major}.{minor}.{patch}",
+        "version_encoded": raw,
+        "loaded_library_path": mapped_path,
+        "rocke_library_opened_as": str(hip._name),
+        "query": "hipRuntimeGetVersion from rocke.runtime.hip_module's cached HIP handle",
+    }
 
 
-def _environment(torch, device_id: int, rocke: Path, script_file: Path) -> dict:
+# These are ROCm components that can be loaded by PyTorch, rocKE or the
+# compiler. The package version is NOT necessarily the version of every library
+# loaded into the process, so capture the actual mapped shared objects too.
+_ROCM_SHARED_OBJECT = re.compile(
+    r"^lib(?:amdhip64|hsa-runtime64|amd_comgr|hiprtc|hipblas(?:lt)?|"
+    r"rocblas|rocsolver|rocsparse|rocfft|hipfft|hiprand|rocrand|"
+    r"miopen|rccl|roctracer64|rocprofiler(?:-sdk)?(?:64)?|"
+    r"rocprim|hipcub)(?:[.\-]|$)",
+    flags=re.IGNORECASE,
+)
+
+
+def _rocm_sdk_package_versions() -> dict[str, str]:
+    """Installed ROCm wheel metadata, not a claim about loaded DSOs."""
+    distributions = (
+        "rocm",
+        "rocm-sdk",
+        "rocm-sdk-core",
+        "rocm-sdk-runtime",
+        "rocm-sdk-libraries",
+        "rocm-hip-runtime",
+        "rocm-comgr",
+        "_rocm_sdk_core",
+    )
+    return {
+        name: version
+        for name in distributions
+        if (version := _package_version(name)) is not None
+    }
+
+
+def _loaded_rocm_shared_objects() -> list[dict]:
+    """Actual ROCm shared objects mapped into THIS running Linux process.
+
+    Read /proc/self/maps to get mapped file identity instead of searching PATH,
+    LD_LIBRARY_PATH, or an installation directory. The same basename can be
+    loaded from different directories, so preserve every distinct mapping.
+    This does not infer an unexposed per-library ROCm release version.
+    """
+    found: dict[tuple[str, str, str], dict] = {}
+    try:
+        with Path("/proc/self/maps").open(encoding="utf-8") as maps:
+            for line in maps:
+                fields = line.rstrip("\n").split(maxsplit=5)
+                if len(fields) < 6:
+                    continue
+                mapped_path = fields[5]
+                if not mapped_path.startswith("/"):
+                    continue
+                # A mapped library might have been unlinked after loading.
+                name = Path(mapped_path.removesuffix(" (deleted)")).name
+                if not _ROCM_SHARED_OBJECT.match(name):
+                    continue
+                key = (mapped_path, fields[3], fields[4])
+                found[key] = {
+                    "name": name,
+                    "mapped_path": mapped_path,
+                    "device": fields[3],
+                    "inode": fields[4],
+                }
+    except OSError as exc:
+        raise RuntimeError("Cannot inspect /proc/self/maps for ROCm libraries") from exc
+    return sorted(found.values(), key=lambda r: (r["name"], r["mapped_path"]))
+
+
+def _environment(
+    torch, device_id: int, rocke: Path, script_file: Path, git_state: dict
+) -> dict:
     # Hardware identity comes from rocKE's HIP runtime, not PyTorch properties.
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
+    from rocke.runtime.comgr import loaded_compiler_info
     from rocke.runtime.hip_module import (
         get_device_name,
         get_device_num_cus,
@@ -276,6 +392,10 @@ def _environment(torch, device_id: int, rocke: Path, script_file: Path) -> dict:
         "architecture": get_device_target_id(device_id),
         "cu_count_reported_by_hip": get_device_num_cus(device_id),
     }
+    # Record the loaded COMGR compiler rather than an environment override or
+    # an unrelated clang executable found on PATH.
+    compiler = loaded_compiler_info()
+    llvm_flavor = _resolve_llvm_flavor()
     return {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "gpu": gpu,
@@ -284,31 +404,25 @@ def _environment(torch, device_id: int, rocke: Path, script_file: Path) -> dict:
             "python_executable": sys.executable,
             "pytorch": torch.__version__,
             "pytorch_hip": getattr(torch.version, "hip", None),
-            "pytorch_git_version": getattr(torch.version, "git_version", None),
+            "hip_runtime": _loaded_hip_runtime_info(),
             "triton": _package_version("triton"),
-            "rocm_sdk_core": _package_version("_rocm_sdk_core"),
-            "clang_version_on_path_NOT_necessarily_comgr": _command_output(
-                ["clang", "--version"]
-            ),
-            "hipcc_version_on_path_if_available": _command_output(
-                ["hipcc", "--version"]
-            ),
+            "rocm_sdk_package_versions": _rocm_sdk_package_versions(),
         },
         "compile_backend": "python",
-        "compiler_flavor_requested": os.environ.get("ROCKE_LLVM_FLAVOR"),
-        "environment_variables": {
-            name: os.environ.get(name)
-            for name in (
-                "ROCKE_ROOT",
-                "ROCKE_BACKEND",
-                "ROCKE_LLVM_FLAVOR",
-                "ROCKE_COMGR_LIB",
-                "ROCKE_HIP_LIB",
-                "PYTHONPATH",
-                "LD_LIBRARY_PATH",
-            )
+        "llvm_flavor": llvm_flavor,
+        "loaded_compiler": {
+            "llvm_version": (
+                ".".join(map(str, compiler.llvm_version))
+                if compiler is not None and compiler.llvm_version is not None
+                else None
+            ),
+            "detection_source": compiler.source if compiler is not None else None,
+            "comgr_library": compiler.comgr_path if compiler is not None else None,
+            "query_library": (
+                compiler.query_library_path if compiler is not None else None
+            ),
         },
-        "git": _git_provenance(rocke),
+        "git": git_state,
         "source_files": {
             "attention_dense.py": str(
                 rocke / "library/kernels/gfx942/attention_dense.py"
@@ -318,191 +432,11 @@ def _environment(torch, device_id: int, rocke: Path, script_file: Path) -> dict:
             ),
             "benchmark_script": str(script_file),
             "benchmark_script_sha256": _file_sha256(script_file),
+            "builder_sha256": _file_sha256(
+                rocke / "library/builders/gfx942/attention/prefill/attention_dense_prefill.py"
+            ),
         },
     }
-
-
-def _replay_script(path: Path, environment_variables: dict) -> None:
-    """Exact Python invocation and relevant wheel/ROCm environment at this run."""
-    names = (
-        "ROCKE_ROOT",
-        "ROCKE_BACKEND",
-        "ROCKE_LLVM_FLAVOR",
-        "ROCKE_COMGR_LIB",
-        "ROCKE_HIP_LIB",
-        "PYTHONPATH",
-        "LD_LIBRARY_PATH",
-    )
-    lines = [
-        "#!/usr/bin/env bash",
-        "set -Eeuo pipefail",
-        "",
-        "# Replays the captured Python invocation in the captured environment.",
-        "# The pinned source files and wheel environment must still exist.",
-    ]
-    for name in names:
-        value = environment_variables.get(name)
-        if value is not None:
-            lines.append(f"export {name}={shlex.quote(value)}")
-    lines.append("")
-    lines.append("exec " + shlex.join([sys.executable, *sys.argv]))
-    path.write_text("\n".join(lines) + "\n")
-    path.chmod(0o755)
-
-
-def _report_text(
-    environment: dict,
-    *,
-    args,
-    shapes,
-    resolved_rows,
-    validation_rows,
-    samples_by_shape,
-    summary_rows,
-    ratio_rows,
-) -> str:
-    """Relative-only LOCAL DRAFT. Never publish absolute achieved latencies."""
-    e = environment
-    gpu = e["gpu"]
-    soft = e["software"]
-    git = e["git"]
-    shape_count = len(shapes)
-    full = {
-        r["shape"]: r
-        for r in ratio_rows
-        if r["numerator"] == "baseline" and r["denominator"] == "cfvst_klds_vpf"
-    }
-    validated = all(v["passed"] == 1 for v in validation_rows)
-    prod = all(r["production_baseline"] for r in resolved_rows)
-    lines = [
-        "# gfx942 BF16 D128 causal prefill: five-way ablation results",
-        "",
-        "**LOCAL DRAFT — review software-version disclosure before publishing.**",
-        "Performance evidence below is relative-only. Internal CSV files hold absolute",
-        "GPU timings and should not be copied into public reports.",
-        "",
-        f"Measured scope: {shape_count} BF16 D128 causal GQA shapes, gfx942; "
-        f"device={gpu['name']}, CUs={gpu['cu_count_reported_by_hip']}; "
-        "five compile-time variants of the current `attention_dense.py`.",
-        f"Source revision: `{git['head_sha'] or 'unknown'}`; "
-        f"working tree dirty: `{git['working_tree_dirty']}`. "
-        f"Production dispatch baseline for all shapes: `{prod}`.",
-        "",
-        "## Benchmark identity and replay",
-        "",
-        f"- Harness: `{e['source_files']['benchmark_script']}`",
-        f"- Harness SHA256: `{e['source_files']['benchmark_script_sha256']}`",
-        f"- Kernel SHA256: `{e['source_files']['attention_dense_sha256']}`",
-        "- Dispatch: `attention_tuning_spec(req, 'gfx942_dense').kernel_spec`",
-        "- Each non-baseline arm changes only `use_cfvst`, `lds_num_buffers`, and `v_reg_prefetch`.",
-        f"- Compile: backend=`{e['compile_backend']}`, "
-        f"ROCKE_LLVM_FLAVOR=`{e['compiler_flavor_requested']}`; "
-        f"COMGR library=`{e['environment_variables'].get('ROCKE_COMGR_LIB')}`",
-        f"- Python={soft['python_version']}, PyTorch={soft['pytorch']}, "
-        f"PyTorch HIP={soft['pytorch_hip']}, Triton={soft['triton']}",
-        "- Exact Python replay (including flags and environment): `replay_command.sh`",
-        "- Complete dispatch specs, including resolved `persistent`, `exp2_fast`, block sizes, "
-        "WPE, and kernel names: `resolved_specs.json`",
-        "- Full environment details and Git state: `provenance.json`",
-        "",
-        "## Correctness and measurement protocol",
-        "",
-        "- Independent reference: chunked FP32 causal GQA SDPA; shared Q/K/V across all arms.",
-        f"- All {len(validation_rows)} validation checks (pre-timing and after each "
-        f"timed batch) passed `torch.testing.assert_close` against FP32 "
-        f"reference: **{validated}**, "
-        f"atol={args.atol:g}, rtol={args.rtol:g}, input dtype=BF16.",
-        "- Post-batch correctness is checked outside GPU-event timing; each check "
-        "verifies the last of the batch's repeated launches, not every launch.",
-        "- Same Python process, same current HIP stream, five independent compiled kernels.",
-        f"- Warmup: {args.warmup} round-robin launches/arm; "
-        f"measurement: {args.rounds} randomized rounds, {args.repeat} direct "
-        "KernelLauncher calls/arm/round; GPU events and synchronization.",
-        "- Reported performance: ratio of each arm's **median round latency** to the",
-        "  baseline median (not median of per-round ratios).",
-        "- Spread: per-arm minimum and maximum round latency expressed as percentage",
-        "  deviations from that arm's median. These are relative spread figures, not absolute latency.",
-        "",
-        "## Five compile-time arms",
-        "",
-        "| Arm | use_cfvst | lds_num_buffers (K) | v_reg_prefetch |",
-        "|---|---:|---:|---:|",
-    ]
-    for v in VARIANTS:
-        lines.append(
-            f"| {v.name} | {v.use_cfvst} | {v.lds_num_buffers} | {v.v_reg_prefetch} |"
-        )
-    lines += [
-        "",
-        "## Full pipeline vs production baseline",
-        "",
-        "| B | S | Hq | Hkv | D | Median speedup | Lower latency |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
-    ]
-    for sh in shapes:
-        r = full[sh.label]
-        lines.append(
-            f"| {sh.batch} | {sh.seqlen} | {sh.hq} | {sh.hkv} | {sh.d} | "
-            f"{float(r['ratio_a_over_b']):.4f}x | "
-            f"{float(r['latency_reduction_pct']):.2f}% |"
-        )
-    lines += [
-        "",
-        "## Five-way ablation by shape (relative values only)",
-        "",
-        "| Shape | Arm | Median speedup vs baseline | Latency reduction vs baseline | "
-        "Round min..max deviation from arm median |",
-        "|---|---|---:|---:|---:|",
-    ]
-    by_summary = {(r["shape"], r["variant"]): r for r in summary_rows}
-    for sh in shapes:
-        for v in VARIANTS:
-            r = by_summary[(sh.label, v.name)]
-            s = samples_by_shape[sh.label][v.name]
-            med = statistics.median(s)
-            lo = 100.0 * (min(s) / med - 1.0)
-            hi = 100.0 * (max(s) / med - 1.0)
-            speedup = float(r["speedup_vs_baseline"])
-            red = 100 * (1 - 1 / speedup)
-            lines.append(
-                f"| {sh.label} | {v.name} | {speedup:.4f}x | {red:+.2f}% | "
-                f"{lo:+.2f}% .. {hi:+.2f}% |"
-            )
-    lines += [
-        "",
-        "## Same-session incremental comparisons",
-        "",
-        "Per comparison below: ratio of medians from the same session, with the",
-        "range of **paired within-round** ratios (round N vs round N).",
-        "",
-        "| Shape | Compared arms (A/B) | Ratio of medians | "
-        "Paired-round ratio min..max |",
-        "|---|---|---:|---:|",
-    ]
-    for r in ratio_rows:
-        sh = r["shape"]
-        a, b = r["numerator"], r["denominator"]
-        ax, bx = samples_by_shape[sh][a], samples_by_shape[sh][b]
-        paired = [u / v for u, v in zip(ax, bx)]
-        lines.append(
-            f"| {sh} | {a} / {b} | {float(r['ratio_a_over_b']):.4f}x | "
-            f"{min(paired):.4f}x .. {max(paired):.4f}x |"
-        )
-    lines += [
-        "",
-        "## Interpretation and limitations",
-        "",
-        "- The comparisons above isolate CFVST, KDB, VPF and their combination.",
-        "- This measured run establishes only the stated GPU and 12 input configurations.",
-        "- Results are opt-in: the production dispatcher resolves the non-optimization",
-        "  fields, but KDB/VPF may not be reachable from tuning/dispatch by default.",
-        "- This script does **not** prove results on another CU count or compiler flavor.",
-        "- The original case-study's 15.67% claim cannot be attributed to a",
-        "  particular new shape without its original measurement record.",
-        "- Review the software stack's public-release status before posting versions.",
-        "",
-    ]
-    return "\n".join(lines)
 
 
 def main() -> int:
@@ -516,18 +450,6 @@ def main() -> int:
         action="append",
         help="B,S,Hq,Hkv,128,bf16 (repeatable; overrides default twelve shapes)",
     )
-    # Production dispatch owns these by default. Explicit deviations require an
-    # opt-in flag and are labelled diagnostic, NOT production-baseline results.
-    parser.add_argument("--persistent", choices=("auto", "on", "off"), default="auto")
-    parser.add_argument("--num-persistent", type=int, default=None)
-    parser.add_argument(
-        "--persist-decode", choices=("auto", "qb_major", "hkv_major"), default="auto"
-    )
-    parser.add_argument(
-        "--allow-nonproduction-baseline",
-        action="store_true",
-        help="permit explicit persistent/NP/decode overrides that differ from dispatch; labels results diagnostic",
-    )
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--rounds", type=int, default=5)
     parser.add_argument("--repeat", type=int, default=50)
@@ -535,30 +457,32 @@ def main() -> int:
     parser.add_argument("--reference-chunk", type=int, default=128)
     parser.add_argument("--rtol", type=float, default=1e-2)
     parser.add_argument("--atol", type=float, default=1e-2)
-    parser.add_argument("--out-dir", default="results/5way_specs")
+    parser.add_argument("--out-dir", default="~/rocke_5way_specs_results")
     args = parser.parse_args()
-    if args.rounds < 1 or args.repeat <= 0 or args.warmup < 0:
-        parser.error("require rounds >= 1, repeat > 0 and warmup >= 0")
-    if (
-        args.num_persistent is not None and args.num_persistent <= 0
-    ) or args.reference_chunk <= 0:
-        parser.error(
-            "num-persistent, if specified, and reference-chunk must be positive"
-        )
+    if args.rounds < 3 or args.repeat <= 0 or args.warmup < 0:
+        parser.error("require rounds >= 3, repeat > 0 and warmup >= 0")
+    if args.reference_chunk <= 0:
+        parser.error("reference-chunk must be positive")
     if args.atol < 0 or args.rtol < 0:
         parser.error("atol and rtol must be nonnegative")
 
     rocke = locate_rocke(args.rocke_root)
+    measured_git = _require_clean_checkout(rocke)
     add_module_paths(rocke)
 
     import torch
     import kernels.gfx942.attention_dense as dense
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
+    from rocke.runtime.hip_module import (
+        current_device,
+        get_device_arch,
+        get_device_count,
+    )
     from dispatch.attention import AttentionRequest, attention_tuning_spec
 
-    if not torch.cuda.is_available():
-        raise SystemExit("ROCm GPU is not visible through torch.cuda")
+    if get_device_count() == 0:
+        raise SystemExit("ROCm GPU is not visible through HIP")
     for required in ("Gfx942AttentionDenseSpec", "attention_dense_runtime_args"):
         if not hasattr(dense, required):
             raise SystemExit(f"Expected updated attention_dense.py; missing {required}")
@@ -568,7 +492,6 @@ def main() -> int:
         raise SystemExit(
             f"Loaded wrong emitter! expected {expected_file}, got {source_file}"
         )
-    source_text = source_file.read_text()
     for knob in ("lds_num_buffers", "v_reg_prefetch", "use_cfvst"):
         if knob not in dense.Gfx942AttentionDenseSpec.__dataclass_fields__:
             raise SystemExit(f"Current Gfx942AttentionDenseSpec is missing knob {knob}")
@@ -582,30 +505,28 @@ def main() -> int:
     shapes = args.shape if args.shape else list(DEFAULT_SHAPES)
     out_dir = Path(args.out_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Resolve the index of the GPU used by PyTorch's benchmark stream so HIP
-    # metadata refers to that same device, even when it is not device 0.
-    device_id = (
-        device.index if device.index is not None else torch.cuda.current_device()
+    # HIP's active device is shared with PyTorch's current CUDA/HIP stream.
+    # Query hardware through rocKE rather than through torch.cuda.
+    device_id = current_device()  # HIP's current device; no torch device-property query
+    if get_device_arch(device_id) != "gfx942":
+        raise SystemExit("This benchmark requires a gfx942 GPU")
+    environment = _environment(
+        torch, device_id, rocke, Path(__file__).resolve(), measured_git
     )
-    environment = _environment(torch, device_id, rocke, Path(__file__).resolve())
+    hip_runtime = environment["software"]["hip_runtime"]
     print(
-        f"ROCKE_ROOT={rocke}\nattention_dense={source_file}\nGPU={environment['gpu']['name']}"
+        f"ROCKE_ROOT={rocke} | GPU={environment['gpu']['name']} "
+        f"({environment['gpu']['cu_count_reported_by_hip']} CUs) | "
+        f"Git={environment['git']['head_sha']} | LLVM={environment['llvm_flavor']}"
     )
-    print(
-        f"Git head={environment['git']['head_sha']} dirty={environment['git']['working_tree_dirty']} "
-        f"LLVM flavor={environment['compiler_flavor_requested']} "
-        f"CUs={environment['gpu']['cu_count_reported_by_hip']}",
-        flush=True,
-    )
-    print(f"current_stream={stream_ptr} | variants={[v.name for v in VARIANTS]}")
+    print(f"HIP runtime={hip_runtime['version']} | DSO={hip_runtime['loaded_library_path']}")
+    print(f"HIP stream={stream_ptr} | arms={[v.name for v in VARIANTS]}")
 
     raw_rows: list[dict] = []
     validation_rows: list[dict] = []
     summary_rows: list[dict] = []
     ratio_rows: list[dict] = []
     resolved_rows: list[dict] = []
-    diagnostic_shapes: list[str] = []
-    samples_by_shape: dict[str, dict[str, list[float]]] = {}
     print(f"Running {len(shapes)} shape(s): {[s.label for s in shapes]}")
     for shape_index, shape in enumerate(shapes, start=1):
         print(f"\n=== Shape {shape_index}/{len(shapes)}: {shape.label} ===", flush=True)
@@ -632,51 +553,21 @@ def main() -> int:
                 "not Gfx942AttentionDenseSpec"
             )
 
-        # Optional execution overrides exist only for explicit diagnostic runs.
-        # Crucially, all other fields (especially exp2 policy, padding, geometry,
-        # WPE, interleave, and persistent) come from the dispatch-resolved spec.
-        requested_overrides = {}
-        if args.persistent != "auto":
-            requested_overrides["persistent"] = args.persistent == "on"
-        if args.num_persistent is not None:
-            requested_overrides["num_persistent"] = args.num_persistent
-        if args.persist_decode != "auto":
-            requested_overrides["persist_decode"] = args.persist_decode
-        deviations = {
-            field: (getattr(production, field), value)
-            for field, value in requested_overrides.items()
-            if getattr(production, field) != value
-        }
-        if deviations and not args.allow_nonproduction_baseline:
-            raise RuntimeError(
-                f"{shape.label}: requested flags override the dispatch baseline: "
-                f"{deviations}. For a production comparison, omit --persistent, "
-                "--num-persistent and --persist-decode. To deliberately measure "
-                "a diagnostic configuration, add --allow-nonproduction-baseline."
-            )
-        base_spec = (
-            replace(production, **requested_overrides) if deviations else production
-        )
-        production_baseline = not bool(deviations)
-        if not production_baseline:
-            diagnostic_shapes.append(shape.label)
-            print(f"  *** DIAGNOSTIC NON-PRODUCTION BASELINE: {deviations} ***")
-
         # The production BF16 D128 default should have none of the three opt-in
         # optimizations on. Refuse to compare if dispatch policy changes later.
         if (
-            base_spec.resolved_use_cfvst(),
-            base_spec.lds_num_buffers,
-            base_spec.v_reg_prefetch,
+            production.resolved_use_cfvst(),
+            production.lds_num_buffers,
+            production.v_reg_prefetch,
         ) != (False, 1, False):
             raise RuntimeError(
                 f"{shape.label}: dispatch baseline now has pipeline knobs enabled; "
                 "redefine the ablation arms before benchmarking"
             )
-        specs = {"baseline": base_spec}  # byte-for-byte production spec, not a copy
+        specs = {"baseline": production}  # Exact production spec
         for variant in VARIANTS[1:]:
             specs[variant.name] = replace(
-                base_spec,
+                production,
                 use_cfvst=variant.use_cfvst,
                 lds_num_buffers=variant.lds_num_buffers,
                 v_reg_prefetch=variant.v_reg_prefetch,
@@ -687,7 +578,7 @@ def main() -> int:
                 raise RuntimeError(f"{shape.label}/{name} rejected: {reason}")
 
         # Trace full specs, including policy resolutions that dataclass fields
-        # otherwise encode as None. This is the reviewer's baseline proof.
+        # otherwise encode as None. 
         def describe_spec(spec):
             return {
                 "fields": asdict(spec),
@@ -706,22 +597,17 @@ def main() -> int:
                 "shape": shape.label,
                 "request": asdict(req),
                 "source": "dispatch.attention.attention_tuning_spec(req, 'gfx942_dense').kernel_spec",
-                "production_baseline": production_baseline,
-                "diagnostic_overrides": deviations,
-                "dispatch_baseline": describe_spec(production),
+                "production_baseline": True,
                 "arms": {name: describe_spec(spec) for name, spec in specs.items()},
             }
         )
         print(
-            "  dispatch baseline: "
-            f"persistent={base_spec.persistent} "
-            f"NP={base_spec.num_persistent} "
-            f"decode={base_spec.resolved_persist_decode} "
-            f"exp2_fast={base_spec.resolved_use_exp2_fast()} "
-            f"bm={base_spec.block_m} bn={base_spec.block_n} "
-            f"wpe={base_spec.waves_per_eu} "
-            f"production={production_baseline}",
-            flush=True,
+            f"  dispatch: persistent={production.persistent}, "
+            f"NP={production.num_persistent}, "
+            f"decode={production.resolved_persist_decode}, "
+            f"exp2_fast={production.resolved_use_exp2_fast()}, "
+            f"bm/bn={production.block_m}/{production.block_n}, "
+            f"wpe={production.waves_per_eu}"
         )
         names = {name: spec.kernel_name() for name, spec in specs.items()}
         if len(set(names.values())) != len(VARIANTS):
@@ -747,20 +633,14 @@ def main() -> int:
         v_tensor = (torch.randn_like(k) * 0.2).contiguous()
         outputs = {v.name: torch.empty_like(q) for v in VARIANTS}
         scale = 1.0 / math.sqrt(128)
-        print(f"\n[{shape.label}] benchmark spec derived from production dispatch")
-
         launchers = {}
         configurations = {}
         values = {}
         compiled_artifacts = {}
-        print("Compiling five independent kernels before any timing...")
+        print("  Compiling five independent kernels and saving HSACOs...")
         for variant in VARIANTS:
             name = variant.name
             spec = specs[name]
-            print(
-                f"  {name:20s} cfvst={spec.use_cfvst} K-buffers={spec.lds_num_buffers} V-prefetch={spec.v_reg_prefetch}"
-            )
-            print(f"    {names[name]} | LDS={dense._lds_bytes(spec)} bytes")
             artifact = compile_kernel(
                 dense.build_attention_dense(spec, arch="gfx942"),
                 arch="gfx942",
@@ -776,7 +656,7 @@ def main() -> int:
                 raise RuntimeError(f"Artifact/kernel name mismatch: {name}")
             compiled_artifacts[name] = {
                 "kernel_name": artifact.kernel_name,
-                "hsaco_sha256": _artifact_digest(artifact.hsaco),
+                "hsaco_sha256": hashlib.sha256(artifact.hsaco).hexdigest(),
                 "lds_bytes": dense._lds_bytes(spec),
             }
             launchers[name] = KernelLauncher(
@@ -804,34 +684,32 @@ def main() -> int:
         reference = fp32_reference(
             torch, q, k, v_tensor, scale=scale, chunk=args.reference_chunk
         )
-        print("Validating all five directly compiled kernels...")
-        for variant in VARIANTS:
-            name = variant.name
-            # Validate through exactly the launcher/config used for timed calls.
-            outputs[name].fill_(float("nan"))
-            launchers[name](values[name], config=configurations[name])
-            torch.cuda.synchronize(device)
+        def check_and_record(name: str, stage: str, round_id: int | str = ""):
+            """Validate against the same FP32 reference and record the exact gate."""
             try:
                 max_abs, max_rel = validate(
                     torch, outputs[name], reference, atol=args.atol, rtol=args.rtol
                 )
             except (AssertionError, RuntimeError) as exc:
                 raise RuntimeError(
-                    f"ABORT: correctness failed for {shape.label}/{name}; no timing performed"
+                    f"ABORT: correctness failed: {shape.label}/{name}, "
+                    f"stage={stage}, round={round_id}"
                 ) from exc
-            validation_rows.append(
-                dict(
-                    shape=shape.label,
-                    variant=name,
-                    stage="pre_timing",
-                    round="",
-                    passed=1,
-                    max_abs=f"{max_abs:.9g}",
-                    max_rel=f"{max_rel:.9g}",
-                    atol=args.atol,
-                    rtol=args.rtol,
-                )
-            )
+            validation_rows.append(dict(
+                shape=shape.label, variant=name, stage=stage, round=round_id,
+                passed=1, max_abs=f"{max_abs:.9g}", max_rel=f"{max_rel:.9g}",
+                atol=args.atol, rtol=args.rtol,
+            ))
+            return max_abs, max_rel
+
+        print("  Validating five compiled kernels...")
+        for variant in VARIANTS:
+            name = variant.name
+            # Validate through exactly the launcher/config used for timed calls.
+            outputs[name].fill_(float("nan"))
+            launchers[name](values[name], config=configurations[name])
+            torch.cuda.synchronize(device)
+            max_abs, max_rel = check_and_record(name, "pre_timing")
             print(f"  PASS {name:20s} max_abs={max_abs:.6g} max_rel={max_rel:.6g}")
         # Keep the FP32 reference alive for post-batch validation.
         torch.cuda.synchronize(device)
@@ -859,31 +737,9 @@ def main() -> int:
                     stream,
                     args.repeat,
                 )
-                # The GPU timing event has already been synchronized. Check
-                # correctness outside the timed interval, after every batch.
-                # Only the final launch's output survives the repeated writes.
-                try:
-                    max_abs, max_rel = validate(
-                        torch, outputs[name], reference, atol=args.atol, rtol=args.rtol
-                    )
-                except (AssertionError, RuntimeError) as exc:
-                    raise RuntimeError(
-                        f"ABORT: correctness failed after timed batch for "
-                        f"{shape.label}/{name}, round={round_id}, latency={ms:.6f} ms"
-                    ) from exc
-                validation_rows.append(
-                    dict(
-                        shape=shape.label,
-                        variant=name,
-                        stage="post_batch",
-                        round=round_id,
-                        passed=1,
-                        max_abs=f"{max_abs:.9g}",
-                        max_rel=f"{max_rel:.9g}",
-                        atol=args.atol,
-                        rtol=args.rtol,
-                    )
-                )
+                # Timed events have already synchronized. Only the last output
+                # of this batch survives; validate it outside the timed window.
+                max_abs, max_rel = check_and_record(name, "post_batch", round_id)
                 samples[name].append(ms)
                 raw_rows.append(
                     dict(
@@ -898,19 +754,16 @@ def main() -> int:
                         ms=f"{ms:.9f}",
                     )
                 )
-                print(
-                    f"  {name:20s} {ms:.6f} ms | PASS post-batch correctness "
-                    f"(max_abs={max_abs:.6g}, max_rel={max_rel:.6g})"
-                )
+                print(f"  {name:20s} {ms:.6f} ms | PASS post-batch (abs={max_abs:.4g})")
 
         del reference
-        samples_by_shape[shape.label] = samples
         median = {name: statistics.median(times) for name, times in samples.items()}
-        print("Medians (ms):")
+        print("  Median ms: " + ", ".join(
+            f"{name}={median[name]:.6f}" for name in median
+        ))
         for variant in VARIANTS:
             name = variant.name
             x = median[name]
-            print(f"  {name:20s} {x:.6f}")
             summary_rows.append(
                 dict(
                     shape=shape.label,
@@ -940,6 +793,8 @@ def main() -> int:
                 raise RuntimeError("GPU timing returned nonpositive latency")
             speedup = a / b
             latency_reduction_pct = 100 * (a - b) / a
+            paired = [a_round / b_round for a_round, b_round in
+                      zip(samples[before], samples[after])]
             ratio_rows.append(
                 dict(
                     shape=shape.label,
@@ -947,107 +802,27 @@ def main() -> int:
                     denominator=after,
                     ratio_a_over_b=f"{speedup:.9f}",
                     latency_reduction_pct=f"{latency_reduction_pct:.6f}",
+                    paired_min=f"{min(paired):.9f}",
+                    paired_max=f"{max(paired):.9f}",
                 )
             )
             print(
                 f"  {before:20s} / {after:20s} {speedup:.5f}x, {latency_reduction_pct:+.3f}%"
             )
 
-    # All output is written only after every requested shape validates and times.
     (out_dir / "resolved_specs.json").write_text(
         json.dumps(resolved_rows, indent=2, default=str) + "\n"
     )
-    write_csv(
-        out_dir / "ablation_runs.csv",
-        (
-            "shape",
-            "round",
-            "order",
-            "variant",
-            "use_cfvst",
-            "lds_num_buffers",
-            "v_reg_prefetch",
-            "repeat",
-            "ms",
-        ),
-        raw_rows,
+    # Stable CSV schemas: the static analyzer and external result consumers
+    # depend on these filenames/field names, so keep them byte-for-byte.
+    exports = (
+        ("ablation_runs.csv", "shape round order variant use_cfvst lds_num_buffers v_reg_prefetch repeat ms", raw_rows),
+        ("ablation_summary.csv", "shape variant median_ms min_ms max_ms speedup_vs_baseline speedup_vs_cfvst rounds repeat", summary_rows),
+        ("validation.csv", "shape variant stage round passed max_abs max_rel atol rtol", validation_rows),
+        ("ablation_ratios.csv", "shape numerator denominator ratio_a_over_b latency_reduction_pct paired_min paired_max", ratio_rows),
     )
-    write_csv(
-        out_dir / "ablation_summary.csv",
-        (
-            "shape",
-            "variant",
-            "median_ms",
-            "min_ms",
-            "max_ms",
-            "speedup_vs_baseline",
-            "speedup_vs_cfvst",
-            "rounds",
-            "repeat",
-        ),
-        summary_rows,
-    )
-    write_csv(
-        out_dir / "validation.csv",
-        (
-            "shape",
-            "variant",
-            "stage",
-            "round",
-            "passed",
-            "max_abs",
-            "max_rel",
-            "atol",
-            "rtol",
-        ),
-        validation_rows,
-    )
-    write_csv(
-        out_dir / "ablation_ratios.csv",
-        (
-            "shape",
-            "numerator",
-            "denominator",
-            "ratio_a_over_b",
-            "latency_reduction_pct",
-        ),
-        ratio_rows,
-    )
-    (out_dir / "measurement_conditions.txt").write_text(
-        "\n".join(
-            (
-                f"rocke_root={rocke}",
-                f"git_head={git_head(rocke)}",
-                f"attention_dense_file={source_file}",
-                f"attention_dense_sha256={hashlib.sha256(source_text.encode()).hexdigest()}",
-                f"gpu={environment['gpu']['name']}",
-                f"torch={torch.__version__}",
-                f"hip={getattr(torch.version, 'hip', None)}",
-                f"stream_ptr={stream_ptr}",
-                f"ROCKE_BACKEND={os.environ.get('ROCKE_BACKEND')}",
-                f"ROCKE_LLVM_FLAVOR={os.environ.get('ROCKE_LLVM_FLAVOR')}",
-                f"shapes={[s.label for s in shapes]}",
-                f"persistent={args.persistent}",
-                f"num_persistent={args.num_persistent}",
-                f"persist_decode={args.persist_decode}",
-                "baseline_source=dispatch.attention.attention_tuning_spec(req, gfx942_dense).kernel_spec",
-                f"production_baseline_all_shapes={not bool(diagnostic_shapes)}",
-                f"nonproduction_shapes={diagnostic_shapes}",
-                "full_per_shape_specs=resolved_specs.json",
-                f"warmup={args.warmup}",
-                f"rounds={args.rounds}",
-                f"repeat={args.repeat}",
-                f"seed={args.seed}",
-                f"reference_chunk={args.reference_chunk}",
-                f"validation_atol={args.atol}",
-                f"validation_rtol={args.rtol}",
-                "timing=direct KernelLauncher, one PyTorch/HIP stream, randomized 5-way rounds",
-                "validation=pre-timing and post-timed-batch last-output check outside GPU events",
-                "variant_kernel_source=CURRENT library/kernels/gfx942/attention_dense.py",
-            )
-        )
-        + "\n"
-    )
+    for filename, schema, rows in exports:
+        write_csv(out_dir / filename, tuple(schema.split()), rows)
     environment["run"] = {
         "shapes": [asdict(sh) for sh in shapes],
         "variant_count": len(VARIANTS),
@@ -1064,30 +839,20 @@ def main() -> int:
         "validation_scope": "pre-timing and final output after every timed batch",
         "validation_checks_per_shape": len(VARIANTS) * (1 + args.rounds),
         "all_validation_passed": all(v["passed"] == 1 for v in validation_rows),
-        "dispatch_baseline_for_all_shapes": not bool(diagnostic_shapes),
-        "diagnostic_shape_labels": diagnostic_shapes,
+        "dispatch_baseline_for_all_shapes": True,
         "exact_python_command": shlex.join([sys.executable, *sys.argv]),
+        "working_directory": str(Path.cwd()),
     }
+    # Snapshot after compilation/launch so lazily loaded ROCm DSOs appear.
+    environment["software"]["rocm_libraries_loaded_at_end"] = (
+        _loaded_rocm_shared_objects()
+    )
     (out_dir / "provenance.json").write_text(
         json.dumps(environment, indent=2, default=str) + "\n"
     )
-    _replay_script(out_dir / "replay_command.sh", environment["environment_variables"])
-    report = _report_text(
-        environment,
-        args=args,
-        shapes=shapes,
-        resolved_rows=resolved_rows,
-        validation_rows=validation_rows,
-        samples_by_shape=samples_by_shape,
-        summary_rows=summary_rows,
-        ratio_rows=ratio_rows,
-    )
-    (out_dir / "ablation_report.md").write_text(report)
     print(f"\nOutputs in {out_dir}")
-    print(
-        "Reviewer evidence: ablation_report.md, provenance.json, "
-        "resolved_specs.json, replay_command.sh"
-    )
+    print("Reproducability: provenance.json, resolved_specs.json, validation.csv, "
+          "ablation_ratios.csv; keep latency CSVs internal")
     return 0
 
 
