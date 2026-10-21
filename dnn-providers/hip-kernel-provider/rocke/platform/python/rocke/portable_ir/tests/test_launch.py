@@ -21,7 +21,6 @@
 #   python3 -m unittest rocke.portable_ir.tests.test_launch
 
 import os
-import tempfile
 import unittest
 
 from rocke.portable_ir.examples import recipe_toy
@@ -205,13 +204,9 @@ class TestCluster(unittest.TestCase):
 
 
 def _online_lib():
-    for cand in (
-        os.environ.get("ROCKE_ONLINE_LIB"),
-        os.path.join(tempfile.gettempdir(), "rocke_online", "librocke.so"),
-    ):
-        if cand and os.path.exists(cand):
-            return cand
-    return None
+    from rocke.portable_ir.src import online
+
+    return online.resolve_library_path(build=False)
 
 
 @unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
