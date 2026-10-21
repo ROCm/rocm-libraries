@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -33,20 +34,56 @@ from reference_common.numeric import (
 )
 
 
-def test_cohort_preserves_existing_sdpa_parameterizations():
-    source = Path(__file__).with_name("test_attention_dense_gfx942_numeric.py")
-    module = ast.parse(source.read_text())
+# The Torch-gated gfx950 dense test has no mask column; it runs its rows causal.
+_LEGACY_MASK = {"gfx942": {}, "gfx950": {"causal": True}}
+
+
+def _legacy_source(architecture):
+    return Path(__file__).with_name(f"test_attention_dense_{architecture}_numeric.py")
+
+
+def _legacy_cases(architecture):
+    """Base ``_COHORT`` rows of a Torch-gated test; it runs them at B=1, S=512."""
+    module = ast.parse(_legacy_source(architecture).read_text())
     original = next(
         ast.literal_eval(node.value)
         for node in module.body
         if isinstance(node, ast.Assign)
         and any(isinstance(t, ast.Name) and t.id == "_COHORT" for t in node.targets)
     )
-    assert [
-        (c.dtype, c.head_dim, c.query_heads, c.kv_heads, c.persistent, c.causal)
-        for c in CASES
-    ] == original
-    assert len({case.id for case in CASES}) == 8
+    fixed = dict(_LEGACY_MASK[architecture], batch=1, sequence_length=512)
+    return tuple(Case(*row, **fixed) for row in original)
+
+
+def _assert_covers_legacy_cohort(architecture):
+    """Keep every legacy parameterization pinned; pinned-only cases need no edit."""
+    cases = get_architecture(architecture).CASES
+    missing = [case.id for case in _legacy_cases(architecture) if case not in cases]
+    assert not missing, (
+        f"{architecture} SDPA cohort no longer covers {missing} from "
+        f"{_legacy_source(architecture).name}::_COHORT. Restore them; cohort "
+        "changes require requalifying the complete cohort (see "
+        "reference_common/docs/gpu-reference-workflow.md)."
+    )
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_cohort_preserves_existing_sdpa_parameterizations(architecture):
+    _assert_covers_legacy_cohort(architecture)
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_legacy_coverage_allows_pinned_only_cases_and_names_dropped_ones(
+    monkeypatch, architecture
+):
+    target = get_architecture(architecture)
+    # Start from exactly the legacy rows so this checks the guard, not the cohort.
+    cases = _legacy_cases(architecture)
+    monkeypatch.setattr(target, "CASES", (*cases, replace(cases[0], batch=2)))
+    _assert_covers_legacy_cohort(architecture)
+    monkeypatch.setattr(target, "CASES", cases[1:])
+    with pytest.raises(AssertionError, match=re.escape(f"['{cases[0].id}']")):
+        _assert_covers_legacy_cohort(architecture)
 
 
 def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
@@ -101,23 +138,6 @@ def test_gfx942_source_adapter_supports_published_dispatch_api(monkeypatch):
         assert spec.causal is case.causal
 
 
-def test_gfx950_cohort_preserves_existing_sdpa_parameterizations():
-    source = Path(__file__).with_name("test_attention_dense_gfx950_numeric.py")
-    module = ast.parse(source.read_text())
-    original = next(
-        ast.literal_eval(node.value)
-        for node in module.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "_COHORT" for t in node.targets)
-    )
-    cases = get_architecture("gfx950").CASES
-    assert [
-        (c.dtype, c.head_dim, c.query_heads, c.kv_heads, c.persistent) for c in cases
-    ] == original
-    assert len({case.id for case in cases}) == 7
-    assert all(c.causal and c.batch == 1 and c.sequence_length == 512 for c in cases)
-
-
 @pytest.mark.parametrize("case", get_architecture("gfx950").CASES, ids=lambda c: c.id)
 @pytest.mark.parametrize("causal", [False, True], ids=["full", "causal"])
 def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
@@ -141,7 +161,12 @@ def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
     )
     assert spec.causal is case.causal
     assert not spec.use_sinks and not spec.sliding_window
-    assert spec.runtime_shape is (not case.persistent)
+    assert spec.runtime_shape is (not case.persistent), (
+        f"{case.id} selected runtime_shape={spec.runtime_shape}. Dense replay "
+        "binds shape scalars only for runtime-shape grid kernels; persistent "
+        "kernels bake the shape. Use a sequence length the aligned (non-ragged) "
+        "grid kernel accepts, or extend the dense replay ABI first."
+    )
     # Replay supplies shape scalars only for the runtime-shape members of this cohort.
     signature = attention_dense_signature(spec)
     names = [arg["name"] for arg in signature]
@@ -294,16 +319,21 @@ def test_bundle_keyed_by_published_ids_loads_and_replays(
 
     manifest = _bundle(tmp_path, architecture)
     cases = get_architecture(architecture).CASES
-    manifest["cases"] = {
-        _published_id(case): manifest["cases"][case.id] for case in cases
+    # Published ids omit batch and length. Cases that would share one were never
+    # published under it, so they keep their full ids.
+    published = [_published_id(case) for case in cases]
+    keys = {
+        case.id: key if published.count(key) == 1 else case.id
+        for case, key in zip(cases, published)
     }
+    manifest["cases"] = {keys[case.id]: manifest["cases"][case.id] for case in cases}
     _lock(tmp_path, manifest)
     assert (
         load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
         == manifest
     )
-    case = cases[-1]
-    key = _published_id(case)
+    case = next(c for c in reversed(cases) if keys[c.id] != c.id)
+    key = keys[case.id]
     assert cli.manifest_key(manifest, case, architecture=architecture) == key
     entry = manifest["cases"][key]
     entry["input_digests"] = {
@@ -590,14 +620,27 @@ def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, di
     checked_inputs(case, digests)
 
 
-@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1200", "gfx1201"])
-@pytest.mark.parametrize("case_index", range(8))
-def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
+def _wmma_grid(prepared):
+    """One CTA per query block, query head, and batch of the prepared case."""
+    case = prepared.case
+    rows = prepared.spec.q_rows_per_cta
+    return (case.sequence_length // rows, case.query_heads, case.batch)
+
+
+@pytest.mark.parametrize(
+    "architecture,case",
+    [
+        (architecture, case)
+        for architecture in ("gfx1151", "gfx1200", "gfx1201")
+        for case in get_architecture(architecture).CASES
+    ],
+    ids=lambda value: value.id if isinstance(value, Case) else value,
+)
+def test_wmma_reference_matches_production_kernel_abi(architecture, case):
     import kernels
     from sdpa_reference.implementations import wmma
 
     target = get_architecture(architecture)
-    case = target.CASES[case_index]
     root = Path(kernels.__file__).resolve().parent.parent
     prepared = target.prepare(case, str(root))
     assert prepared.abi == "wmma-strided-v2"
@@ -605,22 +648,29 @@ def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
     assert [(p.name, p.type.name) for p in kernel.params] == [
         (arg["name"], arg["type"].replace(" ", "")) for arg in wmma.signature(prepared)
     ]
-    assert wmma.grid(prepared) == (4, 4, 2)
+    assert wmma.grid(prepared) == _wmma_grid(prepared)
     assert prepared.spec.block_size == 32
     assert prepared.spec.head_size == case.head_dim
     assert prepared.spec.mask_mode == ("causal" if case.causal else "none")
     assert prepared.spec.layout == "dense"
     values = wmma.scalars(case, case.scale)
-    assert values["seqlen_q"] == values["seqlen_k"] == 64
-    assert values["num_query_heads"] == 4
+    assert values["seqlen_q"] == values["seqlen_k"] == case.sequence_length
+    assert values["num_query_heads"] == case.query_heads
     assert values["num_kv_heads"] == case.kv_heads
     assert values["bottom_right"] == values["write_lse"] == 0
     assert values["window_left"] == values["window_right"] == -1
     assert values["stride_lse_batch"] == 0
     assert values["stride_lse_token"] == values["stride_lse_head"] == 0
     assert values["scale_log2"] == pytest.approx(case.scale * np.log2(np.e))
-    for name, heads in (("q", 4), ("k", case.kv_heads), ("v", case.kv_heads), ("o", 4)):
-        assert values[f"stride_{name}_batch"] == 64 * heads * case.head_dim
+    for name, heads in (
+        ("q", case.query_heads),
+        ("k", case.kv_heads),
+        ("v", case.kv_heads),
+        ("o", case.query_heads),
+    ):
+        assert values[f"stride_{name}_batch"] == (
+            case.sequence_length * heads * case.head_dim
+        )
         assert values[f"stride_{name}_token"] == heads * case.head_dim
         assert values[f"stride_{name}_head"] == case.head_dim
     buffers = {name: object() for name in ("q", "k", "v", "out")}
@@ -646,7 +696,16 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
     from sdpa_reference.implementations import wmma
     from sdpa_reference.worker import replay_values
 
-    case = wmma.CASES[-1]  # Batched, causal GQA exercises the distinct K/V strides.
+    # Batched, causal GQA exercises the distinct K/V strides.
+    case = next(
+        (
+            c
+            for c in reversed(wmma.CASES)
+            if c.batch > 1 and c.causal and c.kv_heads < c.query_heads
+        ),
+        None,
+    )
+    assert case, "the WMMA cohort needs a batched, causal GQA case"
     root = Path(kernels.__file__).resolve().parent.parent
     target = get_architecture(architecture)
     compiler_target = "gfx1151" if architecture == "gfx1151" else "gfx12-generic"
@@ -681,7 +740,7 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
     expected = pack_args(metadata["signature"], replay_values(metadata, buffers, case))
     for arguments, config in launches:
         assert arguments == expected
-        assert config.grid == metadata["grid"] == (4, 4, 2)
+        assert config.grid == metadata["grid"] == _wmma_grid(prepared)
         assert config.block == metadata["block"] == (32, 1, 1)
 
 
@@ -690,10 +749,17 @@ def test_wmma_reference_cohort_and_rejections():
     import kernels
     from sdpa_reference.implementations import wmma
 
-    assert len(wmma.CASES) == len({case.id for case in wmma.CASES}) == 8
-    assert {(c.head_dim, c.kv_heads, c.causal) for c in wmma.CASES} == {
+    assert len(wmma.CASES) == len({case.id for case in wmma.CASES})
+    required = {
         (d, kv, causal) for d in (64, 128) for kv in (1, 4) for causal in (False, True)
     }
+    missing = required - {(c.head_dim, c.kv_heads, c.causal) for c in wmma.CASES}
+    assert not missing, (
+        f"WMMA cohort no longer covers (head_dim, kv_heads, causal) {sorted(missing)}. "
+        "gfx1151, gfx1200, and gfx1201 share it; cohort changes require "
+        "requalifying each of them (see "
+        "reference_common/docs/gpu-reference-workflow.md)."
+    )
     root = str(Path(kernels.__file__).resolve().parent.parent)
     for architecture in ("gfx1151", "gfx1200", "gfx1201"):
         target = get_architecture(architecture)

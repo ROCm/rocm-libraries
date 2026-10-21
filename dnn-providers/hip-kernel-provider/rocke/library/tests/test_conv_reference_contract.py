@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from conv_reference import cli
-from conv_reference.architectures import get_architecture
+from conv_reference.architectures import ARCHITECTURES, get_architecture
 from conv_reference.contract import (
     Case,
     INPUT_GENERATOR,
@@ -31,6 +31,35 @@ from reference_common.numeric import (
     encode,
     file_digest,
     write_json,
+)
+
+# Geometries each architecture's published bundle qualifies, in FP16 and BF16.
+# Adding a case needs no edit here; removing one drops qualified coverage. Either
+# change requires requalifying that architecture's complete cohort.
+_QUALIFIED_GEOMETRIES = dict.fromkeys(
+    ("gfx942", "gfx950"),
+    (
+        "padded",
+        "pointwise",
+        "stride2",
+        "dilation2",
+        "groups2",
+        "asymmetric",
+        "multi-tile",
+        "odd-channels",
+        "odd-input-channels",
+        "stem",
+        "large",
+        "long-k",
+        "grouped-odd",
+        "depthwise",
+        "anisotropic",
+        "out-1x1",
+    ),
+)
+_REQUALIFY = (
+    "Cohort changes require requalifying the complete cohort; see "
+    "reference_common/docs/gpu-reference-workflow.md."
 )
 
 
@@ -81,7 +110,16 @@ def test_spatial_reference_matches_explicit_patch_sums(stride, dilation, padding
     np.testing.assert_array_equal(independent_reference(case, inputs), expected)
 
 
-@pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize(
+    "case",
+    # Architectures share most geometries; check each distinct case once.
+    tuple(
+        dict.fromkeys(
+            case for name in ARCHITECTURES for case in get_architecture(name).CASES
+        )
+    ),
+    ids=lambda c: c.id,
+)
 def test_corpus_and_oracle_are_finite_reproducible_and_authenticated(case):
     arrays = make_inputs(case)
     digests = {name: array_digest(value) for name, value in arrays.items()}
@@ -269,6 +307,53 @@ def test_verification_uses_gpu_outputs_and_frozen_scale_only(
         assert calls == ["replay", "source"]
 
 
+def _qualified_cases(architecture):
+    """Cases with the qualified ids; the adapter owns their exact geometry."""
+    return tuple(
+        Case(name, dtype)
+        for name in _QUALIFIED_GEOMETRIES[architecture]
+        for dtype in ("fp16", "bf16")
+    )
+
+
+def _assert_keeps_qualified_cases(architecture):
+    """Allow additions, but name any qualified case the cohort no longer has."""
+    ids = [case.id for case in get_architecture(architecture).CASES]
+    duplicates = sorted({case_id for case_id in ids if ids.count(case_id) > 1})
+    assert not duplicates, f"{architecture} conv case ids repeat: {duplicates}"
+    missing = sorted({case.id for case in _qualified_cases(architecture)} - set(ids))
+    assert not missing, (
+        f"{architecture} conv cohort no longer contains qualified cases {missing}. "
+        "Restore them, or remove them from _QUALIFIED_GEOMETRIES deliberately. "
+        + _REQUALIFY
+    )
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("change", ["added", "dropped", "duplicate"])
+def test_cohort_check_allows_additions_and_names_lost_cases(
+    monkeypatch, architecture, change
+):
+    target = get_architecture(architecture)
+    # Start from exactly the qualified ids so this checks the guard, not the cohort.
+    cases = _qualified_cases(architecture)
+    changed = {
+        "added": (*cases, Case("added", "fp16", K=48)),
+        "dropped": cases[1:],
+        "duplicate": (*cases, replace(cases[0], K=48)),
+    }
+    monkeypatch.setattr(target, "CASES", changed[change])
+    first_id = rf"\['{cases[0].id}'\]"
+    if change == "added":
+        _assert_keeps_qualified_cases(architecture)
+    elif change == "dropped":
+        with pytest.raises(AssertionError, match=first_id + ".*gpu-reference-workflow"):
+            _assert_keeps_qualified_cases(architecture)
+    else:
+        with pytest.raises(AssertionError, match="repeat: " + first_id):
+            _assert_keeps_qualified_cases(architecture)
+
+
 @pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
 def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
     from conv_reference.architectures.common import convolution_request
@@ -276,7 +361,7 @@ def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
     from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
 
     target = get_architecture(architecture)
-    assert len(target.CASES) == 32
+    _assert_keeps_qualified_cases(architecture)
     for case in target.CASES:
         if architecture == "gfx942":
             spec = target.kernel_spec(case)
@@ -294,16 +379,32 @@ def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
             assert len(plan.steps) == 1 and not plan.workspaces
             grid = plan.steps[0].grid
         assert all(v > 0 for v in grid)
+        # Named cases cover tiling paths described in conv-test-reference.md. A
+        # dispatch or instance-list change can move a case off its path.
         if case.name == "multi-tile":
-            assert grid[0] == 2
-            assert case.K % spec.tile_n != 0
-            assert spec.epilogue == "cshuffle"
+            coverage = (
+                f"{architecture} {case.id} must span two output-channel tiles "
+                f"with a partial second tile and cshuffle; got K={case.K}, "
+                f"tile_n={spec.tile_n}, grid={grid}, epilogue={spec.epilogue}. "
+                "Keep this coverage by choosing a K that still needs two N tiles "
+                "for the selected instance. " + _REQUALIFY
+            )
+            assert grid[0] == 2, coverage
+            assert case.K % spec.tile_n != 0, coverage
+            assert spec.epilogue == "cshuffle", coverage
         elif case.name == "odd-channels":
             assert case.K % 2 == 1
             assert spec.epilogue == "default"
         elif case.name == "large":
-            assert grid == (2, 7, 1)
-            assert case.Y * case.X * case.C % spec.tile_k == 0
+            coverage = (
+                f"{architecture} {case.id} must span 2 output-channel and 7 "
+                "output-pixel tiles with whole K tiles; got "
+                f"tile_n={spec.tile_n}, tile_k={spec.tile_k}, grid={grid}. Keep "
+                "this coverage by choosing geometry that does so for the selected "
+                "instance. " + _REQUALIFY
+            )
+            assert grid == (2, 7, 1), coverage
+            assert case.Y * case.X * case.C % spec.tile_k == 0, coverage
         elif case.name == "grouped-odd":
             assert case.C // case.groups == case.K // case.groups == 33
         elif case.name == "depthwise":
@@ -312,8 +413,15 @@ def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
             assert case.output_shape[1:3] == (1, 1)
 
 
-@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
-@pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize(
+    "architecture,case",
+    [
+        (architecture, case)
+        for architecture in ("gfx942", "gfx950")
+        for case in get_architecture(architecture).CASES
+    ],
+    ids=lambda value: value.id if isinstance(value, Case) else value,
+)
 def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(
     case, monkeypatch, architecture
 ):
