@@ -30,6 +30,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added env-based API for `hipcub::DeviceTransform::*`.
 * Feature parity with CCCL/CUB 3.2.0.
 * Feature parity with CCCL/CUB 3.2.1.
+* Added new `hipcub::DeviceSegmentedScan` with `ExclusiveSegmentedScan`, `ExclusiveSegmentedSum`, `InclusiveSegmentedScan`, `InclusiveSegmentedSum` and `InclusiveSegmentedScanInit`.
 * Feature parity with CCCL/CUB 3.3.0.
 
 ### Changed
