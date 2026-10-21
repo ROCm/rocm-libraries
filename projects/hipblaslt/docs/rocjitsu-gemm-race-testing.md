@@ -84,7 +84,9 @@ HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python3 .github/scripts/run_ra
     --output /path/to/new-results
 ```
 
-Use `--case N` with the same seed to replay one sample. `--dry-run` writes
-inputs without executing them. `--stop-on-failure` stops starting new samples
+Use `--case N` with the same seed to replay one sample. `--dry-run` lets you
+inspect the sampled inputs before running them: it writes inputs and reports
+without starting the benchmark or rocJITsu. These samples are marked `dry-run`,
+so they do not count as passes. `--stop-on-failure` stops starting new samples
 after a failure; already running samples finish. Each run creates a new output
 directory, with `summary.json` for totals and `cases.md` for individual results.
