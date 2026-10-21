@@ -8480,6 +8480,9 @@ namespace
                 log_error(__func__, "library has an unrecognized hardware predicate", shardFile);
                 return false;
             }
+            // The file's index is kept as the key; addSolutions takes only unindexed
+            // solutions. This shard was parsed for this call, so nothing else shares them.
+            entry.second->index = -1;
             solutions.emplace_back(entry.first, entry.second);
         }
         if(solutions.empty())
