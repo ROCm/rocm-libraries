@@ -9,16 +9,12 @@
 
 /**
  * @file cudnn_frontend_Engine.h
- * @brief cuDNN v8 `Engine_v8` / `EngineBuilder_v8` over the shim's backend C API.
+ * @brief cuDNN v8 `Engine_v8` / `EngineBuilder_v8` over the shim's v8 core.
  */
 
 #pragma once
 
-#include <algorithm>
-#include <array>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -28,6 +24,8 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_OperationGraph.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/engine_views.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
@@ -35,7 +33,7 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "cuDNN FE version pin changed: re-diff this file against upstream "
               "include/cudnn_frontend_Engine.h at the new tag, then update this assert.");
 
-// NOLINTBEGIN(readability-identifier-naming,modernize-use-equals-delete,modernize-use-override,modernize-use-emplace,modernize-loop-convert,performance-unnecessary-value-param,readability-isolate-declaration,readability-simplify-boolean-expr,bugprone-multi-level-implicit-pointer-conversion):
+// NOLINTBEGIN(readability-identifier-naming,modernize-use-equals-delete,modernize-use-override,performance-unnecessary-value-param,readability-isolate-declaration,readability-simplify-boolean-expr):
 // ported verbatim; upstream's spelling and shapes are the source-compatible surface.
 
 class Engine_v8 : public BackendDescriptor
@@ -105,71 +103,8 @@ private:
     ManagedOpaqueDescriptor opGraph = nullptr;
     int64_t idx = -1;
     int64_t numKnobs = 0;
-    std::array<ManagedOpaqueDescriptor, CUDNN_KNOB_TYPE_COUNTS> bKnobs = {};
     std::vector<Knob> knobs;
     std::string opGraphTag;
-
-    void buildKnobs()
-    {
-        cudnnStatus_t status;
-        for(auto i = 0; i < numKnobs; i++)
-        {
-            auto bKnob = bKnobs[static_cast<size_t>(i)]->get_backend_descriptor();
-            cudnnBackendKnobType_t type;
-            int64_t maxValue, minValue, stride, elemCount;
-            status = detail::get_attribute(
-                bKnob, CUDNN_ATTR_KNOB_INFO_TYPE, CUDNN_TYPE_KNOB_TYPE, 1, &elemCount, &type);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(this,
-                                              status,
-                                              "CUDNN_BACKEND_ENGINE_DESCRIPTOR: "
-                                              "CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR "
-                                              "GetAttribute CUDNN_ATTR_KNOB_INFO_TYPE failed");
-            }
-            status = detail::get_attribute(bKnob,
-                                           CUDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE,
-                                           CUDNN_TYPE_INT64,
-                                           1,
-                                           &elemCount,
-                                           &maxValue);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(
-                    this,
-                    status,
-                    "CUDNN_BACKEND_ENGINE_DESCRIPTOR: "
-                    "CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR "
-                    "GetAttribute CUDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE Failed");
-            }
-            status = detail::get_attribute(bKnob,
-                                           CUDNN_ATTR_KNOB_INFO_MINIMUM_VALUE,
-                                           CUDNN_TYPE_INT64,
-                                           1,
-                                           &elemCount,
-                                           &minValue);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(
-                    this,
-                    status,
-                    "CUDNN_BACKEND_ENGINE_DESCRIPTOR: "
-                    "CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR "
-                    "GetAttribute CUDNN_ATTR_KNOB_INFO_MINIMUM_VALUE Failed");
-            }
-            status = detail::get_attribute(
-                bKnob, CUDNN_ATTR_KNOB_INFO_STRIDE, CUDNN_TYPE_INT64, 1, &elemCount, &stride);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(this,
-                                              status,
-                                              "CUDNN_BACKEND_ENGINE_DESCRIPTOR: "
-                                              "CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR "
-                                              "GetAttribute CUDNN_ATTR_KNOB_INFO_STRIDE Failed");
-            }
-            knobs.emplace_back(Knob(type, maxValue, minValue, stride));
-        }
-    }
 
 public:
     friend class EngineBuilder_v8;
@@ -241,100 +176,53 @@ public:
     {
         if(m_engine.idx < 0)
         {
-            set_error_and_throw_exception(&m_engine,
-                                          CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_ENGINE_DESCRIPTOR: Check and Set the "
-                                          "CUDNN_ATTR_ENGINE_GLOBAL_INDEX to valid value");
+            set_error_and_throw_exception(
+                &m_engine,
+                CUDNN_STATUS_BAD_PARAM,
+                "EngineBuilder: the global engine index must be non-negative");
             return std::move(m_engine);
         }
         if(m_engine.opGraph == nullptr)
         {
-            set_error_and_throw_exception(&m_engine,
-                                          CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_ENGINE_DESCRIPTOR: Check and Set "
-                                          "CUDNN_ATTR_ENGINE_OPERATION_GRAPH to valid value");
-            return std::move(m_engine);
-        }
-
-        auto status = m_engine.initialize_managed_backend_pointer(CUDNN_BACKEND_ENGINE_DESCRIPTOR);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
             set_error_and_throw_exception(
-                &m_engine,
-                status,
-                "CUDNN_BACKEND_ENGINE_DESCRIPTOR: cudnnCreate Descriptor Failed");
+                &m_engine, CUDNN_STATUS_BAD_PARAM, "EngineBuilder: an operation graph must be set");
             return std::move(m_engine);
         }
 
-        status = detail::set_attribute(m_engine.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINE_OPERATION_GRAPH,
-                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &(m_engine.opGraph->get_backend_descriptor()));
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_engine,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINE_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_ENGINE_OPERATION_GRAPH Failed");
-            return std::move(m_engine);
-        }
-
-        status = detail::set_attribute(m_engine.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                       CUDNN_TYPE_INT64,
-                                       1,
-                                       &m_engine.idx);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_engine,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINE_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_ENGINE_GLOBAL_INDEX Failed");
-            return std::move(m_engine);
-        }
-
-        status = detail::finalize(m_engine.pointer->get_backend_descriptor());
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_engine, status, "CUDNN_BACKEND_ENGINE_DESCRIPTOR: cudnnFinalize Failed");
-            return std::move(m_engine);
-        }
-
-        for(size_t i = 0; i < m_engine.bKnobs.size(); i++)
-        {
-            m_engine.bKnobs[i] = make_shared_backend_pointer(CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR);
-            if(m_engine.bKnobs[i]->is_good() == false)
+        ManagedOpaqueDescriptor built;
+        std::vector<Engine_v8::Knob> knobs;
+        const detail::v8::Outcome outcome = detail::v8::guarded([&] {
+            // Upstream creates the descriptor here, so a failed engine still has a (null) raw
+            // view.
+            m_engine.initialize_managed_backend_pointer(CUDNN_BACKEND_ENGINE_DESCRIPTOR);
+            std::shared_ptr<const detail::v8::GraphCore> graph
+                = detail::v8::recordOf<detail::v8::GraphCore>(m_engine.opGraph);
+            if(!graph)
             {
-                status = m_engine.bKnobs[i]->get_status();
-                set_error_and_throw_exception(
-                    &m_engine,
-                    status,
-                    "CUDNN_BACKEND_ENGINE_DESCRIPTOR: "
-                    "CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR cudnnCreate Failed");
+                throw detail::v8::ShimError(
+                    CUDNN_STATUS_BAD_PARAM,
+                    "EngineBuilder: the operation graph is not a built OperationGraph");
             }
+            std::shared_ptr<const detail::v8::EngineRecord> record = detail::v8::makeEngineRecord(
+                std::move(graph), m_engine.idx, "EngineBuilder: global engine index");
+            for(const detail::v8::EngineKnob& knob : record->knobs())
+            {
+                knobs.emplace_back(
+                    knob.type, knob.range.maxValue, knob.range.minValue, knob.range.stride);
+            }
+            hipdnnBackendDescriptor_t engine = record->hipdnnEngine();
+            built = detail::v8::makeManaged(
+                CUDNN_BACKEND_ENGINE_DESCRIPTOR, std::move(record), engine);
+        });
+        if(!outcome)
+        {
+            set_error_and_throw_exception(&m_engine, outcome.status, outcome.message.c_str());
+            return std::move(m_engine);
         }
 
-        std::array<cudnnBackendDescriptor_t, CUDNN_KNOB_TYPE_COUNTS> bKnobs_ = {};
-        for(std::uint32_t i = 0; i < m_engine.bKnobs.size(); i++)
-        {
-            bKnobs_[i] = m_engine.bKnobs[i]->get_backend_descriptor();
-        }
-        status = detail::get_attribute(m_engine.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINE_KNOB_INFO,
-                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       CUDNN_KNOB_TYPE_COUNTS,
-                                       &m_engine.numKnobs,
-                                       bKnobs_.data());
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_engine,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINE_DESCRIPTOR: GetAttribute "
-                                          "CUDNN_ATTR_ENGINE_KNOB_INFO Query Failed");
-        }
-        m_engine.buildKnobs();
+        m_engine.pointer = std::move(built);
+        m_engine.numKnobs = static_cast<int64_t>(knobs.size());
+        m_engine.knobs = std::move(knobs);
         CUDNN_FE_LOG_LABEL_ENDL(m_engine);
         return std::move(m_engine);
     }
@@ -349,6 +237,6 @@ private:
     Engine_v8 m_engine;
 };
 
-// NOLINTEND(readability-identifier-naming,modernize-use-equals-delete,modernize-use-override,modernize-use-emplace,modernize-loop-convert,performance-unnecessary-value-param,readability-isolate-declaration,readability-simplify-boolean-expr,bugprone-multi-level-implicit-pointer-conversion)
+// NOLINTEND(readability-identifier-naming,modernize-use-equals-delete,modernize-use-override,performance-unnecessary-value-param,readability-isolate-declaration,readability-simplify-boolean-expr)
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend

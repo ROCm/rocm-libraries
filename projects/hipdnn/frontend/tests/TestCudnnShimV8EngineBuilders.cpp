@@ -125,17 +125,19 @@ TEST_F(TestCudnnShimV8EngineBuilders, GlobalIndexOutOfRangeRejected)
             = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
-        EXPECT_NE(failure.what.find("cudnnFinalize"), std::string::npos) << failure.what;
+        EXPECT_NE(failure.what.find("EngineBuilder: global engine index = "), std::string::npos)
+            << failure.what;
     }
 
-    // Negative indices never reach the C API.
+    // Negative indices are rejected before the graph's engine space is consulted.
     fe::EngineBuilder_v8 negative;
     negative.setOperationGraph(graph).setGlobalEngineIdx(-1);
     const BuilderFailure failure
         = builderFailureOf([&negative] { [[maybe_unused]] auto built = negative.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
-    EXPECT_NE(failure.what.find("CUDNN_ATTR_ENGINE_GLOBAL_INDEX"), std::string::npos)
+    EXPECT_NE(failure.what.find("EngineBuilder: the global engine index must be non-negative"),
+              std::string::npos)
         << failure.what;
 }
 

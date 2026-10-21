@@ -55,22 +55,10 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimLogging.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimUtils.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Identifiers.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8AttributeTable.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BackendApi.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8CApiStandalone.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8TensorDescriptor.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8ParameterDescriptors.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Operations.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8OperationLowering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8TypeMapping.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8OperationGraph.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8EngineSelection.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8ExecutionPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Utils.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8DescriptorBuilders.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8AuxBuilders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Tu.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8OperationBuilders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8MixedTu.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Heuristics.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8EngineBuilders.cpp>
@@ -90,6 +78,7 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderEngines.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderPlans.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderInputs.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderContracts.cpp>
     # The errata filter exists only when the frontend keeps its JSON library.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnShimV8Errata.cpp>
     # SDPA node coverage additionally needs the SDPA build.
@@ -246,6 +235,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         TestCudnnShimV8NoExcept.cpp
         TestCudnnShimV8NoexceptOperations.cpp
         TestCudnnShimV8NoexceptPlans.cpp
+        TestCudnnShimV8NoexceptBoundary.cpp
     )
     target_compile_definitions(
         hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE NV_CUDNN_DISABLE_EXCEPTION
@@ -259,6 +249,25 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     )
     clang_tidy_check(hipdnn_frontend_cudnn_v8_noexcept_tests)
     add_hipdnn_test(hipdnn_frontend_cudnn_v8_noexcept_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+    # Link-only gate, like hipdnn_frontend_dynamic_load_tests: the shim links against
+    # hipdnn_frontend_dynamic without libhipdnn_backend.
+    add_executable(hipdnn_frontend_cudnn_v8_dynamic_link_tests TestCudnnShimV8DynamicLink.cpp)
+    target_compile_options(
+        hipdnn_frontend_cudnn_v8_dynamic_link_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+    )
+    target_link_libraries(
+        hipdnn_frontend_cudnn_v8_dynamic_link_tests
+        GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
+    )
+    if(TARGET hipdnn_backend)
+        add_dependencies(hipdnn_frontend_cudnn_v8_dynamic_link_tests hipdnn_backend)
+        target_compile_definitions(
+            hipdnn_frontend_cudnn_v8_dynamic_link_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+        )
+    endif()
+    clang_tidy_check(hipdnn_frontend_cudnn_v8_dynamic_link_tests)
+    add_hipdnn_test(hipdnn_frontend_cudnn_v8_dynamic_link_tests ${CMAKE_CURRENT_BINARY_DIR})
 
     # Compile-only: the umbrella with each JSON opt-out.
     add_library(hipdnn_frontend_cudnn_v8_skip_cudnn_json OBJECT TestCudnnShimV8SkipCudnnJson.cpp)

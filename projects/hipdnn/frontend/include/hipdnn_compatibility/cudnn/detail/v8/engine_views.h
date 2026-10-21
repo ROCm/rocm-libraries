@@ -433,9 +433,8 @@ public:
     }
 
     // The finalized hipDNN ENGINECFG. Without knob settings this is the graph's
-    // shared default config; with them it is built once, at
-    // KnobConfigBuild::NOW or on first use, because the backend accepts knobs
-    // only before its config is finalized.
+    // shared default config; with them it is built once, on the first call,
+    // because the backend accepts knobs only before its config is finalized.
     hipdnnBackendDescriptor_t hipdnnEngineConfig() const
     {
         if(isLoaded())
@@ -465,24 +464,15 @@ private:
     mutable ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _knobConfig;
 };
 
-// When makeConfigRecord builds the knob ENGINECFG: NOW reports a knob-config
-// failure from the config build (builders); ON_FIRST_USE defers it to the
-// first hipdnnEngineConfig() call (the C API, where plan finalize is first).
-enum class KnobConfigBuild
-{
-    NOW,
-    ON_FIRST_USE,
-};
-
 // Validates `requested` against the engine's visible knobs, in order. A -1
 // means "unset" unless the knob accepts -1: once any knob is set, upstream's
 // builder sends -1 for every other knob of the engine. `choicesLabel` prefixes
-// every knob message.
+// every knob message. The knob ENGINECFG is built by the first
+// hipdnnEngineConfig(), not here.
 inline std::shared_ptr<const ConfigRecord>
     makeConfigRecord(std::shared_ptr<const EngineRecord> engine,
                      KnobChoices requested,
-                     std::string_view choicesLabel,
-                     KnobConfigBuild build)
+                     std::string_view choicesLabel)
 {
     if(engine->isLoaded())
     {
@@ -536,13 +526,8 @@ inline std::shared_ptr<const ConfigRecord>
         }
         choices.emplace_back(type, value);
     }
-    auto config = std::make_shared<const ConfigRecord>(
+    return std::make_shared<const ConfigRecord>(
         std::move(engine), std::move(requested), std::move(choices), std::move(settings));
-    if(build == KnobConfigBuild::NOW)
-    {
-        static_cast<void>(config->hipdnnEngineConfig());
-    }
-    return config;
 }
 
 inline std::shared_ptr<const ConfigRecord>

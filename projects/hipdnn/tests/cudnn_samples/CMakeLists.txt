@@ -503,8 +503,11 @@ endforeach()
 
 file(MAKE_DIRECTORY "${REPORT_DIR}/legacy")
 add_executable(tu_legacy_samples ${_legacy_tu_paths})
+# legacy/overlay first: its cudnn.h stubs the raw descriptor C API the shim does not provide,
+# which only test_list.cpp's "Tensor creation comparison" calls.
 target_include_directories(tu_legacy_samples PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/overlay" "${LEGACY_STAGE}")
+    "${CMAKE_CURRENT_SOURCE_DIR}/legacy/overlay" "${CMAKE_CURRENT_SOURCE_DIR}/overlay"
+    "${LEGACY_STAGE}")
 target_link_libraries(tu_legacy_samples PRIVATE hipdnn_frontend Catch2::Catch2WithMain)
 add_test(NAME compile_legacy_samples
          COMMAND ${Python3_EXECUTABLE} "${PROBE}"

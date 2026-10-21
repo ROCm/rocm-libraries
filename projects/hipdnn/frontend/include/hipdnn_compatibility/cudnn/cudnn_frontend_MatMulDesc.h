@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_MatMulDesc.h
- * @brief cuDNN v8 `MatMulDesc_v8` / `MatMulDescBuilder_v8` over the shim's backend C API.
+ * @brief cuDNN v8 `MatMulDesc_v8` / `MatMulDescBuilder_v8`, built as a shim matmul record.
  */
 
 #pragma once
@@ -24,6 +24,8 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
@@ -94,71 +96,34 @@ public:
 
     MatMulDesc_v8&& build()
     {
-        auto status
-            = m_matMulDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_MATMUL_DESCRIPTOR);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_matMulDesc, status, "CUDNN_BACKEND_MATMUL_DESCRIPTOR: cudnnCreate Failed");
-            return std::move(m_matMulDesc);
-        }
+        static const detail::v8::MatmulLabels s_labels{
+            "MatMulDescBuilder: compute type",
+            "MatMulDescBuilder: padding value",
+        };
+        auto outcome = detail::v8::guarded([&] {
+            m_matMulDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_MATMUL_DESCRIPTOR);
 
-        cudnnDataType_t cudnn_data_type;
-        status = detail::convert_to_cudnn_type(m_matMulDesc.compute_type, cudnn_data_type);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_matMulDesc,
-                status,
-                "CUDNN_BACKEND_MATMUL_DESCRIPTOR: SetAttribute CUDNN_ATTR_MATMUL_COMP_TYPE Failed");
-            return std::move(m_matMulDesc);
-        }
-        status = detail::set_attribute(m_matMulDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_MATMUL_COMP_TYPE,
-                                       CUDNN_TYPE_DATA_TYPE,
-                                       1,
-                                       &cudnn_data_type);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_matMulDesc,
-                status,
-                "CUDNN_BACKEND_MATMUL_DESCRIPTOR: SetAttribute CUDNN_ATTR_MATMUL_COMP_TYPE Failed");
-            return std::move(m_matMulDesc);
-        }
-
-#if(CUDNN_VERSION >= 8900)
-        NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR(
-            8900,
-            m_matMulDesc,
-            "CUDNN_BACKEND_MATMUL_DESCRIPTOR: SetAttribute CUDNN_ATTR_MATMUL_PADDING_VALUE "
-            "requires cudnn 8.9.0");
-        if(m_matMulDesc.isPadded)
-        {
-            status = detail::set_attribute(m_matMulDesc.pointer->get_backend_descriptor(),
-                                           CUDNN_ATTR_MATMUL_PADDING_VALUE,
-                                           CUDNN_TYPE_DOUBLE,
-                                           1,
-                                           &m_matMulDesc.paddingValue);
+            cudnnDataType_t cudnn_data_type;
+            auto status = detail::convert_to_cudnn_type(m_matMulDesc.compute_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                set_error_and_throw_exception(&m_matMulDesc,
-                                              status,
-                                              "CUDNN_BACKEND_MATMUL_DESCRIPTOR: SetAttribute "
-                                              "CUDNN_ATTR_MATMUL_PADDING_VALUE Failed");
-                return std::move(m_matMulDesc);
+                throw detail::v8::ShimError(
+                    status, "MatMulDescBuilder: compute type is not set or not a valid DataType_t");
             }
-        }
-#endif
 
-        status = detail::finalize(m_matMulDesc.pointer->get_backend_descriptor());
-        if(status != CUDNN_STATUS_SUCCESS)
+            m_matMulDesc.pointer = detail::v8::makeManaged(
+                CUDNN_BACKEND_MATMUL_DESCRIPTOR,
+                detail::v8::makeMatmulRecord({cudnn_data_type, m_matMulDesc.isPadded}, s_labels));
+        });
+        if(!outcome)
         {
-            set_error_and_throw_exception(
-                &m_matMulDesc, status, "CUDNN_BACKEND_MATMUL_DESCRIPTOR: cudnnFinalize Failed");
+            set_error_and_throw_exception(&m_matMulDesc, outcome.status, outcome.message.c_str());
             return std::move(m_matMulDesc);
         }
 
+        // A retry after a failed build() must not keep that failure's status.
+        m_matMulDesc.set_status(CUDNN_STATUS_SUCCESS);
+        m_matMulDesc.set_error("");
         CUDNN_FE_LOG_LABEL_ENDL(m_matMulDesc);
         return std::move(m_matMulDesc);
     }

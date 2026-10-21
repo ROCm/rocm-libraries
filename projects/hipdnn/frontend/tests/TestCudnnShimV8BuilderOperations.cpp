@@ -59,9 +59,6 @@ struct Slot
 {
     const char* name;
     Setter set;
-    // False when the builder dereferences the slot before validating, so
-    // leaving it unset cannot be observed.
-    bool droppable = true;
 };
 
 // One operation kind (and mode class or norm mode/phase): what its builder
@@ -474,8 +471,8 @@ const std::vector<OpCase>& TestCudnnShimV8BuilderOperations::cases()
          nullptr,
          {pointwiseSlot(PointwiseMode_t::BINARY_SELECT),
           tensorSlot("X", &Builder::setxDesc, 1, X_DIMS),
-          {"B", [](Builder& builder) { builder.setbDesc(tensor(2, X_DIMS)); }, false},
-          {"T", [](Builder& builder) { builder.settDesc(tensor(3, X_DIMS)); }, false},
+          tensorSlot("B", &Builder::setbDesc, 2, X_DIMS),
+          tensorSlot("T", &Builder::settDesc, 3, X_DIMS),
           tensorSlot("Y", &Builder::setyDesc, 4, X_DIMS)},
          {},
          nullptr,
@@ -691,10 +688,6 @@ TEST_P(TestCudnnShimV8BuilderOperationKinds, MissingRequiredSlotIsBadParam)
     const OpCase& opCase = GetParam();
     for(const Slot& slot : opCase.required)
     {
-        if(!slot.droppable)
-        {
-            continue;
-        }
         SCOPED_TRACE(slot.name);
         expectStatus(failureOfCase(opCase, slot.name, nullptr), CUDNN_STATUS_BAD_PARAM);
     }
@@ -759,6 +752,85 @@ TEST_F(TestCudnnShimV8BuilderOperations, UnloweredKindsNotSupported)
     {
         SCOPED_TRACE(kind);
         expectStatus(buildFailure(*builder), CUDNN_STATUS_NOT_SUPPORTED);
+    }
+}
+
+// Upstream checks and sends an unlowerable kind's slots before the kind itself is
+// rejected, so a missing or non-tensor slot is still BAD_PARAM.
+TEST_F(TestCudnnShimV8BuilderOperations, UnloweredKindsCheckSlotsFirst)
+{
+    const Dims channel = {1, 4, 1, 1};
+    const v8fe::RngDesc rngDesc = v8fe::RngDescBuilder()
+                                      .setRngDistribution(CUDNN_RNG_DISTRIBUTION_BERNOULLI)
+                                      .setBernoulliDistProbability(0.5)
+                                      .build();
+    const v8fe::ManagedOpaqueDescriptor notTensor = convolution2d().get_desc();
+    struct MissingSlot
+    {
+        const char* label;
+        DescriptorType_t kind;
+        Setter set;
+    };
+    const std::vector<MissingSlot> cases = {
+        {"GenStats without sum",
+         DescriptorType_t::OPERATION_GEN_STATS_DESCRIPTOR,
+         [&channel](Builder& b) {
+             b.setxDesc(tensor(1, X_DIMS)).setSqSumDesc(tensor(3, channel));
+         }},
+        {"GenStats with a non-tensor X",
+         DescriptorType_t::OPERATION_GEN_STATS_DESCRIPTOR,
+         [&channel, &notTensor](Builder& b) {
+             b.setxDesc(notTensor).setSumDesc(tensor(2, channel)).setSqSumDesc(tensor(3, channel));
+         }},
+        {"BnBackwardWeights without DY",
+         DescriptorType_t::OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR,
+         [&channel](Builder& b) {
+             b.setxDesc(tensor(1, X_DIMS))
+                 .setSavedMeanAndInvVar(tensor(3, channel), tensor(4, channel));
+         }},
+        {"Rng without Y",
+         DescriptorType_t::OPERATION_RNG_DESCRIPTOR,
+         [&rngDesc](Builder& b) { b.setRngDesc(rngDesc).setSeed(7); }},
+        {"Rng without descriptor",
+         DescriptorType_t::OPERATION_RNG_DESCRIPTOR,
+         [](Builder& b) { b.setyDesc(tensor(1, X_DIMS)).setSeed(7); }},
+        {"Reshape without Y",
+         DescriptorType_t::OPERATION_RESHAPE_DESCRIPTOR,
+         [](Builder& b) { b.setxDesc(tensor(1, X_DIMS)); }},
+        {"PagedCacheLoad without sequence",
+         DescriptorType_t::OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR,
+         [](Builder& b) {
+             b.setcontainerDesc(tensor(1, {8, 2, 16, 64}))
+                 .setpageTableDesc(tensor(2, {2, 1, 4, 1}, false, DataType_t::INT32))
+                 .setyDesc(tensor(4, {2, 2, 64, 64}));
+         }},
+    };
+    for(const MissingSlot& missing : cases)
+    {
+        SCOPED_TRACE(missing.label);
+        Builder builder(missing.kind);
+        missing.set(builder);
+        expectStatus(buildFailure(builder), CUDNN_STATUS_BAD_PARAM);
+    }
+}
+
+// A descriptor without a tensor record in a slot the builder sends is a caller
+// error, even where a built tensor would be dropped (index) or NOT_SUPPORTED.
+TEST_F(TestCudnnShimV8BuilderOperations, NonTensorInSentSlotIsBadParam)
+{
+    const v8fe::ManagedOpaqueDescriptor notTensor = convolution2d().get_desc();
+    const v8fe::ManagedOpaqueDescriptor unbuilt
+        = v8fe::make_shared_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
+    for(const v8fe::ManagedOpaqueDescriptor& desc : {notTensor, unbuilt})
+    {
+        SCOPED_TRACE(desc == notTensor ? "convolution descriptor" : "unbuilt tensor");
+        expectStatus(failureWith("ResampleBackward", [&desc](Builder& b) { b.setxDesc(desc); }),
+                     CUDNN_STATUS_BAD_PARAM);
+        expectStatus(
+            failureWith("PointwiseActivationBackward", [&desc](Builder& b) { b.setdyDesc(desc); }),
+            CUDNN_STATUS_BAD_PARAM);
+        expectStatus(failureWith("Matmul", [&desc](Builder& b) { b.setaMatDesc(desc); }),
+                     CUDNN_STATUS_BAD_PARAM);
     }
 }
 

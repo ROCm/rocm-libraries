@@ -361,9 +361,15 @@
     },
     "cases": {
       "Tensor creation comparison": {
-        "tier": "RUN_CLEAN",
-        "reason": "no engine involved; the builder catch only prints (test_list.cpp:45-55), hence the forbid",
-        "forbid": "Exception in tensor creation"
+        "tier": "XFAIL_RUN",
+        "reason": "the builder half runs clean (its catch only prints, test_list.cpp:45-55, hence the forbid); the shim has no raw descriptor C API, so the raw-backend half (test_list.cpp:60-87) runs against legacy/overlay/cudnn.h, whose stubs return NOT_SUPPORTED, and its first REQUIRE fails",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "status == CUDNN_STATUS_SUCCESS",
+            "forbid": "Exception in tensor creation"
+          }
+        ]
       },
       "Use global(index) for execution": {
         "tier": "XFAIL_RUN",
@@ -371,7 +377,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_ATTR_ENGINE_GLOBAL_INDEX = 0 is outside \\[0, 0\\)"
+            "anchor": "EngineBuilder: global engine index = 0 is outside \\[0, 0\\)"
           }
         ]
       },
@@ -411,7 +417,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2 = 0.5 is not supported"
+            "anchor": "OperationBuilder: alpha2 = 0.5 is not supported"
           }
         ]
       },
@@ -432,7 +438,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2 = 0.5 is not supported"
+            "anchor": "OperationBuilder: alpha2 = 0.5 is not supported"
           }
         ]
       },
@@ -591,33 +597,33 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_ATTR_ENGINE_GLOBAL_INDEX = 20 is outside \\[0, 0\\)"
+            "anchor": "EngineBuilder: global engine index = 20 is outside \\[0, 0\\)"
           }
         ]
       },
       "DP4A execution with cudnnFindPlan": {
         "tier": "XFAIL_RUN",
-        "reason": "the INT8 tensors set vector count 4 (conv_sample.cpp:1193), NOT_SUPPORTED at tensor finalize; the catch does CHECK(false) (conv_sample.cpp:1271); KNOWN_DIVERGENCES Tensors: vectorized tensors",
+        "reason": "the INT8 tensors set vector count 4 (conv_sample.cpp:1193), NOT_SUPPORTED at tensor build; the catch does CHECK(false) (conv_sample.cpp:1271); KNOWN_DIVERGENCES Tensors: vectorized tensors",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_ATTR_TENSOR_VECTOR_COUNT other than 1 is not supported"
+            "anchor": "TensorBuilder: vector count other than 1 is not supported"
           }
         ]
       },
       "IMMA execution with manual autotuning": {
         "tier": "XFAIL_RUN",
-        "reason": "vector count 32 (conv_sample.cpp:1309) is NOT_SUPPORTED at tensor finalize, before the INT8x32 reorder type (:1325) or the reorder helper is reached; CHECK(false) (conv_sample.cpp:1442); KNOWN_DIVERGENCES Tensors: vectorized tensors, cudnnReorderFilterAndBiasInt8x32",
+        "reason": "vector count 32 (conv_sample.cpp:1309) is NOT_SUPPORTED at tensor build, before the INT8x32 reorder type (:1325) or the reorder helper is reached; CHECK(false) (conv_sample.cpp:1442); KNOWN_DIVERGENCES Tensors: vectorized tensors, cudnnReorderFilterAndBiasInt8x32",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_ATTR_TENSOR_VECTOR_COUNT other than 1 is not supported"
+            "anchor": "TensorBuilder: vector count other than 1 is not supported"
           }
         ]
       },
       "Use Plan cache for rerunning the same convolution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0), so call 1 throws and call 2's REQUIRE(false == expect_in_cache) fails (conv_sample.cpp:338). With engines it still fails: the cached plan runs on a new handle; KNOWN_DIVERGENCES cudnnBackendExecute handle",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0), so call 1 throws and call 2's REQUIRE(false == expect_in_cache) fails (conv_sample.cpp:338). With engines the cached plan runs on the new handle, since cudnnBackendExecute passes straight through to hipDNN; KNOWN_DIVERGENCES cudnnBackendExecute handle",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
@@ -631,7 +637,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR is not supported"
+            "anchor": "OperationBuilder: gen stats operations are not supported"
           }
         ]
       },
@@ -661,7 +667,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR is not supported"
+            "anchor": "OperationBuilder: gen stats operations are not supported"
           }
         ]
       },
@@ -671,7 +677,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_BACKEND_OPERATION_BN_FINALIZE_STATISTICS_DESCRIPTOR is not supported"
+            "anchor": "OperationBuilder: BN finalize statistics operations are not supported"
           }
         ]
       },
@@ -732,7 +738,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR is not supported"
+            "anchor": "OperationBuilder: BN backward weights operations are not supported"
           }
         ]
       },
@@ -742,7 +748,7 @@
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
-            "anchor": "NORM_(FWD|BWD)_PEER_STAT_DESCS is not supported"
+            "anchor": "OperationBuilder: peer statistics tensors is not supported"
           }
         ]
       }

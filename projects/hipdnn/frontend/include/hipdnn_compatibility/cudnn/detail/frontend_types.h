@@ -13,7 +13,7 @@
  * @file frontend_types.h
  * @brief cuDNN FE enums, knob types, and utility functions for the shim.
  *
- * C-API-free leaf included by the `detail/backend` headers and re-exported by
+ * C-API-free leaf included by the `detail/v8` core and re-exported by
  * `cudnn_frontend_utils.h`.
  */
 

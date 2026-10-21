@@ -6,6 +6,7 @@
 // whose execute is a no-op and whose plans serialize. Engine queries need hipDNN
 // heuristics, which query the device, so these tests skip on device-less hosts.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -163,7 +164,8 @@ class IntegrationCudnnShimV8BuilderExecuteForeignHandle
     : public IntegrationCudnnShimV8BuilderExecute
 {
 protected:
-    static constexpr cudnnStatus_t K_FOREIGN_HANDLE_STATUS = CUDNN_STATUS_BAD_PARAM;
+    // cudnnBackendExecute passes straight through, so hipDNN runs the plan on the given handle.
+    static constexpr cudnnStatus_t K_FOREIGN_HANDLE_STATUS = CUDNN_STATUS_SUCCESS;
 
     void SetUp() override
     {
@@ -184,6 +186,22 @@ protected:
         IntegrationCudnnShimV8BuilderExecute::TearDown();
     }
 
+    // The good test plugin's execute is a no-op, so its correct output is the y buffer as the
+    // caller left it: a foreign-handle run must neither fail nor touch the tensors.
+    static void fill(const DeviceBuffer& buffer, int byte)
+    {
+        ASSERT_EQ(hipMemset(buffer.get(), byte, K_TENSOR_BYTES), hipSuccess);
+    }
+
+    static bool holds(const DeviceBuffer& buffer, unsigned char byte)
+    {
+        std::vector<unsigned char> host(K_TENSOR_BYTES);
+        EXPECT_EQ(hipMemcpy(host.data(), buffer.get(), host.size(), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        return std::all_of(
+            host.begin(), host.end(), [byte](unsigned char value) { return value == byte; });
+    }
+
     cudnnHandle_t _otherHandle = nullptr;
 };
 
@@ -192,8 +210,13 @@ TEST_F(IntegrationCudnnShimV8BuilderExecuteForeignHandle, BuiltPlan)
     const v8fe::ExecutionPlan_v8 plan = heuristicPlan();
     const Buffers buffers(plan.getWorkspaceSize());
     const v8fe::VariantPack_v8 pack = buffers.pack();
+    fill(buffers.x, 0x11);
+    fill(buffers.y, 0x5A);
 
-    EXPECT_EQ(execute(_otherHandle, plan, pack), K_FOREIGN_HANDLE_STATUS);
+    EXPECT_EQ(execute(_otherHandle, plan, pack), K_FOREIGN_HANDLE_STATUS) << lastError();
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_TRUE(holds(buffers.x, 0x11));
+    EXPECT_TRUE(holds(buffers.y, 0x5A));
     EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_SUCCESS) << lastError();
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
@@ -205,8 +228,13 @@ TEST_F(IntegrationCudnnShimV8BuilderExecuteForeignHandle, LoadedPlan)
         = v8fe::ExecutionPlanBuilder_v8().setHandle(_otherHandle).loadFromJson(json);
     const Buffers buffers(loaded.getWorkspaceSize());
     const v8fe::VariantPack_v8 pack = buffers.pack();
+    fill(buffers.x, 0x11);
+    fill(buffers.y, 0x5A);
 
-    EXPECT_EQ(execute(_handle, loaded, pack), K_FOREIGN_HANDLE_STATUS);
+    EXPECT_EQ(execute(_handle, loaded, pack), K_FOREIGN_HANDLE_STATUS) << lastError();
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_TRUE(holds(buffers.x, 0x11));
+    EXPECT_TRUE(holds(buffers.y, 0x5A));
     EXPECT_EQ(execute(_otherHandle, loaded, pack), CUDNN_STATUS_SUCCESS) << lastError();
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }

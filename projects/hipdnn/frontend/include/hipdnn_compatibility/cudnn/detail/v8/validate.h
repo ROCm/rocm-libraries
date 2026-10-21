@@ -32,12 +32,11 @@
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 
 // Record factories: every validation and normalization rule of the cuDNN v8
-// tensor, parameter and operation descriptors, including the ones the C API
-// applies at SET time (enum range, array caps, zero denominators), so builders
-// that call the core directly get them too. Inputs are plain values (unset is
-// std::nullopt, a null pointer or false); labels name each input in messages
-// and are supplied by the caller. Each factory runs its checks in HEAD's
-// finalize order, so the first failing rule decides the status.
+// tensor, parameter and operation descriptors (enum range, array caps, zero
+// denominators included). Inputs are plain values (unset is std::nullopt, a
+// null pointer or false); labels name each input in messages and are supplied
+// by the caller. Each factory runs its checks in a fixed order, so the first
+// failing rule decides the status.
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
@@ -76,7 +75,7 @@ inline TensorPtr requireTensor(const TensorPtr& tensor, std::string_view label)
     return tensor;
 }
 
-// Same rule and text as the C API's SET-time count check.
+// cuDNN's per-attribute element-count cap.
 template <typename T>
 void requireMaxCount(const std::vector<T>& values, std::size_t maxCount, std::string_view label)
 {
@@ -139,8 +138,33 @@ constexpr int lastEnumerator(cudnnBackendTensorReordering_t /*value*/) noexcept
     return CUDNN_TENSOR_REORDERING_F8_128x4;
 }
 
-// A value outside the declared enumerators is a caller error (BAD_PARAM, as
-// at SET), not an unsupported value.
+constexpr int lastEnumerator(cudnnNanPropagation_t /*value*/) noexcept
+{
+    return CUDNN_PROPAGATE_NAN;
+}
+
+constexpr int lastEnumerator(cudnnGenStatsMode_t /*value*/) noexcept
+{
+    return CUDNN_GENSTATS_SUM_SQSUM;
+}
+
+constexpr int lastEnumerator(cudnnBnFinalizeStatsMode_t /*value*/) noexcept
+{
+    return CUDNN_BN_FINALIZE_STATISTICS_TRAINING;
+}
+
+constexpr int lastEnumerator(cudnnBackendHeurMode_t /*value*/) noexcept
+{
+    return CUDNN_HEUR_MODES_COUNT - 1;
+}
+
+constexpr int lastEnumerator(cudnnBackendKnobType_t /*value*/) noexcept
+{
+    return CUDNN_KNOB_TYPE_COUNTS - 1;
+}
+
+// A value outside the declared enumerators is a caller error (BAD_PARAM), not
+// an unsupported value.
 template <typename CEnum>
 CEnum requireEnumerator(CEnum value, std::string_view label)
 {
@@ -197,7 +221,7 @@ inline std::int64_t requireSpatialDims(std::optional<std::int64_t> value, std::s
     return spatialDims;
 }
 
-// The count must match the spatial dimension count and stay within the C API's
+// The count must match the spatial dimension count and stay within cuDNN's
 // CUDNN_DIM_MAX array cap.
 template <typename T>
 void requireSpatialCount(const std::vector<T>& values,

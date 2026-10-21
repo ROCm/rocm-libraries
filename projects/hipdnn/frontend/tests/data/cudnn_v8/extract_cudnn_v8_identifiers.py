@@ -70,6 +70,11 @@ EXCLUDED = {
     "cudnnCausalConv1dBackward": "causal-conv1d C API, out of scope",
     "cudnnCausalConv1dActivation_t": "causal-conv1d C API, out of scope",
     "cudnnGetExecutionPlanWorkspaceSize": "v1-only entry point, out of scope",
+    "cudnnBackendCreateDescriptor": "raw descriptor C API removed; only cudnnBackendExecute stays",
+    "cudnnBackendDestroyDescriptor": "raw descriptor C API removed; only cudnnBackendExecute stays",
+    "cudnnBackendSetAttribute": "raw descriptor C API removed; only cudnnBackendExecute stays",
+    "cudnnBackendGetAttribute": "raw descriptor C API removed; only cudnnBackendExecute stays",
+    "cudnnBackendFinalize": "raw descriptor C API removed; only cudnnBackendExecute stays",
 }
 
 # The v9 shim surface: emitted under ALREADY_DECLARED so the test still checks
@@ -599,8 +604,9 @@ static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-/// @brief Opaque backend descriptor. Mirrors NVIDIA `cudnnBackendDescriptor_t`.
-typedef void* cudnnBackendDescriptor_t;
+/// @brief Backend descriptor, aliased to the hipDNN descriptor type so plans and variant packs
+/// pass straight to hipDNN.
+using cudnnBackendDescriptor_t = ::hipdnnBackendDescriptor_t;
 
 /// @brief Rational number attribute value. Mirrors NVIDIA `cudnnFraction_t`.
 typedef struct

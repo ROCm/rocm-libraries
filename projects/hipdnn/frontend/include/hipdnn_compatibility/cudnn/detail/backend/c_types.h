@@ -34,8 +34,9 @@ static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-/// @brief Opaque backend descriptor. Mirrors NVIDIA `cudnnBackendDescriptor_t`.
-typedef void* cudnnBackendDescriptor_t;
+/// @brief Backend descriptor, aliased to the hipDNN descriptor type so plans and variant packs
+/// pass straight to hipDNN.
+using cudnnBackendDescriptor_t = ::hipdnnBackendDescriptor_t;
 
 /// @brief Rational number attribute value. Mirrors NVIDIA `cudnnFraction_t`.
 typedef struct

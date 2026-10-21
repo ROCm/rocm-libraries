@@ -11,87 +11,53 @@
 
 /**
  * @file cudnn_graph.h
- * @brief cuDNN backend descriptor C API for the hipDNN cuDNN-compatibility shim.
+ * @brief cuDNN backend C types and plan execution for the hipDNN cuDNN-compatibility shim.
  *
- * Header-only replacement for the backend-descriptor half of NVIDIA's
- * `<cudnn_graph.h>`. Descriptors live in the shim; hipDNN is reached only when a
- * graph is lowered. Includable standalone.
+ * Header-only replacement for the parts of NVIDIA's `<cudnn_graph.h>` the shim keeps:
+ * the backend C types, `cudnnBackendExecute` and `cudnnGetLastErrorString`, both of
+ * which pass straight through to hipDNN. Includable standalone.
  */
 
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/backend_api.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/status_translation.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
 extern "C" {
-
-/// @brief Create a backend descriptor. Mirrors NVIDIA `cudnnBackendCreateDescriptor`.
-inline cudnnStatus_t cudnnBackendCreateDescriptor(cudnnBackendDescriptorType_t descriptorType,
-                                                  cudnnBackendDescriptor_t* descriptor)
-{
-    return hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::createDescriptor(
-        descriptorType, descriptor);
-}
-
-/// @brief Destroy a backend descriptor. Mirrors NVIDIA `cudnnBackendDestroyDescriptor`.
-inline cudnnStatus_t cudnnBackendDestroyDescriptor(cudnnBackendDescriptor_t descriptor)
-{
-    return hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::destroyDescriptor(
-        descriptor);
-}
-
-/// @brief Set a descriptor attribute. Mirrors NVIDIA `cudnnBackendSetAttribute`.
-inline cudnnStatus_t cudnnBackendSetAttribute(cudnnBackendDescriptor_t descriptor,
-                                              cudnnBackendAttributeName_t attributeName,
-                                              cudnnBackendAttributeType_t attributeType,
-                                              int64_t elementCount,
-                                              const void* arrayOfElements)
-{
-    return hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::setAttribute(
-        descriptor, attributeName, attributeType, elementCount, arrayOfElements);
-}
-
-/// @brief Get a descriptor attribute. Mirrors NVIDIA `cudnnBackendGetAttribute`.
-inline cudnnStatus_t cudnnBackendGetAttribute(cudnnBackendDescriptor_t descriptor,
-                                              cudnnBackendAttributeName_t attributeName,
-                                              cudnnBackendAttributeType_t attributeType,
-                                              int64_t requestedElementCount,
-                                              int64_t* elementCount,
-                                              void* arrayOfElements)
-{
-    return hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::getAttribute(
-        descriptor,
-        attributeName,
-        attributeType,
-        requestedElementCount,
-        elementCount,
-        arrayOfElements);
-}
-
-/// @brief Finalize a backend descriptor. Mirrors NVIDIA `cudnnBackendFinalize`.
-inline cudnnStatus_t cudnnBackendFinalize(cudnnBackendDescriptor_t descriptor)
-{
-    return hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::finalize(descriptor);
-}
 
 /// @brief Execute an execution plan. Mirrors NVIDIA `cudnnBackendExecute`.
 inline cudnnStatus_t cudnnBackendExecute(cudnnHandle_t handle,
                                          cudnnBackendDescriptor_t executionPlan,
                                          cudnnBackendDescriptor_t variantPack)
 {
-    return hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::execute(
-        handle, executionPlan, variantPack);
+    namespace shim = hipdnn_frontend::compatibility::cudnn_frontend::detail;
+    cudnnStatus_t status = CUDNN_STATUS_SUCCESS;
+    const shim::v8::Outcome outcome = shim::v8::guarded([&] {
+        status = shim::toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendExecute(
+            handle, executionPlan, variantPack));
+    });
+    return outcome ? status : outcome.status;
 }
 
-/// @brief Copy and clear this thread's last error. Mirrors NVIDIA `cudnnGetLastErrorString`.
+/// @brief Copy and clear this thread's last hipDNN error. Mirrors NVIDIA `cudnnGetLastErrorString`.
 inline void cudnnGetLastErrorString(char* message, size_t maxSize)
 {
-    hipdnn_frontend::compatibility::cudnn_frontend::detail::backend::getLastErrorString(message,
-                                                                                        maxSize);
+    if(message == nullptr || maxSize == 0)
+    {
+        return;
+    }
+    message[0] = '\0';
+    const auto outcome = hipdnn_frontend::compatibility::cudnn_frontend::detail::v8::guarded(
+        [&] { hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(message, maxSize); });
+    if(!outcome)
+    {
+        message[0] = '\0';
+    }
 }
 
 } // extern "C"

@@ -199,6 +199,18 @@ protected:
         _failingConfigIds = std::move(failingConfigIds);
     }
 
+    // Installed engine IDs whose config finalizes, without repeats: the graph's engine space.
+    std::vector<std::int64_t> enumerableEngineIds() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        std::set<std::int64_t> ids(_rankedIds.begin(), _rankedIds.end());
+        for(const std::int64_t failing : _failingConfigIds)
+        {
+            ids.erase(failing);
+        }
+        return {ids.begin(), ids.end()};
+    }
+
     // ENGINE_KNOB_INFO of the engine `engineId` yields one KNOB_INFO per knob.
     void installEngineKnobs(std::int64_t engineId, std::vector<MockKnob> knobs)
     {

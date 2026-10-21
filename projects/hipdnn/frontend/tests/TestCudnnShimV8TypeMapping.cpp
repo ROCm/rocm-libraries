@@ -1,10 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Exhaustive by-name checks of the cuDNN C enum <-> shim FE enum tables and the
-// SET-time range check for enum-valued attributes. The C side is enumerated
-// from cudnn_v8_enum_values.inc, so a new C enumerator without a mapping
-// decision fails here; the FE lists are guarded by -Wswitch-enum.
+// Exhaustive by-name checks of the cuDNN C enum <-> shim FE enum tables. The C
+// side is enumerated from cudnn_v8_enum_values.inc, so a new C enumerator without
+// a mapping decision fails here; the FE lists are guarded by -Wswitch-enum.
 #include <hipdnn_compatibility/cudnn/cudnn_graph.h>
 #include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 
@@ -12,9 +11,6 @@
 
 #include <array>
 #include <cstdint>
-#include <limits>
-#include <map>
-#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -26,7 +22,6 @@
 namespace
 {
 
-namespace backend = hipdnn_frontend::compatibility::cudnn_frontend::detail::backend;
 namespace shim = hipdnn_frontend::compatibility::cudnn_frontend::detail;
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
@@ -637,23 +632,6 @@ public:
     }
 };
 
-std::string lastError()
-{
-    std::array<char, 1024> message{};
-    cudnnGetLastErrorString(message.data(), message.size());
-    return message.data();
-}
-
-class ComputingDescriptor final : public backend::Descriptor
-{
-public:
-    using Descriptor::Descriptor;
-    using Descriptor::storeComputed;
-
-protected:
-    void finalizeImpl() override {}
-};
-
 static_assert(shim::toFe(CUDNN_DATA_HALF) == fe::DataType_t::HALF);
 static_assert(shim::toCudnn(fe::PointwiseMode_t::RELU_FWD) == CUDNN_POINTWISE_RELU_FWD);
 static_assert(!shim::toCudnn(fe::DataType_t::NOT_SET).has_value());
@@ -687,133 +665,4 @@ TEST(TestCudnnShimV8TypeMapping, FeEnumeratorsMapBackToSameNamedCEnumerators)
         EXPECT_EQ(checker.usedExceptions.count(exception.enumerator), 1u)
             << "stale exception " << exception.enumerator;
     }
-}
-
-TEST(TestCudnnShimV8TypeMapping, ValueCountMatchesDeclaredEnumerators)
-{
-    const std::map<cudnnBackendAttributeType_t, std::string_view> enumTypes = {
-        {CUDNN_TYPE_BEHAVIOR_NOTE, "cudnnBackendBehaviorNote_t"},
-        {CUDNN_TYPE_BN_FINALIZE_STATS_MODE, "cudnnBnFinalizeStatsMode_t"},
-        {CUDNN_TYPE_CONVOLUTION_MODE, "cudnnConvolutionMode_t"},
-        {CUDNN_TYPE_DATA_TYPE, "cudnnDataType_t"},
-        {CUDNN_TYPE_GENSTATS_MODE, "cudnnGenStatsMode_t"},
-        {CUDNN_TYPE_HEUR_MODE, "cudnnBackendHeurMode_t"},
-        {CUDNN_TYPE_KNOB_TYPE, "cudnnBackendKnobType_t"},
-        {CUDNN_TYPE_NAN_PROPOGATION, "cudnnNanPropagation_t"},
-        {CUDNN_TYPE_NORM_FWD_PHASE, "cudnnBackendNormFwdPhase_t"},
-        {CUDNN_TYPE_NORM_MODE, "cudnnBackendNormMode_t"},
-        {CUDNN_TYPE_NUMERICAL_NOTE, "cudnnBackendNumericalNote_t"},
-        {CUDNN_TYPE_PADDING_MODE, "cudnnPaddingMode_t"},
-        {CUDNN_TYPE_POINTWISE_MODE, "cudnnPointwiseMode_t"},
-        {CUDNN_TYPE_REDUCTION_OPERATOR_TYPE, "cudnnReduceTensorOp_t"},
-        {CUDNN_TYPE_RESAMPLE_MODE, "cudnnResampleMode_t"},
-        {CUDNN_TYPE_RESHAPE_MODE, "cudnnBackendReshapeMode_t"},
-        {CUDNN_TYPE_RNG_DISTRIBUTION, "cudnnRngDistribution_t"},
-        {CUDNN_TYPE_TENSOR_REORDERING_MODE, "cudnnBackendTensorReordering_t"},
-    };
-    std::size_t attributeTypes = 0;
-    for(const CEnumerator& attributeType : cEnumerators())
-    {
-        if(attributeType.cType != "cudnnBackendAttributeType_t")
-        {
-            continue;
-        }
-        ++attributeTypes;
-        const auto type = static_cast<cudnnBackendAttributeType_t>(attributeType.value);
-        const auto found = enumTypes.find(type);
-        if(found == enumTypes.end())
-        {
-            EXPECT_FALSE(backend::enumValueCount(type).has_value()) << attributeType.name;
-            EXPECT_FALSE(backend::isEnumAttributeType(type)) << attributeType.name;
-            continue;
-        }
-        std::int32_t declared = 0;
-        for(const CEnumerator& enumerator : cEnumerators())
-        {
-            if(enumerator.cType == found->second && !isCountSentinel(enumerator.name))
-            {
-                ++declared;
-            }
-        }
-        EXPECT_GT(declared, 0) << found->second;
-        EXPECT_EQ(backend::enumValueCount(type), declared) << attributeType.name;
-        EXPECT_TRUE(backend::isEnumAttributeType(type)) << attributeType.name;
-    }
-    EXPECT_EQ(attributeTypes, static_cast<std::size_t>(CUDNN_TYPE_VOID_PTR) + 1);
-}
-
-TEST(TestCudnnShimV8TypeMapping, OutOfRangeSetIsBadParam)
-{
-    struct Usage
-    {
-        cudnnBackendAttributeName_t name;
-        cudnnBackendAttributeType_t type;
-    };
-    const std::vector<Usage> usages = {
-#define HIPDNN_CUDNN_SHIM_ATTR_USAGE(ATTR, TYPE) {ATTR, TYPE},
-#include "data/cudnn_v8/cudnn_v8_attribute_usage.inc"
-#undef HIPDNN_CUDNN_SHIM_ATTR_USAGE
-    };
-
-    std::set<cudnnBackendAttributeType_t> exercised;
-    for(const Usage& usage : usages)
-    {
-        const std::optional<std::int32_t> valueCount = backend::enumValueCount(usage.type);
-        const std::optional<backend::AttributeInfo> info = backend::attributeInfo(usage.name);
-        ASSERT_TRUE(info.has_value());
-        if(!valueCount || !info->settable)
-        {
-            continue;
-        }
-        exercised.insert(usage.type);
-        cudnnBackendDescriptor_t descriptor
-            = backend::makeHandle(std::make_shared<backend::StorageOnlyDescriptor>(info->owner));
-
-        for(const std::int32_t bad : {-1, *valueCount, std::numeric_limits<std::int32_t>::max()})
-        {
-            EXPECT_EQ(cudnnBackendSetAttribute(descriptor, usage.name, usage.type, 1, &bad),
-                      CUDNN_STATUS_BAD_PARAM)
-                << info->name << " = " << bad;
-            EXPECT_NE(lastError().find(info->name), std::string::npos) << info->name;
-        }
-        for(const std::int32_t good : {0, *valueCount - 1})
-        {
-            EXPECT_EQ(cudnnBackendSetAttribute(descriptor, usage.name, usage.type, 1, &good),
-                      CUDNN_STATUS_SUCCESS)
-                << info->name << " = " << good;
-        }
-        EXPECT_EQ(cudnnBackendDestroyDescriptor(descriptor), CUDNN_STATUS_SUCCESS);
-    }
-    // BEHAVIOR_NOTE and NUMERICAL_NOTE attributes are GET-only (see below).
-    EXPECT_EQ(exercised.size(), 16u);
-}
-
-TEST(TestCudnnShimV8TypeMapping, OutOfRangeComputedValueIsRejected)
-{
-    ComputingDescriptor engine(CUDNN_BACKEND_ENGINE_DESCRIPTOR);
-    const std::array<cudnnBackendNumericalNote_t, 2> numerical
-        = {CUDNN_NUMERICAL_NOTE_FFT, CUDNN_NUMERICAL_NOTE_TYPE_COUNT};
-    try
-    {
-        engine.storeComputed(CUDNN_ATTR_ENGINE_NUMERICAL_NOTE,
-                             CUDNN_TYPE_NUMERICAL_NOTE,
-                             static_cast<std::int64_t>(numerical.size()),
-                             numerical.data());
-        ADD_FAILURE() << "CUDNN_NUMERICAL_NOTE_TYPE_COUNT was stored";
-    }
-    catch(const backend::ShimError& error)
-    {
-        EXPECT_EQ(error.status(), CUDNN_STATUS_BAD_PARAM);
-        EXPECT_NE(std::string(error.what()).find("CUDNN_ATTR_ENGINE_NUMERICAL_NOTE[1]"),
-                  std::string::npos)
-            << error.what();
-    }
-
-    const std::array<cudnnBackendBehaviorNote_t, 2> behavior
-        = {CUDNN_BEHAVIOR_NOTE_CUBLASLT_DEPENDENCY,
-           CUDNN_BEHAVIOR_NOTE_SUPPORTS_CUDA_GRAPH_NATIVE_API};
-    EXPECT_NO_THROW(engine.storeComputed(CUDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
-                                         CUDNN_TYPE_BEHAVIOR_NOTE,
-                                         static_cast<std::int64_t>(behavior.size()),
-                                         behavior.data()));
 }

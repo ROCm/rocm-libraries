@@ -833,4 +833,27 @@ TEST_F(TestCudnnShimV8BuilderTensor, UndeclaredEnumValuesRejected)
     }
 }
 
+TEST_F(TestCudnnShimV8BuilderTensor, RetryAfterFailedPrecheckSucceeds)
+{
+    // As upstream: a precheck runs before the descriptor exists, so fixing the builder and calling
+    // build() again works.
+    v8fe::TensorBuilder builder;
+    builder.setDataType(DataType_t::FLOAT)
+        .setDim(4, X_DIMS.data())
+        .setStride(4, X_STRIDES.data())
+        .setId(1);
+    const BuildFailure failure = buildFailure(builder);
+    ASSERT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+
+    const BuildFailure retry = hipdnn_shim_test::failureOf([&builder] {
+        const v8fe::Tensor built = builder.setAlignment(16).build();
+        EXPECT_EQ(built.get_status(), CUDNN_STATUS_SUCCESS);
+        EXPECT_EQ(built.getAlignment(), 16);
+        EXPECT_NE(v8fe::detail::v8::recordOf<v8fe::detail::v8::TensorRecord>(built.get_desc()),
+                  nullptr);
+    });
+    EXPECT_FALSE(retry.thrown) << retry.what;
+}
+
 } // namespace

@@ -10,7 +10,7 @@
 /**
  * @file cudnn_frontend_Heuristics.h
  * @brief cuDNN v8 `EngineHeuristics_v8` / `EngineHeuristicsBuilder_v8` and `get_heuristics_list`
- *        over the shim's backend C API.
+ *        over the shim's v8 core.
  */
 
 #pragma once
@@ -21,7 +21,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -33,6 +32,9 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_OperationGraph.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/engine_views.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
@@ -59,66 +61,33 @@ public:
 
     ~EngineHeuristics_v8() = default;
 
+    // At most `count` results, in heuristic rank order; the same objects on every call.
     auto getEngineConfig(int64_t count = 1) -> std::vector<ManagedOpaqueDescriptor>&
     {
-        cudnnStatus_t status;
-        for(auto i = 0u; i < count; ++i)
-        {
-            ManagedOpaqueDescriptor engConfig = nullptr;
-            engConfig = make_shared_backend_pointer(CUDNN_BACKEND_ENGINECFG_DESCRIPTOR);
-            if(engConfig->is_good() == false)
-            {
-                set_error_and_throw_exception(
-                    this,
-                    engConfig->get_status(),
-                    "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: "
-                    "CUDNN_BACKEND_ENGINECFG_DESCRIPTOR cudnnCreate Failed");
-                return m_heuristic_results;
-            };
-            m_heuristic_results.emplace_back(engConfig);
-        }
-        std::vector<cudnnBackendDescriptor_t> heuristic_results_;
-        for(std::uint32_t i = 0; i < m_heuristic_results.size(); i++)
-        {
-            heuristic_results_.emplace_back(m_heuristic_results[i]->get_backend_descriptor());
-        }
-        int64_t result = -1;
-        status = detail::get_attribute(pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINEHEUR_RESULTS,
-                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       count,
-                                       &result,
-                                       heuristic_results_.data());
-
-        if(status != CUDNN_STATUS_SUCCESS)
+        if(!built)
         {
             set_error_and_throw_exception(this,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: GetAttribute "
-                                          "CUDNN_ATTR_ENGINEHEUR_RESULTS Failed");
-        };
-        m_heuristic_results.resize(static_cast<size_t>(result));
+                                          CUDNN_STATUS_NOT_INITIALIZED,
+                                          "EngineHeuristics: the heuristics are not built");
+            return m_heuristic_results;
+        }
+        const auto kept = static_cast<std::size_t>(
+            std::clamp<int64_t>(count, 0, static_cast<int64_t>(m_all_results.size())));
+        m_heuristic_results.assign(m_all_results.begin(),
+                                   m_all_results.begin() + static_cast<std::ptrdiff_t>(kept));
         return m_heuristic_results;
     }
 
     auto getEngineConfigCount(void) const -> int64_t
     {
-        cudnnStatus_t status;
-        int64_t count = -1;
-        status = detail::get_attribute(pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINEHEUR_RESULTS,
-                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &count,
-                                       nullptr);
-        if(status != CUDNN_STATUS_SUCCESS)
+        if(!built)
         {
             set_error_and_throw_exception(this,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: GetAttribute "
-                                          "CUDNN_ATTR_ENGINEHEUR_RESULTS Count Failed");
-        };
-        return count;
+                                          CUDNN_STATUS_NOT_INITIALIZED,
+                                          "EngineHeuristics: the heuristics are not built");
+            return -1;
+        }
+        return static_cast<int64_t>(m_all_results.size());
     }
 
 private:
@@ -132,12 +101,9 @@ private:
     std::vector<ManagedOpaqueDescriptor> m_heuristic_results;
     std::string opGraphTag;
     int32_t target_sm_count = -1;
-
-    static std::mutex& get_heur_b_mutex()
-    {
-        static std::mutex heur_b_mutex;
-        return heur_b_mutex;
-    }
+    // Every result of the build; m_heuristic_results is the prefix last requested.
+    std::vector<ManagedOpaqueDescriptor> m_all_results;
+    bool built = false;
 };
 
 class EngineHeuristicsBuilder_v8
@@ -183,106 +149,52 @@ public:
             set_error_and_throw_exception(
                 &m_heuristics,
                 CUDNN_STATUS_BAD_PARAM,
-                "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: Check and Set the "
-                "CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH field for heuristic");
+                "EngineHeuristicsBuilder: an operation graph must be set");
             return std::move(m_heuristics);
         };
 
-        auto status
-            = m_heuristics.initialize_managed_backend_pointer(CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_heuristics, status, "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: cudnnCreate Failed");
-            return std::move(m_heuristics);
-        };
-
-        status = detail::set_attribute(m_heuristics.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
-                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       1,
-                                       &(m_heuristics.opGraph->get_backend_descriptor()));
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_heuristics,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: SetAttribute  "
-                                          "CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH Failed");
-            return std::move(m_heuristics);
-        };
-
-        status = detail::set_attribute(m_heuristics.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_ENGINEHEUR_MODE,
-                                       CUDNN_TYPE_HEUR_MODE,
-                                       1,
-                                       &m_heuristics.mode);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_heuristics,
-                                          status,
-                                          "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_ENGINEHEUR_MODE Failed");
-            return std::move(m_heuristics);
-        };
-
-        if(m_heuristics.device_properties != nullptr)
-        {
-#if(CUDNN_VERSION >= 90800)
-            set_error_and_throw_exception(&m_heuristics,
-                                          CUDNN_STATUS_NOT_SUPPORTED,
-                                          "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_ENGINEHEUR_DEVICEPROP is not supported by "
-                                          "the hipDNN cuDNN shim");
-            return std::move(m_heuristics);
-#endif
-        }
-
-#if(CUDNN_VERSION >= 8905)
-        if(m_heuristics.target_sm_count >= 0)
-        {
-            NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR(
-                8905,
-                m_heuristics,
-                "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: SetAttribute "
-                "CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET requires cudnn "
-                "version 8.9.5");
-            status = detail::set_attribute(m_heuristics.pointer->get_backend_descriptor(),
-                                           CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET,
-                                           CUDNN_TYPE_INT32,
-                                           1,
-                                           &m_heuristics.target_sm_count);
-            if(status != CUDNN_STATUS_SUCCESS)
+        std::vector<ManagedOpaqueDescriptor> results;
+        const detail::v8::Outcome outcome = detail::v8::guarded([&] {
+            m_heuristics.initialize_managed_backend_pointer(CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
+            const std::shared_ptr<const detail::v8::GraphCore> graph
+                = detail::v8::recordOf<detail::v8::GraphCore>(m_heuristics.opGraph);
+            if(!graph)
             {
-                set_error_and_throw_exception(&m_heuristics,
-                                              status,
-                                              "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: SetAttribute "
-                                              "CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET Failed");
-                return std::move(m_heuristics);
-            };
-        }
-#endif
-
-        if(m_heuristics.mode == CUDNN_HEUR_MODE_B)
+                throw detail::v8::ShimError(
+                    CUDNN_STATUS_BAD_PARAM,
+                    "EngineHeuristicsBuilder: the operation graph is not a built OperationGraph");
+            }
+            const cudnnBackendHeurMode_t mode = detail::v8::requireEnumerator(
+                m_heuristics.mode, "EngineHeuristicsBuilder: heuristic mode");
+            constexpr detail::v8::HeuristicLabels LABELS{
+                "EngineHeuristicsBuilder: SM count target",
+                "EngineHeuristicsBuilder: device properties"};
+            // Every mode returns the graph's rank snapshot; no hipDNN heuristic runs per build.
+            std::vector<std::shared_ptr<const detail::v8::EngineRecord>> engines
+                = detail::v8::heuristicResults(
+                    graph,
+                    mode,
+                    {m_heuristics.target_sm_count >= 0, m_heuristics.device_properties != nullptr},
+                    LABELS);
+            results.reserve(engines.size());
+            for(std::shared_ptr<const detail::v8::EngineRecord>& engine : engines)
+            {
+                std::shared_ptr<const detail::v8::ConfigRecord> config
+                    = detail::v8::makeConfigRecord(
+                        std::move(engine), {}, "EngineHeuristicsBuilder");
+                hipdnnBackendDescriptor_t view = config->hipdnnEngineConfig();
+                results.push_back(detail::v8::makeManaged(
+                    CUDNN_BACKEND_ENGINECFG_DESCRIPTOR, std::move(config), view));
+            }
+        });
+        if(!outcome)
         {
-            EngineHeuristics_v8::get_heur_b_mutex().lock();
-        }
-
-        status = detail::finalize(m_heuristics.pointer->get_backend_descriptor());
-
-        if(m_heuristics.mode == CUDNN_HEUR_MODE_B)
-        {
-            EngineHeuristics_v8::get_heur_b_mutex().unlock();
-        }
-
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_heuristics,
-                status,
-                "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: cudnn Finalize failed");
+            set_error_and_throw_exception(&m_heuristics, outcome.status, outcome.message.c_str());
             return std::move(m_heuristics);
-        };
+        }
 
+        m_heuristics.m_all_results = std::move(results);
+        m_heuristics.built = true;
         CUDNN_FE_LOG_LABEL_ENDL(m_heuristics);
         return std::move(m_heuristics);
     }

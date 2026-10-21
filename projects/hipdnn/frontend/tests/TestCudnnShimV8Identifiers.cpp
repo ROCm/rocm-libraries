@@ -159,27 +159,9 @@ static_assert(reorderingMatches(fe::TensorReordering_t::F8_128x4,
                                 CUDNN_TENSOR_REORDERING_F8_128x4));
 
 // Upstream's exact signatures (cudnn_frontend_shim.h); the dynamic-loading path
-// casts symbols to decltype of these.
-static_assert(
-    std::is_same_v<decltype(&cudnnBackendCreateDescriptor),
-                   cudnnStatus_t (*)(cudnnBackendDescriptorType_t, cudnnBackendDescriptor_t*)>);
-static_assert(std::is_same_v<decltype(&cudnnBackendDestroyDescriptor),
-                             cudnnStatus_t (*)(cudnnBackendDescriptor_t)>);
-static_assert(std::is_same_v<decltype(&cudnnBackendSetAttribute),
-                             cudnnStatus_t (*)(cudnnBackendDescriptor_t,
-                                               cudnnBackendAttributeName_t,
-                                               cudnnBackendAttributeType_t,
-                                               std::int64_t,
-                                               const void*)>);
-static_assert(std::is_same_v<decltype(&cudnnBackendGetAttribute),
-                             cudnnStatus_t (*)(cudnnBackendDescriptor_t,
-                                               cudnnBackendAttributeName_t,
-                                               cudnnBackendAttributeType_t,
-                                               std::int64_t,
-                                               std::int64_t*,
-                                               void*)>);
-static_assert(
-    std::is_same_v<decltype(&cudnnBackendFinalize), cudnnStatus_t (*)(cudnnBackendDescriptor_t)>);
+// casts symbols to decltype of these. The descriptor is hipDNN's, so plans and
+// variant packs pass straight through.
+static_assert(std::is_same_v<cudnnBackendDescriptor_t, hipdnnBackendDescriptor_t>);
 static_assert(
     std::is_same_v<
         decltype(&cudnnBackendExecute),

@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_OperationGraph.h
- * @brief cuDNN v8 `OperationGraph_v8` / `OperationGraphBuilder_v8` over the shim's backend C API.
+ * @brief cuDNN v8 `OperationGraph_v8` / `OperationGraphBuilder_v8` over the shim's v8 core.
  */
 
 #pragma once
@@ -28,6 +28,11 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_Operation.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/engine_space.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/error.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/lowering.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 
 // Global, as upstream: Errata.h and consumers name it unqualified.
 constexpr int64_t MAX_OPGRAPH_OPS = 250;
@@ -62,18 +67,18 @@ public:
     auto getEngineCount(void) const -> int64_t
     {
         int64_t global_count = -1;
-        auto status = detail::get_attribute(pointer->get_backend_descriptor(),
-                                            CUDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT,
-                                            CUDNN_TYPE_INT64,
-                                            1,
-                                            nullptr,
-                                            &global_count);
-        if(status != CUDNN_STATUS_SUCCESS)
+        const detail::v8::Outcome outcome = detail::v8::guarded([&] {
+            const auto core = detail::v8::recordOf<detail::v8::GraphCore>(pointer);
+            if(core == nullptr)
+            {
+                throw detail::v8::ShimError(CUDNN_STATUS_NOT_INITIALIZED,
+                                            "OperationGraph: the operation graph was not built");
+            }
+            global_count = core->engineCount();
+        });
+        if(!outcome)
         {
-            set_error_and_throw_exception(this,
-                                          status,
-                                          "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: GetAttribute "
-                                          "CUDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT Failed");
+            set_error_and_throw_exception(this, outcome.status, outcome.message.c_str());
         }
         return global_count;
     }
@@ -207,12 +212,25 @@ public:
 
     OperationGraph_v8&& build()
     {
+        // The empty pointer the built graph replaces, created before the prechecks
+        // so a failed graph's get_raw_desc() is null, not a crash.
+        const detail::v8::Outcome created = detail::v8::guarded([&] {
+            m_operationGraph.initialize_managed_backend_pointer(
+                CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
+        });
+        if(!created)
+        {
+            set_error_and_throw_exception(
+                &m_operationGraph, created.status, created.message.c_str());
+            return std::move(m_operationGraph);
+        }
+
         if(m_operationGraph.numOps <= 0)
         {
-            set_error_and_throw_exception(&m_operationGraph,
-                                          CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: Check and Set "
-                                          "the CUDNN_ATTR_OPERATIONGRAPH_OPS Count field");
+            set_error_and_throw_exception(
+                &m_operationGraph,
+                CUDNN_STATUS_BAD_PARAM,
+                "OperationGraphBuilder: operations is required (non-empty)");
             return std::move(m_operationGraph);
         }
         if(m_operationGraph.numOps > MAX_OPGRAPH_OPS)
@@ -227,8 +245,7 @@ public:
         {
             set_error_and_throw_exception(&m_operationGraph,
                                           CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: Check and set "
-                                          "CUDNN_ATTR_OPERATIONGRAPH_OPS field");
+                                          "OperationGraphBuilder: operation 0 is not set");
             return std::move(m_operationGraph);
         }
 #if(CUDNN_VERSION < 90800)
@@ -236,120 +253,47 @@ public:
         {
             set_error_and_throw_exception(&m_operationGraph,
                                           CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: Check and Set "
-                                          "CUDNN_ATTR_OPERATIONGRAPH_HANDLE");
+                                          "OperationGraphBuilder: handle is required");
             return std::move(m_operationGraph);
         }
 #endif
 
-        auto status = m_operationGraph.initialize_managed_backend_pointer(
-            CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
-        if(status != CUDNN_STATUS_SUCCESS)
+        const detail::v8::Outcome outcome = detail::v8::guarded([&] {
+            static const detail::v8::LoweringLabels labels{
+                "OperationGraphBuilder: handle",
+                "OperationGraphBuilder: operations",
+                "OperationGraphBuilder: dynamic shape",
+                "OperationGraphBuilder: override shape",
+                "OperationGraphBuilder: constant tensor"};
+            std::vector<std::shared_ptr<const detail::v8::OperationRecord>> records;
+            records.reserve(static_cast<size_t>(m_operationGraph.numOps));
+            for(auto i = 0u; i < m_operationGraph.numOps; i++)
+            {
+                records.push_back(
+                    detail::v8::recordOf<detail::v8::OperationRecord>(m_operationGraph.ops[i]));
+                if(records.back() == nullptr)
+                {
+                    throw detail::v8::ShimError(CUDNN_STATUS_BAD_PARAM,
+                                                "OperationGraphBuilder: operation "
+                                                    + std::to_string(i)
+                                                    + " is not a built operation");
+                }
+            }
+            std::shared_ptr<const detail::v8::GraphCore> core
+                = detail::v8::lowerGraph(records,
+                                         m_operationGraph.handle,
+                                         {m_operationGraph.is_dynamic_shape_enabled,
+                                          m_operationGraph.is_override_shape_enabled},
+                                         labels,
+                                         m_operationGraph.opGraphTag);
+            const cudnnBackendDescriptor_t raw = core->hipdnnGraph();
+            m_operationGraph.pointer = detail::v8::makeManaged(
+                CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, std::move(core), raw);
+        });
+        if(!outcome)
         {
             set_error_and_throw_exception(
-                &m_operationGraph,
-                status,
-                "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: cudnnCreate Failed");
-            return std::move(m_operationGraph);
-        }
-
-        std::array<cudnnBackendDescriptor_t, MAX_OPGRAPH_OPS> ops_raw{nullptr};
-        for(auto i = 0u; i < m_operationGraph.numOps; i++)
-        {
-            ops_raw[i] = m_operationGraph.ops[i]->get_backend_descriptor();
-        }
-
-        status = detail::set_attribute(m_operationGraph.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_OPERATIONGRAPH_OPS,
-                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       m_operationGraph.numOps,
-                                       ops_raw.data());
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_operationGraph,
-                                          status,
-                                          "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_OPERATIONGRAPH_OPS Failed");
-            return std::move(m_operationGraph);
-        }
-
-        if(m_operationGraph.handle != nullptr)
-        {
-            status = detail::set_attribute(m_operationGraph.pointer->get_backend_descriptor(),
-                                           CUDNN_ATTR_OPERATIONGRAPH_HANDLE,
-                                           CUDNN_TYPE_HANDLE,
-                                           1,
-                                           &m_operationGraph.handle);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(
-                    &m_operationGraph,
-                    status,
-                    "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: SetAttribute "
-                    "CUDNN_ATTR_OPERATIONGRAPH_HANDLE Failed");
-                return std::move(m_operationGraph);
-            }
-        }
-
-#if(CUDNN_VERSION >= 90400)
-        if(m_operationGraph.is_dynamic_shape_enabled)
-        {
-            NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR(
-                90400,
-                m_operationGraph,
-                "CUDNN_BACKEND_OPERATION_GRAPH: Dynamic shape support requires cudnn 9.4.0 and "
-                "above");
-            status = detail::set_attribute(m_operationGraph.pointer->get_backend_descriptor(),
-                                           CUDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
-                                           CUDNN_TYPE_BOOLEAN,
-                                           1,
-                                           &m_operationGraph.is_dynamic_shape_enabled);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(
-                    &m_operationGraph,
-                    status,
-                    "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: SetAttribute "
-                    "CUDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED "
-                    "Failed");
-                return std::move(m_operationGraph);
-            }
-        }
-#endif
-
-#if(CUDNN_VERSION >= 92100)
-        if(m_operationGraph.is_override_shape_enabled)
-        {
-            NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR(
-                92100,
-                m_operationGraph,
-                "CUDNN_BACKEND_OPERATION_GRAPH: Override shape support requires cudnn 9.21.0 and "
-                "above");
-            status = detail::set_attribute(m_operationGraph.pointer->get_backend_descriptor(),
-                                           CUDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED,
-                                           CUDNN_TYPE_BOOLEAN,
-                                           1,
-                                           &m_operationGraph.is_override_shape_enabled);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                set_error_and_throw_exception(
-                    &m_operationGraph,
-                    status,
-                    "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: SetAttribute "
-                    "CUDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED "
-                    "Failed");
-                return std::move(m_operationGraph);
-            }
-        }
-#endif
-
-        status = detail::finalize(m_operationGraph.pointer->get_backend_descriptor());
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_operationGraph,
-                status,
-                "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: cudnnFinalize Failed");
+                &m_operationGraph, outcome.status, outcome.message.c_str());
             return std::move(m_operationGraph);
         }
 

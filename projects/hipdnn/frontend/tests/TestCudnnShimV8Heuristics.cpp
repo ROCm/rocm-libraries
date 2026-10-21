@@ -112,7 +112,7 @@ TEST_F(TestCudnnShimV8Heuristics, SmCountTargetNotSupported)
         = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_NE(failure.what.find("CUDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET"), std::string::npos)
+    EXPECT_NE(failure.what.find("EngineHeuristicsBuilder: SM count target"), std::string::npos)
         << failure.what;
 
     // The default target (-1) is never sent.
@@ -133,7 +133,7 @@ TEST_F(TestCudnnShimV8Heuristics, DevicePropertiesNotSupported)
         = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_NE(failure.what.find("CUDNN_ATTR_ENGINEHEUR_DEVICEPROP"), std::string::npos)
+    EXPECT_NE(failure.what.find("EngineHeuristicsBuilder: device properties"), std::string::npos)
         << failure.what;
 }
 

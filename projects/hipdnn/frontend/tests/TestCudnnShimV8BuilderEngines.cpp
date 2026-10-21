@@ -436,7 +436,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, KnobChoiceProjectedOntoProviderKnob)
     EXPECT_LT(choicePosition, *setsBeforeFinalize);
 }
 
-TEST_F(TestCudnnShimV8BuilderEngines, KnobConfigBuiltOnceAcrossThreads)
+TEST_F(TestCudnnShimV8BuilderEngines, ConcurrentPlansShareOneKnobConfig)
 {
     installKnobEngine();
     const fe::OperationGraph_v8 graph = convGraph();

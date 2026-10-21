@@ -60,7 +60,7 @@ TEST_F(TestCudnnShimV8NoExcept, FailedPrecheckReturnsStatus)
     const fe::Tensor tensor = builder.build();
 
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_THAT(std::string(tensor.get_error()), HasSubstr("CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT"));
+    EXPECT_THAT(std::string(tensor.get_error()), HasSubstr("TensorBuilder: byte alignment"));
 }
 
 TEST_F(TestCudnnShimV8NoExcept, FailedFinalizeCarriesShimMessage)
@@ -72,7 +72,7 @@ TEST_F(TestCudnnShimV8NoExcept, FailedFinalizeCarriesShimMessage)
 
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_THAT(std::string(tensor.get_error()),
-                HasSubstr("CUDNN_ATTR_TENSOR_VECTOR_COUNT other than 1 is not supported"));
+                HasSubstr("TensorBuilder: vector count other than 1 is not supported"));
 }
 
 TEST_F(TestCudnnShimV8NoExcept, SuccessfulBuildReportsSuccess)
@@ -93,10 +93,14 @@ TEST_F(TestCudnnShimV8NoExcept, SuccessfulBuildReportsSuccess)
         .setDilation(static_cast<int64_t>(UNIT.size()), UNIT.data());
     const fe::ConvDesc conv = convBuilder.build();
 
+    // Descriptors carry a shim record and no hipDNN descriptor.
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_SUCCESS) << tensor.get_error();
-    EXPECT_NE(tensor.get_raw_desc(), nullptr);
+    EXPECT_EQ(tensor.get_raw_desc(), nullptr);
+    EXPECT_NE(fe::detail::v8::recordOf<fe::detail::v8::TensorRecord>(tensor.get_desc()), nullptr);
     EXPECT_EQ(conv.get_status(), CUDNN_STATUS_SUCCESS) << conv.get_error();
-    EXPECT_NE(conv.get_raw_desc(), nullptr);
+    EXPECT_EQ(conv.get_raw_desc(), nullptr);
+    EXPECT_NE(fe::detail::v8::recordOf<fe::detail::v8::ConvolutionRecord>(conv.get_desc()),
+              nullptr);
 }
 
 } // namespace
