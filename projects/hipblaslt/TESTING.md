@@ -77,7 +77,9 @@ below is a place where that sentence would otherwise get said later, with worse 
 **Where this is headed.** Testing for hipBLASLt and TensileLite is being regularized as one effort
 (AIHPBLAS-5028): a shared testing philosophy, a small set of test kinds, a cadence contract for
 presubmit, postsubmit, nightly, and weekly runs, and five workstreams that carry every known gap. See
-[Improvement Roadmap](#improvement-roadmap).
+[Improvement Roadmap](#improvement-roadmap). One part has started: a harness that tests every shipped
+kernel directly, which found a GPU-faulting defect on its first day. See
+[Kernel corpus testing](#kernel-corpus-testing).
 
 ## Contents
 
@@ -131,6 +133,7 @@ its incident write-ups, lives in [tensilelite/TESTING.md](tensilelite/TESTING.md
   - [Testing philosophy](#testing-philosophy)
   - [Target test kinds](#target-test-kinds)
   - [Who tests what](#who-tests-what)
+  - [Kernel corpus testing](#kernel-corpus-testing)
   - [Cadence contract](#cadence-contract)
   - [Workstreams](#workstreams)
 - [Known Risks and Gaps](#known-risks-and-gaps)
@@ -383,6 +386,15 @@ host, so the large-K cases pick the pattern by output type:
 | bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
 | fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
 | int8 | saturates; each saturated result is recomputed | `sparse_k` |
+
+**When fast_check declines a case.** A declined case says nothing about the kernel. It means the case
+asks for something fast_check can't check exactly: a non-integer input or scale, a compute type it
+does not support, or results past the exact range above. `hipblaslt-test` reports a declined case as a
+failure, not a skip, with a message that begins `fast_check requires`, `fast_check does not support`,
+or similar. So a red fast_check case may be a problem with the test rather than a defect. Read the
+message before filing a bug, and fix the case by choosing a pattern from the tables above or by moving
+it to the CPU reference. The kernel corpus harness counts these cases as unsupported rather than as
+failures.
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has
@@ -1236,9 +1248,10 @@ kernels from its own test configurations, which exercise the generator's feature
 kernels in the shipped library logic. StinkyTofu, which schedules and protects those kernels on
 gfx1250, runs none of them (see `shared/stinkytofu/TESTING.md`, in review in
 [PR #13945](https://github.com/ROCm/rocm-libraries/pull/13945)). The result is overlap in the work and
-a hole in the coverage: no suite systematically tests the kernels we ship, across the problems each
-one is selected for. fast_check's every-solution cases are the first piece of that missing layer, and
-they are growing inside the client suite because there is nowhere else for them to go.
+a hole in the coverage: no suite in CI tests the kernels we ship, across the problems each one is
+selected for. That layer has started outside CI, as a kernel corpus harness developed under
+AIHPBLAS-3894 (see [Kernel corpus testing](#kernel-corpus-testing)). Until it lands, fast_check's
+every-solution cases in the client suite are the closest thing CI has.
 
 The proposal is to give each layer one question it owns, and to test each question once, at the layer
 that defines the thing being tested. This is a proposal for the teams involved to agree on, not
@@ -1251,11 +1264,14 @@ current practice.
 | Kernel corpus (new) | Does every kernel we ship compute correctly across the problems it is selected for? | A CPU reference, or fast_check's exact integer checks; repeated launches; buffer placement near 32-bit and 4 GiB boundaries | Almost all of it | Whoever defines the kernels |
 | hipBLASLt library | Does the library validate its arguments, select a kernel, and dispatch it correctly? | Host unit tests against a fake kernel library; a thin end-to-end set on hardware | A thin layer | hipBLASLt team |
 
-Six design rules make the kernel corpus layer concrete:
+Eight design rules make the kernel corpus layer concrete. The last two came out of the first corpus
+pass:
 
-1. **The corpus is what ships.** It is the set of solutions in the library logic for each
-   architecture, plus kernels that do not come from TensileLite at all (the rocRoller kernels, and any
-   hand-written ones). How a kernel was generated does not change how it is tested.
+1. **The corpus is what ships.** It is read from the installed library, the `TensileLibrary` files
+   the runtime actually loads, rather than from the logic YAML that should have produced them. It also
+   includes kernels that do not come from TensileLite at all (the rocRoller kernels, and any
+   hand-written ones). Those do not describe themselves in the same files, so the harness cannot plan
+   tests for them yet. How a kernel was generated does not change how it is tested.
 2. **The range of uses comes from the corpus's own data.** Each solution's logic entry already
    records where it applies: its selection predicates and the sizes it was tuned for. A generator
    reading that data can emit each solution's boundary cases, such as a K tail, M and N that are not
@@ -1278,6 +1294,13 @@ Six design rules make the kernel corpus layer concrete:
    ownership.
 6. **Static checks of the corpus data belong to the corpus.** `TensileLogic --check-all` already
    validates the library logic before codegen; under this split it is the corpus layer's static check.
+7. **A crash costs one case.** Some kernels fault the GPU or hang. The harness records the crash
+   against the case that caused it, checks that the GPU still runs a basic GEMM, and carries on in a
+   new process. Without that, one bad kernel ends the run and hides everything after it. It matters
+   most on gfx1250, where a bad memory access can wedge the GPU until a reboot (ROCM-32049).
+8. **Test the artifacts CI built.** The harness runs against TheRock CI's own build artifacts with
+   no rebuild, so it tests exactly what CI produced. It shards the way TheRock's test jobs do, so it
+   can move into them without rework.
 
 **What it would mean for the existing suites.**
 
@@ -1299,9 +1322,163 @@ Six design rules make the kernel corpus layer concrete:
   corpus layer needs an owner with a runner budget.
 
 **Open questions.** Who owns the corpus: the per-architecture tuning and logic owners, or a dedicated
-team? Where its harness lives in the tree? Whether hipSPARSELt, which also ships TensileLite kernels,
-gets its own corpus or shares this one? None of these is tracked yet; the inventory and the coverage
-model should inform the answers.
+team? Where its harness lives once it lands in `develop`? Whether hipSPARSELt, which also ships
+TensileLite kernels, gets its own corpus or shares this one? These are open under AIHPBLAS-3894, and
+the inventory and the coverage model should inform the answers.
+
+### Kernel corpus testing
+
+The kernel corpus layer proposed above has started, as a test harness developed under AIHPBLAS-3894.
+It is not in `develop` yet, so no CI lane runs it. This section records where it stands and what it
+has taught us, and it changes as the work does.
+
+**What the first pass does.** The first pass, the smoke profile, has four steps:
+
+1. It reads every solution out of an installed hipBLASLt library (design rule 1).
+2. For each solution it builds four problems from that solution's own macro tile: an exact tile
+   multiple, ragged M and N, a K tail, and a strided batch of three.
+3. It runs each problem through `hipblaslt-test` with that solution pinned by index (design rule 3),
+   so the library's own predicates decide whether the solution accepts the problem, and fast_check
+   checks every element of D exactly.
+4. It records each result as it finishes, so a rerun resumes where the last run stopped, and a crash
+   costs only its own case (design rule 7).
+
+**How big the corpus is, and what the first pass found.** These counts come from TheRock CI
+artifacts for one `develop` commit in October 2026. Every tuning pull request changes them, so they
+are a dated snapshot rather than a standing fact.
+
+| Architecture | Solutions | First-pass result |
+| --- | --- | --- |
+| gfx90a | 24,625 | 22,380 pass all four problems. 4 fault the GPU; see [the write-up below](#how-this-one-was-learned-tuned-kernels-no-test-selected). The other 2,241 are kernel types the smoke profile does not build yet |
+| gfx942 | 360,667 | 6 return wrong answers and are in triage: 4 bf16, and 2 that mix fp8 and f16 inputs. About 110,000 run only on other gfx942 devices or partition modes, so the MI300X used could not reach them. 43,040 are kernel types the smoke profile does not build yet |
+| gfx950 | 84,370 | Being rerun, with better handling of which solutions belong to which gfx950 device. The first run found bf16 solutions returning about half the right answer, which look like the ROCM-32151 family |
+| gfx1100, gfx1101 | 2,077 and 1,566 | Clean |
+| gfx1200, gfx1201 | 85,880 and 52,632 | Clean |
+| gfx1150 | Not counted | Not run: the test client hangs at startup |
+| gfx1250 | About 3,000 per variant | Not run yet. The cluster used for the first pass has no gfx1250 hardware |
+
+A pass runs about 110 problems a second on an MI210, and 24 to 67 a second on the larger gfx950 and
+gfx120X libraries. That puts a full smoke pass at minutes to hours of GPU time per architecture. The
+smoke profile is affordable only because fast_check checks a GEMM exactly in a few milliseconds.
+
+**Phases.** The work after the first pass comes in four phases:
+
+1. **Finish the first pass and triage it.** Run the remaining architectures, and explain or file a
+   ticket for every family of failing or refused solutions.
+2. **Widen the per-kernel tests.**
+   - A boundary profile tests each solution at the edges of what its predicates accept, on both sides.
+     Just inside, the solution must give the right answer. Just outside, the library must refuse it.
+     A predicate that is too loose lets a kernel run where it is wrong, and one that is too strict
+     quietly discards a working kernel. Nothing tests either today.
+   - Stress profiles catch silent corruption that depends on timing, repetition, or buffer placement;
+     see [Silent corruption: what our tests own](#silent-corruption-what-our-tests-own).
+   - The kernel types the first pass skips get covered: grouped GEMM, gradient epilogues, the E
+     output, pre-swizzled inputs, and MX formats. A small sample per solution is also checked against
+     the CPU reference on realistic data, because fast_check proves exactness on integers but says
+     nothing about accuracy.
+3. **Land it in CI.** Measure what each profile costs, place each one at a cadence (see
+   [Cadence contract](#cadence-contract)), and select per pull request the kernels a change can affect
+   (design rule 4). Nightly and weekly runs come first. Presubmit and postsubmit follow, report-only
+   until false alarms are near zero.
+4. **Retire what it makes redundant.** Record which kernel every existing client case runs, compare
+   that with corpus coverage, and run both side by side before retiring anything. Kernel-level cases
+   then retire one pull request at a time, each with its evidence, as described under
+   [Who tests what](#who-tests-what).
+
+**Which GPUs can reach which kernels.** Some solutions run only on one device, chosen by chip ID or by
+compute-unit count, and partition modes change the compute-unit count. The library skips those
+solutions anywhere else. So "every kernel" means about 25 device configurations, not one per
+architecture. CI has one runner type per architecture family:
+
+| Architecture | Device configurations its solutions target | CI runner | Solutions CI can reach |
+| --- | --- | --- | --- |
+| gfx90a | MI210 and MI250 | Not yet identified | Not yet measured |
+| gfx942 | MI300X or MI325X, MI300A, MI308X, and four smaller compute-unit counts, probably partition modes (to be confirmed) | MI300X | About 70% (250,928 of 360,667) |
+| gfx950 | MI350X, MI355X, a third chip ID (possibly MI350P), and one partition mode | MI350X | About 89% (75,112 of 84,370). The 8,660 solutions built for MI355X never run in CI |
+| gfx1250 | A base configuration and two variants | gfx1250 runners | Nearly all |
+| gfx110X, gfx115X, gfx120X | One device per architecture | One per family | One architecture per family |
+| gfx908, gfx1152 | One device each | None | None |
+
+The cluster used for the first pass has several of the devices CI lacks: MI355X, MI300A, MI308X,
+MI250, and three Radeon parts. The plan is a weekly cluster sweep for those devices, alongside the
+weekly CI pass. Every report will show three numbers per architecture: solutions tested in CI,
+solutions tested only on the cluster, and solutions not testable on any hardware we have.
+
+**Known failures in the corpus.** The corpus needs a way to record "this kernel is known broken, and
+here's the ticket," so that one bad kernel doesn't turn every run red. The proposal follows the four
+rules under [Keep it honest](#keep-it-honest), and borrows its structure from the TensileLogic list:
+
+- Each entry names an architecture and a solution, by a name that survives retuning, optionally
+  narrowed to one problem or one profile.
+- Each entry has a ticket and a review date.
+- A known-failing solution still runs on every pass. The report shows it as a known failure, and it
+  does not fail the run.
+- A known-failing solution that passes fails the run, with a message to remove the entry. A fix can't
+  go unnoticed.
+- An entry past its review date fails the run too, so nothing sits in the list forever.
+- The report lists every entry and its age.
+
+The first entries will be ROCM-33314 and whichever ROCM-32151 cases the first pass confirms. This list
+does not exist yet. It would be the tenth mechanism in
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures), and the first to meet all four
+rules.
+
+#### Silent corruption: what our tests own
+
+In late September and early October 2026, stress tools run by the hardware validation team found seven
+P1 hipBLASLt defects on gfx1250. Five returned success with a wrong answer, which is the worst failure
+a math library has. The internal gfx1250 nightly ran about 67,500 hipBLASLt tests a night over the same
+period and found none of them. Those tests ran the heuristic's first choice once, at small sizes, with
+no control over where buffers sit in memory. The seven came down to four causes:
+
+| Defect class | Tickets | What catches it | Where it is tested |
+| --- | --- | --- | --- |
+| A missing wait in StinkyTofu's hazard pass let a kernel overwrite a register it was still reading. It fired about once in 2,000 launches, and more often with a particular double-precision workload running beside it | ROCM-31905, ROCM-31901, ROCM-31918, ROCM-32099 | First, an independent static check that every hazard has a covering wait (StinkyTofu). Then repeated launches beside that workload, and enough repeats to catch a once-in-2,000 failure | Static check in StinkyTofu; repeats in the corpus stress profiles, starting on gfx1250 |
+| Persistent kernels reused LDS across tiles too early, with one combination of epilogue options | ROCM-32072 | Exact checks on shapes with several tiles per workgroup, and that option combination | Corpus boundary and stress profiles |
+| A 32-bit add dropped the carry when a buffer crossed a 4 GiB boundary | ROCM-32046 | Buffers placed across 4 GiB boundaries, with poison on either side. Placement makes it fail every time | fast_check placement cases today; the corpus stress profiles next |
+| A crash at one exact buffer size; cause not found | ROCM-32050 | Cases at and around the size thresholds | The client `stress` tier today |
+
+The stress tools find a bad run by repeating one calculation and flagging any answer that differs from
+the first. That's good at catching timing problems, but it can't see an answer that is wrong the same
+way every time. fast_check can. A repeatability check, comparing repeated runs bit for bit, is planned
+as report-only, because hipBLASLt makes no promise that repeated runs give identical results.
+
+Some of what the stress tools do should stay with them, because it screens hardware rather than
+library correctness: power and electrical stress, thermal limits, memory error counters, multi-hour
+soak runs, and whole-system multi-GPU checks.
+
+#### How this one was learned: tuned kernels no test selected
+
+> [!IMPORTANT]
+>
+> **Four gfx90a kernels, tuned for one customer's tall-skinny double-precision sizes, faulted the GPU
+> every time they ran, and no CI lane noticed, because nothing but those exact sizes selects them.**
+>
+> <details>
+> <summary>The full account: how a tuning change shipped kernels no test ran</summary>
+>
+> In October 2026, a tuning pull request
+> ([PR #11798](https://github.com/ROCm/rocm-libraries/pull/11798)) added f64 TN logic for gfx90a,
+> tuned for a customer workload that multiplies a tall, skinny matrix by its own transpose. The
+> selection table maps exactly four sizes, M = N in {1, 3, 5, 15} with K = 1,146,175, to four new
+> solutions. So the default heuristic picks those solutions at those sizes, and nowhere else.
+>
+> Every one of the four faults the GPU, on MI210 and on MI250. Pinned by index, they fault at every K
+> their predicates accept, from 960 up, so the defect is in the kernels rather than in the tuned
+> sizes. A customer running those sizes would hit the fault on the first call.
+>
+> No problem in the client suite uses those sizes, so the suite never selected the kernels, and every
+> lane stayed green. The kernel corpus found them on its first day, in about 15 minutes of GPU time on
+> one MI210, because it runs every shipped solution whether or not anything selects it. It's filed as
+> ROCM-33314.
+>
+> This is the reason the corpus layer exists. A tuning pull request adds kernels for exactly the sizes
+> it was tuned for, and the client suite tests whatever its own problem list happens to select. Those
+> two sets barely overlap, so new tuning is the least tested code in the library on the day it merges.
+> Retesting changed kernels on every pull request (design rule 4) would have run these four before the
+> merge.
+>
+> </details>
 
 ### Cadence contract
 
@@ -1318,6 +1495,17 @@ directory already define. The budgets are the targets those files state today.
 Prerelease runs use `full` as well. The rule for what runs at presubmit follows from the philosophy: a
 case earns a presubmit slot when its unique coverage of high-risk cases is high relative to its
 runtime. Everything else runs at a slower cadence, where it can afford to be denser.
+
+[Kernel corpus testing](#kernel-corpus-testing) follows the same cadences, with budgets of its own.
+None of it runs in CI yet. The numbers below are starting proposals, to be replaced with measured
+costs per profile and architecture once each profile has been timed.
+
+| Cadence | Corpus work | Budget |
+| --- | --- | --- |
+| Presubmit | The smoke profile on every kernel the change affects, the boundary profile on those up to a cap, and a small sample of each kernel type, on architectures with pull-request runners. A change that affects too many kernels tests a capped sample and says so on the pull request | Inside the existing `standard` budget: under 5 minutes for a change that affects no kernels, a few minutes for a tuning change |
+| Postsubmit | Every kernel changed since the last postsubmit run. It also records the kernel hashes that presubmit compares against | 30 minutes per architecture |
+| Nightly | Recently changed kernels, a rotating seventh of the corpus, and the nightly stress checks | 2 hours of wall time per architecture |
+| Weekly | The smoke profile over the whole corpus, whichever boundary slice is due, deep repeats on gfx1250, and large-buffer cases on large-memory runners. A cluster sweep covers the devices CI lacks | 8 hours of wall time |
 
 ### Workstreams
 
@@ -1415,6 +1603,10 @@ cadence, and pull requests get a performance number.
     breaks will stop working without anyone noticing.
   - A named owner for the signal.
 
+- **Test every shipped kernel** (AIHPBLAS-3894). Build out the kernel corpus layer through the phases
+  under [Kernel corpus testing](#kernel-corpus-testing): finish and triage the first pass, add the
+  boundary and stress profiles and the skipped kernel types, land them in CI at the cadences above,
+  and then retire the client cases the corpus makes redundant.
 - **Test address and launch-size arithmetic past 32-bit thresholds systematically** (AIHPBLAS-4988).
   Several defects of this kind returned success with wrong or partly unwritten output, which is the
   worst failure mode a math library has.
@@ -1543,6 +1735,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
+| Shipped kernels that no test problem selects never run in CI. The first corpus pass found four on gfx90a that fault the GPU every time (ROCM-33314) | High | High | The client suite runs whichever kernel each of its own problems selects; fast_check's every-solution cases widen that for chosen shapes | AIHPBLAS-3894 |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates, at the cost of slow feedback | AIHPBLAS-5033 |
 | Address, index, and launch-size arithmetic past 32-bit thresholds is not tested systematically. Several defects of this kind returned success with wrong or partly unwritten output | Medium | High | Targeted large-size regression tests for individual past defects | AIHPBLAS-4988 |
 | Nothing tests the public API itself: no test compiles the public headers from a C translation unit or with more than one toolchain, or checks public macro and type names, so several API breaks were found by users first | Medium | Medium | The client suite exercises the API through C++ only | AIHPBLAS-3579 |
