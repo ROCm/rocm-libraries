@@ -788,7 +788,7 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
 
 - **Random GEMMs under CPU rocJITsu.** The Multi-Arch nightly sidecar checks 1,000
   fixed-seed gfx950 GEMMs, including MXFP8 and MXFP4, using the nightly run's BLAS
-  artifacts. It uses the same seed and sampler as the 100-case per-PR sidecar,
+  artifacts. It uses the same seed and sampler as the 100-case per-PR sidecar.
   Both are advisory, require no GPU, and retain every case's input and logs.
   Manual artifact replay and local validation are documented in
   [random GEMM testing](docs/rocjitsu-gemm-race-testing.md).
