@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -68,11 +69,10 @@ void testing_spvv_bad_arg(const Arguments& argus)
 
     // Structures
     hipsparseSpVecDescr_t x;
-    hipsparseDnVecDescr_t y;
 
     verify_hipsparse_status_success(
         hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType), "Success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, yType), "Success");
+    hipsparseLocalDnVec y(size, dy, yType);
 
     // SpVV bufferSize
     size_t bufferSize;
@@ -112,7 +112,6 @@ void testing_spvv_bad_arg(const Arguments& argus)
 
     // Destruct
     verify_hipsparse_status_success(hipsparseDestroySpVec(x), "Success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
 
     CHECK_HIP_ERROR(hipFree(buffer));
 #endif
@@ -169,11 +168,10 @@ void testing_spvv(Arguments argus)
 
     // Create structures
     hipsparseSpVecDescr_t x;
-    hipsparseDnVecDescr_t y;
 
     CHECK_HIPSPARSE_ERROR(
         hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, yType));
+    hipsparseLocalDnVec y(size, dy, yType);
 
     T hresult;
     T hresult_gold;
@@ -256,7 +254,6 @@ void testing_spvv(Arguments argus)
     CHECK_HIP_ERROR(hipFree(externalBuffer));
 
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 
 #endif
 }
