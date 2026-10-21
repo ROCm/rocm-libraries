@@ -11,6 +11,34 @@ cases; other lanes use the explicit configurations described in the
 [coverage inventory](conv-coverage-roadmap.md). Historical production-selection
 claims do not describe the current registry.
 
+## October 21 requalification on develop
+
+Both forward bundles were requalified at develop revision
+`9b4fee7d99071ca2e40ae74dfa043919fb35d90a`, the refreshed base below. Their
+previous baseline, `c767fbe1af37126cdc75b10f8e23bcee629debb5`, is not reachable
+from develop, and the current gfx950 adapter cannot prepare its older dispatch
+API. Before GPU qualification, the current adapters prepared all 32 cases per
+processor from the new snapshot on a host, with only code-object generation and
+kernel launch stubbed.
+
+Qualification used the current harness, three baseline executions per case,
+and the NumPy oracle without the optional Torch cross-check; Torch was absent.
+Every baseline output was deterministic and matched the previous bundle's
+digest, with unchanged inputs, case contracts, device targets, and baseline
+error bounds. gfx942 code objects are identical to the previous bundle's; gfx950
+code objects now come from the registered production instances and their LLVM
+flavor. The new manifests record `max-reference-bound-v1`, so comparison limits
+no longer subtract the earlier 0.0025 reserve.
+
+| Check | gfx942 | gfx950 |
+|---|---|---|
+| Qualification | 32 cases | 32 cases |
+| Offline `verify` of the candidate | 32 passed; current output identical to baseline | Same |
+| Pinned pytest with candidate bundle and lock | 35 passed: 32 forward, 3 controls; no skips | Same |
+
+The packed archives authenticate against the new locks. The October 20 checks
+below replayed the previous bundles.
+
 ## October 20 refresh onto develop
 
 The convolution work from `9c63320460f`, `aa525708084`, and `c701171f3a7`

@@ -102,9 +102,10 @@ The comparison limit is rounded strictly below the exact rational remainder,
 so acceptance implies `max(abs(N - R_j))/S < 0.05` for every enabled reference.
 A baseline bound at or above the original tolerance fails qualification.
 New qualifications record `budget_policy: "max-reference-bound-v1"` with the
-legacy `margin` field set to zero. Older bundles without this marker retain
-their authenticated 0.0025 reserve and limits until requalified and published.
-No workload coverage is removed by dropping the reserve.
+legacy `margin` field set to zero, as both published bundles do. A bundle
+without this marker retains its authenticated 0.0025 reserve and limits until
+requalified and published. No workload coverage is removed by dropping the
+reserve.
 
 CI requires the baseline output digest to match the independently qualified result
 before using that certificate. A nondeterministic baseline is rejected during
@@ -163,8 +164,9 @@ Archive packaging uses the [packing and publication workflow](../../reference_co
 
 The [six-lane record](../../../../docs/conv-six-lane-validation.md) separates the original
 October 14 qualification and installed checks from validation of the current
-port. Each baseline was independently qualified against NumPy over all 32 cases;
-those expanded bundles did not use the optional Torch cross-check. Do not infer
+port and the October 21 requalification of both bundles at develop revision
+`9b4fee7d990`. Each published baseline was independently qualified against NumPy
+over all 32 cases, without the optional Torch cross-check. Do not infer
 current GPU validation from a successful replay of the old branch history.
 
 ## Bundle identity
