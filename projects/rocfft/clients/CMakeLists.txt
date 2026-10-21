@@ -44,8 +44,6 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-set( ROCFFT_CLIENTS_BUILD_SCOPE ON )
-
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   project( rocfft-clients LANGUAGES CXX C )
   include( ../cmake/buildopts.cmake )
