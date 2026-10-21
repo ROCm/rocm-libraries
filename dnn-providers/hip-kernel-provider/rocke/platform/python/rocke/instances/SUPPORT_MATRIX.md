@@ -164,6 +164,8 @@ parity runs on the matching device and is not implied by the ✅ here.
 | `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified); kept for the hipDNN catalog, no longer selected by rocKE dispatch |
 | `gfx1151/wmma_fmha_fwd_v2` | ❌ | ❌ | ✅ | native WMMA FMHA prefill, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
 | `gfx1151/wmma_fmha_decode` | ❌ | ❌ | ✅ | native split-KV WMMA FMHA decode, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
+| `gfx1151/wmma_fmha_swapqk` | ❌ | ❌ | ✅ | transposed-QK WMMA FMHA prefill, fp16 only (GPU-verified on gfx1151). Dispatcher-reachable **opt-in** (`algorithm="wmma_fmha_swapqk"`); the auto route is still `attention_gfx1151_wmma`. Callers hand V as `[B, H, D, S]` — see `swapqk_transpose_v`. |
+| `gfx1151/paged_decode_splitk` | ❌ | ❌ | ✅ | split-K paged decode, fp16 only (GPU-verified on gfx1151). Not registered in the dispatcher; reached through the vLLM backend under `ROCKE_PAGED_DECODE=1`, which also requires KV ≥ 32 MiB (the Strix Halo MALL size — below it the kernel is a wash). |
 
 ---
 

@@ -70,6 +70,14 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `vector.splat`       | `vector_splat`           | `insertelement` + `shufflevector` |
 | `vector.select`      | `vector_select`          | vector `select`                 |
 | `vector.bitcast`     | `vec_bitcast`            | `bitcast` between equal-size vectors |
+| `vector.ext_to_f32`  | `vec_ext_to_f32`         | elementwise `fpext <N x f16\|bf16> -> <N x float>` |
+| `vector.undef`       | `undef_vec`              | `freeze <N x T> poison`         |
+
+`vector.ext_to_f32` is the widening sibling of `vec_trunc_f32_to_f16`: it
+unpacks an f16-carried accumulator back to the f32 a WMMA c-operand wants.
+`vector.undef` is the base for a vector every lane subsequently overwrites —
+freeze-poison rather than zeroinitializer, so the backend drops the dead
+zero-init instead of materializing it.
 
 ## GPU / Lane
 

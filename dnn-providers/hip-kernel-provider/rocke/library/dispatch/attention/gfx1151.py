@@ -24,6 +24,16 @@ Each arch also registers an opt-in tuned candidate per kernel,
 without the ``attention_`` prefix, ``-`` spelled ``_``), whose default is the
 auto route's spec and whose knob space (:mod:`.wmma_rules`) is what tuning
 sweeps, ``tuning_id`` pins and registry-driven AOT catalogs enumerate.
+
+``kernels/gfx1151/wmma_fmha_swapqk.py`` is a second, independent gfx1151 dense
+forward kernel (transposed QK, Strix Halo only). It registers here as
+``attention_gfx1151_swapqk`` -- opt-in only, so it never competes with the auto
+route above. **Its V layout is a caller contract:** ``SwapQKCfg.v_transposed``
+defaults to True, making V a ``[B, Hk, D, Sk]`` tensor rather than
+``[B, Sk, Hk, D]``. The dispatcher does not relayout tensors -- ``select_spec``
+hands back the kernel's own ``SwapQKCfg`` and the caller feeds it. Callers relay
+with ``swapqk_transpose_v``; :func:`bindings.bind_swapqk_torch` shape-checks V so
+a row-major tensor fails loudly instead of returning plausible garbage.
 """
 
 from __future__ import annotations
@@ -58,6 +68,12 @@ from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     is_valid_spec as _prefill_is_valid,
     wmma_fmha_fwd_v2_grid,
     wmma_fmha_fwd_v2_signature,
+)
+from kernels.gfx1151.wmma_fmha_swapqk import (
+    SwapQKCfg,
+    build_wmma_fmha_swapqk,
+    is_valid_spec as _swapqk_is_valid,
+    swapqk_grid,
 )
 from rocke.core.arch import base_arch_from_target_id, generic_arch_from_target_id
 from rocke.dispatch.core import (
@@ -760,10 +776,174 @@ def _make_tuned_candidate(arch: str, kind: str) -> KernelCandidate:
     )
 
 
+# --------------------------------------------------------------------------
+# Transposed-QK forward (``wmma_fmha_swapqk``) -- a separate Strix Halo kernel.
+# --------------------------------------------------------------------------
+
+SWAPQK_ABI = "rocke-attention-gfx1151-swapqk/v1"
+
+# The kernel is fp16-only: `dtype_ir` is hardcoded to F16 and SwapQKCfg carries
+# no dtype field, so there is nothing to read this from.
+SWAPQK_DTYPES = ("fp16",)
+
+# Take the tile geometry FROM the config rather than transcribing it, so a
+# default that moves takes the declared coverage with it. head_size and
+# num_query_heads are required fields; every other default is the swept winner.
+_SWAPQK_DEFAULT_CFG = SwapQKCfg(head_size=128, num_query_heads=1)
+
+# dual_gather pairs adjacent d-subtiles, so head_size must be even in units of
+# the 16-wide WMMA contraction.
+_SWAPQK_HDIM_MULTIPLE = 32 if _SWAPQK_DEFAULT_CFG.dual_gather else 16
+# swapqk_grid refuses a seqlen_q remainder rather than launching a partial tile.
+_SWAPQK_Q_ROWS_PER_CTA = _SWAPQK_DEFAULT_CFG.q_rows_per_cta
+# The kv loop bound is `seqlen_k / block_n` by plain integer division, so a
+# remainder is silently dropped -- a correctness constraint, not a tiling one.
+_SWAPQK_BLOCK_N = _SWAPQK_DEFAULT_CFG.block_n
+
+# Declared coverage, restating the is_valid_spec and grid-helper gates as DATA.
+_SWAPQK_CAP = Capability(
+    arches=("gfx1151",),
+    dtypes=SWAPQK_DTYPES,
+    shapes=(
+        ShapeRange(
+            "hdim_q", min=_SWAPQK_HDIM_MULTIPLE, multiple_of=_SWAPQK_HDIM_MULTIPLE
+        ),
+        ShapeRange(
+            "seqlen_q", min=_SWAPQK_Q_ROWS_PER_CTA, multiple_of=_SWAPQK_Q_ROWS_PER_CTA
+        ),
+        ShapeRange("seqlen_k", min=_SWAPQK_BLOCK_N, multiple_of=_SWAPQK_BLOCK_N),
+    ),
+    relations=(
+        DimRelation("hdim_q", "==", "hdim_v"),  # single head_size arg
+        DimRelation("nhead_q", "multiple_of", "nhead_k"),  # GQA grouping
+    ),
+    # Causal only. SwapQKCfg's mask_mode vocabulary is "none"/"causal" and it
+    # has no sink or window field at all, so declaring either feature would
+    # admit the request and compile plain causal for it.
+    supports_features=frozenset({"causal"}),
+)
+
+
+def _swapqk_cfg(req: OperatorRequest) -> SwapQKCfg:
+    assert isinstance(req, AttentionRequest)
+    return SwapQKCfg(
+        head_size=int(req.hdim_q),
+        num_query_heads=int(req.nhead_q),
+        num_kv_heads=int(req.nhead_k),
+        mask_mode="causal" if int(req.mask_type) != 0 else "none",
+    )
+
+
+def _swapqk_args_signature() -> Tuple[dict, ...]:
+    """The fixed kernel ABI, byte-identical to the gfx1250 WMMA forward."""
+    ptr = {"type": "ptr<f16, global>", "size_bytes": 8}
+    i32 = {"type": "i32", "size_bytes": 4}
+    strides = (
+        "stride_q_token",
+        "stride_q_head",
+        "stride_k_token",
+        "stride_k_head",
+        "stride_v_token",
+        "stride_v_head",
+        "stride_o_token",
+        "stride_o_head",
+    )
+    return (
+        *({"name": n, **ptr} for n in ("Q", "K", "V", "O")),
+        {"name": "scale_log2", "type": "f32", "size_bytes": 4},
+        *({"name": n, **i32} for n in ("seqlen_q", "seqlen_k", *strides)),
+    )
+
+
+def _make_swapqk_candidate() -> KernelCandidate:
+    """gfx1151 transposed-QK WMMA FMHA forward -- a standalone kernel.
+
+    OPT-IN ONLY, matching the ``attention_gfx950_dense`` and
+    ``attention_<arch>_wmma_fwd`` precedents: selected solely when the request
+    names ``algorithm="wmma_fmha_swapqk"`` or ``spec_id="gfx1151_swapqk"``.
+    Registering it makes it reachable, which is what this phase is for; making
+    it a gfx1151 *default* is a separate, measured decision across the shape
+    space, and ``attention_gfx1151_wmma`` already owns the auto route.
+
+    KNOB REACHABILITY IS DEFERRED, deliberately. :func:`_swapqk_cfg` forwards
+    only the four fields the request actually carries (head_size, the two head
+    counts, mask_mode) and leaves every tuning lever at its default. The
+    defaults are the swept, hardware-validated production configuration, and
+    the remaining ~30 fields are A/B levers whose legal combinations are
+    interdependent -- ``k_dual`` requires ``qk_douter``, ``block_n`` is bounded
+    by ``kv_block_size``, several are measured losses outside one shape corner.
+    Exposing them as a :class:`~rocke.dispatch.tuning.KnobSpace` axis means
+    declaring that lattice and sweeping it, which is its own change. Until
+    then a caller that wants a non-default config builds the kernel directly
+    through ``builders.gfx1151.attention``; the dispatcher serves the winner.
+    """
+    spec_id = "gfx1151_swapqk"
+    name = "attention_gfx1151_swapqk"
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, AttentionRequest)
+        if req.algorithm.strip().lower() != "wmma_fmha_swapqk" and (
+            req.spec_id.strip().lower() != spec_id
+        ):
+            return False, (
+                "gfx1151 swapqk FMHA is opt-in "
+                "(algorithm='wmma_fmha_swapqk'); the gfx1151 auto route is "
+                "attention_gfx1151_wmma"
+            )
+        ok, why = _selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        # Capability already cleared arch / dtype / head_size / seqlen / mask.
+        # Only the residual knob-compatibility gates remain.
+        ok, why = _swapqk_is_valid(_swapqk_cfg(req), arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> SwapQKCfg:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        return _swapqk_cfg(req)
+
+    def grid(spec: SwapQKCfg, req: OperatorRequest):
+        assert isinstance(req, AttentionRequest)
+        return swapqk_grid(spec, seqlen_q=int(req.seqlen_q), batch=int(req.batch))
+
+    def bind_torch(request, spec, tensors, **kwargs):
+        from .bindings import bind_swapqk_torch
+
+        return bind_swapqk_torch(request, spec, tensors, **kwargs)
+
+    candidate = KernelCandidate(
+        name=name,
+        family=FAMILY,
+        algorithm="wmma_fmha_swapqk",
+        spec_id=spec_id,
+        abi_version=SWAPQK_ABI,
+        priority=5,
+        capability=_SWAPQK_CAP,
+        _supports=support,
+        select_spec=select,
+        build=build_wmma_fmha_swapqk,
+        grid=grid,
+        block=lambda spec: (spec.block_size, 1, 1),
+        signature=lambda _spec: _swapqk_args_signature(),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        bind_torch=bind_torch,
+    )
+    return candidate
+
+
 def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     candidates = (
         _make_auto_candidate("decode"),
         _make_auto_candidate("prefill"),
+        # Opt-in only (see module docstring); never competes with the auto route.
+        _make_swapqk_candidate(),
     ) + tuple(
         _make_tuned_candidate(arch, kind)
         for kind in ("prefill", "decode")

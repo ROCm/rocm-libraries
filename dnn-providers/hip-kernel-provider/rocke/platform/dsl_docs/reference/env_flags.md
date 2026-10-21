@@ -102,11 +102,33 @@ are diagnostics that intentionally change emission. None affect the default buil
 | Swizzle study | `CK_SWZ_L`, `CK_SWZ_R`, `CK_SWZ_W` | LDS swizzle levels (left/right/write) |
 | Attention | `ROCKE_ATTENTION_COMPILE_BACKEND`, `ROCKE_ATTENTION_AGPR_ALLOC_ZERO` | attention compile backend / AGPR alloc |
 | gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE` | experimental gfx942 FMHA levers |
+| gfx1151 attention tuning | `ROCKE_BLOCK_N`, `ROCKE_K_LDS`, `ROCKE_PAGED_DECODE_DLANES` | experimental Strix Halo swapqk / paged-decode levers, read at the builder and the instance wrapper |
 | gfx942 V-transpose-store diagnostics | `HIPDNN_GFX942_CFV`, `HIPDNN_GFX942_CFV_CK_VLDS`, `HIPDNN_GFX942_CFV_SCALAR_READ`, `HIPDNN_GFX942_CFV_STORE`, `HIPDNN_GFX942_CFV_STORE_PREZERO`, `HIPDNN_GFX942_CFV_STORE_SCALAR_LOAD`, `HIPDNN_GFX942_CFV_STORE_SCATTER`, `HIPDNN_GFX942_CFV_STORE_SEPOFF`, `HIPDNN_GFX942_CFV_STORE_SPLIT` | gfx942 cfv-store debug toggles (some intentionally change emission) |
 
 For an unlisted variable, check its reader and documentation before assuming its
 default or stability. It may be an internal experimental knob or a setting owned
 by an external library or tool.
+
+### gfx1151 vLLM attention backend (`integrations/vllm/rocm_rocke_attn.py`)
+
+These do **not** select kernels inside the dispatcher. They live in the vLLM v1
+backend shim and exist so an A/B run can hold the backend, the plumbing and the
+KV handling fixed while swapping one thing. Every number quoted for this work
+was produced by toggling one of them between two arms of the same process, so
+they are measurement apparatus, not tuning surface — the defaults are the
+shipping configuration and a deployment should not set any of them.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ROCKE_MIN_SEQLEN` | `512` | Shortest prefill that goes to swapqk; below it Triton is faster. Raise it above the prompt length to force **every** request down the Triton path — that is the matched control arm. |
+| `ROCKE_TRITON_MODE` | `slice` | Which Triton path serves the non-swapqk work: `slice` (per request), `super` (delegate the whole forward to vLLM's own ROCM_ATTN), `batch` (one call for the batch). Picks what the control arm actually measures. |
+| `ROCKE_GQA_FUSE` / `ROCKE_GQA_FUSE_CAP` | `auto` / `4` | Q heads sharing one CTA's K/V fetch, and its ceiling. |
+| `ROCKE_BLOCK_N` / `ROCKE_K_LDS` | `auto` / `auto` | kv tile width and the shared-LDS K window. `auto` picks per sequence length. |
+| `ROCKE_V_TRANSPOSED` | `1` | Hand V as `[B, H, D, S]`. Off reverts to the row-major gather, which is materially slower. |
+| `ROCKE_V_PAGED` | `1` | Read V straight from the paged KV cache instead of permuting it first. |
+| `ROCKE_QK_DOUTER` | `0` | d-outer QK loop. A retracted measurement; off. |
+| `ROCKE_PAGED_DECODE` | `0` | Opt into the rocKE split-K paged decode kernel. |
+| `ROCKE_PAGED_DECODE_MIN_KV_MIB` | `32` | KV bytes below which decode falls back. The default is the Strix Halo MALL size: under it the kernel is a wash, over it it wins. |
 
 ### Compiler detection and provenance
 

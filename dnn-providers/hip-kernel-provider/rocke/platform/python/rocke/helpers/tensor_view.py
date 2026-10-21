@@ -62,7 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
-from ..core.ir import IRBuilder, Type, Value
+from ..core.ir import IRBuilder, TemporalHint, Type, Value
 
 
 StrideElem = Union[int, Value]
@@ -380,13 +380,15 @@ class TensorView:
         value: Value,
         *,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> None:
         """Scalar store. ``value.type`` must match ``self.dtype``.
 
         ``align`` (global address space only) sets the store's byte-alignment
         hint; the default (``None``) lets the IR builder pick. Pass the element
         size (2 for f16) to match a hand-rolled ``global_store(..., align=2)``
-        and let the backend coalesce neighbouring f16 stores.
+        and let the backend coalesce neighbouring f16 stores. ``nontemporal``
+        (global only) streams the store (cache-bypass) for write-once outputs.
         """
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
@@ -411,18 +413,28 @@ class TensorView:
                 f"buffer scalar store not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
+        hint = TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
         if align is None:
-            b.global_store(self.base, off, value)
+            b.global_store(self.base, off, value, temporal_hint=hint)
         else:
-            b.global_store(self.base, off, value, align=align)
+            b.global_store(self.base, off, value, align=align, temporal_hint=hint)
 
     # ---- vector ops ----
 
-    def load_vec(self, b: IRBuilder, indices: Sequence[Value], n: int) -> Value:
+    def load_vec(
+        self,
+        b: IRBuilder,
+        indices: Sequence[Value],
+        n: int,
+        *,
+        nontemporal: bool = False,
+    ) -> Value:
         """Vectorised load of ``n`` consecutive elements starting at
         ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16 (global &
         LDS) and ``n = 2`` for f64 (global); buffer ops use ``dwords =
-        n // 2`` for f16 and support ``n in {2, 4, 8}`` accordingly."""
+        n // 2`` for f16 and support ``n in {2, 4, 8}`` accordingly.
+        ``nontemporal`` (global path only) streams the load
+        (cache-bypass)."""
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
                 return b.smem_load_vN(self.base, *indices, dtype=self.dtype, n=n)
@@ -448,7 +460,15 @@ class TensorView:
             )
         off = self.desc.offset(b, indices)
         if self.dtype.name in ("f16", "bf16", "f64"):
-            return b.global_load_vN(self.base, off, self.dtype, n)
+            return b.global_load_vN(
+                self.base,
+                off,
+                self.dtype,
+                n,
+                temporal_hint=(
+                    TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
+                ),
+            )
         if self.dtype.name == "f32":
             # f32 global vec loads aren't wired through ``global_load_vN``
             # yet (the IR primitive only covers 16-bit elements). Fall
@@ -865,15 +885,24 @@ class TileWindow:
         *local_indices: Value,
         value: Value,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> None:
         self.view.store_scalar(
-            b, self._global_indices(b, local_indices), value=value, align=align
+            b,
+            self._global_indices(b, local_indices),
+            value=value,
+            align=align,
+            nontemporal=nontemporal,
         )
 
     # ---- vector ops ----
 
-    def load_vec(self, b: IRBuilder, *local_indices: Value, n: int) -> Value:
-        return self.view.load_vec(b, self._global_indices(b, local_indices), n=n)
+    def load_vec(
+        self, b: IRBuilder, *local_indices: Value, n: int, nontemporal: bool = False
+    ) -> Value:
+        return self.view.load_vec(
+            b, self._global_indices(b, local_indices), n=n, nontemporal=nontemporal
+        )
 
     def store_vec(
         self, b: IRBuilder, *local_indices: Value, value: Value, n: int

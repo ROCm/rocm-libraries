@@ -2219,6 +2219,21 @@ class IRBuilder:
             ).result
         raise ValueError(f"zero_vec unsupported elem {elem.name}")
 
+    def undef_vec(self, elem: Type, n: int) -> Value:
+        """An uninitialized `<n x elem>` (lowers to ``freeze <n x elem> poison``).
+
+        Use as the base of an insertelement chain that fully overwrites every
+        lane (e.g. a gather that loads all N elements): unlike :meth:`zero_vec`,
+        there is no zero to MATERIALIZE, so the backend drops the dead
+        zero-init ``v_mov`` sequence. Only valid when every lane is subsequently
+        defined -- reading an un-inserted lane is undefined."""
+        return self._op(
+            "vector.undef",
+            result_types=[VectorType(elem, n)],
+            attrs={"elem": elem.name, "vec": n},
+            result_name_hint=f"udf{n}",
+        ).result
+
     # ----- gpu / runtime -----
 
     def thread_id_x(self) -> Value:
@@ -2419,13 +2434,24 @@ class IRBuilder:
         return self.select(mask, loaded, other)
 
     def global_store(
-        self, ptr: Value, idx: Value, value: Value, *, align: int = 1
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        align: int = 1,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> None:
-        self._op(
-            "memref.global_store_typed",
-            [ptr, idx, value],
-            attrs={"elem_type": value.type.name, "align": int(align)},
-        )
+        """Scalar global store. ``temporal_hint`` as for ``global_store_vN``:
+        ``STREAMING`` marks a write-once output so it streams past the cache
+        instead of allocating a line that would evict reused data. ``DEFAULT``
+        records nothing, so an ordinary store carries no ``nontemporal`` attr
+        at all -- portable-IR recipe equivalence compares the attr dict, so a
+        recorded ``nontemporal=False`` would not round-trip."""
+        attrs = {"elem_type": value.type.name, "align": int(align)}
+        if _streaming(temporal_hint):
+            attrs["nontemporal"] = True
+        self._op("memref.global_store_typed", [ptr, idx, value], attrs=attrs)
 
     def global_load_vN_f16(
         self, ptr: Value, idx: Value, n: int, *, align: Optional[int] = None
@@ -5234,6 +5260,15 @@ class IRBuilder:
         """D16-form scalar half buffer load: ``raw_ptr_buffer_load.f16``
         returns `half` directly (no i16 + bitcast round-trip). Port of the
         pinned PR9710 ``tile.buffer_load_f16_d16`` op.
+
+        Unlike :meth:`buffer_load_f16` (which zero-extends an i16 into a full
+        VGPR and thus needs an explicit ``v_mov_b16`` to pack), the `half`
+        return lets the AMDGPU backend select ``buffer_load_short_d16`` /
+        ``buffer_load_short_d16_hi`` -- packing two strided halves into one
+        register's lo/hi lane for free (the buffer analogue of
+        ``global_load_d16_b16/_hi_b16``) when the results feed an
+        ``insertelement <2 x half>``. Same per-element OOB clamp. Address =
+        rsrc.base + voffset + soffset computed in the memory unit (no VALU).
         """
         return self._op(
             "tile.buffer_load_f16_d16",
@@ -5496,6 +5531,19 @@ class IRBuilder:
         """Element-wise `fptrunc <N x float> -> <N x bfloat>` — used by
         the bf16-output cshuffle epilogue."""
         return self.vec_cast_f32_to(v, BF16)
+
+    def vec_ext_to_f32(self, v: Value) -> Value:
+        """Element-wise `fpext <N x f16|bf16> -> <N x float>` — the widening
+        sibling of :meth:`vec_trunc_f32_to_f16`. Used to unpack an f16-carried
+        WMMA accumulator back to the f32 the WMMA c-operand requires."""
+        if not isinstance(v.type, VectorType):
+            raise ValueError("vec_ext_to_f32 expects a vector input")
+        return self._op(
+            "vector.ext_to_f32",
+            [v],
+            [VectorType(F32, v.type.count)],
+            result_name_hint="vext",
+        ).result
 
     def vec_cast_f32_to(self, v: Value, target: Type) -> Value:
         """Element-wise `fptrunc <N x float> -> <N x target>`.
@@ -5867,6 +5915,8 @@ PURE_OP_NAMES = {
     "vector.extract",
     "vector.trunc_f32_to_f16",
     "vector.trunc_f32_to",
+    "vector.ext_to_f32",
+    "vector.undef",
     "vector.bitcast",
     "vector.add",
     "vector.mul",
