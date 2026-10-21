@@ -35,9 +35,11 @@ from rocke.core.ir import (
     F16,
     F32,
     I32,
+    TF32,
     IRBuilder,
     Type,
     Value,
+    VectorType,
 )
 from rocke.helpers.magic_division import do_magic_division_dynamic
 from rocke.helpers.spec import choose_load_vec
@@ -64,10 +66,29 @@ def _ir_dtype(dtype: str) -> Type:
     """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
     t = _DTYPE_TO_IR.get(dtype)
     if t is None:
+        if dtype in _TF32_SPELLINGS:
+            raise ValueError(
+                f"{dtype!r} is a compute mode, not a storage dtype: use "
+                "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'"
+            )
         raise ValueError(
             f"unsupported conv dtype {dtype!r}; choose fp16, bf16, or fp32"
         )
     return t
+
+
+def _smem_dtype_for(dtype: str) -> Optional[Type]:
+    """LDS element type for a *storage* dtype; ``None`` selects the f16 path.
+
+    Keyed on storage, never on the MMA dtype: a TF32 kernel keeps fp32 tiles in
+    LDS and only reinterprets the fragment it reads (:func:`_to_mma_operand`).
+    """
+    return BF16 if dtype == "bf16" else F32 if dtype == "fp32" else None
+
+
+# Spellings of the logical TF32 compute mode (``rocke.core.dtypes`` aliases
+# ``xf32`` to ``tf32``).
+_TF32_SPELLINGS = ("tf32", "xf32")
 
 
 # ---------------------------------------------------------------------
@@ -84,12 +105,58 @@ class ConvDataSpec:
       B: KYXC, dtype_b (weights)
       D: NHWK, dtype_d (output)
       accumulator: dtype_acc (always fp32)
+
+    ``mma_dtype`` selects the matrix-core input type when it differs from the
+    storage type. ``None`` (the default) means the MMA consumes ``dtype_a`` /
+    ``dtype_b`` as stored. The one other value is ``"tf32"``: A and B stay
+    fp32 in memory and LDS, and each fragment read from LDS is reinterpreted as
+    ``vec<tf32xN>`` for the catalog's TF32 atom -- native XF32 on gfx942, BF16x3
+    emulation on gfx950. The reinterpretation does not round, so gfx942 drops the
+    low 13 mantissa bits in hardware and gfx950 splits the full fp32 payload.
     """
 
     dtype_a: str = "fp16"
     dtype_b: str = "fp16"
     dtype_d: str = "fp16"
     dtype_acc: str = "fp32"
+    mma_dtype: Optional[str] = None
+
+    @property
+    def mma_a(self) -> str:
+        """The dtype the MMA consumes for A."""
+        return self.mma_dtype or self.dtype_a
+
+    @property
+    def mma_b(self) -> str:
+        """The dtype the MMA consumes for B."""
+        return self.mma_dtype or self.dtype_b
+
+    @property
+    def is_tf32(self) -> bool:
+        return self.mma_dtype == "tf32"
+
+    def mma_dtype_reason(self) -> Optional[str]:
+        """Why this dtype combination cannot build, or ``None`` if it can.
+
+        Catches the storage/compute mix-ups the byte-sizing validators cannot:
+        they key on ``dtype_a == "fp32"`` and would size a ``"tf32"`` storage
+        dtype as a 2-byte type.
+        """
+        if self.dtype_a in _TF32_SPELLINGS or self.dtype_b in _TF32_SPELLINGS:
+            return (
+                "tf32 is a compute mode, not a storage dtype: use "
+                "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'"
+            )
+        if self.mma_dtype is None:
+            return None
+        if self.mma_dtype != "tf32":
+            return f"mma_dtype must be None or 'tf32', got {self.mma_dtype!r}"
+        if self.dtype_a != "fp32" or self.dtype_b != "fp32":
+            return (
+                "mma_dtype='tf32' needs fp32 A and B storage, got "
+                f"dtype_a={self.dtype_a!r}, dtype_b={self.dtype_b!r}"
+            )
+        return None
 
 
 @dataclass(frozen=True)
@@ -500,6 +567,173 @@ def _emit_smem_load(
     if n == 4:
         return b.smem_load_v4_f16(smem, row, col)
     return b.smem_load_vN_f16(smem, row, col, n=n)
+
+
+def _to_mma_operand(b: IRBuilder, frag: Value, data: "ConvDataSpec") -> Value:
+    """Hand an fp32 LDS fragment to a TF32 MMA as ``vec<tf32xN>``.
+
+    A bitcast: no instruction is emitted and no bit is rounded. Every other
+    data spec gets ``frag`` back unchanged, so existing kernels are untouched.
+    """
+    if not data.is_tf32:
+        return frag
+    return b.bitcast(frag, VectorType(TF32, frag.type.count))
+
+
+# ---------------------------------------------------------------------
+# TF32 compute helpers (shared by forward, dgrad and wgrad)
+# ---------------------------------------------------------------------
+
+# Widest single LDS load a TF32 fragment is issued as (fp32 elements): 16 B,
+# one ds_read_b128. Wider fragments are read as several of these.
+_TF32_LDS_LOAD_MAX = 4
+
+# Physical MFMAs one emulated logical MMA issues, per emulation recipe.
+_EMULATION_MFMAS = {"bf16x3": 3}
+
+
+def _mfma_issues_per_mma(op) -> int:
+    """Physical MFMAs one logical ``op`` issues (3 for gfx950 BF16x3 TF32)."""
+    return _EMULATION_MFMAS[op.emulation.recipe.value] if op.emulation else 1
+
+
+def _load_mma_operand(
+    b: IRBuilder,
+    smem: Value,
+    row: Value,
+    col: Value,
+    n: int,
+    *,
+    smem_dtype: Optional[Type],
+    data: ConvDataSpec,
+) -> Value:
+    """Read one MFMA operand fragment from LDS, in the type the MMA consumes.
+
+    Non-TF32 specs take exactly the :func:`_emit_smem_load` path they always
+    did. Under TF32 the fragment is fp32 in LDS; it is read in loads of at most
+    four elements -- each claims only the 16-byte alignment a ``ds_read_b128``
+    needs, which the validated row stride guarantees -- and then reinterpreted
+    once as ``vec<tf32xN>`` (:func:`_to_mma_operand`, a free bitcast).
+    """
+    if not data.is_tf32:
+        return _emit_smem_load(b, smem, row, col, n, smem_dtype=smem_dtype)
+    if n <= _TF32_LDS_LOAD_MAX:
+        frag = b.smem_load_vN(smem, row, col, dtype=F32, n=n)
+    else:
+        if n % _TF32_LDS_LOAD_MAX:
+            raise ValueError(f"TF32 fragment length {n} is not a multiple of 4")
+        parts = [
+            b.smem_load_vN(
+                smem,
+                row,
+                col if i == 0 else b.add(col, b.const_i32(i)),
+                dtype=F32,
+                n=_TF32_LDS_LOAD_MAX,
+            )
+            for i in range(0, n, _TF32_LDS_LOAD_MAX)
+        ]
+        while len(parts) > 1:
+            parts = [
+                b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)
+            ]
+        frag = parts[0]
+    return _to_mma_operand(b, frag, data)
+
+
+def _tf32_reason(spec, target, family: str, arch: str) -> Optional[str]:
+    """Why ``spec`` (TF32 compute) cannot build on ``arch``, or ``None``.
+
+    TF32 is an MFMA-only mode: no wave32 catalog has a TF32 row, and the WMMA
+    phases read their fragments through a path that was never taught the
+    fp32 -> tf32 reinterpretation. An MFMA arch with no TF32 row at all gets
+    its own reason rather than the generic warp-tile one, so a caller can tell
+    "wrong shape" from "this arch has no TF32". ``spec`` is any conv spec with
+    ``warp_tile_m`` / ``warp_tile_n`` / ``warp_tile_k``.
+    """
+    if family != "mma":
+        return f"mma_dtype='tf32' is MFMA-only; {arch} is a WMMA target"
+    _shapes = sorted(
+        (op.m, op.n, op.k)
+        for op in target.mma.ops
+        if op.family == "mma"
+        and op.a_dtype == "tf32"
+        and op.b_dtype == "tf32"
+        and op.c_dtype == "fp32"
+    )
+    if not _shapes:
+        return f"mma_dtype='tf32': {arch} has no TF32 MFMA atom"
+    if (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) not in _shapes:
+        return (
+            f"mma_dtype='tf32': warp_tile "
+            f"{(spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)} is not a "
+            f"TF32 atom on {arch} (have {_shapes})"
+        )
+    _op = target.mma.op_for_shape(
+        family="mma",
+        a_dtype="tf32",
+        b_dtype="tf32",
+        c_dtype="fp32",
+        m=spec.warp_tile_m,
+        n=spec.warp_tile_n,
+        k=spec.warp_tile_k,
+    )
+    return _tf32_register_reason(spec, _op)
+
+
+# Emulated (BF16x3) TF32 warp tiles at or above this many fp32 accumulators per
+# lane sit at the 512-VGPR ceiling once the hi/lo split temporaries are live,
+# and comgr's VGPR->AGPR spill path miscompiles kernels there: one accumulator
+# register comes out wrong while the same IR is correct at -O1 or with
+# -amdgpu-spill-vgpr-to-agpr=0 (the same failure as the MFMA dgrad budget,
+# PR #13495). Such tiles spill heavily anyway, so they are not worth keeping.
+_TF32_EMULATED_MAX_ACC_PER_LANE = 384
+
+
+def _tf32_register_reason(spec, op) -> Optional[str]:
+    """Reject an emulated-TF32 warp tile that reaches the VGPR ceiling, or None.
+
+    ``op`` is the resolved TF32 MMA op (``None`` or a native atom: no check).
+    ``spec`` is any conv spec with ``tile_m/n`` and ``warp_m/n``; TF32 is
+    MFMA-only, so a lane is one of 64.
+    """
+    if op is None or op.emulation is None:
+        return None
+    _acc = (spec.tile_m // spec.warp_m) * (spec.tile_n // spec.warp_n) // 64
+    if _acc >= _TF32_EMULATED_MAX_ACC_PER_LANE:
+        return (
+            f"mma_dtype='tf32': {_acc} fp32 accumulators per lane with the "
+            "BF16x3-emulated atom reach the 512-VGPR ceiling, where the "
+            "VGPR->AGPR spill path miscompiles; use a smaller warp tile "
+            f"(< {_TF32_EMULATED_MAX_ACC_PER_LANE} accumulators per lane)"
+        )
+    return None
+
+
+def _tf32_lds_stride_reason(
+    row_stride: int, frag: int, arch: Optional[str] = None
+) -> Optional[str]:
+    """Reject an LDS row stride that would misalign a TF32 fragment read.
+
+    A TF32 fragment is ``frag`` fp32 values read from one LDS row (2 on gfx942
+    -> ``ds_read_b64``, 8 on gfx950 -> two ``ds_read_b128``; see
+    :func:`_load_mma_operand`). The column offset is always a multiple of the
+    fragment, so the read is aligned exactly when the row stride is. The loads
+    claim ``min(frag, 4) * 4`` bytes of alignment -- at most 16, the pool's
+    own alignment -- so the row stride must be a multiple of ``min(frag, 4)``
+    elements; anything else would over-claim alignment. The same rule keeps
+    every tile allocation a multiple of 16 bytes, so the tiles placed after
+    the first one in the pool stay 16-byte aligned too.
+    """
+    _need = min(frag, _TF32_LDS_LOAD_MAX)
+    if row_stride % _need:
+        _where = f" on {arch}" if arch else ""
+        return (
+            f"mma_dtype='tf32': LDS row stride {row_stride} fp32 elements is not "
+            f"a multiple of {_need}, so the {frag}-wide fragment read would be "
+            f"misaligned{_where}; use an lds_k_pad that keeps tile_k + pad a "
+            f"multiple of {_need}"
+        )
+    return None
 
 
 def _apply_accumulator_epilogue(
