@@ -6,7 +6,7 @@ This document is the **hipDNN milestone / release verification** plan: the proce
 > ⚠️ **All prerequisites and tests in this document must pass for a successful release.**
 
 > [!NOTE]
-> Commands are given for Linux (bash). Windows differences are noted where they apply.
+> Commands are given for Linux (bash), with Windows (PowerShell) equivalents where they differ. To set up a Windows environment, see [Building hipDNN: Windows](../Building.md#windows).
 
 ---
 
@@ -69,6 +69,8 @@ curl -O https://nightly.repo.amd.com/rocm/core/tarball/therock-dist-<platform>-<
 tar -C rocm-artifacts -zxf therock-dist-<platform>-<group>-tests-<version>.tar.gz
 ```
 
+On Windows, set `<platform>` to `windows` and run `curl.exe`; PowerShell aliases `curl` to `Invoke-WebRequest`. `mkdir` and `tar` work unchanged.
+
 The commands below assume the tarball was extracted to `./rocm-artifacts`; adjust the paths if you used a different folder.
 
 **Record what was validated.** The tarball filename encodes the OS, GPU family, and ROCm version, but the authoritative record is the manifest inside the tree (`rocm-artifacts/share/therock/therock_manifest.json`), which also carries the exact source commit the build came from. Capture the ROCm version and the rocm-libraries source commit (`pin_sha`) in your test record; the [Feature Release Run Template](./TestRunTemplate.md#4-replication-setup) gives the exact commands and confirms the delivery commit is contained in that commit's history.
@@ -85,6 +87,14 @@ Run the `full` tier in every hipDNN test directory of the artifacts. Each compon
 for dir in hipdnn hipdnn_integration_tests_ctest hipdnn_samples miopen_plugin hipblaslt_plugin hip_kernel_provider; do
   ctest --test-dir rocm-artifacts/bin/$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8
 done
+```
+
+Windows (PowerShell):
+
+```powershell
+foreach ($dir in 'hipdnn','hipdnn_integration_tests_ctest','hipdnn_samples','miopen_plugin','hipblaslt_plugin','hip_kernel_provider') {
+  ctest --test-dir rocm-artifacts\bin\$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8
+}
 ```
 
 Where a directory has suites labelled for the GPU under test, replace `-LE ex_gpu` with `-L '^ex_gpu_<arch>$'`, as CI does ([Building and running tests](../TESTING.md#building-and-running-tests)). Add `--verbose` for each test's full output.
@@ -106,7 +116,11 @@ Building from source needs ROCm installed as a **build dependency** (the compile
 
 - **Reuse the TheRock build (recommended).** If you extracted a `-tests.tar.gz` above, the `rocm-artifacts` folder is already a complete ROCm tree. Add its `bin` folder to your `PATH` so the standalone presets discover it automatically:
   ```bash
-  export PATH="$(pwd)/rocm-artifacts/bin:$PATH"   # Linux; on Windows add rocm-artifacts\bin to PATH
+  export PATH="$(pwd)/rocm-artifacts/bin:$PATH"
+  ```
+  On Windows (PowerShell):
+  ```powershell
+  $env:PATH = "$PWD\rocm-artifacts\bin;$env:PATH"
   ```
 - **Or install ROCm separately.** If you did not obtain a build above, install ROCm by any method in [Obtaining ROCm](../Building.md#obtaining-rocm). You do **not** need the `-tests.tar.gz` variant here, because the tests are compiled from source.
 
@@ -164,6 +178,12 @@ Run the headline workloads, the curated regression set described in its [README]
 dnn-benchmark -g Workloads/headline/*.tar.gz -o headline-<version>-<arch>.json
 ```
 
+Windows (PowerShell) expands the workload files itself:
+
+```powershell
+dnn-benchmark -g (Get-ChildItem Workloads\headline\*.tar.gz).FullName -o headline-<version>-<arch>.json
+```
+
 Compare it with the previous release's results file for the same GPU family ([how `compare` reports changes](https://github.com/ROCm/dnn-benchmarking/blob/main/docs/usage.md#compare)):
 
 ```bash
@@ -176,4 +196,4 @@ Ahead of release branching, also run the larger `Workloads/microbench/` and `Wor
 
 - `dnn-benchmark` exits 0.
 - Every regression that `compare` flags is explained or has a tracked issue.
-- The team compares benchmark results release by release with dnn-benchmarking; the results file is the baseline for the next release.
+- Release performance is tracked by running dnn-benchmarking each release and comparing the results with the previous release's; the results file is the baseline for the next release.

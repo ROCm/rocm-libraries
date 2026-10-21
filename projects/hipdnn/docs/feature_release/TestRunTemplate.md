@@ -6,6 +6,7 @@ This is the recording artifact for a **hipDNN milestone / release verification**
 
 - Copy this file to a working notes file for your feature or milestone (e.g. `<version> <short name> validation.md`) and fill in every `<placeholder>`.
 - The run this template records is a run of the [Feature Release Test Plan](./TestPlan.md). Follow the plan's procedures; record the results here.
+- Commands are given for Linux (bash), each followed by its Windows (PowerShell) equivalent. For Windows environment setup, see [Building hipDNN: Windows](../Building.md#windows).
 - Replace the illustrative snippets with your own observed commands and output. Keep it evidence-based: paste real command output, not a summary.
 - See [hipDNN testing documentation](../../README.md#testing) for how this template and the Feature Release Test Plan fit together.
 
@@ -31,8 +32,8 @@ Fill in the identifiers that let a reader trace exactly what was validated back 
 - **PR merge commit**: `<https://github.com/ROCm/rocm-libraries/commit/sha>`
 - **GPU / ASIC families used**: `<every family validated, e.g. gfx942 (MI300), gfx950 (MI350)>`
 - **Build(s) validated** (artifact identifiers/URLs, which encode OS / ASIC / ROCm version):
-  - `<https://.../therock-dist-linux-<gpu-family>-<version>.tar.gz>`
-  - `<https://.../therock-dist-linux-<gpu-family>-tests-<version>.tar.gz>`
+  - `<https://.../therock-dist-<platform>-<gpu-family>-<version>.tar.gz>`
+  - `<https://.../therock-dist-<platform>-<gpu-family>-tests-<version>.tar.gz>`
 
 > The artifact identifier encodes the OS, ASIC family, and ROCm version, so those no longer need separate fields. Still note the physical GPU/ASIC family the run executed on above, since a multi-arch artifact can target several.
 
@@ -88,6 +89,18 @@ mkdir rocm-artifacts
 tar -C rocm-artifacts -zxf therock-dist-linux-<gpu-family>-tests-<version>.tar.gz
 ```
 
+Windows (PowerShell):
+
+```powershell
+mkdir <feature>-validation
+cd <feature>-validation
+
+curl.exe -O https://nightly.repo.amd.com/rocm/core/tarball/therock-dist-windows-<gpu-family>-tests-<version>.tar.gz
+
+mkdir rocm-artifacts
+tar -C rocm-artifacts -zxf therock-dist-windows-<gpu-family>-tests-<version>.tar.gz
+```
+
 Record what the manifest inside the tree reports: the ROCm version and the exact source commit the build came from. Run the following and paste the output here:
 
 ```bash
@@ -95,6 +108,16 @@ Record what the manifest inside the tree reports: the ROCm version and the exact
 grep -E '"the_rock_commit"|"github_run_id"|"rocm_version"|"rocm_package_version"' rocm-artifacts/share/therock/therock_manifest.json
 # The rocm-libraries source commit (pin_sha) the build came from, with its submodule name for context.
 grep -A3 '"submodule_name": "rocm-libraries"' rocm-artifacts/share/therock/therock_manifest.json | grep -E '"submodule_name"|"pin_sha"'
+```
+
+Windows (PowerShell):
+
+```powershell
+$manifest = 'rocm-artifacts\share\therock\therock_manifest.json'
+# ROCm version/package version, the TheRock build commit, and the CI run that produced the build.
+(Select-String -Path $manifest -Pattern '"the_rock_commit"|"github_run_id"|"rocm_version"|"rocm_package_version"').Line
+# The rocm-libraries source commit (pin_sha) the build came from, with its submodule name for context.
+(Select-String -Path $manifest -Pattern '"submodule_name": "rocm-libraries"' -Context 0,3 | ForEach-Object { $_.Line; $_.Context.PostContext }) | Where-Object { $_ -match '"submodule_name"|"pin_sha"' }
 ```
 
 Example output:
@@ -133,6 +156,21 @@ HIPDNN_PLUGIN_DIR="$(pwd)/rocm-artifacts/lib/test_plugins/custom" \
 # One installed sample
 HIPDNN_PLUGIN_DIR="$(pwd)/rocm-artifacts/lib/hipdnn_plugins/engines" \
   ctest --test-dir ./rocm-artifacts/bin/hipdnn_samples -R <test_name_regex> --output-on-failure
+```
+
+Windows (PowerShell):
+
+```powershell
+# Focused gtest filter
+.\rocm-artifacts\bin\<test_binary>.exe --gtest_filter="<Suite1*:Suite2*>" --gtest_brief=1
+
+# Integration tests that load test plugins
+$env:HIPDNN_PLUGIN_DIR = "$PWD\rocm-artifacts\lib\test_plugins\custom"
+.\rocm-artifacts\bin\hipdnn_public_frontend_tests.exe --gtest_filter="<*IntegrationFeature*>" --gtest_brief=1
+
+# One installed sample
+$env:HIPDNN_PLUGIN_DIR = "$PWD\rocm-artifacts\lib\hipdnn_plugins\engines"
+ctest --test-dir .\rocm-artifacts\bin\hipdnn_samples -R <test_name_regex> --output-on-failure
 ```
 
 Paste the result lines you observed, for example:
@@ -179,6 +217,24 @@ cmake --build build/hipdnn-tests
 ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
 ```
 
+Windows (PowerShell):
+
+```powershell
+cmake -S projects/hipdnn `
+  -B build/hipdnn-tests `
+  -GNinja `
+  -DCMAKE_PREFIX_PATH="$PWD/../rocm-artifacts/lib/cmake" `
+  -DROCM_PATH="$PWD/../rocm-artifacts" `
+  -DCMAKE_C_COMPILER="$PWD/../rocm-artifacts/lib/llvm/bin/clang.exe" `
+  -DCMAKE_CXX_COMPILER="$PWD/../rocm-artifacts/lib/llvm/bin/clang++.exe" `
+  -DGPU_TARGETS=<gpu-target> `
+  -DHIPDNN_SKIP_TESTS=OFF `
+  -DENABLE_CLANG_TIDY=OFF
+
+cmake --build build/hipdnn-tests
+ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
+```
+
 > To build a sample instead, point `-S` at `projects/hipdnn/samples` and build the sample target. Expected result: the same passing snippets as section 5, and a full-suite `100% tests passed, 0 tests failed out of <N>`.
 >
 > This flow builds against the installed artifacts with an explicit toolchain and CMake prefix. For an ordinary standalone source build using the checked-in configure presets, follow the [Quick Start Guide](../Building.md#quick-start-guide) instead.
@@ -192,6 +248,7 @@ ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
 For each GPU family, record the results file name and paste the comparison against the previous release.
 
 - **Results file**: `<headline-<version>-<arch>.json>`
+- **dnn-benchmarking version**: `<commit or tag>`
 - **Baseline**: `<previous release's results file for the same GPU family>`
 
 ```bash
