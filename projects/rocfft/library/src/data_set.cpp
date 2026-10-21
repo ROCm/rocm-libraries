@@ -27,6 +27,7 @@
 #include <iterator>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 
 namespace
 {
@@ -123,6 +124,18 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
         (*this)[dim].upper           = upper[dim];
         (*this)[dim].inbuffer_stride = strides[dim];
     }
+}
+
+data_set_t::data_set_t(rocfft_precision           precision,
+                       rocfft_array_type          array_type,
+                       const std::vector<size_t>& lower,
+                       const std::vector<size_t>& upper,
+                       const std::vector<size_t>& strides,
+                       size_t                     batch_rank)
+    : data_set_t(lower, upper, strides, batch_rank)
+{
+    this->array_type = array_type;
+    this->precision  = static_cast<std::underlying_type_t<rocfft_precision>>(precision);
 }
 
 data_set_t data_set_t::full_range(const std::vector<size_t>& lengths,
