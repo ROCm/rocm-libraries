@@ -10,6 +10,7 @@ These tests verify the timing analysis script's parsing and analysis logic
 import pytest
 
 pytestmark = pytest.mark.unit
+import gzip
 import sys
 import os
 from pathlib import Path
@@ -24,6 +25,8 @@ from analyze_timing import (
     parse_context_line,
     analyze_timing_file,
     build_hierarchy,
+    timings_to_tree,
+    tree_to_timings,
     TimingRecord,
     ProblemTiming,
     ALL_KNOWN_CATEGORIES,
@@ -339,3 +342,63 @@ TIMING:python_benchmark_problems:5000.0
         child_names = {c.name for c in bp.children}
         for phase in BENCH_POSTPROCESS_PHASES:
             assert phase in child_names, f"{phase} not in benchpost children"
+
+
+class TestGzipLogs:
+    """analyze_timing_file reads .gz logs the same as plain text."""
+
+    def test_gz_matches_plain(self, tmp_path):
+        plain = tmp_path / "run.log"
+        plain.write_text(SAMPLE_TIMING_LOG)
+        gz = tmp_path / "run.log.gz"
+        with gzip.open(gz, "wt") as f:
+            f.write(SAMPLE_TIMING_LOG)
+
+        plain_timings, plain_problems = analyze_timing_file(str(plain))
+        gz_timings, gz_problems = analyze_timing_file(str(gz))
+
+        assert dict(gz_timings) == dict(plain_timings)
+        assert [p.context for p in gz_problems] == [p.context for p in plain_problems]
+
+
+class TestTimingTree:
+    """timings_to_tree / tree_to_timings: the tiered dict of a run's results."""
+
+    def _timings(self, tmp_path):
+        log = tmp_path / "run.log"
+        log.write_text(SAMPLE_TIMING_LOG)
+        timings, _ = analyze_timing_file(str(log))
+        return timings
+
+    def test_follows_hierarchy_with_raw_count_and_total(self, tmp_path):
+        tree = timings_to_tree(self._timings(tmp_path))
+
+        top = tree["phases"]["python_benchmark_problems"]
+        assert top["count"] == 1 and top["total_ms"] == 20000.0
+        client = top["children"]["python_client_execution"]
+        assert client["count"] == 1 and client["total_ms"] == 15000.0
+        # Two problems -> two cpu_reference_gemm records, summed.
+        ref = client["children"]["pre_problem"]["children"]["cpu_reference_gemm"]
+        assert ref["count"] == 2
+        assert ref["total_ms"] == pytest.approx(1234.567 + 9876.543)
+
+    def test_unlogged_categories_are_left_out(self, tmp_path):
+        tree = timings_to_tree(self._timings(tmp_path))
+        top = tree["phases"]["python_benchmark_problems"]
+        assert "python_cache_check" not in top["children"]
+        assert tree["overlapping_totals"] == {}
+        assert tree["unknown_categories"] == {}
+
+    def test_unknown_category_is_kept_separately(self):
+        tree = timings_to_tree({"made_up_category": [1.0, 2.0]})
+        assert tree["phases"] == {}
+        assert tree["unknown_categories"] == {"made_up_category": {"count": 2, "total_ms": 3.0}}
+
+    def test_roundtrip_preserves_count_and_total(self, tmp_path):
+        timings = self._timings(tmp_path)
+        back = tree_to_timings(timings_to_tree(timings))
+
+        assert set(back) == set(timings)
+        for category, values in timings.items():
+            assert len(back[category]) == len(values)
+            assert sum(back[category]) == pytest.approx(sum(values))
