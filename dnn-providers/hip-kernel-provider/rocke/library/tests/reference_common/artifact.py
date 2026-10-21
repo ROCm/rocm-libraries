@@ -212,7 +212,8 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
             bundle.rename(output)
 
 
-def main() -> None:
+def _parser() -> argparse.ArgumentParser:
+    """Build the parser for this script and for the unpack commands that hints show."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("pack", "unpack", "validate"))
     parser.add_argument(
@@ -224,6 +225,11 @@ def main() -> None:
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--lock", required=True, type=Path)
     parser.add_argument("--archive", type=Path)
+    return parser
+
+
+def main() -> None:
+    parser = _parser()
     args = parser.parse_args()
     operation = args.operation
     if args.command == "validate":

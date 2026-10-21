@@ -525,9 +525,11 @@ class ReferenceOperation:
         the published archive tracked by the DVC pointer beside the default
         bundle. An installed tree has no pointers or archives; installation
         stages its published bundles, so it gets the installation's requirements
-        instead. ``stale`` asks for the directory's removal first, since neither
-        unpack nor installation replaces an existing bundle. ``option`` names the
-        setting that selects a bundle.
+        instead. An architecture without a pointer in a source checkout, or
+        without a committed lock in an installed tree, is unpublished and needs
+        a qualified candidate. ``stale`` asks for the directory's removal first,
+        since neither unpack nor installation replaces an existing bundle.
+        ``option`` names the setting that selects a bundle.
         """
         committed = self.architectures.baseline_lock(architecture)
         lock = lock or committed
@@ -541,6 +543,13 @@ class ReferenceOperation:
         tests = self._package.parent
         published = default_bundle_path(tests, architecture, operation=self.name)
         if installed_test_root(tests) is not None:
+            if not committed.is_file():
+                return (
+                    f"no published {architecture} {self.label} bundle is pinned at "
+                    f"{_shown(committed)}, so installation stages none; an "
+                    "unpublished architecture needs a qualified candidate bundle "
+                    "and its lock"
+                )
             if stale:
                 return (
                     f"delete {_shown(bundle)}, then reinstall the tests from one "
@@ -552,8 +561,7 @@ class ReferenceOperation:
                 f"installed trees receive the published {architecture} {self.label} "
                 f"bundle at {_shown(published)} only when built with "
                 "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and assembled with its "
-                "architecture's test artifact; an unpublished architecture needs a "
-                "qualified candidate bundle and its lock"
+                "architecture's test artifact"
             )
         archive = published.with_name(f"{published.name}.tar.gz")
         pointer = archive.with_name(f"{archive.name}.dvc")

@@ -8,8 +8,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
@@ -82,6 +84,119 @@ def _arguments(command):
     """
     found = re.findall(r'"([^"]*)"|(\S+)', command)
     return [quoted or plain for quoted, plain in found]
+
+
+def _commands(message):
+    """The commands that a hint shows, each split into its arguments.
+
+    A command starts at ``dvc pull`` or at a Python script that a Python
+    interpreter runs, and runs to the end of its line or to ``&&``, whatever
+    prose comes before it; a full stop after it is prose. The interpreter is
+    not part of the command. Prose that only names a command, such as "dvc
+    pull and artifact.py unpack:", neither runs a script nor ends one argument
+    after ``dvc pull``.
+    """
+    commands = []
+    for line in message.splitlines():
+        parts = [[]]
+        for argument in _arguments(line):
+            if argument == "&&":
+                parts.append([])
+            else:
+                parts[-1].append(argument)
+        for words in parts:
+            # A full stop may follow a quoted argument or end the last one.
+            if words[-1:] == ["."]:
+                words.pop()
+            elif words:
+                words[-1] = words[-1].removesuffix(".")
+            for at, word in enumerate(words):
+                pull = words[at : at + 2] == ["dvc", "pull"] and len(words) == at + 3
+                interpreter = Path(words[at - 1]).name if at else ""
+                run = word.endswith(".py") and interpreter.lower().startswith("python")
+                if pull or run:
+                    commands.append(words[at:])
+                    break
+    return commands
+
+
+def _unpacked(command):
+    """Parse a shown artifact.py command with artifact.py's own parser."""
+    from reference_common import artifact
+
+    script, *arguments = command
+    assert _same(script, artifact.__file__)
+    return artifact._parser().parse_args(arguments)
+
+
+def _passed(message, option):
+    """The path that a hint's last step outside its commands passes to ``option``."""
+    passed = []
+    for line in message.splitlines():
+        if not _commands(line):
+            pairs = pairwise(_arguments(line))
+            passed += [after for word, after in pairs if word == option]
+    assert passed, f"no step passes {option}"
+    return passed[-1].rstrip(".")
+
+
+def _step(message):
+    """The next step that a triaged failure gives, through the end of the message."""
+    parts = re.split("next step:", message, maxsplit=1, flags=re.IGNORECASE)
+    assert len(parts) == 2, "no next step"
+    return parts[1]
+
+
+def _deletes(step, path):
+    """Whether a step says to delete ``path``, before any command it shows."""
+    lead = step.lstrip().splitlines()[0]
+    deletes = re.search(r"(?<!not )(?<!n't )\b(delete|remove)\b", lead, re.IGNORECASE)
+    return bool(deletes) and _mentions(lead, path)
+
+
+def _same(shown, path):
+    """Whether a path that a hint shows, absolute or relative, is ``path``."""
+    return Path(shown).resolve() == Path(path).resolve()
+
+
+def _mentions(text, path):
+    """Whether prose names ``path``, absolute or relative to the working directory.
+
+    The name must end where the path does, so a directory is not found in the
+    name of the archive beside it.
+    """
+    path = Path(path)
+    forms = {str(path), str(path.resolve())}
+    try:
+        forms.add(os.path.relpath(path.resolve()))
+    except ValueError:  # Windows has no path from one drive to another.
+        pass
+    return any(
+        re.search(re.escape(form) + r"(?![\w\\/-]|\.\w)", text) for form in forms
+    )
+
+
+def _outcome(call):
+    """Run ``call`` and return how it ended, with the message it ended with.
+
+    ``pytest.raises(pytest.fail.Exception)`` lets a skip escape, so the test
+    reports a skip, and accepts an xfail, which subclasses Failed. Either would
+    let a required reference that compared nothing stay green, so this names
+    the exact outcome: ``fail``, ``xfail``, ``skip``, or ``pass``. A fail or
+    skip raised inside an exception handler would report that error again, so
+    none may be.
+    """
+    try:
+        call()
+    except (pytest.fail.Exception, pytest.skip.Exception) as error:
+        assert error.__context__ is None
+        kinds = {
+            pytest.fail.Exception: "fail",
+            pytest.xfail.Exception: "xfail",
+            pytest.skip.Exception: "skip",
+        }
+        return kinds[type(error)], str(error)
+    return "pass", ""
 
 
 def _another_operation(operation):
@@ -782,14 +897,16 @@ def _track(tests, operation, architecture):
     return pointer
 
 
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize(
-    "operation,architecture",
-    [("sdpa", "gfx942"), ("conv", "gfx942"), ("sdpa", "gfx1200")],
+    "index,published",
+    [(0, True), (-1, True), (-1, False)],
+    ids=["first", "last", "unpublished"],
 )
 @pytest.mark.parametrize("layout", ["source", "installed"])
 @pytest.mark.parametrize("selected", [False, True])
 def test_reference_missing_bundle_fails_only_when_selected(
-    operation, architecture, layout, selected, tmp_path, monkeypatch
+    operation, index, published, layout, selected, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -799,59 +916,72 @@ def test_reference_missing_bundle_fails_only_when_selected(
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     spec = gpu_tests.OPERATION
+    architecture = spec.architectures.ARCHITECTURES[index]
     monkeypatch.setattr(
         hip_module, "get_device_target_id", lambda device=0: architecture
     )
+    missing = tmp_path / "missing"
     monkeypatch.setattr(
-        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
+        gpu_tests, "default_bundle_path", lambda *args, **kwargs: missing
     )
     tests = _relocate(monkeypatch, tmp_path, operation, layout)
     # A published pair has a committed lock and, in a source checkout, a DVC
-    # pointer beside the default bundle; gfx1200 SDPA is enrolled but unpublished.
-    published = spec.architectures.baseline_lock(architecture).is_file()
+    # pointer beside the default bundle. The test decides which pairs those
+    # are, so publishing another architecture cannot remove a case.
+    locks = tmp_path / "locks"
+    monkeypatch.setattr(
+        spec.architectures,
+        "baseline_lock",
+        lambda name: locks / name / "baseline_lock.json",
+    )
+    lock = spec.architectures.baseline_lock(architecture)
     pointer = tests / f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
-    if layout == "source" and published:
-        _track(tests, operation, architecture)
+    if published:
+        lock.parent.mkdir(parents=True)
+        lock.write_text("{}\n")
+        if layout == "source":
+            _track(tests, operation, architecture)
     options = {"--rocke-reference-operation": operation if selected else None}
     config = SimpleNamespace(getoption=options.get)
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
-        with pytest.raises(
-            pytest.fail.Exception if selected else pytest.skip.Exception
-        ) as outcome:
-            next(fixture)
-    message = str(outcome.value)
-    name = operation.upper()
-    assert (
-        f"required {architecture} {name} reference bundle is missing"
-        if selected
-        else f"no extracted {architecture} {name} reference bundle at"
-    ) in message
-    if layout == "installed":
+        outcome, message = _outcome(lambda: next(fixture))
+    # A selected suite without its bundle must fail, so that it cannot pass
+    # in CI without running a comparison.
+    assert outcome == ("fail" if selected else "skip")
+    first = message.splitlines()[0]
+    key = "reference bundle is missing" if selected else "no extracted"
+    assert _documented(key) and key in first
+    assert architecture in first and operation.upper() in first
+    assert _mentions(first, missing)
+    commands = _commands(message)
+    installed = tmp_path / "bin/hip_kernel_provider/engines/test_arch_content/rocke"
+    installed /= f"{operation}/{architecture}"
+    if not published:
+        # Nothing is fetched or staged; qualification makes the bundle.
+        assert commands == [] and "dvc pull" not in message
+        assert "candidate" in message
+        assert _mentions(message, pointer if layout == "source" else lock)
+        assert not _mentions(message, installed)
+        assert "ROCKE_INSTALL_TEST_GPU_REFERENCES" not in message
+    elif layout == "installed":
         # Installation stages published bundles; there is nothing to fetch.
-        installed = tmp_path.resolve() / (
-            "bin/hip_kernel_provider/engines/test_arch_content/rocke/"
-            f"{operation}/{architecture}"
-        )
-        assert (
-            f"installed trees receive the published {architecture} {spec.label} "
-            f"bundle at {installed} only when built with "
-            "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON"
-        ) in message
-        assert "dvc pull" not in message
-    elif published:
-        assert "fetch and extract it with dvc pull and artifact.py unpack" in message
-        assert f"{display_command(['dvc', 'pull', str(pointer)])}\n" in message
-        assert f"artifact.py unpack --operation {operation} " in message
+        assert commands == [] and "dvc pull" not in message
+        assert _mentions(message, installed)
+        assert "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON" in message
     else:
-        assert (
-            f"no published {architecture} {spec.label} archive is tracked at {pointer}"
-        ) in message
-        assert "installed trees" not in message
+        pull, extract = commands
+        assert pull[:2] == ["dvc", "pull"] and _same(pull[2], pointer)
+        args = _unpacked(extract)
+        assert (args.command, args.operation) == ("unpack", operation)
+        # The archive that the pointer tracks unpacks into the missing bundle.
+        assert _same(args.archive, pointer.with_suffix(""))
+        assert _same(args.bundle, missing) and _same(args.lock, lock)
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("index", [0, -1])
 def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
-    operation, tmp_path, monkeypatch
+    operation, index, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -861,7 +991,7 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     registry = import_module(f"{operation}_reference.architectures")
-    architecture = registry.ARCHITECTURES[0]
+    architecture = registry.ARCHITECTURES[index]
     archive = tmp_path / f"{architecture}.tar.gz"
     archive.write_bytes(b"archive fixture")
     monkeypatch.setattr(
@@ -874,13 +1004,19 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
     fixture = gpu_tests.reference_bundle.__wrapped__(
         SimpleNamespace(getoption=options.get)
     )
-    with closing(fixture), pytest.raises(pytest.fail.Exception) as failure:
-        next(fixture)
-    message = str(failure.value)
-    assert "--rocke-reference-bundle needs an extracted bundle directory" in message
-    assert f"artifact.py unpack --operation {operation} " in message
-    option = ["--rocke-reference-bundle", str(tmp_path / architecture)]
-    assert f"then pass {display_command(option)}" in message
+    with closing(fixture):
+        outcome, message = _outcome(lambda: next(fixture))
+    assert outcome == "fail"
+    assert "reference bundle is missing" in message.splitlines()[0]
+    (extract,) = _commands(message)
+    args = _unpacked(extract)
+    assert (args.command, args.operation) == ("unpack", operation)
+    assert _same(args.archive, archive)
+    assert _same(args.lock, registry.baseline_lock(architecture))
+    # The pytest option, not the CLI's --bundle, then selects the directory
+    # that the command extracts beside the archive.
+    passed = _passed(message, "--rocke-reference-bundle")
+    assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
 
 
 def test_displayed_commands_are_plain_text_for_every_shell():
@@ -1285,15 +1421,15 @@ def test_cohort_comparison_reports_each_difference_without_raising():
     assert comparison.repeated == {"b": ["b", "b-copy"]}
 
 
-def _qualified_cohort(tmp_path, operation):
-    """A locked synthetic bundle recording an operation's first enrolled cohort."""
+def _qualified_cohort(tmp_path, operation, index=0):
+    """A locked synthetic bundle recording one of an operation's enrolled cohorts."""
     from dataclasses import asdict
     from importlib import import_module
 
     from reference_common.numeric import payload_digests
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    architecture = spec.architectures.ARCHITECTURES[0]
+    architecture = spec.architectures.ARCHITECTURES[index]
     target = spec.architectures.get_architecture(architecture)
     bundle = tmp_path / "bundle"
     (bundle / "payload").mkdir(parents=True)
@@ -1596,6 +1732,15 @@ _WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
 _TRIAGE_DOC = f"{_WORKFLOW_DOC}#triage"
 
 
+def _documented(key):
+    """Whether the workflow doc's triage table finds a failure by ``key``."""
+    doc = Path(__file__).parent / _WORKFLOW_DOC.removeprefix("library/tests/")
+    text = doc.read_text(encoding="utf-8")
+    section = text.partition("\n## Triage\n")[2].partition("\n#")[0]
+    rows = (row for row in section.splitlines() if row.startswith("| `"))
+    return any(f"`{key}`" in row.split(" | ")[0] for row in rows)
+
+
 def _published_pairs():
     """Every operation/architecture pair with a committed lock.
 
@@ -1730,7 +1875,14 @@ def test_published_cohort_check_names_unqualified_cases(
             tests, name, operation=operation
         ),
     )
-    published = default_bundle_path(tests, architecture, operation=operation)
+    # Where each layout keeps the bundle, written out rather than looked up,
+    # so that a wrong default location cannot place and find it alike.
+    published = tmp_path.resolve() / (
+        "bin/hip_kernel_provider/engines/test_arch_content/rocke"
+        if layout == "installed"
+        else "rocke/library/tests/reference_bundles"
+    )
+    published /= f"{operation}/{architecture}"
     published.parent.mkdir(parents=True)
     archive = published.with_name(f"{architecture}.tar.gz")
     pointer = archive.with_name(f"{archive.name}.dvc")
@@ -1740,56 +1892,53 @@ def test_published_cohort_check_names_unqualified_cases(
         pack(bundle, archive, lock, operation=operation)
     else:
         bundle.rename(published)
-    _check_published_cohort(operation, architecture)
 
+    def check():
+        return _outcome(lambda: _check_published_cohort(operation, architecture))
+
+    assert check() == ("pass", "")
     monkeypatch.setattr(target, "CASES", cases)
-    with pytest.raises(pytest.fail.Exception) as failure:
-        _check_published_cohort(operation, architecture)
-    message = str(failure.value)
-    script = Path(__file__).with_name(f"run_{operation}_reference.py")
-    for expected in (
-        f"enrolled but not in the bundle: {cases[-1].id} (",
-        "needs a complete requalification and a new published archive",
-        _WORKFLOW_DOC,
-        display_command(["python", str(script), "diff", "--arch", architecture]),
-    ):
-        assert expected in message
+    outcome, message = check()
+    assert outcome == "fail"
+    assert f"{cases[-1].id} (" in message and _WORKFLOW_DOC in message
+    (diff,) = _commands(message)
+    assert _same(diff[0], Path(__file__).with_name(f"run_{operation}_reference.py"))
+    args = spec._parser().parse_args(diff[1:])
+    assert (args.command, args.arch) == ("diff", architecture)
     # Data the lock does not pin, such as an archive from an earlier pointer,
-    # fails instead of skipping.
+    # fails instead of skipping, though it records the enrolled cohort.
+    monkeypatch.setattr(target, "CASES", cases[:-1])
     lock.write_text(
         json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
     )
-    with pytest.raises(pytest.fail.Exception) as failure:
-        _check_published_cohort(operation, architecture)
-    assert "not the bundle that its committed lock pins" in str(failure.value)
-    # Raised outside the handler, so pytest shows the message once.
-    assert failure.value.__context__ is None
+    outcome, message = check()
+    assert outcome == "fail"
+    key = "does not match the pinned lock"
+    assert _documented(key) and key in message
     if layout == "archive":
-        # A truncated fetch fails with the step that replaces it.
+        # A truncated fetch fails with the step that replaces it: delete the
+        # archive, then fetch it again through its pointer.
         archive.write_bytes(archive.read_bytes()[: archive.stat().st_size // 2])
-        with pytest.raises(pytest.fail.Exception) as failure:
-            _check_published_cohort(operation, architecture)
-        assert failure.value.__context__ is None
-        message = str(failure.value)
-        assert f"archive {archive.resolve()} cannot be read: " in message
-        fetch = display_command(["dvc", "pull", str(pointer.resolve())])
-        assert (
-            f"delete {archive.resolve()}, then fetch it again with: {fetch}"
-        ) in message
+        outcome, message = check()
+        assert outcome == "fail"
+        assert _documented("cannot be read") and "cannot be read" in message
+        assert _deletes(_step(message), archive)
+        (pull,) = _commands(message)
+        assert pull[:2] == ["dvc", "pull"] and _same(pull[2], pointer)
 
     if layout == "archive":
         archive.unlink()
     else:
         shutil.rmtree(published)
-    with pytest.raises(pytest.skip.Exception) as skip:
-        _check_published_cohort(operation, architecture)
-    reason = str(skip.value)
+    outcome, reason = check()
+    assert outcome == "skip"
     if layout == "installed":
-        assert f"bundle is installed at {published};" in reason
+        assert _mentions(reason, published)
         assert "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON" in reason
     else:
-        assert f"{archive} has not been fetched" in reason
-        assert reason.endswith(display_command(["dvc", "pull", str(pointer)]))
+        assert _mentions(reason, archive)
+        (pull,) = _commands(reason)
+        assert pull[:2] == ["dvc", "pull"] and _same(pull[2], pointer)
 
 
 # Qualification runs this tree's adapter with the baseline snapshot's rocKE and
@@ -2047,9 +2196,10 @@ def test_baseline_preparation_check_names_what_failed(tmp_path, operation, broke
             "raise ImportError('runtime moved')\n"
         )
     revision = "a" * 40
-    with pytest.raises(pytest.fail.Exception) as failure:
-        _check_baseline_preparation(operation, architecture, source, revision)
-    message = str(failure.value)
+    outcome, message = _outcome(
+        lambda: _check_baseline_preparation(operation, architecture, source, revision)
+    )
+    assert outcome == "fail"
     if broken == "prepare":
         assert (
             f"cannot prepare {len(cases)} of {len(cases)} enrolled cases with the "
@@ -2114,17 +2264,22 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     assert exit.value.code == 2
     error = capsys.readouterr().err
     assert "Traceback" not in error
-    assert f"artifact.py unpack --operation {operation} " in error
+    # The command unpacks the archive with the selected lock into the
+    # directory beside it, which the message then says to pass.
+    (extract,) = _commands(error)
+    args = _unpacked(extract)
+    assert (args.command, args.operation) == ("unpack", operation)
+    assert _same(args.archive, archive) and _same(args.lock, lock)
+    passed = _passed(error, "--bundle")
+    assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
     # The suggested command extracts and authenticates a usable bundle.
-    suggested = next(line for line in error.splitlines() if "artifact.py" in line)
-    subprocess.run(
-        [sys.executable, *_arguments(suggested)[1:]], check=True, capture_output=True
-    )
-    assert spec.load_bundle(tmp_path / architecture, lock, architecture=architecture)
+    subprocess.run([sys.executable, *extract], check=True, capture_output=True)
+    assert spec.load_bundle(Path(passed), lock, architecture=architecture)
     with pytest.raises(SystemExit) as exit:
         spec.main([*command, str(tmp_path / "missing")])
     assert exit.value.code == 2
-    assert "bundle directory not found" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "not found" in error and "artifact.py" not in error
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2254,13 +2409,13 @@ def test_operation_without_torch_offers_no_torch_cross_check(tmp_path, operation
     assert not (tmp_path / "bundle").exists()
 
 
-def _verifiable_case(monkeypatch, operation):
-    """An operation's first case enrolled alone, with a synthetic qualified entry."""
+def _verifiable_case(monkeypatch, operation, index=0):
+    """An architecture's first case enrolled alone, with a synthetic qualified entry."""
     from dataclasses import asdict
     from importlib import import_module
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    architecture = spec.architectures.ARCHITECTURES[0]
+    architecture = spec.architectures.ARCHITECTURES[index]
     target = spec.architectures.get_architecture(architecture)
     case = target.CASES[0]
     monkeypatch.setattr(target, "CASES", (case,))
@@ -2281,16 +2436,17 @@ def _verifiable_case(monkeypatch, operation):
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("index", [0, -1])
 @pytest.mark.parametrize(
     "failure", ["baseline-output", "current-output", "qualified-target", "features"]
 )
 def test_verification_failures_name_side_values_cause_and_next_step(
-    tmp_path, monkeypatch, operation, failure
+    tmp_path, monkeypatch, operation, index, failure
 ):
     from reference_common import cli as common_cli
 
     spec, architecture, case, manifest, output = _verifiable_case(
-        monkeypatch, operation
+        monkeypatch, operation, index
     )
     entry = manifest["cases"][case.id]
     changed = decode(output, case.dtype).copy()
@@ -2318,50 +2474,80 @@ def test_verification_failures_name_side_values_cause_and_next_step(
         }
 
     monkeypatch.setattr(common_cli, "run_worker", worker)
+    # Distinct paths, so that a rerun command that swaps them is wrong.
+    bundle, current_root = tmp_path / "bundle", tmp_path / "current"
     with pytest.raises(AssertionError if "output" in failure else ValueError) as error:
         spec.verify_case(
             case,
-            bundle=tmp_path,
+            bundle=bundle,
             manifest=manifest,
-            current_root=tmp_path,
+            current_root=current_root,
             architecture=architecture,
         )
     message = str(error.value)
-    subject = f"{spec.label} {architecture} case {case.id}"
-    assert subject in message
-    assert "\n  likely cause: " in message and "\n  next step: " in message
-    assert message.endswith(_TRIAGE_DOC)
+    problem = message.splitlines()[0]
+    assert f"{spec.label} {architecture} case {case.id}" in problem
+    assert re.search(r"^\s*likely cause:\s*\S", message, re.MULTILINE | re.IGNORECASE)
+    step = _step(message)
+    assert step.strip() and _TRIAGE_DOC in message
+    # A step may rule out a wider tolerance, never suggest one.
+    assert not re.search(
+        r"(?<!rather than )(?<!instead of )(?<!not )\bwiden", step, re.IGNORECASE
+    )
+    key = {
+        "baseline-output": "reference qualification failure",
+        "current-output": "exceeds remaining limit",
+        "qualified-target": "differs from the qualified target",
+        "features": "used different target features",
+    }[failure]
+    assert _documented(key) and key in problem
+    baseline, current = "frozen baseline (replay)", "current kernel (source)"
     if failure == "baseline-output":
-        # The environment, not the current kernel, changed the frozen output.
-        assert f"reference qualification failure for {subject}" in message
-        assert "frozen baseline (replay) output of repetition 2 of 2" in message
-        assert f"has digest {array_digest(changed)[:12]}" in message
-        assert f"qualification recorded {entry['output_digest'][:12]}" in message
-        assert "the current kernel did not run" in message
+        # The environment, not the current kernel, changed the frozen output,
+        # so the current kernel did not run.
         assert modes == ["replay"]
+        assert baseline in problem and current not in problem
+        assert re.search(r"repetition\D+2\D+2\b", problem)
+        measured, recorded = array_digest(changed)[:12], entry["output_digest"][:12]
+        assert problem.index(measured) < problem.index(recorded)
     elif failure == "current-output":
+        assert current in problem and baseline not in problem
+        assert re.search(r"repetition\D+2\D+2\b", problem)
+
+        def shown(label):
+            value = re.search(rf"{re.escape(label)}\s*=?\s*([^\s,;]+)", problem)
+            return float(value.group(1).rstrip("."))
+
         budget = ErrorBudget(**entry["budget"])
-        assert "current kernel (source) output of repetition 2 of 2" in message
-        assert f"GPU reference {spec.metric.name}=" in message
-        assert f"exceeds remaining limit {budget.comparison_limit:.9g}" in message
-        assert f"baseline_bound={budget.baseline_error_bound:.9g}" in message
-        assert f"original_tolerance={case.tolerance:.9g}" in message
-        assert "frozen baseline reproduced its qualified output" in message
-        rerun = ["verify", "--arch", architecture, "--bundle", str(tmp_path)]
-        rerun += ["--current-root", str(tmp_path), "--case", case.id]
-        assert f"run_{operation}_reference.py {display_command(rerun)}`" in message
-    elif failure == "qualified-target":
-        assert (
-            f"frozen baseline (replay) ran on device target {other_target}, but the "
-            f"bundle was qualified on {entry['device_target']}"
-        ) in message
-        assert "differs from the qualified target" in message
+        distance = spec.metric.distance(
+            decode(changed, case.dtype), decode(output, case.dtype), entry
+        )
+        for label, value in (
+            (spec.metric.name, distance),
+            (key, budget.comparison_limit),
+            ("baseline_bound", budget.baseline_error_bound),
+            ("original_tolerance", case.tolerance),
+        ):
+            assert math.isclose(shown(label), value, rel_tol=1e-6), label
+        # The rerun repeats this case with the same bundle and current tree.
+        (rerun,) = re.findall(r"`([^`]+)`", step)
+        script, *arguments = _arguments(rerun)[1:]
+        assert _same(script, Path(__file__).with_name(f"run_{operation}_reference.py"))
+        args = spec._parser().parse_args(arguments)
+        assert (args.command, args.arch, args.cases, args.lock) == (
+            "verify",
+            architecture,
+            [case.id],
+            None,
+        )
+        assert _same(args.bundle, bundle) and _same(args.current_root, current_root)
     else:
-        assert (
-            f"current kernel (source) ran on device target {other_target}, but the "
-            f"frozen baseline (replay) ran on {entry['device_target']}"
-        ) in message
-        assert "different target features" in message
+        # The side that ran on the other target comes first, then the target
+        # it was expected to match.
+        side = baseline if failure == "qualified-target" else current
+        assert side in problem
+        assert problem.index(side) < problem.index(other_target)
+        assert problem.index(other_target) < problem.index(entry["device_target"])
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2460,20 +2646,30 @@ if __name__ == "__main__":
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("index", [0, -1])
 @pytest.mark.parametrize("layout", ["source", "installed"])
 @pytest.mark.parametrize(
-    "problem", ["stale", "no-manifest", "modified", "archive", "candidate"]
+    "problem",
+    ["stale", "no-manifest", "modified", "archive", "candidate", "candidate-archive"],
 )
 def test_rejected_bundles_say_how_to_replace_them(
-    tmp_path, monkeypatch, operation, layout, problem
+    tmp_path, monkeypatch, operation, index, layout, problem
 ):
-    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation, index)
     tests = _relocate(monkeypatch, tmp_path, operation, layout)
     if layout == "source":
         pointer = _track(tests, operation, architecture)
-    if problem != "candidate":
-        # The committed lock authenticates the published bundle.
-        monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    candidate = problem.startswith("candidate")
+    if not candidate:
+        # The committed lock authenticates the published bundle; other
+        # architectures' locks are elsewhere.
+        monkeypatch.setattr(
+            spec.architectures,
+            "baseline_lock",
+            lambda name: lock if name == architecture else tmp_path / f"{name}.json",
+        )
+    # The problem names these paths and values.
+    paths, values = [], []
     if problem in ("stale", "candidate"):
         # The lock now pins a newer manifest than the one extracted earlier.
         extracted = (bundle / "manifest.json").read_bytes()
@@ -2481,60 +2677,76 @@ def test_rejected_bundles_say_how_to_replace_them(
         manifest["baseline_revision"] = "b" * 40
         _relock(bundle, manifest, lock)
         (bundle / "manifest.json").write_bytes(extracted)
-        expected = (
-            "manifest does not match the pinned lock: "
-            f"{bundle.resolve() / 'manifest.json'} has sha256 "
-            f"{hashlib.sha256(extracted).hexdigest()[:12]}, but {lock.resolve()} pins "
-            f"{json.loads(lock.read_text())['manifest_sha256'][:12]}"
-        )
+        paths += [bundle / "manifest.json", lock]
+        values += [hashlib.sha256(extracted).hexdigest()[:12]]
+        values += [json.loads(lock.read_text())["manifest_sha256"][:12]]
+        key = "does not match the pinned lock"
     elif problem == "no-manifest":
         (bundle / "manifest.json").unlink()
-        expected = f"bundle {bundle.resolve()} has no manifest.json"
+        paths += [bundle]
+        key = "has no manifest.json"
     elif problem == "modified":
         (bundle / "payload/kernel.hsaco").write_bytes(b"modified")
-        expected = "payload has missing, modified, or extra files: 1 differ, "
-        expected += "including kernel.hsaco"
+        values += ["kernel.hsaco"]
+        key = "missing, modified, or extra files"
     else:
         archive = tmp_path / f"{architecture}.tar.gz"
         pack(bundle, archive, lock, operation=operation)
         bundle = archive
-        expected = "is a file, but --bundle needs an extracted bundle directory"
+        paths += [archive]
+        key = None
     with pytest.raises(ValueError) as error:
-        spec.load_bundle(
-            bundle, lock if problem == "candidate" else None, architecture=architecture
-        )
+        spec.load_bundle(bundle, lock if candidate else None, architecture=architecture)
     message = str(error.value)
-    assert expected in message
+    first = message.splitlines()[0]
+    assert all(_mentions(first, path) for path in paths)
+    assert all(value in first for value in values)
+    if problem == "modified":
+        # Only the one rewritten payload file differs.
+        assert re.search(r"\b1 differ", first)
+    if problem in ("stale", "candidate"):
+        # Each digest follows the file that it belongs to, in either clause order.
+        parts = re.split(f"({'|'.join(values)})", first)
+        before = dict(zip(parts[1::2], parts[0::2]))
+        assert all(_mentions(before[value], path) for path, value in zip(paths, values))
+    if key:
+        assert _documented(key) and key in first and _TRIAGE_DOC in message
+    commands = _commands(message)
     if problem == "candidate":
-        assert "qualification-lock.json that qualification wrote" in message
+        # A candidate comes from qualification, so there is nothing to fetch.
+        assert commands == [] and "dvc pull" not in message
+        assert "qualification-lock.json" in _step(message)
+    elif bundle.is_file():
+        # The archive unpacks, with the selected lock, into the directory
+        # beside it that the message then says to pass.
         assert "dvc pull" not in message
-    elif problem == "archive":
-        assert f"artifact.py unpack --operation {operation} " in message
+        (extract,) = commands
+        args = _unpacked(extract)
+        assert (args.command, args.operation) == ("unpack", operation)
+        assert _same(args.archive, archive) and _same(args.lock, lock)
+        passed = _passed(message, "--bundle")
+        assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
+        unpack(args.archive, args.bundle, args.lock, operation=args.operation)
+        selected = lock if candidate else None
+        assert spec.load_bundle(Path(passed), selected, architecture=architecture)
     elif layout == "installed":
         # Installation does not replace a directory either, and needs no fetch.
-        installed = tmp_path.resolve() / (
-            "bin/hip_kernel_provider/engines/test_arch_content/rocke/"
-            f"{operation}/{architecture}"
-        )
-        assert "stale (left from an earlier archive)" in message
-        assert (
-            f"delete {bundle.resolve()}, then reinstall the tests from one build; "
-            f"installation stages the published {architecture} {spec.label} bundle "
-            f"at {installed} from the archive that the installed lock pins"
-        ) in message
-        assert "dvc pull" not in message
-        assert message.endswith(_TRIAGE_DOC)
+        assert commands == [] and "dvc pull" not in message
+        installed = tmp_path / "bin/hip_kernel_provider/engines/test_arch_content"
+        installed /= f"rocke/{operation}/{architecture}"
+        step = _step(message)
+        assert _deletes(step, bundle)
+        assert "install" in step and _mentions(step, installed)
     else:
         # Unpack does not replace a directory, so the stale one goes first.
-        assert "stale (left from an earlier archive)" in message
-        assert (
-            f"delete {bundle.resolve()}, then re-run dvc pull and artifact.py unpack:"
-        ) in message
-        assert f"{display_command(['dvc', 'pull', str(pointer)])}\n" in message
-        assert f"artifact.py unpack --operation {operation} --archive " in message
-        paths = ["--bundle", str(bundle.resolve()), "--lock", str(lock.resolve())]
-        assert display_command(paths) in message
-        assert message.endswith(_TRIAGE_DOC)
+        assert _deletes(_step(message), bundle)
+        pull, extract = commands
+        assert pull[:2] == ["dvc", "pull"] and _same(pull[2], pointer)
+        args = _unpacked(extract)
+        assert (args.command, args.operation) == ("unpack", operation)
+        # The archive that the pointer tracks replaces the rejected bundle.
+        assert _same(args.archive, pointer.with_suffix(""))
+        assert _same(args.bundle, bundle) and _same(args.lock, lock)
 
 
 def test_unpack_explains_a_stale_archive_or_extracted_bundle(tmp_path, operation):
