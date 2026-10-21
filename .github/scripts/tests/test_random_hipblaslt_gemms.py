@@ -6,6 +6,7 @@ import random
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -54,6 +55,175 @@ def bench_result(problem, *, norm="0", atol="1e-6"):
 
 
 class RandomGemmTests(unittest.TestCase):
+    def test_explicit_cases_run_in_addition_to_random_samples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            problem = sampler.sample_gemm(random.Random(10))
+            cases = root / "explicit.json"
+            cases.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "required",
+                            "description": "Regression input",
+                            "tracking": "https://github.com/ROCm/rocm-libraries/issues/14129",
+                            "problem": problem,
+                        }
+                    ]
+                )
+            )
+            config = root / "config.json"
+            config.write_text(
+                json.dumps({"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}})
+            )
+            executed = []
+
+            def run_case(args, directory, problem, config):
+                executed.append(directory.name)
+                return {
+                    "outcome": (
+                        "failed" if directory.name.startswith("explicit-") else "passed"
+                    ),
+                    "reason": (
+                        "race reported"
+                        if directory.name.startswith("explicit-")
+                        else None
+                    ),
+                    "exit_code": 0,
+                }
+
+            with patch.object(runner, "run_case", run_case):
+                status = runner.main(
+                    [
+                        "--count",
+                        "3",
+                        "--threads",
+                        "2",
+                        "--explicit-cases",
+                        str(cases),
+                        "--bench",
+                        sys.executable,
+                        "--rocjitsu",
+                        sys.executable,
+                        "--config",
+                        str(config),
+                        "--output",
+                        str(root / "all"),
+                    ]
+                )
+            self.assertEqual(status, 1)
+            self.assertEqual(
+                set(executed),
+                {"explicit-required", "case-0001", "case-0002", "case-0003"},
+            )
+            summary = json.loads((root / "all/summary.json").read_text())
+            self.assertEqual(
+                (
+                    summary["requested"],
+                    summary["sampled"],
+                    summary["failed"],
+                    summary["passed"],
+                ),
+                (4, 3, 1, 3),
+            )
+            self.assertEqual(summary["sources"]["explicit"]["failed"], 1)
+            self.assertTrue(summary["complete"])
+            report = json.loads((root / "all/cases.json").read_text())
+            self.assertEqual(len(report), 4)
+            self.assertIn("race reported", (root / "all/cases.md").read_text())
+            runner.main(["--count", "3", "--dry-run", "--output", str(root / "random")])
+            for iteration in range(1, 4):
+                name = f"case-{iteration:04d}/input.yaml"
+                self.assertEqual(
+                    (root / "all" / name).read_text(),
+                    (root / "random" / name).read_text(),
+                )
+            runner.main(
+                [
+                    "--count",
+                    "0",
+                    "--explicit-cases",
+                    str(cases),
+                    "--dry-run",
+                    "--output",
+                    str(root / "explicit"),
+                ]
+            )
+            self.assertFalse((root / "explicit/case-0001").exists())
+            runner.main(
+                [
+                    "--explicit-case",
+                    "required",
+                    "--explicit-cases",
+                    str(cases),
+                    "--dry-run",
+                    "--output",
+                    str(root / "one"),
+                ]
+            )
+            self.assertEqual(
+                (root / "one/explicit-required/input.yaml").read_text(),
+                (root / "explicit/explicit-required/input.yaml").read_text(),
+            )
+            runner.main(
+                [
+                    "--case",
+                    "2",
+                    "--count",
+                    "3",
+                    "--explicit-cases",
+                    str(cases),
+                    "--dry-run",
+                    "--output",
+                    str(root / "single-random"),
+                ]
+            )
+            self.assertFalse((root / "single-random/explicit-required").exists())
+            with patch.object(runner, "run_case", run_case):
+                status = runner.main(
+                    [
+                        "--count",
+                        "3",
+                        "--explicit-cases",
+                        str(cases),
+                        "--stop-on-failure",
+                        "--bench",
+                        sys.executable,
+                        "--rocjitsu",
+                        sys.executable,
+                        "--config",
+                        str(config),
+                        "--output",
+                        str(root / "stopped"),
+                    ]
+                )
+            self.assertEqual(status, 1)
+            stopped = json.loads((root / "stopped/summary.json").read_text())
+            self.assertEqual(stopped["sources"]["random"]["started"], 0)
+            self.assertFalse(stopped["complete"])
+
+    def test_explicit_cases_reject_duplicates_and_bench_control_overrides(self):
+        cases = runner.load_explicit_cases(
+            Path(__file__).parent.parent / "hipblaslt_explicit_gemms.json"
+        )
+        self.assertEqual(len({case["id"] for case in cases}), len(cases))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            for data in (
+                [cases[0], cases[0]],
+                [{**cases[0], "id": "../escape"}],
+                [
+                    {
+                        **cases[0],
+                        "problem": {**cases[0]["problem"], "norm_check_assert": False},
+                    }
+                ],
+                [{**cases[0], "problem": {**cases[0]["problem"], "M": 0}}],
+            ):
+                path.write_text(json.dumps(data))
+                with self.assertRaises(ValueError):
+                    runner.load_explicit_cases(path)
+
     def test_dry_run_and_single_case_reproduce_the_same_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

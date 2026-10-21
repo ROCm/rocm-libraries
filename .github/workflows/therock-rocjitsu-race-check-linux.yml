@@ -16,7 +16,7 @@ on:
         type: string
         required: true
       random_gemm_count:
-        description: "Number of gfx950 GEMMs"
+        description: "Number of random gfx950 GEMMs, plus required explicit cases"
         type: number
         default: 100
       random_gemm_seed:

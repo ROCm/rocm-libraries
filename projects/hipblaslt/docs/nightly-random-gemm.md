@@ -43,6 +43,9 @@ The public `hipblasLtMatmulAlgoGetHeuristic` query checks one set of descriptors
 there is no public query that enumerates all legal numerical combinations.
 Alignment and a documented type pairing do not guarantee that the loaded
 library contains a kernel for every sampled configuration.
+The [individual observation table](random-gemm-observations.md) records the
+inputs and failures from local exploration, with complete machine-readable
+benchmark inputs alongside it.
 
 ## Running
 
@@ -68,6 +71,26 @@ A pass requires successful numerics and race detection. Known-failure exclusions
 start empty, and every race report fails. Inputs and results are saved under the
 output directory. Use `--help` for all options.
 
+`--explicit-cases` loads a JSON list of required inputs in addition to the random
+samples. Each entry has a stable `id`, a description, a tracking link and a
+complete `problem`. Required cases never consume random draws. The summary
+reports `random` and `explicit` counts separately; `sampled` counts only random
+inputs, while `requested` includes both. Each run writes `cases.md` and
+`cases.json`, listing every input and observed result. Explicit tests retain the
+same numerical assertions and race checks as random tests; there are no expected
+failure exemptions.
+
+The checked-in [required cases](../../../.github/scripts/hipblaslt_explicit_gemms.json)
+include five numerical-validation reproducers and nine BF16 TN inputs covering
+the reduced, tail and original batched shapes from
+[the reported prefetch race](https://github.com/ROCm/rocm-libraries/pull/14147).
+The heuristic may select a different kernel, so these check the shapes rather
+than guaranteeing coverage of that particular custom schedule. Results record
+the selected kernel names. Use `--count 0 --explicit-cases ...` to run the list
+alone, or `--explicit-case ID --explicit-cases ...` to replay one named input.
+`--case N` continues to replay only the Nth random sample. Early stopping also
+applies to explicit tests; omit `--stop-on-failure` to attempt the full list.
+
 ## CI and pre-merge validation
 
 The existing Multi-Arch workflows call the CPU
@@ -77,6 +100,9 @@ nightly samples 1,000. Both use gfx950, seed 0 and eight concurrent GEMMs, so
 the per-PR inputs are the first 100 nightly inputs. The job fetches the matching
 BLAS runtime, device library and bench test payload from that workflow run.
 The emulator is pinned independently to a revision validated with these types.
+Both callers also run the same 14 required cases, giving 114 per-PR inputs and
+1,014 nightly inputs. The known numerical reproducers currently fail strict
+validation and remain visible in the advisory job; no blacklist hides them.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
 but they do not change the required Multi-Arch summary. No known-failure entries
