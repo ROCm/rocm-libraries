@@ -60,6 +60,13 @@ Read `name_absent` with care: it means the exact mangled string rocke emits is
 not a known intrinsic. A nonexistent operation and a mis-mangled overload suffix
 look identical here -- both are decl-table bugs, but different ones.
 
+# Processor names
+
+One more probe per target, not per key: an empty kernel compiled and linked for
+the target. `processors` records whether this compiler accepts the processor
+name at all, which is what the compile helpers read to choose the name they pass
+the compiler (`rocke.core.arch.compiler_target_for_flavor`).
+
 # Provenance
 
 A result is only meaningful against the toolchain that produced it, and a host
@@ -151,7 +158,10 @@ STATUS_PROBE_ERROR = _domain.STATUS_PROBE_ERROR
 #        the key is held out of stage B. No cell moves on a healthy toolchain,
 #        but the stamp must, because a generator-5 column cannot otherwise be
 #        told apart from one that banked a crash as a definite negative.
-GENERATOR = 6
+#   7 -- each target's processor name is probed once with an empty kernel, and
+#        `processors` records whether this flavor's compiler accepts it, so the
+#        compile-target rule reads a measurement instead of guessing.
+GENERATOR = 7
 
 # Hoisted out of `_probe` so the artifact records the flags that actually ran.
 # `-O0` is the one that decides correctness (see `_probe`), which is why a
@@ -822,6 +832,46 @@ def _assemble(
     return STATUS_OK, ""
 
 
+def _processor_support(
+    clang: str, arches: list[str], datalayout: str, scratch: Path
+) -> dict[str, dict[str, object]]:
+    """Whether this clang accepts each target's processor name, one probe each.
+
+    The probe is an empty kernel compiled and linked for the target, so the only
+    question it can answer is the frontend's: is this a processor name the
+    compiler knows. `{"accepted": true}`, or `{"accepted": false, "evidence":
+    ...}` with the compiler's reason. Anything else -- a crash, a timeout, an
+    unrecognised failure -- is not an answer about the name, and is refused
+    rather than written, since a reader would compile for another target on
+    the strength of it.
+    """
+    module = scratch / "empty_kernel.ll"
+    module.write_text(
+        f'target datalayout = "{datalayout}"\n'
+        'target triple = "amdgcn-amd-amdhsa"\n\n'
+        "define amdgpu_kernel void @probe() {\n"
+        "entry:\n"
+        "  ret void\n"
+        "}\n"
+    )
+    support: dict[str, dict[str, object]] = {}
+    for arch in arches:
+        status, evidence = _probe(
+            clang, module, arch, scratch / f"empty_kernel.{arch}.hsaco"
+        )
+        if status == STATUS_OK:
+            support[arch] = {"accepted": True}
+        elif status == STATUS_TARGET_UNSUPPORTED:
+            support[arch] = {"accepted": False, "evidence": evidence}
+        else:
+            raise RuntimeError(
+                f"the empty-kernel probe for {arch} ended {status} "
+                f"({evidence or 'no diagnostic'}); that says nothing about whether "
+                "this compiler accepts the processor name, so nothing is written"
+            )
+    return support
+
+
 # --------------------------------------------------------------------------
 # Inputs: the decl table, the arch list, the toolchain identity
 # --------------------------------------------------------------------------
@@ -1352,6 +1402,18 @@ def main() -> int:
         )
         return 1
 
+    # Before the document is assembled, so a target whose name could not be
+    # measured stops the run instead of leaving a gap in `processors`.
+    try:
+        processors = _processor_support(clang, arches, datalayout, Path(ir_dir))
+    except RuntimeError as exc:
+        print(f"\nFAIL: nothing written. {exc}")
+        return 1
+    rejected = sorted(a for a, cell in processors.items() if not cell["accepted"])
+    print(
+        f"   processors not accepted by this compiler: {', '.join(rejected) or 'none'}"
+    )
+
     doc = {
         "schema": SCHEMA,
         "_comment": (
@@ -1375,6 +1437,11 @@ def main() -> int:
             "probe_timeout_s": PROBE_TIMEOUT_S,
         },
         "keys": results,
+        # Whether this flavor's compiler accepts each target's processor name.
+        # The compile helpers read it to pick the name they pass the compiler:
+        # the target itself, else the generic target its arch_specs.json row
+        # points at.
+        "processors": processors,
         # What this LLVM resolved each surviving declare to. Mostly identical
         # to the declared name; the interesting rows are overloads that
         # remangle (`ds.read.tr16.b64` -> `...b64.v4i16`) and legacy names

@@ -823,20 +823,124 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
     return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
 }
 
+/* True when the llvm_flavor compiler was measured not to accept the processor
+ * named by the first len bytes of gfx (rocke_ati_rejected_processors). */
+static bool rocke_processor_rejected(const char* llvm_flavor, const char* gfx, size_t len)
+{
+    for(const rocke_ati_rejected_processor_t* row = rocke_ati_rejected_processors;
+        row->llvm_flavor != NULL;
+        ++row)
+    {
+        if(strcmp(row->llvm_flavor, llvm_flavor) == 0 && strlen(row->gfx) == len
+           && strncmp(row->gfx, gfx, len) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* The generic target the row named by the first len bytes of gfx points at
+ * (arch_specs.json "facts_of"), or NULL. */
+static const char* rocke_row_facts_of(const char* gfx, size_t len)
+{
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_ati_arch_row_t* row = &rocke_ati_arch_registry[i];
+        if(strlen(row->gfx) == len && strncmp(row->gfx, gfx, len) == 0)
+            return row->facts_of;
+    }
+    return NULL;
+}
+
+static void rocke_set_message(char* message, size_t message_cap, const char* fmt, ...)
+{
+    if(message == NULL || message_cap == 0)
+        return;
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, message_cap, fmt, args);
+    va_end(args);
+}
+
+/* Length of the processor part of target_id with any profile removed
+ * (gfx1250-strict:xnack- -> 7); its features start at strcspn(target_id, ":"). */
+static size_t rocke_compiler_processor_length(const char* target_id)
+{
+    size_t name_len = strcspn(target_id, ":");
+    size_t base_len = rocke_base_arch_length(target_id);
+    if(base_len < name_len && target_id[base_len] == '-')
+        name_len = base_len;
+    return name_len;
+}
+
+/* Write the first name_len bytes of name followed by features into out. */
+static const char* rocke_write_compiler_target(
+    const char* name, size_t name_len, const char* features, char* out, size_t out_cap)
+{
+    if(name_len >= out_cap)
+        return rocke_copy_target(name, name_len, out, out_cap);
+    memcpy(out, name, name_len);
+    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
+    return out;
+}
+
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap)
 {
     if(!target_id || !out || out_cap == 0)
         return NULL;
-    size_t name_len = strcspn(target_id, ":");
-    const char* features = target_id + name_len;
-    size_t base_len = rocke_base_arch_length(target_id);
-    if(base_len < name_len && target_id[base_len] == '-')
-        name_len = base_len;
-    if(name_len >= out_cap)
-        return rocke_copy_target(target_id, name_len, out, out_cap);
-    memcpy(out, target_id, name_len);
-    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
-    return out;
+    return rocke_write_compiler_target(target_id,
+                                       rocke_compiler_processor_length(target_id),
+                                       target_id + strcspn(target_id, ":"),
+                                       out,
+                                       out_cap);
+}
+
+const char* rocke_compiler_target_for_flavor(const char* target_id,
+                                             const char* llvm_flavor,
+                                             char* out,
+                                             size_t out_cap,
+                                             char* message,
+                                             size_t message_cap)
+{
+    rocke_set_message(message, message_cap, "%s", "");
+    if(!target_id || !llvm_flavor || !out || out_cap == 0)
+        return NULL;
+    size_t name_len = rocke_compiler_processor_length(target_id);
+    const char* features = target_id + strcspn(target_id, ":");
+    const char* name = target_id;
+    if(rocke_processor_rejected(llvm_flavor, target_id, name_len))
+    {
+        const char* generic = rocke_row_facts_of(target_id, name_len);
+        const int len = (int)name_len;
+        if(generic == NULL || rocke_processor_rejected(llvm_flavor, generic, strlen(generic)))
+        {
+            rocke_set_message(message,
+                              message_cap,
+                              "the %s compiler does not accept the processor '%.*s', and its "
+                              "arch_specs.json row points at no generic target that compiler "
+                              "accepts -- compile with an LLVM flavor whose compiler accepts "
+                              "'%.*s'",
+                              llvm_flavor,
+                              len,
+                              target_id,
+                              len,
+                              target_id);
+            return NULL;
+        }
+        rocke_set_message(message,
+                          message_cap,
+                          "the %s compiler does not accept the processor '%.*s'; compiling for "
+                          "'%s' instead, the generic target its arch_specs.json row points at, "
+                          "whose code objects load on '%.*s'",
+                          llvm_flavor,
+                          len,
+                          target_id,
+                          generic,
+                          len,
+                          target_id);
+        name = generic;
+        name_len = strlen(generic);
+    }
+    return rocke_write_compiler_target(name, name_len, features, out, out_cap);
 }
 
 const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap)

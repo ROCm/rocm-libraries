@@ -28,6 +28,8 @@
  *   target_id_from_isa(isa)           rocke_target_id_from_isa()
  *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
  *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
+ *   compiler_target_for_flavor(id, llvm_flavor=)
+ *                                     rocke_compiler_target_for_flavor()
  *   generic_arch_from_target_id(id)   rocke_generic_arch_from_target_id()
  *
  * The Python loader reads core/arch/data/arch_specs.json at import time. The C99
@@ -447,6 +449,23 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
 /* Remove profiles but preserve compiler features: gfx1250-strict:xnack-
  * becomes gfx1250:xnack-. */
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* The compiler target to pass to the llvm_flavor compiler for target_id: the
+ * rocke_compiler_target_from_target_id name, whose processor is then checked
+ * against what that compiler was measured to accept. Accepted or never
+ * measured, it stays; not accepted but its row points at a generic target the
+ * compiler accepts, that generic replaces it and message (when non-NULL) says
+ * so; otherwise NULL is returned and message holds the error. message is empty
+ * when the processor stays.
+ * The C++ engine has no compile path yet, so nothing in it calls this: it
+ * exists for API parity with Python's compiler_target_for_flavor, which the
+ * Python compile helpers use. */
+const char* rocke_compiler_target_for_flavor(const char* target_id,
+                                             const char* llvm_flavor,
+                                             char* out,
+                                             size_t out_cap,
+                                             char* message,
+                                             size_t message_cap);
 
 /* Catalogued LLVM generic processor whose code objects load on target_id:
  * gfx1100 and gfx1151:xnack- become gfx11-generic; a generic name maps to

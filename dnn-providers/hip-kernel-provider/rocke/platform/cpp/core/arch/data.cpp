@@ -2860,18 +2860,18 @@ static constexpr rocke_arch_target_t k_target_gfx1201 = facts_of(k_target_gfx12_
 
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic},
-    {"gfx1100", &k_target_gfx1100},
-    {"gfx1101", &k_target_gfx1101},
-    {"gfx1102", &k_target_gfx1102},
-    {"gfx1103", &k_target_gfx1103},
-    {"gfx1150", &k_target_gfx1150},
-    {"gfx1151", &k_target_gfx1151},
-    {"gfx1152", &k_target_gfx1152},
-    {"gfx1153", &k_target_gfx1153},
-    {"gfx1154", &k_target_gfx1154},
+    {"gfx1100", &k_target_gfx1100, "gfx11-generic"},
+    {"gfx1101", &k_target_gfx1101, "gfx11-generic"},
+    {"gfx1102", &k_target_gfx1102, "gfx11-generic"},
+    {"gfx1103", &k_target_gfx1103, "gfx11-generic"},
+    {"gfx1150", &k_target_gfx1150, "gfx11-generic"},
+    {"gfx1151", &k_target_gfx1151, "gfx11-generic"},
+    {"gfx1152", &k_target_gfx1152, "gfx11-generic"},
+    {"gfx1153", &k_target_gfx1153, "gfx11-generic"},
+    {"gfx1154", &k_target_gfx1154, "gfx11-generic"},
     {"gfx12-generic", &k_target_gfx12_generic},
-    {"gfx1200", &k_target_gfx1200},
-    {"gfx1201", &k_target_gfx1201},
+    {"gfx1200", &k_target_gfx1200, "gfx12-generic"},
+    {"gfx1201", &k_target_gfx1201, "gfx12-generic"},
     {"gfx1250", &k_target_gfx1250},
     {"gfx908", &k_target_gfx908},
     {"gfx90a", &k_target_gfx90a},
@@ -2916,5 +2916,19 @@ static const char* const k_generic_gfx12_members[] = {
 const rocke_ati_generic_row_t rocke_ati_generic_targets[] = {
     {"gfx11-generic", k_generic_gfx11_members},
     {"gfx12-generic", k_generic_gfx12_members},
+    {NULL, NULL}, /* terminator */
+};
+
+/* Mirror of "processors" in the committed intrinsic_arch_domain.<flavor>.json
+ * columns, which tools/gen_arch_domain.py measures with one empty-kernel probe
+ * per target: the processor names a flavor's compiler does not accept. Every
+ * other (flavor, target) pair was measured as accepted. The rocke_arch_data_mirror
+ * ctest compares this list with the columns, so update it whenever a column is
+ * regenerated. */
+const rocke_ati_rejected_processor_t rocke_ati_rejected_processors[] = {
+    {"llvm20", "gfx1154"},
+    {"llvm20", "gfx1250"},
+    {"llvm22", "gfx1154"},
+    {"llvm23", "gfx1154"},
     {NULL, NULL}, /* terminator */
 };

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import warnings
 
 import pytest
 
@@ -12,6 +13,7 @@ from rocke.core.arch import (
     ArchTarget,
     arch_from_isa,
     base_arch_from_target_id,
+    compiler_target_for_flavor,
     compiler_target_from_target_id,
     generic_arch_from_target_id,
     known_arches,
@@ -25,6 +27,63 @@ def test_known_target_ids_normalize_to_themselves(arch: str) -> None:
     assert base_arch_from_target_id(arch) == arch
     assert compiler_target_from_target_id(arch) == arch
     assert arch_from_isa(f"amdgcn-amd-amdhsa--{arch}") == arch
+
+
+# What each LLVM flavor's compiler was measured to reject by name: llvm20 knows
+# neither gfx1154 nor gfx1250, llvm22 and llvm23 do not know gfx1154.
+_REJECTED = {
+    "llvm20": {"gfx1154", "gfx1250"},
+    "llvm22": {"gfx1154"},
+    "llvm23": {"gfx1154"},
+}
+
+
+@pytest.mark.parametrize("flavor", sorted(_REJECTED))
+@pytest.mark.parametrize("arch", known_arches())
+def test_each_target_compiles_for_itself_where_its_flavor_accepts_it(
+    arch: str, flavor: str
+) -> None:
+    if arch not in _REJECTED[flavor]:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert compiler_target_for_flavor(arch, llvm_flavor=flavor) == arch
+        return
+    generic = generic_arch_from_target_id(arch)
+    if arch == "gfx1250":
+        with pytest.raises(ValueError):
+            compiler_target_for_flavor(arch, llvm_flavor=flavor)
+        return
+    with pytest.warns(UserWarning, match=f"compiling for '{generic}' instead"):
+        assert compiler_target_for_flavor(arch, llvm_flavor=flavor) == generic
+
+
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm23"])
+def test_gfx1154_compiles_as_gfx11_generic(flavor: str) -> None:
+    with pytest.warns(UserWarning) as record:
+        target = compiler_target_for_flavor("gfx1154-strict:xnack-", llvm_flavor=flavor)
+    assert target == "gfx11-generic:xnack-"
+    assert [str(w.message) for w in record] == [
+        f"the {flavor} compiler does not accept the processor 'gfx1154'; compiling "
+        "for 'gfx11-generic' instead, the generic target its arch_specs.json row "
+        "points at, whose code objects load on 'gfx1154'"
+    ]
+
+
+def test_a_target_no_compiler_can_take_is_refused() -> None:
+    with pytest.raises(ValueError) as err:
+        compiler_target_for_flavor("gfx1250", llvm_flavor="llvm20")
+    assert str(err.value) == (
+        "the llvm20 compiler does not accept the processor 'gfx1250', and its "
+        "arch_specs.json row points at no generic target that compiler accepts -- "
+        "compile with an LLVM flavor whose compiler accepts 'gfx1250'"
+    )
+
+
+@pytest.mark.parametrize("target_id", ["gfx00a", "unexpected-target"])
+def test_a_name_no_column_measured_is_left_to_the_compiler(target_id: str) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert compiler_target_for_flavor(target_id, llvm_flavor="llvm20") == target_id
 
 
 @pytest.mark.parametrize(
@@ -78,7 +137,9 @@ def test_generic_members_are_catalog_rows_of_their_own(
 ) -> None:
     # Every member of a supported generic target has its own row, so catalog
     # lookup keeps the processor's name; its generic is still found by name.
+    # The compiler-target normaliser never replaces the processor either.
     assert base_arch_from_target_id(target_id) == target_id
+    assert compiler_target_from_target_id(target_id) == target_id
     assert generic_arch_from_target_id(target_id) == generic
 
 
@@ -204,13 +265,22 @@ def test_cpp_target_identity_matches_python() -> None:
     expected = []
     for isa in inputs:
         target = target_id_from_isa(isa)
-        expected.append(
-            (
-                target,
-                base_arch_from_target_id(target),
-                compiler_target_from_target_id(target),
-                arch_from_isa(isa),
-                generic_arch_from_target_id(target) or "-",
-            )
-        )
+        row = [
+            target,
+            base_arch_from_target_id(target),
+            compiler_target_from_target_id(target),
+            arch_from_isa(isa),
+            generic_arch_from_target_id(target) or "-",
+        ]
+        for flavor in ("llvm20", "llvm22", "llvm23"):
+            with warnings.catch_warnings(record=True) as record:
+                warnings.simplefilter("always")
+                try:
+                    row.append(compiler_target_for_flavor(target, llvm_flavor=flavor))
+                except ValueError as exc:
+                    row.append("!")
+                    row.append(str(exc))
+                    continue
+            row.append(str(record[0].message) if record else "")
+        expected.append(tuple(row))
     assert actual == expected
