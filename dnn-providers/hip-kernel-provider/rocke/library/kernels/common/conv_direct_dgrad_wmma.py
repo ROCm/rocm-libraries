@@ -44,6 +44,11 @@ barrier per chunk publishes it, after which the slot the previous chunk read
 is refilled ``stages - 1`` chunks ahead. Wave ``i < tile_n`` issues image
 ``i``'s dY transfer, wave ``tile_n`` the weights.
 
+With ``split_barrier`` the per-chunk barrier is split: a wave signals once it
+has read the chunk's last fragments (and, as the issuer, once its next
+transfer has landed), and waits at the top of the next chunk, so its last
+tap's WMMAs run while the slower waves catch up.
+
 Every lane of the accumulator holds one pixel and 8 consecutive dX channels.
 The epilogue stages the dX tile in LDS as [image][row][col][channel] and
 stores it with one TDM transfer per image, which clips it to the image and to
@@ -190,6 +195,16 @@ class DirectDgradWmmaSpec:
     def groups_eff(self) -> int:
         return self.problem.groups // self.pack_groups
 
+    # Split the per-chunk workgroup barrier (s_barrier_signal / _wait): a wave
+    # signals once it has read the chunk's last fragments, and waits only at
+    # the top of the next chunk, so the last tap's WMMAs cover the skew.
+    split_barrier: bool = False
+    # Epilogue per wave: each wave stages its own tiles in a private LDS
+    # region and stores them with its own TDM transfer, with no block barrier
+    # between the staging and the store (needs whole rows of one image per
+    # wave: tiles_p * 16 a multiple of tile_w that divides tile_h * tile_w).
+    wave_epilogue: bool = False
+
     @property
     def block_c(self) -> int:
         return self.waves_c * self.tiles_c * 16
@@ -245,6 +260,9 @@ class DirectDgradWmmaSpec:
         # Each halo slot carries its own wrap slack (see the module docstring).
         ring = self.stages * (self.halo_elems + self.halo_slack + self.wei_elems)
         epi = self.phases * self.block_p * self.w_pitch  # the staged dX tile
+        if self.wave_epilogue:
+            n_waves = self.waves_c * self.waves_p
+            epi = n_waves * self.tiles_p * 16 * (self.tiles_c * 16 + CH_PAD)
         return 2 * max(ring, epi)
 
     def kernel_name(self) -> str:
@@ -268,6 +286,8 @@ class DirectDgradWmmaSpec:
             f"str{p.stride}" if p.stride > 1 else "",
             f"dil{p.dil_h}x{p.dil_w}" if p.is_dilated else "",
             (f"pg{self.pack_groups}c{p.cpg}k{p.kpg}" if self.pack_groups > 1 else ""),
+            "sb" if self.split_barrier else "",
+            "we" if self.wave_epilogue else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -350,12 +370,18 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
     tw = spec.tile_w
     if tw < 1 or spec.tile_n < 1:
         return f"tile_w {tw} and tile_n {spec.tile_n} must be >= 1"
-    if not (tw in (1, 2, 4, 8) or tw % 16 == 0) or spec.block_p % (tw * spec.tile_n):
+    if spec.block_p % (tw * spec.tile_n):
         return f"tile_w {tw} x tile_n {spec.tile_n} must divide {spec.block_p}"
     if spec.tile_n > 1 and (spec.tile_h * tw) % 16:
         return "an image tile must hold whole 16-pixel tiles"
     if spec.tile_n > spec.waves_c * spec.waves_p - 1:
         return "tile_n needs one more wave than images (one dY transfer per image)"
+    if (spec.split_barrier or spec.wave_epilogue) and (p.stride > 1 or G > 1):
+        return "split_barrier / wave_epilogue serve stride-1 unpacked tiles only"
+    if spec.wave_epilogue:
+        wpx = spec.tiles_p * 16
+        if wpx % tw or (spec.tile_h * tw) % wpx:
+            return "wave_epilogue needs whole rows of one image per wave"
     if spec.threads_per_block > target.limits.max_threads_per_block:
         return f"{spec.threads_per_block} threads per block"
     if spec.waves_c * spec.waves_p < 2:
@@ -697,8 +723,10 @@ def build_direct_dgrad_wmma(
                 )
         steps.extend((ks, sh, tl) for sh, tl in groups_by_shift.items())
 
-    def _chunk(kc: Value, accs: list[Value]) -> list[Value]:
-        """Publish chunk ``kc``, refill the ring, multiply the chunk."""
+    SB = spec.split_barrier
+
+    def _wait_landed(kc: Value) -> None:
+        """Wait until this wave's transfer of chunk ``kc`` has landed."""
         if NS == 2:
             b.s_wait_tensorcnt(0)
         else:
@@ -710,7 +738,21 @@ def build_direct_dgrad_wmma(
                     b.s_wait_tensorcnt(NS - 2)
                 with else_ctx:
                     b.s_wait_tensorcnt(0)
-        b.sync_lds_only()
+
+    def _signal_next(kc: Value) -> None:
+        """Split barrier, first half: this wave's reads of chunk ``kc`` are
+        done and its transfer of chunk ``kc + 1`` has landed."""
+        b.s_waitcnt(lgkmcnt=0)
+        _wait_landed(b.add(kc, c1))
+        b.s_barrier_signal(0xFFFFFFFF)
+
+    def _chunk(kc: Value, accs: list[Value]) -> list[Value]:
+        """Publish chunk ``kc``, refill the ring, multiply the chunk."""
+        if SB:
+            b.s_barrier_wait(0xFFFF)
+        else:
+            _wait_landed(kc)
+            b.sync_lds_only()
         nxt = b.add(kc, b.const_i32(NS - 1))
         with b.scf_if(b.cmp_lt(nxt, n_chunks)):
             _issue(nxt)
@@ -741,6 +783,8 @@ def build_direct_dgrad_wmma(
                     nxt_frags = _frags(steps[j + 1])
             else:
                 af, bf = _frags(st)
+            if SB and j == len(steps) - 1:
+                _signal_next(kc)
             for (_, ph), aft in zip(st[2], af):
                 for m in range(TM):
                     for tn in range(TN):
@@ -828,6 +872,60 @@ def build_direct_dgrad_wmma(
                 )
                 b.s_wait_tensorcnt(0)
 
+    def _epilogue_wave(accs: list[Value]) -> None:
+        """Per-wave staging and TDM store (see ``wave_epilogue``)."""
+        if not SB:
+            b.sync_lds_only()  # every wave is done with the ring
+        WPX = TN * 16
+        EP = TM * 16 + CH_PAD
+        ROWS = WPX // TW
+        base = b.mul(wave_id, b.const_i32(WPX * EP))
+        for m in range(TM):
+            col = b.add(b.const_i32(m * 16), b.mul(lhalf, c8))
+            for tn in range(TN):
+                px = b.add(b.const_i32(tn * 16), l16)
+                val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
+                b.smem_store_vN(
+                    lds,
+                    [c0, b.add(base, b.add(b.mul(px, b.const_i32(EP)), col))],
+                    val,
+                    n=8,
+                )
+        b.s_waitcnt(lgkmcnt=0)
+        px0 = b.mul(wave_p, b.const_i32(WPX))
+        img = b.div(px0, b.const_i32(TH * TW))
+        row0 = b.div(b.mod(px0, b.const_i32(TH * TW)), b.const_i32(TW))
+        n_img = b.add(n_base, img)
+        h_w = b.add(h_tile, row0)
+        c_w = b.add(c_base, b.mul(wave_c, b.const_i32(TM * 16)))
+        off = b.add(
+            b.add(
+                b.mul(n_img, params["p_dX_stride_n"]),
+                b.mul(h_w, params["p_dX_stride_hi"]),
+            ),
+            b.add(b.mul(w_tile, params["p_dX_stride_wi"]), b.add(c_grp, c_w)),
+        )
+        c_ext_w = b.smax(b.smin(b.sub(c_cpg, c_w), b.const_i32(TM * 16)), c0)
+        h_ext = b.smax(b.sub(c_H, h_w), c0)
+        dst = b.global_ptr_add(D, b.mul(off, c2))
+        if NB > 1:
+            n_ok = b.cmp_lt(n_img, c_N)
+            h_ext = b.select(n_ok, h_ext, c0)
+            dst = b.select(n_ok, dst, b.global_ptr_add(D, c0))
+        b.tensor_store_from_lds(
+            *_tdm_descriptor_3d(
+                b,
+                dst,
+                b.add(halo_addr, b.mul(base, c2)),
+                dims=(c_ext_w, b.smax(b.sub(c_W, w_tile), c0), h_ext),
+                strides=(params["p_dX_stride_wi"], params["p_dX_stride_hi"]),
+                tile0=EP,
+                tile1=TW,
+                tile2=b.const_i32(ROWS),
+            )
+        )
+        b.s_wait_tensorcnt(0)
+
     if G > 1:
         # Stage the super-group's block-diagonal weights into slot 0 once:
         # zero the slot, then each lane copies one CPG-wide row of one group.
@@ -874,6 +972,10 @@ def build_direct_dgrad_wmma(
     for st in range(NS - 1):
         with b.scf_if(b.cmp_lt(b.const_i32(st), n_chunks)):
             _issue(b.const_i32(st))
+    if SB:
+        b.s_waitcnt(lgkmcnt=0)  # the edge zeroing
+        _wait_landed(c0)
+        b.s_barrier_signal(0xFFFFFFFF)
     zero_acc = b.zero_vec_f32(8)
     loop = b.scf_for_iter(
         c0,
@@ -884,5 +986,10 @@ def build_direct_dgrad_wmma(
     )
     with loop as (kc, carried):
         b.scf_yield(*_chunk(kc, list(carried)))
-    _epilogue(list(loop.results))
+    if SB:
+        b.s_barrier_wait(0xFFFF)
+    if spec.wave_epilogue:
+        _epilogue_wave(list(loop.results))
+    else:
+        _epilogue(list(loop.results))
     return b.kernel

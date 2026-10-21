@@ -308,6 +308,57 @@ DGRAD_WMMA_KNOBS = (
     (4, 2, 2, 8, 32, 1, 32, 2, True),
 )
 
+# Split-barrier configurations of direct_dgrad_wmma: (waves_c, waves_p,
+# tiles_c, tiles_p, tile_w, tile_n, ck, stages, prefetch, wave_epilogue), all
+# with split_barrier=True; prefetch builds with the iterative-ilp scheduler.
+# The best configurations per shape of a tuning sweep over the dense stride-1
+# 3x3 dgrad layers, including tiles whose width is not a power of two (24, 28,
+# 40, 56: whole rows of the 24/28/40/56-wide maps, no padded columns).
+DGRAD_WMMA_SB_KNOBS = (
+    (1, 2, 1, 4, 16, 1, 32, 3, True, True),
+    (1, 4, 3, 7, 16, 2, 32, 2, True, True),
+    (1, 4, 3, 7, 32, 1, 32, 2, True, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, False),
+    (1, 4, 4, 4, 16, 1, 64, 2, True, True),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True, True),
+    (1, 4, 4, 6, 16, 2, 32, 2, True, True),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True, True),
+    (1, 4, 8, 4, 16, 1, 32, 2, True, True),
+    (1, 5, 4, 5, 40, 1, 32, 2, True, True),
+    (1, 7, 3, 7, 16, 1, 32, 2, True, True),
+    (1, 7, 4, 7, 14, 1, 32, 2, True, True),
+    (1, 7, 4, 7, 28, 1, 32, 2, True, False),
+    (1, 7, 4, 7, 28, 1, 32, 2, True, True),
+    (1, 7, 4, 10, 56, 1, 32, 2, False, False),
+    (1, 8, 3, 9, 32, 2, 32, 2, True, False),
+    (1, 8, 4, 6, 24, 4, 32, 2, True, False),
+    (1, 8, 4, 6, 24, 4, 32, 2, True, True),
+    (1, 8, 4, 6, 32, 1, 32, 2, True, True),
+    (1, 8, 4, 8, 16, 1, 32, 2, True, True),
+    (1, 8, 4, 8, 32, 1, 32, 2, True, True),
+    (1, 8, 4, 8, 64, 1, 32, 2, True, True),
+    (1, 8, 4, 9, 24, 1, 32, 2, False, True),
+    (1, 8, 8, 5, 16, 1, 32, 2, False, False),
+    (1, 8, 8, 5, 16, 1, 32, 2, False, True),
+    (1, 8, 8, 5, 64, 1, 32, 2, False, False),
+    (2, 2, 2, 4, 16, 1, 64, 3, True, False),
+    (2, 2, 4, 4, 8, 2, 32, 3, True, False),
+    (2, 2, 4, 4, 8, 2, 32, 3, True, True),
+    (2, 2, 4, 6, 16, 1, 32, 2, True, False),
+    (2, 2, 4, 6, 16, 1, 32, 2, True, True),
+    (2, 2, 4, 8, 16, 1, 32, 2, True, False),
+    (2, 2, 4, 8, 16, 1, 32, 2, True, True),
+    (2, 2, 4, 8, 32, 1, 32, 2, True, True),
+    (2, 4, 4, 8, 16, 1, 32, 2, True, False),
+    (2, 4, 4, 8, 16, 1, 32, 2, True, True),
+    (2, 4, 4, 8, 32, 1, 32, 2, True, True),
+    (2, 4, 4, 10, 16, 1, 32, 2, False, True),
+    (2, 4, 4, 10, 64, 1, 32, 2, False, False),
+    (2, 4, 6, 4, 16, 1, 32, 2, True, False),
+    (2, 4, 6, 4, 16, 1, 32, 2, True, True),
+)
 # Grouped layers with fewer than 8 channels per group (or 16): direct_dgrad_wmma
 # packs 32 // cpg groups into one block-diagonal super-group, one dY chunk.
 DGRAD_WMMA_PACKED_CHANNELS = (4, 8, 16)
@@ -1021,6 +1072,23 @@ def _knob_grid(
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_DILATED_KNOBS)
         else:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_KNOBS)
+            for wc, wp, tc, tp, tw, tn, ck, st, pf, we in DGRAD_WMMA_SB_KNOBS:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    tile_w=tw,
+                    tile_n=tn,
+                    ck=ck,
+                    stages=st,
+                )
+                if pf:
+                    knobs.update(prefetch=True, sched="iterative-ilp")
+                knobs.update(split_barrier=True)
+                if we:
+                    knobs.update(wave_epilogue=True)
+                yield knobs
     elif variant == "direct_wgrad_tiled":
         for (wk16, wc16, wk, wc), (pf, ru), rps, tb, un in itertools.product(
             WGRAD_TILED_WAVES,

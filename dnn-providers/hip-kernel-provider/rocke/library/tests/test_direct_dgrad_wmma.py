@@ -325,6 +325,39 @@ _CASES = (
     (dict(N=2, H=13, W=21, C=32, K=64, PAD=2, dil_w=2), dict(tiles_c=1, tiles_p=2)),
     (dict(N=2, H=13, W=11, C=32, K=64, PAD=1, dil_h=3), dict(tiles_c=1, tiles_p=2)),
     (dict(N=1, H=16, W=16, C=64, K=32, PAD=0, dil_h=2, dil_w=2), dict(tiles_c=2)),
+    # Split barrier over a 3-deep ring (4 chunks), and with prefetch.
+    (
+        dict(N=1, H=18, W=33, C=256, K=128),
+        dict(tiles_c=2, tiles_p=2, stages=3, split_barrier=True),
+    ),
+    (
+        dict(N=2, H=17, W=20, C=128, K=96),
+        dict(tiles_c=4, tiles_p=4, prefetch=True, split_barrier=True),
+    ),
+    # Tile widths that are not a power of two, several images per block (the
+    # last block's images past N), the per-wave epilogue.
+    (
+        dict(N=3, H=24, W=24, C=128, K=64),
+        dict(
+            waves_c=1,
+            waves_p=8,
+            tiles_c=2,
+            tiles_p=6,
+            tile_w=24,
+            tile_n=4,
+            split_barrier=True,
+            wave_epilogue=True,
+        ),
+    ),
+    (
+        dict(N=2, H=30, W=28, C=64, K=64),
+        dict(waves_c=1, waves_p=7, tiles_c=4, tiles_p=7, tile_w=28),
+    ),
+    # Per-wave epilogue on a grouped problem with ragged edges.
+    (
+        dict(N=2, H=9, W=12, C=96, K=64, groups=2),
+        dict(tiles_c=1, tiles_p=2, tile_w=8, wave_epilogue=True),
+    ),
 )
 
 
