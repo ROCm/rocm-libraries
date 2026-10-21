@@ -1714,6 +1714,317 @@ def test_published_cohort_check_names_unqualified_cases(
         assert reason.endswith(f"dvc pull {pointer}")
 
 
+# Qualification runs this tree's adapter with the baseline snapshot's rocKE and
+# library ahead of it on the path. This child imports them the same way, but
+# replaces compilation and code-object loading so that it runs on any host.
+_PREPARE_ENROLLED_CASES = """
+import json
+import sys
+from importlib import import_module
+from pathlib import Path
+from types import SimpleNamespace
+
+import rocke
+import rocke.helpers
+import rocke.runtime
+
+operation, architecture, source, output = sys.argv[1:]
+source = Path(source).resolve()
+
+
+def compile_kernel(kernel, **options):
+    return SimpleNamespace(hsaco=b"", kernel_name=kernel.name)
+
+
+class KernelLauncher:
+    def __init__(self, *, hsaco, kernel_name, signature, **options):
+        self._hsaco = hsaco
+        self.kernel_name = kernel_name
+        self.signature = list(signature)
+
+
+rocke.compile_kernel = rocke.helpers.compile_kernel = compile_kernel
+rocke.runtime.KernelLauncher = KernelLauncher
+target = import_module(f"{operation}_reference.architectures").get_architecture(
+    architecture
+)
+failures = {}
+for case in target.CASES:
+    try:
+        target.prepare(case, str(source / "library"))
+    except Exception as error:
+        failures[case.id] = f"{type(error).__name__}: {error}"
+outside = {
+    name: sys.modules[name].__file__
+    for name in ("rocke", "kernels", "dispatch")
+    if name in sys.modules
+    and not Path(sys.modules[name].__file__ or "").resolve().is_relative_to(source)
+}
+Path(output).write_text(
+    json.dumps(
+        {
+            "cases": [case.id for case in target.CASES],
+            "failures": failures,
+            "outside": outside,
+        }
+    )
+)
+"""
+
+
+def _baseline_repository(tests, revision):
+    """Return the git repository that holds ``revision``, or skip saying why not.
+
+    Only a source checkout's history can export a locked baseline: installed
+    trees carry none, and a shallow clone can lack the revision.
+    """
+    import shutil
+
+    from reference_common.paths import installed_test_root
+
+    if installed_test_root(tests) is not None:
+        pytest.skip(
+            "installed test trees have no git history to export locked baselines "
+            "from; run this check from a rocKE source checkout"
+        )
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed; exporting a locked baseline needs it")
+    found = subprocess.run(
+        ["git", "-C", str(tests), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if found.returncode:
+        pytest.skip(
+            f"{tests} is not in a git checkout, so locked baselines cannot be "
+            f"exported: {found.stderr.strip()}"
+        )
+    repository = Path(found.stdout.strip())
+    present = subprocess.run(
+        ["git", "-C", str(repository), "cat-file", "-e", f"{revision}^{{commit}}"],
+        capture_output=True,
+        check=False,
+    )
+    if present.returncode:
+        pytest.skip(
+            f"locked baseline {revision} is not in the git repository at "
+            f"{repository}, as in a shallow clone; fetch it to run this check"
+        )
+    return repository
+
+
+@pytest.fixture(scope="session")
+def locked_baseline_sources():
+    """Export each locked baseline revision at most once per session.
+
+    Yields ``sources(revision)``, which returns the production sources that
+    qualification at ``revision`` runs, or skips when this tree cannot export
+    them.
+    """
+    import tempfile
+
+    from reference_common.source import snapshot
+
+    tests = Path(__file__).resolve().parent
+    exported = {}
+    with tempfile.TemporaryDirectory(prefix="rocke-reference-baselines-") as temporary:
+
+        def sources(revision):
+            if revision not in exported:
+                output = Path(temporary) / revision
+                snapshot(_baseline_repository(tests, revision), revision, output)
+                exported[revision] = output / "source"
+            return exported[revision]
+
+        yield sources
+
+
+def _check_baseline_preparation(operation, architecture, source, revision):
+    """Fail unless the adapter prepares every enrolled case with ``source``.
+
+    ``source`` holds the ``platform/python`` and ``library`` trees of baseline
+    ``revision``. As in the qualification worker, a child interpreter without
+    Torch imports them ahead of this tree's tests, which provide the adapter.
+    It prepares each case without compiling, loading, or launching a kernel.
+    """
+    import os
+    import tempfile
+    from importlib import import_module
+
+    from reference_common.session import _NO_TORCH
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    name = f"{spec.label} {architecture}"
+    paths = (source / "platform/python", source / "library", Path(__file__).parent)
+    with tempfile.TemporaryDirectory(prefix=f"rocke-{operation}-prepare-") as work:
+        result = Path(work) / "prepared.json"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-s",
+                "-c",
+                _NO_TORCH + _PREPARE_ENROLLED_CASES,
+                operation,
+                architecture,
+                str(source),
+                str(result),
+            ],
+            cwd=work,
+            env=dict(
+                os.environ,
+                PYTHONPATH=os.pathsep.join(str(path.resolve()) for path in paths),
+                PYTHONNOUSERSITE="1",
+                PYTHONDONTWRITEBYTECODE="1",
+            ),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=300,
+        )
+        prepared = None if completed.returncode else json.loads(result.read_text())
+    if prepared is None:
+        pytest.fail(
+            f"{name}: preparing the enrolled cases with locked baseline {revision} "
+            f"failed with exit code {completed.returncode}:\n"
+            f"{completed.stderr[-12000:]}",
+            pytrace=False,
+        )
+    if prepared["outside"]:
+        escaped = ", ".join(
+            f"{package} from {path}" for package, path in prepared["outside"].items()
+        )
+        pytest.fail(
+            f"{name}: preparation imported {escaped}, outside the sources of "
+            f"locked baseline {revision}",
+            pytrace=False,
+        )
+    if prepared["failures"]:
+        errors = {}
+        for case_id, error in prepared["failures"].items():
+            errors.setdefault(error, []).append(case_id)
+        adapter = (
+            f"library/tests/{operation}_reference/architectures/{architecture}/"
+            "__init__.py"
+        )
+        pytest.fail(
+            f"{name}: the current adapter cannot prepare "
+            f"{len(prepared['failures'])} of {len(prepared['cases'])} enrolled "
+            f"cases with the sources of its locked baseline {revision}, so this "
+            "pair cannot be requalified at that baseline:\n"
+            + "".join(
+                f"  {', '.join(ids)}:\n    {error}\n" for error, ids in errors.items()
+            )
+            + f"Extend {adapter} for that baseline's API, or requalify the cohort "
+            f"at a newer committed baseline; see {_WORKFLOW_DOC}.",
+            pytrace=False,
+        )
+
+
+@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
+def test_adapters_prepare_against_their_locked_baselines(
+    operation, architecture, locked_baseline_sources
+):
+    """An adapter port cannot silently drop its locked baseline's API.
+
+    Verification runs the adapter only against the current sources, so
+    otherwise the next GPU qualification at that baseline would be the first
+    to fail.
+    """
+    from importlib import import_module
+
+    registry = import_module(f"{operation}_reference.architectures")
+    lock = json.loads(registry.baseline_lock(architecture).read_text())
+    revision = lock["baseline_revision"]
+    _check_baseline_preparation(
+        operation, architecture, locked_baseline_sources(revision), revision
+    )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("broken", ["prepare", "isolation", "startup"])
+def test_baseline_preparation_check_names_what_failed(tmp_path, operation, broken):
+    """Fail with each case and its error, an escaped import, or the child's error."""
+    from importlib import import_module
+
+    registry = import_module(f"{operation}_reference.architectures")
+    architecture = registry.ARCHITECTURES[0]
+    cases = registry.get_architecture(architecture).CASES
+    # A stand-in baseline whose production packages no longer match the adapter.
+    source = tmp_path / "source"
+    for package in ("rocke", "rocke/helpers", "rocke/runtime"):
+        (source / "platform/python" / package).mkdir(parents=True)
+        (source / "platform/python" / package / "__init__.py").touch()
+    (source / "library/kernels").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere/kernels/__init__.py"
+    kernels = {
+        "prepare": "raise ImportError('kernels moved')\n",
+        # As if an installed or current kernels package shadowed the baseline's.
+        "isolation": f"__file__ = {str(elsewhere)!r}\n",
+        "startup": "",
+    }[broken]
+    (source / "library/kernels/__init__.py").write_text(kernels)
+    if broken == "startup":
+        (source / "platform/python/rocke/runtime/__init__.py").write_text(
+            "raise ImportError('runtime moved')\n"
+        )
+    revision = "a" * 40
+    with pytest.raises(pytest.fail.Exception) as failure:
+        _check_baseline_preparation(operation, architecture, source, revision)
+    message = str(failure.value)
+    if broken == "prepare":
+        assert (
+            f"cannot prepare {len(cases)} of {len(cases)} enrolled cases with the "
+            f"sources of its locked baseline {revision}"
+        ) in message
+        ids = ", ".join(case.id for case in cases)
+        assert f"\n  {ids}:\n    ImportError: kernels moved\n" in message
+        assert (
+            f"Extend library/tests/{operation}_reference/architectures/"
+            f"{architecture}/__init__.py for that baseline's API"
+        ) in message
+    elif broken == "isolation":
+        assert message.endswith(
+            f"preparation imported kernels from {elsewhere}, outside the sources "
+            f"of locked baseline {revision}"
+        )
+    else:
+        assert f"with locked baseline {revision} failed with exit code 1:" in message
+        assert message.rstrip().endswith("ImportError: runtime moved")
+
+
+@pytest.mark.parametrize("missing", ["installed", "git", "checkout", "revision"])
+def test_baseline_preparation_check_says_why_it_skips(tmp_path, monkeypatch, missing):
+    """A tree that cannot export a locked baseline skips with what it lacks."""
+    import shutil
+
+    tests = tmp_path / "rocke/library/tests"
+    tests.mkdir(parents=True)
+    # Never find a repository that encloses the temporary directory.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    revision = "a" * 40
+    if missing == "installed":
+        tests = tmp_path / "bin/hip_kernel_provider/tests/library/tests"
+    elif missing == "git":
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+    elif shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    elif missing == "revision":
+        subprocess.run(["git", "init", "-q", str(tmp_path / "rocke")], check=True)
+    with pytest.raises(pytest.skip.Exception) as skip:
+        _baseline_repository(tests, revision)
+    expected = {
+        "installed": "installed test trees have no git history",
+        "git": "git is not installed",
+        "checkout": f"{tests} is not in a git checkout",
+        "revision": (
+            f"locked baseline {revision} is not in the git repository at "
+            f"{tmp_path / 'rocke'}, as in a shallow clone"
+        ),
+    }[missing]
+    assert expected in str(skip.value)
+
+
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     import shlex

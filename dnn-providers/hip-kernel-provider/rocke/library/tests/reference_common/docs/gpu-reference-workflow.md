@@ -59,6 +59,16 @@ committed lock. A cohort edit without a replacement bundle therefore fails host
 tests, not only the matching GPU suite. The check skips a pair only when no
 archive, extracted bundle, or installed bundle is present.
 
+The same file also checks that each such pair can still be requalified at its
+locked baseline. Because qualification runs the current adapter with the
+baseline's production sources, the check exports the lock's `baseline_revision`
+from the checkout's git history and prepares every enrolled case with the
+current adapter, without compiling or launching a kernel. If you port an adapter
+to a newer production API, keep the older API working or requalify the pair at
+a newer baseline. The check names each case it cannot prepare, with the error.
+It skips in installed trees, without git, and when the revision is absent, as in
+a shallow clone.
+
 ## 1. Choose coverage and implement the contract
 
 Use cases that exercise distinct production paths, rather than counting shapes
