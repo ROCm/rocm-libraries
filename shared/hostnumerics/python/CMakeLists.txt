@@ -33,11 +33,11 @@ file(GENERATE
 )
 
 if(HOSTNUMERICS_BUILD_TESTING)
-    add_test(NAME hostnumerics-python-import
+    add_test(NAME hostnumerics-python-tests
         COMMAND "${Python_EXECUTABLE}" -m unittest discover
                 -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -p "test_*.py"
     )
-    set_tests_properties(hostnumerics-python-import
+    set_tests_properties(hostnumerics-python-tests
         PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
 endif()

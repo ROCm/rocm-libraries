@@ -166,6 +166,7 @@ jobs:
 
       - name: Test
         run: |
+          # Python tests run below with the matching ASan runtime preloaded.
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-sanitizers" \
             --exclude-regex '^hostnumerics-python-.*$' \
             --no-tests=error --output-on-failure
