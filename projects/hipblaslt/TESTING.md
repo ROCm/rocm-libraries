@@ -1527,14 +1527,17 @@ high-impact escape from a class rated low means the rating was wrong.
 The model also records combinations that are not valid (so they do not count as gaps) and the pairs
 of axes that should be covered pairwise, since most interaction defects involve two factors. Each
 suite in the inventory says which classes it is meant to reach through `covers`. That is a claim
-about intent until it is measured, and three measurements are planned under the Inventory workstream:
+about intent until it is measured. Three measurements are planned under the Inventory workstream, and
+one of them has started:
 
 - **Static expansion.** Expand the client test data the way the build does, place every generated
   case in its classes, and report per-class and pairwise coverage by tier and architecture, with the
   uncovered classes ranked by priority. No GPU is needed.
-- **Kernel coverage.** For each architecture, the fraction of shipped solutions that any test
-  executes. hipBLASLt is in effect a very large table of generated kernels, and nothing measures
-  how much of that table the tests touch today.
+- **Kernel coverage (in progress).** For each architecture, the fraction of shipped solutions that
+  any test executes. hipBLASLt is in effect a very large table of generated kernels. The kernel corpus
+  (see [Kernel corpus testing](#kernel-corpus-testing)) tests that table directly, and its reports
+  record which solutions ran, on which device, and which no device we have can reach. What is still
+  unmeasured is how much of the table the client suite and `Tests/common` touch today.
 - **Usage overlay.** Place real calls in the same classes, from the sizes in the library logic YAML,
   the nightly performance problem lists, and bench-mode traces of framework workloads, so coverage
   can be weighted by how the library is actually used.

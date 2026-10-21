@@ -261,6 +261,20 @@ suites:
       problems happen to select. Its first pass found ROCM-33314. Budgets are starting proposals until
       each profile has been timed. Once it runs in CI, the kernel-level cases in the client suite
       become candidates to retire, one at a time and with evidence.
+    covers:
+      - type_combo.*
+      - device.*
+      - kernel_source.tensilelite_generated
+      - api_path.all_solutions
+      - shape.tile_unaligned
+      - shape.past_2_32
+      - layout.padded_ld
+      - batching.strided_batched
+      - batching.grouped
+      - epilogue.gradient
+      - epilogue.aux_output
+      - epilogue.block_scale
+      - values.exact
     tickets: [AIHPBLAS-3894]
     workstreams: [fill_the_holes]
     open_questions:

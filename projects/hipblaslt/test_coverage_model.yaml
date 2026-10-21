@@ -182,8 +182,8 @@ pairwise_focus:
   - [batching, epilogue]
   - [api_path, batching]
 
-# How coverage of this model will be measured. None of these exist yet; each is follow-on work
-# under the Inventory workstream.
+# How coverage of this model will be measured. Each is follow-on work under the Inventory
+# workstream; kernel coverage has started, through the kernel corpus.
 measurement:
   static_expansion:
     status: planned
@@ -192,10 +192,14 @@ measurement:
       through `fields`, and report per-class and pairwise coverage by tier and architecture, plus
       the uncovered classes ranked by priority.
   kernel_coverage:
-    status: planned
+    status: in_progress
+    tickets: [AIHPBLAS-3894]
     description: >-
-      For each architecture, the fraction of shipped solutions any test executes. Needs the selected
-      solution recorded in bench-mode logging; confirm whether it already is.
+      For each architecture, the fraction of shipped solutions any test executes. The kernel corpus
+      tests shipped solutions directly, and its reports record which solutions ran, on which device,
+      and which no available device can reach. Still to measure: which shipped solutions the client
+      suite and Tests/common execute today. That needs the selected solution recorded per case;
+      confirm whether bench-mode logging already records it.
   usage_overlay:
     status: planned
     description: >-
