@@ -162,8 +162,6 @@ foreach( bench ${bench_list})
 
   if( ROCFFT_BUILD_SCOPE )
     set( BENCH_OUT_DIR "/clients/staging" )
-  elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-    set( BENCH_OUT_DIR "/bin" )
   else()
     set( BENCH_OUT_DIR "/bin")
   endif()
