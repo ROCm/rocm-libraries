@@ -1384,35 +1384,160 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
     assert f"{architecture} has no published" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("operation", OPERATIONS)
-def test_fetched_archives_record_the_enrolled_cohorts(operation):
-    """Each fetched DVC archive matches its committed lock and current cohort."""
-    import re
+_WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
+
+
+def _published_pairs():
+    """Every operation/architecture pair with a committed lock.
+
+    Configuration requires a lock for each published pair, and installed trees
+    carry the locks but not the CMake publication list, so these pairs cover
+    every published pair in both layouts.
+    """
+    from importlib import import_module
+
+    pairs = []
+    for operation in OPERATIONS:
+        registry = import_module(f"{operation}_reference.architectures")
+        pairs += [
+            (operation, architecture)
+            for architecture in registry.ARCHITECTURES
+            if registry.baseline_lock(architecture).is_file()
+        ]
+    return pairs
+
+
+def _check_published_cohort(operation, architecture):
+    """Fail when the published bundle does not record the enrolled cohort.
+
+    Verification rejects every case of such a bundle, so otherwise only a
+    matching GPU would notice an enrolled case that was never qualified. This
+    reads the bundle data that ``diff`` reads by default and compares it the
+    same way; it skips only when the tree has no bundle data for the pair.
+    """
     from importlib import import_module
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    registry = spec.architectures
-    checked = []
-    for architecture in registry.ARCHITECTURES:
-        archive = Path(__file__).parent / (
-            f"reference_bundles/{operation}/{architecture}.tar.gz"
+    name = f"{spec.label} {architecture}"
+    bundle = spec.published_bundle(architecture)
+    if not bundle.exists():
+        archive = bundle.with_name(f"{bundle.name}.tar.gz")
+        pointer = archive.with_name(f"{archive.name}.dvc")
+        if pointer.is_file():
+            pytest.skip(
+                f"no {name} bundle data: {archive} has not been fetched and no "
+                f"bundle is extracted at {bundle}; fetch the archive with: "
+                f"dvc pull {pointer}"
+            )
+        pytest.skip(
+            f"no {name} bundle is installed at {bundle}; installed trees have it "
+            "only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
+            "assembled with its architecture's test artifact"
         )
-        pointer = archive.with_name(archive.name + ".dvc")
-        if not (archive.is_file() and pointer.is_file()):
-            continue
-        # Skip an archive left behind by an earlier pointer; dvc pull updates it.
-        recorded = re.search(r"md5: ([0-9a-f]{32})", pointer.read_text())
-        digest = hashlib.md5(archive.read_bytes(), usedforsecurity=False).hexdigest()
-        if not recorded or digest != recorded.group(1):
-            continue
-        differences = spec.diff_bundle(archive, architecture=architecture)
-        assert not differences, (
-            f"{operation} {architecture} cohort differs from its published "
-            f"bundle: {differences}"
+    try:
+        differences = spec.diff_bundle(bundle, architecture=architecture)
+    except ValueError as error:
+        pytest.fail(
+            f"{name} bundle data at {bundle} is not the bundle that its committed "
+            f"lock pins:\n{error}",
+            pytrace=False,
         )
-        checked.append(architecture)
-    if not checked:
-        pytest.skip(f"no current {operation} reference archive has been fetched")
+    if differences:
+        script = Path(__file__).with_name(f"run_{operation}_reference.py")
+        pytest.fail(
+            f"{name}: the enrolled cases differ from the published bundle "
+            f"{bundle}, so verification on a {architecture} GPU rejects every "
+            "case:\n"
+            + "".join(f"  {difference}\n" for difference in differences)
+            + "A cohort or budget change needs a complete requalification and a "
+            "new published archive, lock, and DVC pointer; see "
+            f"{_WORKFLOW_DOC}. Repeat this comparison with: "
+            f"python {script} diff --arch {architecture}",
+            pytrace=False,
+        )
+
+
+@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
+def test_published_bundles_record_the_enrolled_cohorts(operation, architecture):
+    """A cohort edit cannot pass host tests while its published bundle lags."""
+    _check_published_cohort(operation, architecture)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("layout", ["archive", "extracted", "installed"])
+def test_published_cohort_check_names_unqualified_cases(
+    tmp_path, monkeypatch, operation, layout
+):
+    """Fail on an unqualified case or unpinned data; skip only when data is absent."""
+    import shutil
+    from importlib import import_module
+
+    from reference_common import cli as common_cli
+    from reference_common.paths import default_bundle_path
+
+    registry = import_module(f"{operation}_reference.architectures")
+    target = registry.get_architecture(registry.ARCHITECTURES[0])
+    cases = target.CASES
+    # The bundle was qualified before the author enrolled the last case.
+    monkeypatch.setattr(target, "CASES", cases[:-1])
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    tests = tmp_path / (
+        "bin/hip_kernel_provider/tests/library/tests"
+        if layout == "installed"
+        else "rocke/library/tests"
+    )
+    monkeypatch.setattr(
+        common_cli,
+        "default_bundle_path",
+        lambda _, name, *, operation: default_bundle_path(
+            tests, name, operation=operation
+        ),
+    )
+    published = default_bundle_path(tests, architecture, operation=operation)
+    published.parent.mkdir(parents=True)
+    archive = published.with_name(f"{architecture}.tar.gz")
+    pointer = archive.with_name(f"{archive.name}.dvc")
+    if layout != "installed":
+        pointer.write_text("outs:\n")
+    if layout == "archive":
+        pack(bundle, archive, lock, operation=operation)
+    else:
+        bundle.rename(published)
+    _check_published_cohort(operation, architecture)
+
+    monkeypatch.setattr(target, "CASES", cases)
+    with pytest.raises(pytest.fail.Exception) as failure:
+        _check_published_cohort(operation, architecture)
+    message = str(failure.value)
+    for expected in (
+        f"enrolled but not in the bundle: {cases[-1].id} (",
+        "needs a complete requalification and a new published archive",
+        _WORKFLOW_DOC,
+        f"run_{operation}_reference.py diff --arch {architecture}",
+    ):
+        assert expected in message
+    # Data the lock does not pin, such as an archive from an earlier pointer,
+    # fails instead of skipping.
+    lock.write_text(
+        json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
+    )
+    with pytest.raises(pytest.fail.Exception, match="not the bundle that its"):
+        _check_published_cohort(operation, architecture)
+
+    if layout == "archive":
+        archive.unlink()
+    else:
+        shutil.rmtree(published)
+    with pytest.raises(pytest.skip.Exception) as skip:
+        _check_published_cohort(operation, architecture)
+    reason = str(skip.value)
+    if layout == "installed":
+        assert f"bundle is installed at {published};" in reason
+        assert "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON" in reason
+    else:
+        assert f"{archive} has not been fetched" in reason
+        assert reason.endswith(f"dvc pull {pointer}")
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1493,9 +1618,6 @@ def test_every_reference_command_and_option_has_help(operation):
         assert summaries[name] and command.description, name
         for action in command._actions:
             assert action.help, f"{name} {action.option_strings} has no help"
-
-
-_WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
 
 
 def _verifiable_case(monkeypatch, operation):

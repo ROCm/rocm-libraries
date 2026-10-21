@@ -645,6 +645,19 @@ class ReferenceOperation:
                 manifest = self._authenticated_manifest(staged, lock, architecture)
         return self.cohort_differences(manifest, architecture)
 
+    def published_bundle(self, architecture: str) -> Path:
+        """Locate the published bundle data that this tree provides by default.
+
+        A source checkout provides the DVC archive, else a bundle extracted
+        beside it; an installed tree provides the bundle that CMake staged. The
+        path need not exist.
+        """
+        directory = default_bundle_path(
+            self._package.parent, architecture, operation=self.name
+        )
+        archive = directory.with_name(f"{directory.name}.tar.gz")
+        return archive if archive.is_file() else directory
+
     def manifest_key(
         self, manifest: dict, case: Any, *, architecture: str = "gfx942"
     ) -> str:
@@ -1033,15 +1046,12 @@ class ReferenceOperation:
             if not bundle.exists():
                 parser.error(f"bundle not found: {_shown(bundle)}")
         else:
-            directory = default_bundle_path(
-                self._package.parent, args.arch, operation=self.name
-            )
-            archive = directory.with_name(f"{directory.name}.tar.gz")
-            bundle = archive if archive.is_file() else directory
+            bundle = self.published_bundle(args.arch)
             if not bundle.exists():
+                archive = bundle.with_name(f"{bundle.name}.tar.gz")
                 parser.error(
                     f"no {args.arch} {self.label} bundle at {_shown(archive)} or "
-                    f"{_shown(directory)}; fetch the archive with DVC or pass --bundle"
+                    f"{_shown(bundle)}; fetch the archive with DVC or pass --bundle"
                 )
         differences = self.diff_bundle(bundle, lock, architecture=args.arch)
         cases = self.architectures.get_architecture(args.arch).CASES

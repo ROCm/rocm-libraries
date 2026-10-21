@@ -50,6 +50,12 @@ longer enrolled, and changed tolerances or budgets. It exits non-zero on any
 difference. It reads the DVC archive, or the extracted bundle when no archive
 is present; pass `--bundle` and `--lock` to check a candidate instead.
 
+`library/tests/test_reference_common.py`, which is also installed as
+`rocke_reference_common_pytest`, runs the same comparison for every pair with a
+committed lock. A cohort edit without a replacement bundle therefore fails host
+tests, not only the matching GPU suite. The check skips a pair only when no
+archive, extracted bundle, or installed bundle is present.
+
 ## 1. Choose coverage and implement the contract
 
 Use cases that exercise distinct production paths, rather than counting shapes
@@ -226,6 +232,10 @@ python -m pytest library/tests/test_reference_common.py \
   "library/tests/test_${REFERENCE_OPERATION}_reference_contract.py" -q
 ```
 
+Until step 5 replaces the published archive and lock, the host tests report
+an edited cohort as differing from the published bundle; that check must pass
+after step 5.
+
 `verify` reads an extracted bundle directory; given a `.tar.gz` archive, it
 prints the `artifact.py unpack` command to run first. To iterate on a failing
 case, add `--case <id>`, repeated as needed, to run only those cases. The output
@@ -266,6 +276,9 @@ python library/tests/reference_common/artifact.py pack \
   --lock "library/tests/${REFERENCE_OPERATION}_reference/architectures/$REFERENCE_ARCH/baseline_lock.json" \
   --archive "library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH.tar.gz"
 ```
+
+Re-run `python -m pytest library/tests/test_reference_common.py -q`; it now
+compares the enrolled cohort with the new archive and reviewed lock.
 
 From the rocm-libraries root, track and upload that one archive:
 
