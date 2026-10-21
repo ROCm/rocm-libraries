@@ -80,6 +80,22 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  The \ref rocsparse_format_bell and \ref rocsparse_format_sell formats are not supported.
 *
 *  \note
+*  If \p source and \p target have different data types, only the conversions
+*  \ref rocsparse_datatype_f32_r <-> \ref rocsparse_datatype_f64_r,
+*  \ref rocsparse_datatype_f32_r or \ref rocsparse_datatype_f64_r -> \ref rocsparse_datatype_f32_c
+*  and \ref rocsparse_datatype_f32_c <-> \ref rocsparse_datatype_f64_c are supported, depending on
+*  the format of \p target:
+*  - same format as \p source: the values are converted.
+*  - \ref rocsparse_format_coo or \ref rocsparse_format_coo_aos: the values are converted. From
+*    the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and the
+*    conversion goes through an intermediate CSR matrix.
+*  - \ref rocsparse_format_csr: the values are also converted from the COO and COO AoS formats.
+*  - \ref rocsparse_format_csc, \ref rocsparse_format_ell, \ref rocsparse_format_bsr: only from
+*    the same format.
+*
+*  Other combinations return \ref rocsparse_status_not_implemented.
+*
+*  \note
 *  This routine does not support batched computation.
 *
 *  @param[in]
@@ -98,6 +114,7 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example
