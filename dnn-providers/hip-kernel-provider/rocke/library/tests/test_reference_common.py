@@ -290,6 +290,71 @@ def test_operation_package_alone_enrolls_the_common_cli(tmp_path):
         assert result.returncode == returncode, result.stderr
 
 
+def test_published_lists_each_committed_lock_without_site_packages():
+    """Tools read the published variants and their paths with the standard library."""
+    from importlib import import_module
+
+    result = _run("published", "--json")
+    assert result.returncode == 0, result.stderr
+    entries = json.loads(result.stdout)
+    slots = [(e["operation"], e["architecture"], e["variant"]) for e in entries]
+    assert slots == _published_variants()
+    tests = Path(__file__).resolve().parent
+    for (operation, architecture, variant), entry in zip(slots, entries):
+        registry = import_module(f"{operation}_reference.architectures")
+        assert Path(entry["lock"]) == registry.baseline_lock(architecture, variant)
+        archive = tests / "reference_bundles" / operation / architecture
+        archive /= f"{variant}.tar.gz"
+        assert Path(entry["archive"]) == archive
+        assert Path(entry["pointer"]) == archive.with_name(f"{archive.name}.dvc")
+    result = _run("published")
+    assert result.stdout.splitlines() == [" ".join(slot) for slot in slots]
+    for operation in OPERATIONS:
+        result = _run("published", "--operation", operation)
+        assert result.stdout.splitlines() == [
+            " ".join(slot) for slot in slots if slot[0] == operation
+        ]
+
+
+def test_published_lists_locks_in_enrollment_order(tmp_path):
+    """A committed lock publishes its variant; an adapter alone does not.
+
+    Configuration installs a lock under any listed architecture, so one under
+    an architecture that the registry does not enroll is listed after the rest.
+    """
+    tests = tmp_path / "tests"
+    script = tests / "reference_common/artifact.py"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(_SCRIPT.read_bytes())
+    root = tests / "gemm_reference/architectures"
+    root.mkdir(parents=True)
+    (root / "registry.json").write_text('["gfx950", "gfx942"]\n')
+    slots = (
+        "gfx942/wide",
+        "gfx942/narrow",
+        "gfx950/wide",
+        "gfx950/draft",
+        "gfx90a/wide",
+    )
+    for slot in slots:
+        (root / slot).mkdir(parents=True)
+        (root / slot / "__init__.py").touch()
+        if slot != "gfx950/draft":
+            (root / slot / "baseline_lock.json").write_text("{}\n")
+    result = _run("published", script=script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "gemm gfx950 wide",
+        "gemm gfx942 narrow",
+        "gemm gfx942 wide",
+        "gemm gfx90a wide",
+    ]
+    # The bundle commands still need a bundle and its lock.
+    result = _run("validate", "--operation", "gemm", script=script)
+    assert result.returncode == 2
+    assert "required for validate: --bundle, --lock" in result.stderr
+
+
 @pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize("command", ["pack", "validate"])
 def test_common_cli_rejects_wrong_operation_even_with_matching_lock(
@@ -1437,7 +1502,7 @@ def _track(tests, operation, architecture, variant):
     """Add the DVC pointer that a source checkout keeps for a published archive."""
     archives = tests / "reference_bundles" / operation / architecture
     pointer = archives / f"{variant}.tar.gz.dvc"
-    pointer.parent.mkdir(parents=True)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
     pointer.write_text("outs:\n")
     return pointer
 
@@ -2924,6 +2989,336 @@ def test_bundle_commands_say_how_to_provide_the_rocke_platform(
     assert "install rocKE or set PYTHONPATH=platform/python" in result.stderr
 
 
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_status_reports_every_enrolled_variant_and_exits_on_a_difference(
+    second_variant, tmp_path, capsys, monkeypatch, operation
+):
+    """One line per enrolled variant: publication, shared cohort, and bundle state.
+
+    status exits with status 1 when a published bundle differs from its
+    enrolled cases, and otherwise with status 2 when one is unusable.
+    """
+    import shutil
+
+    from reference_common import cli as common_cli
+
+    spec = second_variant
+    registry = spec.architectures
+    first, second = registry.ARCHITECTURES
+    # The bundle records the wide cohort; narrow enrolls all but its first case.
+    _, _, bundle, lock = _qualified_cohort(tmp_path, operation)
+    published = tmp_path / "published"
+    monkeypatch.setattr(
+        common_cli,
+        "default_bundle_path",
+        lambda tests, name, *, operation, variant: published / name / variant,
+    )
+    for variant in ("narrow", "wide"):
+        shutil.copytree(bundle, published / first / variant)
+        shutil.copy(lock, registry.baseline_lock(first, variant))
+    # Paths below the working directory are shown relative to it.
+    monkeypatch.chdir(tmp_path)
+    script = Path(__file__).resolve().with_name(f"run_{operation}_reference.py")
+
+    def diff(variant):
+        command = ["python", str(script), "diff", "--arch", first]
+        return display_command([*command, "--variant", variant])
+
+    head = f"published at baseline {'a' * 12}"
+    narrow = (
+        f"{spec.label} {first} narrow: {head}; bundle "
+        f"{Path('published', first, 'narrow')} differs from the enrolled cases; "
+        f"list the differences with: {diff('narrow')}"
+    )
+    wide = f"{spec.label} {first} wide: {head}; cohort shared with {second} wide"
+    matched = (
+        f"{wide}; bundle {Path('published', first, 'wide')} matches the enrolled cases"
+    )
+    unpublished = (
+        f"{spec.label} {second} wide: unpublished; cohort shared with {first} wide"
+    )
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 1
+    assert capsys.readouterr().out.splitlines() == [
+        narrow,
+        matched,
+        unpublished,
+        (
+            "A cohort or budget change needs a complete requalification; see "
+            f"{_WORKFLOW_DOC}."
+        ),
+    ]
+
+    registry.baseline_lock(first, "narrow").unlink()
+    spec.main(["status"])
+    assert capsys.readouterr().out.splitlines() == [
+        f"{spec.label} {first} narrow: unpublished",
+        matched,
+        unpublished,
+    ]
+
+    payload = published / first / "wide/payload/kernel.hsaco"
+    payload.write_bytes(b"modified")
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 2
+    assert capsys.readouterr().out.splitlines()[1] == (
+        f"{wide}; bundle {Path('published', first, 'wide')} is unusable: "
+        f"{spec.label} bundle payload has missing, modified, or extra files: 1 "
+        f"differ, including kernel.hsaco; see the full error with: {diff('wide')}"
+    )
+    # A difference decides the status even beside an unusable bundle.
+    shutil.copy(lock, registry.baseline_lock(first, "narrow"))
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 1
+    assert capsys.readouterr().out.splitlines()[0] == narrow
+
+    # Without the rocKE platform package, no published bundle can be compared.
+    payload.write_bytes((bundle / "payload/kernel.hsaco").read_bytes())
+
+    def unavailable(target_id):
+        raise ModuleNotFoundError("No module named 'rocke'", name="rocke")
+
+    monkeypatch.setattr(common_cli, "processor_from_target_id", unavailable)
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 2
+    lines = capsys.readouterr().out.splitlines()
+    for line in lines[:2]:
+        assert "is unusable: status reads recorded device target ids" in line
+    assert lines[2] == unpublished
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("layout", ["source", "installed"])
+def test_status_compares_locked_cohorts_without_bundle_data(
+    second_variant, tmp_path, capsys, monkeypatch, operation, layout
+):
+    """A cohort edit differs from the digest that each sharing lock pins.
+
+    A tree without bundle data still learns which published variants need
+    requalification, and how it gets their bundles: a source checkout fetches
+    the tracked archive, and an installed tree needs a build that installs the
+    references. A lock that cannot be read, such as one left in a merge
+    conflict, is unusable and does not end the listing.
+    """
+    from reference_common.paths import default_bundle_path
+
+    spec = second_variant
+    registry = spec.architectures
+    first, second = registry.ARCHITECTURES
+    tests = _relocate(monkeypatch, tmp_path, operation, layout)
+    narrow = spec.enrolled_cohort_digest(first, "narrow")
+    wide = spec.enrolled_cohort_digest(first, "wide")
+    pinned = {"schema": 2, "baseline_revision": "a" * 40, "manifest_sha256": "0" * 64}
+    # Both wide locks pin the cohort from before wide enrolled its first case.
+    for architecture, variant in ((first, "narrow"), (first, "wide"), (second, "wide")):
+        lock = registry.baseline_lock(architecture, variant)
+        lock.write_text(json.dumps(dict(pinned, cohort_sha256=narrow)))
+    # Only a source checkout tracks archives, and only the wide ones here.
+    pointers = (
+        {
+            architecture: _track(tests, operation, architecture, "wide")
+            for architecture in (first, second)
+        }
+        if layout == "source"
+        else {}
+    )
+    monkeypatch.chdir(tmp_path)
+    script = tests / f"run_{operation}_reference.py"
+
+    def shown(path):
+        return path.resolve().relative_to(tmp_path.resolve())
+
+    def bundle(architecture, variant):
+        return default_bundle_path(
+            tests, architecture, operation=operation, variant=variant
+        )
+
+    def diff(architecture):
+        command = ["python", str(shown(script)), "diff", "--arch", architecture]
+        return display_command([*command, "--variant", "wide"])
+
+    def missing(architecture, variant, differs=False):
+        """How this tree gets a variant's absent bundle, as status says it."""
+        if layout == "installed":
+            return (
+                f"bundle missing at {shown(bundle(architecture, variant))}; "
+                "installed trees receive it only when built with "
+                "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and assembled with its "
+                "architecture's test artifact"
+            )
+        if architecture not in pointers or variant != "wide":
+            archive = bundle(architecture, variant).with_name(f"{variant}.tar.gz")
+            return (
+                "bundle missing; no DVC pointer tracks its archive at "
+                f"{shown(archive)}.dvc"
+            )
+        fetch = display_command(["dvc", "pull", str(shown(pointers[architecture]))])
+        then = f", then list the differences with: {diff(architecture)}"
+        return f"bundle missing; fetch it with: {fetch}" + (then if differs else "")
+
+    head = f"published at baseline {'a' * 12}"
+    expected = [f"{spec.label} {first} narrow: {head}; {missing(first, 'narrow')}"]
+    for architecture, other in ((first, second), (second, first)):
+        lock = shown(registry.baseline_lock(architecture, "wide"))
+        expected.append(
+            f"{spec.label} {architecture} wide: {head}; cohort shared with "
+            f"{other} wide; the enrolled cases differ from the cohort that {lock} "
+            f"pins; {missing(architecture, 'wide', differs=True)}"
+        )
+    expected.append(
+        f"A cohort or budget change needs a complete requalification; see "
+        f"{_WORKFLOW_DOC}."
+    )
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 1
+    assert capsys.readouterr().out.splitlines() == expected
+
+    # The differing lock decides before any bundle data present is read.
+    extracted = bundle(second, "wide")
+    extracted.mkdir(parents=True)
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 1
+    line = capsys.readouterr().out.splitlines()[2]
+    assert line.endswith(f" pins; list the differences with: {diff(second)}")
+    extracted.rmdir()
+
+    for architecture in (first, second):
+        lock = registry.baseline_lock(architecture, "wide")
+        lock.write_text(json.dumps(dict(pinned, cohort_sha256=wide)))
+    conflicted = registry.baseline_lock(first, "narrow")
+    conflicted.write_text("<<<<<<< ours\n")
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["status"])
+    assert exit.value.code == 2
+    assert capsys.readouterr().out.splitlines() == [
+        (
+            f"{spec.label} {first} narrow: published; lock {shown(conflicted)} is "
+            "unusable: JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+        ),
+        *(
+            f"{spec.label} {architecture} wide: {head}; cohort shared with "
+            f"{other} wide; {missing(architecture, 'wide')}"
+            for architecture, other in ((first, second), (second, first))
+        ),
+    ]
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("layout", ["tracked", "untracked", "installed"])
+def test_status_says_how_to_provide_missing_bundle_data(
+    tmp_path, capsys, monkeypatch, operation, layout
+):
+    """A missing published bundle is reported with what provides it; it is no failure.
+
+    A source checkout fetches the archive that the variant's DVC pointer
+    tracks; an installed tree receives the bundle only from installation.
+    """
+    from importlib import import_module
+
+    from reference_common.paths import default_bundle_path
+
+    tests = _relocate(
+        monkeypatch,
+        tmp_path,
+        operation,
+        "installed" if layout == "installed" else "source",
+    )
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    expected = {}
+    for name, architecture, variant in _published_variants():
+        if name != operation:
+            continue
+        bundle = default_bundle_path(
+            tests, architecture, operation=operation, variant=variant
+        )
+        pointer = bundle.with_name(f"{variant}.tar.gz.dvc")
+        if layout == "tracked":
+            assert _track(tests, operation, architecture, variant) == pointer
+            fetch = display_command(["dvc", "pull", str(pointer.relative_to(root))])
+            detail = f"bundle missing; fetch it with: {fetch}"
+        elif layout == "untracked":
+            detail = (
+                "bundle missing; no DVC pointer tracks its archive at "
+                f"{pointer.relative_to(root)}"
+            )
+        else:
+            detail = (
+                f"bundle missing at {bundle.relative_to(root)}; installed trees "
+                "receive it only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON "
+                "and assembled with its architecture's test artifact"
+            )
+        expected[f"{spec.label} {architecture} {variant}: "] = detail
+    assert expected
+    spec.main(["status"])
+    lines = capsys.readouterr().out.splitlines()
+    for subject, detail in expected.items():
+        (line,) = (line for line in lines if line.startswith(subject))
+        assert line.endswith(f"; {detail}")
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_status_reports_this_tree_without_a_gpu_or_torch(tmp_path, operation):
+    """status reads this tree's locks and published bundle data on a host.
+
+    Host tests require each bundle in the tree to record its enrolled cohort,
+    so a published variant's bundle matches unless the tree lacks its data.
+    """
+    import importlib.util
+    import os
+    from importlib import import_module
+
+    # Any import of Torch or production kernels fails.
+    for name in ("torch", "kernels", "dispatch"):
+        (tmp_path / f"{name}.py").write_text(
+            f"raise AssertionError('imported {name}')\n"
+        )
+    # Reading recorded device targets needs the rocKE platform package.
+    platform = Path(importlib.util.find_spec("rocke").origin).parents[1]
+    env = dict(
+        os.environ,
+        PYTHONPATH=os.pathsep.join([str(tmp_path), str(platform)]),
+        PYTHONNOUSERSITE="1",
+    )
+    script = Path(__file__).with_name(f"run_{operation}_reference.py")
+    result = subprocess.run(
+        [sys.executable, str(script), "status"],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    registry = spec.architectures
+    slots = [
+        (architecture, variant)
+        for architecture in registry.ARCHITECTURES
+        for variant in registry.variants(architecture)
+    ]
+    lines = result.stdout.splitlines()
+    assert len(lines) == len(slots), result.stdout
+    for line, (architecture, variant) in zip(lines, slots):
+        subject = f"{spec.label} {architecture} {variant}: "
+        lock = registry.baseline_lock(architecture, variant)
+        if not lock.is_file():
+            assert line.startswith(f"{subject}unpublished"), line
+            continue
+        revision = json.loads(lock.read_text())["baseline_revision"]
+        assert line.startswith(f"{subject}published at baseline {revision[:12]}")
+        assert line.endswith(" matches the enrolled cases") or (
+            "; bundle missing" in line
+        ), line
+
+
 _WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
 _TRIAGE_DOC = f"{_WORKFLOW_DOC}#triage"
 
@@ -3900,14 +4295,21 @@ def test_every_reference_command_and_option_has_help(operation):
         for action in parser._actions
         if isinstance(action, argparse._SubParsersAction)
     )
-    assert set(commands.choices) == {"snapshot", "qualify", "verify", "cases", "diff"}
+    assert set(commands.choices) == {
+        "snapshot",
+        "qualify",
+        "verify",
+        "cases",
+        "diff",
+        "status",
+    }
     summaries = {action.dest: action.help for action in commands._choices_actions}
     for name, command in commands.choices.items():
         assert summaries[name] and command.description, name
         for action in command._actions:
             assert action.help, f"{name} {action.option_strings} has no help"
     # Scripts can tell a difference or failed comparison from unusable data.
-    for name in ("diff", "verify"):
+    for name in ("diff", "verify", "status"):
         description = commands.choices[name].description
         assert "status 1" in description and " 2 when the lock or bundle" in description
     assert "PYTHONPATH=platform/python" in commands.choices["diff"].description

@@ -10,9 +10,9 @@ and the old/current comparison are shared, so every operation certifies its
 original tolerance in the same way. The snapshot and qualification commands are
 offline maintenance operations. Verification only executes a locked bundle and
 current kernels; it never downloads dependencies, generates independent answers,
-or promotes a baseline. The cases and diff commands only read the enrolled cohort
-and an authenticated manifest, so an author can review a cohort change on a host
-without a GPU.
+or promotes a baseline. The cases, diff, and status commands only read the
+enrolled cohorts and authenticated manifests, so an author can review a cohort
+change on a host without a GPU.
 """
 
 from __future__ import annotations
@@ -90,6 +90,24 @@ def _shown(path: Path) -> str:
     """Show a path relative to the working directory when it lies inside it."""
     path, here = path.resolve(), Path.cwd().resolve()
     return str(path.relative_to(here) if path.is_relative_to(here) else path)
+
+
+def _shared_cohort(
+    cohorts: Mapping[tuple[str, str], str], slot: tuple[str, str]
+) -> str:
+    """Name the other enrolled slots whose cases have ``slot``'s cohort digest.
+
+    ``cohorts`` maps each enrolled (architecture, variant) slot to its digest,
+    which a published slot's lock pins as ``cohort_sha256``, so a change to a
+    shared cohort needs each of those slots requalified. The note is empty
+    when no other slot shares the cohort.
+    """
+    shared = [
+        f"{name} {variant}"
+        for (name, variant), digest in cohorts.items()
+        if digest == cohorts[slot] and (name, variant) != slot
+    ]
+    return f"; cohort shared with {', '.join(shared)}" if shared else ""
 
 
 @dataclass(frozen=True)
@@ -280,6 +298,14 @@ class ReferenceOperation:
             }
             for case in target.CASES
         )
+
+    def _enrolled_cohorts(self) -> dict[tuple[str, str], str]:
+        """Digest every enrolled (architecture, variant) slot's cohort."""
+        return {
+            (name, variant): self.enrolled_cohort_digest(name, variant)
+            for name in self.architectures.ARCHITECTURES
+            for variant in self.architectures.variants(name)
+        }
 
     def checked_inputs(
         self, case: Any, digests: dict[str, str]
@@ -1023,7 +1049,7 @@ class ReferenceOperation:
         parser = argparse.ArgumentParser(
             description=self.description,
             epilog=(
-                "The cases and diff commands need no GPU or Torch. See "
+                "The cases, diff, and status commands need no GPU or Torch. See "
                 f"{_WORKFLOW} for the authoring and publication procedure."
             ),
         )
@@ -1206,6 +1232,23 @@ class ReferenceOperation:
             help="lock that authenticates the bundle (default: the committed "
             "baseline_lock.json)",
         )
+        commands.add_parser(
+            "status",
+            help="summarize every enrolled variant's publication and bundle",
+            description=(
+                "Print one line per enrolled architecture and variant: whether "
+                "a committed lock publishes it and from which baseline "
+                "revision, the other variants that share its cohort, and "
+                "whether the published bundle that diff reads by default "
+                "matches the enrolled cases, differs from them, is missing, or "
+                "is unusable. A lock that pins another cohort's digest differs "
+                "without bundle data. Exits with status 1 when a published "
+                "bundle differs, otherwise 2 when the lock or bundle cannot be "
+                "read or authenticated; a missing bundle is reported with how to "
+                "provide it and does not fail. Reading the recorded device "
+                "targets needs the rocKE platform package, as diff does."
+            ),
+        )
         return parser
 
     def main(self, argv: Sequence[str] | None = None) -> None:
@@ -1233,6 +1276,8 @@ class ReferenceOperation:
             self._list_cases(args.arch, variants, as_json=args.json)
         elif args.command == "diff":
             self._diff(parser, args)
+        elif args.command == "status":
+            self._status()
         else:
             self._verify(parser, args)
 
@@ -1273,11 +1318,7 @@ class ReferenceOperation:
             }
             print(json.dumps(listing, indent=2))
             return
-        cohorts = {
-            (name, variant): self.enrolled_cohort_digest(name, variant)
-            for name in self.architectures.ARCHITECTURES
-            for variant in self.architectures.variants(name)
-        }
+        cohorts = self._enrolled_cohorts()
         for index, variant in enumerate(variants):
             if index:
                 print()
@@ -1288,13 +1329,7 @@ class ReferenceOperation:
                     f"{name}={value}" for name, value in asdict(case).items()
                 )
                 print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
-            shared = [
-                f"{name} {other}"
-                for (name, other), digest in cohorts.items()
-                if digest == cohorts[architecture, variant]
-                and (name, other) != (architecture, variant)
-            ]
-            note = f"; cohort shared with {', '.join(shared)}" if shared else ""
+            note = _shared_cohort(cohorts, (architecture, variant))
             print(
                 f"{self.label} {architecture} {variant}: {len(cases)} enrolled "
                 f"cases{note}"
@@ -1402,6 +1437,120 @@ class ReferenceOperation:
         if differed:
             raise SystemExit(1)
 
+    def _status(self) -> None:
+        """Print each enrolled slot's publication, shared cohort, and bundle state.
+
+        A slot is published once its committed lock exists. The lock pins the
+        digest of the cohort that its bundle records, so a published slot whose
+        cohort edit was not requalified reports a difference even where the
+        tree has no bundle data, and so does each slot that shares the cohort.
+        Otherwise its bundle is compared as ``diff`` compares it by default.
+        Missing bundle data is reported with the command that provides it and
+        does not fail; an unusable lock or bundle fails with status 2 unless a
+        difference fails with status 1.
+        """
+        cohorts = self._enrolled_cohorts()
+        states = set()
+        for architecture, variant in cohorts:
+            subject = f"{self.label} {architecture} {variant}"
+            note = _shared_cohort(cohorts, (architecture, variant))
+            lock = self.architectures.baseline_lock(architecture, variant)
+            if not lock.is_file():
+                print(f"{subject}: unpublished{note}")
+                continue
+            try:
+                pinned = json.loads(lock.read_text())
+                baseline = pinned["baseline_revision"][:12]
+            except (OSError, ValueError, LookupError, TypeError) as error:
+                # A merge conflict, for one, leaves a lock that is not JSON.
+                states.add("unusable")
+                print(
+                    f"{subject}: published{note}; lock {_shown(lock)} is unusable: "
+                    f"{type(error).__name__}: {error}"
+                )
+                continue
+            # Host tests require the digest in every committed lock; without
+            # it, only the bundle data can show a difference.
+            locked = pinned.get("cohort_sha256")
+            state, detail = self._bundle_state(
+                architecture,
+                variant,
+                cohort_differs=locked not in (None, cohorts[architecture, variant]),
+            )
+            states.add(state)
+            print(f"{subject}: published at baseline {baseline}{note}; {detail}")
+        if "differs" in states:
+            print(
+                "A cohort or budget change needs a complete requalification; see "
+                f"{_WORKFLOW}."
+            )
+            raise SystemExit(1)
+        if "unusable" in states:
+            raise SystemExit(2)
+
+    def _bundle_state(
+        self, architecture: str, variant: str, *, cohort_differs: bool = False
+    ) -> tuple[str, str]:
+        """Compare a published variant's default bundle data with its enrolled cases.
+
+        ``cohort_differs`` says that the variant's lock pins another cohort's
+        digest. Configuration requires the published bundle to record the
+        cohort that its lock pins, so the variant then differs without its
+        bundle data being read, or even present.
+
+        Returns ``matches``, ``differs``, ``missing``, or ``unusable`` and a
+        description that names the bundle or lock and the command to run next.
+        """
+        bundle = self.published_bundle(architecture, variant)
+        diff = self._script_command(
+            "diff", "--arch", architecture, "--variant", variant
+        )
+        lock = self.architectures.baseline_lock(architecture, variant)
+        differs = f"the enrolled cases differ from the cohort that {_shown(lock)} pins"
+        if not bundle.exists():
+            archive = bundle.with_name(f"{bundle.name}.tar.gz")
+            pointer = archive.with_name(f"{archive.name}.dvc")
+            if installed_test_root(self._package.parent) is not None:
+                missing = (
+                    f"bundle missing at {_shown(bundle)}; installed trees receive "
+                    "it only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON "
+                    "and assembled with its architecture's test artifact"
+                )
+            elif not pointer.is_file():
+                missing = (
+                    "bundle missing; no DVC pointer tracks its archive at "
+                    f"{_shown(pointer)}"
+                )
+            else:
+                fetch = display_command(["dvc", "pull", _shown(pointer)])
+                missing = f"bundle missing; fetch it with: {fetch}"
+                if cohort_differs:
+                    missing += f", then list the differences with: {diff}"
+            if cohort_differs:
+                return "differs", f"{differs}; {missing}"
+            return "missing", missing
+        if cohort_differs:
+            return "differs", f"{differs}; list the differences with: {diff}"
+        unusable = []
+        differences = None
+        with self._bundle_errors(unusable.append, "status"):
+            differences = self.diff_bundle(
+                bundle, architecture=architecture, variant=variant
+            )
+        if differences is None:
+            # The first line states the problem; diff shows the whole message.
+            reason = unusable[0].partition("\n")[0]
+            return "unusable", (
+                f"bundle {_shown(bundle)} is unusable: {reason}; see the full "
+                f"error with: {diff}"
+            )
+        if differences:
+            return "differs", (
+                f"bundle {_shown(bundle)} differs from the enrolled cases; list "
+                f"the differences with: {diff}"
+            )
+        return "matches", f"bundle {_shown(bundle)} matches the enrolled cases"
+
     def _verify(
         self, parser: argparse.ArgumentParser, args: argparse.Namespace
     ) -> None:
@@ -1477,8 +1626,7 @@ class ReferenceOperation:
         The command checks the same variant's bundle against the same lock, so
         a failing candidate is not rerun against the committed lock. It names
         the variant even when it is the default, so it stays valid once the
-        architecture enrolls another. The script is installed beside the
-        operation package, so its path is valid in source and installed trees.
+        architecture enrolls another.
         """
         committed = self.architectures.baseline_lock(architecture, variant)
         candidate = (
@@ -1489,23 +1637,28 @@ class ReferenceOperation:
         current = (
             [] if current_root is None else ["--current-root", _shown(current_root)]
         )
-        return display_command(
-            [
-                "python",
-                _shown(self._package.parent / f"run_{self.name}_reference.py"),
-                "verify",
-                "--arch",
-                architecture,
-                "--variant",
-                variant,
-                "--bundle",
-                _shown(bundle),
-                *candidate,
-                *current,
-                "--case",
-                case.id,
-            ]
+        return self._script_command(
+            "verify",
+            "--arch",
+            architecture,
+            "--variant",
+            variant,
+            "--bundle",
+            _shown(bundle),
+            *candidate,
+            *current,
+            "--case",
+            case.id,
         )
+
+    def _script_command(self, *arguments: str) -> str:
+        """Show a command that runs this operation's reference script.
+
+        The script is installed beside the operation package, so its path is
+        valid in source and installed trees.
+        """
+        script = self._package.parent / f"run_{self.name}_reference.py"
+        return display_command(["python", _shown(script), *arguments])
 
     def _unpack_command(
         self, archive: Path, bundle: Path, lock: Path, variant: str

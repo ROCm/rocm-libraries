@@ -209,6 +209,23 @@ def _artifact_operations(library):
     return result.stdout.split()
 
 
+def _artifact_published(library):
+    """Return the published variants that the artifact CLI under `library` lists."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(library / "tests/reference_common/artifact.py"),
+            "published",
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
 def configure(project, *, enabled=True, python=True):
     return subprocess.run(
         [
@@ -347,6 +364,28 @@ def test_an_architecture_installs_each_published_variant(project):
     # CMake wraps message text at spaces, so a path with a space spans lines.
     pointer = f"{archives / 'second.tar.gz'}.dvc"
     assert " ".join(pointer.split()) in " ".join(output.split())
+
+
+def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
+    """Tools list the installed variants and their archives without CMake."""
+    tests = project / "library/tests"
+    variants = tests / "conv_reference/architectures/gfx942"
+    archives = tests / "reference_bundles/conv/gfx942"
+    shutil.copytree(variants / _VARIANT, variants / "second")
+    shutil.copyfile(archives / f"{_VARIANT}.tar.gz", archives / "second.tar.gz")
+    track(archives / "second.tar.gz")
+    # An adapter without a committed lock is enrolled but not published.
+    (variants / "draft").mkdir()
+    (variants / "draft/__init__.py").touch()
+    result = configure(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    listed = {}
+    for entry in _artifact_published(project / "library"):
+        pair = f"{entry['operation']}/{entry['architecture']}"
+        listed.setdefault(pair, []).append(entry["variant"])
+        for name in ("lock", "pointer", "archive"):
+            assert Path(entry[name]).is_file(), entry
+    assert listed == installed_variants(project)
 
 
 def test_staging_rejects_a_bundle_qualified_for_another_variant(project):
@@ -640,6 +679,23 @@ def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
                 assert len(bytes.fromhex(lock["baseline_revision"])) == 20
                 assert len(bytes.fromhex(lock["cohort_sha256"])) == 32
                 assert len(bytes.fromhex(lock["manifest_sha256"])) == 32
+
+
+def test_artifact_cli_lists_the_published_architectures(tmp_path):
+    """Listing committed locks finds exactly the real publication lists' pairs.
+
+    Configuration rejects a listed architecture without a lock and a lock
+    under an unlisted one, so tools need not evaluate the CMake lists.
+    """
+    listed = {
+        (entry["operation"], entry["architecture"])
+        for entry in _artifact_published(_LIBRARY)
+    }
+    assert listed == {
+        (operation, architecture)
+        for operation, architectures in _published(tmp_path).items()
+        for architecture in architectures
+    }
 
 
 def _reference_ctests(published):

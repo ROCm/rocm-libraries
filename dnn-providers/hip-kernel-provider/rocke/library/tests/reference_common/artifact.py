@@ -1,7 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Package and stage a qualified GPU reference bundle without build-time NumPy or HIP."""
+"""Package, stage, and list GPU reference bundles without build-time NumPy or HIP.
+
+Tools list the published variants with the published command instead of
+building archive paths from the CMake publication lists.
+"""
 
 from __future__ import annotations
 
@@ -295,30 +299,102 @@ def unpack(
             bundle.rename(output)
 
 
+def published(operation: str | None = None) -> list[dict[str, str]]:
+    """List the variants that committed locks publish, by operation and architecture.
+
+    A variant's committed ``<arch>/<variant>/baseline_lock.json`` publishes it
+    once its architecture is in the operation's CMake publication list, and
+    configuration rejects a lock under any other, so the locks alone list the
+    published variants. Each entry names the variant's lock, DVC pointer, and
+    archive, which a source checkout tracks and fetches; an installed tree has
+    the locks only. Architectures keep ``registry.json`` order and variants
+    name order. Configuration installs a lock under any listed architecture,
+    so one under an architecture that the registry does not enroll is listed
+    too, after the enrolled ones. ``operation`` restricts the listing to one
+    operation.
+    """
+    if operation is not None:
+        _check_operation(operation)
+    entries = []
+    for name in OPERATIONS if operation is None else (operation,):
+        root = _TESTS / f"{name}_reference" / "architectures"
+        enrolled = json.loads((root / "registry.json").read_text())
+        locked = {lock.parents[1].name for lock in root.glob("*/*/baseline_lock.json")}
+        for architecture in enrolled + sorted(locked - set(enrolled)):
+            for lock in sorted((root / architecture).glob("*/baseline_lock.json")):
+                variant = lock.parent.name
+                archive = (
+                    _TESTS
+                    / "reference_bundles"
+                    / name
+                    / architecture
+                    / f"{variant}.tar.gz"
+                )
+                entries.append(
+                    {
+                        "operation": name,
+                        "architecture": architecture,
+                        "variant": variant,
+                        "lock": str(lock),
+                        "pointer": f"{archive}.dvc",
+                        "archive": str(archive),
+                    }
+                )
+    return entries
+
+
 def _parser() -> argparse.ArgumentParser:
     """Build the parser for this script and for the unpack commands that hints show."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("pack", "unpack", "validate"))
+    parser.add_argument("command", choices=("pack", "unpack", "validate", "published"))
     parser.add_argument(
         "--operation",
         choices=OPERATIONS,
-        required=True,
-        help="reference operation (required for the common command)",
+        help="reference operation (required except by published, which it "
+        "restricts to one operation)",
     )
     parser.add_argument(
         "--variant",
         help="variant that the lock belongs to; a manifest that declares its "
         "variant must declare this one",
     )
-    parser.add_argument("--bundle", required=True, type=Path)
-    parser.add_argument("--lock", required=True, type=Path)
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--lock", type=Path)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print published as JSON, with each variant's lock, DVC pointer, "
+        "and archive paths",
+    )
     return parser
 
 
 def main() -> None:
     parser = _parser()
     args = parser.parse_args()
+    if args.command == "published":
+        entries = published(args.operation)
+        if args.json:
+            print(json.dumps(entries, indent=2))
+        else:
+            for entry in entries:
+                print(entry["operation"], entry["architecture"], entry["variant"])
+        return
+    missing = [
+        option
+        for option, value in (
+            ("--operation", args.operation),
+            ("--bundle", args.bundle),
+            ("--lock", args.lock),
+        )
+        if value is None
+    ]
+    if missing:
+        parser.error(
+            f"the following arguments are required for {args.command}: "
+            + ", ".join(missing)
+        )
     operation, variant = args.operation, args.variant
     if args.command == "validate":
         validate_bundle(args.bundle, args.lock, operation=operation, variant=variant)
