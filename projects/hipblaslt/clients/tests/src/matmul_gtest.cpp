@@ -290,7 +290,6 @@ namespace
 
     TEST_P(matmul_test, matmul)
     {
-        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         SKIP_UNLESS_SELECTED_BY_FILTER();
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
@@ -330,7 +329,6 @@ namespace
 
     TEST_P(rocroller_predicate_test, unrollXYK)
     {
-        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         // rocRoller has predicates that check the dimensions (M/N/K) must be
         // multiples of the work group sizes. This test set the K dimension
         // to not be a multiple, and thus we shall see failure.
