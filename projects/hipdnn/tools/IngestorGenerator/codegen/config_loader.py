@@ -10,6 +10,7 @@ after dropping a whole pack or engine.
 
 import gzip
 import itertools
+import math
 import posixpath
 import re
 import warnings as _warnings
@@ -20,6 +21,7 @@ from typing import Any
 import yaml
 
 from . import generic_targets as gtmod
+from . import json_input
 from .models import (
     ARCH_BASE_ID_PATTERN,
     AUTHORED_TEST_SETS,
@@ -144,9 +146,23 @@ def read_yaml(path: Path) -> Any:
     parser's ``yaml.YAMLError`` carrying the source marks.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt") as f:
+    with opener(path, "rt", encoding="utf-8") as f:
         # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
         return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
+
+
+def read_json_or_yaml(path: Path) -> Any:
+    """Parse one manifest as JSON, falling back to `read_yaml`. A mapping declaring
+    one key twice raises ``yaml.YAMLError`` in either format; input that is neither
+    raises the YAML parser's ``yaml.YAMLError``."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        return json_input.loads(text)
+    except json_input.RepeatedJsonKey as exc:
+        raise yaml.YAMLError(f"{path}: {exc}") from exc
+    except ValueError:
+        return read_yaml(path)
 
 
 def load_config(path: Path) -> IngestorConfig:
@@ -181,6 +197,7 @@ def load_config(path: Path) -> IngestorConfig:
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic=engine_raw.get("heuristic", "native"),
+        census_name_symbol=engine_raw.get("census_name_symbol"),
     )
 
     kmd_fields = []
@@ -328,6 +345,10 @@ def load_config(path: Path) -> IngestorConfig:
                         f"pack '{pack_raw['name']}' kernel "
                         f"'{kernel_raw['name']}' arch",
                     ),
+                    default=_default_marker(
+                        kernel_raw.get("default", False),
+                        f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
+                    ),
                 )
             )
         packs.append(
@@ -356,6 +377,8 @@ def load_config(path: Path) -> IngestorConfig:
     # sequence" ValueError from a scalar and preempt the shaped diagnostic.
     specialization_raw = raw.get("specialization") or {}
     _require_specialization_mapping(specialization_raw)
+    if "reduction" in raw:
+        check_reduction(raw["reduction"], kmd_fields={f.name for f in kmd_fields})
 
     config = IngestorConfig(
         engine=engine,
@@ -367,6 +390,7 @@ def load_config(path: Path) -> IngestorConfig:
         workspace_policy=raw.get("workspace_policy", "none"),
         authored_subpath=raw.get("authored_subpath", ""),
         specialization=dict(specialization_raw),
+        reduction=dict(raw.get("reduction") or {}),
     )
 
     _validate_config(config)
@@ -549,7 +573,7 @@ def _drop_tag_slot(match) -> str:
 
 #: A ``knob_set`` arm's own keys, which are NOT spec fields. Everything else in
 #: an arm is written into the kernel's ``kernel_source.spec``.
-_ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata"})
+_ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata", "default"})
 #: A shape entry's own keys, likewise not spec fields.
 _SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal"})
 
@@ -820,7 +844,7 @@ def _expand_one_arm(
             value = arm_metadata[field_name]
         # Not `field_name in spec`: a spec key present with value None means
         # the kernel's policy decides at build time, the same tri-state as
-        # omitting it (`dispatch_parity.build_config` dumps the builder's
+        # omitting it (`registry_enumerator.build_config` dumps the builder's
         # dataclass, so every unset policy knob arrives present-and-None).
         elif spec.get(field_name) is not None:
             value = spec[field_name]
@@ -851,8 +875,21 @@ def _expand_one_arm(
         if field_name in vocabulary and isinstance(value, str):
             # The matcher compares the hipDNN spelling; the spec carries the
             # builder's. Copying one over the other declines every graph while
-            # the engine still loads and every count reconciles.
-            value = vocabulary[field_name].get(value, value)
+            # the engine still loads and every count reconciles. Either spelling
+            # is accepted: a builder spelling is mapped, a matcher spelling is
+            # kept, since an arm's `metadata` and a shape's `resolved` state
+            # matcher-visible values directly.
+            mapping = vocabulary[field_name]
+            if value in mapping:
+                value = mapping[value]
+            elif value not in mapping.values():
+                raise ConfigError(
+                    f"{shape_where}: metadata field '{field_name}' has value "
+                    f"{value!r}, which this group's vocabulary neither maps nor "
+                    f"lists as a matcher spelling. Mapped: "
+                    f"{sorted(map(str, mapping))}; matcher spellings: "
+                    f"{sorted(map(str, mapping.values()))}."
+                )
         metadata[field_name] = value
 
     # A bool renders as `True`/`False` under str.format, but every shipped
@@ -894,9 +931,116 @@ def _expand_one_arm(
         "name": name,
         "kernel_source": {"spec": spec},
         "metadata": metadata,
+        "default": _default_marker(arm.get("default", False), f"{shape_where} arm"),
         _AUTHORED_KERNEL_SOURCE: (shape_where, {}),
         _EXPANDER_CONSUMED_DEFAULTS: frozenset({"spec"}),
     }
+
+
+def _default_marker(value, where: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(
+            f"{where} 'default' must be true or false, got {value!r}. It marks the "
+            f"cell's declared default variant, which variant reduction always keeps."
+        )
+    return value
+
+
+#: Kernels per arch in one pack above which the AOT build is a red flag.
+DEFAULT_AOT_BUDGET_PER_ARCH = 1000
+
+_KNOWN_REDUCTION = frozenset(
+    {"fields", "aot_budget_per_arch", "single_round_epsilon", "drift_multiplier"}
+)
+
+#: Reduction noise policy: the eps_min a one-round sweep assumes, and the multiple
+#: of the measured round-to-round drift that eps_min takes when there are 2+ rounds.
+DEFAULT_SINGLE_ROUND_EPSILON = 0.05
+DEFAULT_DRIFT_MULTIPLIER = 2
+_KNOWN_REDUCTION_FIELDS = frozenset({"feature", "performance", "ignored"})
+_KNOWN_PERFORMANCE_KNOB = frozenset({"name", "divides", "unset_resolves_by"})
+
+
+def _require_known_keys(value, known: frozenset, where: str) -> None:
+    _require_mapping(value, where)
+    unknown = sorted(set(value) - known)
+    if unknown:
+        raise ConfigError(
+            f"{where} declares {unknown}, which this loader does not read. Known "
+            f"keys: {sorted(known)}."
+        )
+
+
+def check_reduction(reduction, *, kmd_fields) -> None:
+    """Validate a ``reduction`` block: ``fields.feature``/``performance``/``ignored``
+    (each field in at most one), a ``divides`` target that is one of ``kmd_fields``
+    (the engine's KMD field names), and a positive ``aot_budget_per_arch``."""
+    _require_known_keys(reduction, _KNOWN_REDUCTION, "'reduction'")
+    if "fields" not in reduction:
+        raise ConfigError("'reduction' is missing required key 'fields'.")
+    fields = reduction["fields"]
+    _require_known_keys(fields, _KNOWN_REDUCTION_FIELDS, "'reduction.fields'")
+    listed = []
+    for key in ("feature", "ignored"):
+        names = _require_sequence(fields.get(key), f"'reduction.fields.{key}'")
+        if any(not isinstance(n, str) for n in names):
+            raise ConfigError(
+                f"'reduction.fields.{key}' must list field names; got {names!r}."
+            )
+        listed.extend(names)
+    knobs = _require_sequence(
+        fields.get("performance"), "'reduction.fields.performance'", what="knobs"
+    )
+    for index, knob in enumerate(knobs):
+        where = f"'reduction.fields.performance[{index}]'"
+        _require_known_keys(knob, _KNOWN_PERFORMANCE_KNOB, where)
+        if not isinstance(knob.get("name"), str):
+            raise ConfigError(f"{where} must name the knob under 'name'.")
+        if "divides" in knob and not isinstance(knob["divides"], str):
+            raise ConfigError(
+                f"{where} 'divides' must name the shape field the knob divides; got "
+                f"{knob['divides']!r}."
+            )
+        accessor = knob.get("unset_resolves_by")
+        if accessor is not None and (
+            not isinstance(accessor, str) or not accessor.isidentifier()
+        ):
+            raise ConfigError(
+                f"{where} 'unset_resolves_by' must name one zero-argument accessor on "
+                f"the spec; {accessor!r} is not an identifier."
+            )
+        listed.append(knob["name"])
+    repeated = sorted({n for n in listed if listed.count(n) > 1})
+    if repeated:
+        raise ConfigError(
+            f"'reduction.fields' lists {repeated} more than once. A field is a "
+            f"feature, a performance knob or ignored; two classifications leave "
+            f"reduction to guess which one holds."
+        )
+    budget = reduction.get("aot_budget_per_arch", DEFAULT_AOT_BUDGET_PER_ARCH)
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+        raise ConfigError(
+            f"'reduction.aot_budget_per_arch' must be a positive integer; got "
+            f"{budget!r}."
+        )
+    for key in ("single_round_epsilon", "drift_multiplier"):
+        value = reduction.get(key, 0)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ConfigError(
+                f"'reduction.{key}' must be a finite number >= 0; got {value!r}."
+            )
+    for index, knob in enumerate(knobs):
+        target = knob.get("divides")
+        if target is not None and target not in kmd_fields:
+            raise ConfigError(
+                f"'reduction.fields.performance[{index}]' 'divides' names "
+                f"{target!r}, which is not a kmd_fields name: {sorted(kmd_fields)}."
+            )
 
 
 def _reject_deprecated_dict_key(
@@ -987,6 +1131,7 @@ _KNOWN_TOP = frozenset(
         "authored_subpath",
         "graph_match",
         "specialization",
+        "reduction",
     }
 )
 _KNOWN_ENGINE = frozenset(
@@ -996,6 +1141,7 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "census_name_symbol",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
@@ -1025,7 +1171,9 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "shape_axes",
     }
 )
-_KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})
+_KNOWN_KERNEL = frozenset(
+    {"name", "kernel_source", "metadata", "priority", "arch", "default"}
+)
 #: Each authored kind's MANDATORY ``kernel_source`` fields, mirroring
 #: ``hkp_pack._validate_ukd_fields``. Shared with `_KNOWN_KERNEL_SOURCE_BY_KIND`
 #: below so the required set and the closed vocabulary cannot drift.
@@ -1973,6 +2121,15 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
     check #1. A pack's name is the other half of that stem (`kdp_stem` builds
     ``<engine-slug>_<pack-name>``) and is checked for every engine.
     """
+    symbol = config.engine.census_name_symbol
+    if symbol is not None and (
+        not isinstance(symbol, str) or not CXX_IDENTIFIER_PATTERN.fullmatch(symbol)
+    ):
+        raise ConfigError(
+            f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
+            "declared by IngestorPacks.hpp."
+        )
+
     for derived, emitted_as in (
         (
             config.engine.pascal_name,

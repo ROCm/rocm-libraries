@@ -3,8 +3,8 @@
 
 import pytest
 
-from Tensile.ductile.core import Mutation, SearchSpace
-from Tensile.ductile.core.population import Individual
+from tensilelite.ductile.core import Mutation, SearchSpace
+from tensilelite.ductile.core.population import Individual
 
 pytestmark = pytest.mark.unit
 
