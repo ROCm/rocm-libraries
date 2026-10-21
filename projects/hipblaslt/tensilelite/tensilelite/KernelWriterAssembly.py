@@ -101,7 +101,7 @@ from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
   FusedA2AWgRemap
 
-from .KernelWriter import KernelWriter, ABMatrixInfo
+from .KernelWriter import KernelWriter, ABMatrixInfo, TDM_SPLIT_HALF1_MODULE
 from .SolutionStructs.Naming import getKernelFileBase
 from .Toolchain.Component import Assembler
 
@@ -10242,8 +10242,20 @@ class KernelWriterAssembly(KernelWriter):
         idxOuter_stop = kernel["MIWaveTile"][outer] - (1-idxHalfO)* outerBy2
         idxInner_stop = kernel["MIWaveTile"][inner] - (1-idxHalfI)* innerBy2
 
-      for idxOuter in range(idxOuter_start, idxOuter_stop):
-        for idxInner in range(idxInner_start, idxInner_stop):
+      innerRange = list(range(idxInner_start, idxInner_stop))
+      macOrder = [(o, innerRange) for o in range(idxOuter_start, idxOuter_stop)]
+      if loopSwap and not tail and self.tdmSplitHalfSchedule(kernel):
+        # The first half of A (HalfPLR) is split by the B half it multiplies,
+        # matching the order the B halves land in LDS.
+        halfO = kernel["MIWaveTile"][outer] // 2
+        halfI = kernel["MIWaveTile"][inner] // 2
+        firstHalf = [o for o, _ in macOrder if o < halfO]
+        macOrder = [(o, innerRange[:halfI]) for o in firstHalf] + \
+                   [(o, innerRange[halfI:]) for o in firstHalf] + \
+                   [(o, r) for o, r in macOrder if o >= halfO]
+
+      for idxOuter, idxInnerRange in macOrder:
+        for idxInner in idxInnerRange:
           idx0 = idxInner
           idx1 = idxOuter
           if loopSwap:
@@ -12026,22 +12038,25 @@ class KernelWriterAssembly(KernelWriter):
       # if kernel["enableTDMMetadata"] and tP["is_sparse"]:
       #     imod.middle.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
       if kernel["TDMSplit"]:
+        # The second half is one unit (descriptor advance, load, restore) that the
+        # sub-iteration scheduler may issue apart from the first half.
+        splitHalf1 = Module(TDM_SPLIT_HALF1_MODULE)
         if numWaves > 1:
           # Multi-wave: recompute the LDS split boundary and global split increment
           # transiently per use (see _tdmSplitMultiWaveInc).
           with self.allocTmpSgpr(2, tag="tdmSplitInc") as incTmp:
             gIncIdx = incTmp.idx
             scratchIdx = incTmp.idx + 1
-            ldsIncOp = self._tdmSplitMultiWaveInc(imod.middle, kernel, gIncIdx, scratchIdx, self.tPA, self.tPB)
-            imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), ldsIncOp))
-            imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(gIncIdx)))
-            imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
+            ldsIncOp = self._tdmSplitMultiWaveInc(splitHalf1, kernel, gIncIdx, scratchIdx, self.tPA, self.tPB)
+            splitHalf1.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), ldsIncOp))
+            splitHalf1.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(gIncIdx)))
+            splitHalf1.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
         else:
           ldsIncSgprName = f"tdm{tc}LdsSplitIncs"
           globalIncSgprName = f"tdm{tc}GlobalSplitIncs"
-          imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
-          imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
-          imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
+          splitHalf1.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
+          splitHalf1.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
+          splitHalf1.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
         if numWaves > 1:
           # Recompute the two per-half dim1 boundaries from the live descriptor.
           # halfRows is per-wave: even waves load A (MacroTile0//2), odd load B
@@ -12061,34 +12076,35 @@ class KernelWriterAssembly(KernelWriter):
             # first-half count is rebuilt from H0 afterwards rather than saved.
             sIter = hr
             if halfRowsA == halfRowsB:
-              imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows"))
+              splitHalf1.add(SMovB32(sgpr(hr), halfRowsA, "halfRows"))
             else:
-              self._emitTdmWaveParitySCCAuto(imod.middle, kernel,
+              self._emitTdmWaveParitySCCAuto(splitHalf1, kernel,
                                             comment="wave parity (A=even/B=odd)",
                                             tmpTag="tdmSplitDim1Parity")
               # SALU: one literal per instr; s_mov A first (keeps SCC), then s_cselect against B.
-              imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows = A"))
-              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, sgpr(hr), "halfRows = parity ? B : A"))
-            imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
-            imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
-            imod.middle.add(SOrB32(sgpr(h0), sgpr(h0), sgpr(h1), "H0 = full dim1"))
-            imod.middle.add(SSubU32(sgpr(h1), sgpr(h0), sgpr(hr), "H1 = H0 - halfRows"))
-            imod.middle.add(SCSelectB32(sgpr(h1), 0, sgpr(h1), "clamp H1 to 0"))
-            imod.middle.add(comp.setTensorDim1(group1, h1, self))
+              splitHalf1.add(SMovB32(sgpr(hr), halfRowsA, "halfRows = A"))
+              splitHalf1.add(SCSelectB32(sgpr(hr), halfRowsB, sgpr(hr), "halfRows = parity ? B : A"))
+            splitHalf1.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
+            splitHalf1.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
+            splitHalf1.add(SOrB32(sgpr(h0), sgpr(h0), sgpr(h1), "H0 = full dim1"))
+            splitHalf1.add(SSubU32(sgpr(h1), sgpr(h0), sgpr(hr), "H1 = H0 - halfRows"))
+            splitHalf1.add(SCSelectB32(sgpr(h1), 0, sgpr(h1), "clamp H1 to 0"))
+            splitHalf1.add(comp.setTensorDim1(group1, h1, self))
             if needIterCount:
-              self._emitTdmSplitIterCount(imod.middle, kernel, splitIterConsts, group2,
+              self._emitTdmSplitIterCount(splitHalf1, kernel, splitIterConsts, group2,
                                           h1, sIter)
             comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
             if not rapTdmDead:
-              imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
-            imod.middle.add(comp.setTensorDim1(group1, h0, self))
+              splitHalf1.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+            splitHalf1.add(comp.setTensorDim1(group1, h0, self))
             if needIterCount:
-              self._emitTdmSplitIterCount(imod.middle, kernel, splitIterConsts, group2,
+              self._emitTdmSplitIterCount(splitHalf1, kernel, splitIterConsts, group2,
                                           h0, sIter)
         else:
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
           if not rapTdmDead:
-            imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+            splitHalf1.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+        imod.middle.add(splitHalf1)
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:

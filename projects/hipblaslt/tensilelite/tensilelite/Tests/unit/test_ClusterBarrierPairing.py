@@ -121,6 +121,10 @@ class _Writer:
         """Delegate to KernelWriter._ldsTokenBackEdgeMap."""
         return KernelWriter._ldsTokenBackEdgeMap(self)
 
+    def tdmSplitHalfSchedule(self, kernel):
+        """No fixture builds a TDMSplit kernel, so barriers are never joined."""
+        return False
+
 
 def _waveParityKernel(**overrides):
     # OptLevel 3 + derived SIA 0 + TDM on both tensors + more than one wave.

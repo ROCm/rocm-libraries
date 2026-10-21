@@ -101,6 +101,42 @@ def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitte
               and not preLoopLocalReadDrainEmitted)
 
 
+TDM_SPLIT_HALF1_MODULE = "tdmSplitHalf1"
+
+
+def _extractNamedModules(module, name):
+  """Remove every sub-module called name from module, in program order."""
+  found = []
+  kept = []
+  for item in module.items():
+    if isinstance(item, Module) and item.name == name:
+      found.append(item)
+    else:
+      if isinstance(item, Module):
+        found.extend(_extractNamedModules(item, name))
+      kept.append(item)
+  if len(kept) != len(module.items()):
+    module.setItems(kept)
+  return found
+
+
+def _fenceTensorLoads(module, comment):
+  """Put a scheduling fence on both sides of every tensor_load_to_lds in module.
+
+  The token barrier pass later lands the load's barrier between the leading
+  fence and the load, so the pair stays where module places it."""
+  items = []
+  for item in module.items():
+    if isinstance(item, TensorLoadToLds):
+      items += [SSchedulingFence(comment=comment), item, SSchedulingFence(comment=comment)]
+    else:
+      if isinstance(item, Module):
+        _fenceTensorLoads(item, comment)
+      items.append(item)
+  if len(items) != len(module.items()):
+    module.setItems(items)
+
+
 def clusterBarrierSplitWaveLoop(kernel):
   # InitCIterWmma clones every chain head and skips v_mov, so the wave-split
   # loop has to stay off or that clone cannot cover the accumulators.
@@ -1160,8 +1196,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         assert len(packCode.flatitems()) == 0, "Pack code should be empty for half PLR case"
         if kernel["PrefetchGlobalRead"] < 2:
           iterCode.add(globalReadCode)
+        tdmSplitHalf1 = Module("TDMSplit second half")
+        if self.tdmSplitHalfSchedule(kernel) and \
+           not any(isinstance(i, Instruction) for i in pointerLWCode.flatitems()):
+          tdmSplitHalf1.addItems(_extractNamedModules(globalReadCode, TDM_SPLIT_HALF1_MODULE))
         iterCode.add(waitLWCode)
         iterCode.add(syncCode)
+        if tdmSplitHalf1.items():
+          # First TDM half refills the half its reads just drained, ahead of the
+          # next-buffer reads of that half, so one barrier serves both.
+          _fenceTensorLoads(globalReadCode, "TDMSplit: first half opens the sub-iteration")
+          iterCode.add(globalReadCode)
+          globalReadCode = Module()
         iterCode.add(localReadCode)
         iterCode.add(localWriteCode)
         iterCode.add(waitCode)
@@ -1178,6 +1224,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             macToSchedule -= 1
             if macToSchedule == 0:
               break
+        # The second TDM half and its barrier sit between the A halves: after the
+        # first A half is consumed, before the second A half starts.
+        _fenceTensorLoads(tdmSplitHalf1, "TDMSplit: second half between the A halves")
+        iterCode.add(tdmSplitHalf1)
         iterCode.add(localReadCodeSecondHalf.popFirstItem())
         # when HalfPLR == 3, we need to add mac before the second half of LR of B (the inner tile index for mac)
         if kernel["HalfPLR"] == 3:
@@ -4848,6 +4898,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["HalfPLR"]:
         self.states.halfPLRGroups = self.getHalfPLRGroups(kernel, lc, (u+pflr))
       for iui in range(0,kernel["InnerUnroll"]):
+        secondHalfA = None
         reverseLocalReadSides = self.states.localReadSideOrder[0] == "B"
         emittedReadsA = Module() if reverseLocalReadSides else localReads
         emittedReadsB = Module() if reverseLocalReadSides else localReads
@@ -4886,6 +4937,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             tmpModule = Module()
             tmpModule.addItems(readItems)
             localReadsSecondHalf.add(tmpModule)
+            secondHalfA = tmpModule
           else:
             emittedReadsA.add(localReadCodeA)
           localReadsA.add(localReadCodeA)
@@ -4966,6 +5018,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             tmpModule = Module()
             tmpModule.addItems(readItems)
             localReadsSecondHalf.add(tmpModule)
+          elif doNext and secondHalfA is not None and self.tdmSplitHalfSchedule(kernel):
+            # The next buffer's second B half lands with the second TDM, so it is
+            # read after that barrier, ahead of the second A half.
+            half1Tokens = {row[1] for row in self.states.memTokenLdsSplit}
+            def _isHalf1Read(item):
+              memToken = item.getMemToken() if isinstance(item, DSLoadInstruction) else None
+              return memToken is not None and set(memToken.tokens) <= half1Tokens
+            readItems = localReadCodeB.flatitems()
+            emittedReadsB.addItems([item for item in readItems if not _isHalf1Read(item)])
+            secondHalfA.setItems([item for item in readItems if _isHalf1Read(item)] + secondHalfA.items())
           else:
             emittedReadsB.add(localReadCodeB)
           localReadsB.add(localReadCodeB)
@@ -11192,6 +11254,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       and kernel["enableTDMA"] and kernel["enableTDMB"] \
       and numWaves > 1
 
+  def tdmSplitHalfSchedule(self, kernel):
+    # TDMSplit with HalfPLR on A: WMMAs run A0xB0, A0xB1, then A1xB, and each TDM
+    # half is issued next to the next-buffer reads of that half, so a single
+    # barrier covers both the RAW of the incoming half and the WAR of the half
+    # being refilled.
+    return bool(kernel["TDMSplit"]) and kernel["HalfPLR"] == 1 \
+      and kernel["PrefetchGlobalRead"] >= 2 and kernel["LoopIters"] >= 2 \
+      and not kernel["TDMPlusLdsBuf"] and not kernel["ForceUnrollSubIter"] \
+      and self._usesMainLoopTokenBarrierPlanner(kernel)
+
   def _needsSingleLoopPGRSync(self, kernel):
     # PGL1+ and a pre-loop local-read transition drain tensorcnt and barrier
     # before openLoop emits the one-tile escape. Only the unfenced PGL0 path
@@ -11469,6 +11541,22 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     def _crossesLoopBoundary(fromIdx, toIdx):
       return any(fromIdx < b <= toIdx for b in loopBoundaryIndices)
 
+    # A transition right behind the previous barrier, with no compute between,
+    # joins that barrier instead of adding a second sync point.
+    joinAdjacentBarriers = self.tdmSplitHalfSchedule(kernel)
+    lastPlanned = None  # (flat index, plannedBarriers entry)
+    matrixInstClasses = (MFMAInstruction, SMFMAInstruction, MXMFMAInstruction)
+
+    def _canJoin(fromIdx, toIdx, tokens):
+      if _crossesLoopBoundary(fromIdx, toIdx):
+        return False
+      for leaf, _leafOwner, _leafPos in flatLeaves[fromIdx:toIdx]:
+        if _isLabelDef(leaf) or isinstance(leaf, (BranchInstruction, SBarrier) + matrixInstClasses):
+          return False
+        if isinstance(leaf, Instruction) and set(_getTokenList(leaf)) & set(tokens):
+          return False
+      return True
+
     for idx, (item, owner, pos) in enumerate(flatLeaves):
       if openGuards:
         openGuards = [guard for guard in openGuards if guard[0] > idx]
@@ -11555,7 +11643,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if barrierTokens:
         uniqueTokens = sorted(set(barrierTokens))
         if not openGuards:
-          plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
+          if joinAdjacentBarriers and lastPlanned is not None and \
+             _canJoin(lastPlanned[0], idx, uniqueTokens):
+            lastPlanned[1][2] = sorted(set(lastPlanned[1][2]) | set(uniqueTokens))
+          else:
+            plannedBarriers.append([owner, pos, uniqueTokens, "auto token transition barrier"])
+            lastPlanned = (idx, plannedBarriers[-1])
         else:
           outer = openGuards[0]
           blockers = sorted(outer[4].intersection(uniqueTokens))

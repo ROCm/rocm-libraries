@@ -27,6 +27,7 @@ from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel,
 import collections
 import copy
 import math
+import os
 import sys
 
 from enum import Enum
@@ -3345,7 +3346,7 @@ class Solution(collections.abc.Mapping):
 
     # TDMSplit is disabled: it has unresolved read-token/tensorcnt races under
     # the decoupled load-vs-compute wave layout. Reject any solution requesting it.
-    if state["TDMSplit"]:
+    if state["TDMSplit"] and not os.environ.get("TENSILE_EXP_TDMSPLIT"):
       reject(state, printRejectionReason, "TDMSplit is currently disabled")
       return
 
