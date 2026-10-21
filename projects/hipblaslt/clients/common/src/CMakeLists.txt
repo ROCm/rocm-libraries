@@ -3,6 +3,7 @@
 
 target_sources(hipblaslt-clients-common
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/all_devices_bench.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/singletons.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"

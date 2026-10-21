@@ -6248,6 +6248,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best_avg_ulp,
                 best_timing);
         }
+
+        // All-GPU mode (--device all): hand this device's winning-solution timing to the
+        // coordinator so the orchestrator can report per-GPU and aggregate numbers once
+        // every worker thread has joined. No-op in the normal single-device path.
+        if(hipblaslt_bench::all_devices_enabled() && best_gpu_time != std::numeric_limits<double>::max())
+        {
+            hipblaslt_bench::AllDevicesResult r;
+            r.time_us       = best_gpu_time;
+            r.gflop_count   = best_flops;
+            r.gbytes        = gpu_mem_gbytes;
+            r.batch_count   = arg.batch_count;
+            r.solution_name = best_s_name;
+            hipblaslt_bench::all_devices_record_result(r);
+        }
     }
 
     for(auto it : ptrs)

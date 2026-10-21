@@ -3,6 +3,7 @@
 
 target_sources(hipblaslt-clients-common
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/all_devices_bench.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_timing.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/allclose.hpp"

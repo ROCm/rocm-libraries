@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "all_devices_bench.hpp" // all_devices_sync_point (all-GPU --device all mode)
 #include "benchmark_stats.hpp" // TimingConfig, TimingResult
 #include "hipblaslt_test.hpp" // CHECK_HIP_ERROR
 #include "utility.hpp" // get_time_us_sync
@@ -274,6 +275,8 @@ namespace hipblaslt_bench
         {
             const int32_t iters    = cfg.iters > 0 ? cfg.iters : 1;
             double        batch_us = 0.0;
+            // All-GPU mode: release every device's timed region together (no-op otherwise).
+            all_devices_sync_point(stream);
             detail::time_batch(launch, iters, global_index, cfg.use_gpu_timer, events, batch_us);
             const double per_iter = batch_us / iters - cfg.flush_us;
             out.mean_us = out.median_us = out.min_us = per_iter;
@@ -350,6 +353,8 @@ namespace hipblaslt_bench
         bool                  stable      = false;
 
         global_index = 0; // restart rotation for the timed phase
+        // All-GPU mode: release every device's timed region together (no-op otherwise).
+        all_devices_sync_point(stream);
         while(!detail::aborted(should_abort))
         {
             double batch_us = 0.0;

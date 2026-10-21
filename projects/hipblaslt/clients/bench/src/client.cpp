@@ -26,6 +26,7 @@
 
 #include "program_options.hpp"
 
+#include "all_devices_bench.hpp"
 #include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
@@ -39,6 +40,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 
 #include "efficiency_monitor.hpp"
@@ -293,7 +295,10 @@ try
     int         scaleBFormat;
     int         scaleCFormat;
     int         scaleDFormat;
-    int         device_id;
+    int         device_id = 0;
+    std::string device_str;
+    std::string launch_sync_mode;
+    std::string time_aggregation;
     int         flags             = 0;
     bool        datafile          = hipblaslt_parse_data(argc, argv);
     bool        log_function_name = false;
@@ -639,8 +644,23 @@ try
         "Use UserArguments located in device memory for grouped gemm.")
 
         ("device",
-         value<int>(&device_id)->default_value(0),
-         "Set default device to be used for subsequent program runs")
+         value<std::string>(&device_str)->default_value("0"),
+         "Device index to use, or 'all' to benchmark the same workload on every "
+         "HIP-visible GPU at once (simultaneous release of the timed region, with "
+         "per-GPU and aggregate median/mean TFLOPS, GB/s and us). Validation is "
+         "disabled in all-GPU mode.")
+
+        ("launch_sync_mode",
+         value<std::string>(&launch_sync_mode)->default_value("gate"),
+         "How '--device all' releases the timed region together: 'gate' (device-side "
+         "spin-gate kernel + single host release flag; starts within ~ns of each other) "
+         "or 'barrier' (host thread barrier right before the timed enqueue; simpler, "
+         "leaves host enqueue skew).")
+
+        ("time_aggregation",
+         value<std::string>(&time_aggregation)->default_value("median"),
+         "Headline time aggregation for '--device all' ('median' or 'mean'); both are "
+         "always reported.")
 
         ("c_equal_d",
          bool_switch(&arg.c_equal_d)->default_value(false),
@@ -967,20 +987,96 @@ try
                 = stride_e.size() >= length ? stride_e[i] : stride_e[stride_e.size() - 1];
     }
 
+    // Resolve --device: either a numeric index or 'all' (every HIP-visible GPU at once).
+    bool all_devices = false;
+    {
+        std::string dev_lc = device_str;
+        std::transform(dev_lc.begin(), dev_lc.end(), dev_lc.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if(dev_lc == "all")
+            all_devices = true;
+        else
+        {
+            try
+            {
+                size_t pos = 0;
+                device_id  = std::stoi(device_str, &pos);
+                if(pos != device_str.size() || device_id < 0)
+                    throw std::invalid_argument("");
+            }
+            catch(...)
+            {
+                throw std::invalid_argument("Invalid value for --device '" + device_str
+                                            + "' (expected a non-negative index or 'all')");
+            }
+        }
+    }
+
+    // Resolve the all-GPU launch-sync mode and headline aggregation.
+    hipblaslt_bench::LaunchSyncMode sync_mode = hipblaslt_bench::LaunchSyncMode::Gate;
+    {
+        std::string m = launch_sync_mode;
+        std::transform(m.begin(), m.end(), m.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if(m == "gate")
+            sync_mode = hipblaslt_bench::LaunchSyncMode::Gate;
+        else if(m == "barrier")
+            sync_mode = hipblaslt_bench::LaunchSyncMode::Barrier;
+        else
+            throw std::invalid_argument("--launch_sync_mode must be 'gate' or 'barrier', got '"
+                                        + launch_sync_mode + "'");
+    }
+    hipblaslt_bench::TimeAggregation time_agg = hipblaslt_bench::TimeAggregation::Median;
+    {
+        std::string a = time_aggregation;
+        std::transform(a.begin(), a.end(), a.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if(a == "median")
+            time_agg = hipblaslt_bench::TimeAggregation::Median;
+        else if(a == "mean")
+            time_agg = hipblaslt_bench::TimeAggregation::Mean;
+        else
+            throw std::invalid_argument("--time_aggregation must be 'median' or 'mean', got '"
+                                        + time_aggregation + "'");
+    }
+
     // Device Query
     hipDeviceProp_t props;
-    int64_t         device_count = query_device_property(device_id, props);
+    int             all_devices_count = 0;
+    if(all_devices)
+    {
+        CHECK_HIP_ERROR(hipGetDeviceCount(&all_devices_count));
+        if(all_devices_count < 1)
+            throw std::invalid_argument("--device all: no HIP-visible devices");
+        // Device 0's properties seed the F8/arch handling; all-GPU mode assumes a
+        // homogeneous node (the same workload runs on every device).
+        (void)query_device_property(0, props);
+        hipblaslt_cout << std::endl;
+    }
+    else
+    {
+        int64_t device_count = query_device_property(device_id, props);
 
-    hipblaslt_cout << std::endl;
-    if(device_count <= device_id)
-        throw std::invalid_argument("Invalid Device ID");
-    set_device(device_id);
+        hipblaslt_cout << std::endl;
+        if(device_count <= device_id)
+            throw std::invalid_argument("Invalid Device ID");
+        set_device(device_id);
 
-    auto perf_monitor = EfficiencyMonitor::create();
-    perf_monitor->setDeviceId(device_id);
+        auto perf_monitor = EfficiencyMonitor::create();
+        perf_monitor->setDeviceId(device_id);
+    }
 
     if(datafile)
+    {
+        if(all_devices)
+            hipblaslt_cerr << "hipblaslt-bench WARNING: --device all is not supported with a "
+                              "data file; running on device 0 only."
+                           << std::endl;
         return hipblaslt_bench_datafile(filter, any_stride, props);
+    }
 
     // single bench run
 
@@ -1235,6 +1331,60 @@ try
     }
 
     arg.norm_check_assert = false;
+
+    if(all_devices)
+    {
+        const int W = all_devices_count;
+        hipblaslt_cout << "[all-devices] single-process run on " << W << " GPU(s), launch-sync="
+                       << (sync_mode == hipblaslt_bench::LaunchSyncMode::Gate ? "gate" : "barrier")
+                       << " (validation is disabled in this mode)" << std::endl;
+
+        // All-GPU mode benchmarks timing only: force validation and the slow-solution
+        // screen off so every worker enqueues an identical solution list and the timed
+        // region stays in lockstep across devices.
+        arg.norm_check               = 0;
+        arg.allclose_check           = 0;
+        arg.unit_check               = 0;
+        arg.ulp_check                = 0;
+        arg.skip_slow_solution_ratio = 0.0f;
+
+        hipblaslt_bench::all_devices_enable(W, sync_mode, time_agg);
+
+        std::vector<std::thread> workers;
+        workers.reserve(W);
+        for(int slot = 0; slot < W; slot++)
+        {
+            workers.emplace_back([slot, &arg, &filter, any_stride]() {
+                try
+                {
+                    CHECK_HIP_ERROR(hipSetDevice(slot));
+                    hipblaslt_bench::all_devices_bind_thread(slot, slot);
+                    hipDeviceProp_t dev_props;
+                    (void)query_device_property(slot, dev_props);
+                    Arguments dev_arg = arg; // run_bench_test mutates its argument
+                    run_bench_test(dev_arg, filter, any_stride, dev_props);
+                }
+                catch(const std::exception& e)
+                {
+                    hipblaslt_cerr << "[all-devices] device " << slot << " failed: " << e.what()
+                                   << std::endl;
+                    // Release any peers waiting at a launch barrier so they do not hang.
+                    hipblaslt_bench::all_devices_abort();
+                }
+                catch(...)
+                {
+                    hipblaslt_cerr << "[all-devices] device " << slot << " failed (unknown error)"
+                                   << std::endl;
+                    hipblaslt_bench::all_devices_abort();
+                }
+            });
+        }
+        for(auto& t : workers)
+            t.join();
+
+        return hipblaslt_bench::all_devices_report_and_reset();
+    }
+
     return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
