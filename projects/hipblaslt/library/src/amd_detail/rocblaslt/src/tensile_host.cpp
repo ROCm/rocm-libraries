@@ -38,6 +38,7 @@
 #include "rocblaslt-types.h"
 #include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
+#include "candidate_preparation.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -4689,6 +4690,7 @@ namespace
                        == isSolutionSupported(handle, scratchProb, gemmData, &algo, &required)
                    && required <= prob.workspaceSize)
                 {
+                    rocblaslt::prepareCandidateXcc(data->problem, *solution, *hardware);
                     perBlock.reserve(blocks);
                     for(size_t b = 0; b < blocks; b++)
                     {
@@ -5430,7 +5432,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         else
         {
             // cu-fallback detection
-            bool isCUFallback = solution->isFallbackForHW(*hardware);
+            bool isCUFallback = rocblaslt::prepareCandidateXcc(data->problem, *solution, *hardware);
             if(isCUFallback)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -5441,8 +5443,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     log_info(__func__, msg.str());
                 }
             }
-            // set XCC=1 to param when this is a fallback solution
-            data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
             // Build the inputs here rather than inline, so the flag pointer can
             // be pointed at this solution's region before the kernel arguments
@@ -5732,7 +5732,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
 
             // cu-fallback detection
-            bool isCUFallback = solution->isFallbackForHW(*hardware);
+            bool isCUFallback = rocblaslt::prepareCandidateXcc(data->problem, *solution, *hardware);
             if(isCUFallback)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -5743,8 +5743,6 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                     log_info(__func__, msg.str());
                 }
             }
-            // set XCC=1 to param when this is a fallback solution
-            data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
             data->inputs.ws = workspace;
 
