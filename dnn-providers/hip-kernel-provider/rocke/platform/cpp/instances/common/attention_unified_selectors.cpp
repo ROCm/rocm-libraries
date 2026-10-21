@@ -208,8 +208,7 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
      * transposed-32x32 combo; all other SW shapes keep their existing
      * routing. */
     if(p->sliding_window > 0
-       && !(p->head_size == 128
-            && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)
+       && !(p->head_size == 128 && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)
             && p->block_size == 16))
     {
         return false;
