@@ -1095,7 +1095,7 @@ def _declare_params(b: IRBuilder, *, persistent: bool = False, v_paged: bool = F
     return P
 
 
-def build_wmma_fmha_swapqk(spec: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
+def build_wmma_fmha_swapqk(spec: SwapQKCfg, *, arch: str = "gfx1151") -> KernelDef:
     seqlen_q = spec.persist_seqlen_q
     batch = spec.persist_batch
     ok, why = is_valid_spec(spec, arch)

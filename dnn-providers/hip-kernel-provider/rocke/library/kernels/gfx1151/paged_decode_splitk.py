@@ -364,7 +364,7 @@ def _declare_reduce_params(b: IRBuilder, cfg: PagedDecodeCfg) -> Dict[str, Value
 
 
 def build_paged_decode_splitk_segment(
-    spec: PagedDecodeCfg, arch: str = "gfx1151"
+    spec: PagedDecodeCfg, *, arch: str = "gfx1151"
 ) -> KernelDef:
     ok, why = is_valid_spec(spec, arch)
     if not ok:
@@ -748,7 +748,7 @@ def build_paged_decode_splitk_segment(
 
 
 def build_paged_decode_splitk_reduce(
-    spec: PagedDecodeCfg, arch: str = "gfx1151"
+    spec: PagedDecodeCfg, *, arch: str = "gfx1151"
 ) -> KernelDef:
     ok, why = is_valid_spec(spec, arch)
     if not ok:
