@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx12-generic FP16 WMMA attention independently qualified on gfx1200."""
+"""gfx12-generic FP16 WMMA attention, not yet qualified on gfx1200."""
 
 from reference_common.cases import index_cases
 

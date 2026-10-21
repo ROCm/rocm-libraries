@@ -27,11 +27,12 @@ awaits its own GPU qualification and installation enrollment. On a gfx1200
 runner requesting both gfx120X targets, the gfx1201 pinned CTest skips with code
 77; that result is not gfx1200 pinned coverage. See
 [family CI selection](../../sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection).
-Local packaging checks used TheRock's artifact descriptor, splitter, archive
-compression, and downloader selection to verify processor-specific payload routing
-and file-hash preservation for all five published pairs. These checks used the
-Python reference installation harness and local archive transport; native provider
-execution needs separate coverage.
+Before convolution/gfx950 was published, local packaging checks used TheRock's
+artifact descriptor, splitter, archive compression, and downloader selection to
+verify processor-specific payload routing and file-hash preservation for the
+five pairs then published. These checks used a CMake installation of the Python
+reference suites without native binaries, and local archive transport; native
+provider execution needs separate coverage.
 Further architectures, pinned gradient replay, KDA, and GDN remain future work.
 Separate convolution gradient suites check 12 dgrad and 14 wgrad cases per
 processor directly against live NumPy oracles; see the [coverage guide](../../../../docs/conv-coverage-roadmap.md).
@@ -40,8 +41,9 @@ Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
 then compares current rocKE against those answers using the remaining accuracy
 budget. CI neither downloads tensor answers nor qualifies its own baseline.
-Both operations use float64 NumPy references offline. Convolution qualification
-can additionally cross-check CPU Torch when explicitly requested. Reference CI
+Both operations use float64 NumPy references offline. Qualification can
+additionally cross-check Torch when explicitly requested: CPU Torch for
+convolution, and CPU or ROCm GPU Torch for SDPA. Reference CI
 uses an environment without Torch; shared worker launchers block its import.
 
 ```mermaid
@@ -290,7 +292,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942/gfx950 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
-| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
+| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; `wmma.py` also defines the cohort shared by the gfx1151, gfx1200, and gfx1201 adapters, so editing it requires requalifying every published WMMA pair. Dense adapters retain their own cohorts, and every adapter its candidate selection |
 | `worker.py` | Operation-specific launch and replay-argument binding for `../reference_common/worker.py`, the shared HIP execution loop |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
 | `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands and the host-only `cases` and `diff` cohort checks |

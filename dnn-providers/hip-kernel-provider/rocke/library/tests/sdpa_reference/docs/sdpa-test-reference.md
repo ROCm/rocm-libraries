@@ -175,9 +175,9 @@ Source and installed verification each passed all eight comparisons and three
 failure controls, with zero selected GPU skips. The installed shared, SDPA, and
 convolution host suites passed 96, 84, and 63 tests respectively, with the source
 tree moved aside. All eight publication/install contract checks also passed.
-Installation used the lightweight Python CMake harness described in the testing
-guide. This qualification does not establish execution on gfx1200, automatic
-unified attention dispatch, or native provider execution.
+Installation used a CMake installation of the Python reference suites without
+native binaries. This qualification does not establish execution on gfx1200,
+automatic unified attention dispatch, or native provider execution.
 
 The published replacement archive has MD5 `8635f6cf21e20ef3bba89054f54ce952`
 and size 2,596,336 bytes. A fresh anonymous download matched the committed DVC

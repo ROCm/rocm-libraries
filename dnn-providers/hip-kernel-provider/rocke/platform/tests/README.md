@@ -184,8 +184,9 @@ uses the standard archives and committed locks; verify replacement candidates
 with the offline CLI using explicit `--bundle` and `--lock` paths. Each operation
 and architecture retains a separate archive, lock, and installed payload.
 
-The optional `conv_reference/check_torch_reference.py` is an explicit offline
-oracle audit. It is excluded from installation and normal pytest discovery.
+The optional `conv_reference/check_torch_reference.py` and
+`sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
+They are excluded from installation and normal pytest discovery.
 For adding cases, replacing bundles, or enrolling targets, follow the
 [authoritative reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md).
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)

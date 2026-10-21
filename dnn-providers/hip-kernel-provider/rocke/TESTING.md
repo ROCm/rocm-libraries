@@ -150,6 +150,10 @@ the strategy's biggest holes live (see
   For source verification, run
   `python library/tests/run_sdpa_reference.py verify --arch gfx942 --bundle <qualified-bundle> --current-root .`
   from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
+  Add `--case <id>` to run only selected cases; that subset run is not a full
+  verification. The same CLI's `cases` and `diff` commands list an
+  architecture's enrolled cases and compare them with a bundle without a GPU;
+  see the [workflow](library/tests/reference_common/docs/gpu-reference-workflow.md#decide-what-must-change).
   The installed GPU suite reuses separate baseline and current worker processes
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
@@ -158,11 +162,14 @@ the strategy's biggest holes live (see
   Architecture enrollments are listed in
   [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
   used by Python qualification and verification. CMake publication is separate.
-  Each architecture owns its case list, source-dispatch
-  adapter, and baseline lock under `sdpa_reference/architectures/<arch>/`, with a
-  separate DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. Each operation
-  owns its directory under `reference_bundles/`, and convolution references
-  use `reference_bundles/conv/<arch>.tar.gz` and can be updated independently.
+  Each architecture has its own source-dispatch adapter and, once published,
+  baseline lock under `sdpa_reference/architectures/<arch>/`, with a separate
+  DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. gfx942 and gfx950
+  define their own case lists; gfx1151, gfx1200, and gfx1201 share the WMMA
+  cohort in `sdpa_reference/implementations/wmma.py`, so editing it requires
+  requalifying every published WMMA pair. Each operation owns its directory
+  under `reference_bundles/`, and convolution references use
+  `reference_bundles/conv/<arch>.tar.gz` and can be updated independently.
   Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
   the runtime override can select another directory. Installed bundles
   live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
@@ -186,7 +193,8 @@ the strategy's biggest holes live (see
   alongside SDPA. Verify replacement candidates with explicit bundle and lock
   paths through the offline CLI. Both operations use NumPy and ROCm without
   Torch in CI.
-  Optional Torch cross-checking belongs only to offline convolution qualification.
+  Optional Torch cross-checking belongs only to offline qualification: CPU Torch
+  for convolution, and CPU or ROCm GPU Torch for SDPA.
   Separate gradient tests run 12 dgrad and 14 wgrad cases per processor against
   live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md) distinguishes
   production-selected instances from explicit kernel configurations.
@@ -805,6 +813,6 @@ cohort skips the other processors' suites; this records absent pinned-reference
 coverage. Explicit candidate requests still require their bundle and lock.
 See the [processor-selection rules](library/tests/reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 Adding a
-published architecture creates a separate CTest automatically, and the provider
-category YAML selects it by pattern; it also requires an adapter, qualified
-bundle, and matching CI hardware.
+published architecture creates a separate CTest automatically, which the
+provider category YAML selects by pattern. The new architecture also needs an
+adapter, a qualified bundle, and matching CI hardware.

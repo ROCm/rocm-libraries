@@ -102,8 +102,11 @@ kernel binary while still exercising distinct address calculations.
 
 For existing operations, edit
 `library/tests/<operation>_reference/architectures/<arch>/__init__.py` and its
-`CASES`. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`, `prepare`,
-`launch`, and `exported_kernel`. `CASE_BY_ID` indexes `CASES` with
+`CASES`. The gfx1151, gfx1200, and gfx1201 SDPA adapters instead share `CASES`
+from `sdpa_reference/implementations/wmma.py`: editing that cohort changes it
+on every WMMA processor, so each published WMMA pair needs requalification and
+a replacement bundle. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`,
+`prepare`, `launch`, and `exported_kernel`. `CASE_BY_ID` indexes `CASES` with
 `reference_common.cases.index_cases`, so colliding case ids fail on import. An
 adapter that compiles a family code object also exports `COMPILER_TARGET`, and
 its exported kernel metadata records the same `compiler_target`. It must use the
@@ -119,10 +122,15 @@ digests across architectures.
 For a new operation, implement its case model, deterministic quantized inputs,
 independent oracle, fixed comparison metric and budgets, and architecture
 adapters. Its `Case` is a frozen dataclass with `id`, `dtype`, `tolerance`,
-`input_shapes`, and `output_shape`. `reference_common` provides archives,
-numerics, snapshots, worker isolation, and the qualification, verification,
-worker, and GPU test code that every operation shares. The package declares
-only its own parts:
+`input_shapes`, and `output_shape`. Its `dtype` must be `fp16` or `bf16`: the
+shared worker stores the inputs and output in that 2-byte format. The worker
+also requires exactly one kernel launch per repetition and a single output, and
+qualification and verification require the baseline's repeated outputs to be
+bit-identical. Support for multiple launches or outputs is deferred until a
+concrete kernel needs it. `reference_common` provides archives, numerics,
+snapshots, worker isolation, and the qualification, verification, worker, and
+GPU test code that every operation shares. The package declares only its own
+parts:
 
 | File | Declares |
 |---|---|
@@ -148,6 +156,18 @@ numerical cases. New output structures or nondeterministic kernels require a
 numerical/replay contract that supports them; the current contracts cannot be
 assumed to apply. See the [extension strategy](gpu-ci-pinned-rocke-test-reference-plan.md#6-extend-coverage-deliberately).
 
+Run the host contract tests before booking a GPU. They need no GPU or Torch
+and catch cohort, adapter, and frozen-ABI problems before qualification:
+
+```bash
+python -m pytest library/tests/test_reference_common.py \
+  library/tests/test_<operation>_reference_contract.py -q
+```
+
+After a `CASES` edit, `test_published_bundles_record_the_enrolled_cohorts` is
+expected to fail for the edited pair until step 5 replaces its bundle and lock.
+Fix every other failure before qualifying.
+
 ## 2. Prepare reproducible qualification inputs
 
 Commands below use Bash and run from the rocKE root unless stated otherwise.
@@ -155,7 +175,7 @@ Choose one operation and architecture, and an unused working directory outside
 the checkout. Replace the placeholder paths before running:
 
 ```bash
-REFERENCE_OPERATION=conv                 # sdpa or conv
+REFERENCE_OPERATION=conv                 # any registered operation, such as sdpa
 REFERENCE_ARCH=gfx942
 REFERENCE_WORK='<outside-checkout-work-directory>'
 REFERENCE_REPOSITORY='<rocm-libraries-checkout>'
@@ -387,10 +407,24 @@ Run the source publication/install checks:
 python -m pytest platform/tests/test_gpu_references.py -q
 ```
 
-Follow the existing [build procedure](../../../../BUILDING.md) to configure and install
-with `ROCKE_INSTALL_TEST_GPU_REFERENCES=ON`. Fetch all published archives needed
-by that configuration. In a fresh installed tree, verify the candidate manifest
-and lock match the reviewed files, then run the
+Fetch every published archive first; a missing one fails configuration. Then,
+from the rocm-libraries root and with the provider's HIP and hipDNN SDK
+dependencies available, configure the provider with rocKE enabled as in the
+[build quick start](../../../../BUILDING.md#quick-start-cmake-managed-environment),
+build, and install. Provider builds default `ROCKE_INSTALL_TEST_GPU_REFERENCES`
+to ON; pass it explicitly because an existing build directory keeps its cached
+value:
+
+```bash
+cmake -S dnn-providers/hip-kernel-provider -B "$REFERENCE_WORK/build" \
+  -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DROCKE_INSTALL_TEST_GPU_REFERENCES=ON
+cmake --build "$REFERENCE_WORK/build"
+cmake --install "$REFERENCE_WORK/build" --prefix "$REFERENCE_WORK/install"
+```
+
+The installed provider tests are under
+`$REFERENCE_WORK/install/bin/hip_kernel_provider/`. In a fresh installed tree,
+verify the candidate manifest and lock match the reviewed files, then run the
 [Torch-free installed reference procedure](../../../../TESTING.md#running-installed-reference-tests-without-torch)
 on matching hardware with source paths removed from the environment.
 
