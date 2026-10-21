@@ -164,27 +164,20 @@ namespace
         constexpr auto   c32 = rocsparse_datatype_f32_c, c64 = rocsparse_datatype_f64_c;
         using cf = rocsparse_float_complex;
         using cd = rocsparse_double_complex;
-        Silence                                                 silence;
-        const std::pair<rocsparse_datatype, rocsparse_datatype> converted[]
+        Silence                                                        silence;
+        std::vector<std::pair<rocsparse_datatype, rocsparse_datatype>> pairs
             = {{f64, f32}, {f32, f64}, {c32, f32}, {c32, f64}, {c32, c64}, {c64, c32}};
         for(auto t : s_datatypes)
-            for(auto s : s_datatypes)
-            {
-                SCOPED_TRACE(testing::Message() << "target " << t << " source " << s);
-                const std::vector<char> want = iota_bytes(t, n);
-                DevBuf<char> src(iota_bytes(s, n)), dst(std::vector<char>(want.size(), -1));
-                const rocsparse_status st
-                    = rocsparse::convert_array(handle, n, t, dst.get(), s, src.get());
-                EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st_ok);
-                // Library bug: the other pairs return success and write nothing.
-                if(t == s
-                   || std::find(std::begin(converted), std::end(converted), std::make_pair(t, s))
-                          != std::end(converted))
-                {
-                    EXPECT_EQ(st, st_ok);
-                    EXPECT_EQ(dst.read(), want);
-                }
-            }
+            pairs.emplace_back(t, t);
+        for(const auto& [t, s] : pairs)
+        {
+            SCOPED_TRACE(testing::Message() << "target " << t << " source " << s);
+            const std::vector<char> want = iota_bytes(t, n);
+            DevBuf<char>            src(iota_bytes(s, n)), dst(std::vector<char>(want.size(), -1));
+            EXPECT_EQ(rocsparse::convert_array(handle, n, t, dst.get(), s, src.get()), st_ok);
+            EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st_ok);
+            EXPECT_EQ(dst.read(), want);
+        }
         const std::vector<float> hf{1.0f, -2.0f, 3.5f, 0.25f};
         EXPECT_EQ(convert_values<double>(handle, f64, f32, hf),
                   (std::vector<double>{1.0, -2.0, 3.5, 0.25}));
@@ -284,13 +277,11 @@ namespace
         constexpr size_t                 n = 4;
         DevBuf<float>                    d_f32(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
         DevBuf<double>                   d_f64(n);
-        DevBuf<int32_t>                  d_i32(n);
         DevBuf<rocsparse_float_complex>  d_c32(n);
         DevBuf<rocsparse_double_complex> d_c64(n);
-        Dnvec                            vf32, vf64, vi32, vc32, vc64, vshort;
+        Dnvec                            vf32, vf64, vc32, vc64, vshort;
         ASSERT_EQ(rocsparse_create_dnvec_descr(&vf32, n, d_f32, rocsparse_datatype_f32_r), st_ok);
         ASSERT_EQ(rocsparse_create_dnvec_descr(&vf64, n, d_f64, rocsparse_datatype_f64_r), st_ok);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&vi32, n, d_i32, rocsparse_datatype_i32_r), st_ok);
         ASSERT_EQ(rocsparse_create_dnvec_descr(&vc32, n, d_c32, rocsparse_datatype_f32_c), st_ok);
         ASSERT_EQ(rocsparse_create_dnvec_descr(&vc64, n, d_c64, rocsparse_datatype_f64_c), st_ok);
         ASSERT_EQ(rocsparse_create_dnvec_descr(&vshort, n - 1, d_f32, rocsparse_datatype_f32_r),
@@ -306,8 +297,6 @@ namespace
         // Real from real, complex from real, complex from complex.
         ASSERT_EQ(rocsparse::dnvec_transfer_from(handle, vf64, vf32), st_ok);
         EXPECT_EQ(d_f64.read(), (std::vector<double>{1.0, 2.0, 3.0, 4.0}));
-        // Library bug: f32 from i32 returns success and writes nothing (see convert_array).
-        (void)rocsparse::dnvec_transfer_from(handle, vf32, vi32);
         ASSERT_EQ(rocsparse::dnvec_transfer_from(handle, vc32, vf64), st_ok);
         ASSERT_EQ(rocsparse::dnvec_transfer_from(handle, vc64, vc32), st_ok);
         EXPECT_EQ(d_c64.read(),

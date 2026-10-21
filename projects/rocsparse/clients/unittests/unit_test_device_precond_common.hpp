@@ -323,16 +323,9 @@ namespace precond_ut
         return a;
     }
 
-    // The CSR hash kernels of csric0 and csrildlt0 keep the entries of the current
-    // row in a shared-memory table of 32, 64, 128, 256 or 512 slots (wavefront 32:
-    // table size = 32 * HASH, HASH picked from the longest row with
-    // max_nnz <= 32 / 64 / 128 / 256 / 512). A row of EXACTLY that many entries
-    // fills the table and the lookup of a column that is not in the row then probes
-    // forever: the kernel never returns and the GPU hangs. No test may build a matrix
-    // whose longest row has 32, 64, 128, 256 or 512 entries; the generators below
-    // throw instead of launching such a matrix (csrilu0 switches to the binary
-    // search kernel from 512 entries and is not affected, but it is kept away from
-    // these lengths as well).
+    // Precondition of the generators below: the longest row does not have exactly
+    // 32, 64, 128, 256 or 512 entries (the slot counts of the csric0 / csrildlt0
+    // hash tables on a wavefront of 32).
     inline bool is_hash_table_size(int32_t row_length)
     {
         return row_length == 32 || row_length == 64 || row_length == 128 || row_length == 256
@@ -344,7 +337,7 @@ namespace precond_ut
         if(is_hash_table_size(row_length))
         {
             throw std::invalid_argument("row length " + std::to_string(row_length)
-                                        + " fills the csric0/csrildlt0 hash table and hangs");
+                                        + " equals a csric0/csrildlt0 hash table size");
         }
     }
 
@@ -353,9 +346,7 @@ namespace precond_ut
     // (r - band .. r). The longest row, `fat`, selects between the hash kernels
     // (fat <= 512) and the binary-search kernels (fat > 512). With band >= 2 the
     // IC(0) / ILDLT(0) inner sums of the last row have several terms.
-    // `imag` adds an imaginary part to the off-diagonal entries of complex types
-    // (the complex IC(0) kernels conjugate the wrong operand, so IC(0) tests on
-    // complex types must pass imag = false: the products are then real).
+    // `imag` adds an imaginary part to the off-diagonal entries of complex types.
     template <typename T>
     csr_matrix<T> make_fat_row_matrix(int32_t fat, bool imag = true, int32_t band = 1)
     {
@@ -384,8 +375,8 @@ namespace precond_ut
     // Lower band matrix of order n: row r holds the columns max(0, r - w) .. r, so the
     // longest row has min(n, w + 1) entries and every IC(0) / ILDLT(0) inner sum
     // runs over up to w terms. The diagonal grows with w so that the symmetric
-    // matrix (the lower triangle mirrored) stays positive definite. See make_fat_row_matrix for `imag` and the row
-    // lengths that must be avoided.
+    // matrix (the lower triangle mirrored) stays positive definite. See make_fat_row_matrix
+    // for `imag`.
     template <typename T>
     csr_matrix<T> make_lower_band_matrix(int32_t n, int32_t w, bool imag = true)
     {

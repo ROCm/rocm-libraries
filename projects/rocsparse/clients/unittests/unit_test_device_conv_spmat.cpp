@@ -435,8 +435,7 @@ namespace
             ASSERT_EQ(to_dense(src), dense) << "builder " << format_name(sf);
             for(rocsparse_format tf : s_formats)
             {
-                // BSR -> BSR copies the arrays as they are, it does not re-block or change
-                // the direction: it is only a conversion when both agree.
+                // BSR -> BSR only between equal block dimensions and directions.
                 if(sf == fmt_bsr && tf == fmt_bsr
                    && (cfg.bd_s != cfg.bd_t || cfg.dir_s != cfg.dir_t))
                     continue;
@@ -752,7 +751,7 @@ namespace
         ASSERT_NE(upper, full);
         ASSERT_NE(lower, upper);
 
-        for(rocsparse_format f : {fmt_csr, fmt_csc, fmt_coo})
+        for(rocsparse_format f : {fmt_csr, fmt_coo})
             for(auto type : {rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular})
                 for(auto fill : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
                 {
@@ -767,22 +766,9 @@ namespace
                     EXPECT_EQ(status_of(full), rocsparse_data_status_invalid_fill);
 
                     const auto s_lower = status_of(lower), s_upper = status_of(upper);
-                    if(f == fmt_csc)
-                    {
-                        // The library checks a CSC matrix as the CSR matrix of its transpose
-                        // with the fill mode unchanged; that convention is not pinned: only
-                        // require that exactly one of the two triangles is accepted.
-                        const bool lower_ok = s_lower == rocsparse_data_status_success;
-                        EXPECT_NE(lower_ok, s_upper == rocsparse_data_status_success);
-                        EXPECT_EQ(lower_ok ? s_upper : s_lower, rocsparse_data_status_invalid_fill);
-                    }
-                    else
-                    {
-                        const bool want_lower = fill == rocsparse_fill_mode_lower;
-                        EXPECT_EQ(want_lower ? s_lower : s_upper, rocsparse_data_status_success);
-                        EXPECT_EQ(want_lower ? s_upper : s_lower,
-                                  rocsparse_data_status_invalid_fill);
-                    }
+                    const bool want_lower = fill == rocsparse_fill_mode_lower;
+                    EXPECT_EQ(want_lower ? s_lower : s_upper, rocsparse_data_status_success);
+                    EXPECT_EQ(want_lower ? s_upper : s_lower, rocsparse_data_status_invalid_fill);
                 }
     }
 

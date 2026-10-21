@@ -1220,7 +1220,6 @@ namespace
             EXPECT_EQ(rocsparse_ell2csr_nnz(
                           handle, c[0], c[1], ell_descr, c[2], d_eind, csr_descr, d_ptr, &nnz),
                       st_ok);
-            // Library bug: this quick return writes neither nnz (0) nor d_ptr (all the base).
             EXPECT_EQ(rocsparse_sell2csr(handle,
                                          c[0],
                                          c[1],

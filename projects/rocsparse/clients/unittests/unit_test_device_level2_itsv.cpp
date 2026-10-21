@@ -570,8 +570,6 @@ namespace
                                                   dbuf),
                           rocsparse_status_success);
 
-                // The tolerance must be given: with nnz == 0 and a unit diagonal the library
-                // reads host_tol[0] unconditionally, a null tolerance crashes it.
                 const float tol = 1.0e-6f;
                 // y starts at zero, so one step is needed.
                 {

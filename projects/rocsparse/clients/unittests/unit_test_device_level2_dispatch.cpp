@@ -1024,8 +1024,6 @@ namespace
                 expect_near(
                     solve_reference(m.a, {lo, nu, op_n, false}, 2.0, m.x0), to_host(m.y), "sptrsv");
         }
-        // An f32 scalar in device pointer mode is not run: rocsparse_sptrsv solves with
-        // handle->alpha instead of the converted user alpha.
         scoped_pointer_mode device(handle, true);
         o.scalar = f64;
         o.op     = op_t;

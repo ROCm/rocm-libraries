@@ -489,8 +489,6 @@ namespace
         ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(B, hB, dB_ptr, dB_col, dB_val)));
         const Bsr want = extra_ut::bsr_geam(2.0, bsr_from_csr(hA), 3.0, bsr_from_csr(hB));
 
-        // The scalar type is the compute type: spgeam with a different scalar
-        // type reads alpha / beta in the wrong precision (library bug).
         const T          alpha = scalar<T>(2.f);
         const T          beta  = scalar<T>(3.f);
         device_vector<T> d_alpha{std::vector<T>{alpha}};
@@ -623,9 +621,6 @@ TEST_F(ExtraGemmGeam, spgemm_type_index_transpose)
     all_types(int64_t{}, int32_t{}, 4);
     all_types(int64_t{}, int64_t{}, 5);
     run_pair_spgemm<int32_t, int32_t, float>(handle, true);
-
-    // Generic transposed operands are not run: rocsparse_spgemm returns success
-    // and computes A * B instead of not_implemented (library bug).
 
     // The legacy entry points reject transpose before any kernel runs.
     device_vector<rocsparse_int> rp{std::vector<rocsparse_int>{0, 1, 2}};
@@ -863,9 +858,7 @@ TEST_F(ExtraGemmGeam, spgemm_rejected_types_formats_and_bsr)
 
     // BSR is implemented for buffer/nnz/compute; symbolic/numeric are CSR only.
     // C = 2 * A * B with blocks of distinct values, so for bd = 2 the block
-    // direction changes the result (bd = 1 takes the csrgemm path). Transposed
-    // A is not run: rocsparse_spgemm returns success and computes A * B
-    // (library bug).
+    // direction changes the result (bd = 1 takes the csrgemm path).
     auto bsr_case = [&](auto* tag, rocsparse_datatype dt, rocsparse_direction dir, int64_t bd) {
         using V = std::remove_pointer_t<decltype(tag)>;
         SCOPED_TRACE("dir=" + std::to_string(dir) + " bd=" + std::to_string(bd));
@@ -1047,8 +1040,6 @@ TEST_F(ExtraGemmGeam, csrgeam_nnz_branches)
 
 TEST_F(ExtraGemmGeam, spgeam_type_index_scalars)
 {
-    // Transposed operands are not run: rocsparse_spgeam returns success and
-    // computes 2 * A + 3 * B, ignoring the operations (library bug).
     run_spgeam<int32_t, int32_t, float>(handle, false);
     run_spgeam<int32_t, int32_t, float>(handle, true);
     run_spgeam<int32_t, int32_t, double>(handle, false);

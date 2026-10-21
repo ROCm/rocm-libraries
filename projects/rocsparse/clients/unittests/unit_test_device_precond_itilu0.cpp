@@ -286,8 +286,6 @@ namespace
         return out;
     }
 
-    // The sweep kernels always reduce the residual norm into a device scalar, so
-    // every run requests it (without the option that scalar is a null pointer).
     struct x_options
     {
         rocsparse_int options   = rocsparse_itilu0_option_compute_nrm_residual;

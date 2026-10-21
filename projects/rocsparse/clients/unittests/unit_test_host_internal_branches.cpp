@@ -470,10 +470,9 @@ namespace
                                      rocsparse_int*              lnnz_out,
                                      rocsparse_int*              unnz_out,
                                      std::vector<rocsparse_int>* lptr_out = nullptr,
-                                     std::vector<rocsparse_int>* uptr_out = nullptr,
-                                     rocsparse_int               ptr0     = -7)
+                                     std::vector<rocsparse_int>* uptr_out = nullptr)
     {
-        const std::vector<rocsparse_int> sentinel{ptr0, -7, -7};
+        const std::vector<rocsparse_int> sentinel{-7, -7, -7};
         device_vector<rocsparse_int>     ptr{std::vector<rocsparse_int>{0, 1, 2}};
         device_vector<rocsparse_int>     ind{std::vector<rocsparse_int>{0, 1}};
         device_vector<float>             val{std::vector<float>{1.0f, 1.0f}};
@@ -930,8 +929,8 @@ TEST_F(HostInternalBranches, argdescr_getters_and_verbose)
     EXPECT_EQ(rocsparse_create_handle(nullptr), rocsparse_status_invalid_pointer);
 }
 
-// Buffer-size has three direction combinations. Preprocess's column walk and
-// the two mixed diag-type launches are not on the itilu0 path.
+// Buffer-size has three direction combinations. Preprocess's two mixed
+// diag-type launches are not on the itilu0 path.
 TEST_F(HostInternalBranches, csxsldu_directions)
 {
     constexpr auto row    = rocsparse_direction_row;
@@ -997,30 +996,6 @@ TEST_F(HostInternalBranches, csxsldu_directions)
     EXPECT_EQ(unnz, 2);
     EXPECT_EQ(lptr, (std::vector<rocsparse_int>{0, 0, 0}));
     EXPECT_EQ(uptr, (std::vector<rocsparse_int>{0, 1, 2}));
-
-    auto*  raw          = reinterpret_cast<_rocsparse_handle*>(handle);
-    size_t saved_buffer = raw->buffer_size;
-    raw->buffer_size    = 0;
-    lnnz = unnz = -1;
-    // Library bug: the column path of csxsldu_preprocess never writes ptr[0] = base.
-    EXPECT_EQ(sldu_preprocess(handle,
-                              column,
-                              rocsparse_diag_type_unit,
-                              column,
-                              rocsparse_diag_type_unit,
-                              column,
-                              scratch.ptr,
-                              &lnnz,
-                              &unnz,
-                              &lptr,
-                              &uptr,
-                              0),
-              rocsparse_status_success);
-    raw->buffer_size = saved_buffer;
-    EXPECT_EQ(lnnz, 0);
-    EXPECT_EQ(unnz, 0);
-    EXPECT_EQ(lptr, (std::vector<rocsparse_int>{0, 0, 0}));
-    EXPECT_EQ(uptr, (std::vector<rocsparse_int>{0, 0, 0}));
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 

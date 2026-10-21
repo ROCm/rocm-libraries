@@ -28,11 +28,6 @@
 // reporting, and the kernel regimes selected by the row length (hash vs binary
 // search). Every factorization is compared with a host reference and with the
 // residual of the factorization on the sparsity pattern.
-//
-// The row lengths avoid the hash table sizes (32, 64, ..., 512), see
-// make_fat_row_matrix. IC(0) uses real-valued entries for the complex CSR
-// matrices with shared columns below the diagonal (the products of the inner sums
-// are then real, whatever the conjugation order).
 
 #include "unit_test_device_precond_common.hpp"
 
@@ -57,9 +52,7 @@ TYPED_TEST_SUITE(PrecondIluIc, IluIc);
 
 // On the grid matrix a row never shares a column below the diagonal with a row it
 // depends on, so every IC(0) inner sum is zero (the band tests below have non-zero
-// sums). The complex conjugation order of the library's complex IC(0) update (see
-// spic0_csr_nonzero_inner_sums_hash) is therefore invisible here, and the complex
-// types are safe to use on this matrix.
+// sums).
 TYPED_TEST(PrecondIluIc, csr_types_policies_batches_and_index_base)
 {
     constexpr Kind K      = TestFixture::K;
@@ -85,17 +78,11 @@ TYPED_TEST(PrecondIluIc, csr_types_policies_batches_and_index_base)
 }
 
 // IC(0) inner sums with several non-zero terms (rows that share columns below the
-// diagonal) through the hash and the binary-search kernel. The real types are checked
-// with real data; the complex types only with real-valued entries: the library's
-// complex IC(0) kernels accumulate fma(val[k], conj(val[idx]), sum), which is the
-// conjugate of the sum L * L^H requires, so a complex matrix with non-real products
-// does not reproduce the host factorization (library bug, not exercised here). With
-// real values the products are real and the conjugation order does not matter.
+// diagonal) through the hash and the binary-search kernel, with real-valued entries.
 TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
 {
     run_options opt;
-    // Longest rows of 3, 6, 21 and 41 entries (never 32, 64, ..., see
-    // make_fat_row_matrix).
+    // Longest rows of 3, 6, 21 and 41 entries.
     for(const int32_t w : {2, 5, 20, 40})
     {
         for_all_types([&](auto tag) {
@@ -238,7 +225,6 @@ namespace
     }
 }
 
-// Not spildlt0: rocsparse_spildlt0 ignores the boost inputs of its descriptor (bug).
 TEST_F(PrecondGeneric, spilu0_numeric_boost)
 {
     for_all_types([&](auto tag) { check_ilu_boost<decltype(tag)>(handle); });
@@ -250,9 +236,7 @@ TEST_F(PrecondGeneric, spilu0_numeric_boost)
 
 // The IC(0) matrices are block tridiagonal with Hermitian diagonal blocks; the scalar
 // inner sums are non-zero (a scalar row shares columns with the rows it depends on
-// inside a block). The complex types have non-real products here and are compared with
-// the host factorization: the conjugation order problem of the csric0 kernels (see
-// spic0_csr_nonzero_inner_sums_hash) does not show in the bsric0 kernels.
+// inside a block), and the complex types have non-real products.
 TYPED_TEST(PrecondIluIc, bsr_block_dims_and_index_base)
 {
     constexpr Kind K      = TestFixture::K;
@@ -340,9 +324,6 @@ TEST_F(PrecondGeneric, spic0_bsr_long_block_rows)
 TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
 {
     // Row lengths up to 512 select the hash kernel; the table size grows with the length.
-    // The lengths stay below the table sizes (32, 64, ..., 512): a row that fills the
-    // whole shared-memory table makes the lookup of a missing key probe forever (the
-    // generator throws for those lengths).
     run_options opt;
     for(const int32_t fat : {8, 31, 33, 63, 65, 127, 129, 255, 257, 511})
     {
@@ -605,8 +586,7 @@ namespace
     void check_all_row_shapes(rocsparse_handle handle, const std::string& what)
     {
         const run_options opt;
-        // IC(0) accepts only the lower triangle and real products.
-        constexpr bool real_only = (K == Kind::ic);
+        constexpr bool    real_only = (K == Kind::ic);
         // ILU(0) gets the upper triangle as well, or its update would have nothing to do.
         const auto shape = [](const csr_matrix<T>& lower) {
             return (K == Kind::ilu) ? with_upper_triangle(lower) : lower;

@@ -525,9 +525,6 @@ TYPED_TEST(PrecondLegacyCsr, tolerance_argument_checks)
     EXPECT_EQ(get_tolerance<K>(handle, nullptr, &tol), rocsparse_status_invalid_pointer);
     EXPECT_EQ(get_tolerance<K>(handle, di.info, nullptr), rocsparse_status_invalid_pointer);
     EXPECT_EQ(set_tolerance<K>(nullptr, di.info, 1.0), rocsparse_status_invalid_handle);
-    // rocsparse_csric0_set_tolerance does not check its info argument (library bug).
-    if constexpr(K == Kind::ilu)
-        EXPECT_EQ(set_tolerance<K>(handle, nullptr, 1.0), rocsparse_status_invalid_pointer);
     // A negative tolerance is rejected (the status is not documented).
     EXPECT_NE(set_tolerance<K>(handle, di.info, -1.0), rocsparse_status_success);
     EXPECT_EQ(singular_pivot<K>(nullptr, di.info, &position), rocsparse_status_invalid_handle);

@@ -28,7 +28,7 @@
 // The generic rocsparse_spgeam API is driven through
 //  - the combined analysis/compute flow and the split symbolic/numeric flow,
 //  - the output matrix C created before or after the analysis,
-//  - host and device scalars (the scalar type is always the compute type),
+//  - host and device scalars,
 //  - index base one (and mixed bases) for A, B and C,
 //  - the stage state machine (each stage after the listed stage sequences,
 //    including the numeric-only flow: numeric analysis + numeric compute on a
