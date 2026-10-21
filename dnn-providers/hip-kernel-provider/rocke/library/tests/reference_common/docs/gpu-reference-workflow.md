@@ -16,6 +16,20 @@ for how the current kernel and frozen baseline keep separate launch ABIs, and
 [baseline replacement](README.md#when-to-replace-the-baseline) for when a new
 qualification is needed.
 
+## Prerequisites
+
+A change that replaces a bundle, as described in the table below, needs:
+
+- **A GPU of each processor you qualify.** Certificates do not transfer between
+  processors, even ones sharing a generic code object (step 2).
+- **A baseline revision reachable from `develop`.** Merge kernel changes first,
+  then snapshot the merged commit. Pull requests land as squash commits, so a
+  feature-branch commit is not in `develop`'s history; once its branch is
+  deleted, other checkouts cannot snapshot it again and the requalification
+  check below skips the pair.
+- **Write access to the DVC `storage` remote, or a maintainer who has it.**
+  Step 5 covers the upload and how to request publication.
+
 ## Decide what must change
 
 | Change | Required work |
@@ -293,25 +307,53 @@ python library/tests/reference_common/artifact.py pack \
 Re-run `python -m pytest library/tests/test_reference_common.py -q`; it now
 compares the enrolled cohort with the new archive and reviewed lock.
 
-From the rocm-libraries root, track and upload that one archive:
+From the rocm-libraries root, track that one archive:
 
 ```bash
 REFERENCE_DVC="dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH.tar.gz"
 dvc add "$REFERENCE_DVC"
+```
+
+`dvc add` may stage metadata automatically in this repository. Commit the
+pointer and lock, not the archive or extracted payload. Committing a replacement
+pointer does not upload its archive.
+
+Maintainers with write access to the DVC `storage` remote upload archives.
+Without that access, retain the candidate and request publication on the pull
+request from the rocKE library code owners (`@ROCm/rocke-lib`, which owns
+`library/` in [`CODEOWNERS`](../../../../../../../.github/CODEOWNERS)). The
+archive must be uploaded before its pointer merges.
+
+The committed `.dvc/config` sets `allow_anonymous_login = true` on its remotes
+so downloads need no credentials. DVC then sends unsigned requests and ignores
+any credentials, so an upload fails with `AccessDenied` even with write access.
+Once per checkout, turn that off for `storage` in the git-ignored
+`.dvc/config.local`:
+
+```bash
+dvc remote modify --local storage allow_anonymous_login false
+```
+
+Supply credentials through the standard AWS environment variables, such as
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or a named profile selected with
+`AWS_PROFILE`. Never write them into a DVC config file or commit them. Downloads
+in that checkout then need credentials too;
+`dvc remote modify --local --unset storage allow_anonymous_login` restores
+anonymous reads. Reference pointers name no remote, so they upload to the default
+`storage` remote. Pass the pointer, or several, so the push uploads only those
+archives:
+
+```bash
 dvc push "$REFERENCE_DVC.dvc"
 ```
 
-The `storage` remote requires write access for publication; downloads support
-anonymous access. If upload is unavailable, retain the candidate and arrange
-publication with an authorized maintainer before merging its pointer. A local
-cache hit does not establish remote availability: pull the new pointer from an
-isolated checkout with an empty DVC cache and validate the downloaded archive
-against the reviewed lock. Do not delete an existing working cache to perform
-this check. `dvc add` may stage metadata automatically in this repository.
-Commit the pointer and lock, not the archive or extracted payload.
-Committing a replacement pointer does not upload its archive. CI fetches DVC
-objects during source preparation, before GPU suite selection, so the replacement
-must be available remotely even for a job that later skips that processor's suite.
+A local cache hit does not establish remote availability: pull the new pointer
+from an isolated checkout with an empty DVC cache and validate the downloaded
+archive against the reviewed lock. A fresh checkout has no `.dvc/config.local`,
+so that pull is anonymous, as for any reader without credentials. Do not delete
+an existing working cache to perform this check. CI fetches DVC objects during
+source preparation, before GPU suite selection, so the replacement must be
+available remotely even for a job that later skips that processor's suite.
 
 For a newly published architecture, add it to the operation's
 `ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES` list, such as
