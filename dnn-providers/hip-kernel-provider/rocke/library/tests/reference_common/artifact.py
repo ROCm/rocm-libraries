@@ -15,12 +15,33 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 
-OPERATIONS = ("sdpa", "conv")
+_TESTS = Path(__file__).resolve().parents[1]
+# Each tests/<operation>_reference package with an architecture registry is a
+# reference operation. CMake discovers the same packages to stage bundles and
+# register CTests, and requires a publication list for each of them.
+OPERATIONS = tuple(
+    sorted(
+        registry.parents[1].name.removesuffix("_reference")
+        for registry in _TESTS.glob("*_reference/architectures/registry.json")
+    )
+)
 
 
 def _check_operation(operation: str) -> None:
     if operation not in OPERATIONS:
         raise ValueError(f"unsupported reference operation: {operation}")
+
+
+def manifest_operation(operation: str) -> str:
+    """Return the id that the operation's bundle manifests declare.
+
+    The id names the qualified contract (e.g. forward-only convolution) and
+    need not equal the package name, so each package records it in its
+    operation.json.
+    """
+    _check_operation(operation)
+    metadata = _TESTS / f"{operation}_reference" / "operation.json"
+    return json.loads(metadata.read_text())["manifest_operation"]
 
 
 def _digest(path: Path) -> str:
@@ -43,11 +64,10 @@ def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
         or manifest["baseline_revision"] != expected["baseline_revision"]
     ):
         raise ValueError("GPU reference baseline identity mismatch")
-    # The deployed SDPA schema-2 manifest identifies its operation through the
-    # selected lock; convolution also declares its forward-only contract.
+    # The deployed SDPA schema-2 manifest predates the operation field and is
+    # identified through the selected lock; other operations declare their id.
     declared = manifest.get("operation", "sdpa")
-    expected_operation = {"sdpa": "sdpa", "conv": "conv-fwd"}[operation]
-    if declared != expected_operation:
+    if declared != manifest_operation(operation):
         raise ValueError(f"bundle operation {declared!r} does not match {operation!r}")
     if manifest["schema"] != 2:
         raise ValueError("only tensor-free schema-2 reference bundles are supported")

@@ -16,6 +16,11 @@ _PLATFORM = Path(__file__).resolve().parents[1]
 _LIBRARY = _PLATFORM.parent / "library"
 _CMAKE = shutil.which("cmake")
 pytestmark = pytest.mark.skipif(_CMAKE is None, reason="CMake is required")
+# Operation packages by the convention CMake and reference_common/artifact.py use.
+_OPERATIONS = sorted(
+    registry.parents[1].name.removesuffix("_reference")
+    for registry in (_LIBRARY / "tests").glob("*_reference/architectures/registry.json")
+)
 
 
 @pytest.fixture
@@ -26,18 +31,22 @@ def project(tmp_path):
     shutil.copyfile(
         _LIBRARY / "tests/reference_common/artifact.py", common / "artifact.py"
     )
-    # No qualification registries: installation needs only publication metadata.
     cmake = tmp_path / "cmake"
     cmake.mkdir()
     shutil.copyfile(
         _PLATFORM / "cmake/InstallGpuReferences.cmake",
         cmake / "InstallGpuReferences.cmake",
     )
-    (cmake / "PublishedGpuReferences.cmake").write_text(
-        "set(ROCKE_PUBLISHED_SDPA_ARCHITECTURES gfx942)\n"
-        "set(ROCKE_PUBLISHED_CONV_ARCHITECTURES gfx942)\n"
-    )
-    for operation in ("sdpa", "conv"):
+    publish(tmp_path)
+    for operation in _OPERATIONS:
+        # Installation needs each operation's identity, not its qualification code.
+        package = library / f"tests/{operation}_reference"
+        (package / "architectures").mkdir(parents=True)
+        for name in ("operation.json", "architectures/registry.json"):
+            shutil.copyfile(
+                _LIBRARY / f"tests/{operation}_reference" / name, package / name
+            )
+        declared = json.loads((package / "operation.json").read_text())
         bundle = tmp_path / operation
         (bundle / "payload").mkdir(parents=True)
         payload = operation.encode()
@@ -45,15 +54,12 @@ def project(tmp_path):
         manifest = {
             "schema": 2,
             "baseline_revision": "a" * 40,
-            "operation": "conv-fwd" if operation == "conv" else "sdpa",
+            "operation": declared["manifest_operation"],
             "files": {"kernel.hsaco": hashlib.sha256(payload).hexdigest()},
         }
         encoded = json.dumps(manifest).encode()
         (bundle / "manifest.json").write_bytes(encoded)
-        lock = (
-            library
-            / f"tests/{operation}_reference/architectures/gfx942/baseline_lock.json"
-        )
+        lock = package / "architectures/gfx942/baseline_lock.json"
         lock.parent.mkdir(parents=True)
         lock.write_text(
             json.dumps(
@@ -92,11 +98,70 @@ set(_ROCKE_LIBRARY_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/library")
 set(ROCKE_TEST_INSTALL_DIR "tests")
 set(Python3_EXECUTABLE "{Path(sys.executable).as_posix()}")
 include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/InstallGpuReferences.cmake")
-file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/installed.txt"
-     "sdpa=${{_ROCKE_SDPA_INSTALLED_ARCHITECTURES}}\\nconv=${{_ROCKE_CONV_INSTALLED_ARCHITECTURES}}\\n")
+set(installed "")
+foreach(operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
+  string(TOUPPER "${{operation}}" upper)
+  string(APPEND installed "${{operation}}=${{_ROCKE_${{upper}}_INSTALLED_ARCHITECTURES}}\\n")
+endforeach()
+file(WRITE "${{CMAKE_CURRENT_BINARY_DIR}}/installed.txt" "${{installed}}")
 """
     )
     return tmp_path
+
+
+def publish(project, **architectures):
+    """Publish gfx942 for every operation unless overridden; return the lists."""
+    published = {operation: ["gfx942"] for operation in _OPERATIONS} | architectures
+    # An empty set() would unset the list; "" publishes nothing explicitly.
+    values = {
+        operation: " ".join(names) or '""' for operation, names in published.items()
+    }
+    (project / "cmake/PublishedGpuReferences.cmake").write_text(
+        "".join(
+            f"set(ROCKE_PUBLISHED_{operation.upper()}_ARCHITECTURES {value})\n"
+            for operation, value in values.items()
+        )
+    )
+    return published
+
+
+def register(project, operation):
+    """Add an operation package that has qualified no architecture yet."""
+    package = project / f"library/tests/{operation}_reference"
+    (package / "architectures").mkdir(parents=True)
+    (package / "architectures/registry.json").write_text('["gfx942"]\n')
+    (package / "operation.json").write_text(
+        json.dumps({"manifest_operation": f"{operation}-fwd"})
+    )
+
+
+def _architecture_lists(text):
+    """Parse `operation=arch;arch` lines into lists, as CMake would split them."""
+    lists = (line.split("=", 1) for line in text.splitlines())
+    return {
+        operation: list(filter(None, names.split(";"))) for operation, names in lists
+    }
+
+
+def installed(project):
+    return _architecture_lists((project / "build/installed.txt").read_text())
+
+
+def _artifact_operations(library):
+    """Return the operations the artifact CLI under `library` discovers."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import runpy, sys; print(*runpy.run_path(sys.argv[1])['OPERATIONS'])",
+            str(library / "tests/reference_common/artifact.py"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.split()
 
 
 def configure(project, *, enabled=True, python=True):
@@ -118,7 +183,7 @@ def configure(project, *, enabled=True, python=True):
 def test_published_operations_install_separately(project):
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (project / "build/installed.txt").read_text() == "sdpa=gfx942\nconv=gfx942\n"
+    assert installed(project) == {operation: ["gfx942"] for operation in _OPERATIONS}
     prefix = project / "installed"
     subprocess.run(
         [
@@ -132,7 +197,7 @@ def test_published_operations_install_separately(project):
         capture_output=True,
         text=True,
     )
-    for operation in ("sdpa", "conv"):
+    for operation in _OPERATIONS:
         payload = (
             prefix
             / f"tests/engines/test_arch_content/rocke/{operation}/gfx942/payload/kernel.hsaco"
@@ -141,10 +206,15 @@ def test_published_operations_install_separately(project):
 
 
 def test_disabled_references_need_neither_python_nor_bundles(project):
-    shutil.rmtree(project / "library")
+    # Operations are still discovered so their host CTests stay registered.
+    tests = project / "library/tests"
+    shutil.rmtree(tests / "reference_bundles")
+    for path in tests.glob("*_reference/architectures/*/baseline_lock.json"):
+        path.unlink()
+    (tests / "reference_common/artifact.py").unlink()
     result = configure(project, enabled=False, python=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (project / "build/installed.txt").read_text() == "sdpa=\nconv=\n"
+    assert installed(project) == {operation: [] for operation in _OPERATIONS}
 
 
 def test_shared_code_payloads_install_under_separate_processor_directories(project):
@@ -161,15 +231,10 @@ def test_shared_code_payloads_install_under_separate_processor_directories(proje
             tests / "reference_bundles/sdpa/gfx942.tar.gz",
             tests / f"reference_bundles/sdpa/{architecture}.tar.gz",
         )
-    (project / "cmake/PublishedGpuReferences.cmake").write_text(
-        "set(ROCKE_PUBLISHED_SDPA_ARCHITECTURES gfx1200 gfx1201)\n"
-        "set(ROCKE_PUBLISHED_CONV_ARCHITECTURES gfx942)\n"
-    )
+    published = publish(project, sdpa=["gfx1200", "gfx1201"])
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (
-        project / "build/installed.txt"
-    ).read_text() == "sdpa=gfx1200;gfx1201\nconv=gfx942\n"
+    assert installed(project) == published
     prefix = project / "installed"
     subprocess.run(
         [_CMAKE, "--install", str(project / "build"), "--prefix", str(prefix)],
@@ -212,28 +277,113 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         assert "Traceback" not in output
 
 
-def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
-    """Evaluate the real CMake manifest and check its qualification prerequisites."""
-    script = tmp_path / "publication.cmake"
-    script.write_text(
-        f'include("{(_PLATFORM / "cmake/PublishedGpuReferences.cmake").as_posix()}")\n'
-        "foreach(operation sdpa conv)\n"
-        '  string(TOUPPER "${operation}" upper)\n'
-        f'  file(WRITE "{tmp_path.as_posix()}/${{operation}}.txt" '
-        '"${ROCKE_PUBLISHED_${upper}_ARCHITECTURES}")\n'
-        "endforeach()\n"
-    )
+@pytest.mark.parametrize("missing", ["package", "publication", "metadata"])
+def test_half_wired_operation_fails_configuration(project, missing):
+    """Each half-wired state fails instead of silently losing coverage."""
+    if missing == "package":
+        publish(project, gemm=["gfx942"])
+        expected = [
+            "ROCKE_PUBLISHED_GEMM_ARCHITECTURES names no reference operation",
+            "gemm_reference/architectures/registry.json does not exist",
+        ]
+    elif missing == "publication":
+        register(project, "gemm")
+        expected = ["Reference operation gemm has no publication list"]
+    else:
+        register(project, "gemm")
+        (project / "library/tests/gemm_reference/operation.json").unlink()
+        publish(project, gemm=[])
+        expected = [
+            "Reference operation gemm has no",
+            "gemm_reference/operation.json recording the manifest_operation",
+        ]
+    result = configure(project)
+    assert result.returncode != 0
+    # CMake wraps long messages.
+    output = " ".join((result.stdout + result.stderr).split())
+    assert all(message in output for message in expected), output
+
+
+def test_registered_operation_may_publish_no_architecture(project):
+    register(project, "gemm")
+    published = publish(project, gemm=[])
+    result = configure(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert installed(project) == published
+
+
+def test_operations_extending_a_name_keep_the_artifact_cli_order(project):
+    """gemm_bwd_reference/ globs before gemm_reference/, but gemm sorts first."""
+    for operation in ("gemm", "gemm_bwd"):
+        register(project, operation)
+    publish(project, gemm=[], gemm_bwd=[])
+    result = configure(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    # CTests register in CMake's order.
+    expected = sorted([*_OPERATIONS, "gemm", "gemm_bwd"])
+    assert _artifact_operations(project / "library") == expected
+    assert list(installed(project)) == expected
+
+
+def _cmake_script(tmp_path, body):
+    """Run a CMake script and return the value it leaves in `result`."""
+    script = tmp_path / "script.cmake"
+    output = tmp_path / "result.txt"
+    script.write_text(body + f'file(WRITE "{output.as_posix()}" "${{result}}")\n')
     subprocess.run(
         [_CMAKE, "-P", str(script)], check=True, capture_output=True, text=True
     )
-    published = {
-        operation: list(
-            filter(None, (tmp_path / f"{operation}.txt").read_text().split(";"))
+    return output.read_text()
+
+
+def _published(tmp_path):
+    """Evaluate every publication list in the real CMake manifest."""
+    return _architecture_lists(
+        _cmake_script(
+            tmp_path,
+            f'include("{(_PLATFORM / "cmake/PublishedGpuReferences.cmake").as_posix()}")\n'
+            'set(result "")\n'
+            "get_cmake_property(variables VARIABLES)\n"
+            "foreach(variable IN LISTS variables)\n"
+            '  if(variable MATCHES "^ROCKE_PUBLISHED_(.+)_ARCHITECTURES$")\n'
+            '    string(TOLOWER "${CMAKE_MATCH_1}" operation)\n'
+            '    string(APPEND result "${operation}=${${variable}}\\n")\n'
+            "  endif()\n"
+            "endforeach()\n",
         )
-        for operation in ("sdpa", "conv")
-    }
+    )
+
+
+def test_reference_operations_are_defined_once_by_their_packages(tmp_path):
+    """CMake, the artifact CLI and publication all follow the operation packages."""
+    discovered = _cmake_script(
+        tmp_path,
+        f'set(_ROCKE_LIBRARY_DIR "{_LIBRARY.as_posix()}")\n'
+        f'include("{(_PLATFORM / "cmake/InstallGpuReferences.cmake").as_posix()}")\n'
+        'set(result "${_ROCKE_REFERENCE_OPERATIONS}")\n',
+    )
+    assert discovered.split(";") == _OPERATIONS
+    assert _artifact_operations(_LIBRARY) == _OPERATIONS
+    assert sorted(_published(tmp_path)) == _OPERATIONS
     tests = _LIBRARY / "tests"
-    for operation, architectures in published.items():
+    for operation in _OPERATIONS:
+        metadata = json.loads(
+            (tests / f"{operation}_reference/operation.json").read_text()
+        )
+        assert isinstance(metadata["manifest_operation"], str)
+        # CTest registration and the workflow address these files by convention.
+        for name in (
+            f"test_{operation}_reference_contract.py",
+            f"test_{operation}_pinned_reference.py",
+            f"run_{operation}_reference.py",
+        ):
+            assert (tests / name).is_file(), f"{operation} has no {name}"
+
+
+def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
+    """Evaluate the real CMake manifest and check its qualification prerequisites."""
+    tests = _LIBRARY / "tests"
+    for operation, architectures in _published(tmp_path).items():
         assert len(architectures) == len(set(architectures))
         root = tests / f"{operation}_reference/architectures"
         supported = json.loads((root / "registry.json").read_text())

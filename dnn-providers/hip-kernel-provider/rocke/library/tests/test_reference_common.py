@@ -17,7 +17,13 @@ import tarfile
 import numpy as np
 import pytest
 
-from reference_common.artifact import pack, unpack, validate_bundle
+from reference_common.artifact import (
+    OPERATIONS,
+    manifest_operation,
+    pack,
+    unpack,
+    validate_bundle,
+)
 from reference_common.numeric import (
     ErrorBudget,
     array_digest,
@@ -41,8 +47,8 @@ def _fixture(tmp_path, operation):
         "files": {"kernel.hsaco": hashlib.sha256(payload).hexdigest()},
     }
     # The current SDPA manifest has no explicit operation field.
-    if operation == "conv":
-        manifest["operation"] = "conv-fwd"
+    if operation != "sdpa":
+        manifest["operation"] = manifest_operation(operation)
     encoded = json.dumps(manifest).encode()
     (bundle / "manifest.json").write_bytes(encoded)
     lock = tmp_path / "lock.json"
@@ -67,7 +73,12 @@ def _run(*args, script=_SCRIPT):
     )
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+def _another_operation(operation):
+    """Any other registered operation, for cross-operation rejection checks."""
+    return next(other for other in OPERATIONS if other != operation)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
 def test_common_cli_round_trip_without_site_packages(tmp_path, operation):
     bundle, lock = _fixture(tmp_path, operation)
     archive = tmp_path / "common.tar.gz"
@@ -115,13 +126,48 @@ def test_common_cli_requires_a_supported_explicit_operation(tmp_path, operation)
     assert "--operation" in result.stderr
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+def test_operation_package_alone_enrolls_the_common_cli(tmp_path):
+    """Adding <operation>_reference needs no edit to the shared artifact CLI."""
+    tests = tmp_path / "tests"
+    script = tests / "reference_common/artifact.py"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(_SCRIPT.read_bytes())
+    package = tests / "gemm_reference"
+    (package / "architectures").mkdir(parents=True)
+    (package / "architectures/registry.json").write_text('["gfx942"]\n')
+    (package / "operation.json").write_text('{"manifest_operation": "gemm-fwd"}\n')
+    # A package without an architecture registry is not an operation.
+    (tests / "draft_reference").mkdir()
+    bundle, lock = _fixture(tmp_path, "sdpa")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["operation"] = "gemm-fwd"
+    encoded = json.dumps(manifest).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    expected = json.loads(lock.read_text())
+    expected["manifest_sha256"] = hashlib.sha256(encoded).hexdigest()
+    lock.write_text(json.dumps(expected))
+    # Operations come from the tree beside the script, as in an installed tree.
+    for operation, returncode in [("gemm", 0), ("draft", 2), ("sdpa", 2)]:
+        result = _run(
+            "validate",
+            "--operation",
+            operation,
+            "--bundle",
+            bundle,
+            "--lock",
+            lock,
+            script=script,
+        )
+        assert result.returncode == returncode, result.stderr
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize("command", ["pack", "validate"])
 def test_common_cli_rejects_wrong_operation_even_with_matching_lock(
     tmp_path, operation, command
 ):
     bundle, lock = _fixture(tmp_path, operation)
-    other = "conv" if operation == "sdpa" else "sdpa"
+    other = _another_operation(operation)
     archive = tmp_path / "wrong.tar.gz"
     result = _run(
         command,
@@ -252,7 +298,7 @@ def test_generated_bundle_cannot_reintroduce_tensor_files(
         pack(bundle, tmp_path / "bad.tar.gz", lock, operation=operation)
 
 
-@pytest.fixture(params=["sdpa", "conv"])
+@pytest.fixture(params=OPERATIONS)
 def operation(request):
     return request.param
 
@@ -271,7 +317,7 @@ def test_unsupported_storage_schema_is_rejected(tmp_path, schema):
         validate_bundle(bundle, lock, operation="conv")
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize("layout", ["source", "bin/hip_kernel_provider", "standalone"])
 def test_bundle_lookup_stays_in_operation_and_architecture_domain(
     tmp_path, operation, layout
@@ -508,22 +554,27 @@ def test_reference_local_run_without_a_gpu_fails():
         architecture_available("gfx942", None)
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("operation", OPERATIONS)
 def test_reference_family_labels_do_not_require_another_processors_cohort(
     operation, monkeypatch
 ):
     """A multi-family job may run on a supported GPU without this reference."""
+    from importlib import import_module
     from types import SimpleNamespace
 
     from reference_common.pytest_support import start_reference_session
     from rocke.runtime import hip_module
 
+    # Request any enrolled processor while the job's GPU is another one.
+    registry = import_module(f"{operation}_reference.architectures")
+    architecture = registry.ARCHITECTURES[0]
+    detected = "gfx942" if architecture == "gfx950" else "gfx950"
     monkeypatch.setenv("AMDGPU_FAMILIES", "gfx94X-dcgpu,gfx950-dcgpu")
     monkeypatch.delenv("AMDGPU_TARGETS", raising=False)
-    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: "gfx950")
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: detected)
     options = {
         "--rocke-reference-operation": operation,
-        "--rocke-reference-arch": "gfx942",
+        "--rocke-reference-arch": architecture,
     }
     with pytest.raises(pytest.exit.Exception, match="different GPU lane") as error:
         start_reference_session(SimpleNamespace(getoption=options.get))
@@ -632,9 +683,7 @@ def test_reference_fixture_selects_explicit_paths(
         )
     assert calls == [(tmp_path, options["--rocke-reference-lock"], architecture)]
     if candidate:
-        options["--rocke-reference-operation"] = (
-            "conv" if operation == "sdpa" else "sdpa"
-        )
+        options["--rocke-reference-operation"] = _another_operation(operation)
         calls.clear()
         with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
             with pytest.raises(pytest.skip.Exception, match="another operation"):
@@ -697,7 +746,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
             next(fixture)
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("operation", OPERATIONS)
 def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
     from importlib import import_module
 
@@ -707,7 +756,7 @@ def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
         worker.run({}, tmp_path)
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize(
     "architecture,device_target,accepted",
     [
@@ -913,6 +962,7 @@ def test_removing_reserve_accepts_more_drift_without_widening_tolerance():
         budget.check(0.0185)
 
 
+# Only these operations published bundles before budget_policy existed.
 @pytest.mark.parametrize("operation", ["sdpa", "conv"])
 def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
     tmp_path, operation

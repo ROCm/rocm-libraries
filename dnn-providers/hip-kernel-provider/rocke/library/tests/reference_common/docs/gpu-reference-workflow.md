@@ -67,9 +67,15 @@ digests across architectures.
 For a new operation, implement its case model, deterministic quantized inputs,
 independent oracle, fixed comparison metric and budgets, qualification CLI, and
 source/replay worker. Reuse `reference_common` for archives, numerics, snapshots,
-and worker isolation. Add operation support to the shared artifact CLI and
-pytest selector, and add the operation to the explicit CMake installation and
-CTest loops. Add host contract tests and GPU failure controls as well as passing
+and worker isolation. No shared list names the operations: each
+`library/tests/<operation>_reference/` package with `architectures/registry.json`
+is an operation for the shared artifact CLI, the `--rocke-reference-operation`
+pytest option, and the CMake installation and CTest loops. Record the operation
+id its bundle manifests declare in the package's `operation.json`, for example
+`{"manifest_operation": "conv-fwd"}`, and add its publication list (step 5).
+CTest and this workflow find `test_<operation>_reference_contract.py`,
+`test_<operation>_pinned_reference.py`, and `run_<operation>_reference.py` by
+name. Add host contract tests and GPU failure controls as well as passing
 numerical cases. New output structures or nondeterministic kernels require a
 numerical/replay contract that supports them; the current contracts cannot be
 assumed to apply. See the [extension strategy](gpu-ci-pinned-rocke-test-reference-plan.md#6-extend-coverage-deliberately).
@@ -241,13 +247,16 @@ Committing a replacement pointer does not upload its archive. CI fetches DVC
 objects during source preparation, before GPU suite selection, so the replacement
 must be available remotely even for a job that later skips that processor's suite.
 
-For a newly published architecture, add it to
-`ROCKE_PUBLISHED_SDPA_ARCHITECTURES` or `ROCKE_PUBLISHED_CONV_ARCHITECTURES` in
+For a newly published architecture, add it to the operation's
+`ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES` list, such as
+`ROCKE_PUBLISHED_CONV_ARCHITECTURES`, in
 [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake).
-For new operations, add the corresponding list alongside the CMake support from
-step 1. Updating coverage on an already published pair needs no enrollment change.
-CMake consumes only standard archive and baseline-lock paths. Missing or corrupt
-published data fails configuration; it must not silently remove coverage.
+Every operation package needs a list; a new operation that publishes nothing yet
+sets its list to `""`. Updating coverage on an already published pair needs no
+enrollment change. CMake consumes only standard archive and baseline-lock paths.
+Missing or corrupt published data, a list without an operation package, and a
+package without a list or `operation.json` fail configuration; they must not
+silently remove coverage.
 
 ## 6. Validate installation and provider selection
 
