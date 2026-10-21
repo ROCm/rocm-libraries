@@ -21,6 +21,9 @@ Five forward/backward implementations are provided:
 
 from __future__ import annotations
 
+import contextlib
+import functools
+
 import torch
 import torch.nn.functional as F
 
@@ -57,6 +60,47 @@ def _batch_slices(p, n: int):
     return [(n0, min(step, n - n0)) for n0 in range(0, n, step)]
 
 
+@contextlib.contextmanager
+def ieee_fp32():
+    """Run torch's fp32 convolutions in IEEE fp32, never TF32.
+
+    The references below are the fp32 truth a TF32 kernel is judged against,
+    and torch >= 2.9 defaults ``torch.backends.cudnn.conv.fp32_precision`` to
+    ``"tf32"`` (``allow_tf32=True`` before that): once the backend honours it,
+    the reference itself would silently become TF32. The new per-operator API
+    is used where it exists -- mixing it with the legacy ``allow_tf32`` flag
+    makes torch raise -- and the previous setting is restored on exit.
+    """
+    cudnn = torch.backends.cudnn
+    conv = getattr(cudnn, "conv", None)
+    if conv is not None and hasattr(conv, "fp32_precision"):
+        old = conv.fp32_precision
+        conv.fp32_precision = "ieee"
+        try:
+            yield
+        finally:
+            conv.fp32_precision = old
+    else:
+        old = cudnn.allow_tf32
+        cudnn.allow_tf32 = False
+        try:
+            yield
+        finally:
+            cudnn.allow_tf32 = old
+
+
+def _ieee(fn):
+    """Decorate a torch reference to run under :func:`ieee_fp32`."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with ieee_fp32():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_ieee
 def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference weight gradient for a convolution problem.
 
@@ -102,6 +146,7 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
         return dW_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
 
 
+@_ieee
 def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference input gradient for a convolution problem.
 
@@ -134,6 +179,7 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     return dX_nchw.permute(0, 2, 3, 1).contiguous()  # NCHW -> NHWC
 
 
+@_ieee
 def conv_reference(
     A: torch.Tensor, B: torch.Tensor, p, out_dtype: torch.dtype | None = None
 ) -> torch.Tensor:
