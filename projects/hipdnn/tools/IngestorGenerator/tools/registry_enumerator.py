@@ -342,6 +342,9 @@ class Registry:
             if key not in decl:
                 raise EnumerationError(f"the manifest's enumerate block lacks '{key}'.")
         self.decl = decl
+        #: ``(cell_key, kernel spec)`` -> the registry's ``tuning_id`` for it, filled
+        #: by `space`. Absent for a spec the registry hands back unwrapped.
+        self.tuning_ids: dict = {}
         self.space_kind = decl.get("space", "slice")
         if self.space_kind not in ("slice", "full"):
             raise EnumerationError(
@@ -507,9 +510,11 @@ class Registry:
                 f"cells promise: {why}"
             )
         try:
-            base = _unwrap(self.candidate.select_spec(request))
+            base_wrapped = self.candidate.select_spec(request)
+            base = _unwrap(base_wrapped)
             with self._sweep_level(self.decl["sweep_level"]):
-                specs = [_unwrap(s) for s in self.candidate.sweep_space(request)]
+                wrapped = list(self.candidate.sweep_space(request))
+            specs = [_unwrap(s) for s in wrapped]
         except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
                 f"the registry rejects cell {_show(cell)}, which the manifest's cells "
@@ -520,7 +525,24 @@ class Registry:
                 f"the registry routes cell {_show(cell)} without a kernel_spec; the "
                 f"pinned candidate must resolve to a kernel."
             )
+        key = self.cell_key(cell)
+        for item in (base_wrapped, *wrapped):
+            tuning_id = getattr(item, "tuning_id", None)
+            if tuning_id:
+                self.tuning_ids.setdefault((key, _unwrap(item)), str(tuning_id))
         return base, specs
+
+    def provenance(self, cell: dict, spec) -> dict:
+        """The pin's ``spec_id`` and, when the registry names the kernel, its
+        ``tuning_id``: what lets a shipped descriptor be traced back to the
+        registry entry that produced it. Informational; never compared."""
+        out = {}
+        if self.pin.get("spec_id"):
+            out["rocke_spec_id"] = str(self.pin["spec_id"])
+        tuning_id = self.tuning_ids.get((self.cell_key(cell), spec))
+        if tuning_id and tuning_id != "auto":
+            out["rocke_tuning_id"] = tuning_id
+        return out
 
     def slice_of(self, base, specs: list) -> list:
         free = set(self.decl.get("free_fields") or [])
@@ -912,6 +934,9 @@ def build_config(
         }
         if is_default:
             kernel["default"] = True
+        provenance = registry.provenance(cell, ks)
+        if provenance:
+            kernel["provenance"] = provenance
         kernels.append(kernel)
 
     if registry.space_kind == "full":
