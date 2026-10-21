@@ -31,6 +31,7 @@
 #endif
 #include <hipsparse.h>
 
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"
 
@@ -864,11 +865,10 @@ void testing_spmat_descr(void)
     CHECK_HIP_ERROR(
         hipMemcpy(dcsr_valC, hcsr_valC.data(), nnzC * sizeof(float), hipMemcpyHostToDevice));
 
-    hipsparseHandle_t     handle = NULL;
+    hipsparseLocalHandle_t handle;
     hipsparseSpMatDescr_t matA, matB, matC, matD, matE, matF, matG, matH, matI, matJ, matK, matL,
         matM, matN, matO;
 
-    CHECK_HIPSPARSE_ERROR(hipsparseCreate(&handle));
 
     CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&matA,
                                              0,
@@ -1066,7 +1066,6 @@ void testing_spmat_descr(void)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matM));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matN));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matO));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroy(handle));
 
     CHECK_HIP_ERROR(hipFree(dcsr_row_ptrC));
     CHECK_HIP_ERROR(hipFree(dcsr_col_indC));
