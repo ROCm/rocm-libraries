@@ -69,6 +69,10 @@ from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
+from rocke.helpers.magic_division import (
+    calculate_magic_numbers,
+    do_magic_division_dynamic,
+)
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import ceil_div, kernel_name_join
@@ -76,8 +80,6 @@ from rocke.helpers.tensor_view import make_buffer_resource
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
-    calculate_magic_numbers,
-    do_magic_division_dynamic,
     embed,
     pad,
     unmerge_magic,
