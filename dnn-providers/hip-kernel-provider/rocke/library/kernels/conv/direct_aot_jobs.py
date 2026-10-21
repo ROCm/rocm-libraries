@@ -307,6 +307,55 @@ DGRAD_WMMA_KNOBS = (
     (4, 2, 2, 8, 16, 1, 32, 3, True),
     (4, 2, 2, 8, 32, 1, 32, 2, True),
 )
+
+# Grouped layers with fewer than 8 channels per group (or 16): direct_dgrad_wmma
+# packs 32 // cpg groups into one block-diagonal super-group, one dY chunk.
+DGRAD_WMMA_PACKED_CHANNELS = (4, 8, 16)
+DGRAD_WMMA_PACKED_KNOBS = (
+    (1, 4, 2, 8, 16, 2, 32, 2, True),
+    (1, 4, 2, 8, 32, 2, 32, 2, True),
+    (1, 8, 2, 4, 16, 2, 32, 2, True),
+    (1, 8, 2, 4, 16, 4, 32, 2, True),
+    (1, 8, 2, 4, 32, 2, 32, 2, True),
+    (2, 4, 1, 8, 16, 2, 32, 2, True),
+)
+# Stride 2 (phase decomposition: every block computes all four output phases
+# from one dY halo, so it holds 4 x tiles_c x tiles_p accumulators).
+DGRAD_WMMA_STRIDED_KNOBS = (
+    (1, 4, 2, 4, 8, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True),
+    (1, 4, 2, 4, 16, 2, 32, 2, False),
+    (1, 4, 4, 3, 8, 1, 32, 2, False),
+    (1, 4, 4, 3, 16, 1, 32, 2, False),
+    (2, 4, 2, 4, 4, 2, 64, 2, True),
+    (2, 4, 2, 4, 8, 1, 64, 2, True),
+    (2, 4, 2, 4, 8, 2, 64, 2, True),
+    (2, 4, 2, 4, 16, 1, 64, 2, True),
+    (2, 4, 2, 4, 16, 2, 64, 2, True),
+)
+# 2x2 stride 2 (patch merge): every phase is a 1x1, all four share one B
+# fragment, so wider channel blocks pay off.
+DGRAD_WMMA_PATCH2_KNOBS = (
+    (1, 4, 2, 2, 8, 2, 64, 2, False),
+    (2, 4, 2, 2, 8, 2, 64, 2, False),
+    (2, 4, 2, 4, 8, 2, 64, 2, True),
+    (2, 4, 2, 4, 16, 1, 64, 2, False),
+    (2, 4, 2, 4, 16, 1, 64, 2, True),
+    (4, 2, 2, 2, 8, 1, 64, 2, False),
+)
+# Dilated 3x3 rows the cache carries: (PAD, dil_h, dil_w).
+DGRAD_WMMA_DILATIONS = ((2, 1, 2), (1, 3, 1), (2, 2, 2))
+DGRAD_WMMA_DILATED_KNOBS = (
+    (1, 4, 4, 4, 16, 1, 32, 2, True),
+    (1, 4, 4, 4, 16, 1, 64, 2, True),
+    (1, 4, 4, 4, 32, 1, 32, 2, True),
+    (1, 4, 4, 4, 32, 2, 32, 2, True),
+    (2, 4, 4, 6, 64, 1, 32, 2, True),
+    (2, 4, 4, 8, 16, 1, 32, 2, True),
+    (2, 4, 4, 8, 32, 1, 32, 2, True),
+    (2, 4, 4, 8, 64, 1, 32, 2, True),
+)
 WGRAD_MFMA_K = (32,)
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
@@ -668,8 +717,22 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     # well as "same".
     _DGRAD_WMMA: (
         "dgrad",
-        tuple(
-            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3)
+        tuple(DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3))
+        # Small groups: G groups packed into one block-diagonal super-group
+        # (bakes cpg = kpg).
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c)
+            for c in DGRAD_WMMA_PACKED_CHANNELS
+        )
+        # Stride 2 by phase decomposition: 3x3 "same" and the 2x2 patch-merge.
+        + (
+            DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=2, PAD=0, stride=2, cpg=0, kpg=0),
+        )
+        # Dilated 3x3 (per-axis dilation, "same"-or-less padding).
+        + tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
+            for pad, dh, dw in DGRAD_WMMA_DILATIONS
         ),
     ),
     # Tiled wgrad: dense and grouped, channel counts runtime, stride 1.
@@ -767,6 +830,25 @@ def dgrad_rtc_spills(knobs: dict, KH: int, KW: int, arch: str) -> bool:
     waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
     budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
     return dgrad_rtc_vgprs(knobs, KH, KW) > DGRAD_RTC_VGPR_FILL * budget
+
+
+def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
+    for wc, wp, tc, tp, tw, tn, ck, st, pf in rows:
+        knobs = dict(
+            waves_c=wc,
+            waves_p=wp,
+            tiles_c=tc,
+            tiles_p=tp,
+            tile_w=tw,
+            tile_n=tn,
+            ck=ck,
+            stages=st,
+        )
+        if pf:
+            knobs.update(prefetch=True, sched="iterative-ilp")
+        if pack_groups > 1:
+            knobs.update(pack_groups=pack_groups)
+        yield knobs
 
 
 def _knob_grid(
@@ -919,20 +1001,19 @@ def _knob_grid(
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return  # a wave32 kernel: no tuning for this arch at all
-        for wc, wp, tc, tp, tw, tn, ck, st, pf in DGRAD_WMMA_KNOBS:
-            knobs = dict(
-                waves_c=wc,
-                waves_p=wp,
-                tiles_c=tc,
-                tiles_p=tp,
-                tile_w=tw,
-                tile_n=tn,
-                ck=ck,
-                stages=st,
+        if caps is not None and caps.cpg > 0:
+            # Pack groups up to one 32-channel WMMA K step.
+            yield from _dgrad_wmma_knobs(
+                DGRAD_WMMA_PACKED_KNOBS, pack_groups=max(1, 32 // caps.cpg)
             )
-            if pf:
-                knobs.update(prefetch=True, sched="iterative-ilp")
-            yield knobs
+        elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_PATCH2_KNOBS)
+        elif caps is not None and caps.stride > 1:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_STRIDED_KNOBS)
+        elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_DILATED_KNOBS)
+        else:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_KNOBS)
     elif variant == "direct_wgrad_tiled":
         for (wk16, wc16, wk, wc), (pf, ru), rps, tb, un in itertools.product(
             WGRAD_TILED_WAVES,

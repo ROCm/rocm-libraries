@@ -40,7 +40,20 @@ from kernels.common.conv_direct_grouped import DirectConvProblem
 GPU_ARCH = get_device_arch(0)
 
 
-def _problem(N=2, H=13, W=21, C=64, K=96, groups=1, KH=3, PAD=1, dtype="bf16"):
+def _problem(
+    N=2,
+    H=13,
+    W=21,
+    C=64,
+    K=96,
+    groups=1,
+    KH=3,
+    PAD=1,
+    dtype="bf16",
+    stride=1,
+    dil_h=1,
+    dil_w=1,
+):
     return DirectConvProblem(
         N=N,
         H=H,
@@ -51,8 +64,10 @@ def _problem(N=2, H=13, W=21, C=64, K=96, groups=1, KH=3, PAD=1, dtype="bf16"):
         KH=KH,
         KW=KH,
         PAD=PAD,
-        stride=1,
+        stride=stride,
         dtype=dtype,
+        dil_h=dil_h,
+        dil_w=dil_w,
     )
 
 
@@ -76,9 +91,26 @@ class TestDgradWmmaSpec(unittest.TestCase):
             self.assertIsNotNone(why, knobs)
             self.assertIn(needle, why)
         p = DirectConvProblem(
-            N=1, H=8, W=8, groups=1, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=2
+            N=1, H=8, W=8, groups=1, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=3
         )
         self.assertIn("stride", dgrad_wmma_reason(DirectDgradWmmaSpec(problem=p)))
+        for pkw, knobs, needle in (
+            (dict(stride=2, dil_h=2, dil_w=2, PAD=2), {}, "strided dilated"),
+            (dict(dil_h=2, dil_w=2, PAD=5), {}, "PAD"),
+            (dict(C=32, K=32, groups=8), dict(pack_groups=3), "multiple"),
+            (dict(C=24, K=24, groups=8), dict(pack_groups=8), "packed cpg"),
+            (dict(C=64, K=64, groups=8), dict(pack_groups=8), "packed kpg"),
+            (
+                dict(C=32, K=32, groups=8),
+                dict(pack_groups=8, tiles_c=1, waves_c=1),
+                "block_c",
+            ),
+        ):
+            why = dgrad_wmma_reason(
+                DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+            )
+            self.assertIsNotNone(why, (pkw, knobs))
+            self.assertIn(needle, why)
 
     def test_rejects_bad_knobs_without_raising(self):
         """Bad knobs are reasons, not exceptions (validate_direct_spec only
@@ -195,18 +227,20 @@ class TestDgradWmmaSpec(unittest.TestCase):
 
     def test_aot_grid(self):
         from kernels.conv.direct_aot_jobs import (
-            DGRAD_WMMA_KNOBS,
             DIRECT_CAPABILITIES,
             _caps_jobs,
+            _knob_grid,
         )
 
         direction, caps_list = DIRECT_CAPABILITIES["direct_dgrad_wmma"]
         self.assertEqual(direction, "dgrad")
-        for arch, wave, want in (
-            ("gfx1250", 32, len(DGRAD_WMMA_KNOBS)),
-            ("gfx950", 64, 0),
-        ):
+        for arch, wave in (("gfx1250", 32), ("gfx950", 64)):
             for caps in caps_list:
+                # Every knob of the cell's table builds on gfx1250 (none on
+                # a wave64 arch).
+                want = len(list(_knob_grid("direct_dgrad_wmma", arch, "bf16", caps)))
+                if arch == "gfx950":
+                    self.assertEqual(want, 0)
                 _, jobs = _caps_jobs(
                     arch, wave, "direct_dgrad_wmma", "dgrad", caps, "bf16"
                 )
@@ -264,6 +298,33 @@ _CASES = (
         dict(N=1, H=30, W=40, C=256, K=64),
         dict(tiles_c=4, tiles_p=8, tile_w=32, prefetch=True, sched="iterative-ilp"),
     ),
+    # Packed small groups: 8 groups of 4, 4 groups of 8 (ragged pixels, 2
+    # super-groups), 2 groups of 16 with prefetch.
+    (dict(N=2, H=9, W=12, C=32, K=32, groups=8), dict(tiles_c=1, pack_groups=8)),
+    (
+        dict(N=3, H=7, W=10, C=64, K=64, groups=8),
+        dict(waves_c=1, tiles_c=2, tiles_p=2, tile_w=8, tile_n=2, pack_groups=4),
+    ),
+    (
+        dict(N=2, H=9, W=12, C=64, K=64, groups=4, dtype="fp16"),
+        dict(tiles_c=1, pack_groups=2, prefetch=True, sched="iterative-ilp"),
+    ),
+    # Stride 2: odd and even extents, several images per block, the 2x2
+    # patch merge, and fp16 with prefetch.
+    (dict(N=2, H=13, W=21, C=64, K=96, stride=2), dict(tiles_c=1, tiles_p=2)),
+    (
+        dict(N=3, H=8, W=10, C=32, K=64, stride=2),
+        dict(tiles_c=1, tiles_p=2, tile_w=4, tile_n=2),
+    ),
+    (dict(N=2, H=14, W=10, C=64, K=96, KH=2, PAD=0, stride=2), dict(tiles_c=1)),
+    (
+        dict(N=2, H=12, W=17, C=48, K=64, stride=2, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, ck=64, prefetch=True, sched="iterative-ilp"),
+    ),
+    # Dilation, per axis.
+    (dict(N=2, H=13, W=21, C=32, K=64, PAD=2, dil_w=2), dict(tiles_c=1, tiles_p=2)),
+    (dict(N=2, H=13, W=11, C=32, K=64, PAD=1, dil_h=3), dict(tiles_c=1, tiles_p=2)),
+    (dict(N=1, H=16, W=16, C=64, K=32, PAD=0, dil_h=2, dil_w=2), dict(tiles_c=2)),
 )
 
 
@@ -316,7 +377,9 @@ class TestDgradWmmaGpu(unittest.TestCase):
             (p.N, p.total_c, p.H, p.W),
             w.float().permute(0, 3, 1, 2),
             dY.float().permute(0, 3, 1, 2),
+            stride=p.stride,
             padding=p.PAD,
+            dilation=(p.dil_h, p.dil_w),
             groups=p.groups,
         ).permute(0, 2, 3, 1)
         err = float((dX.float() - ref).abs().max() / ref.abs().max())

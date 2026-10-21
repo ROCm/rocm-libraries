@@ -55,6 +55,23 @@ reads per WMMA, the lever of this loop: a tap reads ``tiles_c + tiles_p``
 fragments for ``tiles_c * tiles_p`` WMMAs. Past 256 VGPRs the backend
 addresses the upper register banks.
 
+Stride, dilation and small groups
+---------------------------------
+A stride-``S`` dgrad splits into ``S * S`` output phases: row ``S * i + a``
+collects filter row ``r`` from dY row ``i + delta(r)`` for the one phase ``a``
+with ``(a + PAD - r * dil) % S == 0`` (:func:`_axis_plan`). The block tiles the
+phase grid, keeps one dY halo for all phases, and holds one accumulator set
+per phase; taps that share a halo shift share their B fragments. The
+epilogue interleaves the phases in LDS and stores the dense ``S * tile_h x
+S * tile_w`` dX tile. Dilation only changes the halo shift of each tap, so it
+is the stride-1 case of the same plan.
+
+``pack_groups = G`` treats ``G`` consecutive groups as one super-group of
+``G * cpg`` dX and ``G * kpg`` dY channels (contiguous in NHWC). Its weights
+are staged once, before the loop, as a block-diagonal matrix (zeros off the
+diagonal): the layers this serves are memory-bound, so the zero products cost
+less than the per-group blocks they replace.
+
 AOT
 ---
 Batch, spatial extents, the group count and both channel counts are kernargs
@@ -92,6 +109,27 @@ def _ceil_div(a: int, b: int) -> int:
     return -(-a // b)
 
 
+def _axis_plan(K: int, PAD: int, dil: int, S: int):
+    """Per-axis tap plan of a strided / dilated dgrad.
+
+    Output row ``h = S * i + a`` (phase ``a``) collects filter row ``r`` from
+    dY row ``i + delta(r)``, ``delta(r) = (a + PAD - r * dil) / S``, for the
+    one phase ``a`` that makes it exact. Returns ``([(a, delta - dmin)] per r,
+    dmax - dmin, -dmin)``: the halo offset of every tap, the halo rows past
+    the tile, and the halo origin shift (the forward pass's padding). Stride 1
+    and dilation 1 give ``K - 1 - r``, ``K - 1`` and ``K - 1 - PAD``.
+    """
+    taps = []
+    for r in range(K):
+        for a in range(S):
+            if (a + PAD - r * dil) % S == 0:
+                taps.append((a, (a + PAD - r * dil) // S))
+                break
+    dmin = min(d for _, d in taps)
+    dmax = max(d for _, d in taps)
+    return [(a, d - dmin) for a, d in taps], dmax - dmin, -dmin
+
+
 @dataclass(frozen=True)
 class DirectDgradWmmaSpec:
     """One configuration of :func:`build_direct_dgrad_wmma`.
@@ -117,6 +155,40 @@ class DirectDgradWmmaSpec:
     # AMDGPU machine-scheduler strategy (rocke.core.codegen_policy), or None.
     sched: str | None = None
     wave_size: int = 32
+    # Groups packed into one block-diagonal super-group (small cpg): the
+    # block multiplies pack_groups * cpg dX channels against pack_groups * kpg
+    # dY channels, with the off-diagonal weights zero. Bakes cpg and kpg.
+    pack_groups: int = 1
+
+    @property
+    def stride(self) -> int:
+        return self.problem.stride
+
+    @property
+    def plan_h(self):
+        p = self.problem
+        return _axis_plan(p.KH, p.PAD, p.dil_h, p.stride)
+
+    @property
+    def plan_w(self):
+        p = self.problem
+        return _axis_plan(p.KW, p.PAD, p.dil_w, p.stride)
+
+    @property
+    def phases(self) -> int:
+        return self.problem.stride * self.problem.stride
+
+    @property
+    def cpg_eff(self) -> int:
+        return self.pack_groups * self.problem.cpg
+
+    @property
+    def kpg_eff(self) -> int:
+        return self.pack_groups * self.problem.kpg
+
+    @property
+    def groups_eff(self) -> int:
+        return self.problem.groups // self.pack_groups
 
     @property
     def block_c(self) -> int:
@@ -137,11 +209,11 @@ class DirectDgradWmmaSpec:
 
     @property
     def halo_h(self) -> int:
-        return self.tile_h + self.problem.KH - 1
+        return self.tile_h + self.plan_h[1]
 
     @property
     def halo_w(self) -> int:
-        return self.tile_w + self.problem.KW - 1
+        return self.tile_w + self.plan_w[1]
 
     @property
     def x_pitch(self) -> int:
@@ -167,12 +239,12 @@ class DirectDgradWmmaSpec:
     @property
     def halo_slack(self) -> int:
         # A left-edge block's last row wraps up to KW-1-PAD columns past the ring.
-        return (self.problem.KW - 1 - self.problem.PAD) * self.x_pitch
+        return self.plan_w[2] * self.x_pitch
 
     def lds_bytes(self) -> int:
         # Each halo slot carries its own wrap slack (see the module docstring).
         ring = self.stages * (self.halo_elems + self.halo_slack + self.wei_elems)
-        epi = self.block_p * self.w_pitch  # the staged dX tile
+        epi = self.phases * self.block_p * self.w_pitch  # the staged dX tile
         return 2 * max(ring, epi)
 
     def kernel_name(self) -> str:
@@ -193,27 +265,37 @@ class DirectDgradWmmaSpec:
             f"st{self.stages}",
             "pf" if self.prefetch else "",
             f"s{self.sched}" if self.sched else "",
+            f"str{p.stride}" if p.stride > 1 else "",
+            f"dil{p.dil_h}x{p.dil_w}" if p.is_dilated else "",
+            (f"pg{self.pack_groups}c{p.cpg}k{p.kpg}" if self.pack_groups > 1 else ""),
             flags={"bf16": p.dtype == "bf16"},
         )
 
     def grid(self) -> tuple[int, int, int]:
         p = self.problem
-        n_ct = _ceil_div(p.cpg, self.block_c)
-        n_ht = _ceil_div(p.H, self.tile_h)
-        n_wt = _ceil_div(p.W, self.tile_w)
-        return (_ceil_div(p.N, self.tile_n) * p.groups * n_ht * n_wt * n_ct, 1, 1)
+        S = p.stride
+        n_ct = _ceil_div(self.cpg_eff, self.block_c)
+        n_ht = _ceil_div(_ceil_div(p.H, S), self.tile_h)
+        n_wt = _ceil_div(_ceil_div(p.W, S), self.tile_w)
+        return (
+            _ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_ct,
+            1,
+            1,
+        )
 
 
 def dgrad_wmma_tile_efficiency(spec: DirectDgradWmmaSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
     p = spec.problem
+    S = p.stride
+    hq, wq = _ceil_div(p.H, S), _ceil_div(p.W, S)
     tiles = (
         _ceil_div(p.N, spec.tile_n) * spec.tile_n,
-        _ceil_div(p.H, spec.tile_h) * spec.tile_h,
-        _ceil_div(p.W, spec.tile_w) * spec.tile_w,
-        _ceil_div(p.cpg, spec.block_c) * spec.block_c,
+        _ceil_div(hq, spec.tile_h) * spec.tile_h,
+        _ceil_div(wq, spec.tile_w) * spec.tile_w,
+        _ceil_div(spec.cpg_eff, spec.block_c) * spec.block_c,
     )
-    return (p.N * p.H * p.W * p.cpg) / (tiles[0] * tiles[1] * tiles[2] * tiles[3])
+    return (p.N * hq * wq * spec.cpg_eff) / (tiles[0] * tiles[1] * tiles[2] * tiles[3])
 
 
 def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str | None:
@@ -234,14 +316,31 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
         family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
     ):
         return f"missing wmma_f32_16x16x32_{ab} on {arch}"
-    if p.stride != 1:
-        return f"stride {p.stride} != 1"
-    if p.is_dilated:
-        return "dilation is not supported"
-    if not (0 <= p.PAD <= p.KH - 1 and p.PAD <= p.KW - 1):
-        return f"PAD {p.PAD} outside 0..K-1"
-    if p.cpg % 8 or p.kpg % 8:
-        return f"cpg {p.cpg} and kpg {p.kpg} must be multiples of 8 (16-byte rows)"
+    if p.stride not in (1, 2):
+        return f"stride {p.stride} not in (1, 2)"
+    if p.stride > 1 and p.is_dilated:
+        return "a strided dilated dgrad is not supported"
+    if p.dil_h < 1 or p.dil_w < 1:
+        return f"dilation {p.dil_h}x{p.dil_w} < 1"
+    if p.PAD < 0 or spec.plan_h[2] < 0 or spec.plan_w[2] < 0:
+        return f"PAD {p.PAD} outside 0..(K-1)*dilation"
+    G = spec.pack_groups
+    if G < 1:
+        return f"pack_groups {G} < 1"
+    if G > 1:
+        if p.groups % G:
+            return f"groups {p.groups} not a multiple of pack_groups {G}"
+        if p.cpg not in (2, 4, 8, 16) or p.kpg not in (2, 4, 8, 16):
+            return f"packed cpg {p.cpg} / kpg {p.kpg} not in (2, 4, 8, 16)"
+        if spec.kpg_eff > spec.ck:
+            return f"packed kpg {spec.kpg_eff} > ck {spec.ck} (one dY chunk)"
+        if spec.cpg_eff > spec.block_c:
+            return f"packed cpg {spec.cpg_eff} > block_c {spec.block_c}"
+    if spec.cpg_eff % 8 or spec.kpg_eff % 8:
+        return (
+            f"cpg {spec.cpg_eff} and kpg {spec.kpg_eff} must be multiples of 8"
+            " (16-byte rows)"
+        )
     if spec.ck % WMMA_K or spec.ck <= 0:
         return f"ck {spec.ck} must be a positive multiple of {WMMA_K}"
     if min(spec.waves_c, spec.waves_p, spec.tiles_c, spec.tiles_p) < 1:
@@ -267,9 +366,9 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
         return f"LDS {spec.lds_bytes()} B > {target.lds_capacity_bytes}"
     # Accumulators + one A and one B fragment set per wave. Past 256 the
     # kernel addresses the upper VGPR banks (s_set_vgpr_msb).
-    vgprs = 8 * spec.tiles_c * spec.tiles_p + 8 * (spec.tiles_c + spec.tiles_p) * (
-        2 if spec.prefetch else 1
-    )
+    vgprs = 8 * spec.phases * spec.tiles_c * spec.tiles_p + 8 * (
+        spec.tiles_c + spec.tiles_p
+    ) * (2 if spec.prefetch else 1)
     if vgprs > DGRAD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
     try:
@@ -354,8 +453,11 @@ def build_direct_dgrad_wmma(
 
     p = spec.problem
     KH, KW = p.KH, p.KW
-    PADD_H = KH - 1 - p.PAD  # padding of the equivalent forward pass
-    PADD_W = KW - 1 - p.PAD
+    S = p.stride
+    G = spec.pack_groups
+    NPH = spec.phases
+    taps_h, _, PADD_H = spec.plan_h  # PADD: padding of the equivalent forward pass
+    taps_w, _, PADD_W = spec.plan_w
     io_type = _io_type(p.dtype)
     ab = "bf16" if p.dtype == "bf16" else "f16"
     wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
@@ -387,9 +489,15 @@ def build_direct_dgrad_wmma(
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
     c2 = b.const_i32(2)
-    c_groups = params["p_groups"]
-    c_cpg = b.div(params["p_total_c"], c_groups)
-    c_kpg = b.div(params["p_total_k"], c_groups)
+    if G > 1:
+        # Super-groups of G groups; the packed channel counts are baked.
+        c_groups = b.div(params["p_groups"], b.const_i32(G))
+        c_cpg = b.const_i32(spec.cpg_eff)
+        c_kpg = b.const_i32(spec.kpg_eff)
+    else:
+        c_groups = params["p_groups"]
+        c_cpg = b.div(params["p_total_c"], c_groups)
+        c_kpg = b.div(params["p_total_k"], c_groups)
     c_N = params["p_N"]
     c_H, c_W = params["p_Hi"], params["p_Wi"]
     c_Ho, c_Wo = params["p_Ho"], params["p_Wo"]
@@ -406,8 +514,14 @@ def build_direct_dgrad_wmma(
 
     # ---- tile of this block: bx = (((nblk * G + g) * n_ht + ht) * n_wt + wt) * n_ct + ct.
     n_ct = b.div(b.add(c_cpg, b.const_i32(BC - 1)), b.const_i32(BC))
-    n_ht = b.div(b.add(c_H, b.const_i32(TH - 1)), b.const_i32(TH))
-    n_wt = b.div(b.add(c_W, b.const_i32(TW - 1)), b.const_i32(TW))
+    if S > 1:
+        # Tiles index the phase grid: output row S * i + a, i < ceil(H / S).
+        c_Hq = b.div(b.add(c_H, b.const_i32(S - 1)), b.const_i32(S))
+        c_Wq = b.div(b.add(c_W, b.const_i32(S - 1)), b.const_i32(S))
+    else:
+        c_Hq, c_Wq = c_H, c_W
+    n_ht = b.div(b.add(c_Hq, b.const_i32(TH - 1)), b.const_i32(TH))
+    n_wt = b.div(b.add(c_Wq, b.const_i32(TW - 1)), b.const_i32(TW))
     t = b.block_id_x()
     ct = b.mod(t, n_ct)
     t = b.div(t, n_ct)
@@ -503,6 +617,8 @@ def build_direct_dgrad_wmma(
                         tile2=dy_tile2,
                     )
                 )
+        if G > 1:
+            return  # the packed weights are staged once, before the loop
         with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
             src = b.global_ptr_add(Bp, b.mul(b.add(w_base, b.mul(k0, w_row)), c2))
             dst = b.add(wei_addr, b.mul(stage, b.const_i32(WEI * 2)))
@@ -568,9 +684,18 @@ def build_direct_dgrad_wmma(
         )
         return b.vec_concat(lo, hi)
 
-    steps = [
-        (ks, r, s) for ks in range(CK // WMMA_K) for r in range(KH) for s in range(KW)
-    ]
+    # One step per (k-step, halo shift): the taps sharing a shift (strided
+    # phases) share its B fragments. Stride 1 has one tap per shift.
+    steps = []
+    for ks in range(CK // WMMA_K):
+        groups_by_shift: dict = {}
+        for r in range(KH):
+            for s in range(KW):
+                (a_h, dh), (a_w, dw) = taps_h[r], taps_w[s]
+                groups_by_shift.setdefault((dh, dw), []).append(
+                    (r * KW + s, a_h * S + a_w)
+                )
+        steps.extend((ks, sh, tl) for sh, tl in groups_by_shift.items())
 
     def _chunk(kc: Value, accs: list[Value]) -> list[Value]:
         """Publish chunk ``kc``, refill the ring, multiply the chunk."""
@@ -594,12 +719,16 @@ def build_direct_dgrad_wmma(
         wei_base = b.mul(stage, b.const_i32(WEI))
 
         def _frags(st):
-            ks, r, s = st
-            tap = r * KW + s
-            tap_off = ((KH - 1 - r) * HALO_W + (KW - 1 - s)) * XP + ks * WMMA_K
-            row_off = (tap * CK + ks * WMMA_K) * WPITCH
+            ks, (dh, dw), tl = st
+            tap_off = (dh * HALO_W + dw) * XP + ks * WMMA_K
             bf = [_read_b(halo_base, tn, tap_off) for tn in range(TN)]
-            af = [_read_a(wei_base, m, row_off) for m in range(TM)]
+            af = [
+                [
+                    _read_a(wei_base, m, (tap * CK + ks * WMMA_K) * WPITCH)
+                    for m in range(TM)
+                ]
+                for tap, _ in tl
+            ]
             return af, bf
 
         accs = list(accs)
@@ -612,10 +741,11 @@ def build_direct_dgrad_wmma(
                     nxt_frags = _frags(steps[j + 1])
             else:
                 af, bf = _frags(st)
-            for m in range(TM):
-                for tn in range(TN):
-                    i = m * TN + tn
-                    accs[i] = b.mma(wmma_op, af[m], bf[tn], accs[i])
+            for (_, ph), aft in zip(st[2], af):
+                for m in range(TM):
+                    for tn in range(TN):
+                        i = (ph * TM + m) * TN + tn
+                        accs[i] = b.mma(wmma_op, aft[m], bf[tn], accs[i])
         b.s_setprio(0)
         return accs
 
@@ -624,34 +754,58 @@ def build_direct_dgrad_wmma(
         with one TDM transfer per image; the transfer clips the tile to the
         image and to the group's channels (the pad columns lie past them)."""
         b.sync_lds_only()
-        for m in range(TM):
-            col = b.add(
-                b.mul(b.add(b.mul(wave_c, b.const_i32(TM)), b.const_i32(m)), c16),
-                b.mul(lhalf, c8),
-            )
-            for tn in range(TN):
-                px = b.add(
-                    b.mul(b.add(b.mul(wave_p, b.const_i32(TN)), b.const_i32(tn)), c16),
-                    l16,
+        for ph in range(NPH):
+            a_h, a_w = divmod(ph, S)
+            for m in range(TM):
+                col = b.add(
+                    b.mul(b.add(b.mul(wave_c, b.const_i32(TM)), b.const_i32(m)), c16),
+                    b.mul(lhalf, c8),
                 )
-                val = b.vec_cast_f32_to(accs[m * TN + tn], io_type)
-                b.smem_store_vN(
-                    lds, [c0, b.add(b.mul(px, b.const_i32(WPITCH)), col)], val, n=8
-                )
+                for tn in range(TN):
+                    px = b.add(
+                        b.mul(
+                            b.add(b.mul(wave_p, b.const_i32(TN)), b.const_i32(tn)), c16
+                        ),
+                        l16,
+                    )
+                    if S > 1:
+                        # Phase-grid pixel (ti, tj) -> dX tile pixel
+                        # (S * ti + a_h, S * tj + a_w).
+                        f = px
+                        if NB > 1:
+                            nb = b.div(f, b.const_i32(TH * TW))
+                            f = b.mod(f, b.const_i32(TH * TW))
+                        ti = b.div(f, b.const_i32(TW))
+                        tj = b.mod(f, b.const_i32(TW))
+                        px = b.add(
+                            b.mul(
+                                b.add(b.mul(ti, b.const_i32(S)), b.const_i32(a_h)),
+                                b.const_i32(S * TW),
+                            ),
+                            b.add(b.mul(tj, b.const_i32(S)), b.const_i32(a_w)),
+                        )
+                        if NB > 1:
+                            px = b.add(px, b.mul(nb, b.const_i32(S * S * TH * TW)))
+                    val = b.vec_cast_f32_to(accs[(ph * TM + m) * TN + tn], io_type)
+                    b.smem_store_vN(
+                        lds, [c0, b.add(b.mul(px, b.const_i32(WPITCH)), col)], val, n=8
+                    )
         b.sync_lds_only()
+        hx_tile = h_tile if S == 1 else b.mul(h_tile, b.const_i32(S))
+        wx_tile = w_tile if S == 1 else b.mul(w_tile, b.const_i32(S))
         for im in range(NB):
             with b.scf_if(b.cmp_eq(wave_id, b.const_i32(im))):
                 n_img = b.add(n_base, b.const_i32(im))
                 off = b.add(
                     b.add(
                         b.mul(n_img, params["p_dX_stride_n"]),
-                        b.mul(h_tile, params["p_dX_stride_hi"]),
+                        b.mul(hx_tile, params["p_dX_stride_hi"]),
                     ),
                     b.add(
-                        b.mul(w_tile, params["p_dX_stride_wi"]), b.add(c_grp, c_base)
+                        b.mul(wx_tile, params["p_dX_stride_wi"]), b.add(c_grp, c_base)
                     ),
                 )
-                h_ext = b.smax(b.sub(c_H, h_tile), c0)
+                h_ext = b.smax(b.sub(c_H, hx_tile), c0)
                 dst = b.global_ptr_add(D, b.mul(off, c2))
                 if NB > 1:
                     n_ok = b.cmp_lt(n_img, c_N)
@@ -661,15 +815,60 @@ def build_direct_dgrad_wmma(
                     *_tdm_descriptor_3d(
                         b,
                         dst,
-                        b.add(halo_addr, b.const_i32(im * TH * TW * WPITCH * 2)),
-                        dims=(c_ext, b.smax(b.sub(c_W, w_tile), c0), h_ext),
+                        b.add(
+                            halo_addr,
+                            b.const_i32(im * NPH * TH * TW * WPITCH * 2),
+                        ),
+                        dims=(c_ext, b.smax(b.sub(c_W, wx_tile), c0), h_ext),
                         strides=(params["p_dX_stride_wi"], params["p_dX_stride_hi"]),
                         tile0=WPITCH,
-                        tile1=TW,
-                        tile2=b.const_i32(TH),
+                        tile1=S * TW,
+                        tile2=b.const_i32(S * TH),
                     )
                 )
                 b.s_wait_tensorcnt(0)
+
+    if G > 1:
+        # Stage the super-group's block-diagonal weights into slot 0 once:
+        # zero the slot, then each lane copies one CPG-wide row of one group.
+        CPG0, KPG0 = p.cpg, p.kpg
+        zero_v = b.zero_vec(io_type, 8)
+        nvec = WEI // 8
+        for j in range(0, nvec, THREADS):
+            v = b.add(tid, b.const_i32(j))
+            with b.scf_if(b.cmp_lt(v, b.const_i32(nvec))):
+                b.smem_store_vN(
+                    wei_lds,
+                    [c0, b.add(b.mul(v, b.const_i32(8)), b.const_i32(WEI0))],
+                    zero_v,
+                    n=8,
+                )
+        b.sync_lds_only()
+        VEC = min(CPG0, 8)
+        PARTS = CPG0 // VEC
+        KQ = G * KPG0
+        total = TAPS * KQ * PARTS
+        for j in range(0, total, THREADS):
+            v = b.add(tid, b.const_i32(j))
+            with b.scf_if(b.cmp_lt(v, b.const_i32(total))):
+                part = b.mod(v, b.const_i32(PARTS))
+                rw = b.div(v, b.const_i32(PARTS))
+                tap = b.div(rw, b.const_i32(KQ))
+                kq = b.mod(rw, b.const_i32(KQ))
+                gi = b.div(kq, b.const_i32(KPG0))
+                pv = b.mul(part, b.const_i32(VEC))
+                gidx = b.add(
+                    b.mul(b.add(k_grp, kq), b.const_i32(TAPS * CPG0)),
+                    b.add(b.mul(tap, b.const_i32(CPG0)), pv),
+                )
+                val = b.global_load_vN(Bp, gidx, io_type, VEC)
+                loff = b.add(
+                    b.mul(b.add(b.mul(tap, b.const_i32(CK)), kq), b.const_i32(WPITCH)),
+                    b.add(b.mul(gi, b.const_i32(CPG0)), pv),
+                )
+                b.smem_store_vN(
+                    wei_lds, [c0, b.add(loff, b.const_i32(WEI0))], val, n=VEC
+                )
 
     # ---- main loop over dY channel chunks.
     for st in range(NS - 1):
@@ -677,7 +876,11 @@ def build_direct_dgrad_wmma(
             _issue(b.const_i32(st))
     zero_acc = b.zero_vec_f32(8)
     loop = b.scf_for_iter(
-        c0, n_chunks, c1, [(f"acc{i}", zero_acc) for i in range(TM * TN)], iv_name="kc"
+        c0,
+        n_chunks,
+        c1,
+        [(f"acc{i}", zero_acc) for i in range(NPH * TM * TN)],
+        iv_name="kc",
     )
     with loop as (kc, carried):
         b.scf_yield(*_chunk(kc, list(carried)))
