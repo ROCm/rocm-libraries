@@ -970,6 +970,22 @@ class TestFeatureMatrixCli:
         assert captured.out == ""
         assert captured.err == f"wrote {output}\n"
 
+    def test_dash_output_is_stdout(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # As render_support_matrix.py reads it, not a file named "-".
+        _bundle(tmp_path, "a", [_node(features=["dtype:fp16"])])
+        monkeypatch.chdir(tmp_path)
+        argv = ["--bundles-dir", str(tmp_path), "--output", "-"]
+        assert feature_matrix_main(argv) == 0
+        captured = capsys.readouterr()
+        assert captured.out.startswith("# Support matrix by API option")
+        assert captured.err == ""
+        assert not (tmp_path / "-").exists()
+
     def test_defect_exits_one_and_writes_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

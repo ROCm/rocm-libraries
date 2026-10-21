@@ -515,7 +515,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=pathlib.Path,
-        help="Write the document here instead of stdout.",
+        help="Write the document here instead of stdout; '-' is stdout, as for "
+        "render_support_matrix.py.",
     )
     args = parser.parse_args(argv)
 
@@ -530,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {len(errors)} defect(s); nothing rendered", file=sys.stderr)
         return 1
     document = render(claims)
-    if args.output is None:
+    if args.output is None or str(args.output) == "-":
         write_stdout(document)
     else:
         args.output.write_text(document, encoding="utf-8")
