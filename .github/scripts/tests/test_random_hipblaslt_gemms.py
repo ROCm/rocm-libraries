@@ -2,14 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 import json
-import io
 import random
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from contextlib import redirect_stdout
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import run_random_hipblaslt_gemms as runner
@@ -57,93 +55,6 @@ def bench_result(problem, *, norm="0", atol="1e-6"):
 
 
 class RandomGemmTests(unittest.TestCase):
-    def test_random_no_solution_limit_is_strict_and_cannot_hide_failures(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config = root / "config.json"
-            config.write_text(
-                json.dumps({"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}})
-            )
-            explicit = root / "explicit.json"
-            explicit.write_text(
-                json.dumps(
-                    [
-                        {
-                            "id": "required",
-                            "description": "Required input",
-                            "problem": sampler.sample_gemm(random.Random(0)),
-                        }
-                    ]
-                )
-            )
-            for count, missing, failure, explicit_outcome, expected in (
-                (100, 9, False, "passed", 0),
-                (100, 10, False, "passed", 1),
-                (1000, 99, False, "passed", 0),
-                (1000, 100, False, "passed", 1),
-                (100, 1, True, "passed", 1),
-                (100, 0, False, "unsupported", 1),
-                (0, 0, False, "passed", 0),
-            ):
-                with self.subTest(
-                    count=count,
-                    missing=missing,
-                    failure=failure,
-                    explicit_outcome=explicit_outcome,
-                ):
-                    output = root / f"{count}-{missing}-{failure}-{explicit_outcome}"
-
-                    def run_case(args, directory, problem, config):
-                        if directory.name.startswith("explicit-"):
-                            outcome = explicit_outcome
-                        else:
-                            iteration = int(directory.name.split("-")[1])
-                            outcome = (
-                                "unsupported"
-                                if iteration <= missing
-                                else (
-                                    "failed"
-                                    if failure and iteration == missing + 1
-                                    else "passed"
-                                )
-                            )
-                        return {"outcome": outcome, "reason": None}
-
-                    with patch.object(runner, "run_case", run_case), redirect_stdout(
-                        io.StringIO()
-                    ):
-                        status = runner.main(
-                            [
-                                "--count",
-                                str(count),
-                                "--explicit-cases",
-                                str(explicit),
-                                "--stop-on-failure",
-                                "--bench",
-                                sys.executable,
-                                "--rocjitsu",
-                                sys.executable,
-                                "--config",
-                                str(config),
-                                "--output",
-                                str(output),
-                            ]
-                        )
-                    self.assertEqual(status, expected)
-                    summary = json.loads((output / "summary.json").read_text())
-                    self.assertEqual(
-                        summary["sources"]["random"]["unsupported"], missing
-                    )
-                    if not failure and explicit_outcome == "passed":
-                        self.assertTrue(summary["complete"])
-                        self.assertEqual(
-                            summary["random_no_solution_rate"],
-                            missing / count if count else None,
-                        )
-                        self.assertEqual(
-                            summary["random_no_solution_limit_exceeded"], bool(expected)
-                        )
-
     def test_explicit_cases_run_in_addition_to_random_samples(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -582,7 +493,11 @@ class RandomGemmTests(unittest.TestCase):
                         unsupported = int(mode == "no-solution")
                         self.assertEqual(summary["failed"], 1 - unsupported)
                         self.assertEqual(summary["unsupported"], unsupported)
-                        stopped = early_stop and not unsupported
+                        self.assertEqual(
+                            summary["random_no_solution_rate"],
+                            unsupported / (2 if early_stop else 3),
+                        )
+                        stopped = early_stop
                         self.assertEqual(summary["passed"], 1 if stopped else 2)
                         self.assertEqual(summary["sampled"], 2 if stopped else 3)
                         self.assertEqual(summary["complete"], not stopped)

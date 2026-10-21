@@ -451,11 +451,7 @@ def main(argv=None):
                 with lock:
                     summary[result["outcome"]] += 1
                     summary["sources"][source][result["outcome"]] += 1
-                    if args.stop_on_failure and (
-                        result["outcome"] == "failed"
-                        or source == "explicit"
-                        and result["outcome"] == "unsupported"
-                    ):
+                    if args.stop_on_failure and result["outcome"] != "passed":
                         stop.set()
                 print(
                     f"{name}: {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
@@ -496,21 +492,11 @@ def main(argv=None):
             if completed_random
             else None
         )
-        summary["random_no_solution_limit"] = 0.1
-        # Compare counts exactly: a rate equal to 10% must fail too.
-        summary["random_no_solution_limit_exceeded"] = (
-            random_counts["unsupported"] > 0
-            and random_counts["unsupported"] * 10 >= completed_random
-        )
         summary["elapsed_seconds"] = time.perf_counter() - started
         write_json(args.output / "summary.json", summary)
         write_case_report(args.output, records)
         print(json.dumps(summary, sort_keys=True), flush=True)
-    return int(
-        summary["failed"] > 0
-        or summary["sources"]["explicit"]["unsupported"] > 0
-        or summary["random_no_solution_limit_exceeded"]
-    )
+    return int(summary["failed"] + summary["unsupported"] != 0)
 
 
 if __name__ == "__main__":
