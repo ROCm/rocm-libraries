@@ -311,6 +311,7 @@ jobs:
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           cmake --build "${RUNNER_TEMP}/hostnumerics-sanitizers" --parallel "$(nproc)"
+          # Python tests run below with the matching ASan runtime preloaded.
           ctest \
             --test-dir "${RUNNER_TEMP}/hostnumerics-sanitizers" \
             --exclude-regex '^hostnumerics-(package-components|python-.*)$' \
