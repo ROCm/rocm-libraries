@@ -135,7 +135,9 @@ class ReferenceOperation:
     ``make_inputs``, and ``independent_reference``; ``architectures`` provides
     ``ARCHITECTURES``, ``resolve_variant``, ``get_adapter``, and ``baseline_lock``.
     A ``variant`` argument selects one of an architecture's adapters and
-    defaults to its only one. ``reference`` describes the independent
+    defaults to its only one. Qualification records it in the manifest; a
+    manifest qualified before variants records none, and the lock that the
+    variant selects identifies it. ``reference`` describes the independent
     reference's implementation, metric, and input generator in each manifest.
     Without ``torch``, qualification bounds only the independent reference and
     offers no ``--torch-reference`` option.
@@ -422,6 +424,8 @@ class ReferenceOperation:
             "input_generation": self.contract.INPUT_GENERATOR,
             "baseline_revision": metadata["revision"],
             "baseline_snapshot_sha256": file_digest(baseline / "snapshot.json"),
+            # Verification and staging refuse the bundle as another variant's.
+            "variant": variant,
             "reference": {
                 **self.reference,
                 "numpy_version": np.__version__,
@@ -545,6 +549,14 @@ class ReferenceOperation:
             raise ValueError(
                 f"wrong reference operation: the manifest declares {declared!r}, "
                 f"but {self.label} bundles declare {expected!r}"
+            )
+        # Manifests qualified before variants declare none and are likewise
+        # identified through the selected lock, which is the variant's.
+        declared = manifest.get("variant", variant)
+        if declared != variant:
+            raise ValueError(
+                f"wrong reference variant: the manifest declares {declared!r}, but "
+                f"the selected {self.label} {architecture} variant is {variant!r}"
             )
         if manifest.get("input_generation") != self.contract.INPUT_GENERATOR:
             raise ValueError(f"unsupported {self.label} input generator contract")

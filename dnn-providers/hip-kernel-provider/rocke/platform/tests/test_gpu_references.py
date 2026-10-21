@@ -369,6 +369,9 @@ def test_staging_rejects_a_bundle_qualified_for_another_variant(project):
     output = " ".join((result.stdout + result.stderr).split())
     assert f"CONV reference staging failed for gfx942 {_VARIANT}" in output
     assert f"bundle variant 'other' does not match '{_VARIANT}'" in output
+    # The archive is the one that the lock pins, so fetching it cannot help.
+    assert "baseline_lock.json pins a bundle qualified for variant 'other'" in output
+    assert "dvc pull" not in output
 
 
 @pytest.mark.parametrize("missing", ["package", "publication", "metadata"])

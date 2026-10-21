@@ -22,6 +22,7 @@ import pytest
 
 from reference_common.artifact import (
     OPERATIONS,
+    InconsistentLockError,
     cohort_digest,
     display_command,
     manifest_cohort_digest,
@@ -342,6 +343,8 @@ def test_common_cli_accepts_only_the_selected_declared_variant(
         if declared == "other":
             assert result.returncode != 0
             assert "bundle variant 'other' does not match 'family'" in result.stderr
+            # The lock pins this archive, so it is not called the wrong one.
+            assert "is not the archive that" not in result.stderr
         else:
             assert result.returncode == 0, result.stderr
     assert (tmp_path / "extracted").exists() == (declared != "other")
@@ -2546,6 +2549,72 @@ def test_commands_need_a_variant_when_a_processor_has_several(
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+def test_qualification_records_the_selected_variant(
+    second_variant, tmp_path, monkeypatch, capsys, operation
+):
+    """A new manifest declares the variant that it was qualified for.
+
+    Its lock then authenticates the bundle only as that variant, so
+    verification and staging refuse it as another variant of the processor,
+    even one that enrolls the same cases.
+    """
+    from reference_common import cli as common_cli
+    from reference_common.numeric import file_digest, payload_digests, write_json
+
+    spec = second_variant
+    architecture = spec.architectures.ARCHITECTURES[0]
+    baseline = tmp_path / "baseline"
+    runtime = baseline / "source/platform/python/rocke"
+    runtime.mkdir(parents=True)
+    (runtime / "__init__.py").write_text('"""Host qualification fixture."""\n')
+    write_json(
+        baseline / "snapshot.json",
+        {"revision": "a" * 40, "files": payload_digests(baseline / "source")},
+    )
+    narrow, wide = (
+        spec.architectures.get_adapter(architecture, variant)
+        for variant in ("narrow", "wide")
+    )
+    case = min(narrow.CASES, key=lambda c: math.prod(c.output_shape))
+    for target in (narrow, wide):
+        monkeypatch.setattr(target, "CASES", (case,))
+
+    def worker(request, **kwargs):
+        assert request["variant"] == "narrow"
+        Path(request["export"]).write_bytes(b"synthetic-code-object")
+        with np.load(request["inputs"], allow_pickle=False) as arrays:
+            reference = spec.contract.independent_reference(case, dict(arrays))
+        return [encode(reference, case.dtype)] * request["repetitions"], {
+            "kernel": {"sha256": file_digest(Path(request["export"]))},
+            "device_target": f"{architecture}:fixture",
+            "compiler": {"fixture": True},
+        }
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    bundle = tmp_path / "bundle"
+    spec.qualify(baseline, bundle, 2, architecture, variant="narrow")
+    assert capsys.readouterr().out.startswith(
+        f"{spec.label} {architecture} narrow: qualifying 1 enrolled cases\n"
+    )
+    lock = bundle / "qualification-lock.json"
+    manifest = spec.load_bundle(
+        bundle, lock, architecture=architecture, variant="narrow"
+    )
+    assert manifest["variant"] == "narrow"
+    # SDPA manifests still leave their operation to the lock.
+    assert ("operation" in manifest) == spec.declares_operation
+    validate_bundle(bundle, lock, operation=operation, variant="narrow")
+    with pytest.raises(ValueError) as error:
+        spec.load_bundle(bundle, lock, architecture=architecture, variant="wide")
+    assert str(error.value) == (
+        "wrong reference variant: the manifest declares 'narrow', but the "
+        f"selected {spec.label} {architecture} variant is 'wide'"
+    )
+    with pytest.raises(InconsistentLockError, match="'narrow' does not match 'wide'"):
+        validate_bundle(bundle, lock, operation=operation, variant="wide")
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize("form", ["directory", "archive"])
 def test_diff_reports_every_difference_that_verification_rejects(
     tmp_path, capsys, monkeypatch, operation, form
@@ -2780,6 +2849,47 @@ def test_diff_reports_an_unusable_bundle_once_with_status_2(
     assert "Traceback" not in output.err
     assert output.err.count(expected) == 1
     assert hint is None or output.err.count(hint) == 1
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("declared", [None, "selected", "other"])
+def test_bundle_commands_accept_only_the_selected_declared_variant(
+    tmp_path, capsys, operation, declared
+):
+    """A manifest from before variants declares none; its lock identifies it.
+
+    Verification and diff, of a directory or an archive, report a manifest
+    that declares another variant as unusable, before any case runs.
+    """
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    variant = spec.architectures.resolve_variant(architecture)
+    if declared is not None:
+        recorded = variant if declared == "selected" else declared
+        manifest = json.loads((bundle / "manifest.json").read_text())
+        _relock(bundle, dict(manifest, variant=recorded), lock)
+    archive = tmp_path / "bundle.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    selected = {"architecture": architecture, "variant": variant}
+    if declared != "other":
+        manifest = spec.load_bundle(bundle, lock, **selected)
+        assert manifest.get("variant") == (variant if declared else None)
+        for source in (bundle, archive):
+            assert spec.diff_bundle(source, lock, **selected) == []
+        return
+    expected = (
+        "wrong reference variant: the manifest declares 'other', but the "
+        f"selected {spec.label} {architecture} variant is {variant!r}"
+    )
+    for command, source in (("verify", bundle), ("diff", bundle), ("diff", archive)):
+        with pytest.raises(SystemExit) as exit:
+            spec.main(
+                [command, "--arch", architecture, "--bundle", str(source)]
+                + ["--lock", str(lock)]
+            )
+        assert exit.value.code == 2
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert output.err.count(expected) == 1
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)

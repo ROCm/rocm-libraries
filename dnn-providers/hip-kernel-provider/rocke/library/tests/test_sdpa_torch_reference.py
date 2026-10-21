@@ -87,9 +87,14 @@ def test_qualification_bounds_all_enabled_references(
         return
     cli.qualify(baseline, bundle, 3, torch_reference="cpu" if with_torch else None)
     manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
+    # New SDPA manifests record their variant but, as published ones, no operation.
+    assert manifest["variant"] == "dense"
+    assert "operation" not in manifest
     # Configuration checks the lock's cohort digest against the manifest, and
     # host tests check it against the enrolled cases.
-    validate_bundle(bundle, bundle / "qualification-lock.json", operation="sdpa")
+    validate_bundle(
+        bundle, bundle / "qualification-lock.json", operation="sdpa", variant="dense"
+    )
     lock = json.loads((bundle / "qualification-lock.json").read_text())
     assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest("gfx942")
     entry = manifest["cases"][case.id]

@@ -98,7 +98,7 @@ def manifest_cohort_digest(manifest: Mapping) -> str:
 
 
 class InconsistentLockError(ValueError):
-    """A lock whose fields disagree with each other, so no archive satisfies it."""
+    """A lock that disagrees with itself or its variant, so no archive satisfies it."""
 
 
 def validate_bundle(
@@ -134,9 +134,14 @@ def validate_bundle(
         raise ValueError(f"bundle operation {declared!r} does not match {operation!r}")
     # Manifests qualified before variants predate the variant field and are
     # likewise identified through the selected lock, which is the variant's.
+    # Every archive that the lock accepts declares the same variant, so a
+    # mismatch is the lock's and no fetch repairs it.
     if variant is not None and manifest.get("variant", variant) != variant:
-        raise ValueError(
-            f"bundle variant {manifest['variant']!r} does not match {variant!r}"
+        raise InconsistentLockError(
+            f"bundle variant {manifest['variant']!r} does not match {variant!r}\n"
+            f"  {lock.name} pins a bundle qualified for variant "
+            f"{manifest['variant']!r}; a variant's lock and archive must come "
+            "from its own qualification"
         )
     if manifest["schema"] != 2:
         raise ValueError("only tensor-free schema-2 reference bundles are supported")

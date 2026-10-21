@@ -584,9 +584,15 @@ def test_qualification_freezes_self_contained_replay_support(
         "convolution gfx942 implicit_gemm_fwd: qualifying 1 enrolled cases\n"
     )
     manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
+    assert manifest["variant"] == "implicit_gemm_fwd"
     # Configuration checks the lock's cohort digest against the manifest, and
     # host tests check it against the enrolled cases.
-    validate_bundle(bundle, bundle / "qualification-lock.json", operation="conv")
+    validate_bundle(
+        bundle,
+        bundle / "qualification-lock.json",
+        operation="conv",
+        variant="implicit_gemm_fwd",
+    )
     lock = json.loads((bundle / "qualification-lock.json").read_text())
     assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest("gfx942")
     assert manifest["cases"][case.id]["budget"]["baseline_error_bound"] == (
