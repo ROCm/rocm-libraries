@@ -2259,6 +2259,10 @@ namespace
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         const bool padMXScaleTensorFreeDim = mxScaleTensorNeedsPaddingFreeDim();
+        // padMXScaleTensorFreeDim pads the descriptor for the generated HostPreSwizzle
+        // kernels; the scale pointers set below are still the user's own packed
+        // buffers, so an external custom kernel must get the packed pitch.
+        tensileProblem.setCustomKernelMXScalesArePacked(true);
 
         switch(prob.scaleAType)
         {
@@ -2559,6 +2563,10 @@ namespace
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         const bool padMXScaleTensorFreeDim = mxScaleTensorNeedsPaddingFreeDim();
+        // padMXScaleTensorFreeDim pads the descriptor for the generated HostPreSwizzle
+        // kernels; the scale pointers set below are still the user's own packed
+        // buffers, so an external custom kernel must get the packed pitch.
+        tensileProblem.setCustomKernelMXScalesArePacked(true);
 
         switch(prob.scaleAType)
         {
