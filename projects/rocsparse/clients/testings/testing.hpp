@@ -188,17 +188,8 @@ namespace rocsparse_clients
     {
         int             dev = 0;
         hipDeviceProp_t prop{};
-
-        hipError_t status = hipGetDevice(&dev);
-        if(status != hipSuccess)
-        {
-            throw status;
-        }
-        status = hipGetDeviceProperties(&prop, dev);
-        if(status != hipSuccess)
-        {
-            throw status;
-        }
+        CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+        CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
         return rocsparse_clients::archname_from(prop.gcnArchName, std::forward<P>(p)...);
     }
 }
