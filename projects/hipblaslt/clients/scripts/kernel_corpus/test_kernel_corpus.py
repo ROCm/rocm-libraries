@@ -114,6 +114,26 @@ class CorpusIndexTests(unittest.TestCase):
         )
         self.assertEqual(record(solution(0))["hardware"], {"processor": "gfx90a"})
 
+    def test_device_specific_libraries_keep_every_chip_id(self):
+        sol = solution(0)
+        sol["hardwarePredicate"] = {
+            "type": "AMDGPU",
+            "value": {
+                "type": "And",
+                "value": [
+                    {"type": "Processor", "value": "gfx950"},
+                    {
+                        "type": "Or",
+                        "value": [
+                            {"type": "PciChipId", "value": 0x75A3},
+                            {"type": "PciChipId", "value": 0x75A2},
+                        ],
+                    },
+                ],
+            },
+        }
+        self.assertEqual(record(sol)["hardware"]["pci_chip_ids"], [0x75A3, 0x75A2])
+
     def test_default_rocm_dir_follows_therock_bin_dir(self):
         with mock.patch.dict(os.environ, {"THEROCK_BIN_DIR": "/x/build/bin"}, clear=True):
             self.assertEqual(corpus_index.default_rocm_dir(), Path("/x/build"))
@@ -250,6 +270,44 @@ class ParseTests(unittest.TestCase):
         c.feed("[ RUN      ] x/pre_checkin_kc_1_exact_f32\n")
         c.feed("Warning: Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n")
         self.assertTrue(c.fault)
+
+
+class ReachabilityTests(unittest.TestCase):
+    def test_chip_id_and_cu_count(self):
+        r = record(solution(0, cu=104))
+        r["hardware"]["pci_chip_ids"] = [0x75A3, 0x75A2]
+        self.assertEqual(run.unreachable_reason(r, 104, 0x75A2), "")
+        self.assertIn("0x75a3, 0x75a2", run.unreachable_reason(r, 104, 0x75A0))
+        self.assertIn("104 CUs", run.unreachable_reason(r, 110, 0x75A2))
+        # MI355X (0x75a3) also runs the MI350X (0x75a0) solutions; MI350X does not run its.
+        mi350 = record(solution(1))
+        mi350["hardware"]["pci_chip_ids"] = [0x75A0]
+        self.assertEqual(run.unreachable_reason(mi350, None, 0x75A3), "")
+        self.assertEqual(run.unreachable_reason(mi350, None, 0x75A0), "")
+        # Unknown device facts leave the decision to the library's own check.
+        self.assertEqual(run.unreachable_reason(r, None, None), "")
+
+    def test_rocminfo_gpu_agent(self):
+        text = (
+            "Agent 1\n  Name: AMD EPYC\n  Device Type: CPU\n  Compute Unit: 96\n"
+            "Agent 2\n  Name: gfx950\n  Chip ID:                 30112(0x75a0)\n"
+            "  Device Type:             GPU\n  Compute Unit:            256\n"
+        )
+        self.assertEqual(run.parse_rocminfo_gpu(text), {"cu_count": 256, "pci_chip_id": 0x75A0})
+
+    def test_a_result_from_one_device_outranks_unreachable_on_another(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            (out / "shard-1-of-2").mkdir()
+            (out / "shard-2-of-2").mkdir()
+            ran = {"case_id": "7:exact", "index": 7, "shape": "exact", "status": "pass"}
+            not_here = {"case_id": "7:-", "index": 7, "shape": None, "status": "unreachable"}
+            never = {"case_id": "8:-", "index": 8, "shape": None, "status": "unreachable"}
+            (out / "shard-1-of-2" / "results.jsonl").write_text(json.dumps(ran) + "\n")
+            (out / "shard-2-of-2" / "results.jsonl").write_text(
+                json.dumps(not_here) + "\n" + json.dumps(never) + "\n"
+            )
+            self.assertEqual(set(report.load_results(out)), {"7:exact", "8:-"})
 
 
 class ShardSelectionTests(unittest.TestCase):

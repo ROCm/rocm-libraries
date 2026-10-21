@@ -56,6 +56,7 @@ _SKIPPED = re.compile(r"^\[  SKIPPED \] (\S+) \((\d+) ms\)")
 _BENCH = re.compile(r"^hipblaslt-bench .*")
 _FAULT = re.compile(r"MEMORY_FAULT|illegal memory access|Memory access fault|page fault", re.I)
 _DEVICE = re.compile(r"Device ID \d+ : (.*?) (gfx[0-9a-z]+)")
+_CHIP_ID = re.compile(r"PCI Chip ID: 0x([0-9a-fA-F]+)")
 _VERSION = re.compile(r"hipBLASLt git version: (\S+)")
 _MAX_MESSAGE = 6000
 
@@ -115,10 +116,14 @@ class Tool:
         match = _VERSION.search(info["output"])
         if match:
             info["hipblaslt_git_version"] = match.group(1)
+        match = _CHIP_ID.search(info["output"])
+        info["pci_chip_id"] = int(match.group(1), 16) if match else None
         return info
 
-    def cu_count(self) -> Optional[int]:
-        """The first GPU agent's compute-unit count from rocminfo, if rocminfo is available."""
+    def gpu_agent(self) -> dict:
+        """The first GPU agent's compute-unit count and PCI chip ID from rocminfo, if available.
+        Device-specific libraries (gfx950's ID75a0 and ID75a3-75a2, gfx942's CU variants) are
+        reachable only on a matching device."""
         for rocminfo in (self.rocm_dir / "bin" / "rocminfo", Path("/opt/rocm/bin/rocminfo")):
             if not rocminfo.exists():
                 continue
@@ -128,12 +133,50 @@ class Tool:
                 ).stdout
             except (OSError, subprocess.TimeoutExpired):
                 continue
-            for agent in out.split("Agent ")[1:]:
-                if re.search(r"Device Type:\s+GPU", agent):
-                    match = re.search(r"Compute Unit:\s+(\d+)", agent)
-                    if match:
-                        return int(match.group(1))
-        return None
+            return parse_rocminfo_gpu(out)
+        return {"cu_count": None, "pci_chip_id": None}
+
+
+def parse_rocminfo_gpu(text: str) -> dict:
+    for agent in text.split("Agent ")[1:]:
+        if re.search(r"Device Type:\s+GPU", agent):
+            cu = re.search(r"Compute Unit:\s+(\d+)", agent)
+            chip = re.search(r"Chip ID:\s+(\d+)", agent)
+            return {
+                "cu_count": int(cu.group(1)) if cu else None,
+                "pci_chip_id": int(chip.group(1)) if chip else None,
+            }
+    return {"cu_count": None, "pci_chip_id": None}
+
+
+# TensileLite's ChipIdRegistry (tensilelite/include/Tensile/AMDGPUPredicates.hpp): a device
+# can run solutions for its own PCI chip ID and for the IDs it falls back to. Only gfx950
+# libraries carry chip-ID predicates.
+CHIP_ID_FALLBACKS = {
+    0x75B0: (0x75A0,),
+    0x75A2: (0x75A0,),
+    0x75B2: (0x75A0,),
+    0x75A3: (0x75A0,),
+    0x75B3: (0x75A0,),
+    0x75A8: (0x75A0,),
+    0x75B8: (0x75A0,),
+}
+
+
+def unreachable_reason(record: dict, cu_count: Optional[int], chip_id: Optional[int]) -> str:
+    """Why this device cannot run the solution, or an empty string. Unknown device facts never
+    rule a solution out; the library's own check then refuses it."""
+    hardware = record["hardware"]
+    required_cu = hardware.get("cu_count")
+    if required_cu and cu_count and required_cu != cu_count:
+        return f"unreachable: needs {required_cu} CUs, device has {cu_count}"
+    chip_ids = hardware.get("pci_chip_ids") or []
+    if chip_ids and chip_id:
+        usable = {chip_id, *CHIP_ID_FALLBACKS.get(chip_id, ())}
+        if not usable.intersection(chip_ids):
+            wanted = ", ".join(f"0x{c:x}" for c in chip_ids)
+            return f"unreachable: needs PCI chip ID {wanted}, device is 0x{chip_id:x}"
+    return ""
 
 
 class ChunkRun:
@@ -281,11 +324,12 @@ class Shard:
         self.base: dict = {}
 
     def done_case_ids(self) -> set[str]:
-        """Cases with a final result. A harness error is retried on the next run."""
+        """Cases with a final result. A harness error is retried on the next run, and a
+        solution unreachable on one device is planned again on the next, which may reach it."""
         done = set()
         if self.results_path.exists():
             for row in corpus_index.read_jsonl(self.results_path):
-                if row["status"] == "harness_error":
+                if row["status"] in ("harness_error", "unreachable"):
                     done.discard(row["case_id"])
                 else:
                     done.add(row["case_id"])
@@ -523,6 +567,11 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, help="Test at most this many solutions")
     parser.add_argument("--cu-count", type=int, help="Device CU count (default: from rocminfo)")
+    parser.add_argument(
+        "--pci-chip-id",
+        type=lambda s: int(s, 0),
+        help="Device PCI chip ID, e.g. 0x75a0 (default: from rocminfo)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Plan and report; run nothing")
     args = parser.parse_args(argv)
     if not args.rocm_dir:
@@ -552,7 +601,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not lib_dir.is_dir():
         print(f"error: no hipBLASLt library for {arch} at {lib_dir}", file=sys.stderr)
         return EXIT_USAGE
-    cu_count = args.cu_count or tool.cu_count()
+    agent = tool.gpu_agent() if not (args.cu_count and args.pci_chip_id) else {}
+    cu_count = args.cu_count or agent.get("cu_count")
+    # The chip ID hipblaslt-test reports is the one the library's predicates see.
+    chip_id = args.pci_chip_id or device.get("pci_chip_id") or agent.get("pci_chip_id")
 
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -574,6 +626,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         **shard.base,
         "rocm_dir": str(tool.rocm_dir),
         "cu_count": cu_count,
+        "pci_chip_id": chip_id,
         "profile": args.profile,
         "shard_index": args.shard_index,
         "total_shards": args.total_shards,
@@ -584,7 +637,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     }
     (shard.dir / "run.json").write_text(json.dumps(meta, indent=2) + "\n")
     print(
-        f"{device['device']} {arch} ({cu_count} CUs), hipBLASLt {device['hipblaslt_git_version']}: "
+        f"{device['device']} {arch} ({cu_count} CUs, chip ID "
+        f"{hex(chip_id) if chip_id else '?'}), hipBLASLt {device['hipblaslt_git_version']}: "
         f"shard {args.shard_index}/{args.total_shards} has {len(selected)} of {len(records)} "
         f"solutions",
         flush=True,
@@ -594,13 +648,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     cases: list[plan.Case] = []
     not_planned: list[dict] = []
     for record in selected:
-        required_cu = record["hardware"].get("cu_count")
-        if required_cu and cu_count and required_cu != cu_count:
-            reason, kernel_cases = (
-                f"unreachable: needs {required_cu} CUs, device has {cu_count}",
-                [],
-            )
-        else:
+        reason = unreachable_reason(record, cu_count, chip_id)
+        kernel_cases = []
+        if not reason:
             kernel_cases, reason = plan.plan_kernel(record, args.profile)
         if reason:
             case_id = f"{record['index']}:-"
