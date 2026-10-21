@@ -1256,21 +1256,23 @@ def is_tile_config_valid(
             logging.debug(f"GEMM validation failed: {gemm_valid_error}")
             return False
 
-        # The plain table has no gfx1250 entry; preshuffle uses its own.
-        validate_warp_tile = (
-            validate_gemm_preshuffle_warp_tile_combination
-            if is_preshuffle
-            else validate_gemm_warp_tile_combination
-        )
-        warp_tile_valid, warp_tile_error = validate_warp_tile(
-            warp_tile_m,
-            warp_tile_n,
-            warp_tile_k,
-            a_datatype,
-            b_datatype,
-            c_datatype,
-            gpu_target,
-        )
+        # The plain table has no gfx1250 entry. The preshuffle compute pipelines
+        # read ordinary B, so they use the ordinary gfx1250 rows (as the
+        # dispatcher's listed_warp_tiles does), not the packed-B whitelist.
+        if is_preshuffle:
+            warp_tile = [warp_tile_m, warp_tile_n, warp_tile_k]
+            warp_tile_valid = op_warp_tile_allowed(gpu_target, a_datatype, warp_tile)
+            warp_tile_error = f"warp tile {warp_tile} not listed for {a_datatype} on {gpu_target}"
+        else:
+            warp_tile_valid, warp_tile_error = validate_gemm_warp_tile_combination(
+                warp_tile_m,
+                warp_tile_n,
+                warp_tile_k,
+                a_datatype,
+                b_datatype,
+                c_datatype,
+                gpu_target,
+            )
         if not warp_tile_valid:
             logging.debug(f"Warp tile validation failed: {warp_tile_error}")
             return False

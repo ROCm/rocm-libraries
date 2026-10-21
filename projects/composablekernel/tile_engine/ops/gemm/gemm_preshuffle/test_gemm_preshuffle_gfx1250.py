@@ -37,10 +37,12 @@ def _trait_ok(pipeline, gpu_target="gfx1250", layout="rcr", pad=False, pad_m=Non
     )
 
 
-def _tile_ok(pipeline, gpu_target="gfx1250", warp_n=4, dtype="fp16"):
-    wtk = 64 if dtype in ("fp8", "bf8") else 32
+def _tile_ok(pipeline, gpu_target="gfx1250", warp_n=4, dtype="fp16", tile_k=64, wtk=None):
+    is_8bit = dtype in ("fp8", "bf8")
+    wtk = wtk or (64 if is_8bit else 32)
+    # Like the instance builder, 8-bit inputs write fp16 C.
     return is_tile_config_valid(
-        128, 128, 64, 1, warp_n, 1, 16, 16, wtk, dtype, dtype, dtype,
+        128, 128, tile_k, 1, warp_n, 1, 16, 16, wtk, dtype, dtype, "fp16" if is_8bit else dtype,
         pipeline, "rcr", gpu_target, kernel_name_prefix="gemm_preshuffle",
     )
 
@@ -90,6 +92,15 @@ class TestTileRules(unittest.TestCase):
         for dtype in ("fp8", "bf8"):
             self.assertTrue(_tile_ok("comp_tdm", dtype=dtype), dtype)
             self.assertFalse(_tile_ok("comp_async", dtype=dtype), dtype)
+
+    def test_comp_pipelines_use_ordinary_b_warp_tiles(self):
+        # comp_* read ordinary B, so 8-bit 16x16x128 is valid for them (comp_async
+        # requires it); the packed-B whitelist stays K64-only for preshuffle_tdm.
+        for dtype in ("fp8", "bf8"):
+            for pipeline in COMP:
+                self.assertTrue(_tile_ok(pipeline, dtype=dtype, tile_k=128, wtk=128),
+                                (pipeline, dtype))
+            self.assertFalse(_tile_ok("preshuffle_tdm", dtype=dtype, tile_k=128, wtk=128), dtype)
 
 
 class TestTraitParse(unittest.TestCase):

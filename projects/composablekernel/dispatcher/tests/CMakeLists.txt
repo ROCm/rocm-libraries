@@ -119,6 +119,19 @@ set_tests_properties(dispatcher_test_preshuffle_pipeline_matrix PROPERTIES
     TIMEOUT 120
 )
 
+# gfx1250 preshuffle pipelines: dispatcher/Tile Engine reject-rule parity,
+# tile rules and codegen output for accepted and rejected configs. CPU-only.
+add_test(
+    NAME dispatcher_test_preshuffle_gfx1250_pipelines
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_preshuffle_gfx1250_pipelines.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_preshuffle_gfx1250_pipelines PROPERTIES
+    LABELS "dispatcher;python;bridge;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Auto-correction and validation stress test
 add_test(
     NAME dispatcher_test_autocorrect
