@@ -617,6 +617,11 @@ engine:
                                   # rejected here though the scoped-name regex takes it.
   sdk_version: "1.0.0"            # optional, three components, default "1.0.0"
   behavior_notes: [runtime_compilation]   # optional, closed vocabulary
+  slug: conv_fwd                  # optional; the descriptor directory, file stem and native
+                                  # symbol namespace. Derived by default by splitting the
+                                  # local name before every capital, which turns a name ending
+                                  # in a digit-capital pair (Unified2D) into `unified2_d`.
+                                  # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
 

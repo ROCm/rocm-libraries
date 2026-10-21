@@ -200,6 +200,7 @@ def load_config(path: Path) -> IngestorConfig:
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic=engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
+        slug_override=engine_raw.get("slug"),
     )
 
     kmd_fields = []
@@ -1166,6 +1167,7 @@ _KNOWN_ENGINE = frozenset(
         "knobs",
         "heuristic",
         "census_name_symbol",
+        "slug",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
@@ -2324,6 +2326,16 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
         raise ConfigError(
             f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
             "declared by IngestorPacks.hpp."
+        )
+
+    slug = config.engine.slug_override
+    if slug is not None and (
+        not isinstance(slug, str) or not PATH_STEM_PATTERN.fullmatch(slug)
+    ):
+        raise ConfigError(
+            f"engine.slug {slug!r} must be a single path stem, matching "
+            f"^[A-Za-z0-9_][A-Za-z0-9_-]*$: it names the descriptor directory and "
+            f"the stem of every descriptor file under it."
         )
 
     for derived, emitted_as in (

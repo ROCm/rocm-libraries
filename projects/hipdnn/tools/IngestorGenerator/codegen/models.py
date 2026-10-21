@@ -412,6 +412,10 @@ class EngineSpec:
     #: Optional IngestorPacks.hpp engine-name constant used by the generated
     #: census test; the descriptor still carries ``name`` above.
     census_name_symbol: str | None = None
+    #: Optional descriptor directory / file stem / native-symbol namespace. The derived
+    #: slug splits before every capital, so a local name ending in a digit-capital pair
+    #: (``Unified2D``) would come out as ``unified2_d``.
+    slug_override: str | None = None
 
     @property
     def namespace(self) -> str:
@@ -423,7 +427,10 @@ class EngineSpec:
 
     @property
     def slug(self) -> str:
-        """The bundle's directory name: snake_case of the local name."""
+        """The bundle's directory name: ``slug_override`` if set, else snake_case of
+        the local name."""
+        if self.slug_override is not None:
+            return self.slug_override
         s = re.sub(r"(?<!^)(?=[A-Z])", "_", self.local_name)
         return s.lower()
 
@@ -546,7 +553,11 @@ class IngestorConfig:
     def native_symbol_namespace(self) -> str:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
         becomes ``hipkernel.conv_fwd``."""
-        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", self.engine.local_name).lower()
+        local_snake = self.engine.slug.replace("-", "_")
+        if self.engine.slug_override is None:
+            local_snake = re.sub(
+                r"(?<!^)(?=[A-Z])", "_", self.engine.local_name
+            ).lower()
         return f"{self.engine.namespace}.{local_snake}"
 
     @property
