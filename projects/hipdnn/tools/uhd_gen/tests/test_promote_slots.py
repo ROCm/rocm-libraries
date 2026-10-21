@@ -121,6 +121,7 @@ def _model(
     provenance=None,
     version="1.1",
     metric=None,
+    objective="max",
 ):
     if provenance is None:
         provenance = snapshot_provenance(tree, arch="gfx942", slot=slot)
@@ -129,7 +130,7 @@ def _model(
         "id": NEW,
         "name": "model",
         "adapter": "native",
-        "objective": "max",
+        "objective": objective,
         "features_signature": list(signature),
         "features_hash": FEATURES_HASH,
         "trained_against": provenance,
@@ -167,6 +168,15 @@ def test_a_slot_ranker_that_declares_a_metric_is_refused(tmp_path):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree, slot="dkdv", metric="tflops")
     with pytest.raises(PromoteError, match="a slot ranker must be metric-less"):
+        build_plan(model, tree)
+
+
+def test_a_slot_ranker_declaring_any_metric_is_refused(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(
+        tmp_path / "model", tree, slot="dkdv", metric="time", objective="min"
+    )
+    with pytest.raises(PromoteError, match="declares score.metric 'time'"):
         build_plan(model, tree)
 
 
@@ -386,61 +396,62 @@ def test_an_unslotted_engine_refuses_a_slot_ranker(tmp_path):
         )
 
 
-def _plain_tree(root):
-    _write(
-        root / "engine.ued.json",
-        {
-            "version": "1.0",
-            "id": UED,
-            "name": "test:plain",
-            "metadata": KMD_DKDV,
-            "knobs": ["block_m", "num_warps"],
-            "sort_kernel_catalog": {"gfx942": OLD},
-        },
-    )
-    _write(
-        root / "dkdv.kmd.json",
-        {"version": "1.0", "id": KMD_DKDV, "fields": _fields("block_m", "num_warps")},
-    )
-    _write(
-        root / "match.umd.json",
-        {"version": "1.0", "id": MATCH, "scope": "kernel", "match_symbol": "t.match"},
-    )
-    _write(
-        root / "plain.kdp.json",
-        {
-            "version": "1.0",
-            "id": "00be5fe7-02a7-4ec2-b79c-e849951f8c24",
-            "engine": UED,
-            "arch": ["gfx942"],
-            "matchers": [MATCH],
-        },
-    )
-    _write(
-        root / "old.uhd.json",
-        {
-            "version": "1.0",
-            "id": OLD,
-            "name": "installed",
-            "adapter": "static_order",
-            "static_order": {},
-        },
-    )
-    return root
-
-
-def test_an_unslotted_engine_binds_and_trims_knobs_at_the_engine_level(tmp_path):
-    tree = _plain_tree(tmp_path / "tree")
-    provenance = snapshot_provenance(tree, arch="gfx942")
-    assert "kmd" in provenance and "slot" not in provenance
-    provenance["ued"]["revision"] = "2.0"
-    model = _model(tmp_path / "model", tree, provenance=provenance, version="1.0")
-    plan = build_plan(model, tree, remove_knobs=["num_warps"])
-    _apply(plan)
+def test_a_uhd_two_slots_share_is_not_overwritten_by_promoting_into_one_of_them(
+    tmp_path,
+):
+    tree = _tree(tmp_path / "tree")
+    # dkdv's installed ranker sits where a promotion would write, and dq binds the same UHD.
+    installed = tree / f"{OLD}.uhd.json"
+    destination = (
+        tree / "heuristics" / UED / "dkdv" / "sort_kernel_catalog" / "gfx942"
+    ) / "heuristic.uhd.json"
+    _write(destination, _read(installed))
+    installed.unlink()
     ued = _read(tree / "engine.ued.json")
-    assert ued["sort_kernel_catalog"] == {"gfx942": [NEW]}
-    assert ued["knobs"] == ["block_m"] and ued["revision"] == "2.0"
-    assert plan.slot is None
-    assert plan.destination_descriptor.parent == (
-        tree / "heuristics" / UED / "sort_kernel_catalog" / "gfx942"
+    ued["slots"][2]["sort_kernel_catalog"]["gfx942"] = OLD
+    _write(tree / "engine.ued.json", ued)
+    with pytest.raises(PromoteError, match=f"would clobber UHD {OLD}"):
+        build_plan(_model(tmp_path / "model", tree, slot="dkdv"), tree)
+
+
+def test_a_knob_removed_from_one_slot_does_not_touch_another_slots_model(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    # dq's installed model reads block_m, which dkdv also exposes under the same name.
+    dq_provenance = snapshot_provenance(tree, arch="gfx942", slot="dq")
+    dq_provenance["ued"]["revision"] = "2.0"
+    _write(
+        tree / f"{DQ_BOUND}.uhd.json",
+        {
+            "version": "1.1",
+            "id": DQ_BOUND,
+            "name": "installed",
+            "adapter": "native",
+            "objective": "max",
+            "features_signature": ["$kernel.block_m"],
+            "features_hash": FEATURES_HASH,
+            "trained_against": dq_provenance,
+            "native": {"symbol": "t.score"},
+        },
     )
+    provenance = snapshot_provenance(tree, arch="gfx942", slot="dkdv")
+    provenance["ued"]["revision"] = "2.0"
+    model = _model(
+        tmp_path / "model",
+        tree,
+        signature=("$kernel.num_warps",),
+        provenance=provenance,
+    )
+    plan = build_plan(model, tree, remove_knobs=["block_m"])
+    assert plan.dropped_knobs == ["block_m"]
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [("$ws.scratch_offset",), ("$kernel.block_m", "$ws.dq.offset")],
+)
+def test_a_slot_ranker_reading_a_shared_workspace_token_is_refused(tmp_path, signature):
+    """The loader disables such a ranker and the slot falls back to declared order."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree, slot="dkdv", signature=signature)
+    with pytest.raises(PromoteError, match=r"reads \['\$ws\."):
+        build_plan(model, tree)

@@ -401,13 +401,19 @@ def test_a_slot_ranker_cannot_be_applied_to_another_slot(tmp_path):
         match="names slot 'dkdv', but the ranker serves slot 'dq'",
     ):
         compare_provenance(trained, snapshot_provenance(tree, arch="gfx950", slot="dq"))
-    # Without the optional `slot` member the KMD identity still tells the slots apart.
+
+
+def test_a_slot_ranker_must_name_the_slot_it_was_trained_for(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    trained = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
     anonymous = {k: v for k, v in trained.items() if k != "slot"}
     with pytest.raises(
-        ProvenanceError, match="trained_against.kmd: dependency .* missing"
+        ProvenanceError,
+        match="names no slot, but the ranker of slot 'dkdv' must name the slot it was "
+        "trained for",
     ):
         compare_provenance(
-            anonymous, snapshot_provenance(tree, arch="gfx950", slot="dq")
+            anonymous, snapshot_provenance(tree, arch="gfx950", slot="dkdv")
         )
 
 
@@ -506,6 +512,16 @@ def _ranker(**overrides):
     return base
 
 
+def _estimate(**overrides):
+    base = {
+        "ued": _dep(UED_SLOTTED, "1.0"),
+        "kmds": [{"slot": "a", **_dep(KMD_DQ, "1.0")}],
+        "umd": [],
+    }
+    base.update(overrides)
+    return base
+
+
 @pytest.mark.parametrize(
     "snapshot,refusal",
     [
@@ -517,66 +533,33 @@ def _ranker(**overrides):
             {"ued": _dep(UED_SLOTTED, "1.0"), "umd": [], "slot": "dkdv"},
             "slot requires kmd",
         ),
-        (
-            {
-                "ued": _dep(UED_SLOTTED, "1.0"),
-                "kmds": [{"slot": "a", **_dep(KMD_DQ, "1.0")}],
-                "slot": "a",
-                "umd": [],
-            },
-            "slot requires kmd, and excludes kmds",
-        ),
+        (_estimate(slot="a"), "slot requires kmd, and excludes kmds"),
         (_ranker(slot="Bad"), "trained_against.slot 'Bad' is not a valid slot name"),
         (
             _ranker(slot="global"),
             "trained_against.slot 'global' is not a valid slot name",
         ),
         (_ranker(slot=3), "is not a valid slot name"),
+        (_estimate(kmds=[]), "trained_against.kmds must be a non-empty array"),
+        (_estimate(kmds={}), "trained_against.kmds must be a non-empty array"),
         (
-            {"ued": _dep(UED_SLOTTED, "1.0"), "kmds": [], "umd": []},
-            "trained_against.kmds must be a non-empty array",
-        ),
-        (
-            {"ued": _dep(UED_SLOTTED, "1.0"), "kmds": {}, "umd": []},
-            "trained_against.kmds must be a non-empty array",
-        ),
-        (
-            {
-                "ued": _dep(UED_SLOTTED, "1.0"),
-                "kmds": [{"slot": "a", **_dep(KMD_DQ, "1.0")}] * 2,
-                "umd": [],
-            },
+            _estimate(kmds=[{"slot": "a", **_dep(KMD_DQ, "1.0")}] * 2),
             "kmds names slot 'a' twice",
         ),
         (
-            {
-                "ued": _dep(UED_SLOTTED, "1.0"),
-                "kmds": [{"slot": "global", **_dep(KMD_DQ, "1.0")}],
-                "umd": [],
-            },
+            _estimate(kmds=[{"slot": "global", **_dep(KMD_DQ, "1.0")}]),
             "kmds slot 'global' is not a valid slot name",
         ),
         (
-            {
-                "ued": _dep(UED_SLOTTED, "1.0"),
-                "kmds": [{"id": KMD_DQ, "revision": "1.0"}],
-                "umd": [],
-            },
+            _estimate(kmds=[{"id": KMD_DQ, "revision": "1.0"}]),
             "kmds entries require exactly slot, id and revision",
         ),
         (
-            {
-                "ued": _dep(UED_SLOTTED, "1.0"),
-                "kmds": [{"slot": "a", **_dep(KMD_DQ, "1")}],
-                "umd": [],
-            },
+            _estimate(kmds=[{"slot": "a", **_dep(KMD_DQ, "1")}]),
             "expected semantic revision",
         ),
         (
-            {
-                "ued": _dep(UED_SLOTTED, "1.0"),
-                "kmds": [{"slot": "a", **_dep(KMD_DQ, "1.0")}],
-            },
+            {k: v for k, v in _estimate().items() if k != "umd"},
             "requires exactly ued, kmds and umd",
         ),
         ({"selector_revision": "r", "slot": "dkdv"}, "slot requires kmd"),

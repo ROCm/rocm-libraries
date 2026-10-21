@@ -17,12 +17,14 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 /// The sampling, timer and stall-restart machinery shared by BenchmarkPlan (one catalog's
@@ -43,9 +45,7 @@ constexpr int BENCHMARK_ITERATIONS = 7;
 /// error are never retried this way.
 constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
-// A zero iteration count would leave sampleRuns()'s reduction at its DBL_MAX seed
-// and report that as a real measurement, which reads as a successful benchmark rather
-// than the honest no-usable-candidate path.
+// With zero iterations, the reduction would report its DBL_MAX seed as a real time.
 static_assert(BENCHMARK_ITERATIONS > 0, "benchmarking must time at least one iteration");
 static_assert(BENCHMARK_WARMUP_RUNS >= 0);
 
@@ -64,8 +64,7 @@ inline hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> createScopedHipEve
     return {event, [](hipEvent_t handle) { static_cast<void>(hipEventDestroy(handle)); }};
 }
 
-/// The event pair one timer records into. Created once and re-recorded on every sample:
-/// hipEventRecord() overwrites prior state.
+/// The event pair one timer records into. Created once and re-recorded on every sample.
 struct HipEventPair
 {
     hipdnn_data_sdk::utilities::ScopedResource<hipEvent_t> start = createScopedHipEvent();
@@ -77,10 +76,9 @@ struct HipEventPair
     }
 };
 
-/// One timer's answer for one sample: an elapsed time when the launch could be
-/// timed, whether a stall gate actually held the stream during it, and whether a
-/// stall watchdog released the gate late instead of the host. A timeout always
-/// leaves elapsedMs unset; healthy elapsed is finite and >= 0, including zero.
+/// One timer sample: the elapsed time when timed, whether the stall gate held the
+/// stream, and whether the watchdog (not the host) released it. A timeout leaves
+/// elapsedMs unset.
 struct TimingResult
 {
     std::optional<double> elapsedMs;
@@ -99,22 +97,57 @@ struct CandidateTiming
     int iterations = 0;
 };
 
-/// What one sample attempt produced: a usable timing, an unusable candidate (neither
-/// entered nor blamed on the stall gate), or a request to restart the whole
-/// comparison unstalled.
+/// One candidate's result: usable timings, unusable (timing unset), or a request to
+/// restart the whole comparison unstalled (see sampleRuns()).
 struct SampleOutcome
 {
-    /// The candidate's timings; unset when it could not be timed or a sample was
-    /// malformed. Either way scores the candidate unusable.
     std::optional<CandidateTiming> timing;
     /// Why @c timing is unset: the `reason` of the candidate's failed log record.
     std::string failureReason;
-    /// True when the timed span cannot be trusted as a stalled measurement: either a
-    /// watchdog timeout, or a valid sample the timer reports as unstalled while a
-    /// stalled pass requested one. Neither is about the candidate itself, so the
-    /// whole comparison must stop sampling immediately and restart unstalled.
     bool restartUnstalled = false;
 };
+
+/// The fields common to every candidate log row, layered over the candidate's @p features.
+/// `benchmark` plus `device` identify one problem, as the winner cache keys on both; `device` is
+/// omitted when unidentified. The envelope is written last so a feature key can never overwrite
+/// the row's identity.
+inline nlohmann::json candidateRecord(const nlohmann::json& features,
+                                      const std::string& benchmarkId,
+                                      const std::string& deviceIdentity,
+                                      const DescriptorId& kernelId,
+                                      const DescriptorId& packId,
+                                      const DescriptorId& dispatchId)
+{
+    nlohmann::json record = features;
+    record["event"] = "ingestor.benchmark.candidate";
+    record["benchmark"] = benchmarkId;
+    if(!deviceIdentity.empty())
+    {
+        record["device"] = deviceIdentity;
+    }
+    record["kernel"] = toString(kernelId);
+    record["pack"] = toString(packId);
+    record["dispatch"] = toString(dispatchId);
+    return record;
+}
+
+/// Marks @p record `ok` with the timings a UHD is trained on.
+inline void annotateTiming(nlohmann::json& record, const CandidateTiming& timing)
+{
+    record["status"] = "ok";
+    record["min_ms"] = timing.minMs;
+    record["avg_ms"] = timing.avgMs;
+    record["stddev_ms"] = timing.stddevMs;
+    record["robust_mean_ms"] = timing.robustMeanMs;
+    record["iters"] = timing.iterations;
+}
+
+/// Marks @p record `failed` with its reason (RFC 0019.13 §8.3).
+inline void annotateFailure(nlohmann::json& record, const std::string& reason)
+{
+    record["status"] = "failed";
+    record["reason"] = reason;
+}
 
 /// Times one execute() of a plan, returning elapsed milliseconds or nullopt when it could not
 /// be timed. An injected timer owns its synchronization and measurement method; no HIP
@@ -123,10 +156,9 @@ template <typename THandle>
 using InjectedTimer = std::function<std::optional<double>(
     const IPlan<THandle>&, const THandle&, const hipdnnPluginDeviceBuffer_t*, uint32_t, void*)>;
 
-/// The default timer: HIP events on handle.getStream() rather than the null stream,
-/// so a plan on a non-default stream still measures its own work. @p events and
-/// @p gate are owned by runWithStallRestart() for the lifetime of one comparison; this
-/// closure only borrows them by reference, so nothing it touches outlives that call.
+/// The default timer: HIP events on handle.getStream(), so a plan on a non-default
+/// stream measures its own work. Borrows @p events and @p gate, which runWithStallRestart()
+/// owns for one comparison.
 template <typename THandle>
 auto makeDefaultTimer(std::optional<HipEventPair>& events,
                       std::optional<hipdnn_data_sdk::utilities::StallGate>& gate)
@@ -149,11 +181,8 @@ auto makeDefaultTimer(std::optional<HipEventPair>& events,
         }
         if(!events->isUsable())
         {
-            // Discard the unusable pair so the next sample retries creation. Caching
-            // it would turn one transient hipEventCreate failure into a permanently
-            // untimeable comparison: every candidate's first timed iteration would
-            // return unusable and selection would silently fall back to the ranked
-            // front for the plan's whole life.
+            // Drop the pair so the next sample retries creation; caching it would let
+            // one transient failure make the whole comparison untimeable.
             events.reset();
             return result;
         }
@@ -166,20 +195,15 @@ auto makeDefaultTimer(std::optional<HipEventPair>& events,
         if(stalled)
         {
             armed = gate->arm(stream);
-            // The previous sample is drained, and a failed arm enqueues no new
-            // wait. Continue timing; a valid unstalled sample makes the caller
-            // restart the comparison without stalling.
+            // A failed arm enqueues nothing; the resulting unstalled sample makes the
+            // caller restart the comparison.
         }
         result.stallUsed = armed;
 
-        // Release+drain on every exit once armed, even a throw out of plan.execute()
-        // below: an escaping exception or an early return with the gate still armed
-        // would leave the stream stalled, and a later arm() on the same gate requires
-        // the previously armed stream to have already drained past its wait packet.
-        // `drained` is only set once hipEventSynchronize(stop) below actually
-        // succeeds -- release() alone does not prove the stream drained -- so a
-        // synchronize failure still leaves this guard armed to release and drain by
-        // its own hipStreamSynchronize instead of trusting the failed call.
+        // Once armed, release and drain on every exit, including a throw from
+        // execute(): a stalled stream never drains, and re-arming requires the previous
+        // wait to have retired. Only a successful hipEventSynchronize(stop) sets
+        // `drained`; release() alone does not prove it.
         bool drained = false;
         struct ReleaseAndDrainOnUnwind
         {
@@ -222,8 +246,8 @@ auto makeDefaultTimer(std::optional<HipEventPair>& events,
         }
         drained = true;
 
-        // The watchdog permits work to run before host submission finishes.
-        // Its elapsed span is not a device-only measurement, regardless of cause.
+        // A watchdog release lets work run before submission finishes, so the span is
+        // not device-only.
         if(armed && gate->timedOut())
         {
             result.timedOut = true;
@@ -267,22 +291,23 @@ inline CandidateTiming summarize(const std::vector<double>& samples)
     return timing;
 }
 
-/// The timings of BENCHMARK_ITERATIONS timed executes of @p plan, after BENCHMARK_WARMUP_RUNS
-/// untimed ones. Any timed iteration that could not actually be
-/// measured stalled while @p stalled was requested -- a watchdog timeout, or a valid
-/// sample the timer reports as unstalled -- returns immediately with restartUnstalled
-/// set; the two populations must never be averaged together. Both checks run before
-/// the sign check below, so a negative sample can never hide a restart the comparison
-/// actually needs. A backend error (no elapsed time at all) or a non-finite sample
-/// (NaN/Inf) scores the candidate unusable immediately, with no retry. A finite
-/// negative sample is instead treated as a bad HIP event reading: it is discarded and
-/// the same slot re-measured, using at most MAX_NEGATIVE_SAMPLE_RETRIES extra attempts
-/// for this pass; exhausting that budget scores the candidate unusable without the
-/// malformed value ever reaching the reduction, ranking, or cache.
+/// Times BENCHMARK_ITERATIONS executes of @p plan after BENCHMARK_WARMUP_RUNS untimed ones
+/// and ranks by robustMean(), so an occasionally lucky kernel cannot win on one fast
+/// sample.
 ///
-/// Ranks by robustMean() rather than the fastest sample, so an occasionally lucky but
-/// usually slower kernel cannot win. Each failure path names its reason; the caller
-/// logs it once the comparison settles.
+/// - In a stalled pass, a watchdog timeout or an unstalled sample returns
+///   restartUnstalled: the two populations must never be mixed. These checks precede
+///   the sign check, so a negative sample cannot hide them.
+/// - A missing or non-finite time scores the candidate unusable, with no retry.
+/// - A finite negative time is re-measured in the same slot, at most
+///   MAX_NEGATIVE_SAMPLE_RETRIES times per candidate in each pass. The Windows HIP
+///   runtime reports negative spans (ROCm/rocm-systems#12925), and for short stalled
+///   work it can report them persistently. Exhausting the budget restarts a stalled
+///   pass unstalled, because dropping the candidate would exclude the fastest
+///   kernels; in an unstalled pass it scores the candidate unusable. A negative value
+///   never reaches the ranking or cache.
+///
+/// Each failure path names its reason; the caller logs it once the comparison settles.
 /// @param describe Names the timed candidate for the log lines; called only when one is written.
 /// @param injected The injected timer, or empty to time with @p timer.
 template <typename THandle, typename TDescribe, typename TDefaultTimer>
@@ -343,13 +368,8 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
             }
             if(stalled && !sample.stallUsed)
             {
-                // A genuine measurement, but not a stalled one (unsupported device, a
-                // transient arm failure, ...). Mixing it into a pass whose earlier
-                // samples were actually stalled would rank two incomparable
-                // populations exactly like a watchdog timeout, so it gets the same
-                // whole-comparison restart rather than being accepted here. Checked
-                // before the sign check below: a negative elapsed time must never
-                // mask this restart behind a per-sample retry.
+                // Measured but not stalled (unsupported device, transient arm failure):
+                // restart like a timeout.
                 HIPDNN_PLUGIN_LOG_WARN(
                     "ingestor: benchmarking candidate '"
                     << describe()
@@ -359,9 +379,7 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
             }
             if(!std::isfinite(*sample.elapsedMs))
             {
-                // NaN/Inf is never a transient timing artifact -- it means the event
-                // pair itself is broken -- so it is scored unusable immediately, with
-                // no retry, exactly like the backend error above.
+                // NaN/Inf means the event pair is broken: no retry.
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                        << describe()
                                        << "' reported a non-finite elapsed time; scored unusable");
@@ -369,13 +387,7 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
             }
             if(*sample.elapsedMs < 0.0)
             {
-                // A finite negative elapsed time is a known HIP-event-timing artifact
-                // near the clock's resolution floor, not proof the candidate is
-                // broken: discard it and re-measure the same slot rather than
-                // condemning the whole candidate on one bad reading. A persistently
-                // negative candidate still exhausts the retry budget and falls
-                // through to the unusable return below, never entering the
-                // reduction, ranking, or cache.
+                // Re-measure in place; see the sampleRuns() doc for the budget.
                 if(negativeSampleRetriesLeft > 0)
                 {
                     --negativeSampleRetriesLeft;
@@ -384,6 +396,17 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
                                            << "' reported a negative elapsed time; "
                                               "discarding it and re-measuring");
                     continue;
+                }
+                if(stalled)
+                {
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
+                                           << describe()
+                                           << "' reported a negative stalled elapsed time "
+                                              "after exhausting "
+                                           << MAX_NEGATIVE_SAMPLE_RETRIES
+                                           << " retries; the whole comparison will "
+                                              "restart unstalled");
+                    return {std::nullopt, "negative-stalled-elapsed-time", true};
                 }
                 HIPDNN_PLUGIN_LOG_WARN(
                     "ingestor: benchmarking candidate '"
@@ -404,11 +427,9 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
     }
     catch(...)
     {
-        // IKernelDispatchHandler::launch() and an injected Timer are both extension
-        // points with no exception-type contract. Letting a non-std::exception escape
-        // would leave the plan unresolved, so every later execute() would re-run the
-        // whole comparison and re-hit this candidate. Score it unusable like any other
-        // failure instead.
+        // launch() and an injected Timer have no exception contract. An escaping
+        // exception would leave the plan unresolved and re-run the comparison on
+        // every execute().
         HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                << describe()
                                << "' threw a non-standard exception and is scored unusable");
@@ -422,14 +443,9 @@ SampleOutcome sampleRuns(const IPlan<THandle>& plan,
 /// timer's events and stall gate are local to this call: created here, reused across every
 /// sample and pass, and freed when this function returns.
 ///
-/// A candidate that could not actually be measured stalled -- whether a stall watchdog timed
-/// out, or the gate simply never held the stream (unsupported device, a transient arm failure)
-/// -- cannot be mixed with the rest of the pass's genuinely stalled measurements: that would
-/// rank two incomparable populations. So @p pass stops sampling the instant either happens --
-/// candidates not yet reached are never sampled stalled at all -- and returns nullopt, and
-/// every candidate is re-measured unstalled from scratch. This policy is local to this one
-/// comparison: it never reads or writes any state shared with another comparison, another
-/// gate, or a standalone timed execution elsewhere.
+/// Stalled and unstalled samples are not comparable. If any candidate cannot be measured
+/// stalled (see sampleRuns()), @p pass stops sampling, returns nullopt, and every candidate is
+/// re-measured unstalled. This policy is local to this comparison.
 ///
 /// @param pass Called as `pass(defaultTimer, stalled)`; returns the comparison's result as an
 ///        optional, empty when a sample asked for the restart. It is never asked to restart
@@ -456,10 +472,10 @@ auto runWithStallRestart(bool hasInjectedTimer, TPass&& pass)
         }
 
         HIPDNN_PLUGIN_LOG_WARN(
-            "ingestor: stalled timing was unavailable or timed out during benchmarking. "
+            "ingestor: stalled timing was unavailable, timed out, or kept reading "
+            "negative during benchmarking. "
             "Discarding the pass and re-measuring every candidate unstalled.");
-        // The retry runs with stalled=false, so no sample from it can trigger
-        // another restart: this can happen at most once.
+        // The unstalled pass cannot request a restart, so this runs at most once.
         stalled = false;
     }
 }

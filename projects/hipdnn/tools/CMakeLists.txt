@@ -374,6 +374,10 @@ endif()
         # of <role>=<true|false>, comma rather than semicolon so it survives add_test(). A slot
         # ranker's role is spelled <role>@<slot>. HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC, when
         # set, is text some reported diagnostic must contain.
+        # HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY, when set, is a directory of files laid over a
+        # copy of ROOT in HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR, and the copy is what the tool
+        # validates. HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES, when set, is passed to the
+        # tool as --feature-samples.
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
    OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ROOT
@@ -386,9 +390,34 @@ if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
         "HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS are required")
 endif()
 
+set(validatedRoot "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}")
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY)
+    if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR)
+        message(FATAL_ERROR
+            "HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR is required with "
+            "HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY")
+    endif()
+    file(REMOVE_RECURSE "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}")
+    file(COPY "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}/" DESTINATION "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}")
+    # file(COPY) skips a file whose destination has the same modification time, which a
+    # checkout gives every fixture, so the overlay is copied file by file.
+    file(GLOB_RECURSE overlayFiles RELATIVE "${HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY}"
+         "${HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY}/*")
+    foreach(overlayFile IN LISTS overlayFiles)
+        file(COPY_FILE "${HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY}/${overlayFile}"
+             "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}/${overlayFile}")
+    endforeach()
+    set(validatedRoot "${HIPDNN_VALIDATE_DESCRIPTORS_WORKDIR}")
+endif()
+
+set(featureSamplesArgs)
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES)
+    set(featureSamplesArgs --feature-samples "${HIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES}")
+endif()
+
 execute_process(
-    COMMAND "${HIPDNN_VALIDATE_DESCRIPTORS_TOOL}" "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}"
-            --expect-engine "${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}" --json
+    COMMAND "${HIPDNN_VALIDATE_DESCRIPTORS_TOOL}" "${validatedRoot}"
+            --expect-engine "${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}" ${featureSamplesArgs} --json
     OUTPUT_VARIABLE toolStdout
     ERROR_VARIABLE toolStderr
     RESULT_VARIABLE toolResult
@@ -400,7 +429,7 @@ message(STATUS "hipdnn_validate_descriptors stderr:\n${toolStderr}")
 if(NOT toolResult STREQUAL HIPDNN_VALIDATE_DESCRIPTORS_EXIT)
     message(FATAL_ERROR
         "hipdnn_validate_descriptors exited with '${toolResult}' on "
-        "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}; expected '${HIPDNN_VALIDATE_DESCRIPTORS_EXIT}'")
+        "${validatedRoot}; expected '${HIPDNN_VALIDATE_DESCRIPTORS_EXIT}'")
 endif()
 
 string(JSON engines ERROR_VARIABLE jsonError GET "${toolStdout}" engines)
@@ -487,11 +516,43 @@ endif()
         )
         list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
 
+        # The slotted multi-launch bundle: a single-launch slot beside a slot whose kernels carry a
+        # kpack `sources` map, each slot with its own dispatch descriptor (RFC 0021 §4). Needs no
+        # compiler: the loader reads only the descriptors. A validator that harvested only
+        # `set.packs`, or gave both slots one stub, drops the engine and fails here.
+        set(HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ROOT
+            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_multi_launch"
+        )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ENGINE
+            "hipkernel:ValidateFixtureSlottedMultiLaunch"
+        )
+        add_test(
+            NAME hipdnn_validate_descriptors_slotted_multi_launch
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ROOT}"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SLOTTED_MULTI_LAUNCH_ENGINE}"
+                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        )
+        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS
+             hipdnn_validate_descriptors_slotted_multi_launch
+        )
+
         # <fixture>:<exit status>:<model checks>[:<diagnostic>], as the fixtures' README states
         # them; the optional diagnostic is a colon-free text a reported diagnostic must contain. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
-        # features need a sample, run without one, is admitted with extraction skipped.
+        # features need a sample, run without one, is admitted with extraction skipped. The
+        # slotted fixtures other than slotted_valid are one-file overlays on it, or
+        # recorded samples for it (see the fixtures' README).
+        set(HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY_FIXTURES
+            slotted_ranker_undeclared_field
+            slotted_ranker_unexposed_axis
+            slotted_ranker_reads_workspace_token
+            slotted_two_ws_tokens
+            slotted_ranker_names_other_slot
+        )
         foreach(
             roleFixture
             "l2_static_order:0:sort_kernel_catalog=true"
@@ -499,13 +560,12 @@ endif()
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
             "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
-            "slotted_empty_slot:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true:has no loadable kernel pack"
             "slotted_ranker_undeclared_field:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:Feature references an undeclared KMD field"
             "slotted_ranker_unexposed_axis:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:which its UED does not expose as knobs"
             "slotted_ranker_reads_workspace_token:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:a shared-workspace token a slotted engine reserves"
+            "slotted_two_ws_tokens:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:Feature reads '$ws.a'"
             "slotted_ranker_names_other_slot:1:sort_kernel_catalog@dkdv=false,sort_kernel_catalog@dq=true,predict_engine=true:but the ranker serves slot"
-            "slotted_estimate_missing_slot_kmd:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=false:does not name slot"
-            "slotted_kernel_in_two_slots:1:sort_kernel_catalog@dkdv=false,sort_kernel_catalog@dq=true,predict_engine=true:a kernel serves at most one slot"
+            "slotted_feature_samples_ws:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
         )
             string(REPLACE ":" ";" roleFixture "${roleFixture}")
             list(GET roleFixture 0 fixtureName)
@@ -517,16 +577,34 @@ endif()
                 list(GET roleFixture 3 fixtureDiagnostic)
                 set(fixtureDiagnosticArg "-DHIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC=${fixtureDiagnostic}")
             endif()
+            # An overlay case is slotted_valid with the overlay directory's files laid over a
+            # copy of it; the feature-samples case validates slotted_valid itself against its
+            # recorded samples.
+            set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/${fixtureName}")
+            set(fixtureCaseArgs)
+            if(fixtureName IN_LIST HIPDNN_VALIDATE_DESCRIPTORS_OVERLAY_FIXTURES)
+                set(fixtureCaseArgs
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY=${fixtureRoot}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_WORKDIR=${CMAKE_CURRENT_BINARY_DIR}/vdo/${fixtureName}"
+                )
+                set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+            elseif(fixtureName STREQUAL "slotted_feature_samples_ws")
+                set(fixtureCaseArgs
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES=${fixtureRoot}/feature_samples.json"
+                )
+                set(fixtureRoot "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/slotted_valid")
+            endif()
             add_test(
                 NAME hipdnn_validate_descriptors_${fixtureName}
                 COMMAND
                     ${CMAKE_COMMAND}
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
-                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/${fixtureName}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${fixtureRoot}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_EXIT=${fixtureExit}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS=${fixtureChecks}"
                     ${fixtureDiagnosticArg}
+                    ${fixtureCaseArgs}
                     -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake"
             )
             list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_${fixtureName})

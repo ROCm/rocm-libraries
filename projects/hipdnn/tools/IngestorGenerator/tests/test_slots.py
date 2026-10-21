@@ -59,6 +59,9 @@ def test_unslotted_output_is_byte_identical_to_the_pre_slot_generator(
     configs["heuristic_free"] = make_minimal_config(
         engine=make_engine(heuristic="none")
     )
+    configs["verify_multi_launch"] = load_config(
+        FIXTURES / "verify_multi_launch" / "config.yaml"
+    )
     assert set(configs) == set(golden)
     for name, config in configs.items():
         out = tmp_path / name
@@ -190,6 +193,215 @@ def test_operation_matchers_are_per_slot_not_per_engine(bundle):
         umd = docs[f"operation_is_{discriminator}.umd"]
         assert doc["matchers"] == [umd["id"], kernel_match]
         assert umd["scope"] == "graph"
+
+
+def test_each_slot_dispatches_through_its_own_udd(bundle):
+    """RFC 0021 §4: packs with different launch sets need different dispatch
+    descriptors, so every slot has a UDD and its KDPs name that one."""
+    config, _, docs = bundle
+    udds = {slot.name: docs[f"split_bwd_{slot.name}.udd"] for slot in config.slots}
+    assert len({udd["id"] for udd in udds.values()}) == 3
+    assert "split_bwd.udd" not in docs
+    for name, udd in udds.items():
+        assert udd["dispatch_symbol"] == f"hipkernel.split_bwd.{name}_dispatch"
+    for doc in (d for n, d in docs.items() if n.endswith(".kdp")):
+        assert doc["dispatch"] == udds[doc["slot"]]["id"]
+
+
+def _launch_set_config(tmp_path, slot_kernels, slot_fields=None):
+    """A packaged slotted rocke engine: one pack per slot; `slot_kernels` maps a
+    slot to the launch-name list of each of its kernels (empty: single launch).
+    `slot_fields` maps a slot to one extra mandatory int KMD field `{slot: name}`,
+    which that slot's kernels state as their index and no other slot declares."""
+    slot_fields = slot_fields or {}
+
+    def kernel(slot, index, launches):
+        source = {"spec": {"head_size": 64 * (index + 1)}}
+        if launches:
+            source["launches"] = {name: {} for name in launches}
+        return {
+            "name": f"{slot}.k{index}",
+            "kernel_source": source,
+            "metadata": {
+                "dtype": "FP16",
+                "head_size": 64 * (index + 1),
+                **({slot_fields[slot]: index} if slot in slot_fields else {}),
+            },
+        }
+
+    raw = {
+        "dialect": "packaged",
+        "kernel_source_kind": "rocke",
+        "engine": {"name": "hipkernel:SlotLaunches", "sdk_version": "1.0.0"},
+        "slots": [
+            {
+                "name": slot,
+                "kmd_fields": [
+                    {"name": "dtype", "type": "string"},
+                    {"name": "head_size", "type": "int"},
+                    *(
+                        [{"name": slot_fields[slot], "type": "int"}]
+                        if slot in slot_fields
+                        else []
+                    ),
+                ],
+                "specialization": {
+                    "metadata_fields": ["head_size"],
+                    "matcher_only_fields": [
+                        "dtype",
+                        *([slot_fields[slot]] if slot in slot_fields else []),
+                    ],
+                    "bindings": {"head_size": {"field": "head_size"}},
+                    "vocabulary": {},
+                },
+            }
+            for slot in slot_kernels
+        ],
+        "packs": [
+            {
+                "name": slot,
+                "slot": slot,
+                "arch": ["gfx1151"],
+                "kernel_defaults": {
+                    "kind": "rocke",
+                    "source": "kernels/gfx1151/wmma_fmha_decode.py",
+                    "builder": "build_wmma_fmha_decode_module",
+                },
+                "kernels": [kernel(slot, i, ls) for i, ls in enumerate(kernels)],
+            }
+            for slot, kernels in slot_kernels.items()
+        ],
+    }
+    path = tmp_path / "launch_sets.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return load_config(path)
+
+
+def test_slots_may_launch_different_sets_but_a_slot_may_not_mix(tmp_path):
+    """RFC 0021 §4: the launch set is a slot's, as each slot has its own handler."""
+    _launch_set_config(
+        tmp_path, {"prep": [[]], "dkdv": [["decode", "merge"], ["decode", "merge"]]}
+    )
+    with pytest.raises(ConfigError, match=r"One slot \('dkdv'\) has one dispatch"):
+        _launch_set_config(tmp_path, {"prep": [[]], "dkdv": [["decode", "merge"], []]})
+
+
+def test_a_slotted_multi_launch_slot_emits_ukd_1_1_sources_and_its_own_udd(
+    generator, tmp_path
+):
+    """Packaged slotted rocke `launches` become UKD 1.1 `sources`; a single-launch
+    slot beside it stays a 1.0 `kernel_source`."""
+    config = _launch_set_config(tmp_path, {"prep": [[]], "dkdv": [["decode", "merge"]]})
+    generator.render(config, tmp_path / "out")
+    ddir = tmp_path / "out" / config.descriptor_dir
+    kdps = {
+        json.loads(p.read_text())["slot"]: json.loads(p.read_text())
+        for p in ddir.glob("*.kdp.json")
+    }
+    (prep,) = kdps["prep"]["kernelDescriptors"]
+    (dkdv,) = kdps["dkdv"]["kernelDescriptors"]
+    assert (
+        prep["version"] == "1.0" and "kernel_source" in prep and "sources" not in prep
+    )
+    assert dkdv["version"] == "1.1" and "kernel_source" not in dkdv
+    assert list(dkdv["sources"]) == ["decode", "merge"]
+    assert kdps["prep"]["dispatch"] != kdps["dkdv"]["dispatch"]
+
+
+def _gate_slotted(tmp_path, generator, capsys, edit=None, slot_fields=None):
+    """Render a packaged slotted bundle (single-launch `prep`, multi-launch `dkdv`
+    with two kernels), apply `edit(documents by slot)` to its KDPs and run the
+    variant-set gate on it structurally."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    import verify_variant_sets as gate_module
+
+    config = _launch_set_config(
+        tmp_path,
+        {"prep": [[]], "dkdv": [["decode", "merge"], ["decode", "merge"]]},
+        slot_fields,
+    )
+    generator.render(config, tmp_path / "out")
+    root = tmp_path / "out" / config.descriptor_dir
+    if edit is not None:
+        paths = {json.loads(p.read_text())["slot"]: p for p in root.glob("*.kdp.json")}
+        documents = {slot: json.loads(p.read_text()) for slot, p in paths.items()}
+        edit(documents)
+        for slot, path in paths.items():
+            path.write_text(json.dumps(documents[slot]))
+    code = gate_module.main(["--mode", "structural", "slotted", str(root)])
+    captured = capsys.readouterr()
+    return code, captured.out + captured.err
+
+
+def test_the_variant_set_gate_completes_each_pack_against_its_slot(
+    generator, tmp_path, capsys
+):
+    """RFC 0021 §4: tuple uniqueness is per slot. `prep.k0` and `dkdv.k0` carry
+    the same metadata and are no collision."""
+    code, output = _gate_slotted(tmp_path, generator, capsys)
+    assert code == 0, output
+    assert "descriptors=    3" in output
+
+
+def test_the_variant_set_gate_still_reports_a_same_slot_collision(
+    generator, tmp_path, capsys
+):
+    def collide(documents):
+        first, second = documents["dkdv"]["kernelDescriptors"]
+        second["metadata"] = dict(first["metadata"])
+
+    code, output = _gate_slotted(tmp_path, generator, capsys, collide)
+    assert code == 1
+    assert "loader-tuple collisions" in output
+    assert "dkdv.k0 and dkdv.k1" in output
+
+
+def test_the_variant_set_gate_uses_each_slots_own_kmd(generator, tmp_path, capsys):
+    """`dkdv`'s KMD has a mandatory field `prep`'s lacks, so no single KMD completes
+    every kernel: the gate must complete each pack against its slot's, and still
+    name a collision between two `dkdv` kernels."""
+    fields = {"dkdv": "block_m"}
+    (tmp_path / "ok").mkdir()
+    (tmp_path / "clash").mkdir()
+    code, output = _gate_slotted(tmp_path / "ok", generator, capsys, slot_fields=fields)
+    assert code == 0, output
+
+    def collide(documents):
+        first, second = documents["dkdv"]["kernelDescriptors"]
+        second["metadata"] = dict(first["metadata"])
+
+    code, output = _gate_slotted(
+        tmp_path / "clash", generator, capsys, collide, slot_fields=fields
+    )
+    assert code == 1
+    assert "dkdv.k0 and dkdv.k1 complete to one tuple" in output
+    assert "does not complete" not in output
+
+
+def test_the_packer_resolves_a_generated_slotted_multi_launch_bundle(
+    generator, tmp_path
+):
+    """hkp_pack resolves each slot pack through its slot's KMD and the generated
+    multi-launch descriptors expose every `sources` launch."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    import verify_variant_sets as gate_module  # puts hkp_pack on sys.path
+
+    from hkp_pack import descriptor_context
+    from hkp_pack.sources import kernel_sources
+
+    config = _launch_set_config(
+        tmp_path, {"prep": [[]], "dkdv": [["decode", "merge"], ["decode", "merge"]]}
+    )
+    generator.render(config, tmp_path / "out")
+    index = descriptor_context.Index(str(tmp_path / "out" / config.descriptor_dir))
+    bundles = {b.kdp_doc["slot"]: b for b in descriptor_context.resolve_bundles(index)}
+    assert set(bundles) == {"prep", "dkdv"}
+    slot_kmd = {s["name"]: s["metadata"] for s in bundles["dkdv"].engine["slots"]}
+    for slot, bundle in bundles.items():
+        assert bundle.kmd["id"] == slot_kmd[slot]
+    launches = [sorted(kernel_sources(entry.ukd)) for entry in bundles["dkdv"].entries]
+    assert launches == [["decode", "merge"]] * 2
+    assert [list(kernel_sources(e.ukd)) for e in bundles["prep"].entries] == [[None]]
 
 
 def test_the_emitted_file_list_matches_the_preview(generator, tmp_path):
@@ -419,71 +631,220 @@ def _expect(tmp_path, mutate, message):
         _load(tmp_path, mutate)
 
 
-def test_selection_members_may_not_sit_beside_slots(tmp_path):
-    _expect(
-        tmp_path,
+def _rename_prep(raw, name):
+    raw["slots"][0]["name"] = name
+    raw["packs"][0]["slot"] = name
+
+
+def _drop_prep_pack(raw):
+    raw["packs"] = [p for p in raw["packs"] if p["slot"] != "prep"]
+
+
+# Each row mutates the three-slot config and names the config error that refuses it; the
+# message fragment is the loader's wording for the rule.
+REFUSALS = [
+    (
+        "kmd_fields_beside_slots",
         lambda raw: raw.update(kmd_fields=[{"name": "x", "type": "int"}]),
         r"key 'kmd_fields' must not appear beside 'slots'",
-    )
-    _expect(
-        tmp_path,
+    ),
+    (
+        "engine_knobs_beside_slots",
         lambda raw: raw["engine"].update(knobs=["block_m"]),
         r"key 'engine.knobs' must not appear beside 'slots'",
-    )
-    _expect(
-        tmp_path,
+    ),
+    (
+        "specialization_beside_slots",
         lambda raw: raw.update(specialization={"metadata_fields": []}),
         r"key 'specialization' must not appear beside 'slots'",
-    )
-    _expect(
-        tmp_path,
+    ),
+    (
+        "heuristic_beside_slots",
         lambda raw: raw["engine"].update(heuristic="native"),
         r"engine.heuristic 'native' must not appear beside 'slots'",
-    )
-
-
-def test_an_empty_slot_list_is_refused(tmp_path):
-    _expect(
-        tmp_path,
+    ),
+    (
+        "empty_slot_list",
         lambda raw: raw.update(slots=[]),
         r"'slots' must declare at least one slot",
-    )
+    ),
+    (
+        "name_uppercase",
+        lambda raw: _rename_prep(raw, "Prep"),
+        r"slot name 'Prep' in slots must match \^\[a-z\]\[a-z0-9_\]\*\$",
+    ),
+    (
+        "name_digit_start",
+        lambda raw: _rename_prep(raw, "9p"),
+        r"slot name '9p' in slots must match",
+    ),
+    (
+        "name_global",
+        lambda raw: _rename_prep(raw, "global"),
+        r"slot name 'global' in slots is reserved for engine-wide knobs",
+    ),
+    (
+        "duplicate_name",
+        lambda raw: raw["slots"][2].update(name="dkdv"),
+        r"slot name 'dkdv' is declared more than once",
+    ),
+    (
+        "pack_without_slot",
+        lambda raw: raw["packs"][0].pop("slot"),
+        r"pack 'prep' declares no 'slot', which every pack of a slotted engine must",
+    ),
+    (
+        "pack_names_undeclared_slot",
+        lambda raw: raw["packs"][0].update(slot="nope"),
+        r"pack 'prep' names slot 'nope', which this config does not declare",
+    ),
+    (
+        "ws_token_bare",
+        lambda raw: raw["engine"].update(shared_workspace="bytes"),
+        r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
+    ),
+    (
+        "ws_token_root_only",
+        lambda raw: raw["engine"].update(shared_workspace="ws."),
+        r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
+    ),
+    (
+        "ws_token_not_a_string",
+        lambda raw: raw["engine"].update(shared_workspace=3),
+        r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
+    ),
+    (
+        "slot_without_pack",
+        _drop_prep_pack,
+        r"slot 'prep' declares no packs",
+    ),
+    (
+        # `num_warps` is dkdv's field, not dq's.
+        "knob_not_declared_in_slot_kmd",
+        lambda raw: raw["slots"][2].update(knobs=["block_m", "num_warps"]),
+        r"slots\[dq\].knobs names 'num_warps', which no kmd_fields entry declares",
+    ),
+    (
+        "string_knob",
+        lambda raw: raw["slots"][1].update(knobs=["dtype"]),
+        r"slots\[dkdv\].knobs names 'dtype', declared in kmd_fields with type 'string'",
+    ),
+    (
+        "duplicate_knob",
+        lambda raw: raw["slots"][1].update(knobs=["block_m", "block_m"]),
+        r"slots\[dkdv\].knobs lists \['block_m'\] more than once",
+    ),
+    (
+        # num_warps belongs to dkdv's KMD, not dq's.
+        "kernel_metadata_outside_slot_kmd",
+        lambda raw: raw["packs"][2]["kernels"][0]["metadata"].update(num_warps=4),
+        r"slot 'dq': pack 'dq_causal' kernel 'bwd.dq_causal_m64': metadata names 'num_warps'",
+    ),
+    (
+        "specialization_not_a_partition",
+        lambda raw: raw["slots"][1]["specialization"].update(
+            matcher_only_fields=["block_m", "dtype"]
+        ),
+        r"slot 'dkdv': 'specialization' must partition the declared kmd_fields",
+    ),
+    (
+        "missing_discriminator",
+        lambda raw: raw["packs"][3].pop("discriminator"),
+        r"declare no 'discriminator', but slot 'dq' has 2 packs",
+    ),
+    (
+        "lone_pack_discriminator",
+        lambda raw: raw["packs"][1].update(discriminator="x"),
+        r"declares a discriminator, but slot 'dkdv' has only one pack",
+    ),
+    (
+        "duplicate_discriminator",
+        lambda raw: raw["packs"][3].update(discriminator="causal"),
+        r"packs declare duplicate discriminators",
+    ),
+    (
+        "ranker_not_a_boolean",
+        lambda raw: raw["slots"][1].update(ranker="yes"),
+        r"slots\[dkdv\].ranker must be true or false",
+    ),
+    # A YAML list or mapping is unhashable: it must not escape as a TypeError.
+    (
+        "pack_slot_list",
+        lambda raw: raw["packs"][0].update(slot=["prep"]),
+        r"pack 'prep' declares slot .*, which must be a slot name",
+    ),
+    (
+        "pack_slot_mapping",
+        lambda raw: raw["packs"][0].update(slot={"name": "prep"}),
+        r"pack 'prep' declares slot .*, which must be a slot name",
+    ),
+    (
+        "unknown_slot_key",
+        lambda raw: raw["slots"][1].update(knob=["block_m"]),
+        r"slot 'dkdv' declares \['(knob|typo)'\]",
+    ),
+    (
+        "unknown_slot_kmd_field_key",
+        lambda raw: raw["slots"][1]["kmd_fields"][0].update(typo="x"),
+        r"slot 'dkdv' kmd_fields entry 'block_m' declares \['(knob|typo)'\]",
+    ),
+    (
+        "slot_kmd_field_repeated",
+        lambda raw: raw["slots"][1]["kmd_fields"].append(
+            {"name": "block_m", "type": "int"}
+        ),
+        r"slots\[dkdv\]\.kmd_fields declares \['block_m'\] more than once",
+    ),
+    (
+        "slot_kmd_field_optional",
+        lambda raw: raw["slots"][1]["kmd_fields"][0].update(optional=True),
+        r"kmd_fields\[\]\.optional is not a real key.*Affected entries: block_m",
+    ),
+    (
+        "slot_kmd_field_default",
+        lambda raw: raw["slots"][1]["kmd_fields"][0].update(default=True),
+        r"kmd_fields\[\]\.default is not a real key.*Affected entries: block_m",
+    ),
+]
+
+
+def _reduce(raw, *, feature=("dtype",), divides=None):
+    knob = {"name": "block_m"}
+    if divides is not None:
+        knob["divides"] = divides
+    raw["reduction"] = {
+        "fields": {"feature": list(feature), "performance": [knob], "ignored": []}
+    }
+
+
+REFUSALS += [
+    (
+        "reduction_divides_names_no_slot_field",
+        lambda raw: _reduce(raw, divides="seqlen"),
+        r"'divides' names 'seqlen', which is not a kmd_fields name: "
+        r"\['block_m', 'dtype', 'num_warps'\]",
+    ),
+    (
+        "reduction_feature_names_no_slot_field",
+        lambda raw: _reduce(raw, feature=["dtype", "nonesuch"]),
+        r"'reduction.fields.feature' names \['nonesuch'\], which no slot's",
+    ),
+]
+
+
+def test_reduction_divides_may_name_a_field_only_one_slot_declares(tmp_path):
+    # `num_warps` is declared by the dkdv slot alone.
+    config = _load(tmp_path, lambda raw: _reduce(raw, divides="num_warps"))
+    assert config.slots
 
 
 @pytest.mark.parametrize(
-    "name,message",
-    [
-        ("Prep", r"slot name 'Prep' in slots must match \^\[a-z\]\[a-z0-9_\]\*\$"),
-        ("9p", r"slot name '9p' in slots must match"),
-        ("global", r"slot name 'global' in slots is reserved for engine-wide knobs"),
-    ],
+    "mutate,message",
+    [(mutate, message) for _, mutate, message in REFUSALS],
+    ids=[name for name, _, _ in REFUSALS],
 )
-def test_a_slot_name_follows_the_loaders_rule(tmp_path, name, message):
-    def rename(raw):
-        raw["slots"][0]["name"] = name
-        raw["packs"][0]["slot"] = name
-
-    _expect(tmp_path, rename, message)
-
-
-def test_slot_names_are_unique(tmp_path):
-    def duplicate(raw):
-        raw["slots"][2]["name"] = "dkdv"
-
-    _expect(tmp_path, duplicate, r"slot name 'dkdv' is declared more than once")
-
-
-def test_every_pack_names_a_declared_slot(tmp_path):
-    _expect(
-        tmp_path,
-        lambda raw: raw["packs"][0].pop("slot"),
-        r"pack 'prep' declares no 'slot', which every pack of a slotted engine must",
-    )
-    _expect(
-        tmp_path,
-        lambda raw: raw["packs"][0].update(slot="nope"),
-        r"pack 'prep' names slot 'nope', which this config does not declare",
-    )
+def test_a_slotted_config_is_refused(tmp_path, mutate, message):
+    _expect(tmp_path, mutate, message)
 
 
 def test_an_unslotted_config_refuses_a_pack_slot_and_a_shared_workspace(
@@ -504,129 +865,6 @@ def test_an_unslotted_config_refuses_a_pack_slot_and_a_shared_workspace(
     path.write_text(yaml.safe_dump(shared), encoding="utf-8")
     with pytest.raises(ConfigError, match=r"key 'shared_workspace' requires 'slots'"):
         load_config(path)
-
-
-@pytest.mark.parametrize("token", ["bytes", "ws.", 3])
-def test_the_shared_workspace_token_lives_under_the_ws_root(tmp_path, token):
-    _expect(
-        tmp_path,
-        lambda raw: raw["engine"].update(shared_workspace=token),
-        r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
-    )
-
-
-def test_a_slot_with_no_pack_is_refused(tmp_path):
-    def drop_prep_pack(raw):
-        raw["packs"] = [p for p in raw["packs"] if p["slot"] != "prep"]
-
-    _expect(tmp_path, drop_prep_pack, r"slot 'prep' declares no packs")
-
-
-def test_knobs_are_checked_against_their_own_slots_int_fields(tmp_path):
-    # `num_warps` is dkdv's field, not dq's.
-    _expect(
-        tmp_path,
-        lambda raw: raw["slots"][2].update(knobs=["block_m", "num_warps"]),
-        r"slots\[dq\].knobs names 'num_warps', which no kmd_fields entry declares",
-    )
-
-    def string_knob(raw):
-        raw["slots"][1]["knobs"] = ["dtype"]
-
-    _expect(
-        tmp_path,
-        string_knob,
-        r"slots\[dkdv\].knobs names 'dtype', declared in kmd_fields with type 'string'",
-    )
-    _expect(
-        tmp_path,
-        lambda raw: raw["slots"][1].update(knobs=["block_m", "block_m"]),
-        r"slots\[dkdv\].knobs lists \['block_m'\] more than once",
-    )
-
-
-def test_kernel_metadata_is_checked_against_its_slots_kmd(tmp_path):
-    def foreign_field(raw):
-        # num_warps belongs to dkdv's KMD, not dq's.
-        raw["packs"][2]["kernels"][0]["metadata"]["num_warps"] = 4
-
-    _expect(
-        tmp_path,
-        foreign_field,
-        r"slot 'dq': pack 'dq_causal' kernel 'bwd.dq_causal_m64': metadata names 'num_warps'",
-    )
-
-
-def test_each_slot_declares_its_own_specialization(tmp_path):
-    def partial(raw):
-        raw["slots"][1]["specialization"]["matcher_only_fields"] = ["block_m", "dtype"]
-
-    _expect(
-        tmp_path,
-        partial,
-        r"slot 'dkdv': 'specialization' must partition the declared kmd_fields",
-    )
-
-
-def test_a_multi_pack_slot_needs_discriminators_and_a_lone_pack_must_not_have_one(
-    tmp_path,
-):
-    _expect(
-        tmp_path,
-        lambda raw: raw["packs"][3].pop("discriminator"),
-        r"declare no 'discriminator', but slot 'dq' has 2 packs",
-    )
-    _expect(
-        tmp_path,
-        lambda raw: raw["packs"][1].update(discriminator="x"),
-        r"declares a discriminator, but slot 'dkdv' has only one pack",
-    )
-    _expect(
-        tmp_path,
-        lambda raw: raw["packs"][3].update(discriminator="causal"),
-        r"packs declare duplicate discriminators",
-    )
-
-
-def test_a_slot_ranker_flag_is_a_boolean(tmp_path):
-    _expect(
-        tmp_path,
-        lambda raw: raw["slots"][1].update(ranker="yes"),
-        r"slots\[dkdv\].ranker must be true or false",
-    )
-
-
-@pytest.mark.parametrize("slot", [["prep"], {"name": "prep"}])
-def test_a_pack_slot_that_is_not_a_name_is_a_config_error(tmp_path, slot):
-    # A YAML list or mapping is unhashable: it must not escape as a TypeError.
-    _expect(
-        tmp_path,
-        lambda raw: raw["packs"][0].update(slot=slot),
-        r"pack 'prep' declares slot .*, which must be a slot name",
-    )
-
-
-@pytest.mark.parametrize(
-    "mutate,scope",
-    [
-        (lambda raw: raw["slots"][1].update(knob=["block_m"]), r"slot 'dkdv'"),
-        (
-            lambda raw: raw["slots"][1]["kmd_fields"][0].update(typo="x"),
-            r"slot 'dkdv' kmd_fields entry 'block_m'",
-        ),
-    ],
-)
-def test_an_unknown_key_on_a_slot_or_its_kmd_field_is_refused(tmp_path, mutate, scope):
-    _expect(tmp_path, mutate, scope + r" declares \['(knob|typo)'\]")
-
-
-@pytest.mark.parametrize("key", ["optional", "default"])
-def test_a_deprecated_kmd_field_key_on_a_slot_is_refused(tmp_path, key):
-    _expect(
-        tmp_path,
-        lambda raw: raw["slots"][1]["kmd_fields"][0].update({key: True}),
-        rf"kmd_fields\[\]\.{key} is not a real key.*Affected entries: block_m",
-    )
 
 
 # --- sdk_version and behavior_notes reach the slotted UED -------------------------------

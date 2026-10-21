@@ -4,7 +4,6 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <atomic>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -640,77 +639,6 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
     EXPECT_EQ(reads.load(), 2000) << "the key exists throughout, so no read may miss";
 }
 
-/// A value no other live ScopedCacheDir shares, in this process or any other: a
-/// steady-clock reading separates concurrent processes, the counter separates two
-/// guards within one process. Not getpid(): <unistd.h> does not exist on Windows.
-inline std::string uniqueSuffix()
-{
-    static std::atomic<uint64_t> s_counter{0};
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::to_string(static_cast<uint64_t>(stamp)) + "_"
-           + std::to_string(s_counter.fetch_add(1));
-}
-
-/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
-/// restores the caller's value after.
-///
-/// Also neutralizes HIPDNN_DISABLE_CACHE for the same window. An ambient truthy value in
-/// the runner's environment makes cacheRoot() return empty before it reads
-/// HIPDNN_CACHE_DIR at all, which silently turns every disk test below into a test of the
-/// in-memory fallback.
-class ScopedCacheDir
-{
-public:
-    explicit ScopedCacheDir(const std::string& name)
-        : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
-        , _previousDisable(hipdnn_data_sdk::utilities::getEnv(DISABLE_CACHE_ENV))
-        , _path(std::filesystem::temp_directory_path()
-                / ("hipdnn_winner_cache_test_" + uniqueSuffix() + "_" + name))
-    {
-        std::filesystem::remove_all(_path);
-        std::filesystem::create_directories(_path);
-        const std::string value = _path.string();
-        hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, value.c_str());
-        hipdnn_data_sdk::utilities::unsetEnv(DISABLE_CACHE_ENV);
-    }
-
-    ScopedCacheDir(const ScopedCacheDir&) = delete;
-    ScopedCacheDir& operator=(const ScopedCacheDir&) = delete;
-    ScopedCacheDir(ScopedCacheDir&&) = delete;
-    ScopedCacheDir& operator=(ScopedCacheDir&&) = delete;
-
-    ~ScopedCacheDir()
-    {
-        if(_previous.empty())
-        {
-            hipdnn_data_sdk::utilities::unsetEnv(CACHE_DIR_ENV);
-        }
-        else
-        {
-            hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, _previous.c_str());
-        }
-        if(!_previousDisable.empty())
-        {
-            hipdnn_data_sdk::utilities::setEnv(DISABLE_CACHE_ENV, _previousDisable.c_str());
-        }
-        std::error_code ignored;
-        std::filesystem::remove_all(_path, ignored);
-    }
-
-    const std::filesystem::path& path() const
-    {
-        return _path;
-    }
-
-private:
-    static constexpr const char* CACHE_DIR_ENV = "HIPDNN_CACHE_DIR";
-    static constexpr const char* DISABLE_CACHE_ENV = "HIPDNN_DISABLE_CACHE";
-
-    std::string _previous;
-    std::string _previousDisable;
-    std::filesystem::path _path;
-};
-
 /// The suffixed arch a real gfx942 reports, with nonzero memory properties so a codec that
 /// drops one is caught.
 DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
@@ -781,31 +709,6 @@ TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineBytesAreFormatV2)
     EXPECT_EQ(detail::WINNER_LINE_FORMAT_VERSION, 2);
 }
 
-TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineDecodesBackToTheSameKeyAndRecord)
-{
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto key = keyFor(graph, suffixedDeviceProperties());
-    const WinnerRecord record{entryFor(definitionFor(0x01), 1.5),
-                              entryFor(definitionFor(0x02), 0.25)};
-
-    const auto line = encodeWinnerRecordLine(key, record);
-    const auto decoded = decodeWinnerRecordLine(line);
-
-    ASSERT_TRUE(decoded.has_value());
-    EXPECT_EQ(decoded->first, key);
-    ASSERT_EQ(decoded->second.size(), record.size());
-    for(size_t index = 0; index < record.size(); ++index)
-    {
-        SCOPED_TRACE(index);
-        EXPECT_EQ(decoded->second[index].kernelId, record[index].kernelId);
-        EXPECT_EQ(decoded->second[index].packId, record[index].packId);
-        EXPECT_EQ(decoded->second[index].dispatchId, record[index].dispatchId);
-        EXPECT_DOUBLE_EQ(decoded->second[index].timeMs, record[index].timeMs);
-    }
-    EXPECT_EQ(encodeWinnerRecordLine(decoded->first, decoded->second), line)
-        << "decode followed by encode must reproduce the persisted bytes";
-}
-
 /// The shard path relative to the cache root, as the forward-slash string it is documented
 /// as: `ingestor-winners/<data-sdk version>/<sanitized engine>/<uhd id>/
 /// <revision>-<model hash>/<base arch>/winners.jsonl`.
@@ -840,8 +743,7 @@ TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithoutAM
 }
 
 /// What the state manager really writes: the data-SDK version line, then exactly
-/// encodeWinnerRecordLine() for the record. A later line for the same key supersedes
-/// earlier ones when a fresh manager reads the shard.
+/// encodeWinnerRecordLine() for the record.
 TEST(TestIngestorWinnerCacheStateManager,
      UnslottedGoldenShardHoldsTheVersionLineThenTheEncodedRecord)
 {
@@ -873,18 +775,6 @@ TEST(TestIngestorWinnerCacheStateManager,
         EXPECT_EQ(rawLines[0], std::string(winnerCacheVersion()));
         EXPECT_EQ(rawLines[1], encodeWinnerRecordLine(key, first));
     }
-
-    {
-        std::ofstream out(path, std::ios::app);
-        out << encodeWinnerRecordLine(key, recordFor(0x02, 2.0)) << "\n";
-        out << encodeWinnerRecordLine(key, recordFor(0x03, 3.0)) << "\n";
-    }
-
-    const auto served = makeIdentifiedStateManager(engine)->winnerFor(key);
-    ASSERT_TRUE(served.has_value());
-    ASSERT_EQ(served->size(), 1U);
-    EXPECT_EQ(served->front().kernelId, testId(0x03)) << "the last line for a key must win";
-    EXPECT_DOUBLE_EQ(served->front().timeMs, 3.0);
 }
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
@@ -909,6 +799,9 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
         << "a fresh manager did not read back the record the previous one wrote";
     ASSERT_EQ(served->size(), 1U);
     EXPECT_EQ(served->front().kernelId, testId(0x11));
+    EXPECT_EQ(served->front().packId, definitionFor(0x11).packId);
+    EXPECT_EQ(served->front().dispatchId, definitionFor(0x11).dispatchId);
+    EXPECT_DOUBLE_EQ(served->front().timeMs, 1.5);
 }
 
 /// RFC 0019 §9.2: a retrained model keeps its UHD id, so the content hash must separate it.

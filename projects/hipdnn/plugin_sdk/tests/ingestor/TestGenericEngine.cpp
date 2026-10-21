@@ -979,7 +979,7 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
 TEST(TestIngestorGenericEngine,
      UnslottedGoldenGetDetailsAdvertisesBareKmdFieldIdsAfterTheBenchmarkingKnob)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    // Knob contents are pinned by TestGenericPlanBuilder; this test fixes order and ids.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
     const StubEngine engine(
@@ -999,35 +999,8 @@ TEST(TestIngestorGenericEngine,
 
     EXPECT_EQ(knobs[0]->knobId(), "global.benchmarking");
     EXPECT_EQ(knobs[0]->description(), "Enable benchmarking");
-    EXPECT_EQ(knobs[0]->defaultValueAs<IntValue>().value(), 0);
-    EXPECT_EQ(knobs[0]->constraintAs<IntConstraint>().min_value(), 0);
-    EXPECT_EQ(knobs[0]->constraintAs<IntConstraint>().max_value(), 1);
-    EXPECT_EQ(knobs[0]->constraintAs<IntConstraint>().step(), 1);
-
     EXPECT_EQ(knobs[1]->knobId(), "block_size");
-    EXPECT_EQ(knobs[1]->description(),
-              "Kernel metadata field 'block_size' of engine 'test:engine'");
-    EXPECT_EQ(knobs[1]->defaultValueAs<IntValue>().value(), 64);
-    const auto& blockSize = knobs[1]->constraintAs<IntConstraint>();
-    EXPECT_EQ(blockSize.min_value(), 64);
-    EXPECT_EQ(blockSize.max_value(), 64);
-    EXPECT_EQ(blockSize.step(), 1);
-    ASSERT_NE(blockSize.valid_values(), nullptr);
-    ASSERT_EQ(blockSize.valid_values()->size(), 1U);
-    EXPECT_EQ(blockSize.valid_values()->Get(0), 64);
-
     EXPECT_EQ(knobs[2]->knobId(), "dtype");
-    EXPECT_EQ(knobs[2]->description(),
-              "Kernel metadata field 'dtype' of engine 'test:engine'"
-              " (ordinal: an index into the field's value set)");
-    EXPECT_EQ(knobs[2]->defaultValueAs<IntValue>().value(), 0);
-    const auto& dtype = knobs[2]->constraintAs<IntConstraint>();
-    EXPECT_EQ(dtype.min_value(), 0);
-    EXPECT_EQ(dtype.max_value(), 0);
-    EXPECT_EQ(dtype.step(), 1);
-    ASSERT_NE(dtype.valid_values(), nullptr);
-    ASSERT_EQ(dtype.valid_values()->size(), 1U);
-    EXPECT_EQ(dtype.valid_values()->Get(0), 0);
 }
 
 /// An unslotted descriptor set with one matcher, one dispatch and one kernel, built the
@@ -1072,54 +1045,48 @@ DescriptorSet makeUnslottedGoldenSet(bool withRanker)
 /// dispatches and packs. Expected digests were computed over that JSON independently of
 /// the C++ (sorted keys, no whitespace); any change to what an unslotted engine hashes, or
 /// how, changes them and orphans every trained model's `trained_against`.
-TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionOfAnEngineWithoutARanker)
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsTheSetWithAndWithoutARanker)
 {
-    const auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
-
     EXPECT_EQ(
-        engineSelectorRevision(set),
+        engineSelectorRevision(makeUnslottedGoldenSet(/*withRanker=*/false)),
         "generic-untuned-v1/a19484e1d5bf56d1e57c4b26c42f5af909e3f26325591a6c0bf925b06fde09f6");
-}
-
-TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionOfAnEngineWithARanker)
-{
-    const auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
-
     EXPECT_EQ(
-        engineSelectorRevision(set),
+        engineSelectorRevision(makeUnslottedGoldenSet(/*withRanker=*/true)),
         "generic-untuned-v1/08d0a086e080663548bcda1ae0e01b557cd58734e6d8281839e337ae6de179b2");
 }
 
 /// No ranker: no UHD id, no model hash, and nothing a cached ranking could be invalidated
 /// by, so the disk cache stays enabled.
-TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentityWithoutARanker)
-{
-    const auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
-    const auto identity = engineIdentity(set);
-
-    EXPECT_EQ(identity.name, "test:engine");
-    EXPECT_EQ(identity.version.str(), "1.0.0");
-    EXPECT_EQ(identity.uhdId, "");
-    EXPECT_EQ(identity.modelHash, "");
-    EXPECT_TRUE(identity.contentIdentified);
-    EXPECT_EQ(engineModelHash(set), "");
-    EXPECT_TRUE(engineContentIdentified(set));
-}
-
+///
 /// With a ranker the model hash is the SHA-256 of the compact JSON `{"<metric>@default":
 /// <ranker identity>}` (here the metric-less ranker, key "@default"), computed
 /// independently of the C++.
-TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentityWithARanker)
+TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentity)
 {
-    const auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
-    const auto identity = engineIdentity(set);
+    {
+        const auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+        const auto identity = engineIdentity(set);
 
-    EXPECT_EQ(identity.name, "test:engine");
-    EXPECT_EQ(identity.version.str(), "1.0.0");
-    EXPECT_EQ(identity.uhdId, "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2");
-    EXPECT_EQ(identity.modelHash,
-              "b8da6ea79cf2e67a5ad47173d35c663ab163fba11d23dce8cc193c0d02c164ee");
-    EXPECT_TRUE(identity.contentIdentified);
+        EXPECT_EQ(identity.name, "test:engine");
+        EXPECT_EQ(identity.version.str(), "1.0.0");
+        EXPECT_EQ(identity.uhdId, "");
+        EXPECT_EQ(identity.modelHash, "");
+        EXPECT_TRUE(identity.contentIdentified);
+        EXPECT_EQ(engineModelHash(set), "");
+        EXPECT_TRUE(engineContentIdentified(set));
+    }
+
+    {
+        const auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+        const auto identity = engineIdentity(set);
+
+        EXPECT_EQ(identity.name, "test:engine");
+        EXPECT_EQ(identity.version.str(), "1.0.0");
+        EXPECT_EQ(identity.uhdId, "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2");
+        EXPECT_EQ(identity.modelHash,
+                  "b8da6ea79cf2e67a5ad47173d35c663ab163fba11d23dce8cc193c0d02c164ee");
+        EXPECT_TRUE(identity.contentIdentified);
+    }
 }
 
 /// A ranker naming a model artifact with no digest cannot be versioned, so the engine is
@@ -1191,6 +1158,36 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenDefaultSelectorRevisionIsTheUedId
     EXPECT_NE(stale.reason.find(", engine reports " + expected), std::string::npos) << stale.reason;
 
     hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
+}
+
+/// The unslotted golden set with its one kernel spelled as a multi-launch `sources` map
+/// (two KPACK launches, no `source`). `sources` is part of the selector revision, so the
+/// digests differ from the single-source ones above.
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsAKernelSpelledAsSources)
+{
+    const auto withSources = [](bool withRanker) {
+        auto set = makeUnslottedGoldenSet(withRanker);
+        auto& kernel = set.packs.front().kernels.front();
+        kernel.source = {};
+        KernelSource decode;
+        decode.kind = KernelSourceKind::KPACK;
+        decode.library = "kpack/golden.kpack";
+        decode.tocKey = "golden/decode";
+        decode.symbol = "decode_kernel";
+        decode.sha256 = std::string(64, '1');
+        KernelSource merge = decode;
+        merge.tocKey = "golden/merge";
+        merge.symbol = "merge_kernel";
+        merge.sha256 = std::string(64, '2');
+        kernel.sources = {{"decode", decode}, {"merge", merge}};
+        return set;
+    };
+    EXPECT_EQ(
+        engineSelectorRevision(withSources(/*withRanker=*/false)),
+        "generic-untuned-v1/aae4dd24617344167bbc75680a10a7646cb2bda7efd47ecf12a924c3a01c93c4");
+    EXPECT_EQ(
+        engineSelectorRevision(withSources(/*withRanker=*/true)),
+        "generic-untuned-v1/647d7b25549616277009966aed87c0ef50ca1a22979729c5e8daa154cfbb5e72");
 }
 
 } // namespace

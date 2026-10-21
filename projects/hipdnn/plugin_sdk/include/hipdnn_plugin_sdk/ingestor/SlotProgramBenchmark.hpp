@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,27 @@
 
 namespace hipdnn_plugin_sdk::ingestor
 {
+
+namespace detail
+{
+
+/// The id of a slotted program as an enumerated candidate names it: `<slot>=<kernel id>` for
+/// every slot, in slot order, joined by `|`.
+/// @param part Called with each slot index; returns that slot's name and kernel id as a tuple of
+///        references.
+template <typename TPart>
+std::string compositeCandidateId(size_t slotCount, const TPart& part)
+{
+    std::string id;
+    for(size_t slot = 0; slot < slotCount; ++slot)
+    {
+        const auto& [name, kernelId] = part(slot);
+        id += (slot == 0 ? "" : "|") + name + "=" + toString(kernelId);
+    }
+    return id;
+}
+
+} // namespace detail
 
 /// The IPlan of a slotted engine with benchmarking enabled (RFC 0021 §7). Slots share one stream
 /// and have no time of their own, so it times whole programs, varying one slot at a time, on the
@@ -193,6 +215,8 @@ private:
         std::vector<FailedRun> failed;
         /// The winners program's own outcome; unset when it was not timed.
         std::optional<detail::SampleOutcome> winnersRun;
+        /// The winners program that was timed, as a kernel index per slot; set with winnersRun.
+        std::vector<size_t> winners;
         bool referenceUsable = true;
     };
 
@@ -210,13 +234,10 @@ private:
     /// The composite id of @p picks, as an enumerated candidate names it.
     std::string describe(const std::vector<size_t>& picks) const
     {
-        std::string text;
-        for(size_t slot = 0; slot < _slots.size(); ++slot)
-        {
-            text += (slot == 0 ? "" : "|") + _slots[slot].name + "="
-                    + toString(_slots[slot].kernels[picks[slot]].kernelId);
-        }
-        return text;
+        return detail::compositeCandidateId(_slots.size(), [this, &picks](size_t slot) {
+            return std::forward_as_tuple(_slots[slot].name,
+                                         _slots[slot].kernels[picks[slot]].kernelId);
+        });
     }
 
     /// Times the program of @p picks; empty when the sample asked for the comparison to restart
@@ -347,10 +368,9 @@ private:
             }
         }
 
-        // Each slot's winner, and whether every slot has a measured one to name in a program
-        // record: a slot whose kernels all failed has none, and keeps its reference pick.
+        // Each slot's winner. An uncovered slot always has its reference pick timed, so every
+        // slot has a measured winner to name in the program record.
         std::vector<size_t> winners = reference;
-        bool everySlotRanked = true;
         for(size_t slot = 0; slot < _slots.size(); ++slot)
         {
             auto& timed = settled.timed[slot];
@@ -362,11 +382,6 @@ private:
             std::stable_sort(timed.begin(), timed.end(), [](const Timed& lhs, const Timed& rhs) {
                 return lhs.timing.robustMeanMs < rhs.timing.robustMeanMs;
             });
-            if(timed.empty())
-            {
-                everySlotRanked = false;
-                continue;
-            }
             winners[slot] = timed.front().kernel;
 
             WinnerRecord ranking;
@@ -388,18 +403,15 @@ private:
         if(winnersRun->timing.has_value())
         {
             settled.served = winners;
-            if(everySlotRanked)
+            ProgramRecord program;
+            program.picks.reserve(_slots.size());
+            for(size_t slot = 0; slot < _slots.size(); ++slot)
             {
-                ProgramRecord program;
-                program.picks.reserve(_slots.size());
-                for(size_t slot = 0; slot < _slots.size(); ++slot)
-                {
-                    program.picks.push_back(
-                        {_slots[slot].name, _slots[slot].kernels[winners[slot]].kernelId});
-                }
-                program.timeMs = winnersRun->timing->robustMeanMs;
-                settled.program = std::move(program);
+                program.picks.push_back(
+                    {_slots[slot].name, _slots[slot].kernels[winners[slot]].kernelId});
             }
+            program.timeMs = winnersRun->timing->robustMeanMs;
+            settled.program = std::move(program);
             if(referenceTiming.has_value()
                && winnersRun->timing->robustMeanMs > referenceTiming->robustMeanMs)
             {
@@ -419,6 +431,7 @@ private:
             settled.served = reference;
         }
         settled.winnersRun = std::move(winnersRun);
+        settled.winners = std::move(winners);
         return settled;
     }
 
@@ -461,20 +474,14 @@ private:
             for(const auto& entry : settled.timed[slot])
             {
                 auto record = kernelRecord(slot, entry.kernel);
-                record["status"] = "ok";
-                record["min_ms"] = entry.timing.minMs;
-                record["avg_ms"] = entry.timing.avgMs;
-                record["stddev_ms"] = entry.timing.stddevMs;
-                record["robust_mean_ms"] = entry.timing.robustMeanMs;
-                record["iters"] = entry.timing.iterations;
+                detail::annotateTiming(record, entry.timing);
                 HIPDNN_PLUGIN_LOG_INFO(record.dump());
             }
         }
         for(const auto& run : settled.failed)
         {
             auto record = kernelRecord(run.slot, run.kernel);
-            record["status"] = "failed";
-            record["reason"] = run.reason;
+            detail::annotateFailure(record, run.reason);
             HIPDNN_PLUGIN_LOG_INFO(record.dump());
         }
         if(settled.winnersRun.has_value())
@@ -486,7 +493,7 @@ private:
             {
                 record["device"] = _deviceIdentity;
             }
-            record["program"] = describe(settled.served);
+            record["program"] = describe(settled.winners);
             if(settled.winnersRun->timing.has_value())
             {
                 record["status"] = "ok";
@@ -494,29 +501,24 @@ private:
             }
             else
             {
-                record["status"] = "failed";
-                record["reason"] = settled.winnersRun->failureReason;
+                detail::annotateFailure(record, settled.winnersRun->failureReason);
             }
             HIPDNN_PLUGIN_LOG_INFO(record.dump());
         }
     }
 
-    /// The fields common to every kernel record, layered over the kernel's features. The
-    /// envelope is written last so a feature key can never overwrite the row's identity.
+    /// The fields common to every kernel record, layered over the kernel's features, and the slot
+    /// it belongs to.
     nlohmann::json kernelRecord(size_t slot, size_t kernelIndex) const
     {
         const auto& kernel = _slots[slot].kernels[kernelIndex];
-        nlohmann::json record = kernel.features;
-        record["event"] = "ingestor.benchmark.candidate";
-        record["benchmark"] = _benchmarkId;
-        if(!_deviceIdentity.empty())
-        {
-            record["device"] = _deviceIdentity;
-        }
+        auto record = detail::candidateRecord(kernel.features,
+                                              _benchmarkId,
+                                              _deviceIdentity,
+                                              kernel.kernelId,
+                                              kernel.packId,
+                                              kernel.dispatchId);
         record["slot"] = _slots[slot].name;
-        record["kernel"] = toString(kernel.kernelId);
-        record["pack"] = toString(kernel.packId);
-        record["dispatch"] = toString(kernel.dispatchId);
         return record;
     }
 

@@ -44,6 +44,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/detail/TopLevelArraySax.hpp>
 
 /**
@@ -428,7 +429,7 @@ inline void requireSlotVersion(const nlohmann::json& document,
 /// engine-wide knobs.
 inline void requireSlotName(const std::string& name, const std::string& where)
 {
-    if(!uhd::parser_detail::isSlotName(name))
+    if(!uhd::parser_detail::hasSlotNameForm(name))
     {
         fail("slot name '" + name + "' in " + where + " must match ^[a-z][a-z0-9_]*$");
     }
@@ -2644,6 +2645,23 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
 }
 
 /**
+ * @brief The lexicographically first `ws.*` token @p extractor's signature reads, or empty when
+ *        it reads none; the order does not depend on the extractor's hash order.
+ */
+inline std::string firstWorkspaceReference(const uhd::FeatureExtractor& extractor)
+{
+    std::string first;
+    for(const auto& reference : extractor.getVariableRefs())
+    {
+        if(isWorkspaceToken(reference) && (first.empty() || reference < first))
+        {
+            first = reference;
+        }
+    }
+    return first;
+}
+
+/**
  * @brief The `ws.*` token a slot ranker's feature signature reads, or empty when it reads none.
  *
  * The root is reserved for the shared-workspace region and kept out of every slot ranker's
@@ -2652,26 +2670,14 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
  */
 inline std::string workspaceTokenRead(const HeuristicDescriptor& model)
 {
-    constexpr std::string_view WORKSPACE_ROOT = "ws.";
     if(model.featuresSignature.empty())
     {
         return {};
     }
     try
     {
-        const uhd::FeatureExtractor extractor(model.featuresSignature, model.categoricalEncoding);
-        std::string first;
-        for(const auto& reference : extractor.getVariableRefs())
-        {
-            const bool dollar = !reference.empty() && reference.front() == '$';
-            const std::string_view bare = std::string_view(reference).substr(dollar ? 1 : 0);
-            if(bare.substr(0, WORKSPACE_ROOT.size()) == WORKSPACE_ROOT
-               && (first.empty() || reference < first))
-            {
-                first = reference;
-            }
-        }
-        return first;
+        return firstWorkspaceReference(
+            uhd::FeatureExtractor(model.featuresSignature, model.categoricalEncoding));
     }
     catch(const std::exception&)
     {

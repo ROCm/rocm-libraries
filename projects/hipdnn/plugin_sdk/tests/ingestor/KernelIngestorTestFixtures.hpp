@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <map>
@@ -24,6 +25,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -41,6 +43,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
@@ -972,21 +975,6 @@ inline EngineDescriptor
     return engine;
 }
 
-inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeIntKnobEngineConfig(
-    flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, int64_t value)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    std::vector<flatbuffers::Offset<KnobSetting>> knobSettings;
-    knobSettings.push_back(CreateKnobSettingDirect(
-        builder, knobName.c_str(), KnobValue::IntValue, CreateIntValue(builder, value).Union()));
-    auto knobsVector = builder.CreateVector(knobSettings);
-    builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
-
-    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
-}
-
 inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeFloatKnobEngineConfig(
     flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, double value)
 {
@@ -1096,6 +1084,103 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
         builder.GetBufferPointer(), builder.GetSize());
 }
 
+inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeIntKnobEngineConfig(
+    flatbuffers::FlatBufferBuilder& builder, const std::string& knobName, int64_t value)
+{
+    return makeIntKnobsEngineConfig(builder, {{knobName, value}});
+}
+
+/// A short value no other live ScopedCacheDir shares, in this process or any other: a
+/// steady-clock reading in microseconds, bounded to 8 digits, separates concurrent processes,
+/// the counter separates two guards within one process. Not getpid(): <unistd.h> does not
+/// exist on Windows. Kept short because the cache shard path nests deeply under this
+/// directory and must stay within the Windows MAX_PATH limit.
+inline std::string uniqueSuffix()
+{
+    static std::atomic<uint64_t> s_counter{0};
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+    return std::to_string(static_cast<uint64_t>(micros) % 100000000U) + "_"
+           + std::to_string(s_counter.fetch_add(1));
+}
+
+/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
+/// restores the caller's value after.
+///
+/// Also neutralizes HIPDNN_DISABLE_CACHE for the same window. An ambient truthy value in
+/// the runner's environment makes cacheRoot() return empty before it reads
+/// HIPDNN_CACHE_DIR at all, which silently turns every disk test into a test of the
+/// in-memory fallback.
+class ScopedCacheDir
+{
+public:
+    explicit ScopedCacheDir(const std::string& name)
+        : _path(std::filesystem::temp_directory_path()
+                / ("hit_" + uniqueSuffix() + "_" + name.substr(0, MAX_NAME_CHARS)))
+        , _cacheDirEnv(CACHE_DIR_ENV, _path.string())
+        , _cacheDisableEnv(DISABLE_CACHE_ENV)
+    {
+        std::filesystem::remove_all(_path);
+        std::filesystem::create_directories(_path);
+    }
+
+    ScopedCacheDir(const ScopedCacheDir&) = delete;
+    ScopedCacheDir& operator=(const ScopedCacheDir&) = delete;
+    ScopedCacheDir(ScopedCacheDir&&) = delete;
+    ScopedCacheDir& operator=(ScopedCacheDir&&) = delete;
+
+    ~ScopedCacheDir()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(_path, ignored);
+    }
+
+    const std::filesystem::path& path() const
+    {
+        return _path;
+    }
+
+private:
+    static constexpr const char* CACHE_DIR_ENV = "HIPDNN_CACHE_DIR";
+    static constexpr const char* DISABLE_CACHE_ENV = "HIPDNN_DISABLE_CACHE";
+    static constexpr size_t MAX_NAME_CHARS = 12;
+
+    std::filesystem::path _path;
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDirEnv;
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDisableEnv;
+};
+
+/// A kernel with id testId(@p seed), @p name as its name and entry point, and @p metadata.
+inline KernelDescriptor
+    makeSlotKernel(uint8_t seed, const std::string& name, MetadataValues metadata)
+{
+    KernelDescriptor kernel;
+    kernel.id = testId(seed);
+    kernel.name = name;
+    kernel.source.sourceFile = "Test.cpp";
+    kernel.source.entryPoint = name;
+    kernel.metadata = std::move(metadata);
+    return kernel;
+}
+
+/// A pack of @p kernels serving slot @p slot of ENGINE_ID, with id testId(@p packSeed).
+inline KernelDescriptorPack makeSlotPack(uint8_t packSeed,
+                                         const std::string& slot,
+                                         std::vector<KernelDescriptor> kernels,
+                                         const std::vector<std::string>& arch = {})
+{
+    KernelDescriptorPack pack;
+    pack.id = testId(packSeed);
+    pack.name = slot + " pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.arch = arch;
+    pack.slot = slot;
+    pack.kernels = std::move(kernels);
+    return pack;
+}
+
 /// A synthetic three-slot engine (prep, dkdv, dq; RFC 0021) for plan, workspace and enumeration
 /// tests. Its native graph match publishes the shared-workspace tokens, and each slot's handler
 /// records what it was launched with. Nested so that its names stay out of other fixtures' scopes.
@@ -1186,10 +1271,17 @@ class RecordingSlotHandler : public IKernelDispatchHandler<StubHandle>
     };
 
 public:
-    RecordingSlotHandler(std::string slot, SlotLog& log)
+    /// @param launches What the handler launches per kernel; empty for a single-launch kernel.
+    RecordingSlotHandler(std::string slot, SlotLog& log, std::set<std::string> launches = {})
         : _slot(std::move(slot))
         , _log(&log)
+        , _launches(std::move(launches))
     {
+    }
+
+    std::set<std::string> launchNames() const override
+    {
+        return _launches;
     }
 
     /// Scratch only, as RFC 0021 §6 requires of a slotted kernel.
@@ -1239,6 +1331,7 @@ public:
 private:
     std::string _slot;
     SlotLog* _log;
+    std::set<std::string> _launches;
 };
 
 struct SlotKernel
@@ -1270,9 +1363,16 @@ public:
     using Engine = GenericEngine<StubHandle, StubSettings, StubContext>;
 
     /// @param timer Replaces the benchmark's HIP-event timer, so benchmarking runs without a device.
+    /// @param launchesBySlot The launch names of each slot named here: its handler declares them
+    ///        and each of its kernels carries one kpack entry per name instead of `source`.
+    /// @param identity The state manager's engine identity; a named one gives the engine an
+    ///        on-disk winner cache under HIPDNN_CACHE_DIR, an empty one keeps records in memory.
     explicit SlottedEngineFixture(const std::vector<std::vector<SlotKernel>>& kernelsBySlot
                                   = defaultSlotKernels(),
-                                  BenchmarkPlan<StubHandle>::Timer timer = {})
+                                  BenchmarkPlan<StubHandle>::Timer timer = {},
+                                  const std::map<size_t, std::set<std::string>>& launchesBySlot
+                                  = {},
+                                  EngineIdentity identity = {})
     {
         graphMatchConfig() = GraphMatchConfig{};
         GraphMatchRegistry::registerSymbol(GRAPH_MATCH, &slottedGraphMatch);
@@ -1296,7 +1396,11 @@ public:
             const auto dispatchId = testId(static_cast<uint8_t>(0xD0 + slot));
             _symbols.push_back("hipdnn.kernel_ingestor.test.slotted_engine.dispatch."
                                + names[slot]);
-            _handlers.push_back(std::make_unique<RecordingSlotHandler>(names[slot], _log));
+            const auto launches = launchesBySlot.find(slot);
+            const std::set<std::string> slotLaunches
+                = launches == launchesBySlot.end() ? std::set<std::string>{} : launches->second;
+            _handlers.push_back(
+                std::make_unique<RecordingSlotHandler>(names[slot], _log, slotLaunches));
             DispatchRegistry<StubHandle>::registerSymbol(_symbols.back(), _handlers.back().get());
             dispatches.push_back({dispatchId, names[slot] + " dispatch", _symbols.back()});
 
@@ -1313,6 +1417,18 @@ public:
                 kernel.name = spec.name;
                 kernel.source.sourceFile = "Test.cpp";
                 kernel.source.entryPoint = spec.name;
+                if(!slotLaunches.empty())
+                {
+                    kernel.source = KernelSource{};
+                    for(const auto& launch : slotLaunches)
+                    {
+                        kernel.sources.emplace(
+                            launch,
+                            makeKpackSource("kpack/test.kpack",
+                                            std::string(spec.name) + "/" + launch,
+                                            launch + "_kernel"));
+                    }
+                }
                 kernel.metadata = {{BLOCK_M, MetadataValue{spec.blockM}},
                                    {SCRATCH, MetadataValue{spec.scratch}}};
                 pack.kernels.push_back(std::move(kernel));
@@ -1340,7 +1456,10 @@ public:
             std::move(dispatches),
             GRAPH_MATCH,
             SHARED_TOKEN,
-            "engine 'slotted fixture'");
+            "engine 'slotted fixture'",
+            KernelIngestorStateManager<StubHandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
+            std::move(identity));
+        _descriptor = engine;
         _manager = manager.get();
         _engine = std::make_unique<Engine>(
             std::move(engine),
@@ -1384,6 +1503,19 @@ public:
         return *_manager;
     }
 
+    /// The execution settings the engine's plan builder reads from @p config, without building a
+    /// plan: what initializeExecutionSettings alone accepts or rejects.
+    StubSettings
+        settingsFor(const TestGraph& graph,
+                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config)
+    {
+        const GenericPlanBuilder<StubHandle, StubSettings, StubContext> builder(
+            _descriptor, *_manager, _resolver);
+        StubSettings settings;
+        builder.initializeExecutionSettings(StubHandle{}, graph, config, settings);
+        return settings;
+    }
+
     /// Builds the plan @p config selects for @p graph.
     StubContext planFor(const TestGraph& graph,
                         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config)
@@ -1401,6 +1533,7 @@ private:
     std::vector<std::unique_ptr<RecordingSlotHandler>> _handlers;
     const KernelIngestorStateManager<StubHandle>* _manager = nullptr;
     std::unique_ptr<Engine> _engine;
+    EngineDescriptor _descriptor;
 };
 
 } // namespace slotted

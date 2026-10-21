@@ -7,13 +7,16 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -23,8 +26,10 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 /**
  * @file TestSlottedStateManager.cpp
@@ -37,8 +42,16 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
 using Manager = KernelIngestorStateManager<StubHandle>;
+
+// Catalogs hold pointers into each slot's definitions, which stay valid only while the manager
+// stays where it was built.
+static_assert(!std::is_copy_constructible_v<Manager> && !std::is_copy_assignable_v<Manager>
+                  && !std::is_move_constructible_v<Manager> && !std::is_move_assignable_v<Manager>,
+              "the state manager must be pinned: its catalogs point into its own storage");
 
 constexpr const char* GRAPH_MATCH = "hipdnn.kernel_ingestor.test.slotted.graph_match";
 constexpr const char* WS_BYTES = "ws.bytes";
@@ -121,25 +134,16 @@ KernelDescriptorPack slotPack(uint8_t packSeed,
                               const std::vector<KernelSpec>& kernels,
                               const std::vector<std::string>& arch = {})
 {
-    KernelDescriptorPack pack;
-    pack.id = testId(packSeed);
-    pack.name = slot + " pack";
-    pack.engineId = ENGINE_ID;
-    pack.dispatchId = DISPATCH_ID;
-    pack.arch = arch;
-    pack.slot = slot;
+    std::vector<KernelDescriptor> descriptors;
+    descriptors.reserve(kernels.size());
     for(const auto& spec : kernels)
     {
-        KernelDescriptor kernel;
-        kernel.id = testId(spec.seed);
-        kernel.name = spec.name;
-        kernel.source.sourceFile = "Test.cpp";
-        kernel.source.entryPoint = spec.name;
-        kernel.metadata
-            = {{BLOCK_M, MetadataValue{spec.blockM}}, {BLOCK_N, MetadataValue{spec.blockN}}};
-        pack.kernels.push_back(std::move(kernel));
+        descriptors.push_back(makeSlotKernel(
+            spec.seed,
+            spec.name,
+            {{BLOCK_M, MetadataValue{spec.blockM}}, {BLOCK_N, MetadataValue{spec.blockN}}}));
     }
-    return pack;
+    return makeSlotPack(packSeed, slot, std::move(descriptors), arch);
 }
 
 std::vector<KernelDescriptorPack> prepPacks()
@@ -198,7 +202,7 @@ std::vector<std::string> namesOf(const Catalog& catalog)
     names.reserve(catalog.entries.size());
     for(const auto& entry : catalog.entries)
     {
-        names.push_back(entry.name);
+        names.push_back(entry->name);
     }
     return names;
 }
@@ -226,15 +230,6 @@ TEST(TestSlottedStateManager, EachSlotHoldsItsOwnCatalogInKernelIdOrder)
     EXPECT_TRUE(verdict.applicable) << verdict.declineReason;
     EXPECT_TRUE(manager->isApplicable(context));
     EXPECT_EQ(verdict.sharedWorkspaceBytes, 1000U);
-}
-
-TEST(TestSlottedStateManager, AnOutOfRangeSlotIsRejected)
-{
-    const ScopedSlottedMatch symbols;
-    const auto manager = makeManager();
-    const TestGraph graph(makeGraphId(1));
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
 
     EXPECT_THROW(manager->unsortedCatalog(3, context), std::out_of_range);
     EXPECT_THROW(manager->slotName(3), std::out_of_range);
@@ -243,7 +238,7 @@ TEST(TestSlottedStateManager, AnOutOfRangeSlotIsRejected)
 TEST(TestSlottedStateManager, OneGraphMatchServesEveryAccessorOfACatalogBuild)
 {
     const ScopedSlottedMatch symbols;
-    const auto manager = makeManager();
+    const auto manager = makeManager(defaultSlots(), WS_BYTES, 4);
     const auto properties = testDeviceProperties();
 
     const TestGraph graph(makeGraphId(1));
@@ -263,47 +258,32 @@ TEST(TestSlottedStateManager, OneGraphMatchServesEveryAccessorOfACatalogBuild)
         EXPECT_EQ(manager->unsortedCatalog(slot, context).bound, validTokens()) << "slot " << slot;
     }
 
-    // Another graph is another build.
-    const TestGraph other(makeGraphId(2));
+    // Another graph is another build: the catalog key follows the graph's content, not its id.
+    ContentCarryingTestGraph::Spec otherSpec;
+    otherSpec.tensors[0].dims = {16, 8};
+    const ContentCarryingTestGraph other{otherSpec};
     const MatchContext otherContext{other, 0, properties};
     (void)manager->unsortedCatalog(2, otherContext);
     EXPECT_EQ(graphMatchState().calls, 2);
     (void)manager->unsortedCatalog(0, otherContext);
     (void)manager->unsortedCatalog(1, otherContext);
     EXPECT_EQ(graphMatchState().calls, 2);
+    EXPECT_EQ(namesOf(manager->unsortedCatalog(1, context)), (Names{"dkdv_a", "dkdv_b", "dkdv_c"}))
+        << "the rebuilt catalog is the slot's own";
+    EXPECT_EQ(graphMatchState().calls, 3) << "the evicted entry rebuilds, once";
 }
 
-TEST(TestSlottedStateManager, AGraphWithNoIdentityStillMatchesOncePerBuildNotOncePerSlot)
+TEST(TestSlottedStateManager, AGraphWithNoContentKeyStillMatchesOncePerBuildNotOncePerSlot)
 {
     const ScopedSlottedMatch symbols;
     const auto manager = makeManager();
     const auto properties = testDeviceProperties();
-    const TestGraph graph;
+    const BytelessTestGraph graph;
     const MatchContext context{graph, 0, properties};
 
     EXPECT_TRUE(manager->slotProgramVerdict(context).applicable);
 
     EXPECT_EQ(graphMatchState().calls, 1);
-}
-
-TEST(TestSlottedStateManager, AnEvictedSlotCatalogRebuildsFromOneMatch)
-{
-    const ScopedSlottedMatch symbols;
-    // Room for one graph's three slot catalogs, not a second graph's.
-    const auto manager = makeManager(defaultSlots(), WS_BYTES, 4);
-    const auto properties = testDeviceProperties();
-    const TestGraph first(makeGraphId(1));
-    const TestGraph second(makeGraphId(2));
-    const MatchContext firstContext{first, 0, properties};
-    const MatchContext secondContext{second, 0, properties};
-
-    (void)manager->unsortedCatalog(0, firstContext);
-    (void)manager->unsortedCatalog(0, secondContext);
-    ASSERT_EQ(graphMatchState().calls, 2);
-
-    EXPECT_EQ(namesOf(manager->unsortedCatalog(1, firstContext)),
-              (Names{"dkdv_a", "dkdv_b", "dkdv_c"}));
-    EXPECT_EQ(graphMatchState().calls, 3) << "the evicted entry rebuilds, once";
 }
 
 TEST(TestSlottedStateManager, AnEqualTupleInTwoSlotsIsAcceptedInBoth)
@@ -320,10 +300,10 @@ TEST(TestSlottedStateManager, AnEqualTupleInTwoSlotsIsAcceptedInBoth)
 
     ASSERT_FALSE(dkdv.entries.empty());
     ASSERT_FALSE(dq.entries.empty());
-    EXPECT_EQ(dkdv.entries.front().getIntMetadata(BLOCK_M), 64);
-    EXPECT_EQ(dq.entries.front().getIntMetadata(BLOCK_M), 64);
-    EXPECT_EQ(dkdv.entries.front().getIntMetadata(BLOCK_N), 64);
-    EXPECT_EQ(dq.entries.front().getIntMetadata(BLOCK_N), 64);
+    EXPECT_EQ(dkdv.entries.front()->getIntMetadata(BLOCK_M), 64);
+    EXPECT_EQ(dq.entries.front()->getIntMetadata(BLOCK_M), 64);
+    EXPECT_EQ(dkdv.entries.front()->getIntMetadata(BLOCK_N), 64);
+    EXPECT_EQ(dq.entries.front()->getIntMetadata(BLOCK_N), 64);
     EXPECT_TRUE(manager->slotProgramVerdict(context).applicable);
 }
 
@@ -372,22 +352,12 @@ TEST(TestSlottedStateManager, ADuplicateKernelIdInOneSlotDropsThatPack)
               (Names{"dkdv_a", "dkdv_b", "dkdv_c"}));
 }
 
-TEST(TestSlottedStateManager, AnUnslottedEngineIsOneImplicitSlotAndKeepsItsThrow)
+TEST(TestSlottedStateManager, AnUnslottedEngineIsOneImplicitSlot)
 {
     const ScopedSlottedMatch symbols;
     const TestGraph graph(makeGraphId(1));
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
-
-    // Same two kernels, same tuple: an unslotted engine still refuses to construct.
-    auto repeated = slotPack(0x24, "", {{0x25, "one", 64, 64}, {0x26, "two", 64, 64}});
-    EXPECT_THROW(Manager(slotSchema(0xA2, "kmd"),
-                         {},
-                         makeStubDispatches(),
-                         {repeated},
-                         std::make_shared<UnrankedKernelHeuristic>(),
-                         GRAPH_MATCH),
-                 std::invalid_argument);
 
     const Manager manager(slotSchema(0xA2, "kmd"),
                           {},
@@ -595,6 +565,13 @@ TEST(TestSlottedStateManager, ABadSharedWorkspaceDeclinesWithAMessageNamingTheTo
         {"NonIntegerOffsetToken",
          with("ws.lse.offset", MetadataValue{std::string{"x"}}),
          "offset token 'ws.lse.offset' is not a non-negative integer"},
+        {"TheFirstBadOffsetTokenByNameIsReported",
+         [&] {
+             auto tokens = with("ws.b.offset", MetadataValue{std::string{"x"}});
+             tokens["ws.a.offset"] = MetadataValue{int64_t{-1}};
+             return tokens;
+         }(),
+         "offset token 'ws.a.offset' is not a non-negative integer"},
     };
     for(const auto& testCase : cases)
     {
@@ -618,20 +595,6 @@ TEST(TestSlottedStateManager, ABadSharedWorkspaceDeclinesWithAMessageNamingTheTo
         }
         EXPECT_EQ(graphMatchState().calls, 1);
     }
-}
-
-TEST(TestSlottedStateManager, TheFirstOfSeveralBadOffsetTokensByNameIsReported)
-{
-    const ScopedSlottedMatch symbols;
-    graphMatchState().tokens["ws.b.offset"] = MetadataValue{std::string{"x"}};
-    graphMatchState().tokens["ws.a.offset"] = MetadataValue{int64_t{-1}};
-    const auto manager = makeManager();
-    const TestGraph graph(makeGraphId(1));
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
-
-    EXPECT_EQ(manager->slotProgramVerdict(context).declineReason,
-              "offset token 'ws.a.offset' is not a non-negative integer");
 }
 
 TEST(TestSlottedStateManager, ASharedRegionIsValidatedAgainstItsAlignedSize)
@@ -695,7 +658,12 @@ TEST(TestSlottedStateManager, ASlotListThatRepeatsANameOrIsEmptyIsRejected)
 
 TEST(TestSlottedStateManager, ACatalogKeyDistinguishesTheSlotItsCatalogBelongsTo)
 {
-    const CatalogKey unslotted{makeGraphId(1), 0};
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto makeKey = [&graph] {
+        return CatalogKey{
+            GraphContentKey{graph}, CatalogGraphFields::of(graph.getGraph()), {1, 2}, 0};
+    };
+    const CatalogKey unslotted = makeKey();
     CatalogKey slotted = unslotted;
     slotted.slot = "dq";
     CatalogKey other = unslotted;
@@ -707,8 +675,6 @@ TEST(TestSlottedStateManager, ACatalogKeyDistinguishesTheSlotItsCatalogBelongsTo
     sameSlot.slot = "dq";
     EXPECT_TRUE(slotted == sameSlot);
     EXPECT_NE(CatalogKeyHash{}(slotted), CatalogKeyHash{}(other));
-    // An unslotted key hashes as it always has: the empty slot adds nothing.
-    EXPECT_EQ(CatalogKeyHash{}(unslotted), CatalogKeyHash{}(CatalogKey{makeGraphId(1), 0}));
 }
 
 // ----- ws.* reserve ------------------------------------------------------------------------
@@ -795,10 +761,20 @@ TEST(TestSlottedStateManager, WorkspaceTokensAreNotProblemFeaturesOfASlottedEngi
     EXPECT_TRUE(hipdnn_plugin_sdk::ingestor::detail::isReservedFeatureName("$ws.bytes", true));
     EXPECT_FALSE(hipdnn_plugin_sdk::ingestor::detail::isReservedFeatureName("$ws.bytes"));
     EXPECT_FALSE(hipdnn_plugin_sdk::ingestor::detail::isReservedFeatureName("wsx.bytes", true));
+
+    using hipdnn_plugin_sdk::ingestor::detail::isWorkspaceToken;
+    EXPECT_TRUE(isWorkspaceToken("ws.bytes"));
+    EXPECT_TRUE(isWorkspaceToken("$ws.bytes"));
+    EXPECT_FALSE(isWorkspaceToken("wsx.bytes"));
+    EXPECT_FALSE(isWorkspaceToken("$other.rows.m")) << "the root is a prefix, not a substring";
+    EXPECT_FALSE(isWorkspaceToken("$"));
+    EXPECT_FALSE(isWorkspaceToken(""));
 }
 
 TEST(TestSlottedStateManager, ASlotRankerNeverSeesWorkspaceTokensButAnUnslottedOneStill)
 {
+    // The slotted engine is named, so its winner cache is read from a shard under the cache root.
+    const ScopedCacheDir cacheDir("slot_ws_tokens");
     const ScopedSlottedMatch symbols;
     const hipdnn_plugin_sdk::uhd::ScopedNativeScorer capture(CAPTURE_SYMBOL, &captureRow);
     const MatmulTestGraph matmul(8, 8, 8);
@@ -830,6 +806,37 @@ TEST(TestSlottedStateManager, ASlotRankerNeverSeesWorkspaceTokensButAnUnslottedO
     (void)unslotted->sortedCatalog(context);
     ASSERT_EQ(capturedRows().size(), 3U) << "an unslotted engine's ranker must still bind ws.*";
     EXPECT_DOUBLE_EQ(capturedRows().front().front(), 1000.0);
+}
+
+constexpr const char* DKDV_SCORE = "hipdnn.kernel_ingestor.test.slotted.dkdv_score";
+
+/// Larger tiles first: the opposite of the kernel-id order every slot's kernels are declared in.
+double scoreByTileExtent(const MatchContext& /*context*/,
+                         const BoundTokens& /*bound*/,
+                         const KernelDefinition& kernel)
+{
+    return static_cast<double>(1000 * kernel.getIntMetadata(BLOCK_M)
+                               + kernel.getIntMetadata(BLOCK_N));
+}
+
+TEST(TestSlottedStateManager, ASlotsRankerOrdersOnlyThatSlot)
+{
+    const ScopedSlottedMatch symbols;
+    ScoreRegistry::registerSymbol(DKDV_SCORE, &scoreByTileExtent);
+    const hipdnn_data_sdk::utilities::ScopedResource<const char*> scorer{
+        DKDV_SCORE, [](const char* symbol) { ScoreRegistry::unregisterSymbol(symbol); }};
+    auto slots = defaultSlots();
+    slots[1].heuristic = std::make_shared<NativeKernelHeuristic>(DKDV_SCORE);
+    const auto manager = makeManager(std::move(slots));
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_EQ(namesOf(manager->sortedCatalog(1, context)), (Names{"dkdv_c", "dkdv_b", "dkdv_a"}));
+    EXPECT_EQ(namesOf(manager->sortedCatalog(0, context)), (Names{"prep_small", "prep_large"}))
+        << "prep keeps its own, unranked order";
+    EXPECT_EQ(namesOf(manager->sortedCatalog(2, context)), (Names{"dq_a", "dq_b"}))
+        << "dq keeps its own, unranked order";
 }
 
 // ----- identity ----------------------------------------------------------------------------
@@ -868,12 +875,21 @@ TEST(TestSlottedStateManager, ASlottedEngineIdentityCoversEverySlotRanker)
         << "the hash is a function of the descriptors alone";
 }
 
-TEST(TestSlottedStateManager, ASlottedEngineWithNoSlotRankerHasNoModelHash)
+TEST(TestSlottedStateManager, ASlottedEngineWithNoSlotRankerHashesItsSlotNamesAndOrder)
 {
     const auto set = makeSlottedSet();
+    const auto hash = engineModelHash(set);
 
-    EXPECT_EQ(engineModelHash(set), "");
+    EXPECT_EQ(hash.size(), 64U);
     EXPECT_TRUE(engineIdentity(set).contentIdentified);
+
+    auto renamed = set;
+    renamed.slots[1].name += "_renamed";
+    EXPECT_NE(engineModelHash(renamed), hash);
+
+    auto reordered = set;
+    std::swap(reordered.slots[1], reordered.slots[2]);
+    EXPECT_NE(engineModelHash(reordered), hash);
 }
 
 TEST(TestSlottedStateManager, TheModelHashChangesWithAnySlotRankerAndWithSlotOrder)
@@ -979,6 +995,259 @@ TEST(TestSlottedStateManager, TheEngineChecksEachSlotsKnobsAgainstThatSlotsSchem
         EXPECT_NE(message.find("slot 'dq'"), std::string::npos) << message;
         EXPECT_NE(message.find("'no_such_field'"), std::string::npos) << message;
     }
+}
+
+// ----- multi-launch kernels in a slot (UKD `sources`) --------------------------------------
+
+constexpr const char* SINGLE_DISPATCH_SYMBOL = "hipdnn.kernel_ingestor.test.slotted.single_launch";
+constexpr const char* MULTI_DISPATCH_SYMBOL = "hipdnn.kernel_ingestor.test.slotted.multi_launch";
+
+/// A native handler that launches the named stages; the checks under test never call prepare or
+/// launch.
+class LaunchesHandler : public NoopDispatchHandler<StubHandle>
+{
+public:
+    explicit LaunchesHandler(std::set<std::string> launches)
+        : _launches(std::move(launches))
+    {
+    }
+
+    std::set<std::string> launchNames() const override
+    {
+        return _launches;
+    }
+
+private:
+    std::set<std::string> _launches;
+};
+
+/// Two dispatches, one dispatch descriptor per launch set: slots with different launch sets need
+/// different dispatch descriptors.
+class ScopedLaunchDispatches
+{
+public:
+    ScopedLaunchDispatches() = default;
+
+    static DescriptorId singleId()
+    {
+        return testId(0xD1);
+    }
+
+    static DescriptorId multiId()
+    {
+        return testId(0xD2);
+    }
+
+    static std::vector<DispatchDescriptor> descriptors()
+    {
+        return {{singleId(), "single-launch dispatch", SINGLE_DISPATCH_SYMBOL},
+                {multiId(), "multi-launch dispatch", MULTI_DISPATCH_SYMBOL}};
+    }
+
+private:
+    LaunchesHandler _single{{}};
+    LaunchesHandler _multi{{"decode", "merge"}};
+    ScopedDispatchRegistration<StubHandle> _singleRegistration{SINGLE_DISPATCH_SYMBOL, _single};
+    ScopedDispatchRegistration<StubHandle> _multiRegistration{MULTI_DISPATCH_SYMBOL, _multi};
+};
+
+/// A kernel whose launches are @p launches, each a kpack entry of its own symbol.
+KernelDescriptor multiLaunchKernel(uint8_t seed,
+                                   const std::string& name,
+                                   int64_t blockM,
+                                   int64_t blockN,
+                                   const std::vector<std::string>& launches = {"decode", "merge"})
+{
+    auto kernel = makeSlotKernel(
+        seed, name, {{BLOCK_M, MetadataValue{blockM}}, {BLOCK_N, MetadataValue{blockN}}});
+    kernel.source = KernelSource{};
+    for(const auto& launch : launches)
+    {
+        auto symbol = name;
+        symbol += "/";
+        symbol += launch;
+        kernel.sources.emplace(launch,
+                               makeKpackSource("kpack/test.kpack", symbol, launch + "_kernel"));
+    }
+    return kernel;
+}
+
+/// A single-launch kernel in the same KMD.
+KernelDescriptor
+    singleLaunchKernel(uint8_t seed, const std::string& name, int64_t blockM, int64_t blockN)
+{
+    return makeSlotKernel(
+        seed, name, {{BLOCK_M, MetadataValue{blockM}}, {BLOCK_N, MetadataValue{blockN}}});
+}
+
+KernelDescriptorPack launchPack(uint8_t seed,
+                                const std::string& slot,
+                                const DescriptorId& dispatch,
+                                std::vector<KernelDescriptor> kernels)
+{
+    auto pack = makeSlotPack(seed, slot, std::move(kernels));
+    pack.dispatchId = dispatch;
+    return pack;
+}
+
+/// prep (single-launch handler) and dkdv (a handler launching decode and merge) with @p dkdv.
+std::unique_ptr<Manager> makeLaunchManager(std::vector<KernelDescriptor> prep,
+                                           std::vector<KernelDescriptor> dkdv)
+{
+    std::vector<KernelSlotInput> slots;
+    slots.push_back(
+        slotInput("prep",
+                  0xA1,
+                  {launchPack(0x10, "prep", ScopedLaunchDispatches::singleId(), std::move(prep))}));
+    slots.push_back(
+        slotInput("dkdv",
+                  0xA2,
+                  {launchPack(0x20, "dkdv", ScopedLaunchDispatches::multiId(), std::move(dkdv))}));
+    return std::make_unique<Manager>(std::move(slots),
+                                     std::vector<MatchDescriptor>{},
+                                     ScopedLaunchDispatches::descriptors(),
+                                     GRAPH_MATCH,
+                                     WS_BYTES,
+                                     "engine 'launch fixture'");
+}
+
+std::vector<KernelDescriptor> twoPrepKernels()
+{
+    return {singleLaunchKernel(0x11, "prep_small", 64, 1),
+            singleLaunchKernel(0x12, "prep_large", 128, 1)};
+}
+
+TEST(TestSlottedStateManager, AMultiLaunchSlotBesideASingleLaunchSlotIsApplicable)
+{
+    const ScopedSlottedMatch symbols;
+    const ScopedLaunchDispatches dispatches;
+    const auto manager = makeLaunchManager(
+        twoPrepKernels(),
+        {multiLaunchKernel(0x21, "dkdv_a", 64, 64), multiLaunchKernel(0x22, "dkdv_b", 128, 64)});
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto verdict = manager->slotProgramVerdict(context);
+
+    EXPECT_TRUE(verdict.applicable) << verdict.declineReason;
+    const auto dkdv = manager->unsortedCatalog(1, context);
+    ASSERT_EQ(dkdv.entries.size(), 2U);
+    for(const auto* kernel : dkdv.entries)
+    {
+        EXPECT_EQ(kernel->sources.size(), 2U) << kernel->name << " lost its launches";
+    }
+    EXPECT_EQ(namesOf(manager->unsortedCatalog(0, context)).size(), 2U);
+}
+
+TEST(TestSlottedStateManager, AKernelWhoseLaunchNamesDifferFromItsHandlersIsDroppedFromThatSlotOnly)
+{
+    const ScopedSlottedMatch symbols;
+    const ScopedLaunchDispatches dispatches;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto manager
+        = makeLaunchManager(twoPrepKernels(),
+                            {multiLaunchKernel(0x21, "dkdv_good", 64, 64),
+                             multiLaunchKernel(0x22, "dkdv_renamed", 128, 64, {"decode", "other"}),
+                             singleLaunchKernel(0x23, "dkdv_single", 128, 128)});
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_TRUE(manager->slotProgramVerdict(context).applicable);
+
+    EXPECT_EQ(namesOf(manager->unsortedCatalog(1, context)),
+              (std::vector<std::string>{"dkdv_good"}));
+    EXPECT_EQ(namesOf(manager->unsortedCatalog(0, context)).size(), 2U)
+        << "the other slot's single-launch kernels are unaffected";
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'dkdv_renamed'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'dkdv_single'"));
+}
+
+/// The launch set is the slot's: a single-launch kernel is as unlaunchable by a two-launch
+/// handler as a renamed one, and a slot left with nothing declines the engine while the other
+/// slots keep their catalogs.
+TEST(TestSlottedStateManager, ASlotWhoseEveryKernelMismatchesItsHandlerDeclinesTheEngine)
+{
+    const ScopedSlottedMatch symbols;
+    const ScopedLaunchDispatches dispatches;
+    const auto manager
+        = makeLaunchManager(twoPrepKernels(), {singleLaunchKernel(0x21, "dkdv_single", 64, 64)});
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto verdict = manager->slotProgramVerdict(context);
+
+    EXPECT_FALSE(verdict.applicable);
+    EXPECT_NE(verdict.declineReason.find("slot 'dkdv'"), std::string::npos)
+        << verdict.declineReason;
+    EXPECT_EQ(manager->unsortedCatalog(0, context).entries.size(), 2U);
+}
+
+TEST(TestSlottedStateManager, AnUnadaptableLaunchDropsOnlyItsKernel)
+{
+    const ScopedSlottedMatch symbols;
+    const ScopedLaunchDispatches dispatches;
+    auto oneNot = multiLaunchKernel(0x22, "dkdv_one_not", 128, 64);
+    oneNot.sources.at("merge").kind = KernelSourceKind::HSACO_FILE;
+    const auto manager = makeLaunchManager(twoPrepKernels(),
+                                           {multiLaunchKernel(0x21, "dkdv_all", 64, 64), oneNot});
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_TRUE(manager->slotProgramVerdict(context).applicable);
+
+    EXPECT_EQ(namesOf(manager->unsortedCatalog(1, context)),
+              (std::vector<std::string>{"dkdv_all"}));
+    EXPECT_EQ(manager->unsortedCatalog(0, context).entries.size(), 2U);
+}
+
+/// A kernel dropped for its launch set claims nothing, so a sibling sharing its metadata tuple
+/// is not refused as a duplicate (which in a slotted engine would drop the whole pack).
+TEST(TestSlottedStateManager, AKernelDroppedForItsLaunchSetClaimsNoMetadataTuple)
+{
+    const ScopedSlottedMatch symbols;
+    const ScopedLaunchDispatches dispatches;
+    const auto manager
+        = makeLaunchManager(twoPrepKernels(),
+                            {multiLaunchKernel(0x21, "dkdv_renamed", 64, 64, {"decode", "other"}),
+                             multiLaunchKernel(0x22, "dkdv_good", 64, 64)});
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_TRUE(manager->slotProgramVerdict(context).applicable);
+    EXPECT_EQ(namesOf(manager->unsortedCatalog(1, context)),
+              (std::vector<std::string>{"dkdv_good"}));
+}
+
+/// `sources` is part of the selector identity of a slotted engine's kernels, so a launch's code
+/// object changing makes it a different selector.
+TEST(TestSlottedStateManager, ASlotKernelsSourcesChangeTheEngineIdentity)
+{
+    auto base = makeSlottedSet();
+    auto& dkdvKernel = base.slots[1].packs.front().kernels.front();
+    dkdvKernel = multiLaunchKernel(dkdvKernel.id.front(), "dkdv_a", 64, 64);
+    const auto revision = engineSelectorRevision(base);
+    EXPECT_EQ(engineSelectorRevision(base), revision);
+
+    auto resymbolled = base;
+    resymbolled.slots[1].packs.front().kernels.front().sources.at("merge").symbol = "other_kernel";
+    EXPECT_NE(engineSelectorRevision(resymbolled), revision);
+
+    auto rehashed = base;
+    rehashed.slots[1].packs.front().kernels.front().sources.at("decode").sha256
+        = std::string(64, 'b');
+    EXPECT_NE(engineSelectorRevision(rehashed), revision);
+
+    auto launchRenamed = base;
+    auto& sources = launchRenamed.slots[1].packs.front().kernels.front().sources;
+    sources.emplace("renamed", sources.at("merge"));
+    sources.erase("merge");
+    EXPECT_NE(engineSelectorRevision(launchRenamed), revision);
 }
 
 } // namespace

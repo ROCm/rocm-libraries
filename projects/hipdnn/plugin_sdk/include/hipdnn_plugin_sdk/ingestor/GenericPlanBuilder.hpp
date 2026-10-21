@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -18,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -38,6 +40,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SlotProgramBenchmark.hpp>
 #include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
@@ -82,6 +85,18 @@ inline std::string toHex(uint64_t value)
     std::array<char, 16> digits{};
     const auto end = std::to_chars(digits.data(), digits.data() + digits.size(), value, 16).ptr;
     return {digits.data(), end};
+}
+
+/// An integer knob setting, as an engine config and an enumerated candidate carry it.
+inline std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>
+    makeIntKnobSetting(const std::string& name, int64_t value)
+{
+    auto setting = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>();
+    setting->knob_id = name;
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT integer;
+    integer.value = value;
+    setting->value.Set(integer);
+    return setting;
 }
 
 } // namespace detail
@@ -319,12 +334,11 @@ public:
             size_t maxScratch = 0;
             for(const auto& kernels : selection.perSlot)
             {
-                for(const auto& kernel : kernels)
+                for(const KernelDefinition* kernel : kernels)
                 {
-                    const auto dispatcher = _stateManager.getDispatchDetails(kernel);
+                    const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
                     maxScratch = std::max(
-                        maxScratch,
-                        dispatcher.handler->workspaceBytes(context, selection.bound, kernel));
+                        maxScratch, handler->workspaceBytes(context, selection.bound, *kernel));
                 }
             }
             return selection.alignedSharedBytes + maxScratch;
@@ -339,8 +353,8 @@ public:
             = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         if(filtered.empty())
         {
-            throwUnsatisfiableKnobFilter(executionSettings.ingestorSettings.knobFilter,
-                                         catalog.entries.size());
+            throwUnsatisfiableKnobFilter(
+                0, executionSettings.ingestorSettings.knobFilter, catalog.entries.size());
         }
 
         size_t maxBytes = 0;
@@ -397,7 +411,7 @@ public:
         const auto filtered = applyConstraints(catalog, settings, context);
         if(filtered.empty())
         {
-            throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
+            throwUnsatisfiableKnobFilter(0, settings.knobFilter, catalog.entries.size());
         }
 
         // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
@@ -714,7 +728,7 @@ public:
             return enumerateSlotted(opGraph, context, config, offset, limit);
         }
         const auto catalog = _stateManager.enumerableCatalog(context);
-        const auto filtered = applyKnobFilter(catalog.entries, readKnobFilter(config));
+        const auto filtered = filterSlot(catalog.entries, 0, readKnobFilter(config));
         if(offset > filtered.size())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
@@ -751,12 +765,7 @@ public:
             candidate->id = toString(kernel.kernelId);
             for(const auto& [name, value] : candidateKnobs(kernel))
             {
-                auto setting = std::make_unique<KnobSettingT>();
-                setting->knob_id = name;
-                IntValueT integer;
-                integer.value = value;
-                setting->value.Set(integer);
-                candidate->knob_settings.push_back(std::move(setting));
+                candidate->knob_settings.push_back(detail::makeIntKnobSetting(name, value));
             }
             nlohmann::json features = nlohmann::json::object();
             for(const auto& [name, value] : kernel.metadata)
@@ -903,7 +912,7 @@ public:
             // This is the configuration plan build serves. Naming a later candidate when this
             // one cannot be named would advertise a kernel the request does not build.
             const auto knobs = candidateKnobs(**selected);
-            // Same comparison as applyKnobFilter(): the tuple holds ordinals for non-integer knobs.
+            // Same comparison as filterSlot(): the tuple holds ordinals for non-integer knobs.
             const auto matching = std::count_if(
                 catalog.entries.begin(),
                 catalog.entries.end(),
@@ -1026,37 +1035,43 @@ private:
             {
                 continue;
             }
-            double value = 0.0;
-            if(metric.name == "time")
-            {
-                value = entry.timeMs;
-            }
-            else if(flops.has_value() && entry.timeMs > 0.0)
-            {
-                value = *flops / (entry.timeMs * 1e9);
-            }
+            const double value = metricValue(metric, flops, entry.timeMs);
             ranking.push_back({entry.kernelId, value});
         }
         return ranking;
+    }
+
+    /// @p kernels whose workspace for @p context, added to @p offset, stays within @p limit.
+    /// @param offset Bytes already taken before the kernel's own scratch: a slotted engine's
+    ///        aligned shared region.
+    std::vector<const KernelDefinition*>
+        withinWorkspace(std::vector<const KernelDefinition*> kernels,
+                        const MatchContext& context,
+                        const BoundTokens& bound,
+                        int64_t limit,
+                        size_t offset = 0) const
+    {
+        kernels.erase(
+            std::remove_if(kernels.begin(),
+                           kernels.end(),
+                           [&](const KernelDefinition* kernel) {
+                               const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
+                               return offset + handler->workspaceBytes(context, bound, *kernel)
+                                      > static_cast<uint64_t>(limit);
+                           }),
+            kernels.end());
+        return kernels;
     }
 
     std::vector<const KernelDefinition*> applyConstraints(const Catalog& catalog,
                                                           const IngestorSettings& settings,
                                                           const MatchContext& context) const
     {
-        auto filtered = applyKnobFilter(catalog.entries, settings.knobFilter);
+        auto filtered = filterSlot(catalog.entries, 0, settings.knobFilter);
         if(settings.workspaceLimit)
         {
-            filtered.erase(
-                std::remove_if(filtered.begin(),
-                               filtered.end(),
-                               [&](const KernelDefinition* kernel) {
-                                   const auto dispatch = _stateManager.getDispatchDetails(*kernel);
-                                   return dispatch.handler->workspaceBytes(
-                                              context, catalog.bound, *kernel)
-                                          > static_cast<uint64_t>(*settings.workspaceLimit);
-                               }),
-                filtered.end());
+            return withinWorkspace(
+                std::move(filtered), context, catalog.bound, *settings.workspaceLimit);
         }
         return filtered;
     }
@@ -1074,7 +1089,7 @@ private:
     /// enumeration, with what they share.
     struct SlotCandidates
     {
-        std::vector<std::vector<KernelDefinition>> perSlot;
+        std::vector<std::vector<const KernelDefinition*>> perSlot;
         /// Per slot, the benchmarked record whose order `perSlot` follows; null when none covers
         /// the slot's catalog.
         std::vector<std::shared_ptr<const WinnerRecord>> measured;
@@ -1170,21 +1185,22 @@ private:
     }
 
     /// @p entries of slot @p slot that every setting of @p filter naming that slot's knobs admits.
-    std::vector<KernelDefinition> filterSlot(const std::vector<KernelDefinition>& entries,
-                                             size_t slot,
-                                             const KnobFilter& filter) const
+    std::vector<const KernelDefinition*>
+        filterSlot(const std::vector<const KernelDefinition*>& entries,
+                   size_t slot,
+                   const KnobFilter& filter) const
     {
         const auto pins = slotPins(slot, filter);
         if(pins.empty())
         {
             return entries;
         }
-        std::vector<KernelDefinition> filtered;
+        std::vector<const KernelDefinition*> filtered;
         filtered.reserve(entries.size());
-        for(const auto& kernel : entries)
+        for(const KernelDefinition* kernel : entries)
         {
             const bool admitted = std::all_of(pins.begin(), pins.end(), [&](const auto& pin) {
-                return _stateManager.knobMatches(slot, kernel, pin.first->field, pin.second);
+                return _stateManager.knobMatches(slot, *kernel, pin.first->field, pin.second);
             });
             if(admitted)
             {
@@ -1212,7 +1228,7 @@ private:
             const auto catalog = _stateManager.unsortedCatalog(slot, context);
             if(filterSlot(catalog.entries, slot, filter).empty())
             {
-                throwUnsatisfiableSlotKnobFilter(slot, filter, catalog.entries.size());
+                throwUnsatisfiableKnobFilter(slot, filter, catalog.entries.size());
             }
         }
     }
@@ -1256,22 +1272,16 @@ private:
             auto kept = filterSlot(catalog.entries, slot, settings.knobFilter);
             if(kept.empty())
             {
-                throwUnsatisfiableSlotKnobFilter(slot, settings.knobFilter, catalog.entries.size());
+                throwUnsatisfiableKnobFilter(slot, settings.knobFilter, catalog.entries.size());
             }
             if(settings.workspaceLimit)
             {
                 const auto before = kept.size();
-                kept.erase(std::remove_if(
-                               kept.begin(),
-                               kept.end(),
-                               [&](const auto& kernel) {
-                                   const auto dispatch = _stateManager.getDispatchDetails(kernel);
-                                   return selection.alignedSharedBytes
-                                              + dispatch.handler->workspaceBytes(
-                                                  context, catalog.bound, kernel)
-                                          > static_cast<uint64_t>(*settings.workspaceLimit);
-                               }),
-                           kept.end());
+                kept = withinWorkspace(std::move(kept),
+                                       context,
+                                       catalog.bound,
+                                       *settings.workspaceLimit,
+                                       selection.alignedSharedBytes);
                 if(kept.empty())
                 {
                     throw HipdnnPluginException(
@@ -1294,6 +1304,44 @@ private:
         return selection;
     }
 
+    /// The plan of @p kernel for @p context, or null when it cannot be built, with the reason
+    /// appended to @p failures. A malformed descriptor is the author's mistake, not a kernel that
+    /// happens not to fit this graph: it stops the build instead of costing only its kernel.
+    /// @param onBuilt Called with the built plan inside the same guard, so what it throws costs
+    ///        only @p kernel as the build itself does.
+    /// @throws HipdnnPluginException INVALID_VALUE from a malformed descriptor.
+    std::shared_ptr<GenericPlan<THandle>> tryBuildPlan(
+        const KernelDefinition& kernel,
+        const MatchContext& context,
+        const BoundTokens& bound,
+        std::vector<std::string>& failures,
+        const std::function<void(const std::shared_ptr<GenericPlan<THandle>>&)>& onBuilt = {}) const
+    {
+        try
+        {
+            auto plan = std::make_shared<GenericPlan<THandle>>(
+                _stateManager.getDispatchDetails(kernel), context, bound);
+            if(onBuilt)
+            {
+                onBuilt(plan);
+            }
+            return plan;
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+            {
+                throw;
+            }
+            failures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+        }
+        catch(const std::exception& error)
+        {
+            failures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+        }
+        return nullptr;
+    }
+
     /// Each slot's first kernel of @p selection that builds, in slot order. A kernel that fails
     /// to build costs only its slot's pick, as for an unslotted engine; a malformed descriptor
     /// stops the build.
@@ -1311,34 +1359,21 @@ private:
             std::shared_ptr<GenericPlan<THandle>> plan;
             for(size_t rank = 0; rank < kernels.size() && plan == nullptr; ++rank)
             {
-                try
+                plan = tryBuildPlan(*kernels[rank], context, selection.bound, failures);
+                if(plan != nullptr)
                 {
-                    plan = std::make_shared<GenericPlan<THandle>>(
-                        _stateManager.getDispatchDetails(kernels[rank]), context, selection.bound);
                     HIPDNN_PLUGIN_LOG_INFO(
                         "ingestor: engine '"
                         << _engine.name << "' slot '" << slotName << "' selected kernel "
-                        << toString(kernels[rank].kernelId) << " at rank " << rank << " from "
+                        << toString(kernels[rank]->kernelId) << " at rank " << rank << " from "
                         << kernels.size() << " candidate(s)");
                     continue;
-                }
-                catch(const HipdnnPluginException& error)
-                {
-                    if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
-                    {
-                        throw;
-                    }
-                    failures.emplace_back(toString(kernels[rank].kernelId) + ": " + error.what());
-                }
-                catch(const std::exception& error)
-                {
-                    failures.emplace_back(toString(kernels[rank].kernelId) + ": " + error.what());
                 }
 
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                        << _engine.name << "' slot '" << slotName
                                        << "' could not build a plan for "
-                                       << toString(kernels[rank].kernelId) << " at rank " << rank
+                                       << toString(kernels[rank]->kernelId) << " at rank " << rank
                                        << ": " << failures.back() << "; trying the next candidate");
             }
             if(plan == nullptr)
@@ -1404,34 +1439,26 @@ private:
             typename SlotProgramBenchmark<THandle>::Slot built{slotName, {}, covered};
             built.kernels.reserve(selection.perSlot[slot].size());
             std::vector<std::string> failures;
-            for(const auto& kernel : selection.perSlot[slot])
+            for(const KernelDefinition* kernel : selection.perSlot[slot])
             {
-                try
+                if(tryBuildPlan(*kernel,
+                                context,
+                                selection.bound,
+                                failures,
+                                [&](const auto& plan) {
+                                    built.kernels.push_back({kernel->kernelId,
+                                                             kernel->packId,
+                                                             kernel->dispatchId,
+                                                             plan,
+                                                             candidateFeatures(problem, *kernel)});
+                                })
+                   != nullptr)
                 {
-                    built.kernels.push_back(
-                        {kernel.kernelId,
-                         kernel.packId,
-                         kernel.dispatchId,
-                         std::make_shared<GenericPlan<THandle>>(
-                             _stateManager.getDispatchDetails(kernel), context, selection.bound),
-                         candidateFeatures(problem, kernel)});
                     if(covered)
                     {
                         break;
                     }
                     continue;
-                }
-                catch(const HipdnnPluginException& error)
-                {
-                    if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
-                    {
-                        throw;
-                    }
-                    failures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
-                }
-                catch(const std::exception& error)
-                {
-                    failures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
                 }
                 covered = false;
                 built.covered = false;
@@ -1439,7 +1466,7 @@ private:
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                        << _engine.name << "' slot '" << slotName
                                        << "' dropped benchmarking candidate '"
-                                       << toString(kernel.kernelId) << "': " << failures.back());
+                                       << toString(kernel->kernelId) << "': " << failures.back());
             }
             if(built.kernels.empty())
             {
@@ -1508,6 +1535,24 @@ private:
         return std::nullopt;
     }
 
+    /// @p timeMs in @p metric: the time itself, or for `tflops` `flops / (timeMs * 1e9)`, the
+    /// label uhd_gen trains on; 0 when the metric cannot be valued. @p flops is the graph's work,
+    /// when known.
+    static double metricValue(const hipdnn_data_sdk::utilities::RankingMetric& metric,
+                              const std::optional<double>& flops,
+                              double timeMs)
+    {
+        if(metric.name == "time")
+        {
+            return timeMs;
+        }
+        if(flops.has_value() && timeMs > 0.0)
+        {
+            return *flops / (timeMs * 1e9);
+        }
+        return 0.0;
+    }
+
     /// @p config with the knob settings @p knobs added for every knob it does not already set.
     static std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
         pinnedConfig(const IEngineConfig& config, int64_t engineId, const KnobFilter& knobs)
@@ -1527,12 +1572,7 @@ private:
                   });
             if(existing == exact->knobs.end())
             {
-                auto setting = std::make_unique<KnobSettingT>();
-                setting->knob_id = name;
-                IntValueT integer;
-                integer.value = value;
-                setting->value.Set(integer);
-                exact->knobs.push_back(std::move(setting));
+                exact->knobs.push_back(detail::makeIntKnobSetting(name, value));
             }
         }
         return exact;
@@ -1589,7 +1629,7 @@ private:
         using namespace hipdnn_flatbuffers_sdk::data_objects;
         const auto filter = readKnobFilter(config);
         const auto slotCount = _stateManager.slotCount();
-        std::vector<std::vector<KernelDefinition>> perSlot;
+        std::vector<std::vector<const KernelDefinition*>> perSlot;
         perSlot.reserve(slotCount);
         BoundTokens bound;
         for(size_t slot = 0; slot < slotCount; ++slot)
@@ -1599,17 +1639,17 @@ private:
             // Per slot, not over the product: a combination is unique exactly when each slot's
             // tuple is, and a collision is unaddressable by EngineVariant enrollment.
             std::map<KnobFilter, DescriptorId> identities;
-            for(const auto& kernel : filtered)
+            for(const KernelDefinition* kernel : filtered)
             {
                 const auto inserted
-                    = identities.emplace(candidateKnobs(kernel, slot), kernel.kernelId);
+                    = identities.emplace(candidateKnobs(*kernel, slot), kernel->kernelId);
                 if(!inserted.second)
                 {
                     throw HipdnnPluginException(
                         HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                         "Ambiguous enrolled knob tuple in slot '" + _stateManager.slotName(slot)
                             + "' for candidates '" + toString(inserted.first->second) + "' and '"
-                            + toString(kernel.kernelId)
+                            + toString(kernel->kernelId)
                             + "'; expose enough KMD integer fields in the slot's UED knobs");
                 }
             }
@@ -1658,25 +1698,21 @@ private:
             for(size_t slot = slotCount; slot-- > 0;)
             {
                 const auto& kernels = perSlot[slot];
-                picks[slot] = &kernels[static_cast<size_t>(rest % kernels.size())];
+                picks[slot] = kernels[static_cast<size_t>(rest % kernels.size())];
                 rest /= kernels.size();
             }
 
             auto candidate = std::make_unique<EngineCandidateT>();
+            candidate->id = detail::compositeCandidateId(slotCount, [this, &picks](size_t slot) {
+                return std::forward_as_tuple(_stateManager.slotName(slot), picks[slot]->kernelId);
+            });
             nlohmann::json features = nlohmann::json::object();
             for(size_t slot = 0; slot < slotCount; ++slot)
             {
                 const auto& slotName = _stateManager.slotName(slot);
-                candidate->id
-                    += (slot == 0 ? "" : "|") + slotName + "=" + toString(picks[slot]->kernelId);
                 for(const auto& [name, value] : candidateKnobs(*picks[slot], slot))
                 {
-                    auto setting = std::make_unique<KnobSettingT>();
-                    setting->knob_id = name;
-                    IntValueT integer;
-                    integer.value = value;
-                    setting->value.Set(integer);
-                    candidate->knob_settings.push_back(std::move(setting));
+                    candidate->knob_settings.push_back(detail::makeIntKnobSetting(name, value));
                 }
                 for(const auto& [name, value] : picks[slot]->metadata)
                 {
@@ -1739,10 +1775,11 @@ private:
         {
             const auto tuple = candidateKnobs(stages[slot].plan->kernel(), slot);
             const auto catalog = _stateManager.unsortedCatalog(slot, context);
-            const auto matching = std::count_if(
-                catalog.entries.begin(), catalog.entries.end(), [&](const auto& kernel) {
-                    return candidateKnobs(kernel, slot) == tuple;
-                });
+            const auto matching = std::count_if(catalog.entries.begin(),
+                                                catalog.entries.end(),
+                                                [&](const KernelDefinition* kernel) {
+                                                    return candidateKnobs(*kernel, slot) == tuple;
+                                                });
             if(matching != 1)
             {
                 result.reason
@@ -1753,16 +1790,8 @@ private:
         }
 
         const auto& metric = heuristics::rankingMetric(config);
-        double value = 0.0;
-        if(metric.name == "time")
-        {
-            value = program->timeMs;
-        }
-        else if(const auto flops = metric.name == "tflops" ? graphFlops(context) : std::nullopt;
-                flops.has_value() && program->timeMs > 0.0)
-        {
-            value = *flops / (program->timeMs * 1e9);
-        }
+        const auto flops = metric.name == "tflops" ? graphFlops(context) : std::nullopt;
+        const double value = metricValue(metric, flops, program->timeMs);
         if(value == 0.0 || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, value))
         {
             result.reason = "The program record has no '" + result.metric + "' value";
@@ -1913,32 +1942,6 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
-    std::vector<const KernelDefinition*>
-        applyKnobFilter(const std::vector<const KernelDefinition*>& catalog,
-                        const KnobFilter& filter) const
-    {
-        if(filter.empty())
-        {
-            return catalog;
-        }
-
-        std::vector<const KernelDefinition*> filtered;
-        filtered.reserve(catalog.size());
-        for(const KernelDefinition* kernel : catalog)
-        {
-            // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
-            const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [this, kernel](const auto& setting) {
-                      return _stateManager.knobMatches(*kernel, setting.first, setting.second);
-                  });
-            if(matchesEverySetKnob)
-            {
-                filtered.push_back(kernel);
-            }
-        }
-        return filtered;
-    }
-
     [[noreturn]] void throwNoApplicableKernel(const std::string& reason = {}) const
     {
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -1970,34 +1973,20 @@ private:
                                         + (detail.empty() ? "" : " (" + detail + ")"));
     }
 
-    [[noreturn]] void throwUnsatisfiableSlotKnobFilter(size_t slot,
-                                                       const KnobFilter& filter,
-                                                       size_t survivorsBeforeFilter) const
-    {
-        std::string settingsText;
-        for(const auto& [knob, value] : slotPins(slot, filter))
-        {
-            if(!settingsText.empty())
-            {
-                settingsText += ", ";
-            }
-            settingsText += knob->id + "=" + std::to_string(value);
-        }
-
-        throw HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-            "engine '" + _engine.name + "' has no kernel in slot '" + _stateManager.slotName(slot)
-                + "' satisfying the requested knob setting(s) " + settingsText + " ("
-                + std::to_string(survivorsBeforeFilter)
-                + " kernel(s) matched the graph before knob filtering)");
-    }
-
-    [[noreturn]] void throwUnsatisfiableKnobFilter(const KnobFilter& filter,
+    /// @param slot The slot whose knob settings no kernel satisfies; 0 for an unslotted engine.
+    ///        Names the settings alphabetically, only those addressing @p slot's knobs.
+    [[noreturn]] void throwUnsatisfiableKnobFilter(size_t slot,
+                                                   const KnobFilter& filter,
                                                    size_t survivorsBeforeFilter) const
     {
         std::string settingsText;
         for(const auto& [knobName, value] : filter)
         {
+            const auto* knob = findKnob(knobName);
+            if(knob == nullptr || knob->slot != slot)
+            {
+                continue;
+            }
             if(!settingsText.empty())
             {
                 settingsText += ", ";
@@ -2007,8 +1996,11 @@ private:
 
         throw HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-            "engine '" + _engine.name + "' has no kernel satisfying the requested knob setting(s) "
-                + settingsText + " (" + std::to_string(survivorsBeforeFilter)
+            "engine '" + _engine.name + "' has no kernel"
+                + (_stateManager.isSlotted() ? " in slot '" + _stateManager.slotName(slot) + "'"
+                                             : std::string())
+                + " satisfying the requested knob setting(s) " + settingsText + " ("
+                + std::to_string(survivorsBeforeFilter)
                 + " kernel(s) matched the graph before knob filtering)");
     }
 

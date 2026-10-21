@@ -229,13 +229,17 @@ def mint_ids(
 
     ids = {}
     if config.is_slotted:
-        # One KMD, and one ranker UHD when the slot ranks, per slot (RFC 0021
-        # §3). A slot takes the pair its namesake held in the previous bundle;
-        # a slot the previous bundle lacked is new and gets fresh ids.
+        # One KMD, one UDD, and one ranker UHD when the slot ranks, per slot
+        # (RFC 0021 §3, §4): a slot's dispatch descriptor names its own handler.
+        # A slot takes the ids its namesake held in the previous bundle; a slot
+        # the previous bundle lacked is new and gets fresh ids.
         held_slots = engine.slots if engine else {}
         for slot_index, slot in enumerate(config.slots):
             docs = held_slots.get(slot.name)
             ids[("slot_kmd", slot_index)] = take(docs.kmd["id"] if docs else None)
+            ids[("slot_udd", slot_index)] = take(
+                docs.udd["id"] if docs and docs.udd else None
+            )
             if slot.ranker:
                 ids[("slot_uhd", slot_index)] = take(
                     docs.uhd["id"] if docs and docs.uhd else None
@@ -246,7 +250,8 @@ def mint_ids(
     ids["kernel_match"] = take(engine.kernel_match_umd["id"] if engine else None)
     if config.engine.has_heuristic:
         ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
-    ids["udd"] = take(engine.udd["id"] if engine else None)
+    if not config.is_slotted:
+        ids["udd"] = take(engine.udd["id"] if engine and engine.udd else None)
 
     prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
 
@@ -495,6 +500,18 @@ def build_udd(config: IngestorConfig, ids: dict) -> dict:
         "id": ids["udd"],
         "name": f"{config.engine.local_name} dispatch",
         "dispatch_symbol": config.dispatch_symbol,
+    }
+
+
+def build_slot_udd(config: IngestorConfig, slot: SlotSpec, ids: dict) -> dict:
+    """One slot's dispatch descriptor. Packs with different launch sets need
+    different dispatch descriptors (RFC 0021 §4), so every slot names its own
+    handler symbol."""
+    return {
+        "version": "1.0",
+        "id": ids[_slot_key("udd", config, slot)],
+        "name": f"{config.engine.local_name} {slot.name} dispatch",
+        "dispatch_symbol": config.slot_dispatch_symbol(slot),
     }
 
 
@@ -962,7 +979,9 @@ def build_kdp(
         "name": f"{config.engine.namespace}:{config.kdp_stem(pack)}",
         "matchers": matchers,
         "engine": ids["ued"],
-        "dispatch": ids["udd"],
+        "dispatch": (
+            ids[_slot_key("udd", config, slot)] if slot is not None else ids["udd"]
+        ),
         # Declared once per pack, after minting, since every kernel shares one
         # engine, KMD and field partition. A reader resolves a kernel's own
         # declaration first (``hkp_pack.agreement.resolved_contract``), so a
@@ -1207,10 +1226,16 @@ def resolve_ids(
                             f"Remove the kernel from one of the two files."
                         )
                     kernel_owner[entry["id"]] = kdp.path
-                if kdp.dispatch != engine.udd["id"]:
+                if engine.slots and kdp.slot not in engine.slots:
+                    raise ValueError(
+                        f"{kdp.path}: slot {kdp.slot!r} is not a slot of the UED "
+                        f"{engine.ued['id']} (slots: {sorted(engine.slots)})"
+                    )
+                home_udd = engine.slots[kdp.slot].udd if engine.slots else engine.udd
+                if kdp.dispatch != home_udd["id"]:
                     raise ValueError(
                         f"{kdp.path}: dispatch {kdp.dispatch} is not the home's UDD "
-                        f"{engine.udd['id']}"
+                        f"{home_udd['id']}"
                     )
                 if sibling_roots and kdp.operation_umd_id is not None:
                     raise ValueError(
@@ -1577,13 +1602,13 @@ class IngestorGenerator:
 
     @staticmethod
     def _slotted_descriptor_files(config: IngestorConfig) -> list[str]:
-        """The descriptor files of a slotted engine (RFC 0021): one KMD (and
-        one UHD when the slot ranks) per slot, one KDP per pack."""
+        """The descriptor files of a slotted engine (RFC 0021): one KMD and
+        one UDD (and one UHD when the slot ranks) per slot, one KDP per pack."""
         slug = config.engine.slug
         ddir = config.descriptor_dir
         files = [f"{ddir}/{slug}_{slot.name}.kmd.json" for slot in config.slots]
         files.append(f"{ddir}/{slug}.ued.json")
-        files.append(f"{ddir}/{slug}.udd.json")
+        files += [f"{ddir}/{slug}_{slot.name}.udd.json" for slot in config.slots]
         files += [
             f"{ddir}/{slug}_{slot.name}.uhd.json"
             for slot in config.slots
@@ -1666,7 +1691,11 @@ class IngestorGenerator:
                     build_slot_kmd(config, slot, ids),
                 )
             write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-            write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+            for slot in config.slots:
+                write_json(
+                    f"{ddir}/{slug}_{slot.name}.udd.json",
+                    build_slot_udd(config, slot, ids),
+                )
             for slot in config.slots:
                 uhd = build_slot_uhd(config, slot, ids)
                 if uhd is not None:

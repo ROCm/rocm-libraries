@@ -401,7 +401,17 @@ def load_config(path: Path) -> IngestorConfig:
     specialization_raw = raw.get("specialization") or {}
     _require_specialization_mapping(specialization_raw)
     if "reduction" in raw:
-        check_reduction(raw["reduction"], kmd_fields={f.name for f in kmd_fields})
+        # A slotted engine declares its KMD fields per slot, so `reduction` names
+        # the union of the slots' fields.
+        check_reduction(
+            raw["reduction"],
+            kmd_fields=(
+                {f.name for slot in slots for f in slot.kmd_fields}
+                if slotted
+                else {f.name for f in kmd_fields}
+            ),
+            slotted=slotted,
+        )
 
     config = IngestorConfig(
         engine=engine,
@@ -483,12 +493,24 @@ def _load_slots(raw: dict, engine_raw: dict) -> list:
             )
         specialization = slot_raw.get("specialization") or {}
         _require_specialization_mapping(specialization)
+        kmd_fields = _read_kmd_fields(
+            slot_raw.get("kmd_fields", []), f"{where}.kmd_fields"
+        )
+        names = [kmd_field.name for kmd_field in kmd_fields]
+        # A walk rather than a set: a name YAML read as a list or mapping is unhashable.
+        repeated: list = []
+        for position, field_name in enumerate(names):
+            if field_name in names[:position] and field_name not in repeated:
+                repeated.append(field_name)
+        if repeated:
+            raise ConfigError(
+                f"{where}.kmd_fields declares {repeated} more than once. A slot's KMD "
+                f"holds each field once; a repeat leaves its type ambiguous."
+            )
         slots.append(
             SlotSpec(
                 name=name,
-                kmd_fields=_read_kmd_fields(
-                    slot_raw.get("kmd_fields", []), f"{where}.kmd_fields"
-                ),
+                kmd_fields=kmd_fields,
                 knobs=_require_sequence(slot_raw.get("knobs"), f"{where}.knobs"),
                 ranker=ranker,
                 specialization=dict(specialization),
@@ -1122,10 +1144,12 @@ def _require_known_keys(value, known: frozenset, where: str) -> None:
         )
 
 
-def check_reduction(reduction, *, kmd_fields) -> None:
+def check_reduction(reduction, *, kmd_fields, slotted=False) -> None:
     """Validate a ``reduction`` block: ``fields.feature``/``performance``/``ignored``
     (each field in at most one), a ``divides`` target that is one of ``kmd_fields``
-    (the engine's KMD field names), and a positive ``aot_budget_per_arch``."""
+    (the engine's KMD field names, or the union of the slots' for a ``slotted``
+    config, which also requires each ``feature`` name to be one of them), and a
+    positive ``aot_budget_per_arch``."""
     _require_known_keys(reduction, _KNOWN_REDUCTION, "'reduction'")
     if "fields" not in reduction:
         raise ConfigError("'reduction' is missing required key 'fields'.")
@@ -1191,6 +1215,13 @@ def check_reduction(reduction, *, kmd_fields) -> None:
             raise ConfigError(
                 f"'reduction.fields.performance[{index}]' 'divides' names "
                 f"{target!r}, which is not a kmd_fields name: {sorted(kmd_fields)}."
+            )
+    if slotted:
+        unknown = sorted(set(fields.get("feature") or []) - set(kmd_fields))
+        if unknown:
+            raise ConfigError(
+                f"'reduction.fields.feature' names {unknown}, which no slot's "
+                f"kmd_fields declares: {sorted(kmd_fields)}."
             )
 
 
@@ -1588,33 +1619,28 @@ def _reject_deprecated_keys(raw: dict) -> None:
     retired top-level keys are named so an out-of-tree config still setting
     them is told they were retired.
     """
-    _reject_deprecated_dict_key(
-        raw.get("kmd_fields", []),
-        "optional",
-        "name",
-        "kmd_fields[].optional is not a real key -- RFC 0017 §4's own example "
-        "field carries it, but the loader's MetadataField has no such member. "
-        "A field is optional exactly when it has a default_value; there is no "
-        "separate optional flag.",
-    )
-    _reject_deprecated_dict_key(
-        raw.get("kmd_fields", []),
-        "default",
-        "name",
-        "kmd_fields[].default is not a real key -- the loader spells it "
-        "default_value, not default. Rename the key.",
-    )
-    for slot_raw in raw.get("slots", []) or []:
-        for key, message in (
-            ("optional", "kmd_fields[].optional is not a real key."),
-            (
-                "default",
-                "kmd_fields[].default is not a real key; spell it default_value.",
-            ),
-        ):
-            _reject_deprecated_dict_key(
-                slot_raw.get("kmd_fields", []) or [], key, "name", message
-            )
+    # The engine's own fields, then each slot's: one rule for every kmd_fields list.
+    field_lists = [raw.get("kmd_fields", [])]
+    field_lists += [
+        slot_raw.get("kmd_fields", []) or [] for slot_raw in raw.get("slots", []) or []
+    ]
+    for fields in field_lists:
+        _reject_deprecated_dict_key(
+            fields,
+            "optional",
+            "name",
+            "kmd_fields[].optional is not a real key -- RFC 0017 §4's own example "
+            "field carries it, but the loader's MetadataField has no such member. "
+            "A field is optional exactly when it has a default_value; there is no "
+            "separate optional flag.",
+        )
+        _reject_deprecated_dict_key(
+            fields,
+            "default",
+            "name",
+            "kmd_fields[].default is not a real key -- the loader spells it "
+            "default_value, not default. Rename the key.",
+        )
     if "schema" in raw:
         raise ConfigError(
             "Top-level 'schema' is not a real key. RFC 0020 §4.2 specifies a "
@@ -2233,29 +2259,37 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
 
 
 def _check_launch_names_agree(config: IngestorConfig) -> None:
-    """Every kernel of the engine names the same set of launches.
+    """Every kernel of an engine, or of a slot for a slotted engine, names the
+    same set of launches.
 
-    The engine has one dispatch handler, and the handler declares the one set of
-    launch names it launches (``launchNames()``, which the generated native stub
-    emits). The state manager drops a kernel whose set differs from it, so a
-    config mixing single-launch and multi-launch kernels, or two different sets,
-    would generate cleanly and ship kernels that are dropped at load.
+    The engine (a slot, when slotted) has one dispatch handler, and the handler
+    declares the one set of launch names it launches (``launchNames()``, which
+    the generated native stub emits). The state manager drops a kernel whose set
+    differs from it, so a config mixing single-launch and multi-launch kernels,
+    or two different sets, would generate cleanly and ship kernels that are
+    dropped at load. Slots have separate handlers, so they may differ from one
+    another (RFC 0021 §4).
     """
-    expected = None
-    first = ""
+    scopes: dict = {}
     for pack in config.packs:
+        scope = pack.slot if config.is_slotted else None
         for kernel in pack.kernels:
             names = frozenset(kernel.kernel_source.launches)
             where = f"pack '{pack.name}' kernel '{kernel.name}'"
-            if expected is None:
-                expected, first = names, where
-            elif names != expected:
+            expected, first = scopes.setdefault(scope, (names, where))
+            if names != expected:
+                owner = (
+                    f"One slot ('{scope}') has one dispatch handler"
+                    if config.is_slotted
+                    else "One engine has one dispatch handler"
+                )
                 raise ConfigError(
                     f"{where} names launches {sorted(names) or 'none'}, but "
-                    f"{first} names {sorted(expected) or 'none'}. One engine has "
-                    f"one dispatch handler, which declares one set of launch "
-                    f"names, and a kernel whose set differs is dropped when the "
-                    f"catalog loads. Split the kernels into engines by launch "
+                    f"{first} names {sorted(expected) or 'none'}. {owner}, which "
+                    f"declares one set of launch names, and a kernel whose set "
+                    f"differs is dropped when the catalog loads. Split the "
+                    f"kernels into "
+                    f"{'slots' if config.is_slotted else 'engines'} by launch "
                     f"set."
                 )
 

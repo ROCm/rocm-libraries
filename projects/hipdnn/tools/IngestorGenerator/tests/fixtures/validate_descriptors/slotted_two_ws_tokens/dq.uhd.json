@@ -1,26 +1,28 @@
 {
   "version": "1.1",
-  "id": "c2a00000-0000-4000-8000-000000000010",
-  "name": "dkdv selector",
+  "id": "c2a00000-0000-4000-8000-000000000011",
+  "name": "dq selector",
   "adapter": "native",
   "objective": "max",
   "native": {
-    "symbol": "hipkernel.fixture.dkdv_score"
+    "symbol": "hipkernel.fixture.dq_score"
   },
   "features_signature": [
-    "$kernel.block_m"
+    "$kernel.block_n",
+    "$ws.a",
+    "$ws.b"
   ],
-  "features_hash": "sha256:81b192ab2f421858",
+  "features_hash": "sha256:a9209f171ac63b9e",
   "trained_against": {
     "ued": {
       "id": "c2a00000-0000-4000-8000-000000000001",
       "revision": "1.0"
     },
     "kmd": {
-      "id": "c2a00000-0000-4000-8000-000000000003",
+      "id": "c2a00000-0000-4000-8000-000000000004",
       "revision": "1.0"
     },
-    "slot": "dkdv",
+    "slot": "dq",
     "umd": [
       {
         "id": "c2a00000-0000-4000-8000-000000000005",

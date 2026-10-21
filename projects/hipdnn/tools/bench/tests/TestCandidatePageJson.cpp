@@ -11,6 +11,7 @@
 
 #include <hipdnn_bench/CandidatePageJson.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SlotProgramBenchmark.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace hipdnn_bench
@@ -232,16 +234,6 @@ std::map<std::string, std::string> marksById(const std::vector<std::string>& ids
 
 } // namespace
 
-TEST(TestCandidatePageJson, ACompositeIdSplitsIntoItsSlotsInOrder)
-{
-    const auto kernels = slotKernels("prep=" + PREP[1] + "|dkdv=" + DKDV[0] + "|dq=" + DQ[1]);
-    ASSERT_EQ(kernels.size(), 3U);
-    EXPECT_EQ(kernels[0].slot, "prep");
-    EXPECT_EQ(kernels[0].kernelId, PREP[1]);
-    EXPECT_EQ(kernels[1].slot, "dkdv");
-    EXPECT_EQ(kernels[2].kernelId, DQ[1]);
-}
-
 TEST(TestCandidatePageJson, ABareKernelIdHasNoSlotsAndAMalformedCompositeThrows)
 {
     EXPECT_TRUE(slotKernels(PREP[0]).empty());
@@ -380,6 +372,64 @@ TEST(TestCandidatePageJson, ASweepIsUsableOnlyWhenItsReferenceProgramTimed)
         referenceProgramTimed({resultFor(page, references.program, false, 5)}, page, references));
     EXPECT_FALSE(
         referenceProgramTimed({resultFor(page, references.program, true, 0)}, page, references));
+}
+
+TEST(TestCandidatePageJson, TheRuntimesCompositeIdSplitsBackIntoItsSlotsAndKernels)
+{
+    const std::vector<std::string> names{"prep", "dkdv", "dq"};
+    const std::vector<std::string> kernels{PREP[1], DKDV[2], DQ[0]};
+    std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+    ids.reserve(kernels.size());
+    for(const auto& kernel : kernels)
+    {
+        ids.push_back(hipdnn_flatbuffers_sdk::utilities::parseUuid(kernel));
+    }
+    const auto id = hipdnn_plugin_sdk::ingestor::detail::compositeCandidateId(
+        names.size(), [&](size_t slot) { return std::forward_as_tuple(names[slot], ids[slot]); });
+
+    const auto split = slotKernels(id);
+    ASSERT_EQ(split.size(), names.size());
+    for(size_t slot = 0; slot < names.size(); ++slot)
+    {
+        EXPECT_EQ(split[slot].slot, names[slot]);
+        EXPECT_EQ(split[slot].kernelId, kernels[slot]);
+    }
+}
+
+TEST(TestCandidatePageJson, EachMeasuredConfigurationFindsItsOwnCatalogPositionsSlotRow)
+{
+    const auto page = slottedPage();
+    const auto ids = slottedCatalog();
+    const auto references = slotReferences(ids);
+    const auto marks = marksById(ids);
+
+    // Results arrive in any order (here reversed); the marks are per catalog position.
+    for(size_t index = ids.size(); index-- > 0;)
+    {
+        const auto result = resultFor(page, index, true, 5);
+        const auto row = slotRowOf(page, references, toVariantKnobs(result.knobSettings));
+        ASSERT_TRUE(row.has_value());
+        EXPECT_EQ(row->candidateId, ids[index]);
+        EXPECT_EQ(row->reference, marks.at(ids[index]));
+    }
+
+    hipdnn_frontend::AutotuneResult unenrolled;
+    unenrolled.knobSettings = {hipdnn_frontend::KnobSetting("tile", int64_t{999})};
+    EXPECT_FALSE(slotRowOf(page, references, toVariantKnobs(unenrolled.knobSettings)));
+}
+
+TEST(TestCandidatePageJson, ANonDescriptorEnginesIdsAreOpaqueEvenWhenTheyContainAnEquals)
+{
+    auto page = twoCandidatePage();
+    page.engineDescriptorId.clear();
+    page.candidates[0].id = "algo=3";
+    page.candidates[1].id = "tile=";
+
+    const auto json = pageJson(page, "key", "graph");
+    EXPECT_EQ(json.at("candidates")[0].at("id"), "algo=3");
+    EXPECT_FALSE(json.at("candidates")[0].contains("slot_kernels"));
+    EXPECT_EQ(json.at("candidates")[1].at("id"), "tile=");
+    EXPECT_FALSE(json.at("candidates")[1].contains("slot_kernels"));
 }
 
 TEST(TestCandidatePageJson, AnUnslottedCandidateCarriesNoSlotKernels)
