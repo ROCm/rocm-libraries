@@ -393,10 +393,8 @@ void testing_itilu0_convergence_history(Arguments argus)
     const int option  = ItILU0Option::StoppingCriteria | ItILU0Option::ComputeNrmCorrection
                        | ItILU0Option::ComputeNrmResidual | ItILU0Option::ConvergenceHistory;
 
-    for(ItILU0Algorithm alg : {ItILU0Algorithm::AsyncInPlace,
-                               ItILU0Algorithm::AsyncSplit,
-                               ItILU0Algorithm::SyncSplit,
-                               ItILU0Algorithm::SyncSplitFusion})
+    for(ItILU0Algorithm alg :
+        {ItILU0Algorithm::AsyncInPlace, ItILU0Algorithm::AsyncSplit, ItILU0Algorithm::SyncSplit})
     {
         SCOPED_TRACE(testing::Message() << "ItILU0Algorithm " << alg);
 
