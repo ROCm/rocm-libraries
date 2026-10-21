@@ -1,13 +1,11 @@
-# Random matrix multiplication tests with rocJITsu
+# Nightly GEMM race detection with rocJITsu
 
-This test samples hipBLASLt GEMMs and runs them through rocJITsu, which executes
-GPU instructions on CPUs. It varies sizes, number formats and operation options
-to exercise different GPU functions.
+The nightly job runs 1,000 sampled hipBLASLt GEMMs through rocJITsu with race
+detection enabled. A 100-input subset runs on relevant PRs. Both execute gfx950
+GPU instructions on CPUs and check the numerical output with `hipblaslt-bench`.
 
-The race detector looks for GPU instructions that read or
-overwrite memory or registers too early. This can happen when a required wait or
-coordination between threads is missing. The benchmark also compares the computed
-output with a separate CPU calculation. No physical GPU is required.
+See [rocJITsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/29656a8dcc052615e1ca49cafde98d684b6b81f2/emulation/rocjitsu/docs/race-detector.md)
+for how detection works and its coverage limits.
 
 ## Design
 
