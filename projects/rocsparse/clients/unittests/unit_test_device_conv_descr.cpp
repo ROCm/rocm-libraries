@@ -23,9 +23,9 @@
  * ************************************************************************ */
 
 // Generic-API descriptor and auxiliary entry points: const descriptor constructors and
-// getters, nnz / batch accessors, dense matrix copy, status strings, color info and
-// the spmat printer. Round trips compare what the public getters return with what was
-// passed in; the constructors are checked with one invalid argument at a time.
+// getters, nnz / batch accessors, dense matrix copy and transpose, status strings, color
+// info and the spmat printer. Round trips compare what the public getters return with
+// what was passed in; the constructors are checked with one invalid argument at a time.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -320,8 +320,8 @@ namespace
         int64_t nnz = 0;
         EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_ok);
         EXPECT_GE(nnz, rows * ell_cols);
-        // The nnz of a blocked ELL matrix cannot be set (the header only says it fails).
-        EXPECT_REJECTED(rocsparse_spmat_set_nnz(mut(d), 3));
+        // The nnz of a blocked ELL matrix cannot be set.
+        EXPECT_EQ(rocsparse_spmat_set_nnz(mut(d), 3), st_val);
 
         EXPECT_EQ(mk(nullptr, 4, 4, dir_r, 2, 2, b.i, b.v), st_ptr);
         EXPECT_EQ(mk(&bad, -1, 4, dir_r, 2, 2, b.i, b.v), st_size);
@@ -444,24 +444,65 @@ namespace
         Buf   b;
         Spmat d;
         ASSERT_EQ(rocsparse_create_ell_descr(&d, 5, 7, b.i, b.v, 3, i32, base0, f32), st_ok);
-        // ELL: nnz is ell_width * rows and cannot be set (the header only says it fails).
+        // ELL: nnz is ell_width * rows and cannot be set.
         int64_t nnz = 0;
         EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_ok);
         EXPECT_EQ(nnz, 3 * 5);
-        EXPECT_REJECTED(rocsparse_spmat_set_nnz(d, 4));
+        EXPECT_EQ(rocsparse_spmat_set_nnz(d, 4), st_val);
 
         EXPECT_EQ(rocsparse_ell_set_strided_batch(nullptr, 2, 10), st_ptr);
-        // The header documents invalid_size for an invalid batch count or stride, while
-        // the implementation returns invalid_value; accept both (AISPARSE-904).
-        EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 0, 10), st_size, st_val);
-        EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 2, -1), st_size, st_val);
-        // A positive stride with a batch count of one is not covered by the header; the
-        // library accepts it.
+        // An invalid batch count or stride is an invalid value.
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 0, 10), st_val);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, -1, 10), st_val);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 2, -1), st_val);
+        // A positive stride with a batch count of one is accepted.
         EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 1, 5), st_ok);
         ASSERT_EQ(rocsparse_ell_set_strided_batch(d, 3, 20), st_ok);
         rocsparse_int batch_count = 0;
         EXPECT_EQ(rocsparse_spmat_get_strided_batch(d, &batch_count), st_ok);
         EXPECT_EQ(batch_count, 3);
+    }
+
+    TEST_F(ConvDescr, StridedBatchSettersAndGetters)
+    {
+        Buf   b;
+        Spmat coo, csr, csc;
+        Dnmat dnmat;
+        Dnvec dnvec;
+        ASSERT_EQ(rocsparse_create_coo_descr(&coo, 5, 7, 4, b.i, b.j, b.v, i32, base0, f32), st_ok);
+        ASSERT_EQ(rocsparse_create_csr_descr(&csr, 5, 7, 4, b.i, b.j, b.v, i32, i32, base0, f32),
+                  st_ok);
+        ASSERT_EQ(rocsparse_create_csc_descr(&csc, 5, 7, 4, b.i, b.j, b.v, i32, i32, base0, f32),
+                  st_ok);
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dnmat, 5, 7, 5, b.v, f32, rocsparse_order_column),
+                  st_ok);
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&dnvec, 5, b.v, f32), st_ok);
+
+        // A batch count that is not positive or a negative stride is an invalid value.
+        for(rocsparse_int bad_count : {0, -1})
+        {
+            EXPECT_EQ(rocsparse_spmat_set_strided_batch(csr, bad_count), st_val);
+            EXPECT_EQ(rocsparse_coo_set_strided_batch(coo, bad_count, 10), st_val);
+            EXPECT_EQ(rocsparse_csr_set_strided_batch(csr, bad_count, 6, 4), st_val);
+            EXPECT_EQ(rocsparse_csc_set_strided_batch(csc, bad_count, 8, 4), st_val);
+            EXPECT_EQ(rocsparse_dnmat_set_strided_batch(dnmat, bad_count, 35), st_val);
+            EXPECT_EQ(rocsparse_dnvec_set_strided_batch(dnvec, bad_count, 5), st_val);
+        }
+        EXPECT_EQ(rocsparse_coo_set_strided_batch(coo, 2, -1), st_val);
+        EXPECT_EQ(rocsparse_csr_set_strided_batch(csr, 2, -1, 4), st_val);
+        EXPECT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 6, -1), st_val);
+        EXPECT_EQ(rocsparse_csc_set_strided_batch(csc, 2, -1, 4), st_val);
+        EXPECT_EQ(rocsparse_csc_set_strided_batch(csc, 2, 8, -1), st_val);
+        EXPECT_EQ(rocsparse_dnmat_set_strided_batch(dnmat, 2, -1), st_val);
+
+        // A null output of a getter is an invalid pointer.
+        rocsparse_int batch_count  = 0;
+        int64_t       batch_stride = 0;
+        EXPECT_EQ(rocsparse_spmat_get_strided_batch(csr, nullptr), st_ptr);
+        EXPECT_EQ(rocsparse_dnmat_get_strided_batch(dnmat, nullptr, &batch_stride), st_ptr);
+        EXPECT_EQ(rocsparse_dnmat_get_strided_batch(dnmat, &batch_count, nullptr), st_ptr);
+        EXPECT_EQ(rocsparse_dnvec_get_strided_batch(dnvec, nullptr, &batch_stride), st_ptr);
+        EXPECT_EQ(rocsparse_dnvec_get_strided_batch(dnvec, &batch_count, nullptr), st_ptr);
     }
 
     TEST_F(ConvDescr, SpmatSetNnzPerFormat)
@@ -579,7 +620,8 @@ namespace
 // contiguous, padded and batched layouts, scaled copies through the kernel path in both
 // pointer modes (only with ROCSPARSE_WITH_SPMAT_SCALE, which provides
 // rocsparse_dnvec_descr_create_scalar) and argument validation. Every logical and
-// padding element of the target is checked.
+// padding element of the target is checked. rocsparse_dnmat_transpose (declared under
+// the same option): argument validation.
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 namespace
 {
@@ -757,20 +799,21 @@ namespace
             = [&](rocsparse_dnvec_descr a, rocsparse_dnmat_descr s, rocsparse_dnmat_descr d) {
                   return rocsparse_dnmat_copy_data(handle, a, s, d, nullptr);
               };
-        // (invalid_handle is not in the list of documented statuses)
-        EXPECT_REJECTED(rocsparse_dnmat_copy_data(nullptr, nullptr, src, dst, nullptr));
+        EXPECT_EQ(rocsparse_dnmat_copy_data(nullptr, nullptr, src, dst, nullptr),
+                  rocsparse_status_invalid_handle);
         EXPECT_EQ(copy(nullptr, nullptr, dst), st_ptr);
         EXPECT_EQ(copy(nullptr, src, nullptr), st_ptr);
-        // The header documents invalid_value for different data types while the
-        // implementation returns not_implemented; accept both (AISPARSE-904).
-        EXPECT_STATUS_IN(copy(nullptr, src, dst_double), st_val, rocsparse_status_not_implemented);
+        // Different data types (mixed precision) are not implemented.
+        EXPECT_EQ(copy(nullptr, src, dst_double), rocsparse_status_not_implemented);
         EXPECT_EQ(copy(nullptr, src, tall), st_val);
         EXPECT_EQ(copy(nullptr, src, wide), st_val);
         // Different batch counts.
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 2, 12), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
         EXPECT_EQ(copy(nullptr, src, dst), st_val);
+        // A source batch count of one with a zero stride is broadcast.
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
+        EXPECT_EQ(copy(nullptr, src, dst), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
 #ifdef ROCSPARSE_WITH_SPMAT_SCALE
@@ -779,17 +822,83 @@ namespace
                           handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
                       st_ok);
         };
-        // The scalar must have the data type of the matrices.
+        // A scalar of another data type (mixed precision) is not implemented.
         double alpha_d = 2.0;
         Dnvec  alpha_double;
         scalar(alpha_double, rocsparse_datatype_f64_r, &alpha_d);
-        EXPECT_STATUS_IN(copy(alpha_double, src, dst), st_val, rocsparse_status_not_implemented);
+        EXPECT_EQ(copy(alpha_double, src, dst), rocsparse_status_not_implemented);
         // The scalar batch count must match the target or be one with a zero stride.
         float alpha_f[3] = {2.0f, 3.0f, 4.0f};
         Dnvec alpha;
         scalar(alpha, f32, alpha_f);
         ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 2, 1), st_ok);
         EXPECT_EQ(copy(alpha, src, dst), st_val);
+        // The same checks when the orders differ.
+        Dnmat dst_row;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dst_row, 4, 3, 3, df2, f32, rocsparse_order_row),
+                  st_ok);
+        EXPECT_EQ(copy(alpha_double, src, dst_row), rocsparse_status_not_implemented);
+        EXPECT_EQ(copy(alpha, src, dst_row), st_val);
+#endif
+    }
+
+    TEST_F(ConvDescr, DnmatTransposeInvalid)
+    {
+        DevBuf<float>  df(std::vector<float>(64, 1.0f)), df2(std::vector<float>(64, 1.0f));
+        DevBuf<double> dd(std::vector<double>(64, 1.0));
+        Dnmat          src, dst, same, dst_double;
+        const auto     mk = [&](Dnmat& d, int64_t m, int64_t n, void* p, rocsparse_datatype dt) {
+            ASSERT_EQ(rocsparse_create_dnmat_descr(&d, m, n, m, p, dt, col), st_ok);
+        };
+        mk(src, 4, 3, df, f32);
+        mk(dst, 3, 4, df2, f32);
+        mk(same, 4, 3, df2, f32);
+        mk(dst_double, 3, 4, dd, rocsparse_datatype_f64_r);
+
+        const auto transpose
+            = [&](rocsparse_dnvec_descr a, rocsparse_dnmat_descr s, rocsparse_dnmat_descr d) {
+                  return rocsparse_dnmat_transpose(handle, a, s, d, nullptr);
+              };
+        EXPECT_EQ(rocsparse_dnmat_transpose(nullptr, nullptr, src, dst, nullptr),
+                  rocsparse_status_invalid_handle);
+        EXPECT_EQ(transpose(nullptr, nullptr, dst), st_ptr);
+        EXPECT_EQ(transpose(nullptr, src, nullptr), st_ptr);
+        // Different data types (mixed precision) are not implemented.
+        EXPECT_EQ(transpose(nullptr, src, dst_double), rocsparse_status_not_implemented);
+        // The target must have the transposed dimensions.
+        EXPECT_EQ(transpose(nullptr, src, same), st_val);
+        // Different batch counts.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 2, 12), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst), st_val);
+        // A source batch count of one with a zero stride is broadcast.
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
+
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
+        const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
+            ASSERT_EQ(rocsparse_dnvec_descr_create_scalar(
+                          handle, &a, rocsparse_pointer_mode_host, dt, p, nullptr, nullptr),
+                      st_ok);
+        };
+        // A scalar of another data type (mixed precision) is not implemented.
+        double alpha_d = 2.0;
+        Dnvec  alpha_double;
+        scalar(alpha_double, rocsparse_datatype_f64_r, &alpha_d);
+        EXPECT_EQ(transpose(alpha_double, src, dst), rocsparse_status_not_implemented);
+        // The scalar batch count must match the target or be one with a zero stride.
+        float alpha_f[3] = {2.0f, 3.0f, 4.0f};
+        Dnvec alpha;
+        scalar(alpha, f32, alpha_f);
+        ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 2, 1), st_ok);
+        EXPECT_EQ(transpose(alpha, src, dst), st_val);
+        // The same checks when the orders differ.
+        Dnmat dst_row;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dst_row, 3, 4, 4, df2, f32, rocsparse_order_row),
+                  st_ok);
+        EXPECT_EQ(transpose(alpha_double, src, dst_row), rocsparse_status_not_implemented);
+        EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
 #endif
     }
 } // namespace
