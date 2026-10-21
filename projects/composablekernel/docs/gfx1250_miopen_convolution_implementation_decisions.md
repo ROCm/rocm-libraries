@@ -177,3 +177,130 @@ Focused BF16 and FP16 selected-plugin GPU regressions both passed with poisoned 
 A temporary **baseline-only** plugin linked the same CK archive and current plugin objects but disabled the selected-output definition proof; no source-tree or installed plugin was changed. rocprofv3 cached-driver traces recorded four NCDHW staging transposes per call with that baseline versus three with the retained proof, with the same CK dispatch and required clears (ten repeated calls per trace). Uninstrumented cached-driver AB/BA process pairs measured BF16 old/new medians **0.068609 / 0.0585655 ms** and paired median delta **-0.010292 ms** (12/12 new wins); FP16 **0.072397 / 0.0654555 ms**, paired delta **-0.006705 ms** (6/6 new wins). The original NCDHW driver and selected XDL-v1 kernel were held fixed; clocks were not pinned. This is a measured selected-family benefit, not a universal 3D shortcut.
 
 **Rejected extension.** An FP16 packed-forward `GroupsPerWmma=2`, C=K=8 row passed CPU-reference CK execution and factory/scratch tests but lost to the best eligible CK family on G32/N16/56x56 (0.096461 vs 0.056142 ms, 0/5 paired wins) and G32/N32/225x225/s2 (1.302460 vs 0.965956 ms, 0/5). It also lost on a 7x7 small control; the added row, admission branch and tests were removed. The existing C=K=4/GPW4 candidate is unchanged. No BF16 packed row or speculative A-vector4 backward-data row was registered; vector2 already admits an even-K family but lacked default-solver evidence for a wider portfolio.
+
+## Production-hardware corpus investigation (2026-10-21)
+
+**Scope and provenance.** The user identifies the current device as production hardware,
+unlike the hardware used for earlier trials. New GPU work was serialized with
+`ROCR_VISIBLE_DEVICES=2`: gfx1250, UUID `GPU-6c0381e65d76b84b`, reported ASIC revision 1.
+ROCm/compiler prefix was `/home/sgundabo/rocm-10.2`. The starting branch was
+`5a3e570c85f450bc541c153123886bd27ef78991`. No clocks, power limits or other devices were
+changed. Only MIOpen-consumable BF16, FP16 and FP32 convolutions were investigated.
+Earlier measurements remain evidence for their original hardware, not permanent
+performance rejections on this device.
+
+### Corpus priorities
+
+The supplied `brad_corpus_9471_5a3e570.xlsx` and matching JSON contain 6,295 FP16,
+1,709 BF16 and 1,467 FP32 unique convolutions. Of 9,468 timed rows, 218 selected Naive;
+their summed latency is 8.004384 ms out of 1,280.190425 ms, only 0.625%.
+Naive selection alone is therefore a poor prioritization metric. The largest Naive
+family is FP16 NHWC RGB backward-data, C3/K24, 3x3/stride2, N16/128 at 384/480 square:
+four rows total 3.731732 ms. A neighboring N16/256-square probe verified, selected
+Naive at 0.077491 ms, and had a best CK raw invocation of 0.111423 ms. Do not ban
+Naive or claim missing eligibility when an eligible CK candidate is simply slower.
+
+FP32 dense 3D 3x3x3/stride1 contributes 204.880 ms across 180 direction/shape rows.
+The two rows above 10 ms are FP32 160-cube forward and weight-gradient convolutions.
+FP16 pointwise and dilated families contribute 145.175 and 127.972 ms; BF16 dense
+2D 3x3/stride1 contributes 181.060 ms across all three directions. These are
+latency-family targets, not shape-equality admission rules.
+
+Against `brad_corpus_9471_10202026_8a29d2e.json`, successful paired rows with successful
+tuning and measurement give aggregate baseline/branch speedups of 1.0244x BF16
+(1,698 pairs), 1.2582x FP16 (6,237), and 0.9923x FP32 (1,458). These are historical
+two-pass corpus measurements, not controlled new kernel comparisons. Eight branch
+measurement rows exceed their recorded Find time by more than 4x; original tuning
+logs show independently faster verified execution. For example FP16 G32/C256/K256,
+N128/64-square/stride2 is 0.169769 ms in the tuning log but 6.198481 ms in JSON's
+measurement pass. Timing state, cached configuration and selection need investigation;
+no kernel root cause or corrected corpus speedup is inferred. Six BF16 records have
+failed or mismatched tuning/measurement; original logs include hipConv or hipBLASLt
+errors before downstream launch failures. They are not evidence that CK caused them.
+
+### Retained: FP32 3D backward-data staging
+
+MIOpen's existing selected no-D XDL-v1 full-E proof now accepts FP32 3D default-layout
+problems. Runtime borrowing/copy elision remains gfx1250-only, packed NCDHW, default
+alpha1/beta0, aligned/disjoint caller spans and workspace, zero transposed-output pads,
+and a recognized bare XDL-v1 kernel ID with implicit split one. Other directions,
+explicit splits, fused/unrecognized kernels and aliases retain staging. CK still
+clears all packed E before residue GEMMs. No arithmetic, precision, kernel, solver
+ranking, scratch allocation or public API changed.
+
+An isolated plugin reused the baseline CK archive and all other plugin objects.
+Because shared inline/template symbols can coalesce across replacement and baseline
+objects, the temporary predicate and invoker template were uniquely named; a separate
+diagnostic established `selected=1, borrowable=1, safe=1, skip=1` before removing its
+logging and measuring. Earlier mixed-object samples that did not exercise the modified
+branch are not speedup evidence.
+
+| FP32 N1, 3x3x3/pad1, original NCDHW backward-data | Baseline / changed median, ms | Paired process runs |
+|---|---:|---:|
+| C32/K64, input64-cube, stride1 | 0.3366845 / 0.2595145 | 6 AB/BA pairs, 6/6 wins |
+| C32/K64, input48-cube, stride2 | 0.086303 / 0.064384 | 4 AB/BA pairs, 4/4 wins |
+| C64/K32, input96-cube, stride1 | 0.935457 / 0.786554 | 4 AB/BA pairs, 4/4 wins |
+
+These are conversion-inclusive driver GPU kernel-time averages (50 iterations on
+the first case, 30 on holdouts), not host wall time. Each invocation passed GPU
+reference verification. The selected CK type was unchanged across comparisons:
+`DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 8, 1, 1>`.
+The rebuilt production plugin subsequently verified the same three paths at
+0.261119, 0.064402 and 0.784488 ms. Four focused tests passed: the family/split/scalar
+predicate and FP16/BF16/FP32 selected-invoker regressions with stride-two holes,
+poisoned output/workspace, changed signed data and alias fallback. No full-corpus
+post-change speedup, cross-device benefit or all-kernel numerical sweep is claimed.
+
+### FP32 matrix coverage trial: not retained
+
+gfx1250 already has native float-operand/float-accumulator
+`v_wmma_f32_16x16x4_f32`; FP32 does not require BF16/FP16 conversion. The ordinary
+forward remapping predicate excludes float, rejecting existing public-32x32 dense
+rows. A temporary, no-D/unmerged float remap of only the 3D FP32 compute registrar
+made four additional configurations executable (15 to 19 supported candidates).
+Complete CK hot-reuse invocations included all invoker work, with no cache correction:
+new best 0.707165 versus existing 0.289176 ms at C64/K32/input64-cube; new best
+0.182415 versus existing 0.160725 ms at C128/K128/input32-cube. No new row beat the
+best existing family. The remap was not retained; wider eligibility is not uplift.
+Performance runs did not CPU-verify these rejected rows, so no new correctness
+contract is asserted.
+
+### Reconsidered earlier trials on production hardware
+
+**FP16 C8/GPW2 packed forward remains rejected.** A temporary registrar added the
+previously rejected two-group candidate to the current portfolio, including today's
+GPW4/GPW8 alternatives. Raw whole-invocation timing includes weight packing.
+At G32/N16/input56-square/3x3/stride1, three AB/BA process pairs measured GPW2
+0.0957624 versus best-other 0.0545729 ms. At G32/N32/input225-square/stride2,
+GPW2 was 1.2951 versus current GPW4 0.633808 ms. No new correctness claim or
+production registration follows.
+
+**BF16 WM1b remains promising, not a global change.** Reconstructed the documented
+`NumMacClusters=2` ablation only for block256/M128/N128/K64 in the BF16 2D compute
+registrar, preserving priorities, matrix-reuse settings and the rest of the archive.
+At G1/N42/C=K128, 3x3/input30x40, five AB/BA pairs gave matched baseline/WM1b
+0.0230531/0.0207936 ms (5/5 wins). At C48/K192/input120x160, they gave
+0.238616/0.225823 ms (5/5). But current best-other wavelet rows in the full passes
+were 0.0188738 and 0.146519 ms respectively. The matched-row improvement is stronger
+on this hardware than the old evidence, yet still does not improve the winning
+portfolio. Reconsider this scheduling mechanism only on a current winning family
+with relevant resource/stall evidence; no blanket macro or matrix-reuse change.
+These performance runs did not establish new CPU correctness.
+
+### Artifacts and next targets
+
+The external investigation workbook is
+`/home/sgundabo/miopen_benchmarker/ck_convolution_production_hw_investigation.xlsx`.
+Raw logs, commands, UUID/commit provenance, family/anomaly CSVs and paired samples
+are in `/tmp/ck-corpus-gpu2-hxh4a5_4/`; original benchmark inputs were not modified.
+Temporary overlay sources were removed after recording the experiments.
+
+Prioritize BF16 channels-last dense forward/WRW, FP16 NCHW pointwise/dilated
+conversion-inclusive paths, and FP32 3D forward/WRW native instruction utilization.
+FP16 depthwise partitioned-reduction coverage and FP32 scalar/DL competitors remain
+unmeasured candidates, not promised gains. Reconstruct promising prior trials with
+one independent mechanism per overlay, compare current best eligible families,
+include held-out work-level/stride/channel controls, and reject regressions before
+registration. Hardware change removes a historical performance veto, not correctness,
+precision, alias, determinism or specification requirements.
+

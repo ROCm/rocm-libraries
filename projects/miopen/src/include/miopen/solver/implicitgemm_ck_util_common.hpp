@@ -498,8 +498,9 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
        std::any_of(problem.GetConv().trans_output_pads.begin(),
                    problem.GetConv().trans_output_pads.end(),
                    [](int pad) { return pad != 0; }) ||
-       (!problem.IsFp16() && !problem.IsBfp16()) || problem.HasNonPackedTensors() ||
-       problem.GetGroupCount() == 0 || problem.GetAlphaBetaCase() != DEFAULT)
+       (!problem.IsFp16() && !problem.IsBfp16() && !(problem.IsFp32() && problem.Is3d())) ||
+       problem.HasNonPackedTensors() || problem.GetGroupCount() == 0 ||
+       problem.GetAlphaBetaCase() != DEFAULT)
         return false;
 
     for(const auto* desc : {&problem.GetIn(), &problem.GetWeights(), &problem.GetOut()})

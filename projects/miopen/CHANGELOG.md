@@ -18,6 +18,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Exposed a bounded gfx1250 BF16 group-local depthwise CK backward-weights candidate for packed 2D channels-last short-reduction problems; selected BF16 plugin execution requires the usual WRW alpha/beta workspace contract.
 * [Conv] Borrowed individual FP16/BF16 grouped-CK NCHW/NCDHW operands when their packed layout transpose is an identity and aligned caller tensors and reserved workspace have disjoint spans; aliases, nondefault scalars and nonqualifying operands retain staging and the original workspace reservation.
 * [Conv] Omitted the redundant old-output layout copy on gfx1250 for selected, fully initialized 3D FP16/BF16 grouped CK backward-data XDL-v1 invocations; other devices, kernels, aliases and nondefault scalars retain staged behavior and CK's required output clear.
+* [Conv] Extend gfx1250 3D grouped CK XDL-v1 backward-data old-output copy elision to FP32, preserving native FP32 arithmetic, the full CK clear, alias fallback, and existing workspace reservations.
 * [Conv] Omitted the redundant old-output layout copy for selected, fully initialized 2D FP16/BF16 grouped CK forward and backward-data invocations with disjoint tensors and workspace and default scalars; unsupported kernel families and aliases retain staged behavior.
 * [Conv] Validate ranked grouped CK backward-weights defaults against CK argument support at split-K 1, preserving the untuned split-1 default independently of ranked tuning hints.
 

@@ -1088,9 +1088,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         std::all_of(problem.GetConv().trans_output_pads.begin(),
                     problem.GetConv().trans_output_pads.end(),
                     [](int pad) { return pad == 0; }) &&
-        (problem.IsBfp16() || problem.IsFp16()) && !problem.HasNonPackedTensors() &&
-        problem.GetAlphaBetaCase() == DEFAULT && problem.GetAlpha().GetAsFloat() == 1.0f &&
-        problem.GetBeta().GetAsFloat() == 0.0f;
+        (problem.IsBfp16() || problem.IsFp16() ||
+         (problem.IsFp32() && problem.Is3d() &&
+          problem.GetDirection() == miopen::conv::Direction::BackwardData &&
+          ctx.GetStream().GetDeviceName() == "gfx1250")) &&
+        !problem.HasNonPackedTensors() && problem.GetAlphaBetaCase() == DEFAULT &&
+        problem.GetAlpha().GetAsFloat() == 1.0f && problem.GetBeta().GetAsFloat() == 0.0f;
 
     // The 3D output-copy optimization is restricted to gfx1250; other devices
     // retain staging even when the selected CK invoker defines E.

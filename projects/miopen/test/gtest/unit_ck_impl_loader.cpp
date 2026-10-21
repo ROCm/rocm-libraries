@@ -231,7 +231,7 @@ TEST(CPU_CkImplLoader_NONE, SelectedNcdhwBackwardFullClearRequiresDefaultXdlV1)
         make_problem(miopenBFloat16, Direction::Forward, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 1>",
         std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
+    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
         make_problem(miopenFloat, Direction::BackwardData, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
         xdl_v1,
         std::nullopt));
@@ -930,7 +930,7 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
 {
     const auto device_name = GetCurrentDeviceName();
     if(device_name.find("gfx1250") != 0)
-        GTEST_SKIP() << "3D FP16/BF16 XDL-v1 backward candidates target gfx1250";
+        GTEST_SKIP() << "3D FP16/BF16/FP32 XDL-v1 backward candidates target gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
     ASSERT_TRUE(loader.IsLoaded())
         << "Required CK grouped conv library not installed for " << device_name;
@@ -952,7 +952,7 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
                loader.IsArgsSupported(CKSolverType::GrpConv3dBwd, problem, id, dtype, false);
     });
     ASSERT_NE(selected, kernels.end())
-        << "No supported 3D FP16/BF16 no-D XDL-v1 backward candidate";
+        << "No supported 3D FP16/BF16/FP32 no-D XDL-v1 backward candidate";
     const auto solution =
         loader.GetSolution(CKSolverType::GrpConv3dBwd, ctx, problem, *selected, false);
     ASSERT_EQ(solution.status, miopenStatusSuccess);
@@ -1047,6 +1047,11 @@ TEST(GPU_CkImplLoader_BF16, NcdhwBackwardSelectedFullClearAndAliasFallback)
 TEST(GPU_CkImplLoader_FP16, NcdhwBackwardSelectedFullClearAndAliasFallback)
 {
     CheckNcdhwBackwardSelectedFullClearAndAliasFallback<half_float::half>(miopenHalf);
+}
+
+TEST(GPU_CkImplLoader_FP32, NcdhwBackwardSelectedFullClearAndAliasFallback)
+{
+    CheckNcdhwBackwardSelectedFullClearAndAliasFallback<float>(miopenFloat);
 }
 
 TEST(GPU_CkImplLoader_BF16, DepthwiseWrwTailThroughPlugin)
