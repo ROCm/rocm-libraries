@@ -670,6 +670,10 @@ exclude_gpu:
       # AI heuristic models ship only for gfx908/gfx90a/gfx942/gfx950, and TheRock's Linux install keeps only the
       # runner target's db files. Passes on Windows gfx1151. Remove once the test skips archs without bundled models.
       - "GPU_ConvAIModelLoad_FP32*"
+      # OOM-killed on the 7.5 GB Linux gfx1151 runner strixhalo-12 (ALMIOPEN-2964): SIGKILL / exit 137 in PR #13107 runs
+      # 39480689944 and 39358709264; the same cases pass on the 31-125 GB gfx1151 hosts. Remove when ALMIOPEN-2964 closes.
+      - "CPU_PerfDb_NONE.*"
+      - "Full/GPU_na_*nchw_8_480_128_256_*" # largest BN+activation shape (126M elements, ~500 MB per FP32 tensor)
     labels:
       - "quick"
       - "standard"
@@ -677,18 +681,22 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx115X"
 
-  exclude_gpu_gfx94X:
+  exclude_gpu_gfx115X_windows:
     test_patterns:
-      # Flaky on gfx942 (ALMIOPEN-1926): same bias-only CPU/GPU mismatch at rnn_seq_api.hpp:272 as gfx110X/gfx115X,
-      # at a lower rate (Jenkins filters /1026 and /1095 via add_gtest_negative_filter). Excluded family-wide like
-      # the RDNA archs because the failing index changes from run to run.
-      - "Full/GPU_LstmMSRnn_FP32*"
+      # Fails on every Windows gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist
+      # ...\bin\gfx115128.HIP.fdb.txt" (also gfx115120). 5 of 5 executions failed on 5 hosts in PR #13107 runs
+      # 39358709264 / 39480689944 and develop nightly 38527180317. Remove once the test skips missing dbs or #13680 lands.
+      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
+      # Flaky on Windows gfx1151 (same bias-only RNN CPU/GPU mismatch as ALMIOPEN-1926): Backward Data / Forward Train /
+      # Forward Inference GRU verification failed at gru_test.cpp:1985/2224/2473 for 3 of these 8 bias-enabled cases in
+      # PR #13107 run 39358709264 (attempt 2); the same cases passed on the other attempt and in run 39480689944.
+      - "Full/GPU_GRU_Base_FP16.TestFloat16/batchSize_17_seqLength_23_inVecLen_13_hiddenSize_67_*biasMode_1_*"
     labels:
       - "quick"
       - "standard"
       - "comprehensive"
       - "full"
-      - "ex_gpu_gfx94X"
+      - "ex_gpu_gfx115X"
 
   exclude_gpu_gfx950:
     test_patterns:
