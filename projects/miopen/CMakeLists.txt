@@ -723,7 +723,7 @@ function(unpack_db db_bzip2_file)
 
     if(NOT MIOPEN_USE_SQLITE_PERFDB AND __extension STREQUAL ".db")
         add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}.txt
-                           DEPENDS sqlite2txt generate_${__tname}
+                           DEPENDS sqlite2txt generate_${__tname} ${KERNELS_BINARY_DIR}/${__fname}
                            COMMAND $<TARGET_FILE:sqlite2txt> ${KERNELS_BINARY_DIR}/${__fname} ${KERNELS_BINARY_DIR}/${__fname}.txt
         )
         add_custom_target(generate_${__tname}_txt ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname}.txt)
