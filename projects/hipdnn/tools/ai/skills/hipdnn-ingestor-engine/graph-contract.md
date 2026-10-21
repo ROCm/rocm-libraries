@@ -39,6 +39,23 @@ rejection in `graph_match`. A capacity may require inequality; a performance kno
 no fictitious graph field. Take specialization bindings from
 [rocke-mining.md](rocke-mining.md), not a copied compiler policy.
 
+## Registry pin and descriptor identity
+
+An engine built from the rocKE dispatcher registry names its kernels by the manifest's
+`enumerate.pin` (`configs/<engine>.engine.yaml`, enumerated by
+`registry_enumerator.py`). The registry's identifiers map onto descriptors one way:
+
+| Registry identifier | Descriptor field | Rule |
+|---|---|---|
+| `pin.algorithm` | the engine (UED `name`) | One manifest, one engine, one algorithm family. A second algorithm is a second manifest. |
+| `pin.spec_id` | the pack (one KDP) | One pack per pinned `spec_id`. Another `spec_id` served by the same engine is another pack, told apart by an operation-scoped UMD. |
+| `tuning_id` | per-kernel `provenance.rocke_tuning_id` | Informational: names the configuration the registry produced. Nothing selects on it. |
+| `pin.spec_id` | per-kernel `provenance.rocke_spec_id` | Informational, same as above. |
+| kernel spec fields | `kernel_source.spec` | Written as the registry holds them; fields the manifest does not list sit at their dataclass defaults. |
+
+Request fields reach the graph by the field mapping above, not through the pin: the
+pin selects which registry entry a cell resolves to and never appears in a KMD field.
+
 ## Corpus and numerical reference
 
 Compare real in-tree and external graphs on per-operand dims/strides, optional-field

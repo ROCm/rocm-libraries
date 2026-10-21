@@ -653,7 +653,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Orphaned `library/` behavioral pytest** | Attention *platform behavior* (builds, dispatch wiring, golden IR) runs in no gated tier — only its parity emitters ride the gate | Gate a `library` pytest tier |
+| G6 | **Attention `library/` pytest gated on the host only** | Attention *platform behavior* (dispatch wiring, spec predicates, tuned-candidate contract, golden IR) is gated by the host `library` attention tiers. The gfx950 on-GPU numerics tier exists but runs in no CI job, so attention numerics on hardware are checked only by hand | Run the attention GPU tier on a gfx950 CI runner |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
 
 ### 7.3 What "green" does and does not mean today
@@ -662,8 +662,8 @@ A green gate proves: the two engine implementations agree byte-for-byte across t
 enumerated parity corpus (both trees), IR roundtrips, the platform pytest suite
 passes, and the copyability contract holds. A green gate does **not** prove: that
 the **kernels are correct** on hardware (Question A — needs Tier 3, which itself has
-the holes in G1–G5), that the **kernels are fast** (G8), that attention *platform
-behavior* is correct (G6), or that any arch beyond the enumerated configs works.
+the holes in G1–G5), that the **kernels are fast** (G8), that attention kernels are
+correct on hardware in CI (G6), or that any arch beyond the enumerated configs works.
 
 ---
 
