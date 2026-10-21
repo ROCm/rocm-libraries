@@ -39,7 +39,24 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <sstream>
+#include <stdexcept>
 #include <vector>
+
+// gtest reports what() for an exception that escapes a test body, so the message
+// names the failing call.
+inline void unit_test_throw_hip_error(const char* call, hipError_t status)
+{
+    if(status == hipSuccess)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
 
 namespace rocsparse_ut
 {
@@ -116,20 +133,20 @@ namespace rocsparse_ut
         explicit device_vector(const std::vector<T>& host)
         {
             n = host.size();
-            rocsparse_clients_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
+            unit_test_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
             const hipError_t copy_status
                 = hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
             if(copy_status != hipSuccess)
             {
                 rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
                 ptr = nullptr;
-                rocsparse_clients_throw_hip_error("hipMemcpy", copy_status);
+                unit_test_throw_hip_error("hipMemcpy", copy_status);
             }
         }
         explicit device_vector(size_t count)
             : n(count)
         {
-            rocsparse_clients_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
+            unit_test_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
         }
         device_vector(const device_vector&) = delete;
         device_vector& operator=(const device_vector&) = delete;
@@ -153,7 +170,7 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            rocsparse_clients_throw_hip_error(
+            unit_test_throw_hip_error(
                 "hipMemcpy",
                 hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost));
         }

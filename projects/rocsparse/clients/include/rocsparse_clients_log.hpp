@@ -27,12 +27,10 @@
 #include "rocsparse.h"
 #include <hip/hip_runtime_api.h>
 #include <iostream>
-#include <sstream>
-#include <stdexcept>
 
 // Teardown must not throw: a destructor that throws while another exception is
 // unwinding calls std::terminate. Log the status and keep going.
-inline void rocsparse_clients_log_hip_error(const char* call, hipError_t status)
+inline void rocsparse_clients_log_hip_error(const char* call, hipError_t status) noexcept
 {
     if(status != hipSuccess)
     {
@@ -41,25 +39,12 @@ inline void rocsparse_clients_log_hip_error(const char* call, hipError_t status)
     }
 }
 
-inline void rocsparse_clients_log_rocsparse_error(const char* call, rocsparse_status status)
+inline void rocsparse_clients_log_rocsparse_error(const char*      call,
+                                                  rocsparse_status status) noexcept
 {
     if(status != rocsparse_status_success)
     {
-        std::cerr << call << " failed: status " << static_cast<int>(status) << std::endl;
+        std::cerr << call << " failed: " << rocsparse_get_status_name(status) << " ("
+                  << static_cast<int>(status) << ")" << std::endl;
     }
-}
-
-// A failed allocation, copy, or create has to stop the caller. std::runtime_error
-// is caught by the gtest harness and by rocsparse-test, and the message names the call.
-inline void rocsparse_clients_throw_hip_error(const char* call, hipError_t status)
-{
-    if(status == hipSuccess)
-    {
-        return;
-    }
-
-    std::ostringstream message;
-    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
-            << ")";
-    throw std::runtime_error(message.str());
 }

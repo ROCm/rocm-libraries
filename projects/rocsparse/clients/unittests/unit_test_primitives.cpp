@@ -78,8 +78,8 @@ namespace
     std::vector<T> to_host(const T* d, size_t n)
     {
         std::vector<T> h(n);
-        rocsparse_clients_throw_hip_error(
-            "hipMemcpy", hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost));
+        unit_test_throw_hip_error("hipMemcpy",
+                                  hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost));
         return h;
     }
 } // namespace
