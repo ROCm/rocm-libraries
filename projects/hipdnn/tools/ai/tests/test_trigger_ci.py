@@ -436,7 +436,7 @@ def test_yes_dispatches_when_nothing_is_active(trigger_mod, gh, monkeypatch, cap
         "-f",
         "linux_amdgpu_families=gfx94X",
         "-f",
-        "linux_test_labels=test:hipdnn",
+        "pr_labels=test:hipdnn",
         "--yes",
     )
     assert len(gh.dispatched) == 1
@@ -444,7 +444,7 @@ def test_yes_dispatches_when_nothing_is_active(trigger_mod, gh, monkeypatch, cap
     assert cmd[cmd.index("--ref") + 1] == "users/someone/feature"
     assert _inputs(cmd) == {
         "linux_amdgpu_families": "gfx94X",
-        "linux_test_labels": "test:hipdnn",
+        "pr_labels": "test:hipdnn",
     }
     assert "cancels" not in capsys.readouterr().err
 
