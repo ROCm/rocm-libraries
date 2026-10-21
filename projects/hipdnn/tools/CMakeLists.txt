@@ -398,7 +398,7 @@ endforeach()
             )
         endif()
 
-                _apply_hipdnn_test_category_labels(${HIPDNN_VALIDATE_DESCRIPTORS_TESTS})
+        _apply_hipdnn_test_category_labels(${HIPDNN_VALIDATE_DESCRIPTORS_TESTS})
 
         # IngestorGenerator pytest suite. It is registered here, after the validator target:
         # tests/test_round_trip.py runs that binary (HIPDNN_VALIDATE_DESCRIPTORS) and
