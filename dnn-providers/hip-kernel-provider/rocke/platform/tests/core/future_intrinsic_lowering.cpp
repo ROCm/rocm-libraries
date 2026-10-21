@@ -2904,6 +2904,33 @@ void case_memory_caps()
     }
 }
 
+/* ---- s_waitcnt VMCNT field width ---- */
+
+/* The same table as test_vmcnt_field_width in test_rocke_multiarch.py: the
+ * targets whose VMCNT width was measured with the assembler (how:
+ * "_comment_vmcnt_bits" in arch_specs.json). */
+void case_vmcnt_bits()
+{
+    struct expected_width
+    {
+        const char* gfx;
+        int vmcnt_bits;
+    };
+    static const expected_width table[] = {
+        {"gfx90a", 6},
+        {"gfx942", 6},
+        {"gfx950", 6},
+        {"gfx1151", 6},
+        {"gfx11-generic", 6},
+    };
+    for(const expected_width& row : table)
+    {
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(row.gfx);
+        if(t == nullptr || t->vmcnt_bits != row.vmcnt_bits)
+            fail(row.gfx, __LINE__);
+    }
+}
+
 /* ---- async buffer / global -> LDS ---- */
 void case_buffer_load_lds_async()
 {
@@ -3405,6 +3432,7 @@ const TestCase k_cases[] = {
     {"gfx1250_cluster_dims", case_gfx1250_cluster_dims},
     {"gfx1250_cluster_dims_rejects", case_gfx1250_cluster_dims_rejects},
     {"memory_caps", case_memory_caps},
+    {"vmcnt_bits", case_vmcnt_bits},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"buffer_load_vN_generic", case_buffer_load_vN_generic},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
