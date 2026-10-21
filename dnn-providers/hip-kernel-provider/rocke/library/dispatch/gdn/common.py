@@ -13,6 +13,7 @@ arch does not touch this file.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from numbers import Integral
 
 from kernels.gfx950.gdn_decode import (
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
@@ -139,7 +140,10 @@ def request_errors(req: OperatorRequest) -> list:
     # non-bool (``fuse_conv="false"``) would select a different kernel ABI.
     for field in GDN_DIM_VOCABULARY:
         value = getattr(req, field)
-        if type(value) is not int:
+        # Integral, not int: an ``np.int64(4)`` is an integer and was accepted
+        # by the old ``int()`` coercion; ``bool`` is an Integral subclass but a
+        # flag, never a count or a dim.
+        if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{field} must be an int, got {value!r}")
     for field in ("use_qk_l2norm", "fuse_conv", "fuse_out_norm"):
         value = getattr(req, field)

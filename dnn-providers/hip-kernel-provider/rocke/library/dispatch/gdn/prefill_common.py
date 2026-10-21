@@ -25,6 +25,7 @@ validation. Arch-specific capability, spec construction and the tuned
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from numbers import Integral
 from typing import Tuple
 
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
@@ -134,7 +135,8 @@ class GdnPrefillRequest(OperatorRequest):
         """
         chunk = self.effective_chunk_size
         for v in (chunk, self.seqlen):
-            if isinstance(v, bool) or not isinstance(v, int):
+            # Same rule as prefill_request_errors: Integral, not int.
+            if isinstance(v, bool) or not isinstance(v, Integral):
                 return 0
         if chunk <= 0 or self.seqlen % chunk:
             return 0
@@ -186,14 +188,17 @@ def prefill_request_errors(req: OperatorRequest) -> list:
         "head_v_dim",
     ):
         value = getattr(req, name)
-        if isinstance(value, bool) or not isinstance(value, int):
+        # Integral, not int: an ``np.int64(4)`` is an integer and was accepted
+        # by the old ``int()`` coercion; ``bool`` is an Integral subclass but a
+        # flag, never a count or a dim.
+        if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{name} must be an int, got {type(value).__name__}")
     for name in ("has_initial_state", "store_final_state"):
         value = getattr(req, name)
         if type(value) is not bool:
             errors.append(f"{name} must be a bool, got {value!r}")
     if req.chunk_size is not None and (
-        isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, int)
+        isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, Integral)
     ):
         errors.append(f"chunk_size must be an int, got {type(req.chunk_size).__name__}")
     if errors:
