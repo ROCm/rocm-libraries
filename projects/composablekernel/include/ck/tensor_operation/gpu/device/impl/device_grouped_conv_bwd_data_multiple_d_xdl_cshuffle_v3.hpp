@@ -239,8 +239,7 @@ template <typename GridwiseGemm,
           InMemoryDataOperationEnum EGlobalMemoryDataOperation,
           bool HasMainKBlockLoop,
           bool NoMainKBlockLoop,
-          index_t MinimumOccupancy = 1,
-          TailNumber TailNum       = TailNumber::Full>
+          index_t MinimumOccupancy = 1>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
 __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
@@ -304,32 +303,11 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
 
             if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
             {
-                GridwiseGemm::template Run<HasMainKBlockLoop,
-                                           EGlobalMemoryDataOperation,
-                                           TailNum,
-                                           decltype(a_grid_desc_transform),
-                                           decltype(b_grid_desc_transform),
-                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
-                    karg.p_a_grid + a_batch_offset,
-                    karg.p_b_grid + b_batch_offset,
-                    karg.p_c_grid + e_batch_offset,
-                    p_shared_0,
-                    p_shared_1,
-                    karg,
-                    a_grid_desc_transform,
-                    b_grid_desc_transform,
-                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                    k_idx,
-                    gridDim.z,
-                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
-            }
-            else
-            {
-                if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+                if(gemm_kernel_args[group_id].Tail_ == TailNumber::Odd)
                 {
-                    GridwiseGemm::template Run<true,
+                    GridwiseGemm::template Run<HasMainKBlockLoop,
                                                EGlobalMemoryDataOperation,
-                                               TailNum,
+                                               TailNumber::Odd,
                                                decltype(a_grid_desc_transform),
                                                decltype(b_grid_desc_transform),
                                                EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
@@ -348,9 +326,9 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                 }
                 else
                 {
-                    GridwiseGemm::template Run<false,
+                    GridwiseGemm::template Run<HasMainKBlockLoop,
                                                EGlobalMemoryDataOperation,
-                                               TailNum,
+                                               TailNumber::Even,
                                                decltype(a_grid_desc_transform),
                                                decltype(b_grid_desc_transform),
                                                EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
@@ -366,6 +344,103 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                         k_idx,
                         gridDim.z,
                         blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+            }
+            else
+            {
+                if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+                {
+                    if(gemm_kernel_args[group_id].Tail_ == TailNumber::Odd)
+                    {
+                        GridwiseGemm::template Run<true,
+                                                   EGlobalMemoryDataOperation,
+                                                   TailNumber::Odd,
+                                                   decltype(a_grid_desc_transform),
+                                                   decltype(b_grid_desc_transform),
+                                                   EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                            karg.p_a_grid + a_batch_offset,
+                            karg.p_b_grid + b_batch_offset,
+                            karg.p_c_grid + e_batch_offset,
+                            p_shared_0,
+                            p_shared_1,
+                            karg,
+                            a_grid_desc_transform,
+                            b_grid_desc_transform,
+                            gemm_kernel_args[group_id]
+                                .e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            k_idx,
+                            gridDim.z,
+                            blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    }
+                    else
+                    {
+                        GridwiseGemm::template Run<true,
+                                                   EGlobalMemoryDataOperation,
+                                                   TailNumber::Even,
+                                                   decltype(a_grid_desc_transform),
+                                                   decltype(b_grid_desc_transform),
+                                                   EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                            karg.p_a_grid + a_batch_offset,
+                            karg.p_b_grid + b_batch_offset,
+                            karg.p_c_grid + e_batch_offset,
+                            p_shared_0,
+                            p_shared_1,
+                            karg,
+                            a_grid_desc_transform,
+                            b_grid_desc_transform,
+                            gemm_kernel_args[group_id]
+                                .e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            k_idx,
+                            gridDim.z,
+                            blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    }
+                }
+                else
+                {
+                    if(gemm_kernel_args[group_id].Tail_ == TailNumber::Odd)
+                    {
+                        GridwiseGemm::template Run<false,
+                                                   EGlobalMemoryDataOperation,
+                                                   TailNumber::Odd,
+                                                   decltype(a_grid_desc_transform),
+                                                   decltype(b_grid_desc_transform),
+                                                   EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                            karg.p_a_grid + a_batch_offset,
+                            karg.p_b_grid + b_batch_offset,
+                            karg.p_c_grid + e_batch_offset,
+                            p_shared_0,
+                            p_shared_1,
+                            karg,
+                            a_grid_desc_transform,
+                            b_grid_desc_transform,
+                            gemm_kernel_args[group_id]
+                                .e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            k_idx,
+                            gridDim.z,
+                            blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    }
+                    else
+                    {
+                        GridwiseGemm::template Run<false,
+                                                   EGlobalMemoryDataOperation,
+                                                   TailNumber::Even,
+                                                   decltype(a_grid_desc_transform),
+                                                   decltype(b_grid_desc_transform),
+                                                   EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                            karg.p_a_grid + a_batch_offset,
+                            karg.p_b_grid + b_batch_offset,
+                            karg.p_c_grid + e_batch_offset,
+                            p_shared_0,
+                            p_shared_1,
+                            karg,
+                            a_grid_desc_transform,
+                            b_grid_desc_transform,
+                            gemm_kernel_args[group_id]
+                                .e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            k_idx,
+                            gridDim.z,
+                            blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    }
                 }
             }
         }
@@ -728,14 +803,16 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                  EGridDesc_MPerBlock_NBlock_NPerBlock e_grid_desc_mblock_mperblock_nblock_nperblock,
                  index_t BlockStart,
                  index_t BlockEnd,
-                 bool HasMainKBlockLoop)
+                 bool HasMainKBlockLoop,
+                 TailNumber Tail)
             : a_grid_desc_ak0_m_ak1_(a_grid_desc_ak0_m_ak1),
               b_grid_desc_bk0_n_bk1_(b_grid_desc_bk0_n_bk1),
               e_grid_desc_mblock_mperblock_nblock_nperblock_(
                   e_grid_desc_mblock_mperblock_nblock_nperblock),
               BlockStart_(BlockStart),
               BlockEnd_(BlockEnd),
-              HasMainKBlockLoop_(HasMainKBlockLoop)
+              HasMainKBlockLoop_(HasMainKBlockLoop),
+              Tail_(Tail)
 
         {
         }
@@ -745,6 +822,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         EGridDesc_MPerBlock_NBlock_NPerBlock e_grid_desc_mblock_mperblock_nblock_nperblock_;
         index_t BlockStart_, BlockEnd_;
         bool HasMainKBlockLoop_;
+        TailNumber Tail_;
     };
     // block-to-e-tile map for elementwise kernels
     using Block2TileMapInOutElementwise =
@@ -955,6 +1033,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                         const bool HasMainKBlockLoop =
                             GridwiseGemm::CalculateHasMainKBlockLoop(K_split);
 
+                        const auto Tail = GridwiseGemm::CalculateKBlockLoopTailNum(K_split);
+
                         gemm_kernel_args_[gemms_count_ / MaxGroupedGemmGroupsNum]
                                          [gemms_count_ % MaxGroupedGemmGroupsNum] =
                                              GemmArgs{a_grid_desc_ak0_m_ak1,
@@ -962,7 +1042,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                       e_grid_desc_mblock_mperblock_nblock_nperblock,
                                                       BlockStart,
                                                       BlockEnd,
-                                                      HasMainKBlockLoop};
+                                                      HasMainKBlockLoop,
+                                                      Tail};
                         gemms_count_++;
                         if(gemms_count_ % MaxGroupedGemmGroupsNum == 0)
                         {
@@ -1069,9 +1150,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
                 MemOp,
                 HasMainLoop,
-                NoMainLoop,
-                1, // MinOccupancy
-                TailNum>;
+                NoMainLoop>;
         }
         else
         {
@@ -2083,8 +2162,7 @@ template <index_t NDimSpatial,
           typename CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
           index_t CShuffleBlockTransferScalarPerVector,
           typename AComputeType                       = ADataType,
-          typename BComputeType                       = AComputeType,
-          bool DirectLoad                             = false>
+          typename BComputeType                       = AComputeType>
 using DeviceGroupedConvBwdDataMultipleD_Wavelet_Xdl_CShuffleV3 =
 DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<
         NDimSpatial,
@@ -2136,8 +2214,8 @@ DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<
         BlockGemmPipelineVersion::v1,
         AComputeType,
         BComputeType,
-        DirectLoad,
-        false, //LargeTensors
+        true,  // DirectLoad
+        false, // LargeTensors
         LoadBlockSize>;
 
 } // namespace device
