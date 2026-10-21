@@ -409,6 +409,27 @@ void check_rcr_kernel_gates()
     }
 }
 
+// The kernel forwards FP6's 16-element pack to the stride gate: 520 is a multiple of 8 but not of
+// 16, so an FP8 kernel would accept it.
+template <typename Gemm>
+void check_f6_kernel_stride_gates()
+{
+    expect_shape_rejection<Gemm>(
+        64,
+        64,
+        512,
+        520,
+        512,
+        "requires the stride of a packed A to be a multiple of its pack size 16");
+    expect_shape_rejection<Gemm>(
+        64,
+        64,
+        512,
+        512,
+        520,
+        "requires the stride of a packed B to be a multiple of its pack size 16");
+}
+
 TEST(MxGemmTdmGates, KernelF8TdmV1)
 {
     check_rcr_kernel_gates<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8>>();
@@ -430,6 +451,22 @@ TEST(MxGemmTdmGates, KernelF4TdmV1)
 TEST(MxGemmTdmGates, KernelF4TdmV2)
 {
     check_rcr_kernel_gates<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, F4, F4>>();
+    skip_without_gfx125();
+}
+
+TEST(MxGemmTdmGates, KernelF6TdmV1)
+{
+    using Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F6, F6>;
+    check_rcr_kernel_gates<Gemm>();
+    check_f6_kernel_stride_gates<Gemm>();
+    skip_without_gfx125();
+}
+
+TEST(MxGemmTdmGates, KernelF6TdmV2)
+{
+    using Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, F6, F6>;
+    check_rcr_kernel_gates<Gemm>();
+    check_f6_kernel_stride_gates<Gemm>();
     skip_without_gfx125();
 }
 
@@ -487,6 +524,30 @@ TEST(MxGemmTdmGates, KernelPointerAlignment)
     }
 }
 
+TEST(MxGemmTdmGates, KernelF6PointerAlignment)
+{
+    // 12-byte FP6 packs need 4-byte aligned A and B, not 12-byte aligned ones: kDeviceAddress is 4
+    // mod 12, and kDeviceAddress + 4 is 8 mod 12.
+    using F6Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F6, F6>;
+    ASSERT_EQ(kDeviceAddress % sizeof(F6), 4u)
+        << "the accepted addresses must not be 12-byte aligned";
+    for(std::uintptr_t offset : {0, 4})
+    {
+        const std::uintptr_t ab = kDeviceAddress + offset;
+        EXPECT_TRUE(tdm_pointers_ok<F6Gemm>(ab, ab, kDeviceAddress).first) << offset;
+    }
+    for(std::uintptr_t offset : {1, 2, 3})
+    {
+        const std::uintptr_t bad = kDeviceAddress + offset;
+        const auto [a_ok, a_log] = tdm_pointers_ok<F6Gemm>(bad, kDeviceAddress, kDeviceAddress);
+        EXPECT_FALSE(a_ok) << offset;
+        EXPECT_NE(a_log.find(kAlignmentReason), std::string::npos) << a_log;
+        const auto [b_ok, b_log] = tdm_pointers_ok<F6Gemm>(kDeviceAddress, bad, kDeviceAddress);
+        EXPECT_FALSE(b_ok) << offset;
+        EXPECT_NE(b_log.find(kAlignmentReason), std::string::npos) << b_log;
+    }
+}
+
 template <typename Policy>
 void expect_dense_f6_lds()
 {
@@ -507,6 +568,23 @@ TEST(MxGemmTdmGates, PolicyF6LdsRowsAreDense)
 {
     expect_dense_f6_lds<F6PolicyV1>();
     expect_dense_f6_lds<F6PolicyV2>();
+}
+
+// An FP6 pipeline allocates two dense LDS buffers, because the TDM pipelines double-buffer LDS.
+// Its kernel allocates the larger of the pipeline's and the TDM epilogue's LDS, which is the
+// pipeline's.
+template <template <typename...> class Pipeline>
+void expect_dense_f6_kernel_lds()
+{
+    using Gemm = TdmMxGemm<Pipeline, F6, F6>;
+    EXPECT_EQ(Pipeline<typename Gemm::Problem>::GetSmemSize(), 2 * kF6DenseLdsBufferBytes);
+    EXPECT_EQ(Gemm::Kernel::GetSmemSize(), 2 * kF6DenseLdsBufferBytes);
+}
+
+TEST(MxGemmTdmGates, KernelF6LdsRowsAreDense)
+{
+    expect_dense_f6_kernel_lds<ck_tile::GemmPipelineAgBgCrCompTDMV1>();
+    expect_dense_f6_kernel_lds<ck_tile::GemmPipelineAgBgCrCompTDMV2>();
 }
 
 // Every other operand type keeps the base policy's LDS padding in the host pass; only the gfx125
