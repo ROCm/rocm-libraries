@@ -232,20 +232,26 @@ rocsparse_status rocsparse::spmat_csr2bsr_nnz(rocsparse_handle            handle
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2bsr_nnz(handle,
-                                                      target->block_dir,
-                                                      source->rows,
-                                                      source->cols,
-                                                      source->descr,
-                                                      source->row_type,
-                                                      source->const_row_data,
-                                                      source->col_type,
-                                                      source->const_col_data,
-                                                      target->block_dim,
-                                                      target->descr,
-                                                      target->row_type,
-                                                      target->row_data,
-                                                      bsr_nnz));
+    // The nnz is returned in a host variable.
+    rocsparse_pointer_mode ptr_mode;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &ptr_mode));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    const rocsparse_status status = rocsparse::gcsr2bsr_nnz(handle,
+                                                            target->block_dir,
+                                                            source->rows,
+                                                            source->cols,
+                                                            source->descr,
+                                                            source->row_type,
+                                                            source->const_row_data,
+                                                            source->col_type,
+                                                            source->const_col_data,
+                                                            target->block_dim,
+                                                            target->descr,
+                                                            target->row_type,
+                                                            target->row_data,
+                                                            bsr_nnz);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, ptr_mode));
+    RETURN_IF_ROCSPARSE_ERROR(status);
     return rocsparse_status_success;
 }
 

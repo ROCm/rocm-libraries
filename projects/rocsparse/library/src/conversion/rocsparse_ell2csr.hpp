@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,25 +100,27 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    template <typename I, typename J>
     rocsparse_status ell2csr_nnz_quickreturn(rocsparse_handle          handle,
-                                             int64_t                   m,
-                                             int64_t                   n,
+                                             J                         m,
+                                             J                         n,
                                              const rocsparse_mat_descr ell_descr,
-                                             int64_t                   ell_width,
-                                             const void*               ell_col_ind,
+                                             J                         ell_width,
+                                             const J*                  ell_col_ind,
                                              const rocsparse_mat_descr csr_descr,
-                                             void*                     csr_row_ptr,
-                                             void*                     csr_nnz);
+                                             I*                        csr_row_ptr,
+                                             I*                        csr_nnz);
 
+    template <typename I, typename J>
     rocsparse_status ell2csr_nnz_checkarg(rocsparse_handle          handle,
-                                          int64_t                   m,
-                                          int64_t                   n,
+                                          J                         m,
+                                          J                         n,
                                           const rocsparse_mat_descr ell_descr,
-                                          int64_t                   ell_width,
-                                          const void*               ell_col_ind,
+                                          J                         ell_width,
+                                          const J*                  ell_col_ind,
                                           const rocsparse_mat_descr csr_descr,
-                                          void*                     csr_row_ptr,
-                                          void*                     csr_nnz);
+                                          I*                        csr_row_ptr,
+                                          I*                        csr_nnz);
 
     template <typename I, typename J>
     rocsparse_status ell2csr_nnz_core(rocsparse_handle          handle,

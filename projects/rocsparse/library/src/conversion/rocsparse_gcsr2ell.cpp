@@ -247,13 +247,19 @@ rocsparse_status rocsparse::spmat_csr2ell_width(rocsparse_handle            hand
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2ell_width(handle,
-                                                        source->rows,
-                                                        source->descr,
-                                                        source->row_type,
-                                                        source->const_row_data,
-                                                        target->descr,
-                                                        out_ell_width));
+    // The width is returned in a host variable.
+    rocsparse_pointer_mode ptr_mode;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &ptr_mode));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    const rocsparse_status status = rocsparse::gcsr2ell_width(handle,
+                                                              source->rows,
+                                                              source->descr,
+                                                              source->row_type,
+                                                              source->const_row_data,
+                                                              target->descr,
+                                                              out_ell_width);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, ptr_mode));
+    RETURN_IF_ROCSPARSE_ERROR(status);
 
     return rocsparse_status_success;
 }

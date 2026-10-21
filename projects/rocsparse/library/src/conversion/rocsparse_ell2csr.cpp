@@ -26,6 +26,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_ell2csr.hpp"
 #include "rocsparse_utility.hpp"
+#include "rocsparse_valset.hpp"
 
 #include "ell2csr_device.h"
 #include "rocsparse_primitives.hpp"
@@ -200,34 +201,55 @@ INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
  * ===========================================================================
  */
 
+template <typename I, typename J>
 rocsparse_status rocsparse::ell2csr_nnz_quickreturn(rocsparse_handle          handle,
-                                                    int64_t                   m,
-                                                    int64_t                   n,
+                                                    J                         m,
+                                                    J                         n,
                                                     const rocsparse_mat_descr ell_descr,
-                                                    int64_t                   ell_width,
-                                                    const void*               ell_col_ind,
+                                                    J                         ell_width,
+                                                    const J*                  ell_col_ind,
                                                     const rocsparse_mat_descr csr_descr,
-                                                    void*                     csr_row_ptr,
-                                                    void*                     csr_nnz)
+                                                    I*                        csr_row_ptr,
+                                                    I*                        csr_nnz)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
     if(m == 0 || n == 0 || ell_width == 0)
     {
+        if(csr_nnz != nullptr)
+        {
+            if(handle->pointer_mode == rocsparse_pointer_mode_device)
+            {
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMemsetAsync(csr_nnz, 0, sizeof(I), handle->stream));
+            }
+            else
+            {
+                *csr_nnz = 0;
+            }
+        }
+
+        if(csr_row_ptr != nullptr)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                handle, static_cast<int64_t>(m) + 1, static_cast<I>(csr_descr->base), csr_row_ptr));
+        }
+
         return rocsparse_status_success;
     }
     return rocsparse_status_continue;
 }
 
+template <typename I, typename J>
 rocsparse_status rocsparse::ell2csr_nnz_checkarg(rocsparse_handle          handle,
-                                                 int64_t                   m,
-                                                 int64_t                   n,
+                                                 J                         m,
+                                                 J                         n,
                                                  const rocsparse_mat_descr ell_descr,
-                                                 int64_t                   ell_width,
-                                                 const void*               ell_col_ind,
+                                                 J                         ell_width,
+                                                 const J*                  ell_col_ind,
                                                  const rocsparse_mat_descr csr_descr,
-                                                 void*                     csr_row_ptr,
-                                                 void*                     csr_nnz)
+                                                 I*                        csr_row_ptr,
+                                                 I*                        csr_nnz)
 
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -255,7 +277,7 @@ rocsparse_status rocsparse::ell2csr_nnz_checkarg(rocsparse_handle          handl
                        (csr_descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
-    ROCSPARSE_CHECKARG_ARRAY(5, ell_width * m, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(5, static_cast<int64_t>(ell_width) * m, ell_col_ind);
     ROCSPARSE_CHECKARG_ARRAY(7, m, csr_row_ptr);
 
     const rocsparse_status status = rocsparse::ell2csr_nnz_quickreturn(
@@ -371,16 +393,26 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
     return rocsparse_status_success;
 }
 
-#define INSTANTIATE(I, J)                                        \
-    template rocsparse_status rocsparse::ell2csr_nnz_core<I, J>( \
-        rocsparse_handle          handle,                        \
-        J                         m,                             \
-        J                         n,                             \
-        const rocsparse_mat_descr ell_descr,                     \
-        J                         ell_width,                     \
-        const J*                  ell_col_ind,                   \
-        const rocsparse_mat_descr csr_descr,                     \
-        I*                        csr_row_ptr,                   \
+#define INSTANTIATE(I, J)                                               \
+    template rocsparse_status rocsparse::ell2csr_nnz_quickreturn<I, J>( \
+        rocsparse_handle          handle,                               \
+        J                         m,                                    \
+        J                         n,                                    \
+        const rocsparse_mat_descr ell_descr,                            \
+        J                         ell_width,                            \
+        const J*                  ell_col_ind,                          \
+        const rocsparse_mat_descr csr_descr,                            \
+        I*                        csr_row_ptr,                          \
+        I*                        csr_nnz);                                                    \
+    template rocsparse_status rocsparse::ell2csr_nnz_core<I, J>(        \
+        rocsparse_handle          handle,                               \
+        J                         m,                                    \
+        J                         n,                                    \
+        const rocsparse_mat_descr ell_descr,                            \
+        J                         ell_width,                            \
+        const J*                  ell_col_ind,                          \
+        const rocsparse_mat_descr csr_descr,                            \
+        I*                        csr_row_ptr,                          \
         I*                        csr_nnz)
 
 INSTANTIATE(int32_t, int32_t);
