@@ -426,6 +426,26 @@ protected:
         return {ErrorCode::OK, ""};
     }
 
+    // Workspace of an engine's priming plan: exhaustive autotune compiles it with the
+    // benchmarking knob on.
+    int64_t queryBenchmarkingWorkspaceSize(int64_t engineId) const
+    {
+        return detail::queryEngineWorkspaceSize(
+            _graphDesc->get(),
+            engineId,
+            {KnobSetting(autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1})});
+    }
+
+    // Pre-compile workspace estimate for an engine. For an engine that exposes the
+    // benchmarking knob it is the larger of the default and the priming configuration.
+    int64_t estimateEngineWorkspaceSize(int64_t engineId, bool supportsExhaustive) const
+    {
+        const auto workspaceSize = detail::queryEngineWorkspaceSize(_graphDesc->get(), engineId);
+        return supportsExhaustive
+                   ? std::max(workspaceSize, queryBenchmarkingWorkspaceSize(engineId))
+                   : workspaceSize;
+    }
+
     // Run the mechanical execution-plan finalize sequence on a compiled plan:
     // set the engine config attribute, finalize the execution plan descriptor,
     // then query and cache its workspace size. On failure the workspace size is
@@ -3460,6 +3480,11 @@ public:
             {
                 info.estimatedWorkspaceSize = wsSize;
             }
+            if(info.supportsExhaustive)
+            {
+                info.estimatedWorkspaceSize = std::max(
+                    info.estimatedWorkspaceSize, queryBenchmarkingWorkspaceSize(engineIds[i]));
+            }
 
             configs.push_back(std::move(info));
         }
@@ -3559,7 +3584,7 @@ public:
         HIPDNN_CHECK_ERROR(validateKnobSettingsStrict(spec.knobSettings, engineId));
 
         // Query workspace size
-        spec.workspaceSize = detail::queryEngineWorkspaceSize(_graphDesc->get(), engineId);
+        spec.workspaceSize = estimateEngineWorkspaceSize(engineId, spec.supportsExhaustive);
 
         addPlanSpecIfUnique(spec);
         return {ErrorCode::OK, ""};
@@ -3662,7 +3687,7 @@ public:
             }
 
             spec.workspaceSize
-                = detail::queryEngineWorkspaceSize(_graphDesc->get(), variant.engineId);
+                = estimateEngineWorkspaceSize(variant.engineId, spec.supportsExhaustive);
             addPlanSpecIfUnique(spec);
         }
         return {ErrorCode::OK, ""};
@@ -3743,11 +3768,11 @@ public:
             HIPDNN_CHECK_ERROR(
                 autotune::detail::computeCartesianProduct(filteredAxes, combinations));
 
+            const bool engineSupportsExhaustive = autotune::detail::knobsSupportExhaustive(knobs);
+
             // Query workspace once per engine (shared across all knob combinations)
             const int64_t engineWsSize
-                = detail::queryEngineWorkspaceSize(_graphDesc->get(), sweepSpec.engineId);
-
-            const bool engineSupportsExhaustive = autotune::detail::knobsSupportExhaustive(knobs);
+                = estimateEngineWorkspaceSize(sweepSpec.engineId, engineSupportsExhaustive);
 
             // For each combination, merge with fixed settings and add as a plan spec
             for(auto& combo : combinations)
@@ -3804,8 +3829,9 @@ public:
      * @brief Get the estimated maximum workspace size across all collected plan specs
      *
      * Iterates the plan specs added by add_engine_*() calls and returns
-     * the maximum workspace requirement. Use this to allocate workspace
-     * before calling autotune().
+     * the maximum workspace requirement. For an engine that exposes the
+     * benchmarking knob, the requirement covers its EXHAUSTIVE priming
+     * configuration. Use this to allocate workspace before calling autotune().
      *
      * @param[out] maxSize Maximum workspace size in bytes
      * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if no plan specs

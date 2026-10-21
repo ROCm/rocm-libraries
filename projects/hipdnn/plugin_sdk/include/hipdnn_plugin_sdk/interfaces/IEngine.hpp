@@ -89,7 +89,9 @@ public:
      * @brief Returns the maximum workspace size required for the given graph.
      *
      * This is typically a pass-through to the applicable plan builders, taking
-     * the maximum of all workspaces queried.
+     * the maximum of all workspaces queried. For a config with `global.benchmarking` enabled it
+     * SHOULD cover the workspace of the priming plan compiled from that config: the frontend
+     * sizes its autotune workspace estimate from this query.
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph.

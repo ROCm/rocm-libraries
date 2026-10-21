@@ -12,6 +12,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #endif
@@ -224,6 +225,18 @@ public:
             flags.push_back(s.supportsExhaustive);
         }
         return flags;
+    }
+
+    /// Get the workspace estimate stored on each plan spec (for assertions).
+    std::vector<int64_t> getPlanSpecWorkspaceSizes() const
+    {
+        std::vector<int64_t> sizes;
+        sizes.reserve(_planSpecs.size());
+        for(const auto& s : _planSpecs)
+        {
+            sizes.push_back(s.workspaceSize);
+        }
+        return sizes;
     }
 
     /// Get the knob IDs stored on each plan spec (for assertions).
@@ -9328,6 +9341,163 @@ TEST_F(TestGraph, AddEnginePropagatesSupportsExhaustiveFalseWithoutBenchmarkingK
     const auto flags = graph.getPlanSpecSupportsExhaustive();
     ASSERT_EQ(flags.size(), 1u);
     EXPECT_FALSE(flags[0]);
+}
+
+namespace
+{
+
+// Mocks the engine-config workspace query. The reported size depends on whether knob settings
+// were applied (HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES) to the engine config being queried, which is
+// how the benchmarking estimate differs from the default one. Optionally fails the finalize of an
+// engine config that carries knob settings.
+struct EngineConfigWorkspaceMock
+{
+    std::set<hipdnnBackendDescriptor_t> withKnobs;
+    std::uintptr_t nextHandle = 0x7000;
+    int knobQueries = 0;
+};
+
+std::shared_ptr<EngineConfigWorkspaceMock> mockEngineConfigWorkspace(
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+    int64_t defaultWorkspace,
+    int64_t knobWorkspace,
+    bool failFinalizeWithKnobs = false)
+{
+    auto state = std::make_shared<EngineConfigWorkspaceMock>();
+
+    EXPECT_CALL(*mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([state](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(state->nextHandle++);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, _, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([state](hipdnnBackendDescriptor_t desc,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                const void*) {
+            state->withKnobs.insert(desc);
+            ++state->knobQueries;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([=](hipdnnBackendDescriptor_t desc,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t,
+                            int64_t*,
+                            void* out) {
+            *static_cast<int64_t*>(out)
+                = state->withKnobs.count(desc) != 0 ? knobWorkspace : defaultWorkspace;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    if(failFinalizeWithKnobs)
+    {
+        EXPECT_CALL(*mockBackend, backendFinalize(_))
+            .Times(AnyNumber())
+            .WillRepeatedly([state](hipdnnBackendDescriptor_t desc) {
+                return state->withKnobs.count(desc) != 0 ? HIPDNN_STATUS_BAD_PARAM
+                                                         : HIPDNN_STATUS_SUCCESS;
+            });
+    }
+    return state;
+}
+
+// Exposes the benchmarking knob on the mocked engine so add_engine() treats it as exhaustive-capable.
+void exposeBenchmarkingKnob(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                            hipdnnBackendDescriptor_t engineDesc)
+{
+    auto knobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB001);
+    mockKnobInfoQueryRepeated(mockBackend, engineDesc, {knobDesc});
+    setupKnobDescriptorMockRepeated(mockBackend,
+                                    knobDesc,
+                                    hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME,
+                                    "Benchmarking knob",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{0}});
+}
+
+} // namespace
+
+// For an engine that exposes the benchmarking knob, the stored estimate covers its priming
+// configuration: it is the larger of the default and the knob-on workspace, in both directions.
+TEST_F(TestGraph, AddEngineEstimateTakesBenchmarkingWorkspaceWhenLarger)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+    exposeBenchmarkingKnob(_mockBackend, engineDesc);
+    const auto state = mockEngineConfigWorkspace(_mockBackend, 100, 500);
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{500});
+    EXPECT_EQ(state->knobQueries, 1);
+}
+
+TEST_F(TestGraph, AddEngineEstimateKeepsDefaultWorkspaceWhenLarger)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+    exposeBenchmarkingKnob(_mockBackend, engineDesc);
+    const auto state = mockEngineConfigWorkspace(_mockBackend, 700, 300);
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{700});
+}
+
+// An engine without the benchmarking knob is queried once, with no knob settings.
+TEST_F(TestGraph, AddEngineEstimateIgnoresBenchmarkingForEngineWithoutTheKnob)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto knobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {knobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    knobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{256}});
+    const auto state = mockEngineConfigWorkspace(_mockBackend, 100, 500);
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{100});
+    EXPECT_EQ(state->knobQueries, 0);
+}
+
+// If the knob-on query fails, the estimate falls back to the default one and says so, since the
+// fallback can be too low for the priming plan.
+TEST_F(TestGraph, AddEngineEstimateWarnsWhenBenchmarkingQueryFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+    exposeBenchmarkingKnob(_mockBackend, engineDesc);
+    const auto state
+        = mockEngineConfigWorkspace(_mockBackend, 100, 500, /*failFinalizeWithKnobs=*/true);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto result = graph.add_engine(42, {});
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{100});
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_WARN, "Workspace estimate with knob settings failed"));
 }
 
 TEST_F(TestGraph, AddEngineSweepRejectsInvalidAxisKnob)
