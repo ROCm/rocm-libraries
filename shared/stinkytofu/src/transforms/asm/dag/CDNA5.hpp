@@ -735,6 +735,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool dsOverflow_ = false;
     // decidePromote() held a ready barrier back: the queued WMMA cover is below the barrier cover.
     bool barrierWaitsForCover_ = false;
+    // WMMA count at which a ready barrier was first held for its tail (the hold lasts
+    // kBarrierTailWmmas).
+    std::unordered_map<const DAGNode*, int> barrierCoverHoldStart_;
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -1785,7 +1788,12 @@ void CDNA5ReadyQueue::decidePromote() {
                 // The WMMAs queued behind the barrier hide its stall: refill first.
                 if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
                     const int latency = wmmaQueue.top()->inst->latencyCycles;
-                    if (queuedCoverCycles() < wmmaBarrierCover(latency)) {
+                    const int heldSince =
+                        barrierCoverHoldStart_.emplace(node, wmmaIssuedCountThisRegion_)
+                            .first->second;
+                    if (!isBarrierWait(*node->inst) &&
+                        wmmaIssuedCountThisRegion_ - heldSince < kBarrierTailWmmas &&
+                        queuedCoverCycles() < wmmaBarrierCover(latency)) {
                         barrierWaitsForCover_ = true;
                         continue;
                     }
@@ -2487,6 +2495,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
         if (barrier) {
             updateWMMAStatus(barrier);
+            // The stall in front of a barrier wait (s_wait_dscnt / s_wait_tensorcnt, not simulated)
+            // lets the queued WMMAs finish: take the WMMA queue as empty.
+            if (isBarrierWait(*barrier->inst)) resetActiveWindow();
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -2729,6 +2740,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
     barrierWaitsForCover_ = false;
+    barrierCoverHoldStart_.clear();
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
