@@ -48,6 +48,35 @@ rocsparse_status rocsparse_bench_app_base::run_cases()
 {
     int    sample_argc;
     char** sample_argv = nullptr;
+
+    //
+    // The JSON header describes one device, so every sample has to use the same one.
+    //
+    const char* device_arg = nullptr;
+    for(int k = 0; k < this->m_bench_cmdlines.get_noptions(); ++k)
+    {
+        const char* name = this->m_bench_cmdlines.get_option_name(k);
+        if(strcmp(name, "-d") != 0 && strcmp(name, "--device") != 0)
+        {
+            continue;
+        }
+        for(int j = 0; j < this->m_bench_cmdlines.get_option_nargs(k); ++j)
+        {
+            const char* arg = this->m_bench_cmdlines.get_option_arg(k, j);
+            if(device_arg == nullptr)
+            {
+                device_arg = arg;
+            }
+            else if(strcmp(device_arg, arg) != 0)
+            {
+                std::cerr << "rocsparse-bench error: -d/--device cannot take several devices in "
+                             "one run; run each device separately"
+                          << std::endl;
+                return rocsparse_status_invalid_value;
+            }
+        }
+    }
+
     //
     // Loop over cases.
     //
@@ -227,8 +256,8 @@ rocsparse_status rocsparse_bench_app::export_file()
     char* sample_argv[64];
 
     //
-    // Write the header before opening the file. define_results_json queries the
-    // current device, and opening the file truncates any existing json.
+    // Build the header and check the sizes before opening the file. Either can fail,
+    // and opening the file truncates any existing json.
     //
     std::ostringstream header;
     rocsparse_status   status = define_results_json(header);
@@ -238,12 +267,6 @@ rocsparse_status rocsparse_bench_app::export_file()
         return status;
     }
 
-    std::ofstream out(ofilename);
-    out << header.str();
-
-    //
-    // Loop over cases.
-    //
     const int nsamples = m_bench_cmdlines.get_nsamples();
     if(nsamples != m_bench_timing.size())
     {
@@ -256,6 +279,18 @@ rocsparse_status rocsparse_bench_app::export_file()
         exit(1);
     }
 
+    std::ofstream out(ofilename);
+    if(!out)
+    {
+        std::cerr << "rocsparse-bench error: cannot open output file '" << ofilename << "'"
+                  << std::endl;
+        return rocsparse_status_internal_error;
+    }
+    out << header.str();
+
+    //
+    // Loop over cases.
+    //
     for(int isample = 0; isample < nsamples; ++isample)
     {
         this->m_bench_cmdlines.get(isample, sample_argc, sample_argv);
@@ -279,6 +314,12 @@ rocsparse_status rocsparse_bench_app::export_file()
         return status;
     }
     out.close();
+    if(!out)
+    {
+        std::cerr << "rocsparse-bench error: cannot write output file '" << ofilename << "'"
+                  << std::endl;
+        return rocsparse_status_internal_error;
+    }
     return rocsparse_status_success;
 }
 
@@ -306,7 +347,8 @@ rocsparse_status
 
 rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
 {
-    // The current device is the one run_case() selected, not device 0.
+    // run_cases() rejects several --device values, so the current device is the one every
+    // case used.
     int              device_id  = 0;
     const hipError_t get_status = hipGetDevice(&device_id);
     if(get_status != hipSuccess)
@@ -339,6 +381,8 @@ rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
     out << "\"date\": \"" << str << "\"," << std::endl;
     out << "\"rocSPARSE version\": \"" << rocsparse_get_version() << "\"," << std::endl;
 
+    out << "\"device id\": \"" << device_id << "\"," << std::endl;
+    out << "\"device name\": \"" << prop.name << "\"," << std::endl;
     gpu_config g(prop);
     g.print_json(out);
 

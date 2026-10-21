@@ -27,6 +27,7 @@
 #include "rocsparse_bench.hpp"
 #include "rocsparse_routine.hpp"
 #include "utility.hpp"
+#include <exception>
 #include <iostream>
 
 #include "rocsparse_bench_app.hpp"
@@ -129,6 +130,11 @@ int main(int argc, char* argv[])
                       << ")" << std::endl;
             return EXIT_FAILURE;
         }
+        catch(const std::exception& error)
+        {
+            std::cerr << "rocsparse-bench error: " << error.what() << std::endl;
+            return EXIT_FAILURE;
+        }
     }
     else
     {
@@ -163,6 +169,11 @@ int main(int argc, char* argv[])
         {
             std::cerr << "rocsparse-bench error: " << hipGetErrorString(error) << " (" << error
                       << ")" << std::endl;
+            return EXIT_FAILURE;
+        }
+        catch(const std::exception& error)
+        {
+            std::cerr << "rocsparse-bench error: " << error.what() << std::endl;
             return EXIT_FAILURE;
         }
     }
