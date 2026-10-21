@@ -741,12 +741,19 @@ Ordered by value per unit of effort. Each item is a proposal for the StinkyTofu 
 reshape or reject.
 
 The hipBLASLt testing plan proposes how kernel testing is divided across StinkyTofu, TensileLite, a
-new kernel corpus layer, and hipBLASLt; see *Who tests what* under
+kernel corpus layer, and hipBLASLt; see *Who tests what* under
 [hipBLASLt's Improvement Roadmap](../../projects/hipblaslt/TESTING.md#improvement-roadmap). Under that
 split, StinkyTofu owns one question: does its transformation preserve what a kernel computes, and
 protect every hazard on the hardware it targets? Testing GEMM results across shapes belongs to the
-corpus layer, which tests every shipped kernel however it was generated. The corpus would also be the
-natural set of kernels for the differential execution and hazard-checker items below.
+corpus layer, which tests every shipped kernel however it was generated.
+
+The corpus layer has started, as a harness developed under AIHPBLAS-3894 (see *Kernel corpus
+testing* in the same roadmap). It has not run on gfx1250 yet. Once it does, its gfx1250 kernels,
+about 3,000 per variant, are the natural set for the differential execution and hazard-checker items
+below. Its planned gfx1250 stress profiles repeat each kernel many times beside a double-precision
+workload, the condition that exposed ROCM-31901. Those repeats are a backstop. A timing-dependent
+hazard is best caught by construction, which is why the independent hazard checker below matters
+more than more repeats.
 
 ### Near term, cheap and unblocking
 
@@ -773,11 +780,10 @@ natural set of kernels for the differential execution and hazard-checker items b
    pair has a covering wait or enough distance. It needs no hardware and catches timing-dependent
    hazards without the timing having to happen. It could run over the kernels TensileLite builds in
    CI.
-2. **Differential execution.** Build a set of kernels (the kernel corpus, once it exists) with and
-   without StinkyTofu's scheduling
-   and expert mode, run both on identical integer inputs, and require bitwise-identical output. The
-   check needs no reference implementation, and it is the experiment that confirmed ROCM-31905, done
-   by hand.
+2. **Differential execution.** Build a set of kernels (the kernel corpus's gfx1250 kernels) with and
+   without StinkyTofu's scheduling and expert mode, run both on identical integer inputs, and require
+   bitwise-identical output. The check needs no reference implementation, and it is the experiment
+   that confirmed ROCM-31905, done by hand.
 3. **Per-rule hardware tests.** One small kernel per hazard rule, run many times on gfx1250, to check
    the hardware model against the hardware. This is how the open question at the end of the
    write-up gets settled.
