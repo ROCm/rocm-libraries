@@ -2,8 +2,8 @@
 
 This prototype [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py)
 tests GEMMs through rocJITsu on CPUs, checking numerics and detecting races.
-No physical GPU is required. In this initial prototype, bench chooses its
-kernel through the ordinary heuristic.
+No physical GPU is required. The benchmark chooses its kernel through the
+ordinary heuristic.
 
 The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) has separate
 functions for numerics, shapes, layouts, scalars and epilogues. M, N and K are
@@ -31,7 +31,9 @@ Alpha is sampled from `{-2, -1, 0.5, 1, 2}` and beta from
 and bias+GELU, with FP32 bias. The fixed seed reproduces the sequence across
 thread counts. Alpha stays nonzero so every case exercises multiplication.
 
-The fixed distribution passed 5,000 local samples with no missing solutions.
+The fixed distribution passed 5,000 local samples against the
+[matched gfx950 artifacts](https://github.com/ROCm/rocm-libraries/actions/runs/39535282903)
+with no missing solutions.
 That evidence applies to the tested library build: normal heuristic selection
 can still return `error: NO solution found!` for another configuration or build.
 The runner records that outcome as `unsupported`, retains its input and logs,
@@ -100,9 +102,8 @@ Both callers also run the same required BF16 case, giving 101 per-PR inputs
 and 1,001 nightly inputs.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
-but they do not change the required Multi-Arch summary. No known-failure entries
-are enabled. Every sample is attempted. Missing solutions, race reports and
-numerical failures make the test step fail. Runner unit tests execute on a
+but they do not change the required Multi-Arch summary. Every sample is
+attempted. Runner unit tests execute on a
 small GitHub-hosted runner when the runner or its workflows change.
 
 For local validation of the CI driver, fetch the BLAS and test artifacts with

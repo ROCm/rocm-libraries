@@ -73,8 +73,10 @@ scales on both operands. Layout is packed unless a row specifies
 
 The two broad campaigns include the same deliberately retained tiny GELU case.
 Five distinct numerical inputs were confirmed by serial replays. No race or
-rocJITsu warning/error appeared in the original exploration cases. Neither numerical failures nor
-missing solutions are treated as emulator blacklist entries. Eight exploratory
+rocJITsu warning/error appeared in the original exploration cases. The five
+numerical inputs are retained in the optional
+[diagnostic corpus](../../../.github/scripts/hipblaslt_diagnostic_gemms.json)
+and remain failures when run; none is classified as an emulator exclusion. Eight exploratory
 INT8/FP64 inputs initially had incorrect compute-input options; after correcting
 those harness settings, all eight passed and are omitted from the failure table.
 
@@ -84,7 +86,8 @@ A later run with the explicit list produced one additional nonpassing case:
 | --- | --- | --- | --- | --- |
 | explicit-and-random-100/case-0072 | 32×416×224 | FP32 throughout; TT; 1 | 0.5; -1; FP32 bias+ReLU | `SET_EVENT_MISS: event_id=6 events_.size()=19` after numerical completion; bench exits 0, runner fails. One serial replay passes without the warning. |
 
-This warning remains unclassified and has no blacklist entry. It uses packed layout, FP32 computation and `rand_int` initialization.
+This warning remains unclassified, with no exclusion. It uses packed layout,
+FP32 computation and `rand_int` initialization.
 
 ## Retained explicit input
 

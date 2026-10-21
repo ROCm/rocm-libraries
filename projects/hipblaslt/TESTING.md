@@ -638,7 +638,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
-| Random and required GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs plus the required-case list for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts, required cases or workflows change. See [random GEMM testing](docs/nightly-random-gemm.md) |
+| Random and required GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs plus the required-case list (1,000 random GEMMs nightly) for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts, required cases or workflows change. See [random GEMM testing](docs/nightly-random-gemm.md) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |

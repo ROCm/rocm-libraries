@@ -130,7 +130,9 @@ class RandomGemmTests(unittest.TestCase):
             report = json.loads((root / "all/cases.json").read_text())
             self.assertEqual(len(report), 4)
             self.assertIn("race reported", (root / "all/cases.md").read_text())
-            with patch.object(runner, "run_case", side_effect=OSError("cannot launch")):
+            with patch.object(
+                runner, "run_command", side_effect=OSError("cannot launch")
+            ):
                 self.assertEqual(
                     runner.main(
                         [
