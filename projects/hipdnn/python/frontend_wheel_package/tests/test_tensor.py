@@ -90,6 +90,125 @@ class TestTensorAttributes:
 
         assert tensor.get_is_virtual()
 
+    def test_alignment_round_trip(self):
+        """set_alignment()/get_alignment() round-trip."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+
+        assert tensor.get_alignment() == 16
+        tensor.set_alignment(32)
+        assert tensor.get_alignment() == 32
+
+    def test_set_alignment_returns_self(self):
+        """set_alignment() returns self for chaining."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+
+        assert tensor.set_alignment(32) is tensor
+
+    def test_validate_rejects_alignment_below_one(self):
+        """validate() fails when alignment is less than 1."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_alignment(0)
+
+        result = tensor.validate()
+
+        assert not result.is_good()
+        assert " alignment must be >= 1" in result.get_message()
+
+    def test_ragged_offset_multiplier_round_trip(self):
+        """Ragged offset multiplier setter/getter round-trip."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+
+        assert tensor.get_ragged_offset_multiplier() == 1
+        assert not tensor.has_ragged_offset_multiplier()
+
+        tensor.set_ragged_offset_multiplier(4)
+
+        assert tensor.get_ragged_offset_multiplier() == 4
+        assert tensor.has_ragged_offset_multiplier()
+
+    def test_validate_rejects_multiplier_below_one(self):
+        """validate() fails when the ragged offset multiplier is less than 1."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset_multiplier(0)
+
+        result = tensor.validate()
+
+        assert not result.is_good()
+        assert " ragged offset multiplier must be >= 1" in result.get_message()
+
+    def test_validate_rejects_multiplier_without_ragged_offset(self):
+        """validate() fails when a multiplier is set without a ragged offset."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset_multiplier(4)
+
+        result = tensor.validate()
+
+        assert not result.is_good()
+        assert (
+            " ragged offset multiplier requires a ragged offset" in result.get_message()
+        )
+
+    def test_has_compile_time_constant_follows_set_value(self):
+        """set_value() makes a compile-time constant; clear_value() removes it."""
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+
+        assert not tensor.get_has_compile_time_constant()
+
+        tensor.set_value(2.5)
+        assert tensor.get_has_compile_time_constant()
+
+        assert tensor.clear_value() is tensor
+        assert not tensor.get_has_compile_time_constant()
+
+    def test_set_as_runtime_parameter(self):
+        """set_as_runtime_parameter() marks the tensor runtime pass-by-value."""
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+        tensor.set_value(2.5)
+
+        assert tensor.set_as_runtime_parameter() is tensor
+        assert tensor.get_is_runtime_pass_by_value()
+        assert not tensor.get_has_compile_time_constant()
+
+    def test_ragged_offset_round_trip(self):
+        """set_ragged_offset()/get_ragged_offset() round-trip."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        offset = hipdnn.Tensor.create([4], hipdnn.DataType.INT32)
+
+        assert not tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is None
+
+        tensor.set_ragged_offset(offset)
+
+        assert tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is offset
+
+    def test_set_ragged_offset_accepts_none(self):
+        """set_ragged_offset(None) clears the ragged offset."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset(hipdnn.Tensor.create([4], hipdnn.DataType.INT32))
+
+        tensor.set_ragged_offset(None)
+
+        assert not tensor.has_ragged_offset()
+        assert tensor.get_ragged_offset() is None
+
+    def test_multiplier_with_ragged_offset_validates(self):
+        """A multiplier is valid once a ragged offset is set."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        tensor.set_ragged_offset(hipdnn.Tensor.create([4], hipdnn.DataType.INT32))
+        tensor.set_ragged_offset_multiplier(4)
+
+        result = tensor.validate()
+
+        assert result.is_good(), result.get_message()
+
+    def test_set_ragged_offset_returns_self(self):
+        """set_ragged_offset() returns self for chaining."""
+        tensor = hipdnn.Tensor.create([4], hipdnn.DataType.FLOAT)
+        offset = hipdnn.Tensor.create([4], hipdnn.DataType.INT32)
+
+        assert tensor.set_ragged_offset(offset) is tensor
+
     def test_create_does_not_auto_assign_uid(self):
         """create() leaves the uid unset until set_uid() is called."""
         tensor = hipdnn.Tensor.create([1, 2], hipdnn.DataType.FLOAT)
