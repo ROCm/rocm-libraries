@@ -279,22 +279,42 @@ namespace rocalution
     void rocalution_info_hip(const struct Rocalution_Backend_Descriptor& backend_descriptor)
     {
         // Print rocblas version
-        char rocblas_ver[64];
-        rocblas_get_version_string(rocblas_ver, sizeof(rocblas_ver));
+        char           rocblas_ver[64] = {};
+        rocblas_status blas_ver_status
+            = rocblas_get_version_string(rocblas_ver, sizeof(rocblas_ver));
 
-        LOG_INFO("rocBLAS ver " << rocblas_ver);
+        if(blas_ver_status == rocblas_status_success)
+        {
+            LOG_INFO("rocBLAS ver " << rocblas_ver);
+        }
+        else
+        {
+            LOG_INFO("rocBLAS ver unknown");
+        }
 
         // Print rocsparse versions
-        int rocsparse_ver;
-        rocsparse_get_version(ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle),
-                              &rocsparse_ver);
+        int              rocsparse_ver     = 0;
+        rocsparse_status sparse_ver_status = rocsparse_get_version(
+            ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle), &rocsparse_ver);
 
-        char rocsparse_rev[64];
-        rocsparse_get_git_rev(ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle),
-                              rocsparse_rev);
+        char             rocsparse_rev[64] = {};
+        rocsparse_status sparse_rev_status = rocsparse_get_git_rev(
+            ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle), rocsparse_rev);
 
-        LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
-                                  << "." << rocsparse_ver % 100 << "-" << rocsparse_rev);
+        if(sparse_ver_status != rocsparse_status_success)
+        {
+            LOG_INFO("rocSPARSE ver unknown");
+        }
+        else if(sparse_rev_status != rocsparse_status_success)
+        {
+            LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
+                                      << "." << rocsparse_ver % 100);
+        }
+        else
+        {
+            LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
+                                      << "." << rocsparse_ver % 100 << "-" << rocsparse_rev);
+        }
 
         int num_dev;
 
