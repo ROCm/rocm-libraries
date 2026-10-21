@@ -64,6 +64,7 @@
 #include "device/device_scan.hpp"
 #include "device/device_segmented_radix_sort.hpp"
 #include "device/device_segmented_reduce.hpp"
+#include "device/device_segmented_scan.hpp"
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
 #include "device/device_topk.hpp"
