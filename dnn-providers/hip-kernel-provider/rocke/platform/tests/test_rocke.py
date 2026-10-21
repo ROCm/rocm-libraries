@@ -36,7 +36,6 @@ from rocke import (
     I8,
     I16,
     I32,
-    F32,
     I64,
     IRBuilder,
     PtrType,
@@ -2050,6 +2049,110 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
             fh.write("7.0.0\n")
         self._assert_agree({"ROCM_PATH": root})
 
+    def test_agree_when_comgr_lib_is_pinned_in_a_torch_package(self):
+        """``$ROCKE_COMGR_LIB`` naming a comgr in a torch package, torch not
+        imported: both engines follow the loaded compiler (LLVM 20 here), not
+        the package's ``version.py`` (ROCm 7.13 here)."""
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        if sys.platform != "linux" or not shutil.which("cc"):
+            self.skipTest("ELF compiler fixture requires a Linux C compiler")
+        lib = _fake_torch_comgr(self, "7.13.0")
+        source = os.path.join(os.path.dirname(lib), "compiler.c")
+        with open(source, "w") as fh:
+            fh.write(
+                "void LLVMGetVersion(unsigned *a, unsigned *b, unsigned *c) "
+                "{ *a=20; *b=0; *c=0; }\n"
+            )
+        subprocess.run(["cc", "-shared", "-fPIC", source, "-o", lib], check=True)
+        dl = self._assert_agree({"ROCKE_COMGR_LIB": lib})
+        self.assertIn("-p8:128:128-", dl)
+
+
+def _fake_torch_comgr(case, hip):
+    """``<tmp>/site-packages/torch/lib/libamd_comgr.so`` (empty file) with the
+    ``version.py`` a ROCm torch wheel ships (``hip`` as given; ``None``
+    writes the line of a build without ROCm). Removed with ``case``."""
+    import os
+    import shutil
+    import tempfile
+
+    root = tempfile.mkdtemp()
+    case.addCleanup(shutil.rmtree, root, ignore_errors=True)
+    pkg = os.path.join(root, "site-packages", "torch")
+    os.makedirs(os.path.join(pkg, "lib"))
+    value = "None" if hip is None else repr(hip)
+    with open(os.path.join(pkg, "version.py"), "w") as fh:
+        fh.write(
+            "from typing import Optional\n\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'xpu']\n"
+            "__version__ = '2.12.0+rocm7.0'\n"
+            "debug = False\n"
+            "cuda: Optional[str] = None\n"
+            "git_version = '0123456789abcdef'\n"
+            f"hip: Optional[str] = {value}\n"
+            "xpu: Optional[str] = None\n"
+        )
+    lib = os.path.join(pkg, "lib", "libamd_comgr.so")
+    open(lib, "w").close()
+    return lib
+
+
+class TestTorchPackageComgrVersion(unittest.TestCase):
+    """``comgr.resolved_lib_rocm_version`` of a comgr inside a torch package
+    when torch is not imported (an explicit ``ROCKE_COMGR_LIB``): the
+    package's ``version.py`` names the vintage, read without importing torch.
+    Without it the version came from ``/opt/rocm``: the host's ROCm, not the
+    library's. This is package metadata (the attention backward's toolchain
+    identity); the LLVM flavor follows the loaded compiler."""
+
+    def _version(self, lib):
+        import os
+        from unittest import mock
+
+        from rocke.runtime import comgr
+
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": lib}),
+            mock.patch.object(comgr, "_lib", None),
+        ):
+            return comgr.resolved_lib_rocm_version()
+
+    def test_the_package_version_file_dates_the_library(self):
+        self.assertEqual(
+            self._version(_fake_torch_comgr(self, "7.2.53211-e7b7fa7cd")), (7, 2)
+        )
+        self.assertEqual(self._version(_fake_torch_comgr(self, "6.4.43482")), (6, 4))
+
+    def test_a_build_without_rocm_gives_no_package_version(self):
+        from rocke.runtime import comgr
+
+        lib = _fake_torch_comgr(self, None)
+        self.assertIsNone(comgr._torch_package_rocm_version(lib))
+
+    def test_the_version_line_parse(self):
+        from rocke.runtime.comgr import _torch_package_hip_text as hip
+
+        self.assertEqual(hip("hip: Optional[str] = '7.2.1-x'\n"), "7.2.1-x")
+        self.assertEqual(hip('hip = "7.0.0"'), "7.0.0")
+        self.assertIsNone(hip("hip: Optional[str] = None"))
+        self.assertIsNone(hip("hipify = '9.9'\ncuda = None"))
+        self.assertEqual(hip("hipify = '9.9'\nhip = '6.3.1'"), "6.3.1")
+
+    def test_only_a_torch_lib_directory_is_read(self):
+        import os
+
+        from rocke.runtime import comgr
+
+        lib = _fake_torch_comgr(self, "7.0.0")
+        other = os.path.join(os.path.dirname(os.path.dirname(lib)), "libamd_comgr.so")
+        open(other, "w").close()
+        self.assertEqual(comgr._torch_package_rocm_version(lib), (7, 0))
+        self.assertIsNone(comgr._torch_package_rocm_version(other))
+
 
 class TestTransformsBridge(unittest.TestCase):
     def test_view_from_transforms_descriptor(self):
@@ -2737,19 +2840,36 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertNotIn("asm sideeffect", ll)
 
     # ---- wave_all / wave_any ----
-    def test_wave_all_lowers_to_ballot_eq_minus_one(self):
+    def _lower_wave_votes(self, arch):
         from rocke.core.ir import IRBuilder, PtrType, I32
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-        b = IRBuilder("wave_all_smoke")
+        b = IRBuilder("wave_vote_smoke")
         b.kernel.attrs["max_workgroup_size"] = 64
         Out = b.param("Out", PtrType(I32, "global"))
-        all_t = b.wave_all(b.const_i32(1))
-        b.global_store(Out, b.const_i32(0), all_t)
-        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
-        self.assertIn("@llvm.amdgcn.ballot.i64", ll)
-        # Compares ballot to -1 (i.e. all wave64 lanes voted true).
-        self.assertIn("icmp eq i64", ll)
+        pred = b.const_i32(1)
+        b.global_store(Out, b.const_i32(0), b.wave_all(pred))
+        b.global_store(Out, b.const_i32(1), b.wave_any(pred))
+        return lower_kernel_to_llvm(b.kernel, arch=arch)
+
+    def test_wave_all_full_mask_matches_wave_size(self):
+        import re
+
+        # ballot.i64 only sets the low wave_size bits: the full-wave mask
+        # is -1 on wave64 but 0xffffffff on wave32.
+        for arch, full in (
+            ("gfx950", "-1"),
+            ("gfx942", "-1"),
+            ("gfx1151", "4294967295"),
+            ("gfx11-generic", "4294967295"),
+            ("gfx12-generic", "4294967295"),
+            ("gfx1201", "4294967295"),
+        ):
+            with self.subTest(arch=arch):
+                ll = self._lower_wave_votes(arch)
+                self.assertIn("@llvm.amdgcn.ballot.i64", ll)
+                self.assertRegex(ll, rf"icmp eq i64 %\S+, {re.escape(full)}\n")
+                self.assertRegex(ll, r"icmp ne i64 %\S+, 0\n")
 
     # ---- coherency hints ----
     def test_async_buffer_load_lds_addr_propagates_aux(self):
@@ -3574,7 +3694,6 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         (``[3,3,3,3]``) -- a silently different shuffle, so a wrong
         reduction computes wrong numbers instead of failing.
         """
-        from rocke.core.ir import IRBuilder
         from rocke.core.lower_hip import lower_kernel_to_hip
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -5192,6 +5311,58 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "mean")
 
 
+class TestGemmEpilogueLowererTarget(unittest.TestCase):
+    """The fused GEMM lowerer with an explicit target needs no GPU.
+
+    A candidate made for a wave64 target must be refused by a lowerer whose
+    explicit target is wave32. The refusal happens before any kernel is
+    built or loaded, so this runs on any host without stand-ins for HIP.
+    """
+
+    def test_wave64_candidate_refused_on_wave32_target(self):
+        from rocke.helpers import (
+            FusionOp,
+            FusionTensor,
+            GemmEpilogueLowerer,
+            GreedyFusionScheduler,
+            build_graph,
+        )
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (128, 64), "fp16", is_input=True),
+                FusionTensor("B", (64, 128), "fp16", is_input=True),
+                FusionTensor("mm", (128, 128), "fp16"),
+                FusionTensor("out", (128, 128), "fp16", is_output=True),
+            ],
+            ops=[
+                FusionOp("mm0", "matmul", ("A", "B"), ("mm",)),
+                FusionOp("relu0", "relu", ("mm",), ("out",)),
+            ],
+            inputs=("A", "B"),
+            outputs=("out",),
+        )
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        cfgs = GemmEpilogueLowerer(arch="gfx950").candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        self.assertEqual(cfgs[0].spec.wave_size, 64)
+        with self.assertRaises(ValueError) as ctx:
+            GemmEpilogueLowerer(arch="gfx1151").build(cfgs[0])
+        msg = str(ctx.exception)
+        head, _, targets = msg.partition(" with one of: ")
+        self.assertEqual(
+            head,
+            f"fused GEMM candidate {cfgs[0].spec.name!r} was made for wave size "
+            "64, but the explicit target gfx1151 has wave size 32. Build the "
+            "candidates and the kernel with the same lowerer, or pass a target "
+            "of wave size 64 explicitly: GemmEpilogueLowerer(arch=...)",
+        )
+        # The suggested targets are the known wave64 targets only.
+        suggested = targets.rstrip(".").split(", ")
+        self.assertIn("gfx950", suggested)
+        self.assertNotIn("gfx1151", suggested)
+
+
 class TestLoweringRegistryBuild(unittest.TestCase):
     """Lowerer tests: candidate generation phase (GPU-agnostic).
 
@@ -5317,6 +5488,48 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertIsNotNone(built.launcher)
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
+
+    def test_gemm_epilogue_build_refuses_candidate_for_other_wave_size(self):
+        """A wave32 candidate is refused on the wave64 active device.
+
+        The candidate comes from a lowerer targeting gfx1151 (wave32); the
+        default lowerer targets the active device, reported as gfx950
+        (wave64). The build must fail with a message naming the device, both
+        wave sizes and how to pass a target, not build for another target.
+        """
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        cfgs = GemmEpilogueLowerer(arch="gfx1151").candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        with self.assertRaises(ValueError) as ctx:
+            GemmEpilogueLowerer().build(cfgs[0])
+        msg = str(ctx.exception)
+        self.assertIn("made for wave size 32", msg)
+        self.assertIn("the active device gfx950 has wave size 64", msg)
+        self.assertIn("GemmEpilogueLowerer(arch=...)", msg)
+        self.assertIn("gfx1151", msg)
+
+    def test_gemm_epilogue_explicit_target_overrides_device(self):
+        """An explicit target is used for candidates and build, not the device.
+
+        The active device reports gfx950 (wave64); the lowerer is given
+        gfx1151 (wave32), so its candidates are wave32 WMMA candidates and
+        they build for gfx1151.
+        """
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        lowerer = GemmEpilogueLowerer(arch="gfx1151")
+        cfgs = lowerer.candidates(graph, region)
+        self.assertGreater(len(cfgs), 0)
+        for cfg in cfgs:
+            self.assertEqual(cfg.spec.wave_size, 32)
+        built = lowerer.build(cfgs[0])
+        self.assertIsNotNone(built.launcher)
+        self.assertEqual(built.block_size, cfgs[0].spec.block_size)
 
     def test_elementwise_lowerer_round_trips(self):
         from rocke.helpers import (

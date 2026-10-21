@@ -85,16 +85,7 @@ def _bootstrap_sys_path() -> None:
 # library/tests/test_library_layering.py, and carries the same rule: this list
 # only ever SHRINKS. An entry that starts passing is itself a failure (see
 # STALE below) so a fix cannot silently leave dead weight behind.
-KNOWN_BAD: dict[str, str] = {
-    "attention/gfx942/3d_bf16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-    "attention/gfx942/3d_fp16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-}
+KNOWN_BAD: dict[str, str] = {}
 
 
 def _llvm_tool(name: str) -> str | None:
@@ -149,6 +140,21 @@ def _llvm_tool(name: str) -> str | None:
         raw = os.environ.get(env_var)
         if raw:
             roots.append(Path(raw))
+
+    # Real ROCm installs, found without going through a loaded comgr. When the
+    # comgr that loaded is one bundled with another package (the ROCm torch
+    # wheel ships its own), no LLVM sits beside it, and stopping here would fall
+    # through to PATH -- typically a distro clang with no AMDGPU linker, the
+    # wrong-vintage toolchain this lookup exists to avoid.
+    try:
+        from rocke.runtime.runtime_coexistence import _rocm_root_libdirs
+
+        install_libdirs = _rocm_root_libdirs()
+    except (ImportError, OSError):  # rocke not importable here, or an unreadable /opt
+        install_libdirs = []
+    for libdir in install_libdirs:
+        libp = Path(libdir).resolve()
+        roots.extend(libp.parents[i] for i in range(min(3, len(libp.parents))))
 
     for root in roots:
         cand = root / "llvm" / "bin" / exe
