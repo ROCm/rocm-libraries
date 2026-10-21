@@ -210,6 +210,8 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
                 options.rules.disableAll = true;
             } else if (key == "ruleAudit") {
                 options.rules.auditAll = true;
+            } else if (key == "choose") {
+                options.choose = true;
             } else if (key == "report") {
                 options.report = true;
             } else if (key == "emitRegisterMap") {
@@ -321,6 +323,7 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
         words.push_back(std::string("unbankable=") +
                         unbankableOperandsName(options.unbankableOperands));
     if (options.quadrant != defaults.quadrant) words.push_back("quadrant=prefer");
+    if (options.choose) words.push_back("choose");
 
     std::vector<std::string> activate = sortedUnique(options.rules.activate);
     if (options.rules.activateAll) activate.insert(activate.begin(), "all");

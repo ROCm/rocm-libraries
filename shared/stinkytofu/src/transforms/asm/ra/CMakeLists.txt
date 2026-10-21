@@ -10,6 +10,7 @@ target_sources(stinkytofu_objs PRIVATE
     AllocationVerifier.cpp
     AllocatorRegistry.cpp
     LegacyColoring.cpp
+    LoopMsbCost.cpp
     RegisterAllocationConfig.cpp
     RegisterAllocationPass.cpp
     RegisterBudget.cpp

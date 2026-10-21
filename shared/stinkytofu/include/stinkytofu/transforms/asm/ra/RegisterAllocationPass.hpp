@@ -46,8 +46,19 @@ class Pass;
 struct RegisterAllocationOptions {
     /// Registry name, such as "greedy" or "legacy". Several names joined with
     /// '+' are tried in turn, and the pass applies the first that colours the
-    /// function; allocateRegisters() itself takes one allocator.
+    /// function, or with `choose` the best; allocateRegisters() itself takes
+    /// one allocator.
     std::string allocator = "greedy";
+
+    /// Colour with every allocator in `allocator` and apply the colouring with
+    /// the most waves per SIMD, then the fewest s_set_vgpr_msb per iteration of
+    /// the innermost loops (LoopMsbCost), then the lowest highest VGPR. A tie
+    /// goes to the allocator named first, and one that refuses drops out.
+    ///
+    /// Naming "legacy" in the chain keeps the producer's numbering a
+    /// candidate, so the result never has fewer waves than it. The loop count
+    /// can still be higher, when a colouring with more waves pays for it there.
+    bool choose = false;
 
     /// Register classes the policy may move; see AllocationScope::classes(). The
     /// VGPR-only default is a safety statement, not a preference: no ABI range

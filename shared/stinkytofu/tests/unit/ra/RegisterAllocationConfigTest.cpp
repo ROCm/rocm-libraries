@@ -79,13 +79,14 @@ TEST(RegisterAllocationConfigTest, TwoDifferentModesAreAnError) {
 TEST(RegisterAllocationConfigTest, EveryKeyReachesTheOptions) {
     const RegisterAllocationConfig config = parsed(
         "apply,classes=vs,allocator=greedy-compact-freedom+greedy,unbankable=hold,"
-        "quadrant=prefer,rules=A+B,rules=C,noRule=D,ruleAudit,noRules,pinReg=s0:3+v5,"
+        "quadrant=prefer,choose,rules=A+B,rules=C,noRule=D,ruleAudit,noRules,pinReg=s0:3+v5,"
         "pinReg=s9,regionEnd=^loop,noVerify");
     const RegisterAllocationOptions& options = config.options;
     EXPECT_EQ(options.allocate, RegClassSet::all());
     EXPECT_EQ(options.allocator, "greedy-compact-freedom+greedy");
     EXPECT_EQ(options.unbankableOperands, Unbankable::Hold);
     EXPECT_EQ(options.quadrant, Quadrant::Prefer);
+    EXPECT_TRUE(options.choose);
     EXPECT_EQ(options.rules.activate, (std::vector<std::string>{"A", "B", "C"}));
     EXPECT_EQ(options.rules.disable, (std::vector<std::string>{"D"}));
     EXPECT_TRUE(options.rules.auditAll);
@@ -142,6 +143,14 @@ TEST(RegisterAllocationConfigTest, DiagnosticFlagsBelongToTheToolOnly) {
     EXPECT_NE(errorOf("dumpBlocks=", Dialect::Tool).find("a path prefix"), std::string::npos);
 }
 
+TEST(RegisterAllocationConfigTest, ChooseIsAKernelSettingAsWellAsAToolOne) {
+    EXPECT_TRUE(parsed("apply,allocator=greedy-compact+legacy,choose").options.choose);
+    EXPECT_TRUE(parsed("choose", Dialect::Tool).options.choose);
+    EXPECT_FALSE(parsed("apply,allocator=greedy-compact+legacy").options.choose);
+    EXPECT_NE(errorOf("choose=waves").find("'choose=waves'"), std::string::npos)
+        << "the ranking is fixed, so it takes no value";
+}
+
 TEST(RegisterAllocationConfigTest, TheToolRefusesModeOff) {
     EXPECT_NE(errorOf("off", Dialect::Tool).find("leave the pass out"), std::string::npos);
 }
@@ -160,10 +169,10 @@ TEST(RegisterAllocationConfigTest, CanonicalSpellingOfModeOffIsZeroWhateverElseI
 }
 
 TEST(RegisterAllocationConfigTest, CanonicalSpellingHasAFixedOrderAndSortedLists) {
-    EXPECT_EQ(canonical("noVerify,quadrant=prefer,classes=vs,3,rules=B+A,pinReg=v5+s0:3,"
+    EXPECT_EQ(canonical("noVerify,choose,quadrant=prefer,classes=vs,3,rules=B+A,pinReg=v5+s0:3,"
                         "unbankable=hold,noRule=Z,regionEnd=end,rules=A"),
-              "3,classes=vs,unbankable=hold,quadrant=prefer,rules=A+B,noRule=Z,pinReg=s0:3+v5,"
-              "regionEnd=end,noVerify");
+              "3,classes=vs,unbankable=hold,quadrant=prefer,choose,rules=A+B,noRule=Z,"
+              "pinReg=s0:3+v5,regionEnd=end,noVerify");
     EXPECT_EQ(canonical("2,rules=B,rules=all"), "2,rules=all+B");
 }
 
@@ -174,7 +183,8 @@ TEST(RegisterAllocationConfigTest, CanonicalSpellingKeepsTheAllocatorChainInOrde
 TEST(RegisterAllocationConfigTest, CanonicalSpellingParsesBackToItself) {
     for (const char* text : {"apply", "shadow,classes=vs", "force,unbankable=allocate,noVerify",
                              "2,quadrant=prefer,pinReg=s4+s0:1,regionEnd=^loop",
-                             "1,allocator=greedy-compact-freedom+greedy,rules=all,ruleAudit"}) {
+                             "1,allocator=greedy-compact-freedom+greedy,rules=all,ruleAudit",
+                             "2,classes=v,allocator=greedy-compact+legacy,choose"}) {
         const std::string once = canonical(text);
         EXPECT_EQ(canonical(once), once) << text;
     }

@@ -1,0 +1,37 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact-program+greedy-compact+legacy,classes=v,report,apply,pinReg=v0:253,choose --vgpr-msb-mode=msb8 --InsertVgprMsbPass --LoopRegionRemarkPass --remarks --print-output 2>&1
+#
+# `choose` keeps the colouring whose loop needs the fewest s_set_vgpr_msb when
+# the waves tie, whichever allocator the chain names first.
+#
+# Holding v0..v253 leaves two registers of bank 0, v254 and v255, for four
+# values: %a and %b, which the loop computes, %d, which it computes from them,
+# and %c, which lives from before the loop to after it. Weight order places
+# the loop's values first, because their uses count ten times, so %a, %b and
+# %d stay in bank 0 and %c goes to v256. Program order places %c first,
+# because it becomes live first, so %b lands in v256 and the loop switches
+# banks twice more. Both end at v256, so neither has a wave over the other,
+# and the producer's numbering, up at v403, has fewer.
+#
+# The loop summary then counts what InsertVgprMsbPass emitted for the chosen
+# colouring, which is the count it was chosen on.
+
+# CHECK: chose greedy-compact (waves=3 loopMsb=1 highest=256) over greedy-compact-program (waves=3 loopMsb=3 highest=256), legacy (waves=2 loopMsb=2 highest=403)
+# CHECK: loopMsb=2->1
+# CHECK: loop 'label_loop' summary: {{[0-9]+}} insts, 1 s_set_vgpr_msb,
+
+st.func @choose_by_loop_msb() {
+^entry:
+  v0 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.v_mov_b32"(1) { issueCycles = 1, latencyCycles = 1 }
+  v300 = "st.v_mov_b32"(2) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop
+^label_loop:
+  v400 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v401 = "st.v_add_f32"(v1, v0) { issueCycles = 1, latencyCycles = 5 }
+  v402 = "st.v_add_f32"(v400, v401) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc0"(label_loop, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop, ^label_end
+^label_end:
+  v403 = "st.v_add_f32"(v300, v402) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

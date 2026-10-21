@@ -35,6 +35,8 @@ def make(solution, assembler, isa_info_map):
     ("apply,classes=vs", "2,classes=vs"),
     ("classes=vs,2", "2,classes=vs"),
     ("force,unbankable=hold,classes=vs", "3,classes=vs,unbankable=hold"),
+    ("choose,apply,classes=vs,allocator=greedy-compact+legacy",
+     "2,classes=vs,allocator=greedy-compact+legacy,choose"),
 ])
 def test_a_solution_keeps_the_shortest_spelling(make, value, canonical):
     assert make(value)[KEY] == canonical
@@ -56,6 +58,7 @@ def test_any_config_is_named_by_its_mode_alone(make):
 
 @pytest.mark.parametrize("value", [
     0, 3, "shadow", "apply,classes=vs,allocator=greedy-compact-program+greedy-compact,quadrant=prefer",
+    "apply,allocator=greedy-compact+greedy-compact-program+greedy-compact-largest+legacy,choose",
 ])
 def test_validation_accepts_modes_and_config_strings(value):
     checkParametersAreValid((KEY, [value]), validParameters)
@@ -69,6 +72,7 @@ def test_validation_accepts_modes_and_config_strings(value):
     ("apply,report", "stinkytofu-opt setting"),
     ("apply,allocator=nope", "allocator 'nope' is not registered"),
     ("unbankable=freeze", "hold, allocate or auto"),
+    ("choose=waves", "unknown register allocation setting 'choose=waves'"),
 ])
 def test_validation_refuses_what_stinkytofu_cannot_run(value, reason):
     with pytest.raises(Exception, match=KEY) as raised:

@@ -903,3 +903,148 @@ TEST_F(RegisterAllocationPassTest, AChainThatEveryAllocatorRefusesNamesEachRefus
         << text;
     EXPECT_TRUE(func->hasAttachedSSA()) << "nothing was applied";
 }
+
+namespace {
+
+/// The producer's colouring with some registers renumbered, so `choose` sees
+/// candidates that differ exactly where a test says.
+class RenumberingAllocator : public RegisterAllocator {
+   public:
+    RenumberingAllocator(const char* name, std::vector<std::pair<uint32_t, uint32_t>> moves)
+        : name_(name), moves_(std::move(moves)) {}
+    const char* name() const override {
+        return name_;
+    }
+    AllocatorCapabilities capabilities() const override {
+        return {};
+    }
+    Expected<AllocationResult> allocate(const AllocationContext& context) override {
+        AllocationResult result = createLegacyColoring(context.function);
+        for (SSAValueID id = 1; id <= result.valueCount(); ++id) {
+            if (!result.isAssigned(id)) continue;
+            RegKey reg = result.assignmentOf(id);
+            for (const auto& [from, to] : moves_) {
+                if (reg.type != RegType::V || reg.idx != from) continue;
+                reg.idx = to;
+                result.assign(id, reg);
+                break;
+            }
+        }
+        return result;
+    }
+
+   private:
+    const char* name_;
+    std::vector<std::pair<uint32_t, uint32_t>> moves_;
+};
+
+/// The candidates the choose tests rank, registered for the rest of the run
+/// (the conformance suite took its list before any test ran):
+///   - test-same moves v600 and v601 down to bank 1, and so needs fewer
+///     registers than the producer;
+///   - test-split does the same and also moves v3 to v302, so the loop's two
+///     instructions disagree on the destination's bank.
+void registerChooseCandidates() {
+    static const bool registered = [] {
+        AllocatorRegistry::registerAllocator("test-same", [] {
+            return std::make_unique<RenumberingAllocator>(
+                "test-same", std::vector<std::pair<uint32_t, uint32_t>>{{600, 300}, {601, 301}});
+        });
+        AllocatorRegistry::registerAllocator("test-split", [] {
+            return std::make_unique<RenumberingAllocator>(
+                "test-split",
+                std::vector<std::pair<uint32_t, uint32_t>>{{600, 300}, {601, 301}, {3, 302}});
+        });
+        return true;
+    }();
+    (void)registered;
+}
+
+}  // namespace
+
+class RegisterAllocationChooseTest : public RegisterAllocationPassTest {
+   protected:
+    /// v600 and v601 feed two adds in a loop, whose results leave it:
+    ///   entry: v600 = v0, v601 = v1
+    ///   loop:  v2 = v600 + v601; v3 = v600 + v601   (back to loop)
+    ///   exit:  v4 = v2 + v3
+    /// As the producer numbered it the loop needs one s_set_vgpr_msb per
+    /// iteration, sources in bank 2 and both destinations in bank 0.
+    void SetUp() override {
+        RegisterAllocationPassTest::SetUp();
+        registerChooseCandidates();
+        BasicBlock* entry = block("entry");
+        BasicBlock* loop = block("loop");
+        BasicBlock* exit = block("exit");
+        func->addEdge(entry, loop);
+        func->addEdge(loop, loop);
+        func->addEdge(loop, exit);
+        vMov(entry, 600, 0);
+        vMov(entry, 601, 1);
+        createVAddInBlock(loop, kRaTestArch, 2, 600, 601);
+        createVAddInBlock(loop, kRaTestArch, 3, 600, 601);
+        createVAddInBlock(exit, kRaTestArch, 4, 2, 3);
+        ASSERT_TRUE(liftForAllocation(*func));
+    }
+
+    std::string choose(const std::string& chain) {
+        RegisterAllocationOptions options = legacyApply();
+        options.allocator = chain;
+        options.choose = true;
+        options.report = true;
+        return runPassCapturingRemarks(*func, options);
+    }
+};
+
+TEST_F(RegisterAllocationChooseTest, AtEqualWavesTheCheaperLoopWins) {
+    const std::string text = choose("test-split+test-same+legacy");
+
+    EXPECT_TRUE(contains(text, "chose test-same (waves=")) << text;
+    EXPECT_TRUE(contains(text, "loopMsb=1 highest=301) over test-split (")) << text;
+    EXPECT_TRUE(contains(text, "loopMsb=2 highest=302), legacy (")) << text;
+    EXPECT_TRUE(contains(text, "coloured")) << text;
+    EXPECT_TRUE(contains(physicalIR(*func), "v300")) << physicalIR(*func);
+}
+
+TEST_F(RegisterAllocationChooseTest, MoreWavesWinOverACheaperLoop) {
+    // test-split pays a second switch in the loop, but needs half the registers.
+    const std::string text = choose("legacy+test-split");
+
+    EXPECT_TRUE(contains(text, "chose test-split (")) << text;
+    EXPECT_TRUE(contains(text, "loopMsb=2 highest=302) over legacy (")) << text;
+    EXPECT_TRUE(contains(text, "loopMsb=1 highest=601)")) << text;
+}
+
+TEST_F(RegisterAllocationChooseTest, ATieGoesToTheAllocatorNamedFirst) {
+    const std::string text = choose("test-same+test-same");
+
+    EXPECT_TRUE(contains(text, "chose test-same (")) << text;
+    EXPECT_TRUE(contains(text, ") over test-same (")) << text;
+}
+
+TEST_F(RegisterAllocationChooseTest, ARefusalDropsOutAndIsNamed) {
+    AllocatorRegistry::registerAllocator("test-always-refuses",
+                                         [] { return std::make_unique<AlwaysRefuses>(); });
+    const std::string text = choose("test-always-refuses+legacy");
+
+    EXPECT_TRUE(contains(text, "chose legacy (")) << text;
+    EXPECT_TRUE(contains(text, "; always-refuses refused")) << text;
+    EXPECT_FALSE(contains(text, "NotAllocated")) << text;
+    EXPECT_FALSE(func->hasAttachedSSA());
+}
+
+TEST_F(RegisterAllocationChooseTest, TheReportCountsTheLoopAgainstTheProducer) {
+    const std::string text = choose("test-split");
+
+    EXPECT_TRUE(contains(text, "loopMsb=1->2")) << text;
+}
+
+TEST_F(RegisterAllocationChooseTest, WithoutChooseTheFirstThatColoursStillWins) {
+    RegisterAllocationOptions options = legacyApply();
+    options.allocator = "test-split+test-same";
+    const std::string text = runPassCapturingRemarks(*func, options);
+
+    EXPECT_TRUE(contains(text, "coloured")) << text;
+    EXPECT_TRUE(contains(text, "with test-split")) << text;
+    EXPECT_FALSE(contains(text, "chose")) << text;
+}
