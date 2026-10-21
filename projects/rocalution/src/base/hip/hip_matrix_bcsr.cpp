@@ -185,8 +185,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->nrow_ = nrowb * blockdim;
         this->ncol_ = ncolb * blockdim;
@@ -213,8 +212,7 @@ namespace rocalution
         assert(this->nnz_ >= 0);
         assert(this->mat_.blockdim > 1);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *row_offset = this->mat_.row_offset;
         *col        = this->mat_.col;

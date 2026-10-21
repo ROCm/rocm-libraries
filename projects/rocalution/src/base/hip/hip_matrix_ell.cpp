@@ -157,8 +157,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.max_row = max_row;
         this->nrow_        = nrow;
@@ -180,8 +179,7 @@ namespace rocalution
         assert(this->mat_.max_row >= 0);
         assert(this->mat_.max_row * this->nrow_ == this->nnz_);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         // see free_host function for details
         *col = this->mat_.col;

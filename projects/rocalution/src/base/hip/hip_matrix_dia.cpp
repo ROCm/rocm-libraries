@@ -136,8 +136,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.num_diag = num_diag;
         this->nrow_         = nrow;
@@ -167,8 +166,7 @@ namespace rocalution
             assert(this->nnz_ == this->nrow_ * this->mat_.num_diag);
         }
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *offset = this->mat_.offset;
         *val    = this->mat_.val;

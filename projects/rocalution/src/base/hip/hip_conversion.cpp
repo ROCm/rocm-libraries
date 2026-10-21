@@ -75,8 +75,7 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         return true;
     }
@@ -114,8 +113,7 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         return true;
     }
@@ -311,9 +309,8 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Synchronize stream to make sure, result is available on the host
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Limit ELL size to 5 times CSR nnz
         if(dst->max_row > 5 * (nnz / nrow))
@@ -755,8 +752,7 @@ namespace rocalution
         }
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         return true;
     }
@@ -878,8 +874,7 @@ namespace rocalution
         }
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *nnz_csr = nnz_total;
 

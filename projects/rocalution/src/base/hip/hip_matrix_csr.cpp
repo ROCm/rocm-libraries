@@ -193,8 +193,7 @@ namespace rocalution
         this->ncol_ = ncol;
         this->nnz_  = nnz;
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.row_offset = *row_offset;
         this->mat_.col        = *col;
@@ -212,8 +211,7 @@ namespace rocalution
         assert(this->ncol_ >= 0);
         assert(this->nnz_ >= 0);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         // see free_host function for details
         *row_offset = this->mat_.row_offset;
@@ -3380,6 +3378,7 @@ namespace rocalution
                                                                             this->mat_.val,
                                                                             cast_vec_inv_diag->vec_,
                                                                             d_detect_zero_diag);
+            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             int detect_zero_diag = 0;
             copy_d2h(1, d_detect_zero_diag, &detect_zero_diag);
@@ -4606,8 +4605,7 @@ namespace rocalution
 
         // The compaction reads keep and the old arrays, so it has to finish before any of
         // them are released
-        DISCARD_HIP_ERROR(hipStreamSynchronize(stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipStreamSynchronize(stream));
 
         free_hip(&keep);
 
@@ -5343,9 +5341,8 @@ namespace rocalution
         int iter = 0;
         while(!hdone)
         {
-            DISCARD_HIP_ERROR(hipMemcpy(
+            CHECK_HIP_STATUS(hipMemcpy(
                 max_tuples, tuples, sizeof(mis_tuple) * this->nrow_, hipMemcpyDeviceToDevice));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             if(avg_nnz_per_row <= 8)
             {
@@ -5505,9 +5502,8 @@ namespace rocalution
 
         for(int k = 0; k < 2; k++)
         {
-            DISCARD_HIP_ERROR(hipMemcpy(
+            CHECK_HIP_STATUS(hipMemcpy(
                 max_tuples, tuples, sizeof(mis_tuple) * this->nrow_, hipMemcpyDeviceToDevice));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             kernel_csr_amg_update_aggregates<<<
                 GridSize,
@@ -7470,6 +7466,7 @@ namespace rocalution
                     cast_agg->vec_,
                     cast_agg_nodes->vec_);
         }
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
@@ -7498,6 +7495,7 @@ namespace rocalution
             0,
             HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
             this->nrow_, agg_size, global_column_begin, cast_agg->vec_, cast_agg_nodes->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
@@ -9878,6 +9876,7 @@ namespace rocalution
                                      0,
                                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
             static_cast<int>(this->nnz_), cast_l2g->vec_, this->mat_.col, gcols);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Append additional global columns from ext
         int* workspace = NULL;
@@ -9929,6 +9928,7 @@ namespace rocalution
             cast_ext->vec_,
             workspace,
             gcols + this->nnz_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         int total_nnz;
         copy_d2h(1, workspace + ext_nnz, &total_nnz);
@@ -10046,6 +10046,7 @@ namespace rocalution
             cast_cmb->vec_ + this->nnz_,
             workspace,
             cast_col->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&workspace);
 
@@ -10153,6 +10154,7 @@ namespace rocalution
                                                                         gst_csr_row_ptr,
                                                                         gst_csr_col_ind,
                                                                         gst_csr_val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         cast_int->SetDataPtrCSR(
             &int_csr_row_ptr, &int_csr_col_ind, &int_csr_val, int_nnz, this->nrow_, this->nrow_);
@@ -10493,6 +10495,7 @@ namespace rocalution
             gst_workspace,
             cast_glo->vec_,
             gst_csr_val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Clean up
         free_hip(&int_workspace);

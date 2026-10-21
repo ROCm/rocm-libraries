@@ -111,8 +111,7 @@ namespace rocalution
             assert(*ptr != NULL);
         }
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->vec_  = *ptr;
         this->size_ = size;
@@ -123,8 +122,7 @@ namespace rocalution
     {
         assert(this->size_ >= 0);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
         *ptr       = this->vec_;
         this->vec_ = NULL;
 
@@ -810,9 +808,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -863,9 +860,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -908,9 +904,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -1107,9 +1102,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
