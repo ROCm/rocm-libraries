@@ -9,6 +9,9 @@
 
 #include "fake_backend/ShimV8MockBackendFixture.hpp"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -20,7 +23,7 @@ namespace
 {
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
-namespace backend = fe::detail::backend;
+namespace v8 = fe::detail::v8;
 using fe::AttentionImplementation_t;
 using fe::BehaviorNote_t;
 using fe::BuildPlanPolicy_t;
@@ -331,16 +334,19 @@ TEST_F(TestCudnnShimV8Utils, EnumJsonMatchesNlohmannRendering)
 #endif
 }
 
+// The appended text is hipDNN's last error, which reading clears.
 TEST_F(TestCudnnShimV8Utils, ThrowHelperAppendsLastErrorAndStatus)
 {
-    cudnnBackendDescriptor_t raw = nullptr;
-    ASSERT_EQ(cudnnBackendCreateDescriptor(CUDNN_BACKEND_TENSOR_DESCRIPTOR, &raw),
-              CUDNN_STATUS_SUCCESS);
-    // The first failure reveals the shim's message; the second leaves the same one pending.
-    ASSERT_NE(cudnnBackendFinalize(raw), CUDNN_STATUS_SUCCESS);
-    const std::string shimError = fe::detail::get_last_error_string_();
-    ASSERT_FALSE(shimError.empty());
-    ASSERT_NE(cudnnBackendFinalize(raw), CUDNN_STATUS_SUCCESS);
+    const std::string hipdnnError = " hipDNN said no";
+    bool pending = true;
+    ON_CALL(*_mockBackend, getLastErrorString(::testing::_, ::testing::_))
+        .WillByDefault([&](char* message, std::size_t size) {
+            const std::string text = pending ? hipdnnError : "";
+            pending = false;
+            const std::size_t length = std::min(text.size(), size - 1);
+            std::memcpy(message, text.data(), length);
+            message[length] = '\0';
+        });
 
     DescribedDescriptor desc;
     std::optional<fe::cudnnException> caught;
@@ -355,12 +361,10 @@ TEST_F(TestCudnnShimV8Utils, ThrowHelperAppendsLastErrorAndStatus)
 
     ASSERT_TRUE(caught.has_value());
     EXPECT_EQ(caught->getCudnnStatus(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_EQ(std::string(caught->what()), "X" + shimError + " cudnn_status: mock status");
+    EXPECT_EQ(std::string(caught->what()), "X" + hipdnnError + " cudnn_status: mock status");
     EXPECT_EQ(desc.get_status(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_EQ(std::string(desc.get_error()), "X" + shimError);
+    EXPECT_EQ(std::string(desc.get_error()), "X" + hipdnnError);
     EXPECT_EQ(fe::detail::get_last_error_string_(), "");
-
-    EXPECT_EQ(cudnnBackendDestroyDescriptor(raw), CUDNN_STATUS_SUCCESS);
 }
 
 TEST_F(TestCudnnShimV8Utils, VersionHelpersReportClaim)
@@ -428,25 +432,21 @@ TEST_F(TestCudnnShimV8Utils, GetEnvironmentIsNullForUnsetOrEmpty)
     hipdnn_data_sdk::utilities::unsetEnv(name);
 }
 
-TEST_F(TestCudnnShimV8Utils, OpaquePointerOwnsShimDescriptor)
+// make_shared_backend_pointer gives an empty pointer: builders attach a record (and, where
+// one exists, a view of the hipDNN descriptor it owns) only after a successful build.
+TEST_F(TestCudnnShimV8Utils, EmptyOpaquePointerOwnsNothing)
 {
-    std::weak_ptr<backend::Descriptor> object;
-    {
-        fe::ManagedOpaqueDescriptor pointer
-            = fe::make_shared_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
-        ASSERT_TRUE(pointer->is_good());
-        cudnnBackendDescriptor_t raw = pointer->get_backend_descriptor();
-        ASSERT_NE(raw, nullptr);
-        // White-box: raw is only inspected while the owner keeps it alive.
-        const backend::Handle* handle = backend::liveHandle(raw);
-        ASSERT_NE(handle, nullptr);
-        object = handle->object;
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(::testing::_)).Times(0);
 
-        const fe::ManagedOpaqueDescriptor copy = pointer;
-        pointer.reset();
-        EXPECT_FALSE(object.expired());
-    }
-    EXPECT_TRUE(object.expired());
+    const fe::ManagedOpaqueDescriptor pointer
+        = fe::make_shared_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
+    ASSERT_NE(pointer, nullptr);
+    EXPECT_TRUE(pointer->is_good());
+    EXPECT_EQ(pointer->get_type(), CUDNN_BACKEND_TENSOR_DESCRIPTOR);
+    EXPECT_EQ(pointer->get_backend_descriptor(), nullptr);
+    EXPECT_EQ(pointer->get_record(), nullptr);
+    EXPECT_EQ(v8::recordOf<v8::TensorRecord>(pointer), nullptr);
 }
 
 } // namespace

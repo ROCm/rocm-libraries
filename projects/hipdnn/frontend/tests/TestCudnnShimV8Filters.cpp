@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The ported v0.x engine-config filters against the shim's backend C API and
-// the mock hipDNN backend, including PyTorch's quantized-op use of them.
+// The ported v0.x engine-config filters over the mock hipDNN backend, including
+// PyTorch's quantized-op use of them.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_Filters.h>
 
 #include <gtest/gtest.h>
@@ -30,7 +30,8 @@ TEST_F(TestCudnnShimV8Filters, FilterKeepsFalsePredicate)
     fe::EngineConfigList to = engineConfigs(graph);
     to.resize(1);
 
-    fe::filter(from, to, [](cudnnBackendDescriptor_t config) { return indexOf(config) % 2 == 1; });
+    fe::filter(
+        from, to, [this](cudnnBackendDescriptor_t config) { return indexOf(config) % 2 == 1; });
 
     // Kept configs are appended after what `to` held; rejected ones stay in
     // `from` in their original order.

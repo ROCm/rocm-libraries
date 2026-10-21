@@ -32,8 +32,8 @@ class TestCudnnShimV8ExecutionPlanBuilder : public hipdnn_shim_test::ShimV8PlanF
 {
 };
 
-// Upstream's build() never sets CUDNN_ATTR_EXECUTION_PLAN_HANDLE; the plan runs
-// on the graph's handle.
+// Upstream's build() never sets a plan handle; the plan runs on the handle
+// cudnnBackendExecute is given.
 TEST_F(TestCudnnShimV8ExecutionPlanBuilder, PlanBuildsWithoutPlanHandle)
 {
     fe::OperationGraph_v8 graph = convGraph();
@@ -55,11 +55,12 @@ TEST_F(TestCudnnShimV8ExecutionPlanBuilder, PlanBuildsWithoutPlanHandle)
     EXPECT_EQ(static_cast<void*>(executions().back().handle), static_cast<void*>(_handle));
     EXPECT_EQ(executedEngineIds(), std::vector<std::int64_t>{1});
 
-    // Another handle is still rejected.
+    // Another handle is passed straight to hipDNN too.
     auto* const otherHandle = reinterpret_cast<cudnnHandle_t>(0x23456789);
     EXPECT_EQ(cudnnBackendExecute(otherHandle, plan.get_raw_desc(), pack.get_raw_desc()),
-              CUDNN_STATUS_BAD_PARAM);
-    EXPECT_EQ(executions().size(), 1U);
+              CUDNN_STATUS_SUCCESS);
+    ASSERT_EQ(executions().size(), 2U);
+    EXPECT_EQ(static_cast<void*>(executions().back().handle), static_cast<void*>(otherHandle));
 }
 
 TEST_F(TestCudnnShimV8ExecutionPlanBuilder, PlanTagFormat)
@@ -194,7 +195,7 @@ TEST_F(TestCudnnShimV8ExecutionPlanBuilder, KernelCacheNotSupported)
 
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_NE(failure.what.find("KERNEL_CACHE"), std::string::npos) << failure.what;
+    EXPECT_NE(failure.what.find("setKernelCache"), std::string::npos) << failure.what;
     EXPECT_EQ(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).size(), plansBefore);
 }
 

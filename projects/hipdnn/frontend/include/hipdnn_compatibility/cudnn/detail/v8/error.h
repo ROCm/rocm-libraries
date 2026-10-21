@@ -19,8 +19,8 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
-// Shim-originated failure. Carries the cuDNN status directly so the entry-point
-// catch ladder never has to translate it.
+// Shim-originated failure. Carries the cuDNN status directly so guarded() never has
+// to translate it.
 class ShimError : public std::runtime_error
 {
 public:

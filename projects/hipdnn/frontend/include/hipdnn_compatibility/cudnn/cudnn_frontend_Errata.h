@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Errata.h
- * @brief cuDNN v8 errata filters (`load_from_config`, `check_errata`) over the shim's backend C API.
+ * @brief cuDNN v8 errata filters (`load_from_config`, `check_errata`) over the shim's records.
  */
 
 #pragma once
@@ -27,6 +27,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_OperationGraph.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
@@ -34,7 +35,7 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "cuDNN FE version pin changed: re-diff this file against upstream "
               "include/cudnn_frontend_Errata.h at the new tag, then update this assert.");
 
-// NOLINTBEGIN(readability-identifier-naming,modernize-use-nullptr,readability-container-size-empty,misc-const-correctness,bugprone-multi-level-implicit-pointer-conversion,performance-unnecessary-copy-initialization):
+// NOLINTBEGIN(readability-identifier-naming,modernize-use-nullptr,readability-container-size-empty,misc-const-correctness,performance-unnecessary-copy-initialization):
 // ported verbatim; upstream's spelling and shapes are the source-compatible surface.
 
 // The CUDNN_ERRATA_JSON_FILE environment variable takes precedence over errata_json.
@@ -60,37 +61,78 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
 }
 #endif
 
-// Returns true when the tensor_attr tensor of op matches blocked_shape, given in shape_format
+namespace detail
+{
+
+// The convolution tensors errata shape rules read; upstream names them by backend attribute.
+enum class ErrataTensorSlot
+{
+    CONVOLUTION_FORWARD_X,
+    CONVOLUTION_FORWARD_W,
+    CONVOLUTION_BWD_FILTER_X,
+    CONVOLUTION_BWD_FILTER_DW,
+    CONVOLUTION_BWD_DATA_DX,
+    CONVOLUTION_BWD_DATA_W,
+};
+
+// Null when op is not the slot's operation kind.
+inline v8::TensorPtr errataTensor(const ManagedOpaqueDescriptor& op, ErrataTensorSlot slot)
+{
+    switch(slot)
+    {
+    case ErrataTensorSlot::CONVOLUTION_FORWARD_X:
+    case ErrataTensorSlot::CONVOLUTION_FORWARD_W:
+        if(const auto record = v8::recordOf<v8::ConvolutionForwardOperationRecord>(op))
+        {
+            return slot == ErrataTensorSlot::CONVOLUTION_FORWARD_X ? record->x() : record->w();
+        }
+        break;
+    case ErrataTensorSlot::CONVOLUTION_BWD_FILTER_X:
+    case ErrataTensorSlot::CONVOLUTION_BWD_FILTER_DW:
+        if(const auto record = v8::recordOf<v8::ConvolutionBackwardFilterOperationRecord>(op))
+        {
+            return slot == ErrataTensorSlot::CONVOLUTION_BWD_FILTER_X ? record->x() : record->dw();
+        }
+        break;
+    case ErrataTensorSlot::CONVOLUTION_BWD_DATA_DX:
+    case ErrataTensorSlot::CONVOLUTION_BWD_DATA_W:
+        if(const auto record = v8::recordOf<v8::ConvolutionBackwardDataOperationRecord>(op))
+        {
+            return slot == ErrataTensorSlot::CONVOLUTION_BWD_DATA_DX ? record->dx() : record->w();
+        }
+        break;
+    default:
+        break;
+    }
+    return nullptr;
+}
+
+} // namespace detail
+
+// Returns true when the tensor_slot tensor of op matches blocked_shape, given in shape_format
 // ("NCHW" or "NHWC") order; a -1 entry is a wildcard.
-inline bool check_shape(cudnnBackendDescriptor_t& op,
+inline bool check_shape(const ManagedOpaqueDescriptor& op,
                         const std::string& shape_format,
-                        cudnnBackendAttributeName_t tensor_attr,
+                        detail::ErrataTensorSlot tensor_slot,
                         const std::vector<int64_t>& blocked_shape)
 {
-    ManagedOpaqueDescriptor tensor = make_shared_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
-    cudnnBackendDescriptor_t tensor_ = tensor->get_backend_descriptor();
-    int64_t count = 0;
-    cudnnStatus_t status = detail::get_attribute(
-        op, tensor_attr, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &tensor_);
-    if(status != CUDNN_STATUS_SUCCESS)
+    std::array<int64_t, 5> tensor_dims{};
+    const detail::v8::TensorPtr tensor = detail::errataTensor(op, tensor_slot);
+    if(tensor == nullptr)
     {
 #ifndef NV_CUDNN_DISABLE_EXCEPTION
         throw cudnnException(
-            std::string("Error getting attribute. cudnn_status: " + to_string(status)).c_str(),
-            status);
+            std::string("check_shape: the graph's first operation is not the rule's operation. "
+                        "cudnn_status: "
+                        + to_string(CUDNN_STATUS_BAD_PARAM))
+                .c_str(),
+            CUDNN_STATUS_BAD_PARAM);
 #endif
     }
-
-    std::array<int64_t, 5> tensor_dims{};
-    status = detail::get_attribute(
-        tensor_, CUDNN_ATTR_TENSOR_DIMENSIONS, CUDNN_TYPE_INT64, 5, &count, tensor_dims.data());
-    if(status != CUDNN_STATUS_SUCCESS)
+    else
     {
-#ifndef NV_CUDNN_DISABLE_EXCEPTION
-        throw cudnnException(
-            std::string("Error getting attribute. cudnn_status: " + to_string(status)).c_str(),
-            status);
-#endif
+        const std::vector<int64_t>& dims = tensor->dimensions();
+        std::copy_n(dims.begin(), std::min(dims.size(), tensor_dims.size()), tensor_dims.begin());
     }
     int64_t first_dim = tensor_dims[1];
     int64_t blocked_first_dim = blocked_shape[0];
@@ -198,12 +240,7 @@ inline bool check_rule(const json& json_handle,
 #endif
         }
 
-        std::array<ManagedOpaqueDescriptor, MAX_OPGRAPH_OPS> ops = opGraph.getOps();
-        std::array<cudnnBackendDescriptor_t, MAX_OPGRAPH_OPS> ops_;
-        for(unsigned int i = 0; i < opGraph.getOpCount(); i++)
-        {
-            ops_[i] = ops[i]->get_backend_descriptor();
-        }
+        const std::array<ManagedOpaqueDescriptor, MAX_OPGRAPH_OPS>& ops = opGraph.getOps();
 
         std::string shape_format = json_handle["shape_format"];
         std::vector<int64_t> blocked_shape = json_handle["input_shape"];
@@ -211,62 +248,59 @@ inline bool check_rule(const json& json_handle,
         if(operation == "ConvFwd")
         {
             blocked = blocked
-                      && check_shape(ops_[0],
+                      && check_shape(ops[0],
                                      shape_format,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                     detail::ErrataTensorSlot::CONVOLUTION_FORWARD_X,
                                      blocked_shape);
         }
         else if(operation == "ConvBwdFilter")
         {
             blocked = blocked
-                      && check_shape(ops_[0],
+                      && check_shape(ops[0],
                                      shape_format,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
+                                     detail::ErrataTensorSlot::CONVOLUTION_BWD_FILTER_X,
                                      blocked_shape);
         }
         else if(operation == "ConvBwdData")
         {
             blocked = blocked
-                      && check_shape(ops_[0],
+                      && check_shape(ops[0],
                                      shape_format,
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
+                                     detail::ErrataTensorSlot::CONVOLUTION_BWD_DATA_DX,
                                      blocked_shape);
         }
     }
 
     if(blocked && json_handle.contains("filter_shape"))
     {
-        std::array<ManagedOpaqueDescriptor, MAX_OPGRAPH_OPS> ops = opGraph.getOps();
-        std::array<cudnnBackendDescriptor_t, MAX_OPGRAPH_OPS> ops_;
-        for(unsigned int i = 0; i < opGraph.getOpCount(); i++)
-        {
-            ops_[i] = ops[i]->get_backend_descriptor();
-        }
+        const std::array<ManagedOpaqueDescriptor, MAX_OPGRAPH_OPS>& ops = opGraph.getOps();
 
         std::vector<int64_t> blocked_shape = json_handle["filter_shape"];
 
         // Filters are always [K, C, H, W], hence the hard-coded "NCHW".
         if(operation == "ConvFwd")
         {
-            blocked
-                = blocked
-                  && check_shape(
-                      ops_[0], "NCHW", CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, blocked_shape);
+            blocked = blocked
+                      && check_shape(ops[0],
+                                     "NCHW",
+                                     detail::ErrataTensorSlot::CONVOLUTION_FORWARD_W,
+                                     blocked_shape);
         }
         else if(operation == "ConvBwdFilter")
         {
             blocked = blocked
-                      && check_shape(ops_[0],
+                      && check_shape(ops[0],
                                      "NCHW",
-                                     CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW,
+                                     detail::ErrataTensorSlot::CONVOLUTION_BWD_FILTER_DW,
                                      blocked_shape);
         }
         else if(operation == "ConvBwdData")
         {
-            blocked
-                = blocked
-                  && check_shape(
-                      ops_[0], "NCHW", CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W, blocked_shape);
+            blocked = blocked
+                      && check_shape(ops[0],
+                                     "NCHW",
+                                     detail::ErrataTensorSlot::CONVOLUTION_BWD_DATA_W,
+                                     blocked_shape);
         }
     }
     blocked = blocked && fn();
@@ -319,6 +353,6 @@ inline bool check_errata(const json& json_handle,
 }
 #endif
 
-// NOLINTEND(readability-identifier-naming,modernize-use-nullptr,readability-container-size-empty,misc-const-correctness,bugprone-multi-level-implicit-pointer-conversion,performance-unnecessary-copy-initialization)
+// NOLINTEND(readability-identifier-naming,modernize-use-nullptr,readability-container-size-empty,misc-const-correctness,performance-unnecessary-copy-initialization)
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend

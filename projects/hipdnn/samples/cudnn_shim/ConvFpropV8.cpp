@@ -386,19 +386,11 @@ int runOverhead(cudnnHandle_t handle, const Config& config)
                                      .setUids(3, uids.data())
                                      .build();
 
-    // The baseline needs the hipDNN objects behind the shim's plan and variant pack, which no
-    // public API exposes. It calls the C symbols so the frontend's backend lookup is measured.
-    namespace backend = hipdnn_frontend::compatibility::cudnn_frontend::detail::backend;
-    hipdnnBackendDescriptor_t hipPlan
-        = backend::descriptorCast<backend::ExecutionPlanDescriptor>(
-              *backend::requireHandle(plan.get_raw_desc(), "plan").object,
-              CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR)
-              .hipdnnPlan();
-    hipdnnBackendDescriptor_t hipPack
-        = backend::descriptorCast<backend::VariantPackDescriptor>(
-              *backend::requireHandle(pack.get_raw_desc(), "variantPack").object,
-              CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR)
-              .hipdnnVariantPack();
+    // The baseline runs the hipDNN plan and variant pack behind the shim's objects directly
+    // (get_raw_desc() is the hipDNN descriptor). It calls the C symbols so the frontend's
+    // backend lookup is measured.
+    hipdnnBackendDescriptor_t hipPlan = plan.get_raw_desc();
+    hipdnnBackendDescriptor_t hipPack = pack.get_raw_desc();
 
     auto m1Shim = [&]() {
         return cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc())

@@ -9,13 +9,14 @@
 
 /**
  * @file cudnn_frontend_ConvDesc.h
- * @brief cuDNN v8 `ConvDesc_v8` / `ConvDescBuilder_v8` over the shim's backend C API.
+ * @brief cuDNN v8 `ConvDesc_v8` / `ConvDescBuilder_v8`, built as a shim convolution record.
  */
 
 #pragma once
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -25,6 +26,8 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
@@ -212,159 +215,66 @@ public:
 
     ConvDesc_v8&& build()
     {
-        if(m_convDesc.nDims <= 0)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: Check and Set the "
-                                          "CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS field");
-            return std::move(m_convDesc);
+        static const detail::v8::ConvolutionLabels s_labels{
+            "ConvDescBuilder: compute type",
+            "ConvDescBuilder: mode",
+            "ConvDescBuilder: spatial dimension count",
+            "ConvDescBuilder: pre-padding",
+            "ConvDescBuilder: post-padding",
+            "ConvDescBuilder: dilation",
+            "ConvDescBuilder: spatial stride",
         };
-        if(m_convDesc.stride[0] <= 0)
+        auto outcome = detail::v8::guarded([&] {
+            // Created before upstream's prechecks so that a failed descriptor still has a (null)
+            // raw descriptor to report.
+            m_convDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR);
+            if(m_convDesc.nDims <= 0)
+            {
+                throw detail::v8::ShimError(
+                    CUDNN_STATUS_BAD_PARAM,
+                    "ConvDescBuilder: spatial dimension count must be positive");
+            }
+            if(m_convDesc.stride[0] <= 0)
+            {
+                throw detail::v8::ShimError(
+                    CUDNN_STATUS_BAD_PARAM,
+                    "ConvDescBuilder: spatial strides must be set and positive");
+            }
+
+            cudnnDataType_t cudnn_data_type;
+            auto status = detail::convert_to_cudnn_type(m_convDesc.compute_type, cudnn_data_type);
+            if(status != CUDNN_STATUS_SUCCESS)
+            {
+                throw detail::v8::ShimError(
+                    status, "ConvDescBuilder: compute type is not set or not a valid DataType_t");
+            }
+
+            cudnnConvolutionMode_t mode_ = detail::convert_to_cudnn_type(m_convDesc.mode);
+
+            // A count above the arrays' capacity no longer matches nDims, so the core rejects it.
+            const auto count
+                = static_cast<std::size_t>(std::min<int64_t>(m_convDesc.nDims, CUDNN_DIM_MAX + 1));
+            detail::v8::ConvolutionInputs inputs;
+            inputs.computeType = cudnn_data_type;
+            inputs.mode = mode_;
+            inputs.spatialDims = m_convDesc.nDims;
+            inputs.prePaddings.assign(m_convDesc.padLower, m_convDesc.padLower + count);
+            inputs.postPaddings.assign(m_convDesc.padUpper, m_convDesc.padUpper + count);
+            inputs.dilations.assign(m_convDesc.dilation, m_convDesc.dilation + count);
+            inputs.filterStrides.assign(m_convDesc.stride, m_convDesc.stride + count);
+            m_convDesc.pointer
+                = detail::v8::makeManaged(CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR,
+                                          detail::v8::makeConvRecord(std::move(inputs), s_labels));
+        });
+        if(!outcome)
         {
-            set_error_and_throw_exception(&m_convDesc,
-                                          CUDNN_STATUS_BAD_PARAM,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: Check and Set the "
-                                          "CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES field");
+            set_error_and_throw_exception(&m_convDesc, outcome.status, outcome.message.c_str());
             return std::move(m_convDesc);
         }
 
-        auto status
-            = m_convDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_convDesc,
-                status,
-                "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: Bad descriptor created");
-            return std::move(m_convDesc);
-        }
-
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_convDesc, status, "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: cudnnCreate Failed");
-            return std::move(m_convDesc);
-        }
-
-        cudnnDataType_t cudnn_data_type;
-        status = detail::convert_to_cudnn_type(m_convDesc.compute_type, cudnn_data_type);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_COMP_TYPE Failed");
-            return std::move(m_convDesc);
-        }
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_COMP_TYPE,
-                                       CUDNN_TYPE_DATA_TYPE,
-                                       1,
-                                       &cudnn_data_type);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_COMP_TYPE Failed");
-            return std::move(m_convDesc);
-        }
-
-        cudnnConvolutionMode_t mode_ = detail::convert_to_cudnn_type(m_convDesc.mode);
-
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                       CUDNN_TYPE_CONVOLUTION_MODE,
-                                       1,
-                                       &mode_);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_CONV_MODE Failed");
-            return std::move(m_convDesc);
-        }
-
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS,
-                                       CUDNN_TYPE_INT64,
-                                       1,
-                                       &m_convDesc.nDims);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS Failed");
-            return std::move(m_convDesc);
-        }
-
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
-                                       CUDNN_TYPE_INT64,
-                                       m_convDesc.nDims,
-                                       m_convDesc.padLower);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS Failed");
-            return std::move(m_convDesc);
-        }
-
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_POST_PADDINGS,
-                                       CUDNN_TYPE_INT64,
-                                       m_convDesc.nDims,
-                                       m_convDesc.padUpper);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_POST_PADDINGS Failed");
-            return std::move(m_convDesc);
-        }
-
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_DILATIONS,
-                                       CUDNN_TYPE_INT64,
-                                       m_convDesc.nDims,
-                                       m_convDesc.dilation);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_DILATIONS Failed");
-            return std::move(m_convDesc);
-        }
-
-        status = detail::set_attribute(m_convDesc.pointer->get_backend_descriptor(),
-                                       CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
-                                       CUDNN_TYPE_INT64,
-                                       m_convDesc.nDims,
-                                       m_convDesc.stride);
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(&m_convDesc,
-                                          status,
-                                          "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: SetAttribute "
-                                          "CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES Failed");
-            return std::move(m_convDesc);
-        }
-
-        status = detail::finalize(m_convDesc.pointer->get_backend_descriptor());
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            set_error_and_throw_exception(
-                &m_convDesc, status, "CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR: cudnnFinalize Failed");
-            return std::move(m_convDesc);
-        }
-
+        // A retry after a failed build() must not keep that failure's status.
+        m_convDesc.set_status(CUDNN_STATUS_SUCCESS);
+        m_convDesc.set_error("");
         CUDNN_FE_LOG_LABEL_ENDL(m_convDesc);
         return std::move(m_convDesc);
     }

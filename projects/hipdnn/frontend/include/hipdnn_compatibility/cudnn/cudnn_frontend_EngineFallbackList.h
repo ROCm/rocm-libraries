@@ -10,7 +10,7 @@
 /**
  * @file cudnn_frontend_EngineFallbackList.h
  * @brief cuDNN v8 `EngineFallbackList_v8` / `EngineFallbackListBuilder_v8` and
- *        `get_fallback_engine_list` over the shim's backend C API.
+ *        `get_fallback_engine_list` over the shim's v8 core.
  */
 
 #pragma once
@@ -180,10 +180,11 @@ public:
             set_error_and_throw_exception(
                 &m_fallback_list,
                 CUDNN_STATUS_BAD_PARAM,
-                "CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR: Check and Set the "
-                "CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH field for heuristic");
+                "EngineFallbackListBuilder: an operation graph must be set");
             return std::move(m_fallback_list);
         };
+        // Upstream leaves the pointer unset; an empty one gives the null raw view.
+        m_fallback_list.initialize_managed_backend_pointer(CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
         auto fallback_heuristics
             = EngineHeuristicsBuilder_v8()
                   .setHeurMode(CUDNN_HEUR_MODE_FALLBACK)

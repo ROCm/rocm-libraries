@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_shim.h
- * @brief cuDNN FE `detail::` wrappers over the emulated cuDNN C API, plus the plan timer.
+ * @brief cuDNN FE `detail::` handle, version, stream and execute helpers, plus the plan timer.
  */
 
 #pragma once
@@ -72,47 +72,6 @@ inline std::string convert_version_to_str(const size_t version)
 inline std::string get_backend_version_string()
 {
     return convert_version_to_str(get_backend_version());
-}
-
-inline cudnnStatus_t create_descriptor(cudnnBackendDescriptorType_t descriptorType,
-                                       cudnnBackendDescriptor_t* descriptor)
-{
-    return cudnnBackendCreateDescriptor(descriptorType, descriptor);
-}
-
-inline cudnnStatus_t destroy_descriptor(cudnnBackendDescriptor_t descriptor)
-{
-    return cudnnBackendDestroyDescriptor(descriptor);
-}
-
-inline cudnnStatus_t set_attribute(cudnnBackendDescriptor_t descriptor,
-                                   cudnnBackendAttributeName_t attributeName,
-                                   cudnnBackendAttributeType_t attributeType,
-                                   int64_t elementCount,
-                                   const void* arrayOfElements)
-{
-    return cudnnBackendSetAttribute(
-        descriptor, attributeName, attributeType, elementCount, arrayOfElements);
-}
-
-inline cudnnStatus_t get_attribute(const cudnnBackendDescriptor_t descriptor,
-                                   cudnnBackendAttributeName_t attributeName,
-                                   cudnnBackendAttributeType_t attributeType,
-                                   int64_t requestedElementCount,
-                                   int64_t* elementCount,
-                                   void* arrayOfElements)
-{
-    return cudnnBackendGetAttribute(descriptor,
-                                    attributeName,
-                                    attributeType,
-                                    requestedElementCount,
-                                    elementCount,
-                                    arrayOfElements);
-}
-
-inline cudnnStatus_t finalize(cudnnBackendDescriptor_t descriptor)
-{
-    return cudnnBackendFinalize(descriptor);
 }
 
 inline cudnnStatus_t execute(cudnnHandle_t handle,

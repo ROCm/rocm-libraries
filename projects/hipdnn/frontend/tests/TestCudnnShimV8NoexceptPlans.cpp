@@ -57,14 +57,14 @@ TEST_F(TestCudnnShimV8NoexceptPlans, PlanFailureSetsStatus)
 
     const fe::ExecutionPlan failed = planFor(configs[1], graph.getTag());
     EXPECT_EQ(failed.get_status(), CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_THAT(failed.get_error(), HasSubstr("cudnnFinalize"));
+    EXPECT_THAT(failed.get_error(), HasSubstr("finalizing the hipDNN execution plan"));
 
     const fe::ExecutionPlan withCache = fe::ExecutionPlanBuilder()
                                             .setEngineConfig(configs[0], graph.getTag())
                                             .setKernelCache(std::make_shared<fe::KernelCache>())
                                             .build();
     EXPECT_EQ(withCache.get_status(), CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_THAT(withCache.get_error(), HasSubstr("KERNEL_CACHE"));
+    EXPECT_THAT(withCache.get_error(), HasSubstr("setKernelCache"));
 
     const fe::ExecutionPlan good = planFor(configs[2], graph.getTag());
     EXPECT_EQ(good.get_status(), CUDNN_STATUS_SUCCESS) << good.get_error();
@@ -105,7 +105,7 @@ TEST_F(TestCudnnShimV8NoexceptPlans, EmptyFindAndCacheSetsStatus)
 
     // The returned plan is an empty builder's: its status names the missing engine config.
     EXPECT_EQ(plan.get_status(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_THAT(plan.get_error(), HasSubstr("CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG"));
+    EXPECT_THAT(plan.get_error(), HasSubstr("an engine config is required"));
     const fe::ExecutionPlan* cached = nullptr;
     EXPECT_FALSE(cache.get_plan_from_cache(graph, cached));
 }

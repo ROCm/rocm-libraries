@@ -617,7 +617,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, PlansFromTwoThreadsShareDefaultConfig)
 class TestCudnnShimV8BuilderPlansForeignHandle : public TestCudnnShimV8BuilderPlans
 {
 protected:
-    static constexpr cudnnStatus_t FOREIGN_HANDLE_STATUS = CUDNN_STATUS_BAD_PARAM;
+    // cudnnBackendExecute passes straight through, so hipDNN runs the plan on the given handle.
+    static constexpr cudnnStatus_t FOREIGN_HANDLE_STATUS = CUDNN_STATUS_SUCCESS;
 
     cudnnHandle_t _otherHandle = reinterpret_cast<cudnnHandle_t>(0x23456789);
 };

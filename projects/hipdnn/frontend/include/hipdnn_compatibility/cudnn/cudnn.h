@@ -11,8 +11,8 @@
 
 /**
  * @file cudnn.h
- * @brief cuDNN C-API subset forwarded to hipDNN, plus the backend descriptor C API from
- * `cudnn_graph.h`.
+ * @brief cuDNN C-API subset forwarded to hipDNN, plus the backend types and
+ * `cudnnBackendExecute` from `cudnn_graph.h`.
  */
 
 #pragma once
@@ -36,8 +36,8 @@
 /// @brief hipDNN placeholder so signatures naming it compile; graph capture is unsupported.
 using cudaGraph_t = void*;
 
-// cudnnHandle_t and the backend C-API types live in detail/backend/c_types.h;
-// the backend descriptor entry points live in cudnn_graph.h.
+// cudnnHandle_t and the backend C types live in detail/backend/c_types.h;
+// cudnnBackendExecute and cudnnGetLastErrorString live in cudnn_graph.h.
 
 // Needs cudnnStatus_t; used by the entry points below.
 #include <hipdnn_compatibility/cudnn/detail/status_translation.h>

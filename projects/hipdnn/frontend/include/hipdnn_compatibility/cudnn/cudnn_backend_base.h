@@ -17,9 +17,11 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <utility>
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_shim.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
@@ -28,12 +30,17 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "include/cudnn_backend_base.h at the new tag, then update this assert.");
 
 // NOLINTBEGIN(readability-identifier-naming,modernize-pass-by-value,performance-unnecessary-value-param,modernize-use-equals-default):
-// ported verbatim; upstream's spelling and shapes are the source-compatible surface.
+// upstream's spelling and shapes are the source-compatible surface.
 
+// Upstream wraps one cuDNN descriptor. Here it pairs the shim record behind a builder object with a
+// non-owning view of the hipDNN descriptor (if any) that the record owns; get_backend_descriptor()
+// is what get_raw_desc() and cudnnBackendExecute see.
 class OpaqueBackendPointer
 {
     cudnnBackendDescriptor_t m_desc = nullptr;
     cudnnStatus_t status = CUDNN_STATUS_SUCCESS;
+    cudnnBackendDescriptorType_t m_type{};
+    std::shared_ptr<const detail::v8::Record> m_record;
 
 public:
     OpaqueBackendPointer(const OpaqueBackendPointer&) = delete;
@@ -41,13 +48,19 @@ public:
     OpaqueBackendPointer(OpaqueBackendPointer&&) = default;
 
     OpaqueBackendPointer(cudnnBackendDescriptorType_t type)
+        : m_type(type)
     {
-        status = detail::create_descriptor(type, &m_desc);
     }
-    ~OpaqueBackendPointer()
+    OpaqueBackendPointer(cudnnBackendDescriptorType_t type,
+                         std::shared_ptr<const detail::v8::Record> record,
+                         cudnnBackendDescriptor_t view)
+        : m_desc(view)
+        , m_type(type)
+        , m_record(std::move(record))
     {
-        detail::destroy_descriptor(m_desc);
-    };
+    }
+    ~OpaqueBackendPointer() = default;
+
     const cudnnBackendDescriptor_t& get_backend_descriptor() const
     {
         return m_desc;
@@ -60,6 +73,14 @@ public:
     {
         return status == CUDNN_STATUS_SUCCESS;
     }
+    cudnnBackendDescriptorType_t get_type() const
+    {
+        return m_type;
+    }
+    const std::shared_ptr<const detail::v8::Record>& get_record() const
+    {
+        return m_record;
+    }
 };
 
 using ManagedOpaqueDescriptor = std::shared_ptr<OpaqueBackendPointer>;
@@ -68,6 +89,29 @@ inline ManagedOpaqueDescriptor make_shared_backend_pointer(cudnnBackendDescripto
 {
     return std::make_shared<OpaqueBackendPointer>(type);
 }
+
+namespace detail::v8
+{
+
+inline ManagedOpaqueDescriptor makeManaged(cudnnBackendDescriptorType_t type,
+                                           std::shared_ptr<const Record> record,
+                                           cudnnBackendDescriptor_t view = nullptr)
+{
+    return std::make_shared<OpaqueBackendPointer>(type, std::move(record), view);
+}
+
+// The record of the expected kind, or null when the pointer is empty or holds another kind.
+template <typename T>
+std::shared_ptr<const T> recordOf(const ManagedOpaqueDescriptor& pointer)
+{
+    if(!pointer || !pointer->get_record() || !T::isKind(pointer->get_record()->kind()))
+    {
+        return nullptr;
+    }
+    return recordAs<T>(pointer->get_record());
+}
+
+} // namespace detail::v8
 
 class BackendDescriptor
 {

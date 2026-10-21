@@ -72,9 +72,8 @@ TEST_F(TestCudnnShimV8NoexceptOperations, UnloweredOpSetsStatus)
               .build();
 
     EXPECT_EQ(genStats.get_status(), CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_THAT(std::string(genStats.get_error()), HasSubstr("cudnnFinalize Failed"));
     EXPECT_THAT(std::string(genStats.get_error()),
-                HasSubstr("CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR is not supported"));
+                HasSubstr("gen stats operations are not supported"));
     EXPECT_EQ(genStats.getTag(), "GenStats");
 
     // Upstream's paged-cache-load builder never sets a tag.
@@ -88,7 +87,7 @@ TEST_F(TestCudnnShimV8NoexceptOperations, UnloweredOpSetsStatus)
 
     EXPECT_EQ(pagedCacheLoad.get_status(), CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_THAT(std::string(pagedCacheLoad.get_error()),
-                HasSubstr("CUDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR is not supported"));
+                HasSubstr("paged cache load operations are not supported"));
     EXPECT_EQ(pagedCacheLoad.getTag(), "");
 }
 
@@ -117,6 +116,68 @@ TEST_F(TestCudnnShimV8NoexceptOperations, WrongKindSetterSetsStatus)
 
     EXPECT_EQ(onConv.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(onConv.get_desc(), nullptr);
+}
+
+// A failed tensor in an optional slot is a caller error, not an absent slot: a
+// built index tensor would be lowered, a built X or M override NOT_SUPPORTED.
+TEST_F(TestCudnnShimV8NoexceptOperations, FailedTensorInOptionalSlotIsBadParam)
+{
+    const Dims dims = {2, 4, 8, 8};
+    const Dims strides = {256, 64, 8, 1};
+    // No alignment: TensorBuilder rejects it.
+    const fe::Tensor failed = fe::TensorBuilder()
+                                  .setDataType(DataType_t::FLOAT)
+                                  .setDim(4, dims.data())
+                                  .setStride(4, strides.data())
+                                  .setId(9)
+                                  .build();
+    ASSERT_EQ(failed.get_status(), CUDNN_STATUS_BAD_PARAM);
+
+    const std::array<std::int64_t, 2> window = {2, 2};
+    const std::array<std::int64_t, 2> zeros = {0, 0};
+    const fe::ResampleDesc_v8 pool = fe::ResampleDescBuilder_v8()
+                                         .setResampleMode(fe::ResampleMode_t::MAXPOOL)
+                                         .setComputeType(DataType_t::FLOAT)
+                                         .setPaddingMode(fe::PaddingMode_t::NEG_INF_PAD)
+                                         .setSpatialDim(2, window.data())
+                                         .setPrePadding(2, zeros.data())
+                                         .setPostPadding(2, zeros.data())
+                                         .setSpatialStride(2, window.data())
+                                         .build();
+    ASSERT_EQ(pool.get_status(), CUDNN_STATUS_SUCCESS) << pool.get_error();
+    const Dims pooled = {2, 4, 4, 4};
+
+    const fe::Operation forward
+        = fe::OperationBuilder(DescriptorType_t::OPERATION_RESAMPLE_FWD_DESCRIPTOR)
+              .setResampleDesc(pool)
+              .setxDesc(tensor(1, X_DIMS))
+              .setyDesc(tensor(2, pooled))
+              .setidxDesc(failed)
+              .build();
+    EXPECT_EQ(forward.get_status(), CUDNN_STATUS_BAD_PARAM);
+    EXPECT_THAT(std::string(forward.get_error()), HasSubstr("index tensor is not built"));
+    EXPECT_EQ(forward.get_raw_desc(), nullptr);
+
+    const fe::Operation backward
+        = fe::OperationBuilder(DescriptorType_t::OPERATION_RESAMPLE_BWD_DESCRIPTOR)
+              .setResampleDesc(pool)
+              .setdxDesc(tensor(1, X_DIMS))
+              .setdyDesc(tensor(2, pooled))
+              .setidxDesc(tensor(3, pooled, DataType_t::INT32))
+              .setxDesc(failed)
+              .build();
+    EXPECT_EQ(backward.get_status(), CUDNN_STATUS_BAD_PARAM);
+
+    const fe::MatMulDesc matmul = fe::MatMulDescBuilder().setComputeType(DataType_t::FLOAT).build();
+    const fe::Operation product
+        = fe::OperationBuilder(DescriptorType_t::OPERATION_MATMUL_DESCRIPTOR)
+              .setmatmulDesc(matmul)
+              .setaMatDesc(tensor(1, {2, 4, 8}))
+              .setbMatDesc(tensor(2, {2, 8, 16}))
+              .setcMatDesc(tensor(3, {2, 4, 16}))
+              .setmOverrideDesc(failed)
+              .build();
+    EXPECT_EQ(product.get_status(), CUDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace
