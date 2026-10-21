@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -99,46 +100,38 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     float* dcsr_val_C     = (float*)dcsr_val_C_managed.get();
     void*  dbuf           = (void*)dbuf_managed.get();
 
-    hipsparseSpMatDescr_t A, B, C;
-
     size_t bufferSize;
 
-    verify_hipsparse_status_success(hipsparseCreateCsr(&A,
-                                                       m,
-                                                       n,
-                                                       nnz_A,
-                                                       dcsr_row_ptr_A,
-                                                       dcsr_col_ind_A,
-                                                       dcsr_val_A,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateCsr(&B,
-                                                       m,
-                                                       n,
-                                                       nnz_B,
-                                                       dcsr_row_ptr_B,
-                                                       dcsr_col_ind_B,
-                                                       dcsr_val_B,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateCsr(&C,
-                                                       m,
-                                                       n,
-                                                       nnz_C,
-                                                       dcsr_row_ptr_C,
-                                                       dcsr_col_ind_C,
-                                                       dcsr_val_C,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
+    hipsparseLocalCsr A(m,
+                        n,
+                        nnz_A,
+                        dcsr_row_ptr_A,
+                        dcsr_col_ind_A,
+                        dcsr_val_A,
+                        idxType,
+                        idxType,
+                        idxBase,
+                        dataType);
+    hipsparseLocalCsr B(m,
+                        n,
+                        nnz_B,
+                        dcsr_row_ptr_B,
+                        dcsr_col_ind_B,
+                        dcsr_val_B,
+                        idxType,
+                        idxType,
+                        idxBase,
+                        dataType);
+    hipsparseLocalCsr C(m,
+                        n,
+                        nnz_C,
+                        dcsr_row_ptr_C,
+                        dcsr_col_ind_C,
+                        dcsr_val_C,
+                        idxType,
+                        idxType,
+                        idxBase,
+                        dataType);
 
     // SpGEAM buffer size
     verify_hipsparse_status_invalid_handle(hipsparseSpGEAM_bufferSize(
@@ -283,9 +276,6 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
         "Error: COO format is not supported");
     verify_hipsparse_status_success(hipsparseDestroySpMat(A_coo), "success");
 
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
 #endif
 }
 
@@ -406,41 +396,17 @@ void testing_spgeam_csr(Arguments argus)
 #endif
 
     // Create matrices
-    hipsparseSpMatDescr_t A, B, C1;
+    hipsparseLocalCsr A(
+        m, n, nnz_A, dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A, typeI, typeJ, idxBaseA, typeT);
+    hipsparseLocalCsr B(
+        m, n, nnz_B, dcsr_row_ptr_B, dcsr_col_ind_B, dcsr_val_B, typeI, typeJ, idxBaseB, typeT);
+    hipsparseLocalCsr C1(
+        m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT);
     // clang-format off
 #if(!defined(CUDART_VERSION))
     // clang-format on
-    hipsparseSpMatDescr_t C2;
-#endif
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&A,
-                                             m,
-                                             n,
-                                             nnz_A,
-                                             dcsr_row_ptr_A,
-                                             dcsr_col_ind_A,
-                                             dcsr_val_A,
-                                             typeI,
-                                             typeJ,
-                                             idxBaseA,
-                                             typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&B,
-                                             m,
-                                             n,
-                                             nnz_B,
-                                             dcsr_row_ptr_B,
-                                             dcsr_col_ind_B,
-                                             dcsr_val_B,
-                                             typeI,
-                                             typeJ,
-                                             idxBaseB,
-                                             typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
-        &C1, m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
-    // clang-format off
-#if(!defined(CUDART_VERSION))
-    // clang-format on
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
-        &C2, m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
+    hipsparseLocalCsr C2(
+        m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT);
 #endif
 
     // Buffer size (host pointer mode)
@@ -628,15 +594,10 @@ void testing_spgeam_csr(Arguments argus)
 
     CHECK_HIP_ERROR(hipFree(externalBuffer1));
 
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
-
     // clang-format off
 #if(!defined(CUDART_VERSION))
     // clang-format on
     CHECK_HIP_ERROR(hipFree(externalBuffer2));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
 #endif
 #endif
 }

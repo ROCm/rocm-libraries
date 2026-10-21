@@ -26,6 +26,7 @@
 #define TESTING_SPGEMM_CSR_HPP
 
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -96,47 +97,40 @@ void testing_spgemm_csr_bad_arg(const Arguments& argus)
     void*  dbuf           = (void*)dbuf_managed.get();
 
     // SpGEMM structures
-    hipsparseSpMatDescr_t A, B, C;
 
     size_t bufferSize;
 
     // Create SpGEMM structures
-    verify_hipsparse_status_success(hipsparseCreateCsr(&A,
-                                                       m,
-                                                       k,
-                                                       nnz_A,
-                                                       dcsr_row_ptr_A,
-                                                       dcsr_col_ind_A,
-                                                       dcsr_val_A,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBaseA,
-                                                       dataType),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateCsr(&B,
-                                                       k,
-                                                       n,
-                                                       nnz_B,
-                                                       dcsr_row_ptr_B,
-                                                       dcsr_col_ind_B,
-                                                       dcsr_val_B,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBaseB,
-                                                       dataType),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateCsr(&C,
-                                                       m,
-                                                       n,
-                                                       nnz_C,
-                                                       dcsr_row_ptr_C,
-                                                       dcsr_col_ind_C,
-                                                       dcsr_val_C,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBaseC,
-                                                       dataType),
-                                    "success");
+    hipsparseLocalCsr A(m,
+                        k,
+                        nnz_A,
+                        dcsr_row_ptr_A,
+                        dcsr_col_ind_A,
+                        dcsr_val_A,
+                        idxType,
+                        idxType,
+                        idxBaseA,
+                        dataType);
+    hipsparseLocalCsr B(k,
+                        n,
+                        nnz_B,
+                        dcsr_row_ptr_B,
+                        dcsr_col_ind_B,
+                        dcsr_val_B,
+                        idxType,
+                        idxType,
+                        idxBaseB,
+                        dataType);
+    hipsparseLocalCsr C(m,
+                        n,
+                        nnz_C,
+                        dcsr_row_ptr_C,
+                        dcsr_col_ind_C,
+                        dcsr_val_C,
+                        idxType,
+                        idxType,
+                        idxBaseC,
+                        dataType);
 
     // SpGEMM work estimation
     verify_hipsparse_status_invalid_handle(hipsparseSpGEMM_workEstimation(nullptr,
@@ -325,9 +319,6 @@ void testing_spgemm_csr_bad_arg(const Arguments& argus)
         "Error: C is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
 #endif
 }
 
@@ -441,33 +432,14 @@ void testing_spgemm_csr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t A, B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&A,
-                                             m,
-                                             k,
-                                             nnz_A,
-                                             dcsr_row_ptr_A,
-                                             dcsr_col_ind_A,
-                                             dcsr_val_A,
-                                             typeI,
-                                             typeJ,
-                                             idxBaseA,
-                                             typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&B,
-                                             k,
-                                             n,
-                                             nnz_B,
-                                             dcsr_row_ptr_B,
-                                             dcsr_col_ind_B,
-                                             dcsr_val_B,
-                                             typeI,
-                                             typeJ,
-                                             idxBaseB,
-                                             typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
-        &C1, m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(
-        &C2, m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT));
+    hipsparseLocalCsr A(
+        m, k, nnz_A, dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A, typeI, typeJ, idxBaseA, typeT);
+    hipsparseLocalCsr B(
+        k, n, nnz_B, dcsr_row_ptr_B, dcsr_col_ind_B, dcsr_val_B, typeI, typeJ, idxBaseB, typeT);
+    hipsparseLocalCsr C1(
+        m, n, 0, dcsr_row_ptr_C_1, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT);
+    hipsparseLocalCsr C2(
+        m, n, 0, dcsr_row_ptr_C_2, nullptr, nullptr, typeI, typeJ, idxBaseC, typeT);
 
     // Query SpGEMM work estimation buffer
     size_t bufferSize1;
@@ -798,10 +770,6 @@ void testing_spgemm_csr(Arguments argus)
     CHECK_HIP_ERROR(hipFree(externalBuffer2));
 
     // Clean up
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
 #endif
 }
 

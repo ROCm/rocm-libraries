@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -477,9 +478,7 @@ void testing_sddmm_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     // Create the sparse matrix C once and reuse it across all configurations.
-    hipsparseSpMatDescr_t matC;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matC, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr matC(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     const std::vector<hipsparseOperation_t> ops_A
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
@@ -563,7 +562,6 @@ void testing_sddmm_csr_reuse_descr(Arguments argus)
     }
 
     // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matC));
 #endif
 }
 

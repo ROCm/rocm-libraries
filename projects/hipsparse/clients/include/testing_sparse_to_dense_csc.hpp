@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -79,24 +80,13 @@ void testing_sparse_to_dense_csc_bad_arg(const Arguments& argus)
     void*    dbuf         = (void*)dbuf_managed.get();
 
     // Matrix structures
-    hipsparseSpMatDescr_t matA;
     hipsparseDnVecDescr_t matB;
 
     size_t bsize;
 
     // Create matrix structures
-    verify_hipsparse_status_success(hipsparseCreateCsr(&matA,
-                                                       m,
-                                                       n,
-                                                       nnz,
-                                                       dcsc_col_ptr,
-                                                       dcsc_row_ind,
-                                                       dcsc_val,
-                                                       iType,
-                                                       jType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
+    hipsparseLocalCsr matA(
+        m, n, nnz, dcsc_col_ptr, dcsc_row_ind, dcsc_val, iType, jType, idxBase, dataType);
     verify_hipsparse_status_success(
         hipsparseCreateDnMat(&matB, m, n, ld, ddense_val, dataType, order), "success");
 
@@ -123,7 +113,6 @@ void testing_sparse_to_dense_csc_bad_arg(const Arguments& argus)
         hipsparseSparseToDense(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnMat(matB), "success");
 #endif
 }
