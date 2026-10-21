@@ -94,12 +94,14 @@ A later run with the explicit list produced one additional nonpassing case:
 This warning remains unclassified and has no blacklist entry. The full input
 is included in the machine-readable records above.
 
-## Required cases against the shipping payload
+## Earlier explicit-corpus validation against the shipping payload
 
-The new required-case list ran alongside 100 random samples. All 114 inputs
+The earlier 14-case list ran alongside 100 random samples. All 114 inputs
 were attempted: 108 passed, five failed numerical validation, and one random
 case emitted the shutdown warning documented above. No race was reported.
 The original BF16 batched case also passed an independent replay in 102 seconds.
+The current list retains only `bf16-tn-prefetch-k192` from these nine BF16
+inputs, alongside the five numerical-validation reproducers.
 
 | Required case | M×N×K; batch | Result |
 | --- | --- | --- |
