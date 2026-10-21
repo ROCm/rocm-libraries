@@ -25,6 +25,30 @@
 
 #include "rocsparse_enum.hpp"
 
+// The pivot is passed by pointer so it is read after the zero-pivot call has written it.
+static void throw_on_zero_pivot_status(rocsparse_status     status,
+                                       const rocsparse_int* pivot,
+                                       const char*          file,
+                                       int                  line)
+{
+    const rocsparse_status expected
+        = (*pivot == -1) ? rocsparse_status_success : rocsparse_status_zero_pivot;
+    if(status == expected)
+    {
+        return;
+    }
+
+    std::cerr << file << ":" << line << ": zero pivot status failed: received "
+              << rocsparse_get_status_name(status) << ", expected "
+              << rocsparse_get_status_name(expected) << "." << std::endl;
+    const rocsparse_status error
+        = (status == rocsparse_status_success) ? rocsparse_status_internal_error : status;
+    throw error;
+}
+
+#define CHECK_ROCSPARSE_ZERO_PIVOT(STATUS, PIVOT) \
+    throw_on_zero_pivot_status((STATUS), (PIVOT), __FILE__, __LINE__)
+
 template <typename T>
 void testing_bsrsm_bad_arg(const Arguments& arg)
 {
@@ -526,14 +550,8 @@ void testing_bsrsm(const Arguments& arg)
                                                spol,
                                                dbuffer);
 
-        {
-            const rocsparse_status status
-                = rocsparse_bsrsm_zero_pivot(handle, info, analysis_pivot_gold);
-            const rocsparse_status expected = (*analysis_pivot_gold == -1)
-                                                  ? rocsparse_status_success
-                                                  : rocsparse_status_zero_pivot;
-            EXPECT_ROCSPARSE_STATUS(status, expected);
-        }
+        CHECK_ROCSPARSE_ZERO_PIVOT(rocsparse_bsrsm_zero_pivot(handle, info, analysis_pivot_gold),
+                                   analysis_pivot_gold);
 
         const double gpu_solve_time_used
             = rocsparse_clients::run_benchmark(arg,
@@ -559,14 +577,8 @@ void testing_bsrsm(const Arguments& arg)
                                                spol,
                                                dbuffer);
 
-        {
-            const rocsparse_status status
-                = rocsparse_bsrsm_zero_pivot(handle, info, solve_pivot_gold);
-            const rocsparse_status expected = (*solve_pivot_gold == -1)
-                                                  ? rocsparse_status_success
-                                                  : rocsparse_status_zero_pivot;
-            EXPECT_ROCSPARSE_STATUS(status, expected);
-        }
+        CHECK_ROCSPARSE_ZERO_PIVOT(rocsparse_bsrsm_zero_pivot(handle, info, solve_pivot_gold),
+                                   solve_pivot_gold);
 
         double gflop_count
             = csrsv_gflop_count(m, size_t(dA.nnzb) * block_dim * block_dim, diag) * nrhs;
