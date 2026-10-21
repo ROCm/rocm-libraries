@@ -9,12 +9,7 @@
 
 /**
  * @file graph_helpers.h
- * @brief Error-type aliases and error/log macros for the hipDNN cuDNN shim.
- *
- * Contains aliases for cuDNN-compatible types from hipDNN, and
- * re-exports the cuDNN frontend error/log macros.
- *
- * @note Internal-to-shim; pulled in by the umbrella `cudnn_frontend.h`.
+ * @brief cuDNN FE error types and error/log macros for the shim.
  */
 
 #pragma once
@@ -25,20 +20,17 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
 
+/// @brief Alias of hipdnn_frontend::error_code_t.
 using hipdnn_frontend::error_code_t;
+/// @brief Alias of hipdnn_frontend::error_object.
 using hipdnn_frontend::error_object;
+/// @brief Alias of hipdnn_frontend::error_t.
 using hipdnn_frontend::error_t;
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend
 
-// The log macros forward their `<<`-streamed argument straight into hipDNN's
-// frontend INFO logger. HIPDNN_FE_LOG_INFO gates on HIPDNN_LOG_LEVEL (off by
-// default) and accepts a stream expression, so chained `<<` arguments work.
-//
-// Under NV_CUDNN_FRONTEND_DISABLE_LOGGING (a compile-time cuDNN-frontend
-// contract) the macros expand to a statement that evaluates nothing, matching
-// cuDNN FE. This is compile-time, unlike the runtime env bridge in
-// logging_bridge.h which only takes effect after cudnnCreate().
+// NV_CUDNN_FRONTEND_DISABLE_LOGGING compiles the log macros out, as in cuDNN FE. This is
+// separate from the runtime env bridge in logging_bridge.h, which applies at cudnnCreate().
 #ifdef NV_CUDNN_FRONTEND_DISABLE_LOGGING
 
 #ifndef CUDNN_FE_LOG
@@ -68,24 +60,28 @@ using hipdnn_frontend::error_t;
 
 #else
 
+/// @brief Logs a `<<` stream expression via HIPDNN_FE_LOG_INFO; no-op under
+/// NV_CUDNN_FRONTEND_DISABLE_LOGGING.
 #ifndef CUDNN_FE_LOG
 #define CUDNN_FE_LOG(X) HIPDNN_FE_LOG_INFO(X)
 #endif
 
-// The X argument is a stream expression: it must stay un-parenthesized so it
-// chains off the leftmost LogStream operand (parenthesizing it would force a
-// `const char* << ...` evaluation and break compilation). Same NOLINT pattern
-// the SDK uses for its own streaming log macros.
+// X stays un-parenthesized (hence the NOLINTs) so it chains off the leftmost `<<` operand.
+/// @brief Logs a `[cudnn_frontend] `-prefixed stream expression via HIPDNN_FE_LOG_INFO;
+/// no-op under NV_CUDNN_FRONTEND_DISABLE_LOGGING.
 #ifndef CUDNN_FE_LOG_LABEL
 #define CUDNN_FE_LOG_LABEL(X) \
     HIPDNN_FE_LOG_INFO("[cudnn_frontend] " << X) // NOLINT(bugprone-macro-parentheses)
 #endif
 
+/// @brief Same as CUDNN_FE_LOG_LABEL; no-op under NV_CUDNN_FRONTEND_DISABLE_LOGGING.
 #ifndef CUDNN_FE_LOG_LABEL_ENDL
 #define CUDNN_FE_LOG_LABEL_ENDL(X) \
     HIPDNN_FE_LOG_INFO("[cudnn_frontend] " << X) // NOLINT(bugprone-macro-parentheses)
 #endif
 
+/// @brief Logs a `[cudnn_frontend] === X ===` banner via HIPDNN_FE_LOG_INFO; no-op under
+/// NV_CUDNN_FRONTEND_DISABLE_LOGGING.
 #ifndef CUDNN_FE_LOG_BANNER
 #define CUDNN_FE_LOG_BANNER(X) \
     HIPDNN_FE_LOG_INFO("[cudnn_frontend] === " << X << " ===") // NOLINT(bugprone-macro-parentheses)
@@ -93,8 +89,7 @@ using hipdnn_frontend::error_t;
 
 #endif // NV_CUDNN_FRONTEND_DISABLE_LOGGING
 
-/// @brief Evaluate an expression returning `error_t`; on `is_bad()`, log and
-/// propagate it. Mirrors cuDNN FE's `CHECK_CUDNN_FRONTEND_ERROR`.
+/// @brief Evaluates an `error_t` expression; if bad, logs and returns it.
 #ifndef CHECK_CUDNN_FRONTEND_ERROR
 #define CHECK_CUDNN_FRONTEND_ERROR(x)                                                          \
     do                                                                                         \
@@ -107,8 +102,7 @@ using hipdnn_frontend::error_t;
     } while(0)
 #endif
 
-/// @brief If `cond`, log and `return {retval, message}`. Mirrors cuDNN FE's
-/// `RETURN_CUDNN_FRONTEND_ERROR_IF`.
+/// @brief If `cond`, logs and returns `{retval, message}`.
 #ifndef RETURN_CUDNN_FRONTEND_ERROR_IF
 #define RETURN_CUDNN_FRONTEND_ERROR_IF(cond, retval, message)                           \
     do                                                                                  \

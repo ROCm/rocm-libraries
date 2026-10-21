@@ -264,6 +264,7 @@ namespace TensileLite
                 ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
                 ("init-mx-a",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
                 ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
+                ("mx-data-generator",        po::value<int>()->default_value(-1), "A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: init-a/init-b like non-MX inputs, MX or not, with MX scales from init-mx-a/init-mx-b (MX FP8/BF8/FP4 data).")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
