@@ -732,7 +732,9 @@ static const char* rocke_target_id_start(const char* isa)
  * wildcard. Membership comes from rocke_ati_generic_targets (arch_specs.json
  * "generic_targets"), aligned with LLVM's AMDGPU Generic Processors table:
  * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
- * A member without its own catalog row (gfx1100, gfx1200) uses its generic row. */
+ * A member without its own catalog row uses its generic row; every member of a
+ * catalogued generic target has a row of its own, so this serves only names
+ * the catalog does not list. */
 static const char* rocke_generic_arch_alias(const char* target_id)
 {
     size_t name_len = strcspn(target_id, ":");

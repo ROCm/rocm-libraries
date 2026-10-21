@@ -1109,6 +1109,72 @@ static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op
  * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
 
+/* ----------------------------- gfx908 (CDNA1) ---------------------------- */
+/* wave64, 64 KB LDS, no async_lds, no fp8/bf8, f64 or _1k bf16 MFMA; separate
+ * 256-entry VGPR and AGPR files. Same op rows as the gfx942 f32 and f16 atoms. */
+static const rocke_mma_op_t k_mma_gfx908[] = {
+    {"mma",
+     "fp32",
+     "fp32",
+     "fp32",
+     16,
+     16,
+     4,
+     "mfma_f32_16x16x4_f32",
+     1,
+     1,
+     4,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
+     &lm_mfma_16x16x4_f32_c},
+    {"mma",
+     "fp32",
+     "fp32",
+     "fp32",
+     32,
+     32,
+     2,
+     "mfma_f32_32x32x2_f32",
+     1,
+     1,
+     16,
+     64,
+     &lm_mfma_32x32x2_f32_a,
+     &lm_mfma_32x32x2_f32_b,
+     &lm_mfma_32x32x2_f32_c},
+    {"mma",
+     "fp16",
+     "fp16",
+     "fp32",
+     16,
+     16,
+     16,
+     "mfma_f32_16x16x16_f16",
+     4,
+     4,
+     4,
+     64,
+     &lm_mfma_16x16x16_a,
+     &lm_mfma_16x16x16_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "fp16",
+     "fp16",
+     "fp32",
+     32,
+     32,
+     8,
+     "mfma_f32_32x32x8_f16",
+     4,
+     4,
+     16,
+     64,
+     &lm_mfma_32x32x8_a,
+     &lm_mfma_32x32x8_b,
+     &lm_mfma_32x32x8_c},
+};
+
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
 /* MI200 (Aldebaran): wave64, 64 KB LDS, no async_lds, no fp8/bf8 native MFMA.
  * bf16 32x32x8 is hardware-supported (same MFMA atom dimensions as fp16 32x32x8;
@@ -2676,6 +2742,30 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic error "-Wmissing-field-initializers"
 
+static const rocke_arch_target_t k_target_gfx908 = {
+    .gfx = "gfx908",
+    .family = "cdna",
+    .target_family = "gfx9_mfma",
+    .wave_size = 64,
+    .lds_capacity_bytes = 65536,
+    .vmcnt_bits = 6,
+    .mma = {.ops = k_mma_gfx908, .num_ops = K_NUM(k_mma_gfx908)},
+    .memory = {
+        .has_async_lds = false,
+        .has_async_global_lds = false,
+        .has_ds_read_tr = false,
+        .has_tdm = false,
+        .buffer_load_max_dwords = 4,
+        .async_lds_max_dwords = 0,
+        .has_scalar_data_prefetch = false,
+        .has_global_prefetch = false,
+        .has_cluster_launch = false,
+        .has_multicast_load = false,
+        .has_global_float_atomic_add = false,
+    },
+    .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 256, .sgprs = 102},
+};
+
 static const rocke_arch_target_t k_target_gfx90a = {
     .gfx = "gfx90a",
     .family = "cdna",
@@ -2833,7 +2923,16 @@ static constexpr rocke_arch_target_t facts_of(rocke_arch_target_t generic, const
     return generic;
 }
 
+static constexpr rocke_arch_target_t k_target_gfx1100 = facts_of(k_target_gfx11_generic, "gfx1100");
+static constexpr rocke_arch_target_t k_target_gfx1101 = facts_of(k_target_gfx11_generic, "gfx1101");
+static constexpr rocke_arch_target_t k_target_gfx1102 = facts_of(k_target_gfx11_generic, "gfx1102");
+static constexpr rocke_arch_target_t k_target_gfx1103 = facts_of(k_target_gfx11_generic, "gfx1103");
+static constexpr rocke_arch_target_t k_target_gfx1150 = facts_of(k_target_gfx11_generic, "gfx1150");
 static constexpr rocke_arch_target_t k_target_gfx1151 = facts_of(k_target_gfx11_generic, "gfx1151");
+static constexpr rocke_arch_target_t k_target_gfx1152 = facts_of(k_target_gfx11_generic, "gfx1152");
+static constexpr rocke_arch_target_t k_target_gfx1153 = facts_of(k_target_gfx11_generic, "gfx1153");
+static constexpr rocke_arch_target_t k_target_gfx1154 = facts_of(k_target_gfx11_generic, "gfx1154");
+static constexpr rocke_arch_target_t k_target_gfx1200 = facts_of(k_target_gfx12_generic, "gfx1200");
 static constexpr rocke_arch_target_t k_target_gfx1201 = facts_of(k_target_gfx12_generic, "gfx1201");
 
 /* =========================================================================
@@ -2841,39 +2940,48 @@ static constexpr rocke_arch_target_t k_target_gfx1201 = facts_of(k_target_gfx12_
  * =========================================================================
  *
  * Python known_arches() returns tuple(sorted(specs)); sorted() on the gfx
- * strings yields: "gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201",
- * "gfx1250", "gfx90a", "gfx942", "gfx950". ('-' (0x2D) < digits, so a generic
- * name sorts before its family's processors; '0' < '4' so "gfx90a" sorts
- * before "gfx942".)
+ * strings yields: "gfx11-generic", "gfx1100" .. "gfx1154", "gfx12-generic",
+ * "gfx1200", "gfx1201", "gfx1250", "gfx908", "gfx90a", "gfx942", "gfx950".
+ * ('-' (0x2D) < digits, so a generic name sorts before its family's
+ * processors; digits < letters so "gfx908" sorts before "gfx90a"; '0' < '4' so
+ * "gfx90a" sorts before "gfx942".)
  * The registry is kept in this same sorted order so rocke_known_arches can return
  * rocke_ati_known_arches directly.
  */
 
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic},
+    {"gfx1100", &k_target_gfx1100},
+    {"gfx1101", &k_target_gfx1101},
+    {"gfx1102", &k_target_gfx1102},
+    {"gfx1103", &k_target_gfx1103},
+    {"gfx1150", &k_target_gfx1150},
     {"gfx1151", &k_target_gfx1151},
+    {"gfx1152", &k_target_gfx1152},
+    {"gfx1153", &k_target_gfx1153},
+    {"gfx1154", &k_target_gfx1154},
     {"gfx12-generic", &k_target_gfx12_generic},
+    {"gfx1200", &k_target_gfx1200},
     {"gfx1201", &k_target_gfx1201},
     {"gfx1250", &k_target_gfx1250},
+    {"gfx908", &k_target_gfx908},
     {"gfx90a", &k_target_gfx90a},
     {"gfx942", &k_target_gfx942},
     {"gfx950", &k_target_gfx950},
     {NULL, NULL}, /* terminator */
 };
 
-const int rocke_ati_arch_registry_len = 8;
+/* Rows before the NULL terminator, derived so a new row cannot be missed. */
+const int rocke_ati_arch_registry_len = K_NUM(rocke_ati_arch_registry) - 1;
 
 const char* const rocke_ati_known_arches[] = {
-    "gfx11-generic",
-    "gfx1151",
-    "gfx12-generic",
-    "gfx1201",
-    "gfx1250",
-    "gfx90a",
-    "gfx942",
-    "gfx950",
-    NULL,
+    "gfx11-generic", "gfx1100", "gfx1101", "gfx1102",       "gfx1103", "gfx1150", "gfx1151",
+    "gfx1152",       "gfx1153", "gfx1154", "gfx12-generic", "gfx1200", "gfx1201", "gfx1250",
+    "gfx908",        "gfx90a",  "gfx942",  "gfx950",        NULL,
 };
+
+static_assert(K_NUM(rocke_ati_known_arches) == K_NUM(rocke_ati_arch_registry),
+              "rocke_ati_known_arches must list exactly the registry's gfx tokens");
 
 /* Mirror of arch_specs.json "generic_targets": each catalogued LLVM generic
  * processor followed by the concrete processors that load its code objects. */

@@ -173,6 +173,13 @@ def _align_up(n: int, gran: int) -> int:
 # (8) and granularity are conservative CDNA2-era figures (CDNA3 may be 10 / 8) and
 # await their own rocprofv3 calibration. Once validated these belong in
 # ``core/arch/data/arch_specs.json`` (the hardware SSOT), read via ArchTarget.
+#
+# gfx908 (CDNA1) has separate VGPR and AGPR files of 256 per SIMD each, both
+# allocated in steps of 4, at most 10 waves per SIMD; its code object's
+# ``.vgpr_count`` is the larger of the VGPR and AGPR counts. Those three fields
+# match the compiler's occupancy report for every VGPR and every AGPR count from 1
+# to 256 (clang 20; test_occupancy.py pins them and re-checks them against the
+# local llc). Its LDS and workgroup fields are not checked against the compiler.
 _ARCH_CAPS = {
     "gfx950": dict(
         lds_per_cu=163840,
@@ -201,6 +208,16 @@ _ARCH_CAPS = {
         agpr_per_simd=256,
         granularity=8,
         waves_per_simd=8,
+        simds_per_cu=4,
+        combined_reg_pool=False,
+    ),
+    "gfx908": dict(
+        lds_per_cu=65536,
+        max_waves_per_cu=40,
+        vgpr_per_simd=256,
+        agpr_per_simd=256,
+        granularity=4,
+        waves_per_simd=10,
         simds_per_cu=4,
         combined_reg_pool=False,
     ),

@@ -36,7 +36,16 @@ static const registry_row_t REGISTRY[] = {
     {"gfx90a", ROCKE_ISA_GFX9_MFMA, 6, ROCKE_BUFFER_RSRC_WORD3_CDNA, ROCKE_WAITCNT_GFX9_10, 64},
     {"gfx942", ROCKE_ISA_GFX9_MFMA, 6, ROCKE_BUFFER_RSRC_WORD3_CDNA, ROCKE_WAITCNT_GFX9_10, 64},
     {"gfx950", ROCKE_ISA_GFX950, 6, ROCKE_BUFFER_RSRC_WORD3_CDNA, ROCKE_WAITCNT_GFX9_10, 64},
+    {"gfx1100", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1101", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1102", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1103", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1150", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
     {"gfx1151", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1152", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1153", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1154", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
+    {"gfx1200", ROCKE_ISA_GFX12_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
     {"gfx1201", ROCKE_ISA_GFX12_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
     {"gfx11-generic",
      ROCKE_ISA_GFX11_RDNA,
@@ -94,8 +103,9 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
              * sorted-list suffix is reproducible from rocke_backend_is_known if
              * a caller wants it, so we keep this allocation-free. */
             *err = "no ISA backend registered for the given gfx target; known: "
-                   "gfx11-generic, gfx1151, gfx12-generic, gfx1201, gfx1250, gfx908, gfx90a, "
-                   "gfx942, gfx950";
+                   "gfx11-generic, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, "
+                   "gfx1152, gfx1153, gfx1154, gfx12-generic, gfx1200, gfx1201, gfx1250, "
+                   "gfx908, gfx90a, gfx942, gfx950";
         }
         return be;
     }

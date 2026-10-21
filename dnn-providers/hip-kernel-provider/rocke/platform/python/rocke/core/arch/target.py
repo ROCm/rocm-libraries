@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from functools import lru_cache
@@ -1962,11 +1963,10 @@ def base_arch_from_target_id(target_id: str) -> str:
     Removes features after ``:`` and profile suffixes such as ``-strict``:
     ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
     ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved. A concrete processor in one of LLVM's
-    documented generic compatibility domains (``generic_targets``: gfx1100 ->
-    ``gfx11-generic``, gfx1200 -> ``gfx12-generic``) uses that generic rocKE
-    catalog row unless rocKE has a more-specific row; exact rows such as
-    ``gfx1151`` and ``gfx1201`` therefore take precedence.
+    ``gfx11-generic`` and every member of a catalogued generic target
+    (``gfx1100``, ``gfx1200``), are preserved. A processor in one of LLVM's
+    documented generic compatibility domains (``generic_targets``) that has no
+    row of its own uses that generic rocKE catalog row.
 
     Any other unknown name is reduced to its leading ``gfx`` token when
     possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
@@ -2026,6 +2026,26 @@ def generic_arch_from_target_id(target_id: str) -> Optional[str]:
         if base_arch == generic or base_arch in members:
             return generic
     return None
+
+
+def listed_arch_for(arch: str, listed: Iterable[str]) -> Optional[str]:
+    """The entry of ``listed`` that covers ``arch``, or ``None`` when none does.
+
+    That is ``arch`` itself when it is listed, else the generic target its
+    ``arch_specs.json`` row points at (``facts_of``) when that is listed. A list
+    that names ``gfx11-generic`` therefore covers every gfx11 processor whose row
+    points there, and a processor the list names still matches itself first.
+    A row that holds its own facts, and a name with no row, match only
+    themselves.
+
+    Use the returned entry, not ``arch``, to look up anything the list's owner
+    keyed by its entries (a per-target table, a candidate name).
+    """
+    entries = tuple(listed)
+    if arch in entries:
+        return arch
+    generic = _load_pointers().get(arch)
+    return generic if generic in entries else None
 
 
 def arch_from_isa(isa: str) -> str:

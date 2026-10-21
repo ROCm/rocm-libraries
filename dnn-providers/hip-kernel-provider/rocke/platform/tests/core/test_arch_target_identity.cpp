@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 // Host coverage for the target identity contract in test_arch_target_identity.py.
 #include "rocke/arch_target.h"
+#include "rocke/arch_target_internal.h"
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 using query_fn = const char* (*)(const char*, char*, size_t);
 static int failures = 0;
@@ -84,23 +86,48 @@ static void check_facts_of(const char* gfx, const char* generic)
     }
 }
 
+// One query: the identity of `isa` as tab-separated fields on one line.
+static void print_identity(const char* isa)
+{
+    char target[1024], base[1024], compiler[1024], arch[1024], generic[1024];
+    rocke_target_id_from_isa(isa, target, sizeof(target));
+    rocke_base_arch_from_target_id(target, base, sizeof(base));
+    rocke_compiler_target_from_target_id(target, compiler, sizeof(compiler));
+    rocke_arch_from_isa(isa, arch, sizeof(arch));
+    if(rocke_generic_arch_from_target_id(target, generic, sizeof(generic)) == NULL)
+        strcpy(generic, "-");
+    printf("%s\t%s\t%s\t%s\t%s\n", target, base, compiler, arch, generic);
+}
+
+// Query mode: one input per line on standard input (the list outgrows the
+// command-line length Windows allows), each answered by print_identity.
+static int run_queries()
+{
+    char line[1024];
+    while(fgets(line, sizeof(line), stdin) != NULL)
+    {
+        size_t len = strlen(line);
+        if(len > 0 && line[len - 1] != '\n' && !feof(stdin))
+        {
+            fprintf(stderr, "FAIL: a query line is longer than %zu bytes\n", sizeof(line) - 2);
+            return 2;
+        }
+        while(len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        print_identity(line);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     // Query mode lets external Python/C++ comparisons use the real engine.
+    if(argc == 2 && strcmp(argv[1], "--query") == 0)
+        return run_queries();
     if(argc > 1)
     {
-        for(int i = 1; i < argc; ++i)
-        {
-            char target[1024], base[1024], compiler[1024], arch[1024], generic[1024];
-            rocke_target_id_from_isa(argv[i], target, sizeof(target));
-            rocke_base_arch_from_target_id(target, base, sizeof(base));
-            rocke_compiler_target_from_target_id(target, compiler, sizeof(compiler));
-            rocke_arch_from_isa(argv[i], arch, sizeof(arch));
-            if(rocke_generic_arch_from_target_id(target, generic, sizeof(generic)) == NULL)
-                strcpy(generic, "-");
-            printf("%s\t%s\t%s\t%s\t%s\n", target, base, compiler, arch, generic);
-        }
-        return 0;
+        fprintf(stderr, "usage: %s [--query < inputs]\n", argv[0]);
+        return 2;
     }
 
     int count = 0;
@@ -114,22 +141,22 @@ int main(int argc, char** argv)
     check_target("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-");
     check_target("gfx1250-strict:xnack-", "gfx1250", "gfx1250:xnack-");
     check_target("gfx11-generic-strict:xnack-", "gfx11-generic", "gfx11-generic:xnack-");
-    check_target("gfx1100", "gfx11-generic", "gfx1100");
-    check_target("gfx1101", "gfx11-generic", "gfx1101");
-    check_target("gfx1101:unknown+", "gfx11-generic", "gfx1101:unknown+");
-    check_target("gfx1101-strict", "gfx11-generic", "gfx1101");
-    check_target("gfx1101-strict:unknown+", "gfx11-generic", "gfx1101:unknown+");
-    check_target("gfx1102", "gfx11-generic", "gfx1102");
-    check_target("gfx1103", "gfx11-generic", "gfx1103");
-    check_target("gfx1150", "gfx11-generic", "gfx1150");
+    check_target("gfx1100", "gfx1100", "gfx1100");
+    check_target("gfx1101", "gfx1101", "gfx1101");
+    check_target("gfx1101:unknown+", "gfx1101", "gfx1101:unknown+");
+    check_target("gfx1101-strict", "gfx1101", "gfx1101");
+    check_target("gfx1101-strict:unknown+", "gfx1101", "gfx1101:unknown+");
+    check_target("gfx1102", "gfx1102", "gfx1102");
+    check_target("gfx1103", "gfx1103", "gfx1103");
+    check_target("gfx1150", "gfx1150", "gfx1150");
     check_target("gfx1151", "gfx1151", "gfx1151");
     check_target("gfx1151-strict:unknown+", "gfx1151", "gfx1151:unknown+");
-    check_target("gfx1152", "gfx11-generic", "gfx1152");
-    check_target("gfx1153", "gfx11-generic", "gfx1153");
-    check_target("gfx1154", "gfx11-generic", "gfx1154");
+    check_target("gfx1152", "gfx1152", "gfx1152");
+    check_target("gfx1153", "gfx1153", "gfx1153");
+    check_target("gfx1154", "gfx1154", "gfx1154");
     check_target("gfx1170", "gfx1170", "gfx1170");
-    check_target("gfx1200", "gfx12-generic", "gfx1200");
-    check_target("gfx1200-strict:xnack-", "gfx12-generic", "gfx1200:xnack-");
+    check_target("gfx1200", "gfx1200", "gfx1200");
+    check_target("gfx1200-strict:xnack-", "gfx1200", "gfx1200:xnack-");
     check_target("gfx1201", "gfx1201", "gfx1201");
     check_target("gfx1101_bad", "gfx1101", "gfx1101_bad");
     check_target("gfx00a-profile:unknown+", "gfx00a", "gfx00a:unknown+");
@@ -145,8 +172,11 @@ int main(int argc, char** argv)
     check(rocke_base_arch_from_target_id, "", "");
     check(rocke_compiler_target_from_target_id, "", "");
     check(rocke_arch_from_isa, "", "");
-    check_facts_of("gfx1151", "gfx11-generic");
-    check_facts_of("gfx1201", "gfx12-generic");
+    // Every member of a supported generic target (read from the generic_targets
+    // mirror) has its own row holding exactly its generic's facts.
+    for(const rocke_ati_generic_row_t* g = rocke_ati_generic_targets; g->generic != NULL; ++g)
+        for(const char* const* member = g->members; *member != NULL; ++member)
+            check_facts_of(*member, g->generic);
     check(rocke_generic_arch_from_target_id, "gfx1100", "gfx11-generic");
     check(rocke_generic_arch_from_target_id, "gfx1151-strict:xnack-", "gfx11-generic");
     check(rocke_generic_arch_from_target_id, "gfx11-generic", "gfx11-generic");
