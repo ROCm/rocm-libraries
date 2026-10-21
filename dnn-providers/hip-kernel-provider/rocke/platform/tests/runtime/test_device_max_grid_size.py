@@ -66,9 +66,14 @@ def test_unknown_when_a_limit_is_not_positive(monkeypatch):
     assert hip_module.get_device_max_grid_size() is None
 
 
-def test_unknown_without_a_hip_library(monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    # HipError is what the lazy loader raises when no HIP library loads.
+    [hip_module.HipError("cannot load libamdhip64"), OSError("libamdhip64")],
+)
+def test_unknown_without_a_hip_library(monkeypatch, error):
     def missing(*args):
-        raise OSError("libamdhip64 not found")
+        raise error
 
     monkeypatch.setattr(hip_module, "_hipDeviceGetAttribute", missing)
     assert hip_module.get_device_max_grid_size() is None

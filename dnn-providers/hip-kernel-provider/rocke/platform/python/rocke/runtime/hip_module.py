@@ -342,7 +342,8 @@ def get_device_max_grid_size(device: int = 0) -> tuple[int, int, int] | None:
             v = ctypes.c_int(0)
             try:
                 rc = _hipDeviceGetAttribute(ctypes.byref(v), attr, device)
-            except (AttributeError, OSError):
+            except (AttributeError, OSError, HipError):
+                # HipError: the lazy loader found no HIP library.
                 rc = -1
             if rc != 0 or v.value <= 0:
                 break
