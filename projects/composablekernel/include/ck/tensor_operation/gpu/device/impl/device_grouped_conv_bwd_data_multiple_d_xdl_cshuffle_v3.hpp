@@ -100,7 +100,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 
             if constexpr(GridwiseGemm::DirectLoadEnabled)
             {
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__)
                 const auto a_grid_desc_ak0_m_ak1_transformed =
                     GridwiseGemm::template TransformGrid<AGridDesc_AK0_M_AK1,
                                                          GridwiseGemm::AK0Number,
@@ -581,6 +581,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                               IsWave64>();
     }
 
+    template <bool IsWave64,
+              index_t MPerXdlAligned = MPerXdl,
+              index_t NPerXdlAligned = NPerXdl,
+              index_t MRepeatAligned = MRepeat>
+    static constexpr auto GetNXdlPerWave()
+    {
+        return GetXdlPerWave2<BlockSize,
+                              MPerBlock,
+                              NPerBlock,
+                              MPerXdlAligned,
+                              NPerXdlAligned,
+                              MRepeatAligned,
+                              IsWave64>();
+    }
+
+    // Default GridwiseGemm: we modify MXdlPerWave
     static constexpr bool Wave32Force16MNPerXdl = sizeof(ADataType) == 2 && sizeof(BDataType) == 2;
     static constexpr index_t Wave32MaxMNPerXdl =
         Wave32Force16MNPerXdl ? 16 : math::max(MPerXdl, NPerXdl);
@@ -591,13 +607,21 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                          Wave32MaxMNPerXdl,
                                                          NRepeat*(NPerXdl / Wave32MaxMNPerXdl)>();
 
+    // Wavelet GridwiseGemm: we modify NXdlPerWave
+    // The inner loop is over MXdlPerWave so we don't change that to have consistent instances
+    // across archs with 16x16 wave tiles)
+    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
+    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false,
+                                                         Wave32MaxMNPerXdl,
+                                                         Wave32MaxMNPerXdl,
+                                                         MRepeat*(MPerXdl / Wave32MaxMNPerXdl)>();
+
     static constexpr index_t NumDTensor = DsDataType::Size();
     static constexpr auto I0            = Number<0>{};
     static constexpr auto I1            = Number<1>{};
     static constexpr auto I2            = Number<2>{};
     static constexpr auto I3            = Number<3>{};
     static_assert(NumDTensor == 0, "Not supported");
-    // static_assert(DirectLoad, "Not supported");
 
     static constexpr GemmSpecialization GemmSpec = GemmSpecialization::MNKPadding;
     static constexpr bool IsSplitKSupported      = false;
@@ -707,7 +731,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         DirectLoad && BLdsScalarLoadToVgpr,
         LargeTensors>;
 
-    template <index_t MRepeat_, index_t MPerXdl_, index_t NPerXdl_>
+    template <index_t NRepeat_, index_t MPerXdl_, index_t NPerXdl_>
     using GridwiseGemmWavelet = GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3<
         tensor_layout::gemm::RowMajor,
         tensor_layout::gemm::RowMajor,
@@ -730,8 +754,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         BK1,
         MPerXdl_,
         NPerXdl_,
-        MRepeat_,
-        NRepeat*(NPerXdl / NPerXdl_),
+        MRepeat*(MPerXdl / MPerXdl_),
+        NRepeat_,
         ABlockTransferThreadClusterLengths_AK0_M_AK1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -748,8 +772,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         BBlockTransferDstScalarPerVector_BK1,
         false,
         BBlockLdsExtraN,
-        CShuffleMRepeatPerShuffle,
-        CShuffleNRepeatPerShuffle*(NPerXdl / NPerXdl_),
+        CShuffleMRepeatPerShuffle*(MPerXdl / MPerXdl_),
+        CShuffleNRepeatPerShuffle,
         CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         CShuffleBlockTransferScalarPerVector,
         AComputeType,
@@ -759,14 +783,18 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         false, // UseNamedBarrier
         UseLdsTranspose>;
 
-    template <index_t MRepeat_, index_t MPerXdl_, index_t NPerXdl_>
+    template <index_t MNRepeat_, index_t MPerXdl_, index_t NPerXdl_>
     using GridwiseGemmBase = std::conditional_t<WaveletEnabled,
-                                                GridwiseGemmWavelet<MRepeat_, MPerXdl_, NPerXdl_>,
-                                                GridwiseGemmDefault<MRepeat_, MPerXdl_, NPerXdl_>>;
+                                                GridwiseGemmWavelet<MNRepeat_, MPerXdl_, NPerXdl_>,
+                                                GridwiseGemmDefault<MNRepeat_, MPerXdl_, NPerXdl_>>;
 
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(MXdlPerWave64, 1), MPerXdl, NPerXdl>;
-    using GridwiseGemm32 =
-        GridwiseGemmBase<math::max(MXdlPerWave32, 1), Wave32MaxMNPerXdl, Wave32MaxMNPerXdl>;
+    static constexpr index_t MNXdlPerWave64 =
+        WaveletEnabled ? math::max(NXdlPerWave64, 1) : math::max(MXdlPerWave64, 1);
+    using GridwiseGemm64 = GridwiseGemmBase<MNXdlPerWave64, MPerXdl, NPerXdl>;
+
+    static constexpr index_t MNXdlPerWave32 =
+        WaveletEnabled ? math::max(NXdlPerWave32, 1) : math::max(MXdlPerWave32, 1);
+    using GridwiseGemm32 = GridwiseGemmBase<MNXdlPerWave32, Wave32MaxMNPerXdl, Wave32MaxMNPerXdl>;
     // Default GridwiseGemm alias for use in non-wave-size-dependent code paths
     using GridwiseGemm = GridwiseGemm64;
 
@@ -1133,8 +1161,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     template <typename GridwiseGemm_,
               bool HasMainLoop,
               bool NoMainLoop,
-              InMemoryDataOperationEnum MemOp,
-              TailNumber TailNum = TailNumber::Even>
+              InMemoryDataOperationEnum MemOp>
     static auto SelectKernel()
     {
         if constexpr(DirectLoad && WaveletEnabled)
