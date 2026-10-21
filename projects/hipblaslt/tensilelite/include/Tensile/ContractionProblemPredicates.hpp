@@ -3155,8 +3155,14 @@ namespace TensileLite
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     // A predicate built under DeferWorkgroupMappingDeviceQuery
-                    // must not be evaluated. cuCount is 0, with no device behind it.
-                    assert(!deviceQueryDeferred);
+                    // must not be evaluated: cuCount is 0 with no device behind
+                    // it, and with value[1] == -1 the comparison below would
+                    // then accept any power-of-two XCC. Never match instead, so
+                    // a solution that was never checked against a device cannot
+                    // be selected. This has to hold where NDEBUG is defined, so
+                    // it is a branch and not an assert.
+                    if(deviceQueryDeferred)
+                        return false;
                     // If XCC == -1, we automatically set it to the number XCCs.
                     // In this case, no predicate is needed.
                     if(value[0] == -1)
@@ -3173,7 +3179,13 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    assert(!deviceQueryDeferred);
+                    if(deviceQueryDeferred)
+                    {
+                        stream << "WorkgroupMappingXCCCheck built without a device "
+                                  "query: cannot match."
+                               << std::endl;
+                        return false;
+                    }
                     if(value[0] == -1)
                         return true;
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
