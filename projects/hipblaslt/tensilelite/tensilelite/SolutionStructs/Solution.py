@@ -55,7 +55,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+                                       tdmGroupingName, tdmPapRejectReason, tdmWavePartition
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -65,7 +65,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxTdmTileM
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -284,6 +284,40 @@ def _validateMXFreePhase(state, printRejectionReason):
       reject(state, printRejectionReason,
              "MacroTile%s %u is not aligned to MXBlockFree%s %u; the workgroup phase needs %s"
              % (tc, mt, tc, mxTile, why))
+      return False
+  return True
+
+
+def _validateMXTdmMSplit(state, printRejectionReason):
+  """Reject 2D MX tiles whose wave-separated TDM M-split drops scale rows.
+
+  With fewer K-groups than TDM components each component loads
+  scaleRows // numComp rows and starts wCompId * MT/numComp elements in
+  (TensorDataMover.calculateStartAddrWaveSeparated, initTDMDescriptorWaveSeparated).
+  A remainder row is never loaded (MT=384 at MXBlockFree 128 is 3 rows over 2
+  components), and an unaligned MT puts MT/numComp off a row boundary, so
+  require MT aligned to MXBlockFree and the rows to split evenly.
+  """
+  if not (state["enableTDMA"] and state["enableTDMB"]) or state["NumWaves"] <= 1 \
+      or state["UseSubtileImpl"]:
+    return True
+  for tc in ("A", "B"):
+    mxTc = "MXS" + tc
+    mxBlock = state["ProblemType"]["MXBlock%s" % tc]
+    mxTile = mxFreeTile(state, mxTc)
+    if not mxBlock or mxTile <= 1 or state["DirectToVgpr%s" % mxTc]:
+      continue
+    mxUnit = state["MatrixInstK"] // mxBlock
+    numMxKGroups = (state["DepthU"] // mxBlock) // mxUnit
+    numComp, _ = tdmWavePartition(state, mxTc)
+    mt = state["MacroTile%s" % mxTc]
+    scaleRows = mxTdmTileM(mt, mxTile)
+    if numMxKGroups >= numComp or scaleRows < numComp:
+      continue  # K-split, or every component loads the whole small tile
+    if mt % mxTile or scaleRows % numComp:
+      reject(state, printRejectionReason,
+             "MX%s 2D TDM M-split: %u scale rows (MacroTile %u, MXBlockFree %u) do not split "
+             "evenly over %u TDM components" % (tc, scaleRows, mt, mxTile, numComp))
       return False
   return True
 
@@ -4760,6 +4794,9 @@ class Solution(collections.abc.Mapping):
         return
 
       if not _validateMXFreePhase(state, printRejectionReason):
+        return
+
+      if not _validateMXTdmMSplit(state, printRejectionReason):
         return
 
       # An explicitly wide local read cannot be reduced by the auto-width

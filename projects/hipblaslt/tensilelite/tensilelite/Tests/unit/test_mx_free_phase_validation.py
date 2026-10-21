@@ -3,9 +3,11 @@
 """2D MX (MXBlockFree > 1) solution checks for unaligned MacroTiles.
 
 _validateMXFreePhase keeps unaligned tiles to what mxPhaseLraFixup handles.
+_validateMXTdmMSplit rejects a wave-separated TDM M-split that would drop or
+misplace scale rows.
 """
 
-from Tensile.SolutionStructs.Solution import _validateMXFreePhase
+from Tensile.SolutionStructs.Solution import _validateMXFreePhase, _validateMXTdmMSplit
 
 
 def _state(mtA=256, mtB=224, free=128, depthU=256, numWaves=4, vwB=1, **overrides):
@@ -55,3 +57,16 @@ def test_free_phase_rejects_what_the_fixup_cannot_index():
     # a vector straddles a scale row.
     assert not _validateMXFreePhase(_state(vwB=4), False)
 
+
+def test_tdm_k_split_is_untouched():
+    # DepthU 256 / MXBlock 128 = 2 K-groups >= 2 components (4 waves).
+    assert _validateMXTdmMSplit(_state(mtB=384), False)
+
+
+def test_tdm_m_split_needs_even_aligned_rows():
+    # DepthU 128: 1 K-group < 2 components, so the components split rows.
+    assert _validateMXTdmMSplit(_state(depthU=128, mtB=256), False)
+    assert not _validateMXTdmMSplit(_state(depthU=128, mtB=384), False)  # 3 rows / 2
+    assert not _validateMXTdmMSplit(_state(depthU=128, mtB=448), False)  # unaligned
+    # Fewer rows than components: every component loads the whole tile.
+    assert _validateMXTdmMSplit(_state(depthU=128, mtA=128, mtB=128), False)
