@@ -40,7 +40,7 @@ namespace hiptensor
         // 4d Permutation
         registerSolutions(enumerateElementwiseSolutions<ck::Tuple<double>,
                                                         ck::Tuple<double>,
-                                                        CkPermutationUnaryCombinedOp,
+                                                        CkPermutationUnaryCombinedOpF64,
                                                         4>());
     }
 } // namespace hiptensor

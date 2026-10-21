@@ -37,7 +37,7 @@ namespace hiptensor
         // 2d Permutation
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<double>,
                                                       ck::Tuple<double>,
-                                                      CkPermutationUnaryCombinedOp,
+                                                      CkPermutationUnaryCombinedOpF64,
                                                       2>());
 
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<float>,
