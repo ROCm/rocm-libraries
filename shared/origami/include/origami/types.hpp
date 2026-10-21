@@ -444,6 +444,8 @@ struct tensile_params_t {
 
   /// Prefetch global read depth
   int prefetch_global_read = 2;
+
+  /// Buffer load/store flags - use buffer instructions for global memory access
   bool buffer_load = true;
   bool buffer_store = true;
 

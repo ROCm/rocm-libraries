@@ -607,10 +607,13 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
       REQUIRE_FALSE(results[3].config.tensile().buffer_load);
       REQUIRE_FALSE(results[3].config.tensile().buffer_store);
 
-      // Buffer preference outranks arithmetic intensity inside the latency tie:
-      // the buffer sort runs last, so arithmetic intensity only orders tiles
-      // within the same buffer rank. Each higher-intensity tile leads its own
-      // buffer group but stays behind every tile with a better buffer rank.
+      // Buffer preference is the lowest-priority tie-break: it is sorted first,
+      // then arithmetic intensity (a higher-priority criterion) sorts on top of
+      // it. Because both sorts are stable, AI still determines which subgroup
+      // leads, but within each AI-equal subgroup the buffer order from the first
+      // sort survives. So every higher-AI tile stays ahead of every lower-AI
+      // tile, and buffer rank only breaks ties among tiles that share the same
+      // AI (it applies within both the higher-AI and lower-AI subgroups below).
       auto arithmetic_intensity = [](const origami::config_t& config) {
         const double flops          = 2.0 * config.mt.m * config.mt.n * config.mt.k;
         const double memory_traffic = static_cast<double>(
@@ -631,17 +634,22 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
       auto ranked_ai = origami::rank_configs(problem, hardware, with_higher_ai);
       origami::runtime_options::get().heuristics_variance = saved_variance;
       REQUIRE(ranked_ai.size() == with_higher_ai.size());
-      REQUIRE(ranked_ai[0].config.index == 3);
-      REQUIRE(ranked_ai[1].config.index == 4);
+      // Higher-AI subgroup (indices 4, 5) leads; buffer rank orders within it
+      // the same way the plain `results` case above ordered the lower-AI tiles.
+      REQUIRE(ranked_ai[0].config.index == 4);
+      REQUIRE(ranked_ai[0].config.mt.n == 256);
+      REQUIRE(ranked_ai[0].config.tensile().buffer_load);
+      REQUIRE_FALSE(ranked_ai[0].config.tensile().buffer_store);
+      REQUIRE(ranked_ai[1].config.index == 5);
       REQUIRE(ranked_ai[1].config.mt.n == 256);
-      REQUIRE(ranked_ai[1].config.tensile().buffer_load);
+      REQUIRE_FALSE(ranked_ai[1].config.tensile().buffer_load);
       REQUIRE_FALSE(ranked_ai[1].config.tensile().buffer_store);
-      REQUIRE(ranked_ai[2].config.index == 2);
-      REQUIRE(ranked_ai[3].config.index == 1);
-      REQUIRE(ranked_ai[4].config.index == 5);
-      REQUIRE(ranked_ai[4].config.mt.n == 256);
-      REQUIRE_FALSE(ranked_ai[4].config.tensile().buffer_load);
-      REQUIRE_FALSE(ranked_ai[4].config.tensile().buffer_store);
+      // Lower-AI subgroup (indices 0-3) follows, still ordered by buffer rank
+      // among themselves: buffer preference applies within every AI subgroup,
+      // not just the leading one.
+      REQUIRE(ranked_ai[2].config.index == 3);
+      REQUIRE(ranked_ai[3].config.index == 2);
+      REQUIRE(ranked_ai[4].config.index == 1);
       REQUIRE(ranked_ai[5].config.index == 0);
 
       // Equal buffer ranks keep their incoming order.

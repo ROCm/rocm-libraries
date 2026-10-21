@@ -867,8 +867,8 @@ class SizeMapping:
                    DirectToLdsB             = dtlB,
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim'],
-                   BufferLoad               = bool(d.get('BufferLoad', True)),
-                   BufferStore              = bool(d.get('BufferStore', True))
+                   BufferLoad               = d['BufferLoad'],
+                   BufferStore              = d['BufferStore']
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
