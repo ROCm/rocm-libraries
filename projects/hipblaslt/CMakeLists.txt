@@ -287,8 +287,10 @@ if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE)
         if(msgpackc-cxx_FOUND)
             set(hipblaslt_msgpack_target "msgpackc-cxx")
             message(STATUS "Found msgpack (<=5.x)")
-        else()
-            # Header-only. The coverage lane has no msgpack-cxx package.
+        elseif(HIPBLASLT_ENABLE_FETCH)
+            # Header-only, downloaded at configure time. Opt-in, so a machine
+            # with no msgpack package and no network still gets an immediate,
+            # legible configure failure instead of a silent download.
             message(STATUS "msgpack-cxx was not found; fetching 6.1.0")
             include(FetchContent)
             FetchContent_Declare(
@@ -313,6 +315,13 @@ if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE)
             endif()
             set(hipblaslt_msgpack_target "msgpack-cxx")
             set(hipblaslt_msgpack_fetched TRUE)
+        else()
+            message(FATAL_ERROR
+                "msgpack-cxx was not found. Install msgpack-cxx (>=6.x) or "
+                "msgpackc-cxx (<=5.x), or configure with "
+                "-DHIPBLASLT_ENABLE_FETCH=ON to download it at configure time. "
+                "A msgpack package is required whenever the host library is "
+                "built against MessagePack or device libraries are generated.")
         endif()
     endif()
 endif()
@@ -630,10 +639,21 @@ if(_hipblaslt_export_targets)
             get_target_property(_hipblaslt_target_type hipblaslt TYPE)
         endif()
 
-        if(NOT hipblaslt_msgpack_fetched
-           AND NOT HIPBLASLT_ENABLE_YAML
-           AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
-            if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
+        if(NOT HIPBLASLT_ENABLE_YAML AND _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+            if(hipblaslt_msgpack_fetched)
+                # A static archive carries msgpack into INTERFACE_LINK_LIBRARIES
+                # as $<LINK_ONLY:msgpack-cxx>, so the export set references it.
+                # A fetched msgpack-cxx is a build-tree target, not an imported
+                # one, and cannot be exported; downstream static consumers would
+                # also have no msgpack to link against. Say so here rather than
+                # at generate time.
+                message(FATAL_ERROR
+                    "A static, exported hipBLASLt needs an installed msgpack "
+                    "package: a fetched msgpack-cxx is a build-tree target and "
+                    "cannot be exported. Install msgpack-cxx (>=6.x) or "
+                    "msgpackc-cxx (<=5.x), or build shared with "
+                    "-DHIPBLASLT_BUILD_SHARED_LIBS=ON.")
+            elseif(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
                 list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
             else()
                 list(APPEND _hipblaslt_static_depends

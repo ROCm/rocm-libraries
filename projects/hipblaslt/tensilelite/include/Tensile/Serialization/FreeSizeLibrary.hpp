@@ -121,6 +121,9 @@ namespace TensileLite
                         std::ostringstream msg;
                         msg << "[FreeSizeLibrary] Empty table";
                         iot::setError(io, msg.str());
+                        // setError records the message; it does not unwind.
+                        // Returning keeps *table below from dereferencing null.
+                        return;
                     }
                 }
                 else

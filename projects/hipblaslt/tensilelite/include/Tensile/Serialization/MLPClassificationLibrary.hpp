@@ -179,6 +179,13 @@ namespace TensileLite
                 if(iot::outputting(io))
                 {
                     model = std::dynamic_pointer_cast<MLPNet>(lib.model);
+                    if(!model)
+                    {
+                        // setError records the message; it does not unwind.
+                        // Returning keeps *model below from dereferencing null.
+                        iot::setError(io, "[MLPClassificationLibrary] Empty model");
+                        return;
+                    }
                 }
                 else
                 {
@@ -186,7 +193,10 @@ namespace TensileLite
                     lib.model = model;
                 }
                 iot::mapRequired(io, "mlp", *model);
-                if(!model->valid(true))
+                // Only on the read path: a library that already loaded is being
+                // re-encoded, and throwing out of a trait would leave the output
+                // half-built instead of reporting through the error list.
+                if(!iot::outputting(io) && !model->valid(true))
                     throw std::runtime_error("ERROR: MLP library not in a valid state.");
 
                 using ProblemFeatures
