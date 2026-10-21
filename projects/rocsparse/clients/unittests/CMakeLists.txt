@@ -103,10 +103,24 @@ set_target_properties(rocsparse-unit-test PROPERTIES
 )
 
 # TheRock's test artifact includes bin/rocsparse/** and bin/rocsparse-test*,
-# and ctest runs from bin/rocsparse. These binaries do not match
-# bin/rocsparse-test*, so install them beside CTestTestfile.cmake. That is one
+# and ctest runs from bin/rocsparse. The host binary does not match
+# bin/rocsparse-test*, so install it beside CTestTestfile.cmake. That is one
 # directory deeper than the other clients, so the RPATH gains an extra "..".
+#
+# On Windows the device binary is installed in bin/ instead, next to
+# amdhip64_7.dll. The loader searches the executable directory, then System32,
+# before PATH, so a copy in bin/rocsparse/ loads the display driver's HIP
+# runtime. That runtime cannot load kpack device code, and
+# rocsparse_create_handle returns rocsparse_status_internal_error.
 function(rocsparse_install_unit_test target)
+  if(WIN32 AND target STREQUAL "rocsparse-unit-test-device")
+    install(
+      TARGETS ${target}
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+      COMPONENT tests)
+    return()
+  endif()
+
   # TheRock's post-configure hook rewrites INSTALL_RPATH for every executable
   # as if it lived in bin/. These binaries are installed in bin/rocsparse/, so
   # tell that hook the real directory. It then emits $ORIGIN/../../lib, which
@@ -500,8 +514,9 @@ set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;${ROCSPAR
 if(ROCSPARSE_CTEST_INSTALL_FILE)
   file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 # rocSPARSE unit-test binaries (quick, standard, comprehensive, full).
-# Installed into bin/rocsparse/ next to this file. TheRock packages that
-# directory, and ctest runs from it. gfx1151 entries carry ex_gpu_gfx1151 so
+# The host binary is installed into bin/rocsparse/ next to this file. On
+# Windows the device binary is installed into bin/ and launched with "../".
+# ctest runs from bin/rocsparse/. gfx1151 entries carry ex_gpu_gfx1151 so
 # TheRock selects them with -L <tier> -L ex_gpu_gfx1151. Other GPUs exclude
 # ex_gpu and run the plain entries.
 
@@ -512,11 +527,9 @@ add_test(rocsparse-unit-test_gfx1151 "./rocsparse-unit-test")
 set_tests_properties(rocsparse-unit-test_gfx1151 PROPERTIES LABELS "quick;standard;comprehensive;full;ex_gpu_gfx1151")
 
 ]=])
-  # Windows searches System32 before PATH, so from bin/rocsparse/ the device
-  # binary loads the display driver's amdhip64_7.dll instead of the one in
-  # bin/. That runtime cannot load kpack-split device code, so every kernel
-  # launch fails. Register the device binary on Windows only once it is
-  # installed in bin/ beside the HIP runtime.
+  # Windows searches the executable directory, then System32, before PATH.
+  # The device binary is installed in bin/ beside amdhip64_7.dll. ctest's
+  # working directory is bin/rocsparse/, so ".." is bin/.
   if(NOT WIN32)
     file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 add_test(rocsparse-unit-test-device "./rocsparse-unit-test-device")
@@ -527,11 +540,18 @@ set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;q
 
 ]=])
   else()
-    # ctest's working directory is bin/rocsparse/, so ".." is bin/.
     file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
+add_test(rocsparse-unit-test-device "../rocsparse-unit-test-device")
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full")
+
+add_test(rocsparse-unit-test-device_gfx1151 "../rocsparse-unit-test-device")
+set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
+
 set_tests_properties(
   rocsparse-unit-test
   rocsparse-unit-test_gfx1151
+  rocsparse-unit-test-device
+  rocsparse-unit-test-device_gfx1151
   PROPERTIES ENVIRONMENT_MODIFICATION
     "PATH=path_list_prepend:../../lib/rocsparse-clients/lib;PATH=path_list_prepend:../../llvm/lib;PATH=path_list_prepend:../../lib;PATH=path_list_prepend:..")
 
