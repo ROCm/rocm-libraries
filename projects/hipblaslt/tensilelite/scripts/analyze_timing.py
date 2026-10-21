@@ -1088,12 +1088,17 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     it is the tree as the timers are nested in the code, with the original display groups.
     """
     global TABLE_WIDTH
-    if not timings:
-        nodes = []
-    elif legacy:
-        nodes = build_hierarchy(timings)
+    legacy_nodes = build_hierarchy(timings) if timings else []
+    purpose_nodes = [] if (legacy or not timings) else build_purpose_hierarchy(timings)
+    # The tables printed, in order: (title, tree, separator lines between rows). The default report
+    # shows the purpose tree first and the legacy tree (nested as the timers are) below it.
+    if legacy:
+        tables = [("TIMING BY PHASE", legacy_nodes, True)]
+        nodes = legacy_nodes
     else:
-        nodes = build_purpose_hierarchy(timings)
+        tables = [("TIMING BY PURPOSE", purpose_nodes, False),
+                  ("TIMING BY TIMER NESTING (legacy view)", legacy_nodes, True)]
+        nodes = purpose_nodes
 
     total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
 
@@ -1109,17 +1114,23 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         mean_ms = total_ms / count if count > 0 else 0
         return (cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms))
 
-    # Rows shown below the tree: categories the hierarchy does not know, and the overlapping totals.
+    # Rows shown below the trees: categories the hierarchy does not know, and the overlapping totals.
     unknown_rows = [extra_row(c) for c in sorted(
         set(timings.keys()) - ALL_KNOWN_CATEGORIES - OVERLAPPING_TOTALS)]
     overlapping_rows = [extra_row(c) for c in OVERLAPPING_TOTALS_ORDER if c in timings]
 
-    layout = _table_layout(nodes, unknown_rows + overlapping_rows, wall_clock_ms)
+    # One layout for every table so their columns line up.
+    layout = _table_layout([n for _, tree, _ in tables for n in tree],
+                           unknown_rows + overlapping_rows, wall_clock_ms)
     COL_CAT = layout["cat"]
     TABLE_WIDTH = layout["table"]
 
     print("=" * TABLE_WIDTH)
     print("TIMING ANALYSIS SUMMARY")
+    if not legacy and timings:
+        minutes, seconds = divmod(wall_clock_s, 60)
+        human = f" ({int(minutes)} min {seconds:.1f} s)" if minutes >= 1 else ""
+        print(f"TOTAL RUNTIME: {wall_clock_s:,.2f} s{human}  (sum of the instrumented phases)")
     print("=" * TABLE_WIDTH)
     print()
 
@@ -1145,19 +1156,6 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         wall = f"{pct_wall:>{w_wall - 1}.1f}%" if pct_wall is not None else " " * w_wall
         print(f"{cat:<{COL_CAT}} {c} {t} {m} {par}   {wall}")
 
-    print("TIMING BY PHASE")
-    print("-" * TABLE_WIDTH)
-    hdr_cat = "Category"
-    print(
-        f"  {hdr_cat:<{COL_CAT - 2}}"
-        f" {'Count':>{w_cnt}}"
-        f" {'Total (ms)':>{w_tot}}"
-        f" {'Mean (ms)':>{w_mean}}"
-        f" {'% of Parent':>{w_parent}}"
-        f"   {'% of Wall':>{w_wall}}"
-    )
-    print("-" * TABLE_WIDTH)
-
     SEPARATORS = {
         0: lambda: None,  # no separator before top-level (handled specially)
         1: lambda: print("    " + "-" * (TABLE_WIDTH - 4)),
@@ -1168,37 +1166,56 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     def sep_top():
         print("  " + "=" * (TABLE_WIDTH - 2))
 
-    def render_node(node: PhaseNode, depth: int, parent_ms: Optional[float],
-                    wall_clock_ms: float, is_first: bool):
-        """Recursively render a PhaseNode at a given depth."""
-        # Separators between siblings (legacy view only: the purpose view has many sibling rows)
-        if depth == 0 or not legacy:
-            pass  # handled by caller
-        elif depth == 1:
-            SEPARATORS[1]()
-        elif depth == 2:
-            SEPARATORS[2]()
-        elif depth == 3 and is_first:
-            SEPARATORS[3]()
-        # depth >= 4 or depth == 3 non-first: no separator
+    def render_table(title: str, tree: List[PhaseNode], row_separators: bool):
+        print(title)
+        print("-" * TABLE_WIDTH)
+        hdr_cat = "Category"
+        print(
+            f"  {hdr_cat:<{COL_CAT - 2}}"
+            f" {'Count':>{w_cnt}}"
+            f" {'Total (ms)':>{w_tot}}"
+            f" {'Mean (ms)':>{w_mean}}"
+            f" {'% of Parent':>{w_parent}}"
+            f"   {'% of Wall':>{w_wall}}"
+        )
+        print("-" * TABLE_WIDTH)
 
-        pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
-        pct_wall = as_percentage(node.total_ms, wall_clock_ms)
+        def render_node(node: PhaseNode, depth: int, parent_ms: Optional[float],
+                        wall_clock_ms: float, is_first: bool):
+            """Recursively render a PhaseNode at a given depth."""
+            # Separators between siblings (not in the purpose tree, which has many sibling rows)
+            if depth == 0 or not row_separators:
+                pass  # handled by caller
+            elif depth == 1:
+                SEPARATORS[1]()
+            elif depth == 2:
+                SEPARATORS[2]()
+            elif depth == 3 and is_first:
+                SEPARATORS[3]()
+            # depth >= 4 or depth == 3 non-first: no separator
 
-        fmt_row(depth, node.name, node.count, node.total_ms, node.mean_ms,
-                pct_parent, pct_wall)
+            pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
+            pct_wall = as_percentage(node.total_ms, wall_clock_ms)
 
-        for i, child in enumerate(_get_display_children(node)):
-            render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+            fmt_row(depth, node.name, node.count, node.total_ms, node.mean_ms,
+                    pct_parent, pct_wall)
 
-    for top_idx, node in enumerate(nodes):
-        if top_idx > 0:
-            sep_top()
-        pct_wall = as_percentage(node.total_ms, wall_clock_ms)
-        fmt_row(0, node.name, node.count, node.total_ms, node.mean_ms, None, pct_wall)
+            for i, child in enumerate(_get_display_children(node)):
+                render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
-        for i, child in enumerate(node.children):
-            render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+        for top_idx, node in enumerate(tree):
+            if top_idx > 0:
+                sep_top()
+            pct_wall = as_percentage(node.total_ms, wall_clock_ms)
+            fmt_row(0, node.name, node.count, node.total_ms, node.mean_ms, None, pct_wall)
+
+            for i, child in enumerate(node.children):
+                render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+
+    for table_idx, (title, tree, row_separators) in enumerate(tables):
+        if table_idx > 0:
+            print()
+        render_table(title, tree, row_separators)
 
     # Unknown categories
     if unknown_rows:
@@ -1219,8 +1236,9 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     print()
     print("-" * TABLE_WIDTH)
-    print(f"  ESTIMATED WALL CLOCK TIME: {wall_clock_s:.2f}s")
-    print()
+    if legacy:
+        print(f"  ESTIMATED WALL CLOCK TIME: {wall_clock_s:.2f}s")
+        print()
 
     # -- Hierarchy validation -------------------------------------------------
     print_hierarchy_validation(total_time_by_category)

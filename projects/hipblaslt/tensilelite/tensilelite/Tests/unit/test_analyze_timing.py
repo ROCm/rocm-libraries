@@ -422,7 +422,9 @@ class TestColumnAlignment:
     def _table_numeric_edges(self, out):
         lines = out.split("\n")
         header_i = next(i for i, l in enumerate(lines) if l.strip().startswith("Category"))
-        end_i = next(i for i, l in enumerate(lines) if "ESTIMATED WALL CLOCK" in l)
+        end_i = next(i for i, l in enumerate(lines)
+                     if "ESTIMATED WALL CLOCK" in l or l.startswith(("HIERARCHY VALIDATION",
+                                                                      "TIME BREAKDOWN")))
         header = lines[header_i]
         allowed = {header.index(k) + len(k)
                    for k in ("Count", "Total (ms)", "Mean (ms)", "% of Parent", "% of Wall")}
@@ -557,12 +559,26 @@ class TestPurposeHierarchy:
         for name in list(TIMING_HIERARCHY) + list(top):
             assert name in PURPOSE_OF, f"{name} has no purpose group"
 
-    def test_default_report_is_purpose_and_legacy_flag_keeps_the_old_one(self, capsys):
+    def test_default_report_has_the_total_up_top_then_purpose_then_legacy_table(self, capsys):
         print_summary(dict(self.TIMINGS), [])
-        default = capsys.readouterr().out
+        out = capsys.readouterr().out
+        lines = out.split("\n")
+
+        # Total runtime is in the header, above the first table.
+        header_end = next(i for i, l in enumerate(lines) if l.startswith("TIMING BY"))
+        assert any(l.startswith("TOTAL RUNTIME:") for l in lines[:header_end])
+        # The purpose table comes first and the old (timer-nested) table below it.
+        assert out.index("TIMING BY PURPOSE") < out.index("TIMING BY TIMER NESTING (legacy view)")
+        assert out.index(G_REFERENCE) < out.index("Data Preparation")
+        # The columns of the two tables line up.
+        headers = [l for l in lines if l.strip().startswith("Category")]
+        assert len(headers) == 2 and headers[0] == headers[1]
+
+    def test_legacy_flag_prints_only_the_old_report(self, capsys):
         print_summary(dict(self.TIMINGS), [], legacy=True)
         legacy = capsys.readouterr().out
 
-        assert G_REFERENCE in default and "Data Preparation" not in default
         assert "Data Preparation" in legacy and G_REFERENCE not in legacy
+        assert "TOTAL RUNTIME" not in legacy and "TIMING BY PURPOSE" not in legacy
+        assert "TIMING BY PHASE" in legacy and "ESTIMATED WALL CLOCK TIME" in legacy
         assert "Reference computation (CPU GEMM)" in legacy
