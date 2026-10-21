@@ -365,13 +365,13 @@ G_INPUT = "Input data preparation"
 G_KERNEL = "Kernel launch & execution"
 G_BOOKKEEPING = "Per-solution bookkeeping & reporting"
 G_LAUNCH = "Client launch (startup, setup & teardown)"
-G_INSTRUMENTATION = "Instrumentation overhead"
+G_INSTRUMENTATION = "MEASUREMENT OVERHEAD (instrumentation)"
 G_BUILD = "Solution generation & build (Python)"
-G_PY_BOOKKEEPING = "Python bookkeeping (cache & solution files)"
+G_PY_BOOKKEEPING = "SHARED: cache & solution files"
 G_DUCTILE = "Ductile GA search (Python)"
 G_LIBRARY_CLIENT = "Library client (Python)"
 G_LIBRARY_LOGIC = "Library logic (Python)"
-G_UNATTRIBUTED = "Unattributed (untracked time & timer overhead)"
+G_UNATTRIBUTED = "UNATTRIBUTED (untracked time & timer overhead)"
 
 PURPOSE_OF = {
     # Python side
@@ -452,6 +452,18 @@ PURPOSE_TRANSPARENT = {
     "post_solution",
     "validate_warmups",
 }
+
+# The groups are gathered into stages. A stage is only shown if it has time, so the same report
+# works for a build-only log (BUILD), a run-only log (RUN, with --use-cache) and for both together.
+# Groups that are not part of a stage (cache and solution-file bookkeeping, which happens in both
+# stages, the measurement overhead and the unattributed time) are shown next to the stages.
+STAGES = [
+    ("RUN: benchmark client",
+     [G_REFERENCE, G_INPUT, G_VALIDATION, G_KERNEL, G_BOOKKEEPING, G_LAUNCH,
+      G_LIBRARY_CLIENT, G_LIBRARY_LOGIC]),
+    ("BUILD: solution generation & compile", [G_BUILD, G_DUCTILE]),
+]
+ROOT_NAME = "TOTAL RUNTIME"
 
 # --- Derived constants ---
 
@@ -816,6 +828,48 @@ def build_purpose_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
     return nodes
 
 
+def _wall_clock_ms(timings: Dict[str, List[float]]) -> float:
+    """Total runtime: the raw sum of the top-level phases (all categories if none was logged)."""
+    totals = {cat: sum(vals) for cat, vals in timings.items()}
+    wall = sum(totals.get(c, 0) for c in TIMING_HIERARCHY)
+    return wall if wall else sum(totals.values())
+
+
+def build_staged_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
+    """The purpose tree under one root, with the groups gathered into stages (see STAGES).
+
+    Returns ``[root]``: TOTAL RUNTIME -> stage rows (RUN, BUILD) and stand-alone groups -> purpose
+    groups -> rows. The root is the raw wall clock total. The parent timers' totals are adjusted
+    for the overhead of the timers inside them, so the groups add up to slightly less than that;
+    the difference is shown as its own row in the measurement overhead group.
+    """
+    groups = build_purpose_hierarchy(timings)
+    if not groups:
+        return []
+    by_name = {g.name: g for g in groups}
+
+    diff = _wall_clock_ms(timings) - sum(g.total_ms for g in groups)
+    if abs(diff) > 0.01:
+        name, label = ((G_INSTRUMENTATION, "(timer overhead subtracted from parent timers)")
+                       if diff > 0 else (G_UNATTRIBUTED, "(children exceed parents)"))
+        target = by_name.setdefault(name, PhaseNode(name, None, 0.0, None, []))
+        target.children.append(PhaseNode(label, None, diff, None, []))
+        target.children.sort(key=lambda n: n.total_ms, reverse=True)
+        target.total_ms += diff
+
+    top: List[PhaseNode] = []
+    staged = set()
+    for stage_name, stage_groups in STAGES:
+        members = sorted((by_name[g] for g in stage_groups if g in by_name),
+                         key=lambda n: n.total_ms, reverse=True)
+        if members:
+            top.append(PhaseNode(stage_name, None, sum(m.total_ms for m in members), None, members))
+            staged.update(m.name for m in members)
+    top.extend(g for g in by_name.values() if g.name not in staged)
+    top.sort(key=lambda n: (n.name == G_UNATTRIBUTED, -n.total_ms))
+    return [PhaseNode(ROOT_NAME, None, sum(n.total_ms for n in top), None, top)]
+
+
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
     """Parse a TIMING: line and return a TimingRecord."""
     start_sentinel = 'TIMING:'
@@ -1089,7 +1143,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     """
     global TABLE_WIDTH
     legacy_nodes = build_hierarchy(timings) if timings else []
-    purpose_nodes = [] if (legacy or not timings) else build_purpose_hierarchy(timings)
+    purpose_nodes = [] if (legacy or not timings) else build_staged_hierarchy(timings)
     # The tables printed, in order: (title, tree, separator lines between rows). The default report
     # shows the purpose tree first and the legacy tree (nested as the timers are) below it.
     if legacy:
@@ -1127,10 +1181,6 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     print("=" * TABLE_WIDTH)
     print("TIMING ANALYSIS SUMMARY")
-    if not legacy and timings:
-        minutes, seconds = divmod(wall_clock_s, 60)
-        human = f" ({int(minutes)} min {seconds:.1f} s)" if minutes >= 1 else ""
-        print(f"TOTAL RUNTIME: {wall_clock_s:,.2f} s{human}  (sum of the instrumented phases)")
     print("=" * TABLE_WIDTH)
     print()
 
@@ -1277,8 +1327,9 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     print("KEY INSIGHTS (% of wall clock)")
     print("-" * TABLE_WIDTH)
     if not legacy:
-        label_width = max([43] + [len(group.name) for group in nodes])
-        for group in nodes:
+        insight_groups = build_purpose_hierarchy(timings)
+        label_width = max([43] + [len(group.name) for group in insight_groups])
+        for group in insight_groups:
             print(f"  {group.name:<{label_width}} {group.total_ms / 1000:.2f}s "
                   f"({as_percentage(group.total_ms, wall_clock_ms):.1f}%)")
     else:

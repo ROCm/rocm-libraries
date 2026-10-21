@@ -31,6 +31,9 @@ from analyze_timing import (
     print_summary,
     TimingSeries,
     build_purpose_hierarchy,
+    build_staged_hierarchy,
+    STAGES,
+    ROOT_NAME,
     TIMING_HIERARCHY,
     PURPOSE_OF,
     G_REFERENCE,
@@ -559,14 +562,15 @@ class TestPurposeHierarchy:
         for name in list(TIMING_HIERARCHY) + list(top):
             assert name in PURPOSE_OF, f"{name} has no purpose group"
 
-    def test_default_report_has_the_total_up_top_then_purpose_then_legacy_table(self, capsys):
+    def test_default_report_has_the_root_row_then_purpose_then_legacy_table(self, capsys):
         print_summary(dict(self.TIMINGS), [])
         out = capsys.readouterr().out
         lines = out.split("\n")
 
-        # Total runtime is in the header, above the first table.
-        header_end = next(i for i, l in enumerate(lines) if l.startswith("TIMING BY"))
-        assert any(l.startswith("TOTAL RUNTIME:") for l in lines[:header_end])
+        # The first row of the first table is the total runtime, at 100% of the wall clock.
+        purpose_start = next(i for i, l in enumerate(lines) if l.startswith("TIMING BY PURPOSE"))
+        root = next(l for l in lines[purpose_start:] if l.strip().startswith(ROOT_NAME))
+        assert root.rstrip().endswith("100.0%")
         # The purpose table comes first and the old (timer-nested) table below it.
         assert out.index("TIMING BY PURPOSE") < out.index("TIMING BY TIMER NESTING (legacy view)")
         assert out.index(G_REFERENCE) < out.index("Data Preparation")
@@ -579,6 +583,65 @@ class TestPurposeHierarchy:
         legacy = capsys.readouterr().out
 
         assert "Data Preparation" in legacy and G_REFERENCE not in legacy
-        assert "TOTAL RUNTIME" not in legacy and "TIMING BY PURPOSE" not in legacy
+        assert ROOT_NAME not in legacy and "TIMING BY PURPOSE" not in legacy
         assert "TIMING BY PHASE" in legacy and "ESTIMATED WALL CLOCK TIME" in legacy
         assert "Reference computation (CPU GEMM)" in legacy
+
+
+class TestStagedHierarchy:
+    """One root (the total runtime) over RUN / BUILD stages, for build-only, run-only and both."""
+
+    BUILD = {
+        "python_benchmark_problems": [1000.0],
+        "python_cache_check": [2.0],
+        "python_kernel_compilation": [900.0],
+        "python_write_cache": [3.0],
+    }
+    RUN = {
+        "python_benchmark_problems": [500.0],
+        "python_cache_check": [1.0],
+        "python_client_execution": [450.0],
+        "cpu_reference_gemm": [300.0],
+        "pre_problem": [320.0],
+        "hip_initialization": [100.0],
+    }
+
+    @staticmethod
+    def _tree(timings):
+        (root,) = build_staged_hierarchy(timings)
+        return root, {c.name: c for c in root.children}
+
+    def test_build_only_log_has_only_the_build_stage(self):
+        root, top = self._tree(dict(self.BUILD))
+        assert "BUILD: solution generation & compile" in top
+        assert "RUN: benchmark client" not in top
+
+    def test_run_only_log_has_only_the_run_stage(self):
+        root, top = self._tree(dict(self.RUN))
+        assert "RUN: benchmark client" in top
+        assert "BUILD: solution generation & compile" not in top
+
+    def test_combined_logs_have_both_stages_and_sum_their_processes(self):
+        # A combined run is two processes, so their records are concatenated (summed).
+        combined = {k: list(self.BUILD.get(k, [])) + list(self.RUN.get(k, []))
+                    for k in set(self.BUILD) | set(self.RUN)}
+        root, top = self._tree(combined)
+        assert "RUN: benchmark client" in top
+        assert "BUILD: solution generation & compile" in top
+        assert root.total_ms == pytest.approx(1500.0)       # both python_benchmark_problems
+
+    def test_root_is_the_wall_clock_and_equals_its_children(self):
+        for timings in (self.BUILD, self.RUN):
+            root, _ = self._tree(dict(timings))
+            assert root.total_ms == pytest.approx(sum(timings["python_benchmark_problems"]), abs=0.05)
+            assert sum(c.total_ms for c in root.children) == pytest.approx(root.total_ms)
+
+    def test_stage_rows_gather_their_groups(self):
+        _, top = self._tree(dict(self.RUN))
+        assert {c.name for c in top["RUN: benchmark client"].children} >= {G_REFERENCE, G_LAUNCH}
+        assert G_REFERENCE not in top        # nested under the stage, not next to it
+
+    def test_every_stage_group_is_a_known_purpose_group(self):
+        known = set(PURPOSE_OF.values())
+        for _stage, members in STAGES:
+            assert set(members) <= known
