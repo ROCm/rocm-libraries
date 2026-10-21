@@ -60,6 +60,7 @@
 // hipError_t instead of cudaError_t
 #include "device/device_adjacent_difference.hpp"
 #include "device/device_copy.hpp"
+#include "device/device_find.hpp"
 #include "device/device_for.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_memcpy.hpp"

@@ -15,6 +15,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added `rocprim::warp_scan::scan` variant without initial value.
 * Added support for predicated `rocprim::device_transform`.
 * Added support for nullary transform `rocprim::device_generate`.
+* Added new `rocprim::device_find_if`.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
