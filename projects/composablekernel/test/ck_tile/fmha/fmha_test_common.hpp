@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_splitkv_pipeline_qr_ks_vs_tdm_sched.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched.hpp"
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
 #include "gtest/gtest.h"
@@ -61,6 +62,69 @@ struct Model
     static_assert(Traits::kStoreLSE == Lse && !Traits::kHasBiasGrad);
     static_assert(Problem::kStoreLSE == Lse);
     using Geometry = ck_tile::FmhaTdmSchedGeometryFor<Problem>;
+};
+
+// Split-kv counterpart of Model, shared by both split-kv TDM copies. The shape
+// matches the prefill pipeline each copy was derived from -- they share its
+// policy -- only the problem type and traits differ. Flag values mirror what
+// codegen/ops/fmha_fwd_splitkv.py emits for them: no bias, no soft cap, no
+// quant, no paged-kv, LSE always stored.
+//
+// BlockM selects which copy's tile is being described: qr_tdm_sched runs the
+// 128-wide hand-tuned tile, qr_tdm the 64-wide one.
+template <int HeadDim,
+          bool Mask         = false,
+          typename Data     = ck_tile::bf16_t,
+          int N             = 128,
+          int ValueDim      = 128,
+          bool UnevenSplits = true,
+          int BlockM        = 128>
+struct SplitKVModel
+{
+    using Shape  = ck_tile::TileFmhaShape<ck_tile::sequence<BlockM, N, 32, ValueDim, 32, HeadDim>,
+                                          ck_tile::sequence<4, 1, 1>,
+                                          ck_tile::sequence<16, 16, 32>,
+                                          ck_tile::sequence<4, 1, 1>,
+                                          ck_tile::sequence<16, 16, 32>,
+                                          true>;
+    using Traits = ck_tile::TileFmhaFwdSplitKVTraits<true,  // kPadSeqLenQ
+                                                     true,  // kPadSeqLenK
+                                                     false, // kPadHeadDimQ
+                                                     false, // kPadHeadDimV
+                                                     false, // kHasLogitsSoftCap
+                                                     ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                                                     false, // kHasBiasGrad
+                                                     true,  // kStoreLSE
+                                                     false, // kDoFp8StaticQuant
+                                                     false, // kIsPagedKV
+                                                     UnevenSplits,
+                                                     false, // kMergeNumHeadGroupsSeqLenQ
+                                                     1,     // kBlockPerCu
+                                                     false>; // kHasSink
+    using Problem =
+        ck_tile::BlockFmhaFwdSplitKVPipelineProblem<Data,
+                                                    Data,
+                                                    Data,
+                                                    float,
+                                                    float,
+                                                    Data,
+                                                    float,
+                                                    Data,
+                                                    float,
+                                                    float,
+                                                    Shape,
+                                                    false,
+                                                    ck_tile::ComposedAttention<
+                                                        0,
+                                                        CK_TILE_FMHA_FWD_FAST_EXP2>,
+                                                    ck_tile::SimplifiedGenericAttentionMask<Mask>,
+                                                    Traits>;
+    // Only one of these is valid for a given BlockM, and neither alias
+    // instantiates until it is used: SchedPipeline / Geometry go through
+    // FmhaTdmSchedSupportedGeometry, which asserts kM == 128.
+    using Pipeline     = ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched<Problem>;
+    using TdmPipeline  = ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm<Problem>;
+    using Geometry     = ck_tile::FmhaTdmSchedGeometryFor<Problem>;
 };
 
 class Gfx125FmhaTest : public ::testing::Test

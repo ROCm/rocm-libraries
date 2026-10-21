@@ -42,6 +42,10 @@ FMHA_FWD_SPLITKV_PIPELINE_MAP = {
     # prefill BlockFmhaPipelineQRKSVSTdmSched that fmha_fwd.py maps to -- same
     # policy, separate pipeline body. Do not point this at the prefill class.
     "qr_tdm_sched": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched",
+    # Split-kv flavour of the qr_tdm single-V / double-K path. Same relationship
+    # to the prefill BlockFmhaPipelineQRKSVSTdm as qr_tdm_sched above: shared
+    # policy, separate pipeline body carrying only that one path.
+    "qr_tdm": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm",
 }
 
 FMHA_FWD_SPLITKV_KERNEL_BODY = """
@@ -363,7 +367,7 @@ class FmhaFwdSplitKVApiTrait:
                 return "true"  # always support
             else:
                 return "true"
-        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched"]:
+        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched", "qr_tdm"]:
             if self.spad == "t":
                 return f"true /*a.seqlen_q % {self.bm0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -388,7 +392,7 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0"
             else:
                 return f"a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0"
-        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched"]:
+        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched", "qr_tdm"]:
             if self.skpad == "t":
                 return f"true /*a.seqlen_k_ptr != nullptr || a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -404,7 +408,7 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.hdim_q % {vec} == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched"]:
+        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched", "qr_tdm"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -421,7 +425,7 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.hdim_v % {vec} == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched"]:
+        elif self.pipeline_tag in ["qr", "qr_nwarp_sshuffle", "qr_tdm_sched", "qr_tdm"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -586,11 +590,19 @@ class FmhaFwdSplitKVApiPool:
                         default=0,
                     )
                     inners = str()
-                    # Try qr_tdm_sched before qr: both match on decode shapes and
-                    # dispatch returns on the first hit. sorted() is stable, so
-                    # each group keeps its tile order.
+                    # Try the TDM copies before qr: all of them match on decode
+                    # shapes and dispatch returns on the first hit. qr_tdm goes
+                    # first because on D128 decode it is the faster of the two:
+                    # measured 1.19-1.76x over qr_tdm_sched across
+                    # batch 1-64 x num_splits 4-32 at seqlen_k 4096/16384.
+                    # Swap the two entries below to A/B the other way round.
+                    # sorted() is stable, so each group keeps its tile order.
+                    tdm_dispatch_order = {"qr_tdm": 0, "qr_tdm_sched": 1}
                     for i_trait, trait in enumerate(
-                        sorted(pool_by_hdim, key=lambda t: t.pipeline_tag != "qr_tdm_sched")
+                        sorted(
+                            pool_by_hdim,
+                            key=lambda t: tdm_dispatch_order.get(t.pipeline_tag, 2),
+                        )
                     ):
                         inners += FMHA_FWD_SPLITKV_API_INNER_DISPATCH.format(
                             F_if=if_(i_trait),
@@ -931,7 +943,17 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         if dtype in ["fp16", "bf16"] and hdim == 128:
             Pipeline = FmhaFwdSplitKVPipeline
             for mask in get_mask_map(mask_impl).keys():
-                pipelines.append(Pipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask))  # fmt: skip
+                # qr_tdm_sched carries the same restrictions and is kept in the
+                # tree (pipeline, policy and tests all still build), but no
+                # instances are emitted for it: qr_tdm's tile is bm0 64, so
+                # seqtune hands it the unconditional fallback while
+                # qr_tdm_sched's 128-wide tile only gets "seqlen_q <= 128".
+                # Dispatch returns on the first hit, so qr_tdm_sched could never
+                # be reached on D128 and measured 1.19-1.76x slower anyway.
+                # To bring it back: re-enable the append below and restore its
+                # tile in get_hdim_tile_size_dict.
+                # pipelines.append(Pipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask))  # fmt: skip
         return pipelines
 
     @staticmethod
@@ -941,11 +963,44 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 #                      bm0, bn0, bk0, bn1, bk1,
                 "32" : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "64" : FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                # Second D128 entry is qr_tdm_sched's hand-tuned tile; it must
-                # match _QR_TDM_SCHED_TILES[(128, 128)] in fmha_fwd.py exactly,
-                # occupancy included, or the pipeline's policy assert fires.
+                # D128 carries three tiles, told apart by occupancy and bm0 (see
+                # the pairing rule in FmhaFwdSplitKVApiPool):
+                #   occupancy -1          -> qr / qr_nwarp_sshuffle
+                #   occupancy set, bm0 128 -> qr_tdm_sched, must match
+                #                             _QR_TDM_SCHED_TILES[(128,128)] in
+                #                             fmha_fwd.py exactly (occupancy
+                #                             included) or its policy assert fires
+                #   occupancy set, bm0 64  -> qr_tdm. Shape is the same as the qr
+                #                             tile above; occupancy 2 is what
+                #                             BlockFmhaPipelineQRKSVSTdm's own
+                #                             kBlockPerCu computes for D128 /
+                #                             NO_BIAS / kM0 64, so naming it here
+                #                             changes nothing but makes the tile
+                #                             distinguishable from qr's.
+                # D128 carries two tiles, told apart by occupancy (see the
+                # pairing rule in FmhaFwdSplitKVApiPool):
+                #   occupancy -1          -> qr / qr_nwarp_sshuffle
+                #   occupancy set, bm0 64 -> qr_tdm. Same shape as the qr tile
+                #                            above; occupancy 2 is what
+                #                            BlockFmhaPipelineQRKSVSTdm's own
+                #                            kBlockPerCu computes for D128 /
+                #                            NO_BIAS / kM0 64, so naming it here
+                #                            changes nothing but makes the tile
+                #                            distinguishable from qr's.
+                #
+                # qr_tdm_sched's 128-wide tile used to sit between them. It is
+                # gone along with its pipeline entry in get_pipelines -- see the
+                # comment there. Restoring it means adding back
+                #   FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4,1,1, 4,1,1, 16,16,32, 16,16,32, 1)
+                # which must match _QR_TDM_SCHED_TILES[(128,128)] in fmha_fwd.py
+                # exactly, occupancy included, or its policy assert fires.
+                #
+                # Two other qr_tdm tiles were measured and dropped: occupancy 3
+                # (same shape) was within noise everywhere, and bn0 32 was 4-5x
+                # slower because progressive K reload requires
+                # Gemm0::NIterPerWarp == 4, i.e. bn0 == 64.
                 "128": [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                        FmhaFwdTileSize(128, 128,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   1)],
+                        FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   2)],
                 "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
             }  # fmt: skip
         elif dtype in ["fp8", "bf8"]:
@@ -997,13 +1052,49 @@ def get_fwd_splitkv_blobs(
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
                     continue
-                # qr_tdm_sched owns the hand-tuned tiles carrying an explicit
-                # occupancy; every other tile keeps occupancy == -1.
-                if (tile.F_occupancy != -1) != (pipeline.tag == "qr_tdm_sched"):
+                # The two TDM split copies own the tiles carrying an explicit
+                # occupancy; every other tile keeps occupancy == -1. They are
+                # told apart by bm0: qr_tdm_sched's hand-tuned tile is 128 wide
+                # in M, qr_tdm's is 64 (same shape as the qr tile, which is why
+                # the occupancy is what separates them).
+                tdm_tags = ("qr_tdm_sched", "qr_tdm")
+                if (tile.F_occupancy != -1) != (pipeline.tag in tdm_tags):
                     continue
-                # Group mode is not covered yet for qr_tdm_sched (gappy paged kv
-                # and per-batch seqlen offsets are untested on the TDM path).
-                if pipeline.tag == "qr_tdm_sched" and mode == "group":
+                if pipeline.tag in tdm_tags:
+                    wanted_bm0 = 128 if pipeline.tag == "qr_tdm_sched" else 64
+                    if tile.F_bm0 != wanted_bm0:
+                        continue
+                # Group mode is not covered yet for either TDM copy (gappy paged
+                # kv and per-batch seqlen offsets are untested on the TDM path).
+                if pipeline.tag in tdm_tags and mode == "group":
+                    continue
+                # Drop the qr instances qr_tdm shadows. Both tiles are bm0 64, so
+                # seqtune gives both the unconditional fallback and every other
+                # dispatch predicate matches too -- qr would never be reached for
+                # this exact trait combination, it would just cost build time and
+                # binary size. qr stays for everything qr_tdm does not cover:
+                # bias, logits soft cap, paged kv, sink, group mode, col-major V,
+                # unpadded variants, and every head dim other than 128.
+                if (
+                    pipeline.tag == "qr"
+                    and mode == "batch"
+                    and hdim == 128
+                    and dtype in ["fp16", "bf16"]
+                    and (
+                        pipeline.F_vlayout,
+                        pipeline.F_spad,
+                        pipeline.F_skpad,
+                        pipeline.F_dpad,
+                        pipeline.F_dvpad,
+                        pipeline.F_logits,
+                        pipeline.F_bias,
+                        pipeline.F_lse,
+                        pipeline.F_squant,
+                        pipeline.F_pagedkv,
+                        pipeline.F_sink,
+                    )
+                    == ("row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f")
+                ):
                     continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
