@@ -583,4 +583,5 @@ def test_additive_bias_attn_values_rejects_null_ptr():
             include_bt_stride=True,
             additive_bias=None,
             include_additive_bias_strides=True,
+            kv_addr_limit=None,
         )
