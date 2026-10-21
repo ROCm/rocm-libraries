@@ -556,12 +556,33 @@ def _shutdown_worker_pool():
         pass
 
 
+def _coverage_subprocess_rc():
+    """Path to the worker coverage config when the coverage-unit lane asked for
+    worker measurement, else ``None``.
+
+    The lane sets ``TENSILE_COVERAGE_SUBPROCESS_RC`` so the native-rocisa workers
+    started below begin their own coverage (joblib/loky does not inherit the
+    parent's tracer). Unset in every normal run, so worker spawning is unchanged.
+    """
+    rc = os.environ.get("TENSILE_COVERAGE_SUBPROCESS_RC")
+    return rc if rc and os.path.isfile(rc) else None
+
+
 @contextmanager
 def _native_rocisa_workers():
     """Run the enclosed ParallelMap2 calls on fresh native-rocisa workers."""
     orig_backend = os.environ.get("ROCISA_BACKEND")
     orig_threads = globalParameters["CpuThreads"]
     os.environ["ROCISA_BACKEND"] = "rocisa"
+    # Under the coverage-unit lane, have the freshly spawned loky workers start
+    # their own coverage so the non-gfx1250 emitters they run are measured; set
+    # only here and restored below, so the main process and its xdist workers --
+    # already measured by pytest-cov -- never double-start coverage. No-op when
+    # the lane did not opt in (the common case).
+    cov_rc = _coverage_subprocess_rc()
+    orig_cov_start = os.environ.get("COVERAGE_PROCESS_START")
+    if cov_rc is not None:
+        os.environ["COVERAGE_PROCESS_START"] = cov_rc
     # Keep at least 2 threads so ParallelMap2 runs in worker processes, not in-process.
     if 0 <= orig_threads < 2:
         globalParameters["CpuThreads"] = 2
@@ -577,6 +598,11 @@ def _native_rocisa_workers():
             os.environ.pop("ROCISA_BACKEND", None)
         else:
             os.environ["ROCISA_BACKEND"] = orig_backend
+        if cov_rc is not None:
+            if orig_cov_start is None:
+                os.environ.pop("COVERAGE_PROCESS_START", None)
+            else:
+                os.environ["COVERAGE_PROCESS_START"] = orig_cov_start
 
 
 def _mapKernelsByBackend(fn, nativeFn, kernels):
