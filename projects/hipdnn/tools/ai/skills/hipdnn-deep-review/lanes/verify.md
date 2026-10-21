@@ -23,7 +23,7 @@ one to `IMPORTANT` or above, also run step 3.
    - Reuse the build directory, configure line and binaries `RUN` recorded under **Checked, no finding**, and never mutate the
      shared `$SCRATCH/RUN/` tree. Every scratch build disables clang-tidy as `RUN` does
      ([build-validate.md](build-validate.md) step 3). With none, build
-     the smallest target that holds the proof, or return `UNVERIFIED` with `no build
+     the smallest target that holds the proof (a full checkout is `fullclone "$SCRATCH/VER-<batch>/src" "$HEAD"`), or return `UNVERIFIED` with `no build
      available`.
    - **Mutating a built tree.** A build tree is bound to its absolute path (the generator hashes command lines), so a copy at
      another path rebuilds everything. Use `Mutation:` from `dispatch-context.md` when it names a recipe. Otherwise, in order:

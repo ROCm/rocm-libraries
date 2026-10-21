@@ -58,7 +58,7 @@ With no PR, save the intent document as `intent.md`. An empty description is an 
 Complete `PIN.md` by appending the `report.md` fields `init` does not write: `Change`,
 `Round`, `Repo`, `Stack parent`, `Description`, `Checks`, `PR bot`, `Build host`,
 `Leak terms`. `Build host: yes` needs `cmake`, `ninja`, a C++ compiler, a ROCm install
-(Linux: `${ROCM_PATH:-/opt/rocm}`; Windows: the wheel SDK, which `windows_rocm_setup.py --provision never --venv-path $SCRATCH/rocm-venv` from [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) validates; `RUN` provisions it with `--provision auto`; Clang present per that skill) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
+(Linux: `${ROCM_PATH:-/opt/rocm}`; Windows: the wheel SDK, which `windows_rocm_setup.py --provision never --venv-path $SCRATCH/rocm-venv` from [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) validates; when only the wheel SDK is missing, record `yes (RUN provisions the SDK)`, since `RUN` provisions it with `--provision auto`; Clang present per that skill) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
 the `therock-pr-bot` check. Round N > 1 also records the previous head and base, saves `git
 -C "$CLONE" range-diff <old-base>..<old-head> <new-base>..<new-head>` to `range-diff.txt` and
 writes `affected.txt` (*Iterate*); `partition.py packets` lists them when `range-diff.txt` exists.
@@ -144,7 +144,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `TESTB` | [test-breadth](lanes/test-breadth.md) | Which changed behaviors have tests at all | Non-documentation file changes |
 | `AUTH` | [author-testing](lanes/author-testing.md) | What the author and CI ran against what the change needs; M4, M5, PR bot. Its claims reconciliation against what `RUN` executed is the follow-up `AUTH-f1` | Always |
 | `BUILD` | [build-packaging](lanes/build-packaging.md) | CMake targets, option defaults and registration, install rules, exported config, CI files | `CMakeLists.txt`, `*.cmake`, `*.cmake.in`, any `CMakePresets.json`, `*test_categories*.yaml`, `.github/` or `version.json` changes |
-| `DEPS` | [dependencies](lanes/dependencies.md) | New dependencies and boundary crossings | CMake, `pyproject.toml`, `requirements*.txt`, `.github/` or C/C++/HIP source (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hip`, `.cu`) changes |
+| `DEPS` | [dependencies](lanes/dependencies.md) | New dependencies and boundary crossings | CMake, `pyproject.toml`, `requirements*.txt`, `.github/` or C/C++/HIP source (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`, `.hip`, `.cu`, `.cuh`) changes |
 | `API` | [public-api](lanes/public-api.md) | Public surfaces, behavior changes in source, docs of new public declarations | A file in the brief's surfaces table, or non-test source under `projects/hipdnn/` or `dnn-providers/`, changes |
 | `ROCK` | [therock](lanes/therock.md) | Whether TheRock CI builds and tests the change: skip-ci, job, family and tier selection, flags, RPATH, CTest files, artifact split, Windows lookup | Non-documentation file changes |
 | `LEAK` | [leaks](lanes/leaks.md) | Private information in the change and in review output | Always |
@@ -242,10 +242,12 @@ waits; the answer resumes the round (*Iterate*, same head).
 A follow-up dispatch (approved request, decision, Handoff) carries the lane's report path and
 the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's last `p<n>`.
 
-`AUTH` runs in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
+`AUTH` and `TESTQ` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
-Re-dispatch it when `RUN` is re-dispatched with an approval.
+When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from
+`RUN`'s regression-test runs ([lanes/test-quality.md](lanes/test-quality.md)). A lane's newest follow-up report wins when
+`ledger.py mlines` reads an `M<n>:` line. Re-dispatch both when `RUN` is re-dispatched with an approval.
 
 An agent that fails, times out or returns a non-conforming report twice is `FAILED
 (<reason>)` in the Lanes table; split an over-large lane by area before the second attempt.
@@ -349,6 +351,6 @@ row, so when a later head breaks a closed finding, `ledger.py set ... <ID> OPEN`
 Decisions and Open questions tables, by hand.
 
 **Gate:** [SKILL.md](SKILL.md) *Completion*. On closing, `pin.py cleanup --evidence "$EVIDENCE"
---round <N>` removes the review worktrees under `$SCRATCH` (including the lanes') and this
-review's refs (a head that exists only as a ref is lost); it keeps `$EVIDENCE` and prints
-`removed <n> worktrees, <m> refs`.
+--round <N>` removes the review worktrees under `$SCRATCH` (including the lanes'), the `fullclone` checkouts
+`$SCRATCH/RUN/head`, `RUN/base` and `ROCK/src`, and this review's refs (a head that exists only as a ref is lost); it keeps
+`$EVIDENCE` and prints `removed <n> worktrees, <m> refs`.

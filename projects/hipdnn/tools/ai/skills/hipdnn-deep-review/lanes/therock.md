@@ -16,7 +16,7 @@ ROCK_REF=$(pin "$HEAD"); ROCK_REF_BASE=$(pin "$BASE")
 git -C "$CLONE" -c gc.auto=0 grep -nE 'ROCm/TheRock.*@[0-9a-f]{40}|ref: .*[0-9a-f]{40}' "$HEAD" -- .github | "$GREP" -v "$ROCK_REF"
 T=$SCRATCH/ROCK/therock
 printf '%s\n' "$ROCK_REF" > "$SCRATCH/ROCK/ref"; printf '%s\n' "$ROCK_REF_BASE" > "$SCRATCH/ROCK/ref-base"; printf '%s\n' "$T" > "$SCRATCH/ROCK/T"
-git clone -q --filter=blob:none https://github.com/ROCm/TheRock "$T" && git -C "$T" checkout -q "$ROCK_REF" || exit 1
+git clone -q --filter=blob:none https://github.com/ROCm/TheRock "$T" && git -C "$T" checkout -q "$ROCK_REF" || { echo "STOP: cannot check out TheRock at $ROCK_REF" >&2; exit 1; }
 ```
 
 When the block stops, the lane returns `STOP: <reason>`. Later blocks begin with `. ./env.sh;
@@ -114,7 +114,7 @@ resolve it per workflow from four places:
 | `FLAGS.cmake` `THEROCK_FLAG_*` | ON injects the flag's CMake vars. OFF injects nothing, so the component default stands (`therock_flag_utils.cmake`) |
 | `extra_cmake_options` in each rocm-libraries workflow | Per-run overrides: `git -C "$CLONE" grep -n THEROCK_FLAG_ "$HEAD" -- .github/workflows` (PR, nightly, ASAN, flag-on lanes) |
 
-The code is covered only by workflows where it resolves ON and whose families test it. Count a family only from executed test counts in its job logs (`gh run view <run-id> -R <owner>/<repo> --log > "$EVIDENCE/r<N>/lanes/ROCK-evidence/run-<id>.log"`, then `"$GREP"` the file; the run id is the `/runs/<id>/` segment of a check's `html_url`).
+The code is covered only by workflows where it resolves ON and whose families test it. Count a family only from executed test counts in its job logs (`mkdir -p "$EVIDENCE/r<N>/lanes/ROCK-evidence"; gh run view <run-id> -R <owner>/<repo> --log > "$EVIDENCE/r<N>/lanes/ROCK-evidence/run-<id>.log"`, then `"$GREP"` the file; the run id is the `/runs/<id>/` segment of a check's `html_url`).
 
 ## 4. Will TheRock package and run it?
 
@@ -129,7 +129,7 @@ not parameterize them per provider. Once approved, build in `$SCRATCH/ROCK/build
 
 ```bash
 . ./env.sh; T=$(cat "$SCRATCH/ROCK/T")
-git clone --shared --no-checkout "$CLONE" "$SCRATCH/ROCK/src" && git -C "$SCRATCH/ROCK/src" checkout --detach "$HEAD" || exit 1
+fullclone "$SCRATCH/ROCK/src" "$HEAD" || exit 1
 cmake -S "$T" -B "$SCRATCH/ROCK/build" -GNinja -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR="$SCRATCH/ROCK/src" \
   -DTHEROCK_AMDGPU_TARGETS=<arch> -DTHEROCK_DIST_AMDGPU_TARGETS=<arch> -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_HIPDNN=ON
 ninja -C "$SCRATCH/ROCK/build" -j<cores> hipDNN+stage

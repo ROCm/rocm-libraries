@@ -36,3 +36,9 @@ Judge whether each added or changed test, and each change to test configuration,
 - **Conventions.** Names and tiers follow `projects/hipdnn/docs/TESTING.md`, `projects/hipdnn/test_categories.yaml` and the
   provider `test_categories*.yaml`. Graph correctness uses JSON bundles per `dnn-providers/integration-tests/docs/file-formats.md` unless
   there is a reason.
+
+## Reconcile with `RUN` (`TESTQ-f1`)
+
+Read the `TESTQ` and `RUN` reports and rewrite the `M1:` line from `RUN`'s regression-test rows under **Checked, no finding**: `PASS` when
+each regression test fails at `$BASE` (or with the fix reverted) and passes at `$HEAD`; `FAIL` when one passes without the fix, so it
+is not a regression test (file the finding); `UNVERIFIED` when `RUN` could not run it. Write only this line and any new findings.

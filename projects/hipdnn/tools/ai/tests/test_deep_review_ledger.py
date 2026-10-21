@@ -448,6 +448,11 @@ def test_set_closes_accepts_and_reopens_and_verdicts_skip_closed_rows(
     run(ledger, "set", ev, 3, "CORR-1", "OPEN")
     rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
     assert (rows["CORR-1"]["Status"], rows["CORR-1"]["Round closed"]) == ("OPEN", "")
+    assert rows["CORR-1"]["Verdict"] == ""
+    (ev / "r1" / "verify" / "CORR-1.md").unlink()
+    capsys.readouterr()
+    run(ledger, "verdicts", ev)
+    assert "missing: CORR-1" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -463,3 +468,20 @@ def test_set_rejects_incomplete_or_unknown(ledger, ev, args, capsys):
     make_candidates(ledger, ev, "IMPORTANT")
     capsys.readouterr()
     assert run(ledger, "set", ev, 1, *args) == 1
+
+
+def test_mlines_newest_follow_up_wins(ledger, ev, capsys):
+    seeded(ledger, ev)
+    lanes = ev / "r1" / "lanes"
+    (lanes / "TESTQ.md").write_text(
+        report("TESTQ", mlines=["M1: UNVERIFIED not run", "M3: PASS ok"])
+    )
+    (lanes / "TESTQ-f1.md").write_text(
+        report("TESTQ-f1", mlines=["M1: PASS fails at base"])
+    )
+    (lanes / "TESTB.md").write_text(report("TESTB", mlines=["M2: PASS covered"]))
+    (lanes / "AUTH.md").write_text(report("AUTH", mlines=["M4: PASS t", "M5: PASS t"]))
+    capsys.readouterr()
+    assert run(ledger, "mlines", ev) == 0
+    out = capsys.readouterr().out
+    assert "M1 PASS (TESTQ-f1)" in out and "UNVERIFIED" not in out

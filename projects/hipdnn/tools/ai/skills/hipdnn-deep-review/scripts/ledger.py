@@ -60,8 +60,18 @@ def collapse(text):
     return " ".join(text.split())
 
 
+def report_order(path):
+    """Sort key: a lane's report, then its follow-ups in numeric order (`AUTH`, `AUTH-f1`,
+    `AUTH-f2`), so the last report of a lane is its newest."""
+    lane, _, follow = path.stem.partition("-f")
+    return (lane, int(follow) if follow.isdigit() else 0, path.stem)
+
+
 def read_reports(rp, pattern="lanes/*.md"):
-    return [(p.stem, p.read_text(encoding="utf-8")) for p in sorted(rp.glob(pattern))]
+    return [
+        (p.stem, p.read_text(encoding="utf-8"))
+        for p in sorted(rp.glob(pattern), key=report_order)
+    ]
 
 
 def cmd_seed(a):
@@ -386,8 +396,7 @@ def cmd_counts(a):
 def cmd_set(a):
     """Set one finding's status by hand: `FIXED@<sha>` (needs --class, the evidence class of
     the proof that it no longer holds), `ACCEPTED-RISK` (needs --note, the human decision;
-    also appends a Decisions row) or `OPEN` (reopen a closed row; `verdicts` then re-verifies
-    it). Sets or clears the row's Round closed. `verdicts` never touches FIXED or
+    also appends a Decisions row) or `OPEN` (reopen a closed row and clear its verdict, so `verdicts` lists it as missing until it is re-verified). Sets or clears the row's Round closed. `verdicts` never touches FIXED or
     ACCEPTED-RISK rows."""
     status = a.status
     if (
@@ -411,6 +420,10 @@ def cmd_set(a):
     row = rows[0]
     row["Status"] = status
     row["Round closed"] = "" if status == "OPEN" else str(a.round)
+    if status == "OPEN":
+        row["Verdict"] = (
+            ""  # `verdicts` then lists it as `missing:` until a verifier files a new verdict
+        )
     if status.startswith("FIXED"):
         row["Evidence"] = collapse(f"{a.evidence_class}: {a.note or row['Evidence']}")
     if status == "ACCEPTED-RISK":

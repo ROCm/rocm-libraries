@@ -13,7 +13,7 @@ reports after `RUN` returns and does only *Reconcile with `RUN`*.
 2. **Executed in CI.** For every check run at `$HEAD` that executes tests, record suite, arch, OS, and executed and skipped counts:
    `gh api --paginate "repos/<owner>/<repo>/commits/$HEAD/check-runs" --jq '.check_runs[] | [.name,.conclusion,.html_url] | @tsv'`;
    the run id is the `/runs/<id>/` segment of a check's `html_url`. Save each log, never print it:
-   `gh run view <id> -R <owner>/<repo> --log > "$EVIDENCE/r<N>/lanes/AUTH-evidence/run-<id>.log"`, then `"$GREP"` the file. With no PR or no checks, record "no CI"; absent CI is a finding only
+   `mkdir -p "$EVIDENCE/r<N>/lanes/AUTH-evidence"; gh run view <id> -R <owner>/<repo> --log > "$EVIDENCE/r<N>/lanes/AUTH-evidence/run-<id>.log"`, then `"$GREP"` the file. With no PR or no checks, record "no CI"; absent CI is a finding only
    where step 3 requires an executed run. Sources:
    - `.github/workflows/hipdnn-superbuild-ci.yml` (PRs touching `projects/hipdnn/**` or `dnn-providers/**`): ctest and pytest on one
      Linux and one Windows target. `GPU_TARGET` selects only the build target. The runners (`azure-*-scale-rocm`) have shown no GPU
@@ -59,5 +59,6 @@ TheRock (`AUTH` must not clone it):
 ```bash
 . ./env.sh
 ref=$(git -C "$CLONE" show "$HEAD:.github/actions/ci-env/action.yml" | "$GREP" -A2 'therock-ref:' | "$GREP" -oE '[0-9a-f]{40}' | head -n1)
+[ ${#ref} -eq 40 ] || { echo "STOP: cannot read therock-ref at HEAD" >&2; exit 1; }
 gh api "repos/ROCm/TheRock/contents/build_tools/github_actions/amdgpu_family_matrix.py?ref=$ref" --jq .content | base64 -d
 ```

@@ -290,3 +290,23 @@ def test_env_sh_exports_gnu_grep(pin, origin):
     assert run("bash", "-c", f'. "{env}"; "$GREP" --version | head -n1').startswith(
         "grep"
     )
+
+
+@needs_posix_bash
+def test_fullclone_checks_out_a_full_tree_and_cleanup_removes_it(pin, origin):
+    pin.main(init_args(origin, "--branch", "feat/one"))
+    t = origin["tmp"]
+    env = t / "ev/r1/env.sh"
+    head = t / "scratch/RUN/head"
+    script = f'. "{env}"; mkdir -p "$SCRATCH/RUN"; fullclone "$SCRATCH/RUN/head" "$HEAD" && fullclone "$SCRATCH/RUN/head" "$BASE" && git -C "$SCRATCH/RUN/head" rev-parse HEAD'
+    assert run("bash", "-c", script).splitlines()[-1] == origin["base"]
+    assert (head / "projects/hipdnn/src/a.cpp").read_text() == "a\n"
+    clone = t / "scratch/clone"
+    assert (
+        run("git", "-C", str(clone), "worktree", "list", "--porcelain").count(
+            "worktree "
+        )
+        == 3
+    )
+    pin.main(["cleanup", "--evidence", str(t / "ev"), "--round", "1"])
+    assert not head.exists()

@@ -55,7 +55,7 @@ if [ -d pr ]; then
   for k in branch pr-text pr-comment pr-inline; do meta "$k" < "pr/$k.txt"; done
 else
   [ -f intent.md ] && meta intent < intent.md
-  BRANCH_NAME=$(awk -F': *' '/^Change:/{print $2}' PIN.md)   # a range target has no branch
+  BRANCH_NAME=$(sed -n 's/^Change: *//p' PIN.md)   # a range target has no branch
   case $BRANCH_NAME in branch:*) printf '%s\n' "${BRANCH_NAME#branch:}" | meta branch ;; esac
 fi
 ```

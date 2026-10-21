@@ -14,8 +14,7 @@ When your packet lists owned files (docs-only change), you are the correctness o
 ## Concision
 
 Concision, hedging, filler, marketing and table-versus-prose points are findings only when the bloat hides a requirement,
-contradicts another document or makes an instruction ambiguous (`SUGGESTION`, or per [../findings.md](../findings.md) tier
-rules); otherwise they are checked, no finding. When one is a finding, propose a shorter version. Look for:
+contradicts another document or makes an instruction ambiguous (`SUGGESTION`; tiers per [../policy.md](../policy.md) *Tiers*); otherwise they are checked, no finding. When one is a finding, propose a shorter version. Look for:
 
 - Sentences that restate the code, the heading or the previous sentence; preamble, recaps and closing summaries.
 - Hedging, filler and marketing ("simply", "robust", "powerful", "it is important to note").

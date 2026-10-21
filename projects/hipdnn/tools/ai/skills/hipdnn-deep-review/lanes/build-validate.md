@@ -6,17 +6,15 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
 
 ## Steps
 
-1. **Checkout.** Create full (non-sparse) worktrees without writing to `$CLONE` (`$CLONE` is blobless, so the checkout fetches
-   blobs over the network, as expected):
+1. **Checkout.** Create a full (non-sparse) checkout without writing to `$CLONE`. `fullclone` (from `env.sh`) shares `$CLONE`'s
+   objects and fetches the blobs `$CLONE` lacks from the real origin; it reuses an existing directory and moves it to the SHA:
 
    ```bash
-   . ./env.sh; mkdir -p "$SCRATCH/RUN"
-   git clone --shared --no-checkout "$CLONE" "$SCRATCH/RUN/head" && git -C "$SCRATCH/RUN/head" checkout --detach "$HEAD"
-   git clone --shared --no-checkout "$CLONE" "$SCRATCH/RUN/base" && git -C "$SCRATCH/RUN/base" checkout --detach "$BASE"
+   . ./env.sh; mkdir -p "$SCRATCH/RUN"; fullclone "$SCRATCH/RUN/head" "$HEAD"
    ```
 
-   Tests resolve paths against the repository root, so `$SCRATCH/RUN/head` is a full worktree. Create `$SCRATCH/RUN/base` only for
-   a base reproduction (steps 6 and 7). A change that builds nothing (docs or tooling only) still needs `$SCRATCH/RUN/head` for
+   Tests resolve paths against the repository root, so `$SCRATCH/RUN/head` is a full checkout. Create `$SCRATCH/RUN/base` the same
+   way (`fullclone "$SCRATCH/RUN/base" "$BASE"`) only for a base reproduction (steps 6 and 7). A change that builds nothing (docs or tooling only) still needs `$SCRATCH/RUN/head` for
    `pre-commit` (a sparse clone is fine there); other read-only checks may run in `$REPO`, but `pre-commit` never does. Never
    build in `$REPO` or `$REPO_BASE`. Without a ROCm install, CMake, Ninja and a C++ toolchain, build nothing and write
    `Build: none (<missing>)` under **Coverage**; `defect` and `test-gap` candidates then stay `UNVERIFIED`.
@@ -38,8 +36,8 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
 
    A raw standalone build is used only when the PR's own steps or the change itself requires it (options the superbuild does not expose), and never on Windows: it skips the superbuild's DLL staging (`amd_comgr.dll`, `amdhip64_<N>.dll`), so load failures would also occur at `$BASE`, be labelled pre-existing and drop coverage.
 
-   Run `pre-commit` as `. ./env.sh; cd "$SCRATCH/RUN/head" && PRE_COMMIT_HOME="$SCRATCH/RUN/pre-commit" pre-commit run --files
-   <changed files>`. Its hooks include fixers (black, `clang-format -i`, end-of-file-fixer, trailing-whitespace), which is why it
+   Run `pre-commit` as `( . ./env.sh; cd "$SCRATCH/RUN/head" && PRE_COMMIT_HOME="$SCRATCH/RUN/pre-commit" pre-commit run --files
+   <changed files> )`. Its hooks include fixers (black, `clang-format -i`, end-of-file-fixer, trailing-whitespace), which is why it
    never runs in `$REPO`. Then record `git -C "$SCRATCH/RUN/head" status --porcelain`: a hook that modified a file is a finding
    (the change is not clean); discard the modification.
 

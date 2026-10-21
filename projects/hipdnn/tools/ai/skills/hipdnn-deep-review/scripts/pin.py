@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,12 @@ ENV_SH = (
     + PIN_VARS
     + r"""):/{v=$0; sub(/^[A-Z_]+: */,"",v); k=$1; sub(/:$/,"",k); gsub(/\047/,"\047\\\047\047",v); print "export " k "=\047" v "\047"}' "$(dirname "${BASH_SOURCE[0]}")/PIN.md")"
 GREP="$(command -v ggrep || echo /usr/bin/grep)"; export GREP
+# fullclone <dir> <sha>: a full checkout of <sha> that never writes to $CLONE. $CLONE is blobless, so the copy keeps its objects
+# by alternates and fetches missing blobs from the real origin; an existing <dir> is reused and moved to <sha>.
+fullclone() { { [ -d "$1/.git" ] || git clone -q --shared --no-checkout "$CLONE" "$1"; } &&
+  git -C "$1" remote set-url origin "$(git -C "$CLONE" remote get-url origin)" &&
+  git -C "$1" config remote.origin.promisor true && git -C "$1" config remote.origin.partialclonefilter blob:none &&
+  git -C "$1" checkout -q --detach "$2" || { echo "STOP: cannot check out $2 in $1" >&2; return 1; }; }
 : "${EVIDENCE:?}" "${SCRATCH:?}" "${CLONE:?}" "${KEY:?}"; cd "$(dirname "${BASH_SOURCE[0]}")"
 """
 )
@@ -326,6 +333,16 @@ def read_pin(rdir):
     return pin
 
 
+def remove_tree(path):
+    """rmtree that also removes read-only git object files (Windows)."""
+
+    def writable(func, p, _exc):
+        os.chmod(p, 0o700)
+        func(p)
+
+    shutil.rmtree(path, onerror=writable)
+
+
 def same_path(text):
     """Comparable form of a path: git prints `C:/x` where PIN.md holds `C:\\x`, and Windows
     paths ignore case."""
@@ -338,8 +355,12 @@ def cmd_cleanup(args):
     clone, key = pin["CLONE"], pin["KEY"]
     clone_path, scratch_path = same_path(clone), same_path(pin["SCRATCH"])
     n = 0
+    for rel in ("RUN/head", "RUN/base", "ROCK/src"):
+        if (scratch_path / rel).is_dir():
+            remove_tree(scratch_path / rel)
+            n += 1
     if not Path(clone).is_dir():
-        print("removed 0 worktrees, 0 refs (no clone)")
+        print(f"removed {n} worktrees, 0 refs (no clone)")
         return
     for line in git(clone, "worktree", "list", "--porcelain").splitlines():
         if line.startswith("worktree "):

@@ -27,8 +27,9 @@ shared, published or swept, and no report or comment may depend on a reader open
 - Read the description (`pr/body.md` or `intent.md`) with its `Known issues` items (`K<n>`). Do not file a known item. File it
   only when the description understates it (worse effect, wider reach or higher tier than stated); the finding then says
   `understated: known-open-item K<n>`.
-- Shell blocks begin `. ./env.sh`, which exports the variables above and `GREP`: run them from `$EVIDENCE/r<N>/` (`cd` there
-  first; the absolute paths are in `dispatch-context.md`). A block that prints `STOP:` ends the lane with `STOP: <reason>`.
+- Shell blocks begin `. ./env.sh`, which exports the variables above, `GREP` and `fullclone`: run each block as its own
+  command in a subshell (`( … )` or `bash -c`) from `$EVIDENCE/r<N>/` (the absolute paths are in `dispatch-context.md`), so a
+  `cd` or an `exit` does not outlive it. A block that prints `STOP:` ends the lane with `STOP: <reason>`.
 - Never edit `$REPO`, `$REPO_BASE` or `$CLONE`, or write refs into `$CLONE`. To try a fetch,
   `git clone --shared --no-checkout` it into `$SCRATCH/<ID>/clone` and `git remote set-url
   origin https://github.com/<owner>/<repo>.git` there.
