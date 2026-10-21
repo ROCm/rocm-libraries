@@ -79,7 +79,7 @@ def load_output_fail_pattern():
     disables that scan; a test then fails only on its exit status or timeout.
     """
     global output_fail_re
-    raw = os.environ.get("ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN", "").strip()
+    raw = os.environ.get("ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN", "")
     if not raw:
         output_fail_re = None
         return
@@ -284,7 +284,7 @@ def run_cmd(cmd, test = False, time_limit = 0, path = "" ):
                     # Optional text scan. Skip the GTest summary line, which
                     # contains "FAILED" while the process exit status already
                     # records that result.
-                    if output_fail_re is not None and not re.search(r'\[ FAILED.*\]', outstring):
+                    if output_fail_re is not None and not re.search(r'\[\s+FAILED.*\]', outstring):
                         error = error or bool(output_fail_re.search(outstring))
             status = test_proc.poll()
             if time_limit > 0:
@@ -452,9 +452,10 @@ def main():
     global args
     global timer_thread
 
-    load_output_fail_pattern()
     os_detect()
     args = parse_args()
+
+    load_output_fail_pattern()
 
     # PR / CI labels (e.g. GitHub Actions): semicolon-separated, same format as --ci_labels.
     # When --ci_labels is omitted, use GITHUB_PR_LABELS from the environment (e.g. set by CI before ctest).
