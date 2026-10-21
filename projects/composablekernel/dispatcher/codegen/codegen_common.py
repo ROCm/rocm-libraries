@@ -802,6 +802,23 @@ _VEC_ELEMENT_BYTES = {
 }
 
 
+def streamk_atomic_c_reject_reason(
+    reduction_strategy: Optional[str], vector_size_c: int, dtype_c: str
+) -> Optional[str]:
+    """Why a Stream-K C store width is illegal for ``reduction_strategy`` (None if legal).
+
+    Only the atomic strategy adds partial C tiles into C, with buffer atomics that
+    need at least 4 bytes. Linear and tree reduce the partials in an fp32 workspace
+    and store C with a plain store (StreamKTilePartitionerBase::MemoryOperation is
+    ``set``), so any width works for them. ``vector_size_c`` of 0 means native.
+    """
+    if reduction_strategy != "atomic" or not vector_size_c:
+        return None
+    if vector_size_c * _VEC_ELEMENT_BYTES.get(dtype_c, 2) < 4:
+        return f"stream_k atomic C store needs >= 4 bytes, got vector_size_c={vector_size_c}"
+    return None
+
+
 def _native_ab_vector_size(
     elem: int, mn_per_block: int, x_per_tile: int, tile_k: int, block_size: int
 ) -> int:
@@ -1076,6 +1093,7 @@ def resolve_gemm_vector_sizes(
     pipeline: str = "compv3",
     epilogue: str = "cshuffle",
     variant: str = "standard",
+    reduction_strategy: Optional[str] = "atomic",
 ) -> Tuple[Tuple[int, int, int], Optional[str]]:
     """Resolve requested A/B/C global vector widths to the canonical triple.
 
@@ -1084,6 +1102,10 @@ def resolve_gemm_vector_sizes(
     where ``triple`` is ``(0, 0, 0)`` when every effective width equals the
     native one, and ``reject_reason`` is None when the widths are legal for
     this tile (otherwise a short human-readable string).
+
+    ``reduction_strategy`` only matters for ``variant="stream_k"``: the atomic
+    strategy needs a C store of at least 4 bytes, linear and tree do not. None
+    defers that check to the caller, which applies it per strategy.
     """
     native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
         dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
@@ -1121,12 +1143,10 @@ def resolve_gemm_vector_sizes(
                     f"comp_async async copy cannot move {width * elem} bytes "
                     f"(vector_size_{name}={width})",
                 )
-    # Stream-K reduces partial C tiles with buffer atomics, which need >= 4 bytes.
-    if variant == "stream_k" and eff[2] * ec < 4:
-        return (
-            eff,
-            f"stream_k atomic C store needs >= 4 bytes, got vector_size_c={eff[2]}",
-        )
+    if variant == "stream_k":
+        c_reason = streamk_atomic_c_reject_reason(reduction_strategy, eff[2], dtype_c)
+        if c_reason:
+            return eff, c_reason
     # K-major-in-LDS operands (col-major A / row-major B) on wave64 need
     # (tile_k / Y2) >= warp_size / warp_tile_mn in the LDS descriptor.
     for name, width, (y, x), xdl, k_out in (

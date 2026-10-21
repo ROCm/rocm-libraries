@@ -43,6 +43,7 @@ from codegen_common import (
     gemm_default_epilogue_vector_size,
     gemm_vector_size_suffix,
     resolve_gemm_vector_sizes,
+    streamk_atomic_c_reject_reason,
     normalize_gfx_arch,
 )
 
@@ -2005,6 +2006,14 @@ class UnifiedGemmCodegen:
                     streamk_cfg = self.config.get("streamk_config", {})
                     strategies = streamk_cfg.get("reduction_strategy", ["atomic"])
                     for reduction_strategy in strategies:
+                        reason = streamk_atomic_c_reject_reason(
+                            reduction_strategy,
+                            trait.vector_size_c,
+                            TypeMappings.get_output_dtype(self.datatype),
+                        )
+                        if reason:
+                            vector_rejects[reason] = vector_rejects.get(reason, 0) + 1
+                            continue
                         configs.append(
                             KernelConfig(
                                 tile=tile,
@@ -2145,6 +2154,9 @@ class UnifiedGemmCodegen:
             pipeline=trait.pipeline,
             epilogue=trait.epilogue,
             variant=variant.value,
+            # Stream-K's C-width rule depends on the reduction strategy, which is
+            # expanded per trait below; it is applied there.
+            reduction_strategy=None if variant == GemmVariant.STREAM_K else "atomic",
         )
         # Fixed widths only serve misaligned extents, which always need padding.
         pads = dict(pad_m=True, pad_n=True, pad_k=True) if any(vec) else {}

@@ -36,7 +36,6 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import replace
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -338,16 +337,16 @@ def main():
                 dtype=args.dtype,
                 layout=args.layout,
                 variant="stream_k",
+                # Applied while expanding, so each fixed vector width is checked
+                # against the strategy that will actually run it.
+                reduction_strategies=(
+                    [args.reduction_strategy] if args.reduction_strategy else None
+                ),
                 **vfb.expand_kwargs,
             )
         )
 
     vfb.report_rejects()
-
-    if args.reduction_strategy is not None:
-        all_configs = [
-            replace(c, reduction_strategy=args.reduction_strategy) for c in all_configs
-        ]
 
     all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
