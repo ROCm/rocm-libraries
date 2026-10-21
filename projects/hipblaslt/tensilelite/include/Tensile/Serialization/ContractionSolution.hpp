@@ -252,7 +252,7 @@ namespace TensileLite
             static void mapping(IO& io, ContractionSolution::InternalArgsSupport& s)
             {
                 iot::mapRequired(io, "version", s.version);
-                iot::mapOptional(io, "persistentLoopArgsVersion", s.persistentLoopArgsVersion);
+                iot::mapOptional(io, "persistentLoopArgsVersion", s.persistentLoopArgsVersion, 0);
                 iot::mapRequired(io, "gsu", s.gsu);
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
@@ -330,9 +330,11 @@ namespace TensileLite
             using iot = IOTraits<IO>;
             static void mapping(IO& io, ContractionSolution::LinearModel& s)
             {
-                iot::mapOptional(io, "slope", s.slope);
+                iot::mapOptional(io, "slope", s.slope, 1.0);
+                // Not defaulted: -0.0 compares equal to the 0.0 an absent key
+                // means, so omitting it would drop the sign.
                 iot::mapOptional(io, "intercept", s.intercept);
-                iot::mapOptional(io, "max", s.max);
+                iot::mapOptional(io, "max", s.max, 1000.0);
             }
 
             const static bool flow = false;
