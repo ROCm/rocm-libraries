@@ -23,6 +23,8 @@ __all__ = [
     "DIRECT_DGRAD_REORGANIZE_RTC",
     "DIRECT_DGRAD_TRANSPOSE",
     "DIRECT_DGRAD_TRANSPOSE_RTC",
+    "DIRECT_DGRAD_PATCH_WMMA",
+    "DIRECT_DGRAD_SMALLC_WMMA",
     "DIRECT_DGRAD_WMMA",
     "DIRECT_GROUPED_HALO",
     "DIRECT_HALO_VARIANTS",
@@ -53,6 +55,11 @@ DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
 DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
+# Wave32 WMMA dgrad of stem convolutions (C <= 4, ungrouped): a patch
+# embedding as one GEMM with a pixel-shuffle store, and overlapping stems as a
+# GEMM over the flattened (r, s, c) followed by col2im in LDS.
+DIRECT_DGRAD_PATCH_WMMA = "direct_dgrad_patch_wmma"
+DIRECT_DGRAD_SMALLC_WMMA = "direct_dgrad_smallc_wmma"
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
 DIRECT_GROUPED_HALO = "direct_grouped_halo"
@@ -137,6 +144,18 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
 
         return DirectDgradWmmaSpec(
             problem=problem, name="rocke_direct_dgrad_wmma", **knobs
+        )
+    if variant == DIRECT_DGRAD_PATCH_WMMA:
+        from kernels.common.conv_dgrad_patch_wmma import DgradPatchWmmaSpec
+
+        return DgradPatchWmmaSpec(
+            problem=problem, name="rocke_dgrad_patch_wmma", **knobs
+        )
+    if variant == DIRECT_DGRAD_SMALLC_WMMA:
+        from kernels.common.conv_dgrad_smallc_wmma import DgradSmallcWmmaSpec
+
+        return DgradSmallcWmmaSpec(
+            problem=problem, name="rocke_dgrad_smallc_wmma", **knobs
         )
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
@@ -437,6 +456,16 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
         if variant == "direct_grouped_dgrad_4c":
             spec.validate()
             return dc.is_valid_spec_4c(spec, arch=arch)
+        if variant == DIRECT_DGRAD_PATCH_WMMA:
+            from kernels.common.conv_dgrad_patch_wmma import is_valid_dgrad_patch_spec
+
+            return is_valid_dgrad_patch_spec(spec, arch=arch)
+        if variant == DIRECT_DGRAD_SMALLC_WMMA:
+            from kernels.common.conv_dgrad_smallc_wmma import (
+                is_valid_dgrad_smallc_spec,
+            )
+
+            return is_valid_dgrad_smallc_spec(spec, arch=arch)
         if variant == "direct_wgrad":
             spec.validate()
             return dc.is_valid_wgrad_spec(spec, arch=arch)
@@ -489,6 +518,8 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     function for the ``(spec, arch)`` builder signature, and this one takes
     an extra ``variant``.
     """
+    from kernels.common import conv_dgrad_patch_wmma as dpw
+    from kernels.common import conv_dgrad_smallc_wmma as dsw
     from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
@@ -500,6 +531,8 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
 
     builders = {
         DIRECT_DGRAD_WMMA: dwm.build_direct_dgrad_wmma,
+        DIRECT_DGRAD_PATCH_WMMA: dpw.build_dgrad_patch_wmma,
+        DIRECT_DGRAD_SMALLC_WMMA: dsw.build_dgrad_smallc_wmma,
         "direct_wgrad_tiled": wt.build_direct_wgrad_tiled,
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,
@@ -608,6 +641,18 @@ def direct_spec_for_problem(
         from kernels.common.conv_direct_dgrad_wmma import dgrad_wmma_tile_efficiency
 
         eff = dgrad_wmma_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_DGRAD_PATCH_WMMA:
+        from kernels.common.conv_dgrad_patch_wmma import dgrad_patch_tile_efficiency
+
+        eff = dgrad_patch_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_DGRAD_SMALLC_WMMA:
+        from kernels.common.conv_dgrad_smallc_wmma import dgrad_smallc_tile_efficiency
+
+        eff = dgrad_smallc_tile_efficiency(spec)
         if eff < 0.5:
             return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
     if variant == DIRECT_GROUPED_HALO and spec.tile_k > spec.merged_k:
