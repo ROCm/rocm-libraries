@@ -8,6 +8,7 @@ import unittest
 from types import SimpleNamespace
 
 from rocke.benchmark.perf import occupancy
+from rocke.core.arch import ArchTarget, known_arches
 from rocke.tests.arch_marks import arch_specific
 
 _CDNA_ARCHS = ("gfx942", "gfx950")
@@ -225,16 +226,19 @@ def _find_llvm_tool(name):
     return None
 
 
-def _vgpr_kernel_ir(vgprs, wave_size=32):
-    """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs (it clobbers the top one).
+def _vgpr_kernel_ir(vgprs, wave_size=32, agprs=0):
+    """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs and ``agprs`` AGPRs
+    (it clobbers the top register of each).
 
     The workgroup is capped at 64 lanes so the workgroup size never limits the
-    occupancy the compiler reports; only the VGPR count does.
+    occupancy the compiler reports; only the register count does. ``wave_size``
+    only matters on RDNA: CDNA processors always build wave64 code.
     """
     features = ' "target-features"="+wavefrontsize64"' if wave_size == 64 else ""
+    clobbers = f"~{{v{vgprs - 1}}}" + (f",~{{a{agprs - 1}}}" if agprs else "")
     return (
         "define amdgpu_kernel void @k() #0 {\n"
-        f'  call void asm sideeffect "", "~{{v{vgprs - 1}}}"()\n'
+        f'  call void asm sideeffect "", "{clobbers}"()\n'
         "  ret void\n"
         "}\n"
         f'attributes #0 = {{ "amdgpu-flat-work-group-size"="1,64"{features} }}\n'
@@ -255,20 +259,21 @@ def _run_llc(llc, processor, ir, *extra_args):
     return out.stdout
 
 
-def _llc_occupancy(llc, processor, vgprs):
-    """The waves per SIMD llc reports for a kernel using ``vgprs`` VGPRs."""
-    asm = _run_llc(llc, processor, _vgpr_kernel_ir(vgprs), "-o", "-")
+def _llc_occupancy(llc, processor, vgprs, agprs=0):
+    """The waves per SIMD llc reports for a kernel using ``vgprs`` VGPRs and
+    ``agprs`` AGPRs."""
+    asm = _run_llc(llc, processor, _vgpr_kernel_ir(vgprs, agprs=agprs), "-o", "-")
     if asm is None:
         return None
     return int(re.search(rb"; Occupancy: (\d+)", asm).group(1))
 
 
-def _llc_code_object(llc, processor, vgprs, wave_size=32):
+def _llc_code_object(llc, processor, vgprs, wave_size=32, agprs=0):
     """A real relocatable code object (ELF with AMDGPU notes) built by llc."""
     obj = _run_llc(
         llc,
         processor,
-        _vgpr_kernel_ir(vgprs, wave_size),
+        _vgpr_kernel_ir(vgprs, wave_size, agprs),
         "-filetype=obj",
         "-o",
         "-",
@@ -364,6 +369,84 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
                     self.assertEqual(
                         res["occupancy"], _llc_occupancy(llc, processor, 128)
                     )
+
+
+# gfx908 register counts at the edges of every wave count, and the waves per SIMD
+# the compiler reports at each (separate 256-entry VGPR and AGPR files, steps of 4,
+# at most 10 waves).
+_GFX908_REGISTER_SWEEP = (1, 24, 25, 28, 29, 32, 33, 36, 37, 40, 41, 48, 49, 64, 65)
+_GFX908_REGISTER_SWEEP += (84, 85, 128, 129, 256)
+_GFX908_WAVES = (10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1)
+# (VGPRs, AGPRs) used by a kernel: VGPRs only, AGPRs only, and mixed. The code
+# object's ``.vgpr_count`` is the larger of the two.
+_GFX908_REGISTER_USES = (
+    (64, 0),
+    (65, 0),
+    (1, 64),
+    (1, 200),
+    (10, 64),
+    (100, 20),
+    (129, 128),
+    (256, 256),
+)
+
+
+class TestGfx908RegisterFiles(unittest.TestCase):
+    """The occupancy estimates on gfx908 match the compiler.
+
+    gfx908 has separate VGPR and AGPR files of 256 per SIMD each, both allocated in
+    steps of 4, at most 10 waves. Measured with the compiler's own occupancy report
+    for every VGPR count 1..256, every AGPR count 1..256 and a grid of mixed uses at
+    clang 20:
+
+        llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx908 -o - kernel.ll | grep Occupancy
+
+    where kernel.ll is ``_vgpr_kernel_ir(v, agprs=a)``.
+    """
+
+    def test_model_matches_the_measured_wave_counts(self):
+        for count, waves in zip(_GFX908_REGISTER_SWEEP, _GFX908_WAVES):
+            with self.subTest(count=count):
+                self.assertEqual(
+                    occupancy._occupancy_estimate(count, "gfx908", 64), waves
+                )
+
+    def test_code_objects_match_the_local_compiler(self):
+        # Real code objects, with and without AGPRs: both the VGPR-file estimate
+        # and the multi-limiter model read from the notes equal the wave count llc
+        # reports for the same kernel.
+        llc = _find_llvm_tool("llc")
+        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+            self.skipTest("llc or llvm-readelf not found")
+        for vgprs, agprs in _GFX908_REGISTER_USES:
+            with self.subTest(vgprs=vgprs, agprs=agprs):
+                code_object = _llc_code_object(
+                    llc, "gfx908", vgprs, wave_size=64, agprs=agprs
+                )
+                reported = _llc_occupancy(llc, "gfx908", vgprs, agprs)
+                res = occupancy.resources(code_object, "gfx1100")
+                self.assertEqual(res["target_arch"], "gfx908")
+                self.assertEqual(res["occupancy"], reported)
+                detail = occupancy.estimate_occupancy_detail(code_object, "gfx908")
+                self.assertEqual(detail["waves_per_simd"], reported)
+
+
+class TestEveryTargetIsModelled(unittest.TestCase):
+    """Every target rocKE lowers for has a register file in the occupancy model at
+    its wave size, so its VGPR-limited estimate is a number, never a gap. Every
+    wave64 target also has the caps of the multi-limiter model, which models
+    wave64 code only (for any other target it returns an empty result)."""
+
+    def test_every_known_target_has_a_register_file(self):
+        for arch in known_arches():
+            target = ArchTarget.from_gfx(arch)
+            with self.subTest(arch=arch):
+                self.assertIn(arch, occupancy._VGPR_FILES)
+                self.assertEqual(
+                    occupancy._VGPR_FILES[arch].wave_size, target.wave_size
+                )
+                if target.wave_size == 64:
+                    self.assertIn(arch, occupancy._ARCH_CAPS)
 
 
 class TestUnmodelledCodeIsRefused(unittest.TestCase):

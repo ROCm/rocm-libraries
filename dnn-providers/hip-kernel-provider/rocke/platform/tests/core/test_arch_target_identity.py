@@ -17,6 +17,7 @@ from rocke.core.arch import (
     known_arches,
     target_id_from_isa,
 )
+from rocke.core.arch.target import _load_generic_targets
 
 
 @pytest.mark.parametrize("arch", known_arches())
@@ -65,35 +66,35 @@ def test_target_id_extraction_accepts_all_triple_field_forms(
 
 
 @pytest.mark.parametrize(
-    "target_id",
+    ("target_id", "generic"),
     [
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1152",
-        "gfx1153",
-        "gfx1154",
+        (member, generic)
+        for generic, members in _load_generic_targets().items()
+        for member in members
     ],
 )
-def test_gfx11_processors_use_the_generic_catalog_row(target_id: str) -> None:
-    assert base_arch_from_target_id(target_id) == "gfx11-generic"
-    assert compiler_target_from_target_id(target_id) == target_id
+def test_generic_members_are_catalog_rows_of_their_own(
+    target_id: str, generic: str
+) -> None:
+    # Every member of a supported generic target has its own row, so catalog
+    # lookup keeps the processor's name; its generic is still found by name.
+    assert base_arch_from_target_id(target_id) == target_id
+    assert generic_arch_from_target_id(target_id) == generic
 
 
 @pytest.mark.parametrize(
-    ("target_id", "compiler_target"),
+    ("target_id", "base", "compiler_target"),
     [
-        ("gfx1101:unknown+", "gfx1101:unknown+"),
-        ("gfx1101-strict", "gfx1101"),
-        ("gfx1101-strict:unknown+", "gfx1101:unknown+"),
+        ("gfx1101:unknown+", "gfx1101", "gfx1101:unknown+"),
+        ("gfx1101-strict", "gfx1101", "gfx1101"),
+        ("gfx1101-strict:unknown+", "gfx1101", "gfx1101:unknown+"),
+        ("gfx1200-strict:xnack-", "gfx1200", "gfx1200:xnack-"),
     ],
 )
-def test_gfx11_generic_catalog_selection_is_independent_of_target_suffixes(
-    target_id: str, compiler_target: str
+def test_member_catalog_selection_is_independent_of_target_suffixes(
+    target_id: str, base: str, compiler_target: str
 ) -> None:
-    assert base_arch_from_target_id(target_id) == "gfx11-generic"
+    assert base_arch_from_target_id(target_id) == base
     assert compiler_target_from_target_id(target_id) == compiler_target
 
 
@@ -103,21 +104,6 @@ def test_nonmembers_do_not_use_a_generic_catalog_row(
 ) -> None:
     expected = "gfx1101" if target_id == "gfx1101_bad" else target_id
     assert base_arch_from_target_id(target_id) == expected
-
-
-@pytest.mark.parametrize(
-    ("target_id", "base", "compiler_target"),
-    [
-        ("gfx1200", "gfx12-generic", "gfx1200"),
-        ("gfx1200-strict:xnack-", "gfx12-generic", "gfx1200:xnack-"),
-        ("gfx1201", "gfx1201", "gfx1201"),
-    ],
-)
-def test_gfx12_processors_without_a_row_use_the_generic_catalog_row(
-    target_id: str, base: str, compiler_target: str
-) -> None:
-    assert base_arch_from_target_id(target_id) == base
-    assert compiler_target_from_target_id(target_id) == compiler_target
 
 
 @pytest.mark.parametrize(
@@ -159,8 +145,6 @@ def test_generic_arch_covers_family_members(target_id: str, generic) -> None:
 
 
 def test_generic_targets_are_catalogued_and_disjoint() -> None:
-    from rocke.core.arch.target import _load_generic_targets
-
     seen = set()
     for generic, members in _load_generic_targets().items():
         target = ArchTarget.from_gfx(generic)
@@ -213,8 +197,15 @@ def test_cpp_target_identity_matches_python() -> None:
         for profile in ("", "-strict")
         for features in ("", ":", ":sramecc+:xnack-", ":unknown+")
     ]
+    # The inputs go through standard input, one per line: as arguments they
+    # would outgrow the command-line length Windows allows.
     result = subprocess.run(
-        [executable, *inputs], capture_output=True, text=True, check=True, timeout=30
+        [executable, "--query"],
+        input="".join(f"{isa}\n" for isa in inputs),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
     )
     actual = [tuple(line.split("\t")) for line in result.stdout.splitlines()]
     expected = []

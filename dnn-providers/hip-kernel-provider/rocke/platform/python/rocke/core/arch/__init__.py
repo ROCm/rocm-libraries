@@ -24,6 +24,7 @@ from .target import (  # noqa: F401
     compiler_target_from_target_id,
     generic_arch_from_target_id,
     known_arches,
+    listed_arch_for,
     target_id_from_isa,
     validate_arch,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "compiler_target_from_target_id",
     "generic_arch_from_target_id",
     "known_arches",
+    "listed_arch_for",
     "normalize_dtype",
     "target_id_from_isa",
     "validate_arch",

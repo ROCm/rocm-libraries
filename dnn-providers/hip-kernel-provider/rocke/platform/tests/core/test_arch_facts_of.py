@@ -17,6 +17,8 @@ import dataclasses
 
 import pytest
 from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import domain as arch_domain
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.arch.target import (
     _load_doc,
     _load_generic_targets,
@@ -27,7 +29,14 @@ from rocke.core.arch.target import (
     normalize_dtype,
 )
 
-POINTERS = {"gfx1151": "gfx11-generic", "gfx1201": "gfx12-generic"}
+# Every member of a generic target rocKE supports has a row of its own; these
+# members' recorded facts are all their generic's, so each row is a pointer to
+# the generic target that lists it (read from generic_targets, not restated).
+POINTERS = {
+    member: generic
+    for generic, members in _load_generic_targets().items()
+    for member in members
+}
 
 _GENERIC_TARGETS = {
     "gfx11-generic": ("gfx1100", "gfx1151"),
@@ -41,7 +50,7 @@ def _fact_row(**extra) -> dict:
 
 
 def test_shipped_pointer_rows():
-    """The file holds exactly these pointers, each naming its generic target."""
+    """The file's pointers are exactly the generic members, each naming its generic."""
     raw = _load_doc()["arches"]
     pointers = {gfx: row["facts_of"] for gfx, row in raw.items() if "facts_of" in row}
     assert pointers == POINTERS
@@ -101,9 +110,46 @@ def test_pointers_add_nothing_to_the_op_id_lookups():
     assert _op_id_family() == expected_family
 
 
-def test_loader_reads_the_shipped_generic_targets():
-    for gfx, generic in POINTERS.items():
-        assert gfx in _load_generic_targets()[generic]
+def test_every_generic_target_member_has_a_row():
+    """Support is explicit: a supported generic's members are all known arches."""
+    for generic, members in _load_generic_targets().items():
+        assert generic in known_arches()
+        for member in members:
+            assert member in known_arches(), (generic, member)
+
+
+def _measured_cells(column, gfx):
+    return {key: column.lookup(key, gfx) for key in column.keys()}
+
+
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+@pytest.mark.parametrize("gfx,generic", sorted(POINTERS.items()))
+def test_pointer_has_its_generics_measured_compiler_data(gfx, generic, flavor):
+    """The compiler agrees with the pointer: in every committed arch-domain
+    column, each declaration the member was probed for links or fails exactly as
+    it does for its generic. Where the flavor's compiler does not accept the
+    member's name, every probed cell says so and none answers for it.
+    """
+    column = arch_domain.load(flavor)
+    if column is None:
+        pytest.skip(f"no committed {flavor} arch-domain column")
+    member = _measured_cells(column, gfx)
+    reference = _measured_cells(column, generic)
+    assert None not in member.values()
+    unsupported = {
+        key
+        for key, cell in member.items()
+        if cell.status == arch_domain.STATUS_TARGET_UNSUPPORTED
+    }
+    if not unsupported:
+        assert member == reference
+        return
+    for key, cell in member.items():
+        assert cell.status != arch_domain.STATUS_OK, key
+        assert (
+            cell == reference[key]
+            or cell.status == arch_domain.STATUS_TARGET_UNSUPPORTED
+        ), key
 
 
 def test_fact_row_resolves_to_itself():
@@ -117,7 +163,7 @@ def test_fact_row_resolves_to_itself():
 def test_pointer_resolves_to_its_generic_row():
     arches = {
         "gfx11-generic": _fact_row(),
-        "gfx1151": {"_comment": "kept by code", "facts_of": "gfx11-generic"},
+        "gfx1151": {"_comment": "a member", "facts_of": "gfx11-generic"},
     }
     assert _resolve_row(arches, _GENERIC_TARGETS, "gfx1151") is arches["gfx11-generic"]
 
