@@ -4,109 +4,73 @@
 #pragma once
 
 /**
- * Hands hipBLASLt's kernel descriptions to rocRoller.
+ * Translates hipBLASLt's description of a kernel into rocRoller's.
  *
- * hipBLASLt describes a kernel's operands with its own enumerations
- * (kernel_data_types.hpp), which the tile ranker uses in every configuration.
- * rocRoller, the generator hipBLASLt drives when it is enabled, has
- * enumerations of its own for the same formats and gives them the same values,
- * so a conversion is a cast. The static assertions below are what entitles the
- * cast: if rocRoller renumbers either enumeration, they fail here rather than
- * letting a kernel be generated for the wrong format.
+ * hipBLASLt describes a kernel's operands the way the rest of the library
+ * does: an element format is a hipDataType. rocRoller, the generator hipBLASLt
+ * drives when it is enabled, has an enumeration of its own for the same
+ * formats, so the two are translated here and nowhere else. A kernel's scaling
+ * arrangement never reaches rocRoller as a value, so it needs no translation.
  *
- * Only sources built against rocRoller's headers include this. Everything that
- * reaches the ranker stops at kernel_data_types.hpp.
+ * This mirrors hip2TensileType in tensile_host.cpp, which does the same job for
+ * the TensileLite backend. Only sources built against rocRoller's headers
+ * include this file; everything the tile ranker reaches stops at the hipBLASLt
+ * types. When rocRoller is retired this header goes with it, and the code that
+ * describes a kernel does not change.
  *
- * A failure here means rocRoller renumbered an enumeration. Take the new value
- * from rocRoller/DataTypes/DataTypes.hpp or rocRoller/Operations/BlockScale_fwd.hpp
- * and update kernel_data_types.hpp.
+ * The translation rejects a format it does not name, so a format that gains a
+ * kernel without gaining a translation stops the run instead of being silently
+ * generated as some other format.
  */
 
-#include "kernel_data_types.hpp"
+#include <hipblaslt/hipblaslt.h>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Operations/BlockScale_fwd.hpp>
-
-#include <ostream>
-#include <string>
-#include <type_traits>
+#include <rocRoller/Utilities/Error.hpp>
 
 namespace hipblaslt
 {
-    static_assert(std::is_same_v<std::underlying_type_t<rocRoller::DataType>,
-                                 std::underlying_type_t<DataType>>,
-                  "rocRoller::DataType changed its underlying type; update kernel_data_types.hpp.");
-    static_assert(std::is_same_v<std::underlying_type_t<rocRoller::Operations::ScaleMode>,
-                                 std::underlying_type_t<ScaleMode>>,
-                  "rocRoller::Operations::ScaleMode changed its underlying type; update "
-                  "kernel_data_types.hpp.");
-
-#define HIPBLASLT_ASSERT_SAME_DATA_TYPE(name)                                                      \
-    static_assert(static_cast<int>(DataType::name) == static_cast<int>(rocRoller::DataType::name), \
-                  "rocRoller::DataType::" #name " changed value; update kernel_data_types.hpp.")
-
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(Float);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(Double);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(Half);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(BFloat16);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(FP8);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(BF8);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(FP4);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(FP6);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(BF6);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(Int32);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(E8M0);
-    HIPBLASLT_ASSERT_SAME_DATA_TYPE(None);
-
-#undef HIPBLASLT_ASSERT_SAME_DATA_TYPE
-
-    static_assert(static_cast<int>(ScaleMode::None)
-                      == static_cast<int>(rocRoller::Operations::ScaleMode::None),
-                  "rocRoller::Operations::ScaleMode::None changed value; update "
-                  "kernel_data_types.hpp.");
-    static_assert(static_cast<int>(ScaleMode::Separate)
-                      == static_cast<int>(rocRoller::Operations::ScaleMode::Separate),
-                  "rocRoller::Operations::ScaleMode::Separate changed value; update "
-                  "kernel_data_types.hpp.");
-
     /**
-     * @brief The rocRoller format that stands for this hipBLASLt one.
+     * @brief The rocRoller element format that stands for this hipDataType.
      */
-    inline constexpr rocRoller::DataType toRocRoller(DataType type)
+    inline rocRoller::DataType hip2RocRollerType(hipDataType type)
     {
-        return static_cast<rocRoller::DataType>(type);
+        // Compared as integers because a HIP release that predates these
+        // formats declares them as constants rather than enumerators, which is
+        // how the rest of hipBLASLt reads them too (see utility.cpp).
+        if(static_cast<int>(type) == HIP_R_6F_E2M3)
+            return rocRoller::DataType::FP6;
+        if(static_cast<int>(type) == HIP_R_6F_E3M2)
+            return rocRoller::DataType::BF6;
+        if(static_cast<int>(type) == HIP_R_4F_E2M1)
+            return rocRoller::DataType::FP4;
+
+        switch(type)
+        {
+        case HIP_R_32F:
+            return rocRoller::DataType::Float;
+        case HIP_R_64F:
+            return rocRoller::DataType::Double;
+        case HIP_R_16F:
+            return rocRoller::DataType::Half;
+        case HIP_R_16BF:
+            return rocRoller::DataType::BFloat16;
+        case HIP_R_32I:
+            return rocRoller::DataType::Int32;
+        case HIP_R_8F_E4M3:
+            return rocRoller::DataType::FP8;
+        case HIP_R_8F_E5M2:
+            return rocRoller::DataType::BF8;
+        case HIP_R_8F_UE8M0:
+            return rocRoller::DataType::E8M0;
+        default:
+            break;
+        }
+
+        rocRoller::Throw<rocRoller::FatalError>(
+            "hipBLASLt asked rocRoller for a kernel whose element format rocRoller has no "
+            "translation for: hipDataType ",
+            static_cast<int>(type));
     }
 
-    /**
-     * @brief The rocRoller scaling arrangement that stands for this hipBLASLt one.
-     */
-    inline constexpr rocRoller::Operations::ScaleMode toRocRoller(ScaleMode mode)
-    {
-        return static_cast<rocRoller::Operations::ScaleMode>(mode);
-    }
-
-    // The spellings rocRoller gives these formats. Generated kernel names are
-    // built from them, so they have to read exactly as rocRoller's do; deferring
-    // keeps that true without a second table to maintain. Found by argument
-    // lookup, which is why callers that already said toString(x) or stream x
-    // need no change.
-    inline std::string toString(DataType type)
-    {
-        return rocRoller::toString(toRocRoller(type));
-    }
-
-    inline std::string toString(ScaleMode mode)
-    {
-        return rocRoller::Operations::toString(toRocRoller(mode));
-    }
-
-    inline std::ostream& operator<<(std::ostream& stream, DataType type)
-    {
-        return stream << toRocRoller(type);
-    }
-
-    inline std::ostream& operator<<(std::ostream& stream, ScaleMode mode)
-    {
-        return stream << toRocRoller(mode);
-    }
 } // namespace hipblaslt

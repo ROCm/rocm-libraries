@@ -62,8 +62,8 @@ constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleS
 // 2. Only A non-temporal enabled (cache_hints_a=4, cache_hints_b=0)
 // 3. Only B non-temporal enabled (cache_hints_a=0, cache_hints_b=4)
 // Never generates configs where both are enabled simultaneously.
-template <hipblaslt::DataType typeA,
-          hipblaslt::DataType typeB,
+template <hipDataType typeA,
+          hipDataType typeB,
           size_t              TileCount,
           const std::array<WorkGroupTileSize, TileCount>& TileArray>
 std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool hasPreTile)
@@ -79,8 +79,8 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
         auto        MI  = pickMI(typeA, typeB, wgt);
 
         int wgtk = wgt.k;
-        if constexpr(typeA == hipblaslt::DataType::Half || typeA == hipblaslt::DataType::BFloat16
-                     || typeA == hipblaslt::DataType::Float)
+        if constexpr(typeA == HIP_R_16F || typeA == HIP_R_16BF
+                     || typeA == HIP_R_32F)
         {
             wgtk = 32;
         }
@@ -134,7 +134,7 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
 }
 
 // Standard tile list generator using possibleTileSizes
-template <hipblaslt::DataType typeA, hipblaslt::DataType typeB>
+template <hipDataType typeA, hipDataType typeB>
 std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreTile)
 {
     return generateTileListImpl<typeA, typeB, possibleTileSizesCount, possibleTileSizes>(
@@ -142,7 +142,7 @@ std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreT
 }
 
 // Swizzle tile list generator using possibleSwizzleTileSizes (FP4 only)
-template <hipblaslt::DataType typeA, hipblaslt::DataType typeB>
+template <hipDataType typeA, hipDataType typeB>
 std::vector<origami::config_t> generateSwizzleTileList(bool hasPreSwizzle, bool hasPreTile)
 {
     return generateTileListImpl<typeA, typeB, possibleSwizzleTileSizesCount, possibleSwizzleTileSizes>(
@@ -151,37 +151,39 @@ std::vector<origami::config_t> generateSwizzleTileList(bool hasPreSwizzle, bool 
 
 using TileListGeneratorFn = std::vector<origami::config_t> (*)(bool, bool);
 
-template <hipblaslt::DataType A, hipblaslt::DataType B>
+template <hipDataType A, hipDataType B>
 std::vector<origami::config_t> generateTileListWrapper(bool hasPreSwizzle, bool hasPreTile)
 {
     return generateTileList<A, B>(hasPreSwizzle, hasPreTile);
 }
 
-#define INSTANTIATE_TILE_LIST(A, B)                                                  \
-    {                                                                                \
-        {hipblaslt::DataType::A, hipblaslt::DataType::B},                            \
-            &generateTileListWrapper<hipblaslt::DataType::A, hipblaslt::DataType::B> \
+#define INSTANTIATE_TILE_LIST(A, B) \
+    {                               \
+        {A, B}, &generateTileListWrapper<A, B> \
     }
 
-#define INSTANTIATE_TILE_LIST_FOR(A)                                       \
-    INSTANTIATE_TILE_LIST(A, Half), INSTANTIATE_TILE_LIST(A, Float),       \
-        INSTANTIATE_TILE_LIST(A, BFloat16), INSTANTIATE_TILE_LIST(A, FP8), \
-        INSTANTIATE_TILE_LIST(A, BF8), INSTANTIATE_TILE_LIST(A, FP4),      \
-        INSTANTIATE_TILE_LIST(A, BF6), INSTANTIATE_TILE_LIST(A, FP6)
+// The eight element formats a ranked kernel's A and B operands can have. A
+// problem whose operands normalise to anything else misses this map and is
+// left with no tiles, which is how an unsupported format is refused.
+#define INSTANTIATE_TILE_LIST_FOR(A)                                                 \
+    INSTANTIATE_TILE_LIST(A, HIP_R_16F), INSTANTIATE_TILE_LIST(A, HIP_R_32F),        \
+        INSTANTIATE_TILE_LIST(A, HIP_R_16BF), INSTANTIATE_TILE_LIST(A, HIP_R_8F_E4M3), \
+        INSTANTIATE_TILE_LIST(A, HIP_R_8F_E5M2), INSTANTIATE_TILE_LIST(A, HIP_R_4F_E2M1), \
+        INSTANTIATE_TILE_LIST(A, HIP_R_6F_E3M2), INSTANTIATE_TILE_LIST(A, HIP_R_6F_E2M3)
 
-const std::map<std::pair<hipblaslt::DataType, hipblaslt::DataType>, TileListGeneratorFn>
-    tileListGenerators = {INSTANTIATE_TILE_LIST_FOR(Half),
-                          INSTANTIATE_TILE_LIST_FOR(Float),
-                          INSTANTIATE_TILE_LIST_FOR(BFloat16),
-                          INSTANTIATE_TILE_LIST_FOR(FP8),
-                          INSTANTIATE_TILE_LIST_FOR(BF8),
-                          INSTANTIATE_TILE_LIST_FOR(FP4),
-                          INSTANTIATE_TILE_LIST_FOR(BF6),
-                          INSTANTIATE_TILE_LIST_FOR(FP6)};
+const std::map<std::pair<hipDataType, hipDataType>, TileListGeneratorFn> tileListGenerators
+    = {INSTANTIATE_TILE_LIST_FOR(HIP_R_16F),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_32F),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_16BF),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_8F_E4M3),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_8F_E5M2),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_4F_E2M1),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_6F_E3M2),
+       INSTANTIATE_TILE_LIST_FOR(HIP_R_6F_E2M3)};
 
 // Pre-instantiated swizzle tile generator for FP4 x FP4 (compile-time optimized)
 static const TileListGeneratorFn fp4SwizzleTileGenerator
-    = &generateSwizzleTileList<hipblaslt::DataType::FP4, hipblaslt::DataType::FP4>;
+    = &generateSwizzleTileList<HIP_R_4F_E2M1, HIP_R_4F_E2M1>;
 
 std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernelType)
 {
@@ -192,8 +194,8 @@ std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernel
                        && kernelType.scaleTypeB.preTile.size() == 2);
 
     // Use swizzle tile sizes only for FP4 x FP4 with swizzleA enabled
-    if(kernelType.swizzleA && kernelType.typeA == hipblaslt::DataType::FP4
-       && kernelType.typeB == hipblaslt::DataType::FP4)
+    if(kernelType.swizzleA && kernelType.typeA == HIP_R_4F_E2M1
+       && kernelType.typeB == HIP_R_4F_E2M1)
     {
         return fp4SwizzleTileGenerator(hasPreSwizzle, hasPreTile);
     }
@@ -218,40 +220,58 @@ size_t maxNumberSolutions()
     return possibleTileSizes.size();
 }
 
-hipblaslt::DataType hipDataType_to_kernel_data_type(hipDataType type)
+// The element format a kernel operand of this type is ranked as.
+//
+// Two jobs, both of which used to be done by the conversion into a generator's
+// enumeration and now have to be done here instead:
+//
+//  - Fold the spellings that name one kernel operand class onto one of them.
+//    HIP distinguishes 8-bit E4M3 in its finite-and-NaN-only encoding
+//    (HIP_R_8F_E4M3_FNUZ) from the OCP encoding (HIP_R_8F_E4M3), and likewise
+//    for E5M2, but a ranked kernel is the same kernel either way. The tile map
+//    is keyed on the folded format, so the fold has to happen before the lookup.
+//  - Answer HIPBLASLT_DATATYPE_INVALID for a format no ranked kernel handles.
+//    That value is in no tile-map key, so such a problem is left with no tiles.
+hipDataType normalizeOperandType(hipDataType type)
 {
+    // Compared as integers because a HIP release that predates these formats
+    // declares them as constants rather than enumerators, which is how the rest
+    // of hipBLASLt reads them too (see utility.cpp).
     if(static_cast<int>(type) == HIP_R_6F_E2M3)
-        return hipblaslt::DataType::FP6;
+        return HIP_R_6F_E2M3;
     if(static_cast<int>(type) == HIP_R_6F_E3M2)
-        return hipblaslt::DataType::BF6;
+        return HIP_R_6F_E3M2;
     if(static_cast<int>(type) == HIP_R_4F_E2M1)
-        return hipblaslt::DataType::FP4;
+        return HIP_R_4F_E2M1;
 
     switch(type)
     {
     case HIP_R_16F:
-        return hipblaslt::DataType::Half;
+        return HIP_R_16F;
     case HIP_R_32F:
-        return hipblaslt::DataType::Float;
+        return HIP_R_32F;
     case HIP_R_16BF:
-        return hipblaslt::DataType::BFloat16;
+        return HIP_R_16BF;
     case HIP_R_8F_E4M3_FNUZ:
     case HIP_R_8F_E4M3:
-        return hipblaslt::DataType::FP8;
+        return HIP_R_8F_E4M3;
     case HIP_R_8F_E5M2_FNUZ:
     case HIP_R_8F_E5M2:
-        return hipblaslt::DataType::BF8;
+        return HIP_R_8F_E5M2;
     default:
-        return hipblaslt::DataType::None;
+        return HIPBLASLT_DATATYPE_INVALID;
     }
 }
 
-hipblaslt::DataType rocblaslt_compute_type_to_kernel_data_type(rocblaslt_compute_type type)
+// The element format a kernel accumulates in, for a requested compute type.
+// HIPBLASLT_DATATYPE_INVALID for a compute type no ranked kernel offers; the
+// caller refuses the problem rather than accumulating in something else.
+hipDataType accumulationType(rocblaslt_compute_type type)
 {
     switch(type)
     {
     case rocblaslt_compute_f16:
-        return hipblaslt::DataType::Half;
+        return HIP_R_16F;
     case rocblaslt_compute_f32:
     case rocblaslt_compute_f32_fast_xf32:
     case rocblaslt_compute_f32_fast_f16:
@@ -264,21 +284,21 @@ hipblaslt::DataType rocblaslt_compute_type_to_kernel_data_type(rocblaslt_compute
     case rocblaslt_compute_f32_fast_bf8:
     case rocblaslt_compute_f32_fast_f8bf8:
     case rocblaslt_compute_f32_fast_bf8f8:
-        return hipblaslt::DataType::Float;
+        return HIP_R_32F;
     case rocblaslt_compute_f64:
-        return hipblaslt::DataType::Double;
+        return HIP_R_64F;
     case rocblaslt_compute_i32:
-        return hipblaslt::DataType::Int32;
+        return HIP_R_32I;
     default:
-        return hipblaslt::DataType::None;
+        return HIPBLASLT_DATATYPE_INVALID;
     }
 }
 
 namespace
 {
-hipblaslt::DataType scaleDataType(RocblasltContractionProblem::ScalingFormat)
+hipDataType scaleDataType(RocblasltContractionProblem::ScalingFormat)
 {
-    return hipblaslt::DataType::E8M0;
+    return HIP_R_8F_UE8M0;
 }
 } // namespace
 
@@ -286,11 +306,11 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 {
     KernelType kernelType;
 
-    kernelType.typeA    = hipDataType_to_kernel_data_type(prob.a_type);
-    kernelType.typeB    = hipDataType_to_kernel_data_type(prob.b_type);
-    kernelType.typeC    = hipDataType_to_kernel_data_type(prob.c_type);
-    kernelType.typeD    = hipDataType_to_kernel_data_type(prob.d_type);
-    kernelType.typeAcc  = rocblaslt_compute_type_to_kernel_data_type(prob.compute_type);
+    kernelType.typeA    = normalizeOperandType(prob.a_type);
+    kernelType.typeB    = normalizeOperandType(prob.b_type);
+    kernelType.typeC    = normalizeOperandType(prob.c_type);
+    kernelType.typeD    = normalizeOperandType(prob.d_type);
+    kernelType.typeAcc  = accumulationType(prob.compute_type);
     kernelType.transA   = prob.trans_a == HIPBLAS_OP_T;
     kernelType.transB   = prob.trans_b == HIPBLAS_OP_T;
     kernelType.swizzleA = prob.swizzleA;
@@ -298,7 +318,7 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 
     if(isBlockScaling(prob.scaleAType))
     {
-        kernelType.scaleTypeA.mode           = hipblaslt::ScaleMode::Separate;
+        kernelType.scaleTypeA.format         = prob.scaleAType;
         kernelType.scaleTypeA.blockRowSize   = blockSize(prob.scaleAType);
         kernelType.scaleTypeA.blockColSize   = 1;
         kernelType.scaleTypeA.type           = scaleDataType(prob.scaleAType);
@@ -308,7 +328,7 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 
     if(isBlockScaling(prob.scaleBType))
     {
-        kernelType.scaleTypeB.mode           = hipblaslt::ScaleMode::Separate;
+        kernelType.scaleTypeB.format         = prob.scaleBType;
         kernelType.scaleTypeB.blockRowSize   = 1;
         kernelType.scaleTypeB.blockColSize   = blockSize(prob.scaleBType);
         kernelType.scaleTypeB.type           = scaleDataType(prob.scaleBType);
@@ -329,23 +349,23 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
     // Scalar widths, matching DataTypeInfo::Get().elementBits for the types this
     // ranker sees. Inlined so this file does not link the rocRoller library.
-    auto elementBits = [](hipblaslt::DataType type) -> size_t {
+    auto elementBits = [](hipDataType type) -> size_t {
         switch(type)
         {
-        case hipblaslt::DataType::FP4:
+        case HIP_R_4F_E2M1:
             return 4;
-        case hipblaslt::DataType::FP6:
-        case hipblaslt::DataType::BF6:
+        case HIP_R_6F_E2M3:
+        case HIP_R_6F_E3M2:
             return 6;
-        case hipblaslt::DataType::FP8:
-        case hipblaslt::DataType::BF8:
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
             return 8;
-        case hipblaslt::DataType::Half:
-        case hipblaslt::DataType::BFloat16:
+        case HIP_R_16F:
+        case HIP_R_16BF:
             return 16;
-        case hipblaslt::DataType::Float:
+        case HIP_R_32F:
             return 32;
-        case hipblaslt::DataType::Double:
+        case HIP_R_64F:
             return 64;
         default:
             return 0;
@@ -365,9 +385,9 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                                                                           : origami::transpose_t::N,
         .b_transpose = (prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T
                                                                           : origami::transpose_t::N,
-        .a_dtype     = kernel_data_type_to_analytical_type(kernelType.typeA),
-        .b_dtype     = kernel_data_type_to_analytical_type(kernelType.typeB),
-        .mi_dtype    = kernel_data_type_to_analytical_type(
+        .a_dtype     = hipDataType_to_analytical_type(kernelType.typeA),
+        .b_dtype     = hipDataType_to_analytical_type(kernelType.typeB),
+        .mi_dtype    = hipDataType_to_analytical_type(
             elementSizeA_bits < elementSizeB_bits ? kernelType.typeB : kernelType.typeA),
         .a_mx_block_size = kernelType.scaleTypeA.blockRowSize * kernelType.scaleTypeA.blockColSize,
         .b_mx_block_size = kernelType.scaleTypeB.blockRowSize * kernelType.scaleTypeB.blockColSize,
@@ -397,18 +417,18 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         wgt.k /= unrollAmount;
 
         // FP8 kernels run out of registers with larger tile sizes
-        if((kernelType.typeA == hipblaslt::DataType::FP8
-            || kernelType.typeA == hipblaslt::DataType::BF8
-            || kernelType.typeB == hipblaslt::DataType::FP8
-            || kernelType.typeB == hipblaslt::DataType::BF8)
+        if((kernelType.typeA == HIP_R_8F_E4M3
+            || kernelType.typeA == HIP_R_8F_E5M2
+            || kernelType.typeB == HIP_R_8F_E4M3
+            || kernelType.typeB == HIP_R_8F_E5M2)
             && (wgt.m == 192 || wgt.n == 192))
             continue;
 
         // 6bit datatypes only work with power of 2 tile sizes
-        if((kernelType.typeA == hipblaslt::DataType::FP6
-            || kernelType.typeA == hipblaslt::DataType::BF6
-            || kernelType.typeB == hipblaslt::DataType::FP6
-            || kernelType.typeB == hipblaslt::DataType::BF6)
+        if((kernelType.typeA == HIP_R_6F_E2M3
+            || kernelType.typeA == HIP_R_6F_E3M2
+            || kernelType.typeB == HIP_R_6F_E2M3
+            || kernelType.typeB == HIP_R_6F_E3M2)
             && (!std::has_single_bit(static_cast<unsigned int>(wgt.m))
                 || !std::has_single_bit(static_cast<unsigned int>(wgt.n))))
             continue;
@@ -416,8 +436,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         // check if this size is valid for pre-swizzled data
         if (hasPreSwizzle)
         {
-            if (kernelType.typeA != hipblaslt::DataType::FP4 ||
-                kernelType.typeB != hipblaslt::DataType::FP4)
+            if (kernelType.typeA != HIP_R_4F_E2M1 ||
+                kernelType.typeB != HIP_R_4F_E2M1)
                 continue;
             if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
                 continue;
@@ -429,8 +449,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             continue;
 
         // {256, 256, 256} tile size is only supported for FP4 data types with preSwizzled and preTiled scale data
-        bool isFP4 = (kernelType.typeA == hipblaslt::DataType::FP4
-                        && kernelType.typeB == hipblaslt::DataType::FP4);
+        bool isFP4 = (kernelType.typeA == HIP_R_4F_E2M1
+                        && kernelType.typeB == HIP_R_4F_E2M1);
 
         bool is256Tile = (wgt.m == 256 && wgt.n == 256 && wgt.k == 256);
 
@@ -460,14 +480,14 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         size_t numTilesN    = prob.n / wgt.n;
         size_t numTiles     = numTilesM * numTilesN * prob.batch_count;
         size_t itersPerTile = prob.k / wgt.k;
-        auto   isF6         = (kernelType.typeA == hipblaslt::DataType::FP6
-                        || kernelType.typeA == hipblaslt::DataType::BF6
-                        || kernelType.typeB == hipblaslt::DataType::FP6
-                        || kernelType.typeB == hipblaslt::DataType::BF6);
-        auto isLargeF8 = ((kernelType.typeA == hipblaslt::DataType::FP8
-            || kernelType.typeA == hipblaslt::DataType::BF8
-            || kernelType.typeB == hipblaslt::DataType::FP8
-            || kernelType.typeB == hipblaslt::DataType::BF8)
+        auto   isF6         = (kernelType.typeA == HIP_R_6F_E2M3
+                        || kernelType.typeA == HIP_R_6F_E3M2
+                        || kernelType.typeB == HIP_R_6F_E2M3
+                        || kernelType.typeB == HIP_R_6F_E3M2);
+        auto isLargeF8 = ((kernelType.typeA == HIP_R_8F_E4M3
+            || kernelType.typeA == HIP_R_8F_E5M2
+            || kernelType.typeB == HIP_R_8F_E4M3
+            || kernelType.typeB == HIP_R_8F_E5M2)
             && wgt.m + wgt.n > 256);
         int cu_multiplier = 1;
         if(kernelType.swizzleA)
