@@ -15,8 +15,8 @@ Proposed location: `.github/scripts/run_random_hipblaslt_gemms.py`.
 The script accepts the bench executable, seed, case count, per-case timeout and
 output directory. The case count is configurable, with a default of 100; seed 0
 is proposed. The timeout will be chosen once the workload sizes are known.
-A dry-run option writes inputs
-without executing them. A case option reproduces one position in the sequence.
+A dry-run option writes inputs without executing them. A case option reproduces
+one position in the sequence.
 
 The caller supplies the ROCm environment, matching device library and
 rocJITsu executable/configuration. rocJITsu executes GPU code under emulation
@@ -54,8 +54,8 @@ saved inputs remain the authoritative reproduction of an earlier run.
 
 Run cases sequentially, with one bench process per case. Each input is a YAML
 list containing one record with ordinary heuristic selection and one requested
-algorithm. Enable numerical checks and `norm_check_assert` in that record: the direct
-command-line `--verify` path computes diagnostics but disables that assertion.
+algorithm. Enable numerical checks and `norm_check_assert` in that record: the
+direct command-line `--verify` path computes diagnostics but disables that assertion.
 Use the matching bench client's `--yaml` conversion environment.
 
 Use zero warmup iterations, fixed timing and one timed iteration initially.
@@ -65,16 +65,19 @@ correctness rather than performance, and does not require exactly one dispatch.
 
 ## Known failures and counts
 
-Maintain separate lists for confirmed rocJITsu problems and genuine kernel
-races awaiting fixes. Each entry identifies a complete GEMM input, the observed
-failure and its tracker. rocJITsu entries distinguish core-emulator bugs from
-race-detector-plugin bugs. A race report alone does not establish which list
-it belongs to; investigation determines whether the report is a detector bug
-or a genuine race.
+Initially assume there are no kernels with known races. Execute every sampled
+GEMM and treat any race report as a failure. There is no genuine-race exclusion
+list in the initial runner. This is a starting assumption, not evidence that
+every kernel is free of races.
+
+The rocJITsu blacklist starts empty. Add entries only for confirmed
+core-emulator or race-detector-plugin problems. Each entry identifies a
+complete GEMM input, the observed failure and its tracker. A race report alone
+does not establish a rocJITsu bug; investigate it before adding an exclusion.
 
 Identify entries by their GEMM parameters rather than a solution index or just
 a seed and case number. Changing the distribution must not make an old entry
-match an unrelated input. Keep the lists empty until a failure is confirmed;
+match an unrelated input. Keep the blacklist empty until a failure is confirmed;
 do not import unrelated historical exclusions automatically.
 
 Process all requested samples and print these totals:
@@ -82,7 +85,6 @@ Process all requested samples and print these totals:
 | Outcome | Meaning |
 | --- | --- |
 | Known rocJITsu problem | Input listed for a confirmed emulator or detector bug |
-| Known genuine race | Input listed for a confirmed kernel race awaiting a fix |
 | Passed | Executed and passed both numerical checking and race detection |
 | Unexpected failure | Unlisted failure, timeout, no solution or missing result |
 
@@ -97,9 +99,9 @@ An unexpected failure makes the final script exit unsuccessful. Failure to
 start the runner, load its configuration or write results aborts the run and
 reports how many samples were processed.
 
-Whether listed GEMMs are skipped before execution or run to detect fixes is
-still to be decided. If listed cases run, a changed failure must remain visible
-and a passing case must be reported as a pass so its entry can be removed.
+With an empty blacklist, no case is skipped or classified as a known failure.
+Decide how to handle listed cases when the first confirmed rocJITsu problem
+is added; that decision does not hold up the initial runner.
 
 ## Results and reproduction
 
