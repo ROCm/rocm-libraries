@@ -290,7 +290,6 @@ def main(argv=None):
         "passed": 0,
         "failed": 0,
         "unsupported": 0,
-        "known_failures": 0,
         "coverage": {key: {} for key in ("family", "transpose", "epilogue")},
         "threads": args.threads,
         "dry_run": args.dry_run,
