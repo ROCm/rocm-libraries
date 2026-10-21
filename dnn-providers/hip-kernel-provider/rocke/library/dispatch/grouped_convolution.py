@@ -7,8 +7,9 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
-(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
+forward and backward-data (dgrad) convolutions on gfx950 and forward
+convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
+dgrad have no list registered at all:
 this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
 ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
@@ -150,6 +151,7 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
+    ("gfx1250", "fwd"): "gfx1250_fwd.json",
 }
 
 # The LLVM flavor a request is admitted against unless it names its own: the
