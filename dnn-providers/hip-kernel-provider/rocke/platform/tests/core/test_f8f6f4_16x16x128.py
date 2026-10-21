@@ -410,7 +410,7 @@ class TestToolchain(unittest.TestCase):
                     src.write_text(_lower(_kernel(kind, fmt=fmt), flavor))
                     cmd = (
                         [tool, str(src), "-o", str(Path(td) / "k.bc")]
-                        if tool.endswith("llvm-as")
+                        if Path(tool).stem == "llvm-as"
                         else [tool, "-passes=verify", "-disable-output", str(src)]
                     )
                     proc = subprocess.run(
