@@ -1841,6 +1841,30 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
+    # The ingestor generator's own gates (config loader, enumerator, catalog_diff, the
+    # g1-g4 regeneration gates over every configs/*.engine.yaml). They read the rocKE
+    # library and the shipped descriptors of THIS tree, so they run here with the other
+    # host-only pytest lanes rather than in the hipDNN-only build. Not registered when the
+    # generator tree is absent (a provider-only checkout) or the interpreter lacks the
+    # generator's own requirements (PyYAML, Jinja2).
+    set(_ingestor_generator_dir "${HKP_PKG_DIR}/../../../projects/hipdnn/tools/IngestorGenerator")
+    cmake_path(NORMAL_PATH _ingestor_generator_dir)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import yaml, jinja2"
+        RESULT_VARIABLE _ingestor_generator_deps_rc
+        OUTPUT_QUIET ERROR_QUIET)
+    if(IS_DIRECTORY "${_ingestor_generator_dir}/tests" AND _ingestor_generator_deps_rc EQUAL 0)
+        add_test(NAME hip-kernel-provider-ingestor-generator
+                 COMMAND "${Python3_EXECUTABLE}" -m pytest "${_ingestor_generator_dir}/tests" -v
+                 WORKING_DIRECTORY "${_ingestor_generator_dir}")
+        set_tests_properties(hip-kernel-provider-ingestor-generator PROPERTIES
+            TIMEOUT 600)
+    else()
+        message(STATUS
+            "hkp: hip-kernel-provider-ingestor-generator not registered "
+            "(generator tree absent or PyYAML/Jinja2 not importable by ${Python3_EXECUTABLE})")
+    endif()
+
     # Both entries are add_test()'d in this scope, so the YAML's test_patterns match them
     # via the directory-property loop. EXPLICIT_TESTS is avoided:
     # apply_ctest_category_labels joins it with ';', which execute_process re-splits into

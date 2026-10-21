@@ -3,7 +3,8 @@
 #
 # CTest categories for the two families descriptor-packaging/cmake/HkpPackaging.cmake
 # pre-registers via add_test() rather than through a GTest binary: the hkp pytest entries
-# (hkp_register_tests) and the census entries (hkp_register_census_tests).
+# (hkp_register_tests, which also registers the IngestorGenerator pytest lane in quick)
+# and the census entries (hkp_register_census_tests).
 #
 # The two pytest entries run DISJOINT sets -- quick is `-m quick` (the no-compile
 # subset), standard is `-m "not quick"`. The tier cascade labels a quick test
@@ -27,6 +28,7 @@ test_categories:
     description: "hkp descriptor-packaging pytest (no-compile subset) and the descriptor census"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
+      - "hip-kernel-provider-ingestor-generator"
       - "hip-kernel-provider-hkp-census-.*"
     labels:
       - "unit_test"
@@ -37,6 +39,7 @@ test_categories:
     description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks and census"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
+      - "hip-kernel-provider-ingestor-generator"
       - "hip-kernel-provider-hkp-census-.*"
     labels:
       - "ffm-full"
