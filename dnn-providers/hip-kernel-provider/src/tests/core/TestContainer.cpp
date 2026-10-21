@@ -70,8 +70,8 @@ static std::vector<std::string> expectedEngineNames()
 }
 
 /// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
-/// more engines than this.
-constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
+/// more engines than this. FlyDSL alone adds one engine per kernel family.
+constexpr uint32_t MAX_EXPECTED_ENGINES = 32;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -374,7 +374,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     Handle handle;
     auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
+    if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
@@ -399,13 +399,35 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+    const auto applies = [&applicableEngines](auto engineId) {
+        return std::find(applicableEngines.begin(), applicableEngines.end(), engineId)
+               != applicableEngines.end();
+    };
 
+    // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
+    size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ASSERT_EQ(applicableEngines.size(), 1);
-    EXPECT_EQ(applicableEngines.front(), asm_sdpa_engine::AsmSdpaEngine::staticId());
-#else
-    EXPECT_TRUE(applicableEngines.empty());
+    // The assembly kernels are built for gfx942 and gfx950 only.
+    if(deviceString != "gfx90a")
+    {
+        EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
+        ++expected;
+    }
 #endif
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+    // FlyDSL's CDNA SDPA engines, one per kernel family, each when this build staged objects
+    // for the device (the dual-wave kernel's only on gfx950).
+    for(const char* engine : {"hipkernel:flydsl_sdpa_cdna",
+                              "hipkernel:flydsl_sdpa_cdna_dualwave",
+                              "hipkernel:flydsl_sdpa_cdna_decode"})
+    {
+        if(applies(hipdnn_data_sdk::utilities::engineNameToId(engine)))
+        {
+            ++expected;
+        }
+    }
+#endif
+    EXPECT_EQ(applicableEngines.size(), expected);
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

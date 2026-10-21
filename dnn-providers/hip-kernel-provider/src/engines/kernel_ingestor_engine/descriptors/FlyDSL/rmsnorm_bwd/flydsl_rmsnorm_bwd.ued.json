@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "e0f4eda1-e55b-5e1e-8923-27302152522b",
+  "name": "hipkernel:flydsl_rmsnorm_bwd",
+  "graph_match": {
+    "native": "hipkernel.flydsl_rmsnorm_bwd.graph_match"
+  },
+  "heuristic": "f2cc7bac-2ce6-5237-8ceb-d9350ea7f62b",
+  "metadata": "68946940-ac32-5de0-85fe-92a8e85157dc",
+  "knobs": []
+}

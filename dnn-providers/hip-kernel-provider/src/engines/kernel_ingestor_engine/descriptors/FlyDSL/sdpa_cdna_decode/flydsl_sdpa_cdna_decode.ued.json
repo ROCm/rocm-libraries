@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "63ffc720-10c9-55e1-9b3b-78da0f7c4aea",
+  "name": "hipkernel:flydsl_sdpa_cdna_decode",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_cdna_decode.graph_match"
+  },
+  "heuristic": "0f57374d-d4f2-5d2a-8a38-e83997d4e4be",
+  "metadata": "3ebdeb0d-adbe-50c3-b251-ea4b5710d50f",
+  "knobs": [
+    "block_m",
+    "waves_per_eu",
+    "has_bias",
+    "kv_gpfetch",
+    "dv_split",
+    "k_chunk",
+    "has_sink"
+  ]
+}
