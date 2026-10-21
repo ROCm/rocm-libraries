@@ -267,15 +267,29 @@ class KernelSource:
     def authored_document(self) -> dict:
         """The ``kernel_source`` mapping a config would state to get this source
         back: this source's own object plus, for a multi-launch source, each
-        launch as a full override entry."""
+        launch as the override it needs, i.e. only the keys that differ from this
+        source. A role-only launch is written as ``{role: ...}``, so it keeps
+        inheriting each variant's spec; writing its spec in full would make it a
+        static override that differs per kernel and cannot be factorised."""
         document = self._own_document()
         if self.launches:
-            # An override never states `kind`: a launch is a rocke source.
             document["launches"] = {
-                name: {k: v for k, v in launch.as_document().items() if k != "kind"}
+                name: self._launch_override(name, launch)
                 for name, launch in self.launches.items()
             }
         return document
+
+    def _launch_override(self, name: str, launch: "KernelSource") -> dict:
+        base = self._own_document()
+        own = launch.as_document()
+        dropped = sorted(set(base) - set(own))
+        if dropped:
+            raise ValueError(
+                f"launch {name!r} drops {dropped} from its base kernel_source; an "
+                f"override can only set a key, not remove one"
+            )
+        # An override never states `kind`: a launch is a rocke source.
+        return {k: v for k, v in own.items() if k != "kind" and base.get(k) != v}
 
     def as_document(self) -> dict:
         """The single ``kernel_source`` JSON object for this source. A
