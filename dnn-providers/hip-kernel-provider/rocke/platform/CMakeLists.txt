@@ -374,9 +374,9 @@ if(ROCKE_INSTALL_TESTS)
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), the WaveScope sidecar
     # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
-    # and the arch-domain artifact gate (imports tools/gen_arch_domain.py, which
-    # is not installed -- and an unresolvable import is a collection error that
-    # aborts the whole installed pytest session, not one skipped test).
+    # and the arch-domain artifact unit tests (import tools/gen_arch_domain.py,
+    # which is not installed). The full regeneration sweep is a separate
+    # source-only CTest and is likewise absent from installed artifacts.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even

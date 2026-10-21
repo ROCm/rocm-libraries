@@ -192,6 +192,27 @@ def test_ctest_readiness_and_failure_propagation(
         assert "ctest: SKIPPED" in capsys.readouterr().out
 
 
+def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
+    runner, monkeypatch, tmp_path, capsys
+):
+    (tmp_path / "CTestTestfile.cmake").touch()
+
+    def run(command, **kwargs):
+        listing = {
+            "tests": [
+                {
+                    "name": "rocke_arch_domain_reproducibility",
+                    "command": [runner.sys.executable, "generator.py", "--check"],
+                }
+            ]
+        }
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    assert not runner.ctest_ready(tmp_path, "Release")
+    assert "no built registered tests" in capsys.readouterr().out
+
+
 def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
     (tmp_path / "CTestTestfile.cmake").touch()
 
@@ -245,10 +266,39 @@ def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_
             "-B",
             str(tmp_path),
             "-DCMAKE_BUILD_TYPE=Debug",
+            f"-DPython3_EXECUTABLE={runner.sys.executable}",
             "-DROCKE_BUILD_SHARED_ENGINE=ON",
             "-DBUILD_TESTING=ON",
         ]
     ]
+
+
+def test_arch_domain_ctest_registration_contract(runner, tmp_path):
+    if not all(shutil.which(tool) for tool in ("cmake", "ctest")):
+        pytest.skip("CMake and CTest required for registration regression")
+
+    build = tmp_path / "build"
+    runner.configure_pytest_build(build, "Release")
+    tests = runner.ctest_tests(build, "Release", "^rocke_arch_domain_reproducibility$")
+    assert len(tests) == 1
+    test = tests[0]
+    assert test["name"] == "rocke_arch_domain_reproducibility"
+    assert test["command"][:2] == [runner.sys.executable, "-u"]
+    assert (
+        Path(test["command"][2]).resolve()
+        == (runner.ROCKE / "tools" / "gen_arch_domain.py").resolve()
+    )
+    assert test["command"][3:] == [
+        "--check",
+        "--unvalidated-exit-code",
+        "77",
+    ]
+    properties = {item["name"]: item["value"] for item in test["properties"]}
+    assert properties["SKIP_RETURN_CODE"] == 77
+    assert properties["RUN_SERIAL"] is True
+    assert properties["TIMEOUT"] == 1800.0
+    assert "integration" in properties["LABELS"]
+    assert "standard" in properties["LABELS"]
 
 
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):

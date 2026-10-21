@@ -14,6 +14,30 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  # Source artifact-reproduction gate, deliberately separate from pytest. It
+  # re-probes the full intrinsic/architecture matrix and therefore has a
+  # different timeout, resource, and skip contract from Python unit tests.
+  # It is source-tree-only: the generator is not part of installed artifacts.
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME rocke_arch_domain_reproducibility
+      COMMAND "${Python3_EXECUTABLE}" -u
+              "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
+              --check --unvalidated-exit-code 77)
+    set_tests_properties(
+      rocke_arch_domain_reproducibility
+      PROPERTIES
+        LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+        TIMEOUT 1800
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+  else()
+    message(WARNING
+            "rocKE: Python3 interpreter not found; arch-domain reproducibility "
+            "CTest is not registered")
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)

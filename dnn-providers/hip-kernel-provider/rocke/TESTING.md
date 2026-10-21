@@ -398,6 +398,31 @@ the cases is what stops it widening in silence: a different case that starts
 demanding an allowlisted intrinsic is a new finding. `ROCKE_ARCH_DOMAIN=off`
 disables the lookup.
 
+### 4.6 Does the measured arch-domain artifact reproduce?
+
+The warning gate consumes committed measurements; it does not prove that this
+host's toolchain reproduces them. The source-only
+`rocke_arch_domain_reproducibility` CTest runs
+`tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
+for the host flavor and compares the result with the committed column. This is
+an artifact-reproduction gate backed by the host toolchain, not a Python unit
+test: it owns external compiler processes, a dedicated timeout and resource
+policy, and an explicit CTest skip result.
+
+The result mapping deliberately preserves the former pytest item's behavior:
+no clang, no committed host-flavor column, and a clang/resolved-flavor mismatch
+skip; a partial or internally inconsistent LLVM installation fails. Flavor
+auto-detection errors, including unavailable COMGR evidence, also remain
+failures during this migration.
+
+The fast structure and generator units remain in
+`platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
+`ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The CTest is
+not installed because the generator is source-only. It is categorized as
+standard where source-build CTests are selected, but current installed-artifact
+CI does not contain it; final CI enrollment and tier policy remain open testing
+strategy decisions.
+
 ---
 
 ## 5. Execution tiers & gating

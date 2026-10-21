@@ -936,6 +936,16 @@ def _prune() -> int:
     return 0
 
 
+def _unvalidated_exit(requested: int | None, legacy: int) -> int:
+    """Map an existing unvalidated result to a scheduler-requested skip code.
+
+    The generator's legacy CLI uses different exits for different conditions.
+    The source CTest asks only that those same conditions be distinguishable
+    from green; it does not redefine which conditions are unvalidated.
+    """
+    return requested if requested is not None else legacy
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -961,7 +971,21 @@ def main() -> int:
     )
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--unvalidated-exit-code",
+        type=int,
+        default=None,
+        help=(
+            "exit with this code when --check cannot validate on this host "
+            "(CTest uses 77 to report a skip; defaults preserve legacy exits)"
+        ),
+    )
     args = ap.parse_args()
+    if args.unvalidated_exit_code is not None:
+        if not args.check:
+            ap.error("--unvalidated-exit-code requires --check")
+        if not 1 <= args.unvalidated_exit_code <= 255:
+            ap.error("--unvalidated-exit-code must be between 1 and 255")
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
@@ -1021,7 +1045,7 @@ def main() -> int:
             "\nRESULT: UNVALIDATED - no clang found under the resolved ROCm "
             "install or on PATH; nothing was probed. Set ROCKE_LLVM_BIN."
         )
-        return 0
+        return _unvalidated_exit(args.unvalidated_exit_code, 0)
 
     # `opt` is not optional: it owns the flavor axis, and without it nothing
     # separates "this LLVM has no such intrinsic" from "this target cannot
@@ -1056,7 +1080,7 @@ def main() -> int:
             "Set ROCKE_LLVM_BIN to the matching toolchain, or ROCKE_LLVM_FLAVOR "
             "if the override is intended."
         )
-        return 2
+        return _unvalidated_exit(args.unvalidated_exit_code, 2)
 
     # `opt` and `clang` are found by independent searches, so a prefix that
     # ships clang but not `opt` lets `opt` fall through to another install.
@@ -1397,7 +1421,7 @@ def main() -> int:
                 f"\nUNVALIDATED: no committed column for {flavor} "
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
-            return 0
+            return _unvalidated_exit(args.unvalidated_exit_code, 0)
         committed = out.read_text()
         if committed == text:
             print(f"\nOK: {out.name} is up to date.")

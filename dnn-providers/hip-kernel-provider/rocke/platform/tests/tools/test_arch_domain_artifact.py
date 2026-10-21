@@ -9,18 +9,19 @@ declarations actually link for which gfx target, and commits the answer as
 artifact that is not gated drifts from its generator, and a stale availability
 table is worse than none because it is trusted.
 
-Two gates, because they fail for different reasons and are available in
-different places:
+Two gates fail for different reasons and run under different schedulers:
 
-* **Structure** runs everywhere — no LLVM, no GPU, no built C++ engine. It reads
-  the committed JSON and checks it against the decl table it claims to describe,
-  catching the realistic drift: an intrinsic key added, renamed or removed and
-  the artifact silently no longer covering it while still looking authoritative.
+* **Structure** is the pytest coverage in this file. It needs no LLVM, GPU, or
+  built C++ engine. It reads the committed JSON and checks it against the decl
+  table it claims to describe, catching an intrinsic key added, renamed, or
+  removed while the artifact still looks authoritative.
 
-* **Regeneration** re-probes the toolchain and asserts the committed column for
-  *this host's* flavor comes back byte-identical. It is the only check that can
-  catch a wrong measurement rather than a missing one. A full sweep is ~150 keys
-  x 7 targets and finishes in seconds, so it is a test rather than a nightly.
+* **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
+  It re-probes the toolchain and asserts the committed measurements for *this
+  host's* flavor reproduce cell-for-cell; compiler-build provenance may differ.
+  It is the only check that can catch a wrong measurement rather than a missing
+  one. Its external compiler processes,
+  timeout, resource policy, and skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
 toolchain is skipped, never failed — "we did not get an answer" must not be
@@ -28,10 +29,10 @@ recorded as "the answer is no". Same reason the artifact distinguishes
 ``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``,
 ``toolchain_crash`` and ``toolchain_timeout`` (no data).
 
-This file is a **source-tree** gate, excluded from the installed test tree by
-`CMakeLists.txt`: it imports the generator out of the uninstalled `tools/`, and
-an uninstallable import is a collection error that takes the whole pytest
-session down. Keep the exclusion in step if this file is ever renamed.
+This file contains **source-tree** unit and structure tests and is excluded
+from the installed test tree by ``CMakeLists.txt``: it imports the generator out
+of the uninstalled ``tools/``. The regeneration CTest is source-only for the
+same reason. Keep both registrations in step if either path is renamed.
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -51,7 +51,7 @@ from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import _resolve_llvm_flavor
 
 _HERE = Path(__file__).resolve().parent
-_ROCKE = _HERE.parents[1]  # tests/core -> platform
+_ROCKE = _HERE.parents[1]  # tests/tools -> platform
 _TOOL = _ROCKE / "tools" / "gen_arch_domain.py"
 
 # Through the package, not the checkout layout: the artifacts are package data,
@@ -735,6 +735,18 @@ class RefusalTest(unittest.TestCase):
         path.chmod(0o755)
         return str(path)
 
+    def _clang_with_accepting_assembler(self, body: str) -> str:
+        """A complete stub compiler install for tests that must reach probing.
+
+        The generator now requires the matching ``llvm-mc`` beside clang and
+        assembles every successfully linked probe before recording ``ok``.
+        """
+        clang = Path(self._stub("clang", body))
+        llvm_mc = clang.with_name("llvm-mc")
+        llvm_mc.write_text("#!/usr/bin/env python3\n")
+        llvm_mc.chmod(0o755)
+        return str(clang)
+
     # Answers `--version` as an unrecognised vintage -- `flavor_of_clang`
     # returns None, so the flavor-mismatch exit does not fire and the run
     # reaches the stage under test.
@@ -757,12 +769,44 @@ for line in open(src):
         print(line.rstrip() + " #0")
 """
 
-    def _run(self, tools: dict[str, str | None], out: Path) -> int:
+    _CLANG_ACCEPTS = """
+import sys
+if "--version" in sys.argv:
+    print("AMD clang version 22.0.0git")
+sys.exit(0)
+"""
+
+    _OPT_RESOLVES_AND_IDENTIFIES = """
+import sys
+if "--version" in sys.argv:
+    print("AMD LLVM version 22.0.0git")
+    sys.exit(0)
+src = sys.argv[-1]
+for line in open(src):
+    if line.startswith("declare "):
+        print(line.rstrip() + " #0")
+"""
+
+    def _run(
+        self,
+        tools: dict[str, str | None],
+        out: Path,
+        *extra_args: str,
+    ) -> int:
         from unittest import mock
 
         import check_ir_validity as V
 
-        argv = [str(_TOOL), "--out", str(out), "--arch", "gfx942", "--only", "fabs"]
+        argv = [
+            str(_TOOL),
+            "--out",
+            str(out),
+            "--arch",
+            "gfx942",
+            "--only",
+            "fabs",
+            *extra_args,
+        ]
         with (
             mock.patch.object(V, "_llvm_tool", lambda n: tools.get(n)),
             mock.patch.object(sys, "argv", argv),
@@ -783,10 +827,16 @@ for line in open(src):
         """
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
-        clang = self._stub("clang", self._CLANG_REJECTS)
-        rc = self._run({"clang": clang, "opt": None}, out)
-        self.assertEqual(rc, 1, "a partial toolchain is a broken env, not a no-op")
-        self.assertFalse(out.exists(), "wrote a column with no name check behind it")
+        clang = self._clang_with_accepting_assembler(self._CLANG_REJECTS)
+        for extra in ((), ("--check", "--unvalidated-exit-code", "77")):
+            with self.subTest(adapter=bool(extra)):
+                rc = self._run({"clang": clang, "opt": None}, out, *extra)
+                self.assertEqual(
+                    rc, 1, "a partial toolchain is a broken env, not a no-op"
+                )
+                self.assertFalse(
+                    out.exists(), "wrote a column with no name check behind it"
+                )
 
     def test_an_unclassified_probe_writes_nothing_and_fails(self):
         """`probe_error` is this tool reporting itself broken, not a fact about
@@ -796,7 +846,7 @@ for line in open(src):
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
         tools = {
-            "clang": self._stub("clang", self._CLANG_REJECTS),
+            "clang": self._clang_with_accepting_assembler(self._CLANG_REJECTS),
             "opt": self._stub("opt", self._OPT_RESOLVES),
         }
         rc = self._run(tools, out)
@@ -814,8 +864,8 @@ for line in open(src):
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
         tools = {
-            "clang": self._stub(
-                "clang", 'import sys\nprint("AMD clang version 22.0.0git")\n'
+            "clang": self._clang_with_accepting_assembler(
+                'import sys\nprint("AMD clang version 22.0.0git")\n'
             ),
             "opt": self._stub(
                 "opt", 'import sys\nprint("AMD LLVM version 20.0.0git")\n'
@@ -823,10 +873,59 @@ for line in open(src):
         }
         # Pin the flavor so the earlier clang-vs-rocke check passes on any host
         # and the run reaches the pairing check.
+        for extra in ((), ("--check", "--unvalidated-exit-code", "77")):
+            with self.subTest(adapter=bool(extra)), mock.patch.dict(
+                os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}
+            ):
+                rc = self._run(tools, out, *extra)
+                self.assertEqual(rc, 2, "two vintages measured one column")
+                self.assertFalse(out.exists(), "wrote a column measured by two LLVMs")
+
+    def test_ctest_can_translate_a_flavor_mismatch_to_a_skip(self):
+        """The standalone CTest distinguishes unvalidated from green.
+
+        Legacy callers keep rc 2 for a mismatched compiler. The dedicated
+        CTest requests rc 77, which CTest maps to SKIP_RETURN_CODE.
+        """
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        tools = {
+            "clang": self._clang_with_accepting_assembler(
+                'import sys\nprint("AMD clang version 22.0.0git")\n'
+            ),
+            "opt": self._stub(
+                "opt", 'import sys\nprint("AMD LLVM version 22.0.0git")\n'
+            ),
+        }
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm20"}):
+            rc = self._run(
+                tools,
+                out,
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+        self.assertEqual(rc, 77)
+        self.assertFalse(out.exists())
+
+    def test_ctest_can_translate_a_missing_column_to_a_skip(self):
+        """A measured flavor with no baseline is unvalidated, not green."""
+        out = Path(tempfile.mkdtemp()) / "missing-column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        tools = {
+            "clang": self._clang_with_accepting_assembler(self._CLANG_ACCEPTS),
+            "opt": self._stub("opt", self._OPT_RESOLVES_AND_IDENTIFIES),
+        }
         with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
-            rc = self._run(tools, out)
-        self.assertEqual(rc, 2, "two vintages measured one column")
-        self.assertFalse(out.exists(), "wrote a column measured by two LLVMs")
+            rc = self._run(
+                tools,
+                out,
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+        self.assertEqual(rc, 77)
+        self.assertFalse(out.exists())
 
     def test_an_unparseable_banner_is_not_a_disagreement(self):
         """Unknown must never read as mismatch: a vendor rewording its version
@@ -899,6 +998,30 @@ class PartialSweepTest(unittest.TestCase):
             mock.patch.object(sys, "argv", argv),
         ):
             self.assertEqual(G.main(), 0, "the guard swallowed a well-formed probe")
+
+
+class CTestExitTest(unittest.TestCase):
+    """The standalone CTest must distinguish unvalidated from green."""
+
+    def test_missing_toolchain_uses_the_requested_skip_code(self):
+        import check_ir_validity as V
+
+        argv = [str(_TOOL), "--check", "--unvalidated-exit-code", "77"]
+        with (
+            mock.patch.object(V, "_llvm_tool", return_value=None),
+            mock.patch.object(sys, "argv", argv),
+        ):
+            self.assertEqual(G.main(), 77)
+
+    def test_skip_code_must_be_nonzero_and_check_only(self):
+        for args in (
+            ("--check", "--unvalidated-exit-code", "0"),
+            ("--unvalidated-exit-code", "77"),
+        ):
+            with self.subTest(args=args), mock.patch.object(
+                sys, "argv", [str(_TOOL), *args]
+            ), self.assertRaises(SystemExit):
+                G.main()
 
 
 class ValidityGateTest(unittest.TestCase):
@@ -1114,29 +1237,6 @@ class ValidityGateTest(unittest.TestCase):
         ):
             with self.subTest(exc=other):
                 self.assertFalse(F.requires_newer_flavor(other))
-
-
-class ArchDomainRegenerationTest(unittest.TestCase):
-    """Re-probe this host's flavor and require the committed column to match."""
-
-    def test_regenerating_this_hosts_column_is_a_no_op(self):
-        proc = subprocess.run(
-            [sys.executable, str(_TOOL), "--check"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=1800,
-        )
-        out = proc.stdout + proc.stderr
-
-        # "We cannot answer here" is a skip: failing it would red every CI
-        # machine whose ROCm differs from the one that blessed the artifact.
-        if "UNVALIDATED" in out:
-            self.skipTest(out.strip().splitlines()[-1])
-        if proc.returncode == 2 and "clang reports" in out:
-            self.skipTest("toolchain flavor disagrees with the resolved flavor")
-
-        self.assertEqual(proc.returncode, 0, out)
 
 
 if __name__ == "__main__":

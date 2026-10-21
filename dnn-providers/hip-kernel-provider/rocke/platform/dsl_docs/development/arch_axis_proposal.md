@@ -1,7 +1,8 @@
 # Proposal: give intrinsic resolution an arch axis
 
-**Status:** S1 implemented (`tools/gen_arch_domain.py`, two committed columns,
-gated by `tests/core/test_arch_domain_artifact.py`); S2–S4 still proposed.
+**Status:** S1 implemented (`tools/gen_arch_domain.py`, committed columns,
+structure-tested by `tests/tools/test_arch_domain_artifact.py` and regenerated
+by the `rocke_arch_domain_reproducibility` CTest); S2–S4 still proposed.
 Delivery breakdown: [`arch_axis_epic.md`](arch_axis_epic.md).
 **Non-specialist summary:** [`arch_axis_brief.md`](arch_axis_brief.md) (one page).
 **Scope:** `core/lower_llvm.py` + `cpp/core/lower_llvm/` declare resolution.
@@ -245,7 +246,8 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 
 `tools/gen_arch_domain.py`, for each decl key × each wired arch, emits a minimal
 module, compiles **and links** it in a **subprocess**, and classifies the
-outcome. Commit the result; `tests/core/test_arch_domain_artifact.py` asserts
+outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
+its structure and the `rocke_arch_domain_reproducibility` CTest asserts
 regeneration is a no-op. This is exactly how golden is managed.
 
 Shipped schema — per-cell provenance is the point, per
@@ -450,9 +452,10 @@ subprocess, and classify stderr by the §3 taxonomy.
 
 Acceptance for the change itself:
 
-- `python -m pytest tests/core/test_arch_domain_artifact.py` green (the structure
-  half runs without a toolchain; the regeneration half skips where the flavor has
-  no committed column)
+- `python -m pytest tests/tools/test_arch_domain_artifact.py` green for the
+  source-only structure and generator unit coverage
+- `ctest -R '^rocke_arch_domain_reproducibility$' -V` passes, or reports a named
+  skip when this host cannot validate a committed flavor
 - `python tools/check_byte_identity.py` GREEN at each flavor (S4)
 - `python tools/check_ir_validity.py` GREEN, with no *new* failures beyond the 2
   documented `KNOWN_BAD` emission defects

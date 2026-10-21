@@ -49,6 +49,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
+| `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
 > Notes: `instances/rocke_ir_parity_harness.py` is a helper imported by the
@@ -67,7 +68,8 @@ Four distinct things run here; don't conflate them:
    above) -> `ctest` when any registered test executable is built in `--build-root`
    for the selected `--config`. CTest supplies the executable paths, including
    configuration directories and platform suffixes. The entire registered suite
-   runs, so a partial build exposes missing tests as failures. No configured test
+   runs, including the source-only `rocke_arch_domain_reproducibility` toolchain
+   gate, so a partial build exposes missing tests as failures. No configured test
    build or no built registered tests is reported explicitly as a skipped stage.
 2. **Diagnostics** (opt-in, not in the gate): `run_diff.py --ir` (IR-canonical
    diff), `fuzz_diff.py`, `ir_artifact_diff.py`.
@@ -77,6 +79,49 @@ Four distinct things run here; don't conflate them:
    compile by hand against `librocke_core.a`): `core/ir_lower_cli.cpp`,
    `instances/jit_demo.cpp`, `instances/gemm_jit_demo.cpp`, plus the build-only
    `core/smoke.cpp`.
+
+### Arch-domain reproducibility CTest
+
+`rocke_arch_domain_reproducibility` owns the full
+`tools/gen_arch_domain.py --check` sweep. It is deliberately not collected by
+pytest: the sweep starts external compiler/linker processes, has its own timeout
+and resource contract, and is independent of `ROCKE_BACKEND`.
+
+The migration preserves the former pytest item's result mapping:
+
+| Condition | CTest result |
+|---|---|
+| Committed measurements reproduce cell-for-cell (compiler-build provenance may differ) | Pass |
+| No clang | Skip |
+| Clang flavor differs from rocKE's resolved flavor | Skip |
+| No committed column for the host flavor | Skip |
+| Clang exists but `opt` is absent | Fail |
+| Clang and `opt` report different flavors | Fail |
+| Flavor auto-detection fails, including unavailable COMGR evidence | Fail |
+| Measurements drift or a probe is unclassified | Fail |
+
+Run it from a configured platform build with:
+
+```bash
+ctest --test-dir <build> -R '^rocke_arch_domain_reproducibility$' -V
+```
+
+#### Migration status and known limitations
+
+This move exposes the sweep as one independently schedulable CTest; it does not
+settle its final CI or toolchain policy.
+
+- The target is source-build only because the generator is not installed. It is
+  absent from the installed test artifact used by current provider CI.
+- Its standard-tier categorization applies only where source-build CTests are
+  selected. Final CI enrollment and tier placement remain open decisions.
+- Exit code 77 is an orchestration adapter preserving the old pytest skip
+  behavior, not yet a typed semantic outcome from the generator.
+- Flavor auto-detection can fail before a skip result when COMGR evidence is
+  unavailable; this preserves existing behavior for the migration.
+- Probe batching, worker tuning, caching, timeout/retry policy, and automated
+  end-to-end provider-tier selection checks are deferred until the standalone
+  target provides enough evidence to evaluate them.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 
