@@ -213,10 +213,9 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
             {                                                                                     \
                 CHECK_HIP_ERROR(error);                                                           \
             }                                                                                     \
-            catch(std::exception & error)                                                         \
+            catch(const std::exception& error)                                                    \
             {                                                                                     \
-                std::cerr << error.what() << std::endl;                                           \
-                CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                         \
+                CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception) << error.what();         \
             }                                                                                     \
         }                                                                                         \
                                                                                                   \
@@ -243,10 +242,9 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
                 {                                                                                 \
                     CHECK_HIP_ERROR(error);                                                       \
                 }                                                                                 \
-                catch(std::exception & error)                                                     \
+                catch(const std::exception& error)                                                \
                 {                                                                                 \
-                    std::cerr << error.what() << std::endl;                                       \
-                    CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                     \
+                    CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception) << error.what();     \
                 }                                                                                 \
             }                                                                                     \
         }                                                                                         \
@@ -286,10 +284,9 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
             {                                                                                     \
                 CHECK_HIP_ERROR(error);                                                           \
             }                                                                                     \
-            catch(std::exception & error)                                                         \
+            catch(const std::exception& error)                                                    \
             {                                                                                     \
-                std::cerr << error.what() << std::endl;                                           \
-                CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                         \
+                CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception) << error.what();         \
             }                                                                                     \
         }                                                                                         \
                                                                                                   \
@@ -316,10 +313,9 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
                 {                                                                                 \
                     CHECK_HIP_ERROR(error);                                                       \
                 }                                                                                 \
-                catch(std::exception & error)                                                     \
+                catch(const std::exception& error)                                                \
                 {                                                                                 \
-                    std::cerr << error.what() << std::endl;                                       \
-                    CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                     \
+                    CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception) << error.what();     \
                 }                                                                                 \
             }                                                                                     \
         }                                                                                         \

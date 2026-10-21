@@ -125,29 +125,24 @@ namespace
                 static bool query_device = true;
                 if(query_device)
                 {
-                    // This filter runs while the test suites are being instantiated, outside
-                    // of the harness that catches hipError_t. Returning false on a failed
-                    // query would make every test look like it targets another architecture,
-                    // so the binary would report a pass having run nothing at all.
+                    // main() has already selected and queried this device; this is a backstop.
+                    // Returning false here would filter out every test as another architecture,
+                    // and the binary would pass having run nothing.
                     const hipError_t get_status = hipGetDevice(&dev);
                     if(get_status != hipSuccess)
                     {
-                        fprintf(stderr,
-                                "rocsparse-test error: hipGetDevice failed: %s (%d)\n",
-                                hipGetErrorString(get_status),
-                                get_status);
+                        std::cerr << "rocsparse-test error: hipGetDevice failed: "
+                                  << hipGetErrorString(get_status) << " (" << get_status << ")"
+                                  << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
                     const hipError_t prop_status = hipGetDeviceProperties(&prop, dev);
                     if(prop_status != hipSuccess)
                     {
-                        fprintf(
-                            stderr,
-                            "rocsparse-test error: hipGetDeviceProperties(%d) failed: %s (%d)\n",
-                            dev,
-                            hipGetErrorString(prop_status),
-                            prop_status);
+                        std::cerr << "rocsparse-test error: cannot get properties of device ID "
+                                  << dev << ": " << hipGetErrorString(prop_status) << " ("
+                                  << prop_status << ")" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
