@@ -22,3 +22,6 @@ integration_test_bundles/
 # plain checkout -- no GPU, no plugin, no DVC:
 #   python3 dnn-providers/integration-tests/scripts/render_support_matrix.py
 SUPPORT_MATRIX.md
+# Its --overview-only render. Not committed either: the committed overview,
+# SUPPORT_MATRIX_OVERVIEW.md, is support_features/feature_matrix.py's.
+SUPPORT_MATRIX_GRAPH_OVERVIEW.md

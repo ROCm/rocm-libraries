@@ -594,9 +594,9 @@ jobs:
           "$VENV_PYTHON" "$scripts/render_support_matrix.py" \
             --output build/support-matrix/SUPPORT_MATRIX.md
           "$VENV_PYTHON" "$scripts/render_support_matrix.py" --overview-only \
-            --output build/support-matrix/SUPPORT_MATRIX_OVERVIEW.md
+            --output build/support-matrix/SUPPORT_MATRIX_GRAPH_OVERVIEW.md
           "$VENV_PYTHON" "$scripts/support_features/feature_matrix.py" \
-            --output build/support-matrix/FEATURE_MATRIX.md
+            --output build/support-matrix/SUPPORT_MATRIX_OVERVIEW.md
 
       - name: Upload support matrix
         if: ${{ !cancelled() }}

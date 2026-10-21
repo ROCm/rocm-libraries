@@ -26,7 +26,6 @@ import pytest
 from render_support_matrix import (
     DEFAULT_BUNDLES_DIR,
     DEFAULT_MATRIX_PATH,
-    DEFAULT_OVERVIEW_PATH,
     main,
 )
 from support_matrix_markdown import (
@@ -1675,7 +1674,7 @@ class TestOverviewOnlyCli:
         # Stay inside this test's tmp_path; its parent is shared by other tests.
         out_dir = tmp_path / "out"
         out_dir.mkdir()
-        out = out_dir / "SUPPORT_MATRIX_OVERVIEW.md"
+        out = out_dir / "SUPPORT_MATRIX_GRAPH_OVERVIEW.md"
         monkeypatch.setattr(
             "render_support_matrix.DEFAULT_MATRIX_PATH",
             out_dir / "SUPPORT_MATRIX.md",
@@ -2076,17 +2075,6 @@ class TestRealBundleTree:
                 summed = [sum(col) for col in zip(*_row_counts(table))]
                 assert summed == overview, f"{level} rows do not sum to the overview"
 
-    def test_committed_overview_stays_renderable(self, units: list[ClaimUnit]) -> None:
-        """GitHub stops rendering markdown well past a few hundred KB.
-
-        Only the overview is committed and browsed on GitHub; the full matrix
-        is git-ignored and read locally, so it has no such ceiling.
-        """
-        size = len(render_markdown(units, 0, overview_only=True).encode("utf-8"))
-        assert size < 500_000, (
-            f"overview is {size} bytes; split it before it stops rendering on " "GitHub"
-        )
-
     def test_real_tree_renders(self, tmp_path: Path) -> None:
         """The same check the pre-commit hook runs.
 
@@ -2107,22 +2095,6 @@ class TestRealBundleTree:
         assert main(["--output", str(first)]) == 0
         assert main(["--output", str(second)]) == 0
         assert first.read_bytes() == second.read_bytes()
-
-    def test_committed_overview_is_current(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """The committed overview matches a fresh render of the committed sidecars.
-
-        The check-support-matrix-overview hook cannot guard this on its own:
-        the top-level pre-commit exclude hides integration-test-bundles/ from
-        every hook, so a commit that changes only bundle data never runs it.
-        This test runs on any change under dnn-providers/, whichever file in
-        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
-        """
-        status = main(
-            ["--overview-only", "--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
-        )
-        assert status == 0, capsys.readouterr().err
 
     def test_stdout_survives_a_consumer_that_closes_early(self) -> None:
         """`--output - | head` must exit quietly, not print a traceback.

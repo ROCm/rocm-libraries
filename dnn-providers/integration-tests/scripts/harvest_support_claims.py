@@ -93,9 +93,8 @@ from typing import (
     Tuple,
 )
 
-import render_support_matrix
 from support_claim_schema import VALID_PLATFORMS
-from support_matrix_markdown import REGEN_OVERVIEW_COMMAND
+from support_features import feature_matrix
 from support_sidecar import (
     BUNDLE_DIR,
     Claim,
@@ -891,10 +890,10 @@ def plan_claims(cells: Sequence[Cell], root: Path, git: Git) -> Dict[Path, Chang
 
 def refresh_overview(root: Path) -> int:
     """Re-render ``root``'s committed overview; 0 on success."""
-    overview = root / render_support_matrix.DEFAULT_OVERVIEW_PATH.name
-    argv = ["--overview-only", "--bundles-dir", str(root / BUNDLE_DIR)]
+    overview = root / feature_matrix.DEFAULT_OVERVIEW_PATH.name
+    argv = ["--bundles-dir", str(root / BUNDLE_DIR)]
     try:
-        return render_support_matrix.main([*argv, "--output", str(overview)])
+        return feature_matrix.main([*argv, "--output", str(overview)])
     except OSError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -1044,7 +1043,7 @@ def main(
     if args.write and plan and overview(root) != 0:
         print(
             "error: the sidecars are written but the overview is stale;"
-            f" regenerate it with: {REGEN_OVERVIEW_COMMAND}",
+            f" regenerate it with: {feature_matrix.REGEN_COMMAND}",
             file=sys.stderr,
         )
         return 1

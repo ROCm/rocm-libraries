@@ -186,12 +186,14 @@ repos:
         files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py)$
 
       # SUPPORT_MATRIX_OVERVIEW.md *is* committed, so check it for staleness.
+      # It is the by-API-option view, rendered by support_features/feature_matrix.py
+      # through the same support_matrix_units.py collection.
       - id: check-support-matrix-overview
         name: Support matrix overview is current (RFC 0015)
-        entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --overview-only --check
+        entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --check
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)

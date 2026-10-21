@@ -28,9 +28,10 @@ sidecar edit and a file near the size at which GitHub stops rendering markdown.
 Run the command above to produce your own copy; it is git-ignored, so it will
 not show up in `git status`. The matrix is a pure view of the sidecars, so two
 people rendering the same checkout get byte-identical files. Every
-`hipdnn-superbuild-ci` Linux run also renders it, with the overview and the
-feature matrix, and uploads all three as the `hipdnn-support-matrix` artifact,
-so you can download it from a PR's checks instead of rendering it.
+`hipdnn-superbuild-ci` Linux run also renders it, with its `--overview-only`
+variant and the committed overview, and uploads all three as the
+`hipdnn-support-matrix` artifact, so you can download it from a PR's checks
+instead of rendering it.
 
 The renderer is three files in `scripts/`: `support_matrix_units.py` collects
 one unit per graph from the bundle tree, `support_matrix_markdown.py` renders
@@ -38,20 +39,29 @@ those units, and `render_support_matrix.py` is the command line over both.
 They read bundle JSON through the same `bundle_discovery.py` loader as
 `verify_support_claims.py`, so the two tools agree on which files are readable.
 
-`SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the compact
-overview-only variant produced by `--overview-only`, small enough to render on
-GitHub. CI fails if it is stale; regenerate it with `--overview-only` in the
-same commit as the sidecar change. `harvest_support_claims.py --write`
-regenerates it for you.
+`SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the by-option view
+from `support_features/feature_matrix.py` (see
+[Feature coverage per op](#feature-coverage-per-op)), small enough to render on
+GitHub. CI fails if it is stale; regenerate it in the same commit as the
+sidecar change:
+
+```bash
+python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py
+```
+
+`harvest_support_claims.py --write` regenerates it for you. The graph-count
+`--overview-only` render of `render_support_matrix.py` is git-ignored, like the
+full matrix.
 
 Bundle data is checked in CI, not at commit time. The top-level exclude in
 `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook,
 so the real tree is checked by `test_render_support_matrix.py` instead. It
 runs as the `hipdnn_support_matrix_renderer_python_tests` ctest in
-`hipdnn-superbuild-ci` on every change under `dnn-providers/`: the full matrix
-must render, and the committed overview must match a fresh render. To check
-locally before pushing, run that ctest, or run the script with
-`--overview-only --check`.
+`hipdnn-superbuild-ci` on every change under `dnn-providers/`, and the full
+matrix must render. `test_support_features.py`, the
+`hipdnn_support_features_python_tests` ctest, does the same for the committed
+overview, which must match a fresh render. To check locally before pushing,
+run those ctests, or run `feature_matrix.py --check`.
 
 Three pre-commit hooks give quick feedback when a commit changes the scripts
 themselves (or, for the last one, the overview file):
@@ -60,7 +70,7 @@ themselves (or, for the last one, the overview file):
 |------|------------|
 | `verify-support-claims` | a sidecar is malformed, orphaned, or names an unknown case id |
 | `render-support-matrix` | the full matrix cannot be rendered — a malformed or orphaned sidecar, a claim on an unknown case, two tier copies of one bundle holding different graphs, or a bundle not under `<tier>/<Op>/`. Output is discarded |
-| `check-support-matrix-overview` | the committed `SUPPORT_MATRIX_OVERVIEW.md` differs from a fresh `--overview-only` render |
+| `check-support-matrix-overview` | the committed `SUPPORT_MATRIX_OVERVIEW.md` differs from a fresh `feature_matrix.py` render |
 
 Moving a bundle between tiers does not change the overview and needs no
 regenerate: a case is identified by
@@ -75,7 +85,7 @@ Useful flags:
 | `--output PATH` | write somewhere other than the default path; `-` means stdout |
 | `--bundles-dir PATH` | render a tree other than `integration-test-bundles/` |
 | `--max-case-ids N` | inline up to N sweep case ids per bundle in the provenance comments (0 = none, the default) |
-| `--overview-only` | emit only the per-target overview tables — no collapsible details, no per-variant drilldowns; writes to `SUPPORT_MATRIX_OVERVIEW.md` by default |
+| `--overview-only` | emit only the per-target overview tables — no collapsible details, no per-variant drilldowns; writes to the git-ignored `SUPPORT_MATRIX_GRAPH_OVERVIEW.md` by default |
 | `--check` | compare against an existing file and exit 1 if they differ; for keeping a local copy in sync |
 
 Nothing is filtered: every `(arch, platform)` target gets its own section, and
@@ -85,7 +95,7 @@ indistinguishable from one nobody has looked at.
 
 Reading it: each overview row is one op family. In the full
 `SUPPORT_MATRIX.md`, disclosure triangles expand a row into per-variant and then
-per-(variant, dtype) rows; the committed overview has the family rows only. A
+per-(variant, dtype) rows; the `--overview-only` render has the family rows only. A
 `—` means the graph is **unclaimed**, which is not the same as *known
 unsupported* — the engine may reject it, or nobody has written the claim yet.
 The Reading guide at the end of the full document spells out the rest,
@@ -109,11 +119,8 @@ groups by GPU and OS, then one table per engine, where a cell is the share of
 the op's features claimed there rather than the share of its graphs. The
 rendered document calls features *options*. Its *Options per op* section lists
 every option counted, split into those a graph exercises and those none does.
-
-```bash
-python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py \
-    --output feature_matrix.md
-```
+Its output is the committed `SUPPORT_MATRIX_OVERVIEW.md`; `--output -` prints
+it instead, and `--check` compares without writing.
 
 The denominator is the op's API, not the bundles: each op module
 (`support_features/sdpa.py`, ...) catalogs the features of one node type in

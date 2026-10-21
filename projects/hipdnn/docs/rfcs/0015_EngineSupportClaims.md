@@ -770,25 +770,28 @@ copy to go stale. The one committed projection, the overview below, is checked i
 
 The cost is that the full document is not in a pull request diff, and a reader cannot browse
 it on the web without a checkout. A compact overview recovers most of that:
-`render_support_matrix.py --overview-only` writes
-`dnn-providers/integration-tests/SUPPORT_MATRIX_OVERVIEW.md`, the per-target overview tables
-alone, small enough to render on GitHub. The overview **is committed**, so a claim change shows
-in the diff as a changed family row, and it is regenerated in the same commit as the sidecars
-it reflects — `harvest_support_claims.py --write` (§12.3) does so itself. Reviewers who want
-the per-variant detail regenerate the full matrix locally.
+`support_features/feature_matrix.py` writes
+`dnn-providers/integration-tests/SUPPORT_MATRIX_OVERVIEW.md`, the share of each op's API
+options claimed per GPU family, engine and target, small enough to render on GitHub. The
+overview **is committed**, so a claim change shows in the diff as a changed percentage, and it
+is regenerated in the same commit as the sidecars it reflects — `harvest_support_claims.py
+--write` (§12.3) does so itself. Reviewers who want the per-graph detail regenerate the full
+matrix locally; `render_support_matrix.py --overview-only` gives its per-target graph counts
+alone.
 
 **Freshness.** Three checks keep the sidecars and the overview in step:
 
 - The `render-support-matrix` pre-commit hook renders the full matrix and discards it, failing
   if any sidecar cannot be resolved: a malformed or orphaned sidecar, or a claim on an unknown
   case.
-- The `check-support-matrix-overview` pre-commit hook runs `--overview-only --check`, failing
-  if the committed overview differs from a fresh render.
+- The `check-support-matrix-overview` pre-commit hook runs `feature_matrix.py --check`,
+  failing if the committed overview differs from a fresh render.
 - Both hooks see only the files pre-commit passes them, and the top-level `exclude` in
   `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook, so a commit
   that changes only sidecars triggers neither. The `hipdnn_support_matrix_renderer_python_tests`
-  ctest covers that case: it runs in `hipdnn-superbuild-ci` on every change under
-  `dnn-providers/`, renders the real tree, and fails if the committed overview is stale.
+  and `hipdnn_support_features_python_tests` ctests cover that case: they run in
+  `hipdnn-superbuild-ci` on every change under `dnn-providers/` and render the real tree, and
+  the second fails if the committed overview is stale.
 
 Claim *correctness* is enforced separately by `verify-support-claims` (§9.3) and by the
 integration tests themselves (§4).

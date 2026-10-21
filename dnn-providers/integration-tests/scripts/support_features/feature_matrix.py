@@ -21,12 +21,16 @@ says nothing about bf16 *with* causal. ``coverage.py`` prints the per-feature
 graph counts behind every cell, and ``coverage.py --graphs OP FEATURE --arch
 ARCH`` lists the graphs themselves.
 
+This document is the committed ``SUPPORT_MATRIX_OVERVIEW.md``, and CI and
+pre-commit fail if it differs from a fresh render (``--check``).
+
 Usage:
 
     python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py \\
-        [--output PATH]
+        [--output PATH] [--check]
 
-Without ``--output`` the document goes to stdout.
+Without ``--output`` the document goes to ``SUPPORT_MATRIX_OVERVIEW.md``;
+``--output -`` sends it to stdout.
 """
 
 from __future__ import annotations
@@ -56,6 +60,7 @@ from support_matrix_units import (  # noqa: E402
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[4]
 REGEN_COMMAND = f"python3 {SCRIPT_PATH.relative_to(REPO_ROOT).as_posix()}"
+DEFAULT_OVERVIEW_PATH = SCRIPT_PATH.parents[2] / "SUPPORT_MATRIX_OVERVIEW.md"
 
 NOT_CLAIMED = "❌"
 PLATFORMS = ("linux", "windows")
@@ -515,8 +520,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=pathlib.Path,
-        help="Write the document here instead of stdout; '-' is stdout, as for "
-        "render_support_matrix.py.",
+        default=DEFAULT_OVERVIEW_PATH,
+        help=f"Write here (default: {DEFAULT_OVERVIEW_PATH}, the committed "
+        "overview); '-' is stdout, as for render_support_matrix.py.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not write. Re-render and compare against --output; exit 1 if "
+        "they differ or it is missing. The CI and pre-commit check on the "
+        "committed overview.",
     )
     args = parser.parse_args(argv)
 
@@ -531,7 +544,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {len(errors)} defect(s); nothing rendered", file=sys.stderr)
         return 1
     document = render(claims)
-    if args.output is None or str(args.output) == "-":
+    if args.check:
+        if str(args.output) == "-":
+            print("error: --check needs a file to compare against", file=sys.stderr)
+            return 2
+        try:
+            committed = args.output.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"error: cannot read {args.output} ({exc})", file=sys.stderr)
+            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            return 1
+        if committed != document:
+            print(
+                f"error: {args.output} is stale -- it does not match a re-render "
+                "of the current sidecars",
+                file=sys.stderr,
+            )
+            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            return 1
+        return 0
+    if str(args.output) == "-":
         write_stdout(document)
     else:
         args.output.write_text(document, encoding="utf-8")

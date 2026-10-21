@@ -69,6 +69,7 @@ from support_features.coverage import (
 )
 from support_features.feature_matrix import (
     DATA_CENTER,
+    DEFAULT_OVERVIEW_PATH,
     FAMILIES,
     GPUS,
     compute_feature_claims,
@@ -1013,6 +1014,7 @@ class TestStdoutEncoding:
             [
                 sys.executable,
                 str(Path(__file__).with_name("support_features") / script),
+                *(["--output", "-"] if script == "feature_matrix.py" else []),
             ],
             capture_output=True,
             env=env,
@@ -7355,3 +7357,27 @@ class TestRealBundleTree:
         claims = compute_feature_claims(units, errors)
         assert errors == []
         assert claims.targets
+
+    def test_committed_overview_stays_renderable(self, units: list[ClaimUnit]) -> None:
+        """GitHub stops rendering markdown well past a few hundred KB."""
+        document = render_feature_matrix(compute_feature_claims(units))
+        size = len(document.encode("utf-8"))
+        assert (
+            size < 500_000
+        ), f"overview is {size} bytes; split it before it stops rendering on GitHub"
+
+    def test_committed_overview_is_current(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """SUPPORT_MATRIX_OVERVIEW.md matches a fresh render of the committed tree.
+
+        The check-support-matrix-overview hook cannot guard this on its own:
+        the top-level pre-commit exclude hides integration-test-bundles/ from
+        every hook, so a commit that changes only bundle data never runs it.
+        This test runs on any change under dnn-providers/, whichever file in
+        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
+        """
+        status = feature_matrix_main(
+            ["--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
+        )
+        assert status == 0, capsys.readouterr().err

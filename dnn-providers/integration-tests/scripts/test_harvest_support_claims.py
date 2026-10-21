@@ -38,9 +38,8 @@ from harvest_support_claims import (
     run_git,
     split_streams,
 )
-from render_support_matrix import DEFAULT_OVERVIEW_PATH
-from render_support_matrix import main as render_main
-from support_matrix_markdown import REGEN_OVERVIEW_COMMAND
+from support_features.feature_matrix import DEFAULT_OVERVIEW_PATH, REGEN_COMMAND
+from support_features.feature_matrix import main as render_main
 from support_sidecar import Claim, load, render
 
 _TS = "2026-09-28T05:47:38.5917461Z "
@@ -862,7 +861,7 @@ class TestWrite(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn(
             "error: the sidecars are written but the overview is stale;"
-            f" regenerate it with: {REGEN_OVERVIEW_COMMAND}\n",
+            f" regenerate it with: {REGEN_COMMAND}\n",
             err,
         )
         self.assertEqual(load(self.single), {self._claim()})
@@ -1351,7 +1350,7 @@ class TestRefreshOverview(unittest.TestCase):
 
     def test_writes_the_overview_a_check_accepts(self) -> None:
         self.assertEqual(self._refresh(), 0)
-        argv = ["--overview-only", "--check", "--bundles-dir", str(self.bundles)]
+        argv = ["--check", "--bundles-dir", str(self.bundles)]
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(render_main([*argv, "--output", str(self.overview)]), 0)
 

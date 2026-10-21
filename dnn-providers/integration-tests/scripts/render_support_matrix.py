@@ -26,8 +26,10 @@ The work is split three ways, so each part can be read and tested alone:
 
 The full document, ``SUPPORT_MATRIX.md``, is **generated, not committed** --
 see ``dnn-providers/integration-tests/.gitignore`` for why, and RFC 0015 §11.
-The compact ``--overview-only`` render, ``SUPPORT_MATRIX_OVERVIEW.md``, **is
-committed**, and CI and pre-commit fail if it differs from a fresh render.
+So is the compact ``--overview-only`` render,
+``SUPPORT_MATRIX_GRAPH_OVERVIEW.md``. The committed overview,
+``SUPPORT_MATRIX_OVERVIEW.md``, counts API options rather than graphs and is
+rendered by ``support_features/feature_matrix.py``.
 
 Usage:
 
@@ -57,7 +59,7 @@ from support_matrix_units import collect_units, warn, write_stdout  # noqa: E402
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 INTEGRATION_TESTS_DIR = SCRIPT_PATH.parent.parent
 DEFAULT_MATRIX_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX.md"
-DEFAULT_OVERVIEW_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX_OVERVIEW.md"
+DEFAULT_OVERVIEW_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX_GRAPH_OVERVIEW.md"
 
 # --------------------------------------------------------------------------
 # Entry point
@@ -94,9 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Do not write. Re-render and compare against an existing file "
             "(--output, or the default output path); exit 1 if they differ or "
-            "it is missing. With --overview-only this is the CI and pre-commit "
-            "check on the committed overview. The full matrix is not "
-            "committed, so checking it only keeps a local copy in sync."
+            "it is missing. Neither render is committed, so this only keeps "
+            "a local copy in sync."
         ),
     )
     parser.add_argument(
@@ -114,8 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Emit only the per-target overview tables (no per-family detail "
-            "sections, no collapsible wrappers). The output is small enough "
-            "to commit and render directly on GitHub."
+            "sections, no collapsible wrappers)."
         ),
     )
     return parser
