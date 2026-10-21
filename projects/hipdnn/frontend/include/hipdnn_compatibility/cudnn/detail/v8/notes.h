@@ -10,7 +10,7 @@
 
 #include <hipdnn_backend.h>
 
-#include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/type_mapping.h>

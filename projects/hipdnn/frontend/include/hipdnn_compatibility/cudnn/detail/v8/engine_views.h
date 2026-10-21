@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>

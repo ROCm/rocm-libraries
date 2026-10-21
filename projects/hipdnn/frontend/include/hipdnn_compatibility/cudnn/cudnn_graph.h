@@ -23,7 +23,7 @@
 #include <cstddef>
 
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
-#include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/status_translation.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>

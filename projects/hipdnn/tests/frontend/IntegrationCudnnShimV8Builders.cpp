@@ -1,11 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Builds cuDNN v8 operation graphs with the ported v0.x builders, whose
-// always-set attributes (alpha/beta, the DOUBLE resample scales, the pointwise
-// parameter sequence) the raw C API suites do not send, and finalizes them
-// against the real hipDNN backend. Graph finalize needs no device, so this
-// suite does not skip on device-less hosts.
+// Builds cuDNN v8 operation graphs with the ported v0.x builders, including their
+// always-set parameters (alpha/beta, the DOUBLE resample scales, the pointwise
+// parameters), and lowers them against the real hipDNN backend. Graph lowering
+// needs no device, so this suite does not skip on device-less hosts.
 
 #include <array>
 #include <cstddef>

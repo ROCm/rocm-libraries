@@ -144,8 +144,8 @@ static_assert(countSentinelsPinned() == std::size(COUNT_SENTINELS),
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-// Upstream sets the FE TensorReordering_t bytes as CUDNN_TYPE_TENSOR_REORDERING_MODE,
-// so both enums must share values.
+// Upstream's Tensor.h passes the FE TensorReordering_t bytes as the C value, so both
+// enums keep the same values.
 constexpr bool reorderingMatches(fe::TensorReordering_t feValue,
                                  cudnnBackendTensorReordering_t cValue)
 {
