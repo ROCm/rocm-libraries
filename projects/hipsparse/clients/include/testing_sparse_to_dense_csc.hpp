@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csc.hpp"
 #include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -216,9 +217,7 @@ void testing_sparse_to_dense_csc(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcsc_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsc(&matA, m, n, nnz, dptr, drow, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsc matA(m, n, nnz, dptr, drow, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrix
     hipsparseDnMatDescr_t matB;
@@ -327,7 +326,6 @@ void testing_sparse_to_dense_csc(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matB));
 #endif
 }

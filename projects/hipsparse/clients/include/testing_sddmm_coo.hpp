@@ -31,6 +31,7 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_coo.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -82,7 +83,6 @@ void testing_sddmm_coo_bad_arg(const Arguments& argus)
 
     // SDDMM structures
     hipsparseDnMatDescr_t A, B;
-    hipsparseSpMatDescr_t C;
 
     size_t bsize;
 
@@ -91,9 +91,7 @@ void testing_sddmm_coo_bad_arg(const Arguments& argus)
                                     "success");
     verify_hipsparse_status_success(hipsparseCreateDnMat(&B, k, n, k, dB, dataType, orderB),
                                     "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(&C, m, n, nnz, drow, dcol, dval, idxTypeI, idxBase, dataType),
-        "success");
+    hipsparseLocalCoo C(m, n, nnz, drow, dcol, dval, idxTypeI, idxBase, dataType);
 
     // SDDMM buffer
     verify_hipsparse_status_invalid_handle(hipsparseSDDMM_bufferSize(
@@ -177,7 +175,6 @@ void testing_sddmm_coo_bad_arg(const Arguments& argus)
     // Destruct
     verify_hipsparse_status_success(hipsparseDestroyDnMat(A), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
 
 #endif
 }
@@ -303,11 +300,8 @@ void testing_sddmm_coo(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t C1, C2;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&C1, C_m, C_n, nnz, drow, dcol, dval1, typeI, idx_base, typeT));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&C2, C_m, C_n, nnz, drow, dcol, dval2, typeI, idx_base, typeT));
+    hipsparseLocalCoo C1(C_m, C_n, nnz, drow, dcol, dval1, typeI, idx_base, typeT);
+    hipsparseLocalCoo C2(C_m, C_n, nnz, drow, dcol, dval2, typeI, idx_base, typeT);
 
     // Create dense matrices
     hipsparseDnMatDescr_t A, B;
@@ -433,8 +427,6 @@ void testing_sddmm_coo(Arguments argus)
 
     // free.
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 

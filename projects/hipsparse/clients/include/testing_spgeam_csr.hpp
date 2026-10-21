@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_coo.hpp"
 #include "hipsparse_local_csr.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -258,23 +259,12 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
                                           "Error: opB transpose is not supported");
 
     // Only the CSR format is supported.
-    hipsparseSpMatDescr_t A_coo;
-    verify_hipsparse_status_success(hipsparseCreateCoo(&A_coo,
-                                                       m,
-                                                       n,
-                                                       nnz_A,
-                                                       dcsr_row_ptr_A,
-                                                       dcsr_col_ind_A,
-                                                       dcsr_val_A,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
+    hipsparseLocalCoo A_coo(
+        m, n, nnz_A, dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A, idxType, idxBase, dataType);
     verify_hipsparse_status_not_supported(
         hipsparseSpGEAM_bufferSize(
             handle, transA, transB, &alpha, A_coo, &beta, B, C, dataType, alg, descr, &bufferSize),
         "Error: COO format is not supported");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A_coo), "success");
 
 #endif
 }
