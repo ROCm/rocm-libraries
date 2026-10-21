@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
@@ -29,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Re-export for callers using the original architecture entry point.
 from ..dtypes import normalize_dtype
+from . import domain as arch_domain
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
@@ -1987,7 +1989,7 @@ def base_arch_from_target_id(target_id: str) -> str:
 
 
 def compiler_target_from_target_id(target_id: str) -> str:
-    """Derive the target name that the compile helpers pass to COMGR or hipcc.
+    """Derive the compiler target name for ``target_id``.
 
     Removes profile suffixes such as ``-strict`` from the processor token, but
     keeps features after ``:``. Catalog selection remains independent, so a
@@ -1995,8 +1997,8 @@ def compiler_target_from_target_id(target_id: str) -> str:
     rocKE catalog row. For example, ``gfx1250-strict`` becomes ``gfx1250``,
     while ``gfx942:sramecc+:xnack-`` stays unchanged.
 
-    This only converts the string. COMGR or hipcc checks whether the target
-    and its features are supported when compilation runs.
+    This only converts the string. :func:`compiler_target_for_flavor` decides
+    which name a given compiler is passed.
     """
 
     target_without_features, separator, features = target_id.partition(":")
@@ -2006,6 +2008,57 @@ def compiler_target_from_target_id(target_id: str) -> str:
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features
+
+
+def compiler_target_for_flavor(target_id: str, *, llvm_flavor: str) -> str:
+    """The compiler target to pass to the ``llvm_flavor`` compiler for ``target_id``.
+
+    Starts from :func:`compiler_target_from_target_id` (profile removed,
+    features kept) and checks its processor against what the ``llvm_flavor``
+    compiler was measured to accept (``processors`` in that flavor's
+    arch-domain column):
+
+    * accepted, or never measured (no committed column, or a name with no
+      ``arch_specs.json`` row): the processor itself, and the compiler has the
+      last word;
+    * not accepted, and its row points at a generic target (``facts_of``) the
+      compiler accepts: that generic target, whose code objects load on the
+      processor, with a ``UserWarning`` that says so (Python's default warning
+      filter shows it once per process for each processor and flavor);
+    * not accepted otherwise: ``ValueError``.
+
+    Features after ``:`` are kept either way. Catalog selection is independent
+    of this name: the processor lowers through its own row whichever name it is
+    compiled for. Pass the flavor of the compiler that actually runs.
+    """
+    processor, separator, features = compiler_target_from_target_id(
+        target_id
+    ).partition(":")
+    name = _processor_the_compiler_accepts(processor, llvm_flavor)
+    return f"{name}{separator}{features}"
+
+
+def _processor_the_compiler_accepts(processor: str, llvm_flavor: str) -> str:
+    """``processor``, or the generic target to compile it as (see
+    :func:`compiler_target_for_flavor`)."""
+    column = arch_domain.load(llvm_flavor)
+    if column is None or column.accepts_processor(processor) is not False:
+        return processor
+    generic = _load_pointers().get(processor)
+    if generic is not None and column.accepts_processor(generic) is not False:
+        warnings.warn(
+            f"the {llvm_flavor} compiler does not accept the processor "
+            f"{processor!r}; compiling for {generic!r} instead, the generic "
+            f"target its arch_specs.json row points at, whose code objects load "
+            f"on {processor!r}",
+            stacklevel=3,
+        )
+        return generic
+    raise ValueError(
+        f"the {llvm_flavor} compiler does not accept the processor {processor!r}, "
+        f"and its arch_specs.json row points at no generic target that compiler "
+        f"accepts -- compile with an LLVM flavor whose compiler accepts {processor!r}"
+    )
 
 
 def generic_arch_from_target_id(target_id: str) -> Optional[str]:

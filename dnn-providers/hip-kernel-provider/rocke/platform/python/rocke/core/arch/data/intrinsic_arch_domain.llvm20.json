@@ -17475,6 +17475,64 @@
       }
     }
   },
+  "processors": {
+    "gfx11-generic": {
+      "accepted": true
+    },
+    "gfx1100": {
+      "accepted": true
+    },
+    "gfx1101": {
+      "accepted": true
+    },
+    "gfx1102": {
+      "accepted": true
+    },
+    "gfx1103": {
+      "accepted": true
+    },
+    "gfx1150": {
+      "accepted": true
+    },
+    "gfx1151": {
+      "accepted": true
+    },
+    "gfx1152": {
+      "accepted": true
+    },
+    "gfx1153": {
+      "accepted": true
+    },
+    "gfx1154": {
+      "accepted": false,
+      "evidence": "invalid target ID"
+    },
+    "gfx12-generic": {
+      "accepted": true
+    },
+    "gfx1200": {
+      "accepted": true
+    },
+    "gfx1201": {
+      "accepted": true
+    },
+    "gfx1250": {
+      "accepted": false,
+      "evidence": "invalid target ID"
+    },
+    "gfx908": {
+      "accepted": true
+    },
+    "gfx90a": {
+      "accepted": true
+    },
+    "gfx942": {
+      "accepted": true
+    },
+    "gfx950": {
+      "accepted": true
+    }
+  },
   "schema": "rocke.intrinsic_arch_domain/v1",
   "toolchain": {
     "arches": [
@@ -17499,7 +17557,7 @@
     ],
     "clang": "AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.1.1 25444 27682a16360e33e37c4f3cc6adf9a620733f8fe1)",
     "flavor": "llvm20",
-    "generator": 6,
+    "generator": 7,
     "probe_cflags": [
       "-O0",
       "-nogpulib"

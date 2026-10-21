@@ -187,6 +187,19 @@ which itself holds facts; the loader refuses anything else. In C++ the processor
 array. Grouping is decided by the recorded fields only: a member points at its
 generic exactly when every field this file records matches.
 
+Each target compiles for itself where the LLVM flavor's compiler accepts its
+processor name. `tools/gen_arch_domain.py` records that per target in each
+column's `processors`; where a flavor rejects a member's name,
+`compiler_target_for_flavor()` (C++: `rocke_compiler_target_for_flavor()`,
+whose rejection list `rocke_ati_rejected_processors` mirrors the columns; the
+`rocke_arch_data_mirror` ctest fails when the two differ) compiles it as the
+generic its row points at, with a message saying so, and refuses a target with
+no such generic. Each compile helper passes the flavor of the compiler it runs:
+the one COMGR loads for `compile_kernel`, hipcc's own clang for the hipcc helpers.
+`compiler_target_from_target_id()` only removes the profile and never replaces
+the processor. The C++ engine has no compile path yet; its function exists for
+API parity.
+
 ## 2 · ISA backend
 
 Add one row to `BACKEND_REGISTRY` in

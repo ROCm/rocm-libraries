@@ -16920,6 +16920,62 @@
       }
     }
   },
+  "processors": {
+    "gfx11-generic": {
+      "accepted": true
+    },
+    "gfx1100": {
+      "accepted": true
+    },
+    "gfx1101": {
+      "accepted": true
+    },
+    "gfx1102": {
+      "accepted": true
+    },
+    "gfx1103": {
+      "accepted": true
+    },
+    "gfx1150": {
+      "accepted": true
+    },
+    "gfx1151": {
+      "accepted": true
+    },
+    "gfx1152": {
+      "accepted": true
+    },
+    "gfx1153": {
+      "accepted": true
+    },
+    "gfx1154": {
+      "accepted": true
+    },
+    "gfx12-generic": {
+      "accepted": true
+    },
+    "gfx1200": {
+      "accepted": true
+    },
+    "gfx1201": {
+      "accepted": true
+    },
+    "gfx1250": {
+      "accepted": true
+    },
+    "gfx908": {
+      "accepted": true
+    },
+    "gfx90a": {
+      "accepted": true
+    },
+    "gfx942": {
+      "accepted": true
+    },
+    "gfx950": {
+      "accepted": true
+    }
+  },
   "schema": "rocke.intrinsic_arch_domain/v1",
   "toolchain": {
     "arches": [
@@ -16944,7 +17000,7 @@
     ],
     "clang": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 2792f8ceeb5aa6e188c1ce2b735923b2406a8e59)",
     "flavor": "llvm24",
-    "generator": 6,
+    "generator": 7,
     "probe_cflags": [
       "-O0",
       "-nogpulib"
