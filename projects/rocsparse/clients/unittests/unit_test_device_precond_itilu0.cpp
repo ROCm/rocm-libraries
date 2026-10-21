@@ -25,10 +25,10 @@
 // Iterative ILU(0) (csritilu0) coverage:
 //  * the (deprecated) rocsparse_Xcsritilu0_compute entry points, for every
 //    algorithm and value type, checked against the exact ILU(0) factor;
-//  * the async_split driver of the "x" interface, which is not reachable from
-//    the public API (the public async_split path forwards to sync_split), driven
-//    through csritilu0x_compute_impl with hand-built L (rows), U (columns) and D
-//    structures for every nnz-per-row bucket of the sweep kernels.
+//  * the async_split driver of the "x" interface, driven directly through
+//    csritilu0x_compute_impl (which has no public wrapper) with hand-built L
+//    (rows), U (columns) and D structures for every nnz-per-row bucket of the
+//    sweep kernels.
 
 #include "unit_test_device_precond_common.hpp"
 

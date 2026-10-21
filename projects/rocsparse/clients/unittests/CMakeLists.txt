@@ -420,7 +420,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_compute.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2csc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2coo.cpp
-  # csritilu0x_*_impl is not reachable from the public itilu0 API. The symbols
+  # csritilu0x_*_impl has no public wrapper in the itilu0 API. The symbols
   # are hidden in librocsparse, so the defining TUs (and the x-driver TUs they
   # reference) are compiled into this test binary.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
