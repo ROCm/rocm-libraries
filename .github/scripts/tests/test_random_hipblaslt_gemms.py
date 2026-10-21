@@ -130,6 +130,24 @@ class RandomGemmTests(unittest.TestCase):
             report = json.loads((root / "all/cases.json").read_text())
             self.assertEqual(len(report), 4)
             self.assertIn("race reported", (root / "all/cases.md").read_text())
+            with patch.object(runner, "run_case", side_effect=OSError("cannot launch")):
+                self.assertEqual(
+                    runner.main(
+                        [
+                            "--count", "2", "--bench", sys.executable,
+                            "--rocjitsu", sys.executable, "--config", str(config),
+                            "--output", str(root / "launch-failure"),
+                        ]
+                    ),
+                    1,
+                )
+            failure = json.loads((root / "launch-failure/summary.json").read_text())
+            self.assertTrue(failure["complete"])
+            self.assertEqual(failure["failed"], 2)
+            self.assertEqual(
+                json.loads((root / "launch-failure/cases.json").read_text())[0]["result"]["reason"],
+                "execution error: cannot launch",
+            )
             runner.main(["--count", "3", "--dry-run", "--output", str(root / "random")])
             for iteration in range(1, 4):
                 name = f"case-{iteration:04d}/input.yaml"
