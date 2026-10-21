@@ -283,9 +283,8 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Analysis populates the ellCols field of the descriptor.
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_analysis(handle, matA, matB, alg, buffer));

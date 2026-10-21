@@ -164,9 +164,8 @@ void testing_gtsv_interleaved_batch(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseXgtsvInterleavedBatch_bufferSizeExt(
         handle, algo, m, ddl, dd, ddu, dx, batch_count, &bufferSize));
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.unit_check)
     {

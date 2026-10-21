@@ -68,9 +68,8 @@ void testing_gemvi_bad_arg(const Arguments& argus)
     T*   y    = (T*)y_managed.get();
 
     // gemvi
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, 100));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(100), device_free};
+    void* buffer         = buffer_managed.get();
 
     verify_hipsparse_status_invalid_handle(hipsparseXgemvi(
         nullptr, opType, m, n, &alpha, A, lda, nnz, x, xInd, &beta, y, idxBase, buffer));
@@ -211,13 +210,12 @@ void testing_gemvi(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dA, hA.data(), sizeof(T) * m * n, hipMemcpyHostToDevice));
 
     // gemvi bufferSize
-    int   bufferSize;
-    void* externalBuffer = nullptr;
+    int bufferSize;
 
     CHECK_HIPSPARSE_ERROR(
         testing::hipsparseXgemvi_bufferSize<T>(handle, trans, m, n, nnz, &bufferSize));
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer, bufferSize));
-    auto externalBuffer_managed = hipsparse_unique_ptr{externalBuffer, device_free};
+    auto  externalBuffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* externalBuffer         = externalBuffer_managed.get();
 
     if(argus.unit_check)
     {

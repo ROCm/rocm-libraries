@@ -156,9 +156,8 @@ void testing_gtsv2(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         hipsparseXgtsv2_bufferSizeExt(handle, m, n, ddl, dd, ddu, dB, ldb, &bufferSize));
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.unit_check)
     {

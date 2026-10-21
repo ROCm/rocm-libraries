@@ -338,9 +338,8 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
         handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, &bufferSize));
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Preprocess (optional)
     if(argus.call_preprocess)

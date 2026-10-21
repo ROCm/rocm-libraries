@@ -259,9 +259,8 @@ void testing_spsv_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_bufferSize(
         handle, transA, &h_alpha, A, x, y1, typeT, alg, descr, &bufferSize));
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));

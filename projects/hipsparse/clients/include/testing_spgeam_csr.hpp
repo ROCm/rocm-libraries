@@ -449,9 +449,8 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_bufferSize(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, &bufferSize1));
 
-    void* externalBuffer1 = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer1, bufferSize1));
-    auto externalBuffer1_managed = hipsparse_unique_ptr{externalBuffer1, device_free};
+    auto  externalBuffer1_managed = hipsparse_unique_ptr{device_malloc(bufferSize1), device_free};
+    void* externalBuffer1         = externalBuffer1_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, &h_alpha, A, &h_beta, B, C1, typeT, alg, descr, externalBuffer1));
@@ -465,9 +464,8 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_bufferSize(
         handle, transA, transB, d_alpha, A, d_beta, B, C2, typeT, alg, descr2, &bufferSize2));
 
-    void* externalBuffer2 = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer2, bufferSize2));
-    auto externalBuffer2_managed = hipsparse_unique_ptr{externalBuffer2, device_free};
+    auto  externalBuffer2_managed = hipsparse_unique_ptr{device_malloc(bufferSize2), device_free};
+    void* externalBuffer2         = externalBuffer2_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpGEAM_nnz(
         handle, transA, transB, d_alpha, A, d_beta, B, C2, typeT, alg, descr2, externalBuffer2));

@@ -92,9 +92,8 @@ void testing_spvv_bad_arg(const Arguments& argus)
         "Error: bufferSize is nullptr");
 
     // SpVV
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, 100));
-    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(100), device_free};
+    void* buffer         = buffer_managed.get();
 
     verify_hipsparse_status_invalid_handle(
         hipsparseSpVV(nullptr, opType, x, y, &result, computeType, buffer));
@@ -184,9 +183,8 @@ void testing_spvv(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         testing::hipsparseSpVV_bufferSize(handle, trans, x, y, &hresult, computeType, &bufferSize));
 
-    void* externalBuffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer, bufferSize));
-    auto externalBuffer_managed = hipsparse_unique_ptr{externalBuffer, device_free};
+    auto  externalBuffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* externalBuffer         = externalBuffer_managed.get();
 
     if(argus.unit_check)
     {

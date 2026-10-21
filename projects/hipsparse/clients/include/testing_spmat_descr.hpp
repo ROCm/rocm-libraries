@@ -850,15 +850,15 @@ void testing_spmat_descr(void)
     std::vector<int>   hcsr_col_indC = {0, 2, 0, 1};
     std::vector<float> hcsr_valC     = {5.0f, 6.0f, 7.0f, 8.0f, 1.0f, 2.0f};
 
-    int*   dcsr_row_ptrC = NULL;
-    int*   dcsr_col_indC = NULL;
-    float* dcsr_valC     = NULL;
-    CHECK_HIP_ERROR(hipMalloc((void**)&dcsr_row_ptrC, (m + 1) * sizeof(int)));
-    auto dcsr_row_ptrC_managed = hipsparse_unique_ptr{dcsr_row_ptrC, device_free};
-    CHECK_HIP_ERROR(hipMalloc((void**)&dcsr_col_indC, nnzC * sizeof(int)));
-    auto dcsr_col_indC_managed = hipsparse_unique_ptr{dcsr_col_indC, device_free};
-    CHECK_HIP_ERROR(hipMalloc((void**)&dcsr_valC, nnzC * sizeof(float)));
-    auto dcsr_valC_managed = hipsparse_unique_ptr{dcsr_valC, device_free};
+    auto dcsr_row_ptrC_managed
+        = hipsparse_unique_ptr{device_malloc((m + 1) * sizeof(int)), device_free};
+    auto dcsr_col_indC_managed
+        = hipsparse_unique_ptr{device_malloc(nnzC * sizeof(int)), device_free};
+    auto dcsr_valC_managed = hipsparse_unique_ptr{device_malloc(nnzC * sizeof(float)), device_free};
+
+    int*   dcsr_row_ptrC = (int*)dcsr_row_ptrC_managed.get();
+    int*   dcsr_col_indC = (int*)dcsr_col_indC_managed.get();
+    float* dcsr_valC     = (float*)dcsr_valC_managed.get();
 
     CHECK_HIP_ERROR(hipMemcpy(
         dcsr_row_ptrC, hcsr_row_ptrC.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice));
