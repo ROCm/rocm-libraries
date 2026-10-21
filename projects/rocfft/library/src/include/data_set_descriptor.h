@@ -112,6 +112,39 @@ struct data_descriptor_t
                       size_t                     batch_rank = 1);
 
     /**
+     * @brief Constructs a new `data_descriptor_t` object with explicit member values,
+     * including the precision and array type of the data set.
+     *
+     * @param[in] precision precision of the data set's elements.
+     * @param[in] array_type array type of the data set.
+     * @param[in] lower lower bounds along all axes of the logical index range
+     * (lower bounds are included).
+     * @param[in] upper upper bounds along all axes of the logical index range
+     * (upper bounds are excluded).
+     * @param[in] strides in-buffer strides associated with all axes of the
+     * logical index range.
+     * @param[in] batch_rank number of batch axes in the logical index range.
+     * Default value is `1`.
+     *
+     * @note `precision` and `array_type` are deliberately listed first: both are
+     * unscoped enums that implicitly convert to `size_t`, so trailing positions
+     * would let a call with a missing argument silently bind to the overload
+     * without them (using an enum value as `batch_rank`).
+     *
+     * @note All vector arguments implicitly consider that length axes are listed
+     * first followed by `batch_rank` batch axes.
+     *
+     * @throw An `std::invalid_argument` is thrown in the same cases as the
+     * overload without `precision` and `array_type`.
+     */
+    data_descriptor_t(rocfft_precision           precision,
+                      rocfft_array_type          array_type,
+                      const std::vector<size_t>& lower,
+                      const std::vector<size_t>& upper,
+                      const std::vector<size_t>& strides,
+                      size_t                     batch_rank = 1);
+
+    /**
      * @brief Constructs a new `data_descriptor_t` object capturing a full range of logical
      * indices with one batch axis.
      * 
@@ -457,6 +490,10 @@ private:
     // vector plus a batch_rank counter because the split *is* the rank bookkeeping.
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
+
+    // Default array type that stores information about the FFT. Can be set in the constructor.
+    rocfft_array_type array_type = rocfft_array_type_unset;
+
     // If the current object captures the data layout for a sub-dimensional data set
     // embedded within another, an embedding map is required to keep track of which of
     // the current object's axes correspond to the embedding set's length axes. If
