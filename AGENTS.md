@@ -35,7 +35,7 @@ PR quality is a layered set of skills: one library-agnostic base, and thin overl
 rocm-pr-quality (base, in ROCm/TheRock)
  |-- hipblaslt-pr-quality   projects/hipblaslt/**
  |-- hipdnn-pr-quality      projects/hipdnn/**, dnn-providers/**
- `-- github-ci-pr-quality   .github/** (planned, follow-up PR)
+ `-- github-ci-pr-quality   .github/**
 ```
 
 - **The base is not in this repo.** `rocm-pr-quality` lives in ROCm/TheRock at [`skills/rocm-pr-quality/`](https://github.com/ROCm/TheRock/tree/main/skills/rocm-pr-quality) (`SKILL.md` plus `reference.md`). Each overlay's "Dependency" section says how to get it. Do not vendor a copy here.
@@ -57,7 +57,7 @@ Keep this table current. See [Adding a skill](#adding-a-skill-or-overlay).
 | `rocm-pr-quality` (base) | [ROCm/TheRock `skills/rocm-pr-quality/`](https://github.com/ROCm/TheRock/tree/main/skills/rocm-pr-quality) | Authoring, reviewing, or merge-gating any ROCm library PR. Read first. |
 | `hipblaslt-pr-quality` | [`projects/hipblaslt/skills/hipblaslt-pr-quality/`](projects/hipblaslt/skills/hipblaslt-pr-quality/SKILL.md) | A PR touches `projects/hipblaslt/**` (including `tensilelite/`). |
 | `hipdnn-pr-quality` | [`projects/hipdnn/tools/ai/skills/hipdnn-pr-quality/`](projects/hipdnn/tools/ai/skills/hipdnn-pr-quality/SKILL.md) | A PR touches `projects/hipdnn/**` or `dnn-providers/**`. |
-| `github-ci-pr-quality` | Planned | A PR touches `.github/**` (workflows, actions, scripts). Added in a follow-up PR. |
+| `github-ci-pr-quality` | [`skills/github-ci-pr-quality/`](skills/github-ci-pr-quality/SKILL.md) | A PR touches `.github/**` (workflows, actions, scripts). Cross-reads each affected project's `TESTING.md`. |
 
 `hipdnn-review` and `pr-summary` (under `projects/hipdnn/tools/ai/skills/`) are deprecated stubs that redirect to `hipdnn-pr-quality`.
 
@@ -122,6 +122,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | --- | --- |
 | [`hipblaslt-pr-quality.instructions.md`](.github/instructions/hipblaslt-pr-quality.instructions.md) | `projects/hipblaslt/**` |
 | [`projects-rocblas-testing.instructions.md`](.github/instructions/projects-rocblas-testing.instructions.md) | `projects/rocblas/**` |
+| [`github-ci-pr-quality.instructions.md`](.github/instructions/github-ci-pr-quality.instructions.md) | `.github/**` |
 | [`rocke-pr-review.instructions.md`](.github/instructions/rocke-pr-review.instructions.md) | `dnn-providers/hip-kernel-provider/rocke/**` |
 
 ## Adding a skill or overlay

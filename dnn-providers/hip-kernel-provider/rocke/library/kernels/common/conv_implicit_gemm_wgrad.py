@@ -2501,7 +2501,7 @@ def build_implicit_gemm_conv_wgrad(
             # so that run is exactly Gm, a build-time constant: fold it and its
             # magic pair here instead of reading the kernargs. The epilogue
             # keeps the true cpg through ``params``.
-            from rocke.helpers.transforms import calculate_magic_numbers
+            from rocke.helpers.magic_division import calculate_magic_numbers
 
             _merged_cpg = p_load.cpg
             _mult, _shift = calculate_magic_numbers(_merged_cpg)

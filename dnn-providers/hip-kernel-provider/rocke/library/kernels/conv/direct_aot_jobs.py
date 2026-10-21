@@ -21,7 +21,10 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
+    DIRECT_GROUPED_HALO as _GROUPED_HALO,
+    DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
+    DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     DIRECT_WAVE_PARAMETRIC,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
@@ -30,6 +33,10 @@ from kernels.conv.direct_variants import (
     validate_direct_spec as validate_spec,
 )
 from kernels.conv.kernel_identity import KernelIdentity
+
+# Direction name of the forward helper kernels (shape-independent passes like
+# the split-C reduction) -- found by exact identity, not by capability match.
+_FWD_HELPER = "direct_fwd_helper"
 
 
 # Operand dtypes the direct kernels build for. The cache is filled for one at a
@@ -292,6 +299,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad, s, dh, dw in _NONGROUPED_DILATED
         ),
     ),
+    # Grouped forward through the non-grouped kernel's LDS-halo pipeline:
+    # groups and per-group channels runtime, small cpg merged into one MFMA
+    # problem with block-diagonal weights (knob group_merge).
+    _GROUPED_HALO: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product(_NONGROUPED_FILTERS, _STRIDES)
+        ),
+    ),
     # Depthwise forward: square odd filters 3..11, stride 1 and 2, plus the
     # large stride-1 filters.
     # The weight-preloading kernel holds KH*KW taps per lane, so 31x31 does
@@ -423,12 +440,25 @@ def dgrad_rtc_vgprs(knobs: dict, KH: int, KW: int) -> int:
     return acc + KH * KW * per_wave * knobs["m_tiles"] * (load_vec // 2)
 
 
-def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
+def _knob_grid(
+    variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
+) -> Iterator[dict]:
     if variant == "direct_nongrouped":
-        from kernels.common.conv_direct_nongrouped import nongrouped_knobs
+        from kernels.common.conv_direct_nongrouped import (
+            nongrouped_knobs,
+            nongrouped_split_knobs,
+        )
 
         # Every width (no Wo to pick from): plan_for keeps those that fit.
         yield from nongrouped_knobs(arch, dtype)
+        # The split-C rows serve small images with many channels; the dilated
+        # rows (DeepLab-style, large maps) never need them.
+        if caps is None or (caps.dil_h, caps.dil_w) == (1, 1):
+            yield from nongrouped_split_knobs(arch, dtype)
+    elif variant == _GROUPED_HALO:
+        from kernels.common.conv_direct_nongrouped import grouped_knobs
+
+        yield from grouped_knobs(arch, dtype)
     elif variant == "direct_grouped":
         for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
             yield dict(block_q=bq, block_groups=bg, double_buffer=db)
@@ -595,6 +625,34 @@ def _helper_identity(
     )
 
 
+# Capabilities of the split reduction: it bakes no filter or channel count.
+_NO_CAPS = DirectCaps(KH=0, PAD=0, stride=0, cpg=0, kpg=0)
+
+
+def _split_reduce_identity(
+    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    return _identity(
+        arch,
+        wave_size,
+        _SPLIT_REDUCE,
+        _FWD_HELPER,
+        _NO_CAPS,
+        {"split_c": split_c},
+        dtype,
+    )
+
+
+def _split_reduce_job(
+    arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
+) -> BuildJob:
+    return _job(
+        _split_reduce_identity(arch, wave_size, split_c, dtype),
+        _NO_CAPS,
+        {"split_c": split_c},
+    )
+
+
 def _caps_of(identity: KernelIdentity) -> DirectCaps:
     return DirectCaps(
         KH=identity.filter_h,
@@ -624,7 +682,8 @@ def probe_problem(
     stride-2 output wider than the widest W tile. Runtime channel counts
     (``cpg == 0``: the non-grouped forward kernel and wgrad) take one group of
     256: a multiple of every channel chunk and of every channel tile, and as
-    many 16-channel tiles as the widest wgrad ``waves_c``.
+    many 16-channel tiles as the widest wgrad ``waves_c`` -- 1024 for the
+    non-grouped kernel, whose split-C rows need a chunk per split.
 
     The runtime-channel MFMA dgrad bakes its channel *tile counts* instead,
     so its probe takes them from ``knobs``: ``k_atoms`` full K-atoms of dY
@@ -648,14 +707,34 @@ def probe_problem(
             stride=caps.stride,
             dtype=dtype,
         )
+    if variant == _GROUPED_HALO:
+        # Runtime groups and channels: 64 channels per group are a multiple of
+        # every chunk and channel tile at every merge degree, and 16 groups a
+        # multiple of every degree.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=16,
+            cpg=64,
+            kpg=64,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
     if caps.cpg == 0:
+        # The non-grouped kernel's split-C rows need a whole chunk per split:
+        # 1024 channels cover the deepest split (16 x ck 64).
+        channels = 1024 if variant == "direct_nongrouped" else 256
         return DirectConvProblem(
             N=1,
             H=64,
             W=64,
             groups=1,
-            cpg=256,
-            kpg=256,
+            cpg=channels,
+            kpg=channels,
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
@@ -726,7 +805,7 @@ def _caps_jobs(
     rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
     # The runtime-channel dgrad probe follows each knob's tile counts.
     probe = None if rtc_dgrad else probe_problem(caps, dtype, variant)
-    for knobs in _knob_grid(variant, arch, dtype):
+    for knobs in _knob_grid(variant, arch, dtype, caps):
         n_raw += 1
         if rtc_dgrad:
             probe = probe_problem(caps, dtype, variant, knobs)
@@ -737,7 +816,7 @@ def _caps_jobs(
         spec = make_spec(variant, probe, knobs, wave_size)
         if not validate_spec(variant, spec, arch)[0]:
             continue
-        if variant == "direct_nongrouped" and _nongrouped_spills(spec, arch):
+        if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
             continue
         if variant == "direct_depthwise" and _depthwise_stream_spills(spec):
             continue
@@ -750,6 +829,8 @@ def _caps_jobs(
                 knobs,
             )
         ]
+        if variant == "direct_nongrouped" and knobs.get("split_c", 1) > 1:
+            cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
         if variant in _MFMA_DGRAD:
             for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(
                 knobs, variant
@@ -773,10 +854,18 @@ def count_direct_jobs(
     """Raw candidate count ``direct_kernel_sweep.enumerate_direct_jobs`` walks
     (the progress denominator): capabilities times tuning knobs, before validation."""
     return sum(
-        len(caps_list) * sum(1 for _ in _knob_grid(variant, arch, dtype))
+        sum(1 for _ in _knob_grid(variant, arch, dtype, caps))
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
+        for caps in caps_list
     )
+
+
+@dataclass(frozen=True)
+class _DtypeOnly:
+    """The only problem field a shape-independent helper's spec reads."""
+
+    dtype: str
 
 
 def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
@@ -789,6 +878,9 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
+    if variant == _SPLIT_REDUCE:
+        spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
+        return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
     spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size)
     ok, why = validate_spec(variant, spec, arch)
@@ -819,6 +911,23 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         )
     caps = _caps_of(identity)
     knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if identity.direction == _FWD_HELPER:
+        split_c = knobs.get("split_c")
+        rebuilt = (
+            _split_reduce_identity(
+                identity.arch, identity.wave_size, split_c, identity.dtype_a
+            )
+            if identity.algorithm == _SPLIT_REDUCE and isinstance(split_c, int)
+            else None
+        )
+        if (
+            rebuilt is None
+            or replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity
+        ):
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _NO_CAPS, {"split_c": split_c})
     if identity.direction == "direct_dgrad_helper":
         rebuilt = _helper_identity(
             identity.arch,

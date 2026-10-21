@@ -575,6 +575,33 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
     return _build
 
 
+def build_lightning_indexer_case(arch, **over):
+    """Build one representative lightning-indexer kernel for ``arch``.
+
+    The kernel is arch-neutral (gfx942/gfx950); ``arch`` only selects the lowering
+    target. Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted
+    into the tile spec so the case table stays flat.
+    """
+
+    def _build():
+        from kernels.common.lightning_indexer import (
+            IndexerSpec,
+            IndexerTileSpec,
+            build_lightning_indexer,
+        )
+
+        opts = dict(over)
+        block_size = opts.pop("block_size", None)
+        tile = (
+            IndexerTileSpec(block_size=block_size)
+            if block_size is not None
+            else IndexerTileSpec()
+        )
+        return build_lightning_indexer(IndexerSpec(tile=tile, **opts), arch=arch)
+
+    return _build
+
+
 def _d256_problem():
     """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -3453,6 +3480,21 @@ def cases():
                 **_kw,
             ),
         )
+    # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5, so the
+    # magic sum carries a real multiply-high term (a power-of-two ratio has multiplier 1).
+    for _dim, _three_d in (("2d", False), ("3d", True)):
+        add(
+            "attention",
+            f"attention/gfx950/scalar{_dim}_fp16_d128_q40_kv8",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar{_dim}_q40_kv8",
+                "gfx950",
+                three_d=_three_d,
+                num_query_heads=40,
+                num_kv_heads=8,
+            ),
+        )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
     # 4-warp GQA V-transpose (gfx942) routes.
@@ -4102,7 +4144,7 @@ def cases():
     # Depthwise forward direct kernels on the wave32 gfx1250, built at its wave
     # size; plus the preloading kernel as a logical wave64 (no cross-lane
     # operation, so it runs as two hardware waves). Mirrors
-    # library/tests/parity/conv_direct_grouped_emit.* (indices 95+).
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 114+).
     for _tag, _wave in (("dw_n4h16_w32", 32), ("dw_n4h16_w64", 64)):
         add(
             "conv_direct",
@@ -4271,6 +4313,73 @@ def cases():
         "gfx1201",
         build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
     )
+
+    # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
+    # arch-neutral (no arch-specific atom, intrinsic, or LDS), so both lower the
+    # same specs (scalar-v1 model-shaped cases: DeepSeek H_I=64, GLM H_I=32, a
+    # small case; plus the MFMA body on 16-aligned shapes). The emitted IR is
+    # currently identical across arches, so the two per-arch goldens hold the same
+    # SHAs; the split is kept to catch future arch-specific divergence (fp8, wider
+    # atoms) the moment it appears.
+    for _arch in ("gfx942", "gfx950"):
+        for _case_id, _over in (
+            (
+                "deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "small",
+                {
+                    "n_index_heads": 4,
+                    "index_head_dim": 16,
+                    "seqlen_q": 8,
+                    "seqlen_k": 32,
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+        ):
+            add(
+                "lightning_indexer",
+                f"lightning_indexer/{_arch}/{_case_id}",
+                _arch,
+                build_lightning_indexer_case(_arch, **_over),
+            )
 
     return out
 

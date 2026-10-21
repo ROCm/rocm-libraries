@@ -181,7 +181,30 @@ static void ll_wrapping_binop(rocke_lower_t* L,
 }
 static void _op_arith_add(rocke_lower_t* L, const rocke_op_t* op)
 {
+    /* Python: an explicit no-unsigned-wrap add is "add nuw"; otherwise the
+     * type's default (nsw for signed values, no flag for unsigned ones). */
+    char wrap_buf[128];
+    const char* wrap_error
+        = rocke_i_add_wrap_error(&op->attrs, op->operands[0]->type, wrap_buf, sizeof wrap_buf);
+    if(wrap_error)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", wrap_error);
+        return;
+    }
+    const char* wrap = rocke_attr_get_str(&op->attrs, "wrap");
+    if(wrap && strcmp(wrap, "nuw") == 0)
+    {
+        rocke_ll_binop(L, op, "add nuw");
+        return;
+    }
     ll_wrapping_binop(L, op, "add nsw", "add");
+}
+/* Python _op_arith_assume_range: emits nothing; rocke_ll_operand prints the
+ * marked value (operand 0) at every use of the marker's result. */
+static void _op_arith_assume_range(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)L;
+    (void)op;
 }
 static void _op_arith_sub(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -890,6 +913,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT, _op_arith_constant);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT_VEC, _op_arith_constant_vec);
     rocke_ll_set_handler(ROCKE_OP_ARITH_ADD, _op_arith_add);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_ASSUME_RANGE, _op_arith_assume_range);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SUB, _op_arith_sub);
     rocke_ll_set_handler(ROCKE_OP_ARITH_MUL, _op_arith_mul);
     rocke_ll_set_handler(ROCKE_OP_ARITH_DIV, _op_arith_div);
