@@ -13,6 +13,11 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
+// Switch (default on): issue the K0/V0 prologue loads before waiting for Q.
+#ifndef CK_TILE_BP_PT_EXP_EARLY_KV
+#define CK_TILE_BP_PT_EXP_EARLY_KV 1
+#endif
+
 namespace ck_tile {
 
 // Paged QR schedule for batch prefill. K and V share one page ID per logical N128 tile;
@@ -154,6 +159,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static constexpr bool kLeanD64Loop = Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
                                          Geometry::kN == 128 && Problem::kPageBlockSize >= 128 &&
                                          !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+
+    // Prologue order. Q is staged in the V1 buffer so the K0/V0 loads (which do not depend on Q)
+    // are issued right after it, and the Q and K/V load latencies overlap instead of adding up.
+    // Without it Q is staged in K0 and must be read out before K0 is loaded. Whole-tile pages
+    // only: for P16 the extra live state raises SGPR spills (D128 causal 32 -> 67, ~3% slower).
+    static constexpr bool kEarlyKvPrologue =
+        CK_TILE_BP_PT_EXP_EARLY_KV != 0 && PagedTransfer::kFragmentsPerWave == 1;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -386,17 +398,22 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
             tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
         }
 
-        // Q tile in LDS
+        // Q tile in LDS. With kEarlyKvPrologue Q lands in the V1 buffer, which is first
+        // written by the V prefetch of iteration 0, so the K0/V0 loads can be issued while Q
+        // is still in flight.
+        auto* q_lds_ptr = static_cast<QDataType*>(kEarlyKvPrologue ? smem_ptrv1 : smem_ptrk0);
+        static_assert(!kEarlyKvPrologue ||
+                          Policy::template GetSmemSizeQ<Problem>() <= Policy::kVFootprintBytes,
+                      "Q does not fit in the V1 buffer");
+
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
         auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
-            static_cast<QDataType*>(smem_ptrk0),
-            Policy::template MakeQLdsBlockDescriptor<Problem>());
+            q_lds_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
 
         auto q_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            static_cast<QDataType*>(smem_ptrk0),
-            Policy::template MakeQLdsBlockDescriptor<Problem>());
+            q_lds_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
 
         auto q_lds_store_window =
             make_tile_window(q_lds_write_view,
@@ -410,8 +427,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                              Policy::template MakeQRegTileDistribution<Problem>());
 
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
-        s_wait_tensorcnt_barrier<0>();
-        auto q_tile = load_tile(q_lds_read_window);
+        using QTile  = decltype(load_tile(q_lds_read_window));
+        QTile q_tile = [&]() {
+            if constexpr(kEarlyKvPrologue)
+                return QTile{}; // read after the K/V prologue loads are issued
+            else
+            {
+                s_wait_tensorcnt_barrier<0>();
+                return load_tile(q_lds_read_window);
+            }
+        }();
 
         // K tile in LDS (sink-aware start)
         const auto kv_load_start =
@@ -521,7 +546,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
             else
                 return 0;
         }();
-        block_sync_lds<0>();
+        // Without kEarlyKvPrologue, Q occupies K0: all Q reads must end before K0 is written.
+        if constexpr(!kEarlyKvPrologue)
+            block_sync_lds<0>();
         // Fixed TDM prologue: current K/V and the first look-ahead K buffer.
         k_dram_window.set_page_id(page_id0);
         v_dram_window.set_page_id(page_id0);
@@ -533,6 +560,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         {
             if(num_sink_loop == 1 && num_total_loop > 1)
                 move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+        }
+        if constexpr(kEarlyKvPrologue)
+        {
+            // Tensor loads complete in issue order: once at most the K0 and V0 issues remain,
+            // Q has landed. K1 is issued only after this wait, so no wave has more tensor loads
+            // in flight than in the Q-in-K0 order.
+            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount +
+                                     PagedTransfer::kVPrefetchTensorCount>();
+            q_tile = load_tile(q_lds_read_window);
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
@@ -546,7 +582,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
                       v_lds_insts == Geometry::kVStageLoadCount);
 
-        s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount>();
+        if constexpr(kEarlyKvPrologue)
+        {
+            // K0/V0 landed, and (dscnt 0 before the barrier) every wave has finished reading Q,
+            // so iteration 0 may overwrite V1.
+            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount, 0>();
+        }
+        else
+        {
+            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount>();
+        }
         auto initial_k_lds_su_read_window =
             make_tile_window(k_lds_read_view,
                              make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
