@@ -278,6 +278,26 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v)
     return n;
 }
 
+/* The unsigned HIP spelling of a scalar integer type (Python
+ * _HIP_UNSIGNED_INT_TYPE); NULL for any other type. */
+const char* rocke_h_unsigned_int_type(const rocke_type_t* t)
+{
+    const char* name = t ? t->name : NULL;
+    if(!name)
+        return NULL;
+    if(strcmp(name, "i1") == 0)
+        return "bool";
+    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0)
+        return "uint8_t";
+    if(strcmp(name, "i16") == 0)
+        return "uint16_t";
+    if(strcmp(name, "i32") == 0)
+        return "uint32_t";
+    if(strcmp(name, "i64") == 0)
+        return "uint64_t";
+    return NULL;
+}
+
 /* The raw _HIP_TYPE dict: scalar IR name -> HIP scalar spelling. NULL if
  * unknown (caller decides whether that is an error).
  * No packed-only type has an entry: rocke_i_refuse_packed_only_value keeps

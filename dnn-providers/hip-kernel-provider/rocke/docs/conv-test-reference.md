@@ -121,8 +121,14 @@ published archives and always validates them against their committed architectur
 locks. After publication, check the installed layout through the normal CMake path.
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF` registers no pinned-reference GPU entries
-for any operation. Required tests fail on missing gfx942 hardware or a
-missing/corrupt bundle; other unenrolled architectures remain outside the cohort.
+for any operation. A job running on another processor in `AMDGPU_TARGETS` skips
+the gfx942 suite, including when convolution has no reference bundle for that
+processor. Without `AMDGPU_TARGETS`, a different detected processor also skips.
+Selection uses physical GPU identity; family names do not imply reference
+enrollment. Missing hardware or a GPU outside the requested targets fails a
+requested gfx942 suite, and missing or corrupt reference data fails on matching
+hardware. See the shared
+[processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 
 Shared numeric, digest, archive, snapshot, and interpreter-transport support lives
 in `library/tests/reference_common`. Both operations import that support directly. Existing frozen SDPA bundles remain self-contained; newly qualified bundles

@@ -465,6 +465,10 @@ typedef enum rocke_opcode
     ROCKE_OP_ARITH_UITOFP_F32,
     ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
 
+    /* Range marker (Python IRBuilder._assume_range): its result is its first
+     * operand; it emits no instruction. Appended so no existing index shifts. */
+    ROCKE_OP_ARITH_ASSUME_RANGE,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -693,14 +697,20 @@ bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
  * signedness asks it which form to emit. NULL-safe. */
 bool rocke_type_is_unsigned(const rocke_type_t* t);
 
-/* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
+/* AMDGPU buffer-load cache-policy bits (the AUX operand; Python module
+ * constants). Bit 0 (1) is GLC on gfx90a and SC0 on gfx942/gfx950; bit 1 (2) is
+ * SLC on gfx90a and NT (streaming) on gfx942/gfx950. */
 typedef enum rocke_cache_policy
 {
-    ROCKE_CACHE_ALL = 0,
-    ROCKE_CACHE_GLOBAL = 1,
-    ROCKE_CACHE_STREAM = 2,
-    ROCKE_NON_TEMPORAL = 3
+    ROCKE_CACHE_ALL = 0, /* no bits: the default caching */
+    ROCKE_CACHE_GLOBAL = 1, /* GLC / SC0 */
+    ROCKE_CACHE_STREAM = 2, /* SLC / NT */
+    ROCKE_NON_TEMPORAL = 3 /* GLC + SLC / SC0 + NT */
 } rocke_cache_policy_t;
+
+/* The bits of a cache-policy name ("all", "global", "stream", "nt"; Python
+ * cache_policy_from_name). Returns false for any other name. */
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out);
 
 /* ============================== ATTR MAP ================================ */
 
@@ -792,6 +802,9 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
 
 /* ----- arith integer / logic ----- */
 rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python add_nuw: integer a + c that does not wrap as unsigned ("add nuw").
+ * Operands are two i32 or two i64 values. */
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_mul(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_div(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -837,6 +850,9 @@ rocke_value_t* rocke_b_cmp_gt(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_ge(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
+ * values. */
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
