@@ -191,8 +191,6 @@ target_link_libraries( hipfft-test PRIVATE ${HIPFFT_RTC_LIB} )
 
 if( HIPFFT_BUILD_SCOPE )
   set( TESTS_OUT_DIR "/clients/staging" )
-elseif( HIPFFT_CLIENTS_BUILD_SCOPE )
-  set( TESTS_OUT_DIR "/bin" )
 else()
   set( TESTS_OUT_DIR "/bin" )
 endif()
