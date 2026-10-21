@@ -150,7 +150,7 @@ rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle            hand
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_not_implemented the sparse format is invalid or the preconditioner \p P is not identical to the matrix to factorize \p A.
  *  \retval rocsparse_status_invalid_value the \p spildlt0_stage value is invalid.
- *  \retval rocsparse_status_invalid_pointer \p spildlt0_descr, \p A, \p P, or \p buffer_size_in_bytes pointer is invalid.
+ *  \retval rocsparse_status_invalid_pointer \p spildlt0_descr, \p A, \p P, or \p buffer_size_in_bytes pointer is invalid, or the numeric boost is enabled (\ref rocsparse_spildlt0_input_boost_enable) without a boost tolerance or value.
  *
  *  \par Example
  *  \snippet example_rocsparse_spildlt0.cpp doc example
