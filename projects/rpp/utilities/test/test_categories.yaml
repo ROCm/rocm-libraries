@@ -1,0 +1,95 @@
+# RPP test categories for TheRock's tiered CI (see shared/ctest/README.md).
+# Case names: {Domain}_{Category}/{Op}Test.{Intent}/{Backend}_{DType}_{Layout}_{Roi}_{Size}
+
+test_categories:
+  quick:
+    description: "Core tests plus one config per op and backend (target: < 5 min)"
+    test_patterns:
+      - "HandleTest.*"
+      - "RoiTest.*"
+      - "DescriptorTest.*"
+      - "GoldenLayoutTest.*"
+      - "Sample*Test.*"
+      - "SrcTexelTest.*"
+      - "BorderIndexTest.*"
+      - "*/*_U8toU8_PKD3_FullRoi_*"
+      - "*/*_F32toF32_PKD3_FullRoi_*"
+      - "Image_DataExchange/ColorToGreyscaleTest.*_U8toU8_PKD3toPLN1_FullRoi_*"
+      - "Image_Filter/SobelFilterTest.*_U8toU8_PLN1_FullRoi_*"
+      - "Misc_*/*_2D_*2x24x32"
+      - "Voxel_*/*_NCDHW1_FullRoi_XYZWHD_*"
+    labels:
+      - "quick"
+      - "smoke"
+
+  standard:
+    description: "Full correctness grid (target: < 30 min)"
+    test_patterns:
+      - "*"
+    labels:
+      - "standard"
+      - "pr"
+
+  # No extended grid yet, so comprehensive and full match standard.
+  comprehensive:
+    description: "Same as standard until an extended grid exists (target: < 2 h)"
+    test_patterns:
+      - "*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+
+  full:
+    description: "Same as comprehensive (2 h+)"
+    test_patterns:
+      - "*"
+    labels:
+      - "full"
+
+  # Emulator tiers are HIP-only: HOST cases already run on native runners.
+  ffm-quick:
+    description: "HIP-only subset of quick for emulator runs"
+    test_patterns:
+      - "HandleTest.*HIP*"
+      - "*/*HIP_U8toU8_PKD3_FullRoi_*"
+      - "*/*HIP_F32toF32_PKD3_FullRoi_*"
+      - "Image_DataExchange/ColorToGreyscaleTest.*HIP_U8toU8_PKD3toPLN1_FullRoi_*"
+      - "Image_Filter/SobelFilterTest.*HIP_U8toU8_PLN1_FullRoi_*"
+      - "Misc_*/*HIP_*_2D_*2x24x32"
+      - "Voxel_*/*HIP_*_NCDHW1_FullRoi_XYZWHD_*"
+    labels:
+      - "ffm-quick"
+
+  ffm-standard:
+    description: "HIP-only full correctness grid for emulator runs"
+    test_patterns:
+      - "*HIP*"
+    labels:
+      - "ffm-standard"
+
+  ffm-comprehensive:
+    description: "Same as ffm-standard until an extended grid exists"
+    test_patterns:
+      - "*HIP*"
+    labels:
+      - "ffm-comprehensive"
+
+  ffm-full:
+    description: "Same as ffm-comprehensive"
+    test_patterns:
+      - "*HIP*"
+    labels:
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 1800
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 300
+    ffm-standard: 1800
+    ffm-comprehensive: 7200
+    ffm-full: 14400
