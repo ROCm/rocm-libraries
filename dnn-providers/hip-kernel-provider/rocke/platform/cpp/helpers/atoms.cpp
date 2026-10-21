@@ -21,7 +21,7 @@
  * of the Python MFMA_ATOMS tuple:
  *
  *     MFMA_ATOMS = MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS
- *                  + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+ *                  + MFMA_FP8_ATOMS + MFMA_MX_ATOMS + MFMA_TF32_ATOMS
  *
  *   MFMA_F16_ATOMS  = (f16_4x4x4, f16_16x16x16, f16_16x16x32,
  *                      f16_32x32x8, f16_32x32x16)
@@ -31,6 +31,8 @@
  *   MFMA_FP8_ATOMS  = (fp8_16x16x32, fp8_32x32x16, bf8_16x16x32,
  *                      bf8_32x32x16, fp8_16x16x128)
  *   MFMA_MX_ATOMS   = (fp4_16x16x128, fp6_16x16x96)
+ *   MFMA_TF32_ATOMS = (tf32_16x16x8, tf32_32x32x4, tf32_16x16x32,
+ *                      tf32_32x32x16)
  *
  * _BY_SHAPE keys each by (dtype_in, m, n, k). All keys are unique, so the linear
  * scan below is order-independent for correctness, but the catalog order is
@@ -64,6 +66,11 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
     /* ---- MFMA_MX_ATOMS ---- */
     {16, 16, 128, 16, 16, 4, "fp4", "f32", "mfma_f32_16x16x128_fp4"},
     {16, 16, 96, 12, 12, 4, "fp6", "f32", "mfma_f32_16x16x96_fp6"},
+    /* ---- MFMA_TF32_ATOMS (native gfx942 pair, then gfx950 BF16x3 pair) ---- */
+    {16, 16, 8, 2, 2, 4, "tf32", "f32", "mfma_f32_16x16x8_xf32"},
+    {32, 32, 4, 2, 2, 16, "tf32", "f32", "mfma_f32_32x32x4_xf32"},
+    {16, 16, 32, 8, 8, 4, "tf32", "f32", "mfma_f32_16x16x32_xf32"},
+    {32, 32, 16, 8, 8, 16, "tf32", "f32", "mfma_f32_32x32x16_xf32"},
 };
 
 #define ROCKE_NUM_MFMA_ATOMS ((int)(sizeof(ROCKE_MFMA_ATOMS) / sizeof(ROCKE_MFMA_ATOMS[0])))
@@ -73,7 +80,8 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
  *     bf8 -> bf8e5m2, bf8e5m2 -> bf8e5m2,
  *     f16 -> f16, fp16 -> f16,
  *     f32 -> fp32, fp32 -> fp32, float -> fp32,
- *     bf16 -> bf16, bfloat16 -> bf16.
+ *     bf16 -> bf16, bfloat16 -> bf16,
+ *     tf32 -> tf32, xf32 -> tf32.
  * Any key not in the table maps to itself (Python dict.get(dtype, dtype)). */
 static const char* rocke_canon_dtype(const char* dtype)
 {
@@ -93,6 +101,8 @@ static const char* rocke_canon_dtype(const char* dtype)
         {"float", "fp32"},
         {"bf16", "bf16"},
         {"bfloat16", "bf16"},
+        {"tf32", "tf32"},
+        {"xf32", "tf32"},
     };
     int i;
     int n = (int)(sizeof(aliases) / sizeof(aliases[0]));
