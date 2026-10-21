@@ -51,8 +51,6 @@ class GFX942Params(BaseOptimizationParams):
         return self._make_param("DirectToVgprB", self._dtv_values("B", ctx))
 
     def _dtv_values(self, a_or_b: str, ctx: SizeContext) -> List[bool]:
-        # DirectToVgprA/B are bool in TensileLite's validParameters; its input-YAML type check
-        # rejects 0 / 1 ("expected bool").
         transA, transB = self._gt.transA, self._gt.transB
         dsz = dataSize[self._gt.data_type]
         if transA == "N" and transB == "T" and dsz < 4:
