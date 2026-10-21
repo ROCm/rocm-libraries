@@ -12,6 +12,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "AsmSdpaConfigHelpers.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
@@ -455,13 +456,16 @@ std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
     return cases;
 }
 
-// Stats (LSE) output is not supported for ragged tensors.
+// Stats (LSE) output is not supported for ragged tensors, nor with causal masks on the
+// current ASM kernels (SdpaFwdPlanBuilder::isApplicable declines both), so only
+// batch-mode NO_MASK kernels are paired with stats.
 std::vector<GraphTestCase> getBatchModeStatsTestCases()
 {
     std::vector<GraphTestCase> cases;
     for(const auto& [key, config] : cfg_fmha_fwd)
     {
-        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH)
+        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH
+           && static_cast<plan_utils::MaskType>(config.mask) == plan_utils::MaskType::NO_MASK)
         {
             cases.push_back(configToTestCase(config, /*withStats=*/true));
         }
