@@ -147,6 +147,45 @@ class TestExpansion:
         assert kernel.kernel_source.spec["dtype"] == "bf16"
         assert kernel.metadata["dtype"] == "BF16"
 
+    def test_a_value_outside_the_declared_vocabulary_is_refused(self, tmp_path):
+        shape = {
+            "dtype": "bf61",
+            "seqlen_q": 512,
+            "knobs": "pair",
+            "resolved": {"use_exp2_fast": 1},
+        }
+        with pytest.raises(ConfigError, match=r"dtype.*bf61|bf61.*dtype"):
+            _kernels(tmp_path, shapes=[shape])
+
+    def test_an_arm_metadata_value_may_use_the_matcher_spelling(self, tmp_path):
+        """An arm's `metadata` states the matcher-visible value directly, so it is
+        written in the vocabulary's values, not its builder keys."""
+        kernels = _kernels(
+            tmp_path,
+            knob_sets={"pair": [{"block_m": 128, "metadata": {"dtype": "BF16"}}]},
+        )
+        assert [k.metadata["dtype"] for k in kernels] == ["BF16"]
+
+    def test_a_resolved_value_may_use_the_matcher_spelling(self, tmp_path):
+        shape = {
+            "seqlen_q": 512,
+            "knobs": "pair",
+            "resolved": {"dtype": "BF16", "use_exp2_fast": 1},
+        }
+        kernels = _kernels(
+            tmp_path,
+            name="attn.sq{seqlen_q}_bm{block_m}_e{md_use_exp2_fast}",
+            shapes=[shape],
+        )
+        assert [k.metadata["dtype"] for k in kernels] == ["BF16", "BF16"]
+
+    def test_an_arm_metadata_value_outside_the_vocabulary_is_refused(self, tmp_path):
+        with pytest.raises(ConfigError, match=r"dtype.*bf61|bf61.*dtype"):
+            _kernels(
+                tmp_path,
+                knob_sets={"pair": [{"block_m": 128, "metadata": {"dtype": "bf61"}}]},
+            )
+
     def test_a_group_with_no_variants_key_expands_to_nothing(self, tmp_path):
         raw = _config(
             kernels=[
@@ -265,7 +304,9 @@ class TestShapeAxes:
 
     def test_axes_cross_every_shape_first_axis_outermost(self, tmp_path):
         kernels = self._axes_kernels(
-            tmp_path, {"dtype": ["bf16", "fp16"], "seqlen_q": [512, 1024]}
+            tmp_path,
+            {"dtype": ["bf16", "fp16"], "seqlen_q": [512, 1024]},
+            vocabulary={"dtype": {"bf16": "BF16", "fp16": "FP16"}},
         )
         assert [
             (
@@ -590,6 +631,7 @@ class TestRejections:
         kernels = _kernels(
             tmp_path,
             name="attn.{dtype}_bm{block_m}_{tag}",
+            vocabulary={"dtype": {"a__b": "A", "a_b": "B"}},
             knob_sets={"one": [{"block_m": 128, "tag": ""}]},
             shapes=[
                 {

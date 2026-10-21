@@ -74,7 +74,8 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
-from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
+from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
+  b_rotate_reason as segBRotateReason
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -6890,6 +6891,12 @@ class Solution(collections.abc.Mapping):
         if state["LoopIters"] % (state["PrefetchLocalRead"]+1) != 0:
           reject(state, "dot2 kernel does not support LoopIters(%u) %% (PLR+1)(%u) != 0" % (state["LoopIters"], state["PrefetchLocalRead"]+1))
 
+    if (state["EnableMatrixInstruction"] and not state["ClusterLocalRead"] and state["PrefetchLocalRead"] == 2
+        and state["LoopIters"] >= 4 and state["ProblemType"]["MacDataTypeA"].numBytes() < 4
+        and state["ProblemType"]["MacDataTypeB"].numBytes() < 4):
+      reject(state, printRejectionReason, "PrefetchLocalRead=2 with ClusterLocalRead=0 and numByte<4 does not support LoopIters>=4")
+      return
+
     # reject iterations are not enough to use wider local read
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
@@ -7367,6 +7374,12 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
+
+    if state["LDSSegmentBRotate"]:
+      _bRotReason = segBRotateReason(state, isPersistent(state))
+      if _bRotReason is not None:
+        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
+        return
 
   ########################################
   @ staticmethod

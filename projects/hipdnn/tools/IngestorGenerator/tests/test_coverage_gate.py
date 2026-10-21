@@ -8,7 +8,7 @@ catalog tuple makes the loader reject the whole engine and the phase still exits
 property under test is that each rung stays separable, and that a rung which cannot run
 reports NOT RUN and fails rather than being skipped into a pass.
 
-The end-to-end class needs a validator and a profile named in the environment and skips
+The end-to-end class needs a build carrying the descriptor validator and skips
 otherwise; the rung-separation tests need neither, so the property is checked on every
 machine.
 """
@@ -23,7 +23,8 @@ from pathlib import Path
 
 import pytest
 
-_GATE = Path(__file__).resolve().parents[1] / "tools" / "coverage_gate.py"
+_IG_ROOT = Path(__file__).resolve().parents[1]
+_GATE = _IG_ROOT / "tools" / "coverage_gate.py"
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
 sys.path.insert(
@@ -32,41 +33,42 @@ sys.path.insert(
 
 from hkp_pack import provenance_sidecar  # noqa: E402
 
-#: The env vars naming the authoring profile handed to `--profile`, in precedence
-#: order: unsuffixed, then gfx942, then gfx950. Any of the three serves, since nothing
-#: here asserts a profile's CONTENT; gfx942 precedes gfx950 because `_EXPECT_ENGINE`'s
-#: default names a gfx942 engine. The chosen profile and `_EXPECT_ENGINE` must name the
-#: same pack.
-_PROFILE_VARS = (
-    "HIPDNN_INGESTOR_PROFILE",
-    "HIPDNN_INGESTOR_PROFILE_GFX942",
-    "HIPDNN_INGESTOR_PROFILE_GFX950",
+#: The engine manifest the shipped production bundle is generated from.
+_SHIPPED_MANIFEST = _IG_ROOT / "configs" / "gfx950_attention_dense.engine.yaml"
+
+#: The env vars naming the engine manifest handed to `--manifest`, first wins. The
+#: chosen manifest and `_EXPECT_ENGINE` must name the same pack.
+_MANIFEST_VARS = (
+    "HIPDNN_INGESTOR_MANIFEST",
+    "HIPDNN_INGESTOR_MANIFEST_GFX942",
+    "HIPDNN_INGESTOR_MANIFEST_GFX950",
 )
 
 #: The engine name the packed tree must expose, overridable because it identifies a
-#: specific pack. The default names a rocKE gfx942 attention-dense engine under the
+#: specific pack. The default names the gfx950 attention-dense engine shipped under the
 #: provider's production root
 #: (`src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>/`), the only
-#: place a bundle reaches the PACKED tree `_find_build_artifacts` probes. That root
-#: ships empty, so an author points `HIPDNN_INGESTOR_ENGINE` at their own bundle's
-#: engine; naming one only a `configs/` file mentions would reject every build dir.
+#: place a bundle reaches the PACKED tree `_find_build_artifacts` probes. An author
+#: gating their own bundle points `HIPDNN_INGESTOR_ENGINE` at its engine; naming one
+#: only a `configs/` file mentions would reject every build dir.
 _EXPECT_ENGINE = os.environ.get(
-    "HIPDNN_INGESTOR_ENGINE", "hipkernel:Gfx942AttentionDense"
+    "HIPDNN_INGESTOR_ENGINE", "hipkernel:Gfx950AttentionDense"
 )
 
 
-def _profile_from_env() -> Path | None:
-    """The first of `_PROFILE_VARS` naming an existing file, or None. No fixture
-    default: the committed profiles describe no real pack, so defaulting would
-    manufacture a failure on the first machine that has a build."""
-    for var in _PROFILE_VARS:
+def _manifest_from_env() -> Path | None:
+    """The first of `_MANIFEST_VARS` naming an existing file; `_SHIPPED_MANIFEST` when
+    none is set; None when set but naming no file."""
+    if not any(os.environ.get(var) for var in _MANIFEST_VARS):
+        return _SHIPPED_MANIFEST
+    for var in _MANIFEST_VARS:
         raw = os.environ.get(var)
         if raw and Path(raw).is_file():
             return Path(raw)
     return None
 
 
-_PROFILE = _profile_from_env()
+_MANIFEST = _manifest_from_env()
 
 
 def _loaded_engines(validator: Path, packed: Path) -> list[str] | None:
@@ -138,24 +140,23 @@ def _find_build_artifacts(
 _VALIDATOR, _PACKED = _find_build_artifacts()
 
 _NEEDS_BUILD_REASON = (
-    "needs BOTH a build*/ carrying the descriptor validator beside a packed tree "
-    "(configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON) AND one of "
-    f"{', '.join(_PROFILE_VARS)} (first wins) set to the existing authoring profile "
-    "that build was packed from -- a profile is an author's input this repo does not "
-    "ship, so this class is opt-in and its absence is not a broken checkout"
+    "needs a build*/ carrying the descriptor validator beside a packed tree "
+    "(configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON), and an engine manifest: "
+    f"{_SHIPPED_MANIFEST.name} unless one of {', '.join(_MANIFEST_VARS)} (first wins) "
+    "names the existing manifest that build was packed from"
 )
 
 
-def _missing_prerequisite(validator: Path | None, profile: Path | None) -> str | None:
+def _missing_prerequisite(validator: Path | None, manifest: Path | None) -> str | None:
     """The reason the end-to-end class cannot run, or None. Only genuinely absent inputs
     belong here; a present build missing `_EXPECT_ENGINE` is a failure, not a skip."""
-    if validator is None or profile is None:
+    if validator is None or manifest is None:
         return _NEEDS_BUILD_REASON
     return None
 
 
 _needs_build = pytest.mark.skipif(
-    _missing_prerequisite(_VALIDATOR, _PROFILE) is not None, reason=_NEEDS_BUILD_REASON
+    _missing_prerequisite(_VALIDATOR, _MANIFEST) is not None, reason=_NEEDS_BUILD_REASON
 )
 
 
@@ -172,60 +173,115 @@ _KMD_ID = "44444444-4444-4444-4444-444444444444"
 _UED_ID = "55555555-5555-5555-5555-555555555555"
 
 
-def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
-    """A structurally-valid, id-wired bundle, so rung 1 can pass without a build: the
-    static rung reaches the schema through `KDP.engine -> UED.metadata -> KMD`."""
-    root = tmp_path / name
-    root.mkdir()
-    (root / "test_engine.kmd.json").write_text(
+def _write_bundle(
+    root: Path,
+    stem: str = "test_engine",
+    ids: tuple[str, str, str, str] = (
+        _KMD_ID,
+        _UED_ID,
+        "66666666-6666-6666-6666-666666666666",
+        "77777777-7777-7777-7777-777777777777",
+    ),
+    block_n: int = 64,
+    name: str | None = None,
+) -> None:
+    """One id-wired, packed bundle `<stem>.*.json`; `ids` is (KMD, UED, KDP, UKD)."""
+    kmd_id, ued_id, kdp_id, ukd_id = ids
+    (root / f"{stem}.kmd.json").write_text(
         json.dumps(
             {
                 "version": "1.0",
-                "id": _KMD_ID,
+                "id": kmd_id,
                 "fields": [{"name": "block_n", "type": "int", "default_value": 64}],
             }
         )
     )
-    (root / "test_engine.ued.json").write_text(
+    (root / f"{stem}.ued.json").write_text(
         json.dumps(
             {
                 "version": "1.0",
-                "id": _UED_ID,
-                "name": "test:Engine",
-                "metadata": _KMD_ID,
+                "id": ued_id,
+                "name": name or f"test:{stem}",
+                "metadata": kmd_id,
             }
         )
     )
     kdp = {
         "version": "1.0",
-        "id": "66666666-6666-6666-6666-666666666666",
-        "engine": _UED_ID,
+        "id": kdp_id,
+        "engine": ued_id,
         "arch": ["gfx942"],
         "kernelDescriptors": [
             {
                 "version": "1.0",
-                "id": "77777777-7777-7777-7777-777777777777",
-                "name": "k0",
+                "id": ukd_id,
+                "name": f"{stem}_k0",
                 "arch": ["gfx942"],
                 "kernel_source": {
                     "kind": "kpack",
                     "library": "kpack/test.kpack",
                     "toc_key": "v0",
-                    "symbol": "s0",
+                    "symbol": f"{stem}_s0",
                     "sha256": "a" * 64,
                 },
-                "metadata": {"block_n": 64},
+                "metadata": {"block_n": block_n},
                 "provenance": {},
             }
         ],
     }
     # Packed trees carry each UKD's provenance in a sidecar beside the KDP, and the
     # packer's marker in its directory.
-    sidecar, data = provenance_sidecar.detach("test_engine.kdp.json", kdp)
+    sidecar, data = provenance_sidecar.detach(f"{stem}.kdp.json", kdp)
     (root / sidecar).write_bytes(data)
     (root / provenance_sidecar.PACKED_MARKER).write_bytes(b"")
-    (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+    (root / f"{stem}.kdp.json").write_text(json.dumps(kdp))
+
+
+def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
+    """A structurally-valid, id-wired bundle, so rung 1 can pass without a build: the
+    static rung reaches the schema through `KDP.engine -> UED.metadata -> KMD`."""
+    root = tmp_path / name
+    root.mkdir()
+    _write_bundle(root)
     return root
+
+
+class TestTheManifestSelectsTheBundleToGate:
+    """Two engines under one root, one carrying a `-1` sentinel: `--manifest` picks the
+    bundle rung 1 gates by its `engine.name`."""
+
+    @staticmethod
+    def _two_bundle_tree(root: Path, broken: str) -> Path:
+        root.mkdir()
+        for stem, name in (
+            ("gfx950_attention_dense", "hipkernel:Gfx950AttentionDense"),
+            ("other_engine", None),
+        ):
+            _write_bundle(
+                root,
+                stem,
+                ids=tuple(f"{stem}-{part}" for part in ("kmd", "ued", "kdp", "ukd")),
+                block_n=-1 if stem == broken else 64,
+                name=name,
+            )
+        return root
+
+    def test_the_shipped_manifest_gates_its_own_bundle(self, tmp_path):
+        def static(tag: str, broken: str, *manifest: str) -> str:
+            root = self._two_bundle_tree(tmp_path / tag, broken)
+            result = _run("--tree", str(root), "--mode", "structural", *manifest)
+            return result.stdout
+
+        shipped = ("--manifest", str(_SHIPPED_MANIFEST))
+        other_broken = static("other_broken", "other_engine", *shipped)
+        own_broken = static("own_broken", "gfx950_attention_dense", *shipped)
+        unselected = static("unselected", "other_engine")
+
+        assert "1. STATIC   PASS (STRUCTURAL ONLY" in other_broken, other_broken
+        assert "1. STATIC   FAIL" in own_broken, own_broken
+        assert "gfx950_attention_dense_k0" in own_broken, own_broken
+        assert "1. STATIC   FAIL" in unselected, unselected
+        assert "Set engine.name in the manifest" in unselected, unselected
 
 
 class TestTheStaticRungNeverOverstatesItself:
@@ -317,6 +373,23 @@ class TestRungsStaySeparable:
             "reports another engine's work as this engine's"
         )
 
+    def test_a_serving_threshold_this_tool_cannot_check_fails_the_gate(self, tmp_path):
+        """Rungs 1 and 2 green, rung 3 not run: asking for served graphs must not
+        pass on that evidence."""
+        validator = tmp_path / "validator"
+        validator.write_text(
+            f'#!{sys.executable}\nprint(\'{{"engines": ["stub"]}}\')\n'
+        )
+        validator.chmod(0o755)
+        argv = ["--tree", str(_minimal_tree(tmp_path)), "--mode", "structural"]
+        argv += ["--validator", str(validator)]
+        without = _run(*argv)
+        assert without.returncode == 0, without.stdout + without.stderr
+        asked = _run(*argv, "--min-served", "1")
+        assert asked.returncode == 1
+        failed = next(l for l in asked.stdout.splitlines() if "GATE FAILED" in l)
+        assert "serving-not-run" in failed
+
     def test_a_missing_tree_is_an_error_not_an_empty_pass(self, tmp_path):
         result = _run("--tree", str(tmp_path / "nope"), "--mode", "structural")
         assert result.returncode == 2
@@ -340,22 +413,22 @@ class TestDiscoverySeparatesNoBuildFromADroppedEngine:
         return candidate
 
     @staticmethod
-    def _a_profile(tmp_path: Path) -> Path:
-        """An existing profile, so each case isolates the build half of the pair."""
-        profile = tmp_path / "profile.json"
-        profile.write_text("{}")
-        return profile
+    def _a_manifest(tmp_path: Path) -> Path:
+        """An existing manifest, so each case isolates the build half of the pair."""
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}")
+        return manifest
 
     def test_an_absent_build_skips_where_a_dropped_engine_fails(self, tmp_path):
         """Both trees in one case: only the pair rules out a discovery rule that answers
         "no build" to both."""
-        profile = self._a_profile(tmp_path)
+        manifest = self._a_manifest(tmp_path)
 
         absent = tmp_path / "absent"
         self._build_tree(absent, present=False)
         no_build = _find_build_artifacts(absent)
         assert no_build == (None, None)
-        assert _missing_prerequisite(no_build[0], profile) is not None, (
+        assert _missing_prerequisite(no_build[0], manifest) is not None, (
             "nothing on disk to run the gate against is an absent prerequisite, and "
             "an opt-in class skips on it"
         )
@@ -367,7 +440,7 @@ class TestDiscoverySeparatesNoBuildFromADroppedEngine:
             "a validator binary beside a packed directory is a build; reporting it "
             "as absent turns the dropped-engine regression test into a skip"
         )
-        assert _missing_prerequisite(validator, profile) is None, (
+        assert _missing_prerequisite(validator, manifest) is None, (
             "the build is present, so the class runs and the dropped engine has to "
             "surface as a failure"
         )
@@ -394,8 +467,7 @@ class TestDiscoverySeparatesNoBuildFromADroppedEngine:
 @_needs_build
 class TestAgainstTheRealBuild:
     """The whole gate end to end against a packed tree an author built. Opt-in on a
-    build and a profile; the classes above pin the rung-separation property
-    everywhere."""
+    build; the classes above pin the rung-separation property everywhere."""
 
     def test_packed_tree_passes_both_runnable_rungs(self):
         # Checked by name first so a dropped engine reports itself instead of
@@ -406,8 +478,8 @@ class TestAgainstTheRealBuild:
             str(_PACKED),
             "--mode",
             "full",
-            "--profile",
-            str(_PROFILE),
+            "--manifest",
+            str(_MANIFEST),
             "--validator",
             str(_VALIDATOR),
             "--expect-engine",
@@ -427,8 +499,8 @@ class TestAgainstTheRealBuild:
             str(_PACKED),
             "--mode",
             "full",
-            "--profile",
-            str(_PROFILE),
+            "--manifest",
+            str(_MANIFEST),
             "--validator",
             str(_VALIDATOR),
             "--expect-engine",

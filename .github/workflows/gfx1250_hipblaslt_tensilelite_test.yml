@@ -19,6 +19,7 @@
 # PR code runs on the self-hosted runner only after that gate.
 # Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
 # On-demand: workflow_dispatch on any branch, no gating.
+# The nightly emails a test report; a manual run emails only with send_report.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
 run-name: ${{ github.event_name == 'pull_request' && format('PR {0} @ {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}{1} @ {2}', github.event_name == 'schedule' && 'Nightly ' || '', github.ref_name, github.sha) }}
@@ -50,6 +51,10 @@ on:
         description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
         default: ""
+      send_report:
+        description: "Email the test report, as the nightly does"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -110,6 +115,9 @@ jobs:
       cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
+    permissions:
+      contents: read
+      actions: read  # test report: the previous nightly's results
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
     # new enough to compile and run gfx1250-strict. pip reuses downloaded
     # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
@@ -164,6 +172,7 @@ jobs:
         { print; fflush() }
     steps:
       - name: Checkout hipBLASLt + shared deps (sparse)
+        id: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 1
@@ -175,9 +184,11 @@ jobs:
             shared/stinkytofu
             cmake
             .github/actions/ci-env
+            .github/scripts
           sparse-checkout-cone-mode: true
 
       - name: Install the ROCm SDK (gfx1250-strict capable)
+        id: sdk
         env:
           # Only this step uses the shared cache; later pip runs (the build's venv, tox,
           # which builds wheels from source) use pip's default cache under the job's HOME.
@@ -225,6 +236,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Check the SDK compiler matches per-PR CI
+        id: compiler
         # Warn only: the pin stays fixed. Flags in the step summary when the pinned SDK was
         # built with a different compiler than the one at ci-env's therock-ref.
         env:
@@ -299,6 +311,7 @@ jobs:
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
 
       - name: Build hipBLASLt from source
+        id: build
         run: |
           set -euo pipefail
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
@@ -312,6 +325,7 @@ jobs:
             | awk -F, -v OFS=, "$HW_SCRUB"
 
       - name: Run hipBLASLt tests
+        id: hipblaslt
         timeout-minutes: 120
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
         env:
@@ -383,6 +397,7 @@ jobs:
           exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
+        id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
         if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
@@ -414,6 +429,7 @@ jobs:
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
       - name: Upload test results
+        id: upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -422,6 +438,36 @@ jobs:
             test_results/
             tensilelite_test_results/
           if-no-files-found: warn
+
+      # Before the hand-back, which also covers the previous results it downloads.
+      - name: Email the test report
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.send_report) }}
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.GFX1250_BLAS_NIGHTLY_WEBHOOK_URL }}
+          SYSTEM_LABEL: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
+          GH_TOKEN: ${{ github.token }}
+          TEST_RUNNER_NAME: ${{ runner.name }}
+          # The steps' own outcomes; the job status covers anything not listed.
+          STEPS: >-
+            Test job=${{ job.status }},
+            Checkout=${{ steps.checkout.outcome }},
+            Install the ROCm SDK=${{ steps.sdk.outcome }},
+            Check the SDK compiler=${{ steps.compiler.outcome }},
+            Check the runtime reports gfx1250-strict=${{ steps.strict.outcome }},
+            Build hipBLASLt=${{ steps.build.outcome }},
+            Run hipBLASLt tests=${{ steps.hipblaslt.outcome }},
+            Run TensileLite common tests=${{ steps.tensilelite.outcome }},
+            Upload test results=${{ steps.upload.outcome }}
+        # The TensileLite log holds two pytest sessions: rocisa, then the common tests.
+        run: |
+          python3 .github/scripts/blas_nightly_report.py --results . --title gfx1250-strict \
+            --artifact gfx1250-strict-test-results --steps "$STEPS" \
+            --suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log" \
+            --suite "TensileLite Common=pytest:tensilelite_test_results/common_test.log#2" \
+            --suite "Rocisa=pytest:tensilelite_test_results/common_test.log#1" \
+            --meta "Architecture=gfx1250-strict" --meta "ROCm SDK=$ROCM_SDK_VERSION" \
+            --strip "_/matmul_test.matmul/" --strip "tensilelite/Tests/common/"
 
       - name: Hand the workspace back to the runner's user
         # The container runs as root, so everything it wrote under _work (checkout, build
