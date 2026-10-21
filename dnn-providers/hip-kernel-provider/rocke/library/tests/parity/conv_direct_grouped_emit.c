@@ -12,7 +12,9 @@
  * index 63 the dilated non-grouped spec; from index 66 specs both engines must
  * reject; from index 71 the runtime-channel wgrad spec; from index 75 the
  * parametric rocke_direct_conv_spec_t and the MFMA dgrad weight transforms,
- * baked and runtime-channel; from index 95 the direct wgrad kernels:
+ * baked and runtime-channel; from index 95 the split-C non-grouped spec and its
+ * rocke_direct_conv_split_reduce_spec_t second pass; from index 103 the grouped /
+ * group-merge non-grouped spec; from index 114 the direct wgrad kernels:
  * rocke_direct_wgrad_tiled_spec_t, rocke_dw_wgrad_{fold,cols,lds}_spec_t and
  * rocke_direct_wgrad_gather_spec_t) identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
@@ -51,11 +53,12 @@ enum
     KIND_GENERIC = 12,
     KIND_TRANSPOSE = 13,
     KIND_REORG = 14,
-    KIND_WGRAD_TILED = 15,
-    KIND_DW_WGRAD_FOLD = 16,
-    KIND_DW_WGRAD_COLS = 17,
-    KIND_DW_WGRAD_LDS = 18,
-    KIND_WGRAD_GATHER = 19
+    KIND_SPLIT_REDUCE = 15,
+    KIND_WGRAD_TILED = 16,
+    KIND_DW_WGRAD_FOLD = 17,
+    KIND_DW_WGRAD_COLS = 18,
+    KIND_DW_WGRAD_LDS = 19,
+    KIND_WGRAD_GATHER = 20
 };
 
 #define NONGROUPED_CFG_BASE 42
@@ -69,9 +72,15 @@ enum
  * 5 must-reject ones; the parametric DirectConvSpec + dgrad weight-transform
  * configs follow them. */
 #define GENERIC_CFG_BASE 75
+/* Split-C non-grouped configs and the split-C reduction follow the 20 generic
+ * ones. */
+#define NONGROUPED_SPLIT_CFG_BASE 95
+/* Grouped (grouped = true, group_merge) non-grouped configs follow the 8 split-C
+ * ones. */
+#define NONGROUPED_GROUPED_CFG_BASE 103
 /* The direct wgrad kernels (tiled, depthwise fold / cols / lds, gather) follow
- * the 20 parametric configs. */
-#define WGRAD_DIRECT_CFG_BASE 95
+ * the 11 grouped non-grouped configs. */
+#define WGRAD_DIRECT_CFG_BASE 114
 
 static rocke_direct_conv_problem_t
     mk_dw_problem(int N, int H, int W, int groups, int KH, int PAD, int stride, const char* dtype)
@@ -466,6 +475,191 @@ static int make_nongrouped_cfg(int idx, rocke_direct_conv_nongrouped_spec_t* s, 
         s->double_buffer = true;
         s->iglp = 1;
         s->chiplet_swizzle = false;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Split-C configs, emitted as NONGROUPED_SPLIT_CFG_BASE + idx (mirrors Python
+ * _nongrouped_split_spec). Returns 0 on success, -1 past the last one. */
+static int make_nongrouped_split_cfg(int idx,
+                                     int* kind,
+                                     rocke_direct_conv_nongrouped_spec_t* s,
+                                     rocke_direct_conv_split_reduce_spec_t* sred,
+                                     const char** arch)
+{
+    *arch = "gfx950";
+    *kind = KIND_NONGROUPED;
+    switch(idx)
+    {
+    case 0:
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(2, 14, 14, 256, 128, 3, 3, 1, 1, "bf16"));
+        s->split_c = 2;
+        return 0;
+    case 1:
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 24, 24, 128, 64, 3, 3, 1, 2, "fp16"));
+        s->ck = 16;
+        s->double_buffer = true;
+        s->split_c = 4;
+        return 0;
+    case 2:
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 7, 7, 512, 64, 3, 3, 1, 1, "bf16"));
+        s->chiplet_swizzle = false;
+        s->waves_per_eu = 3;
+        s->split_c = 16;
+        return 0;
+    case 3:
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 12, 12, 320, 64, 3, 3, 1, 1, "fp16"));
+        s->tile_h = 12;
+        s->tile_w = 16;
+        s->waves_n = 4;
+        s->atom = "16x16x32";
+        s->split_c = 4;
+        return 0;
+    case 4:
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 28, 28, 256, 64, 3, 3, 1, 1, "fp16"));
+        s->tile_k = 32;
+        s->waves_m = 1;
+        s->atom = "32x32x8";
+        s->ck = 16;
+        s->double_buffer = true;
+        s->chiplet_swizzle = false;
+        s->split_c = 2;
+        *arch = "gfx942";
+        return 0;
+    case 5:
+        *sred = rocke_direct_conv_split_reduce_spec_default();
+        sred->dtype = "fp16";
+        sred->split_c = 2;
+        *kind = KIND_SPLIT_REDUCE;
+        return 0;
+    case 6:
+        *sred = rocke_direct_conv_split_reduce_spec_default();
+        sred->dtype = "bf16";
+        sred->split_c = 8;
+        sred->threads = 128;
+        *kind = KIND_SPLIT_REDUCE;
+        return 0;
+    case 7:
+        /* Must reject: 16 splits of a C that has only 8 chunks of ck=32. */
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 7, 7, 256, 64, 3, 3, 1, 1, "bf16"));
+        s->split_c = 16;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+static rocke_direct_conv_problem_t mk_grouped_problem(
+    int N, int H, int W, int groups, int cpg, int kpg, int stride, const char* dtype)
+{
+    rocke_direct_conv_problem_t p
+        = mk_nongrouped_problem(N, H, W, cpg, kpg, 3, 3, 1, stride, dtype);
+    p.groups = groups;
+    return p;
+}
+
+/* Grouped configs, emitted as NONGROUPED_GROUPED_CFG_BASE + idx (mirrors Python
+ * _nongrouped_grouped_spec); 7..10 are must-reject. Returns 0 on success, -1 past
+ * the last one. */
+static int
+    make_nongrouped_grouped_cfg(int idx, rocke_direct_conv_nongrouped_spec_t* s, const char** arch)
+{
+    *arch = "gfx950";
+    switch(idx)
+    {
+    case 0:
+        /* group_merge 1, fp16, cpg 32: plain weight path, K_M masks. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(2, 14, 20, 4, 32, 32, 1, "fp16"));
+        s->grouped = true;
+        s->group_merge = 1;
+        return 0;
+    case 1:
+        /* group_merge 8 of cpg 4, bf16, 16x16x32 (two pieces), ck 32. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 16, 16, 16, 4, 4, 1, "bf16"));
+        s->tile_k = 32;
+        s->atom = "16x16x32";
+        s->ck = 32;
+        s->grouped = true;
+        s->group_merge = 8;
+        return 0;
+    case 2:
+        /* group_merge 4 of cpg 8, fp16, stride 2, 32x32x16, ck 16. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 24, 24, 8, 8, 8, 2, "fp16"));
+        s->tile_k = 32;
+        s->waves_m = 1;
+        s->atom = "32x32x16";
+        s->ck = 16;
+        s->grouped = true;
+        s->group_merge = 4;
+        return 0;
+    case 3:
+        /* group_merge 4 of cpg 12, bf16, 16x16x16 (one piece), ck 16. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 16, 16, 8, 12, 12, 1, "bf16"));
+        s->tile_k = 32;
+        s->atom = "16x16x16";
+        s->ck = 16;
+        s->grouped = true;
+        s->group_merge = 4;
+        return 0;
+    case 4:
+        /* Grouped + split_c 2 + double-buffered LDS. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 14, 14, 4, 64, 32, 1, "fp16"));
+        s->double_buffer = true;
+        s->split_c = 2;
+        s->grouped = true;
+        s->group_merge = 2;
+        return 0;
+    case 5:
+        /* Grouped, no chiplet swizzle, waves_per_eu, bf16, group_merge 2. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(2, 12, 20, 6, 16, 16, 1, "bf16"));
+        s->tile_k = 32;
+        s->waves_m = 1;
+        s->chiplet_swizzle = false;
+        s->waves_per_eu = 3;
+        s->grouped = true;
+        s->group_merge = 2;
+        return 0;
+    case 6:
+        /* gfx942 32x32x8, fp16, group_merge 4 of cpg 8, ck 16. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 20, 20, 8, 8, 8, 1, "fp16"));
+        s->tile_k = 32;
+        s->waves_m = 1;
+        s->atom = "32x32x8";
+        s->ck = 16;
+        s->grouped = true;
+        s->group_merge = 4;
+        *arch = "gfx942";
+        return 0;
+    case 7:
+        /* Must reject: group_merge 3 does not divide 8 groups. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 16, 16, 8, 8, 8, 1, "bf16"));
+        s->tile_k = 32;
+        s->grouped = true;
+        s->group_merge = 3;
+        return 0;
+    case 8:
+        /* Must reject: cpg 6 is not a whole number of 4-channel weight loads. */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 16, 16, 4, 6, 8, 1, "fp16"));
+        s->tile_k = 32;
+        s->waves_m = 1;
+        s->atom = "32x32x8";
+        s->ck = 8;
+        s->grouped = true;
+        s->group_merge = 4;
+        return 0;
+    case 9:
+        /* Must reject: group_merge without grouped. */
+        *s = mk_nongrouped_spec(mk_nongrouped_problem(1, 16, 16, 64, 64, 3, 3, 1, 1, "bf16"));
+        s->group_merge = 2;
+        return 0;
+    case 10:
+        /* Must reject: grouped with no groups (0 % group_merge is 0). */
+        *s = mk_nongrouped_spec(mk_grouped_problem(1, 16, 16, 0, 8, 8, 1, "bf16"));
+        s->tile_k = 32;
+        s->grouped = true;
+        s->group_merge = 1;
         return 0;
     default:
         return -1;
@@ -1689,10 +1883,30 @@ int main(int argc, char** argv)
     rocke_direct_transpose_weights_dgrad_spec_t stp;
     rocke_direct_reorganize_weights_spec_t sreorg;
     wgrad_direct_specs_t swd;
+    rocke_direct_conv_split_reduce_spec_t sred;
     const char* arch = "gfx950";
     if(idx >= WGRAD_DIRECT_CFG_BASE)
     {
         if(make_wgrad_direct_cfg(idx - WGRAD_DIRECT_CFG_BASE, &kind, &swd, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= NONGROUPED_GROUPED_CFG_BASE)
+    {
+        kind = KIND_NONGROUPED;
+        if(make_nongrouped_grouped_cfg(idx - NONGROUPED_GROUPED_CFG_BASE, &snongrouped, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= NONGROUPED_SPLIT_CFG_BASE)
+    {
+        if(make_nongrouped_split_cfg(
+               idx - NONGROUPED_SPLIT_CFG_BASE, &kind, &snongrouped, &sred, &arch)
+           != 0)
         {
             fprintf(stderr, "unknown config index %d\n", idx);
             return 2;
@@ -1764,6 +1978,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_dw_wgrad_lds_new(&b, &swd.lds, arch);
     else if(kind == KIND_WGRAD_GATHER)
         kernel = rocke_build_direct_wgrad_gather_new(&b, &swd.gather, arch);
+    else if(kind == KIND_SPLIT_REDUCE)
+        kernel = rocke_build_direct_conv_split_reduce_new(&b, &sred, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)

@@ -23,8 +23,11 @@ __all__ = [
     "DIRECT_DGRAD_REORGANIZE_RTC",
     "DIRECT_DGRAD_TRANSPOSE",
     "DIRECT_DGRAD_TRANSPOSE_RTC",
+    "DIRECT_GROUPED_HALO",
+    "DIRECT_HALO_VARIANTS",
     "DIRECT_MFMA_DGRAD",
     "DIRECT_MFMA_HELPERS",
+    "DIRECT_SPLIT_REDUCE",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
@@ -44,6 +47,15 @@ DIRECT_DGRAD_REORGANIZE = "direct_dgrad_reorganize"
 DIRECT_DGRAD_TRANSPOSE_RTC = "direct_dgrad_transpose_rtc"
 DIRECT_DGRAD_REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
 DIRECT_MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
+# Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
+# groups/channels, small cpg merged into one MFMA problem).
+DIRECT_GROUPED_HALO = "direct_grouped_halo"
+# Variants built by conv_direct_nongrouped (dense, and grouped via merging).
+DIRECT_HALO_VARIANTS = ("direct_nongrouped", DIRECT_GROUPED_HALO)
+# Second pass of a split-C non-grouped forward kernel: folds the fp32 partial
+# sums into the output. Shape-independent (one binary per split_c and dtype),
+# cached under its own direction and found by exact identity.
+DIRECT_SPLIT_REDUCE = "direct_split_reduce"
 # variant -> (transpose helper, reorganize helper)
 DIRECT_MFMA_HELPERS = {
     "direct_grouped_dgrad_mfma": (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE),
@@ -86,6 +98,10 @@ def make_direct_spec(variant: str, problem, knobs: dict):
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
             problem=problem, name="rocke_direct_conv_nongrouped", **knobs
+        )
+    if variant == DIRECT_GROUPED_HALO:
+        return dn.DirectNongroupedConvSpec(
+            problem=problem, name="rocke_direct_conv_grouped_halo", **knobs
         )
     if variant == "direct_depthwise":
         return dc.DirectDepthwiseSpec(
@@ -167,6 +183,8 @@ def make_direct_spec(variant: str, problem, knobs: dict):
         from kernels.common.conv_direct_dw_wgrad import DwWgradFoldSpec
 
         return DwWgradFoldSpec(name="rocke_direct_wgrad_fold", **knobs)
+    if variant == DIRECT_SPLIT_REDUCE:
+        return dn.DirectSplitReduceSpec(dtype=problem.dtype, **knobs)
     if variant == DIRECT_DGRAD_TRANSPOSE:
         return dc.DirectTransposeWeightsDgradSpec(problem=problem)
     if variant == DIRECT_DGRAD_REORGANIZE:
@@ -271,7 +289,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
     from kernels.common import conv_direct_nongrouped as dn
 
     try:
-        if variant == "direct_nongrouped":
+        if variant in DIRECT_HALO_VARIANTS:
             return dn.is_valid_nongrouped_spec(spec, arch=arch)
         if variant in ("direct_grouped",) + DIRECT_MFMA_DGRAD:
             spec.validate()
@@ -312,6 +330,9 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return is_valid_wgrad_gather_spec(spec, arch=arch)
         if variant in _HELPERS:
             return True, "ok"
+        if variant == DIRECT_SPLIT_REDUCE:
+            spec.validate()
+            return True, "ok"
     except ValueError as e:
         return False, str(e)
     raise ValueError(f"unknown direct conv variant {variant!r}")
@@ -340,6 +361,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_WGRAD_FOLD: dw.build_dw_wgrad_fold,
         "direct_grouped": dc.build_direct_conv,
         "direct_nongrouped": dn.build_direct_conv_nongrouped,
+        DIRECT_GROUPED_HALO: dn.build_direct_conv_nongrouped,
         "direct_grouped_dgrad_mfma": dc.build_direct_conv,
         "direct_dgrad_mfma_rtc": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
@@ -353,6 +375,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DGRAD_REORGANIZE: dc.build_direct_reorganize_weights,
         DIRECT_DGRAD_TRANSPOSE_RTC: dc.build_direct_transpose_weights_dgrad,
         DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
+        DIRECT_SPLIT_REDUCE: dn.build_direct_conv_split_reduce,
     }
     return builders[variant](spec, arch=arch)
 
@@ -392,7 +415,7 @@ def direct_spec_for_problem(
                 f"waves_c={spec.waves_c} exceeds the {c_tiles} channel tile(s) "
                 f"of cpg={problem.cpg}"
             )
-    if variant == "direct_nongrouped":
+    if variant in DIRECT_HALO_VARIANTS:
         # A binary serves every width, but only the widths a sweep for this
         # shape would try are offered, so no binary spends MFMA work past the
         # image edge when one that does not exists.
@@ -404,6 +427,11 @@ def direct_spec_for_problem(
                 f"tile_w={spec.tile_w} does not fit Wo={problem.Wo} "
                 f"(widths tried for it: {widths})"
             )
+    if variant == DIRECT_GROUPED_HALO and spec.tile_k > spec.merged_k:
+        return None, (
+            f"tile_k={spec.tile_k} exceeds the {spec.merged_k} output channels "
+            f"of a merged block"
+        )
     return spec, "ok"
 
 
