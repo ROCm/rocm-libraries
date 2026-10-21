@@ -133,6 +133,9 @@ _DIRECTION_DIRS: Dict[str, str] = {
     # looked up by exact identity from the pipeline's main entry and never
     # offered as candidates on their own.
     "direct_dgrad_helper": "conv_direct_dgrad_helpers",
+    # The split-C reduction of the non-grouped forward kernel, found the same
+    # way from a split entry.
+    "direct_fwd_helper": "conv_direct_fwd_helpers",
 }
 
 
@@ -231,6 +234,11 @@ class KernelCache:
             self._meta_path(identity),
             json.dumps(full_meta, indent=2, sort_keys=True).encode("utf-8"),
         )
+        self._loaded.clear()
+
+    def discard(self, identity: KernelIdentity) -> None:
+        """Remove ``identity``'s entry. Its binary stays: others may share it."""
+        self._meta_path(identity).unlink(missing_ok=True)
         self._loaded.clear()
 
     def put(

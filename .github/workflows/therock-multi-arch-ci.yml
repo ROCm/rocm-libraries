@@ -7,10 +7,9 @@
 # TheRock's reusable workflows directly. It provides sharded, multi-stage
 # builds with per-architecture testing.
 #
-# Key differences from therock-ci.yml:
 # - Uses TheRock's multi-arch sharded build pipeline (foundation -> compiler-runtime -> math-libs)
 # - Supports prebuilt stages to skip certain build stages
-# - Better parallelization across GPU architectures
+# - Parallelizes across GPU architectures
 
 name: TheRock Multi-Arch CI
 
@@ -33,11 +32,11 @@ on:
     inputs:
       linux_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
+        description: "Comma-separated Linux GPU families to build and test, ex: gfx94X,gfx120X. Use 'none' to skip Linux or 'all' for every family."
         default: ""
       windows_amdgpu_families:
         type: string
-        description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx120X (empty = skip windows)"
+        description: "Comma-separated Windows GPU families to build and test, ex: gfx110X,gfx120X. Use 'none' to skip Windows or 'all' for every family."
         default: ""
       pr_labels:
         type: string
@@ -159,6 +158,11 @@ jobs:
       # built it on every PR/push before Multi-Arch CI became the default, and this
       # restores that parity so gfx1250 build breaks are caught same-PR instead of
       # only nightly.
+      #
+      # An empty input means "not specified" here and falls back to these
+      # defaults, including on workflow_dispatch. To skip a platform entirely,
+      # pass 'none', which setup_multi_arch.yml resolves to an empty build
+      # config.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       pr_labels: ${{ inputs.pr_labels || '' }}
@@ -286,6 +290,49 @@ jobs:
       amdgpu_targets: gfx942
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
       # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
+
+  notify_teams_on_failure:
+    name: Notify Teams Channel on Failure
+    # Build and test jobs run inside TheRock's reusable workflows, so
+    # notify_teams.py reports each failed Linux::/Windows:: job of this run
+    # from here, routing to the MIOpen / hipDNN channels by PR title tag
+    # ([miopen], [hipdnn], [miopenprovider]) or component name.
+    # Webhook secrets are unavailable to fork PRs.
+    needs: [configure, linux_build_and_test, windows_build_and_test]
+    # A notification problem must never fail the PR.
+    continue-on-error: true
+    if: >-
+      ${{
+        always() &&
+        !github.event.pull_request.head.repo.fork &&
+        (
+          needs.linux_build_and_test.result == 'failure' ||
+          needs.windows_build_and_test.result == 'failure'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout notify script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts/notify_teams.py
+          sparse-checkout-cone-mode: false
+
+      - name: Notify Teams for failed build and test jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          CHANGED_PROJECTS: ${{ needs.configure.outputs.changed_projects }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --failed-jobs-from-run \
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${CHANGED_PROJECTS}"
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
