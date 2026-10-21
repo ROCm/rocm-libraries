@@ -174,45 +174,103 @@ inline void forEachUnencodableVgprOperand(const StinkyInstruction& inst, Callbac
                             });
 }
 
-/// Record the per-slot VGPR banks of \p inst; \p hasVgpr set if any VGPR is seen.
-inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
-                                bool& hasVgpr) {
-    forEachVgprOperandField(*inst, [&](const StinkyRegister& reg, size_t, bool, int slot) {
-        if (slot < 0) return;
-        const int msb = getMsbFromVgpr(reg);
-        if (msb < 0) return;
-
-        hasVgpr = true;
-        if (slot == 3)
-            msbDst = msb;
-        else
-            msbSrc[slot] = msb;
-    });
+/// Whether \p inst reads the bank state at all. Scalar, branch, call, barrier,
+/// wait and side-effect instructions never ask for a bank, so they neither need
+/// an s_set_vgpr_msb nor change which byte is in force.
+inline bool carriesVgprMsb(const StinkyInstruction& inst) {
+    return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
+             inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
+             inst.is(InstFlag::IF_Branch) || inst.is(InstFlag::IF_Call) ||
+             inst.is(InstFlag::IF_Barrier) || inst.is(InstFlag::IF_WaitCnt) ||
+             inst.is(InstFlag::IF_HasSideEffect));
 }
 
-/// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal, hasVgpr)
-/// with hasVgpr false / setVal -1 for ops that carry no VGPR MSB. Shared by the scheduler
-/// (MSB-affinity tiebreak) and InsertVgprMsbPass (materialization) so they cannot drift.
-inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
-    if (inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad) ||
-        inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic) ||
-        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Call) ||
-        inst->is(InstFlag::IF_Barrier) || inst->is(InstFlag::IF_WaitCnt) ||
-        inst->is(InstFlag::IF_HasSideEffect)) {
-        return {-1, false};
+/// What an instruction needs the bank state to be when it issues.
+struct VgprMsbNeed {
+    /// The s_set_vgpr_msb byte: the bank of each slot's operand. A slot no
+    /// operand selects reads bank 0.
+    int value = 0;
+    /// 0x3 at each slot an operand selects its bank through.
+    int usedSlots = 0;
+
+    /// False for an instruction that names no VGPR through a slot; the bank
+    /// state is then none of its business.
+    bool any() const {
+        return usedSlots != 0;
+    }
+};
+
+/// The bank state \p inst needs, with each VGPR operand at the index
+/// `indexOf(operand, operandIndex, isDest)` gives it: the operand's own index
+/// for the instruction as written, or the register a colouring not yet applied
+/// would write there. A later operand in a slot overrides an earlier one, since
+/// each slot has one selector.
+///
+/// InsertVgprMsbPass emits by this rule, so anything that predicts what it will
+/// emit has to use the rule too.
+template <typename IndexOf>
+inline VgprMsbNeed vgprMsbNeed(const StinkyInstruction& inst, IndexOf&& indexOf) {
+    static_assert(std::is_invocable_r_v<uint32_t, IndexOf, const StinkyRegister&, size_t, bool>,
+                  "vgprMsbNeed index lookup must be callable as "
+                  "(const StinkyRegister& operand, size_t index, bool isDest) -> uint32_t");
+
+    VgprMsbNeed need;
+    if (!carriesVgprMsb(inst)) return need;
+    forEachVgprOperandField(
+        inst, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+            if (slot < 0 || getMsbFromVgpr(reg) < 0) return;
+            const int bank = static_cast<int>(indexOf(reg, operand, isDest) / kVgprBankSize);
+            const int field = encodeVgprMsbForSlot(slot, 0x3);
+            need.value = (need.value & ~field) | encodeVgprMsbForSlot(slot, bank);
+            need.usedSlots |= field;
+        });
+    return need;
+}
+
+/// The bank state \p inst needs as written.
+inline VgprMsbNeed vgprMsbNeed(const StinkyInstruction& inst) {
+    return vgprMsbNeed(inst, [](const StinkyRegister& reg, size_t, bool) { return reg.reg.idx; });
+}
+
+/// The byte the last s_set_vgpr_msb put in force, followed along a block in
+/// order. Unknown where a block starts, after a label and after a call, because
+/// control can arrive there with any byte in force.
+class VgprMsbState {
+   public:
+    bool known() const {
+        return current_ >= 0;
     }
 
-    int msbSrc[3] = {0, 0, 0};
-    int msbDst = 0;
-    bool hasVgpr = false;
+    /// The byte in force; meaningful only when known().
+    int current() const {
+        return current_;
+    }
 
-    collectVgprMsbSlots(inst, msbSrc, msbDst, hasVgpr);
+    /// Whether an instruction with \p need has to be preceded by an s_set_vgpr_msb.
+    bool needsSet(const VgprMsbNeed& need) const {
+        return need.any() && need.value != current_;
+    }
 
-    if (!hasVgpr) return {-1, false};
+    void set(const VgprMsbNeed& need) {
+        current_ = need.value;
+    }
 
-    int setVal = encodeVgprMsbForSlot(0, msbSrc[0]) | encodeVgprMsbForSlot(1, msbSrc[1]) |
-                 encodeVgprMsbForSlot(2, msbSrc[2]) | encodeVgprMsbForSlot(3, msbDst);
-    return {setVal, true};
+    void forget() {
+        current_ = -1;
+    }
+
+   private:
+    int current_ = -1;
+};
+
+/// The s_set_vgpr_msb immediate \p inst needs for its VGPR operands; (setVal,
+/// hasVgpr) with hasVgpr false and setVal -1 for an instruction that carries no
+/// VGPR MSB. The scheduler's MSB-affinity tiebreak reads this; it is
+/// vgprMsbNeed() in another shape.
+inline std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
+    const VgprMsbNeed need = vgprMsbNeed(*inst);
+    if (!need.any()) return {-1, false};
+    return {need.value, true};
 }
 
 }  // namespace stinkytofu

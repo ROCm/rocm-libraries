@@ -227,7 +227,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     // in dests (it's the "output" of the Python instruction), but the HW format
     // (e.g. MUBUF_STORE) defines ALL operand fields as sources (S0..S3).  When
     // the HW descriptor has zero dest fields but irInst has dests, prepend them
-    // to srcRegs so that collectVgprMsbSlots lines up registers with HW fields.
+    // to srcRegs so that forEachVgprOperandField lines up registers with HW fields.
     bool hwHasDestField = false;
     if (desc) {
         for (const auto& f : desc->operandFields) {

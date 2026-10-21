@@ -111,6 +111,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/BarrierTest.cpp
     unit/asm/MergeBarrierPassTest.cpp
     unit/asm/LoopRegionRemarkPassTest.cpp
+    unit/asm/VgprMsbEncodingTest.cpp
     unit/asm/BranchHelpersTest.cpp
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp

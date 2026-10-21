@@ -39,18 +39,6 @@
 
 namespace stinkytofu {
 namespace {
-enum VgprMsbState : int {
-    NOT_REQUIRED = -1,
-    LABEL_BEGIN = -2,
-};
-
-bool isMsbComputableClass(const StinkyInstruction& inst) {
-    return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
-             inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
-             inst.is(InstFlag::IF_Branch) || inst.is(InstFlag::IF_Call) ||
-             inst.is(InstFlag::IF_Barrier) || inst.is(InstFlag::IF_WaitCnt) ||
-             inst.is(InstFlag::IF_HasSideEffect));
-}
 
 // Give each VGPR operand the offset its index calls for, so `v[idx + offset]`
 // lands in 0-255. Assigned unconditionally, bank 0 included: the offset is
@@ -98,37 +86,30 @@ void collectUnbankableOperands(const StinkyInstruction& inst, const std::string&
         });
 }
 
-bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
-                         GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
-    if (!hasVgpr || requiredSetVal == currentMsb) {
-        if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
-        return false;
-    }
-
-    if (currentMsb == VgprMsbState::LABEL_BEGIN) {
+/// Put \p need in force with an s_set_vgpr_msb before \p insertBefore.
+void emitVgprMsb(const VgprMsbNeed& need, VgprMsbState& state, bool afterLabel,
+                 AsmIRBuilder& irBuilder, GfxArchID archId, IRBase* insertBefore,
+                 VgprMsbMode msbMode) {
+    if (afterLabel) {
         StinkyInstruction* nopInst =
             irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
         nopInst->addSrcReg(StinkyRegister(0));
     }
 
-    int combinedSetVal = requiredSetVal;
-    if (msbMode == VgprMsbMode::Msb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
-        currentMsb != VgprMsbState::LABEL_BEGIN) {
-        combinedSetVal += (currentMsb << 8);
-    }
+    int combinedSetVal = need.value;
+    if (msbMode == VgprMsbMode::Msb16 && state.known()) combinedSetVal += (state.current() << 8);
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
     assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
     StinkyInstruction* msbInst = irBuilder.create(desc, insertBefore);
     msbInst->addSrcReg(StinkyRegister(combinedSetVal));
 
-    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 0)) +
-                             ", src1: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 1)) +
-                             ", src2: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 2)) +
-                             ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
+    std::string msbComment = "src0: " + std::to_string(decodeVgprMsbForSlot(need.value, 0)) +
+                             ", src1: " + std::to_string(decodeVgprMsbForSlot(need.value, 1)) +
+                             ", src2: " + std::to_string(decodeVgprMsbForSlot(need.value, 2)) +
+                             ", dst: " + std::to_string(decodeVgprMsbForSlot(need.value, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
-    currentMsb = requiredSetVal;
-    return true;
+    state.set(need);
 }
 
 bool preferInsertAfter(const StinkyInstruction& inst) {
@@ -176,7 +157,10 @@ class InsertVgprMsbPassImpl : public Pass {
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
-            int currentMsb = VgprMsbState::NOT_REQUIRED;
+            VgprMsbState state;
+            // Only the instruction straight after a label: its s_set_vgpr_msb is
+            // preceded by an s_nop.
+            bool afterLabel = false;
             IRBase* preferredInsertBefore = nullptr;
             auto findNextInstructionAnchor = [&](BasicBlock::iterator from) -> IRBase* {
                 for (auto scanIt = from; scanIt != bb.end(); ++scanIt) {
@@ -191,7 +175,8 @@ class InsertVgprMsbPassImpl : public Pass {
                 if (!inst) continue;
 
                 if (inst->getUnifiedOpcode() == GFX::LABEL) {
-                    currentMsb = VgprMsbState::LABEL_BEGIN;
+                    state.forget();
+                    afterLabel = true;
                     preferredInsertBefore = nullptr;
                     continue;
                 }
@@ -204,7 +189,8 @@ class InsertVgprMsbPassImpl : public Pass {
                 // the single-function pipeline, which re-established MSB after the
                 // call because the call ended a basic block.
                 if (isCall(*inst)) {
-                    currentMsb = VgprMsbState::NOT_REQUIRED;
+                    state.forget();
+                    afterLabel = false;
                     // Never carry a deferred insertion anchor across call boundaries:
                     // call may clobber VGPR MSB state, so post-call rebuilds must stay post-call.
                     preferredInsertBefore = nullptr;
@@ -213,12 +199,14 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
 
-                auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb,
-                                                          irBuilder, archId, insertBefore, msbMode);
+                const VgprMsbNeed need = vgprMsbNeed(*inst);
+                const bool emittedVgprMsb = state.needsSet(need);
+                if (emittedVgprMsb)
+                    emitVgprMsb(need, state, afterLabel, irBuilder, archId, insertBefore, msbMode);
+                afterLabel = false;
                 collectUnbankableOperands(*inst, func.getName(), unbankable);
                 encodeVgprOperands(inst);
-                if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;
+                if (emittedVgprMsb || carriesVgprMsb(*inst)) preferredInsertBefore = nullptr;
 
                 if (preferInsertAfter(*inst)) {
                     preferredInsertBefore = findNextInstructionAnchor(std::next(it));
