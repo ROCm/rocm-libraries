@@ -14,7 +14,9 @@ coverage descriptions; they link here for the procedure.
 Read [kernel arguments and compatibility](README.md#kernel-arguments-and-compatibility)
 for how the current kernel and frozen baseline keep separate launch ABIs, and
 [baseline replacement](README.md#when-to-replace-the-baseline) for when a new
-qualification is needed.
+qualification is needed. The [quickstart](quickstart.md) gives short recipes
+for common tasks, and the [glossary](README.md#glossary) defines terms. When a
+pinned test fails, start at [triage](#triage).
 
 ## Prerequisites
 
@@ -482,3 +484,43 @@ host cases, GPU comparisons, negative controls, and skips separately. The bundle
 and matching source cohort must be available together when CI runs. Keep this
 guide as the single procedure; operation guides should explain their contracts
 and link here rather than reproduce these steps.
+
+## Triage
+
+A pinned reference failure names the operation, architecture, and case, and
+the side that failed: the frozen baseline (replay), the current kernel
+(source), or the baseline snapshot (qualification). Most messages also give a
+likely cause and a next step. Find the row with text from the message; only
+rows for the kernel author implicate a kernel change.
+
+| Message contains | Likely cause | Who acts | Next step |
+|---|---|---|---|
+| `is outside its qualified budget`, `exceeds remaining limit` | The current kernel or its dispatch changed the output by more than the case's comparison limit | Kernel author | Rerun the case with the `verify --case` command the message prints, then [check the change against the independent reference](#check-a-changed-output-against-the-independent-reference) |
+| `current kernel (source) worker failed` | The adapter no longer matches a renamed or re-signed dispatch, build, or launch API, or the current kernel fails to compile, writes `non-finite or unwritten output`, does not launch once per repetition, or exceeds the request timeout | Kernel author | Read the worker log that the message includes. Update the adapter it names for a changed API, or fix the kernel |
+| `reference qualification failure` | The frozen baseline's output no longer matches its qualified digest: the GPU driver, ROCm runtime, or firmware differs from the qualified environment. The current kernel did not run | GPU environment owner, not the kernel author | Rerun to confirm, then compare the environment with the qualified one. Do not change the kernel or a tolerance; an environment that is meant to change the output needs a replacement baseline qualified in it |
+| `frozen baseline (replay) worker failed` | This environment cannot run the frozen runtime and code object, such as through its GPU driver, ROCm runtime, or device visibility | GPU environment owner | Read the worker log and compare the environment with the qualified one |
+| `differs from the qualified target`, `used different target features` | The GPU's target features, such as xnack or sramecc, differ from the qualified GPU's or between the two workers | GPU environment owner | Run on a GPU configured like the qualified one, or qualify a bundle for this target |
+| `reference bundle is missing`, `no extracted`, `does not match the pinned lock`, `has no manifest.json`, `missing, modified, or extra files`, `cannot be read`, `baseline identity mismatch`, `targets a different architecture`, `wrong reference operation` | The bundle was not fetched or extracted, is stale (extracted from an earlier archive, partly extracted, or modified), or belongs to another pair | Whoever runs the test | Run the `dvc pull` and `artifact.py unpack` commands the message prints, deleting a stale directory first, or pass the matching bundle and lock. Reinstall an installed tree from one build |
+| `reference archive missing`, `reference staging failed`, `No qualified ... baseline lock`, `has no publication list` during CMake configuration | A published archive was not fetched or does not match its lock, or the publication lists, locks, and operation packages disagree | Whoever configures the build, or the author of the publication change | Fetch every published archive before configuring ([step 6](#6-validate-installation-and-provider-selection)). Publish a pair only with its lock, and give each operation package a list and an `operation.json` |
+| `does not cover the complete enrolled cohort`, `the enrolled cases differ from`, `tolerance or budget changed`, `different compiler target` | The adapter's `CASES`, a shared cohort, the operation's `Case` fields, or the adapter's `COMPILER_TARGET` changed without a replacement bundle | Author of that change | Revert an unintended change. Otherwise [requalify the complete cohort](#decide-what-must-change) and publish its archive, lock, and DVC pointer. `diff` lists every difference |
+| `the current adapter cannot prepare`, `outside the sources of locked baseline` | An adapter update for a newer production API dropped the API of the pair's locked baseline revision, or a new case needs newer kernel support | Author of the adapter or case change | Keep the older API working in the adapter, or requalify the pair at a newer baseline revision |
+| `input digest mismatch` | The input generator or the NumPy implementation differs from qualification | Author of the contract change | Restore the generator; an intended change needs requalification of every pair of the operation |
+| `GPU unavailable`, `GPU is not available` | An explicitly selected suite found no GPU, or a GPU outside `AMDGPU_TARGETS` | CI job configuration | Run on the selected processor; see [processor selection](#processor-selection-in-therock-jobs) |
+| `baseline snapshot (qualification) worker failed`, `is not deterministic`, `leaves no comparison budget` | During qualification: the adapter does not support the snapshot's API, or the baseline kernel fails, is not deterministic, or exceeds the tolerance | Whoever qualifies | Select another committed baseline revision or extend the adapter. Never raise a tolerance to qualify |
+
+A skip is not a failure, but it records missing coverage on that GPU; check
+that the expected cases ran.
+
+### Check a changed output against the independent reference
+
+An output outside the comparison limit is not necessarily less accurate: a
+result closer to the independent reference can still fall outside the region
+allowed around the baseline. To tell, commit the change and qualify that
+revision into a scratch directory with
+[steps 2 and 3](#2-prepare-reproducible-qualification-inputs), using the commit
+as `REFERENCE_REVISION`, without publishing the result. Qualification prints
+each case's `old_bound`, here the changed kernel's error against the
+independent reference, and fails with `leaves no comparison budget` when that
+error reaches the tolerance. Fix such a regression. For an intended numerical
+change within the tolerance, qualify a replacement baseline as described above
+instead of widening the tolerance.

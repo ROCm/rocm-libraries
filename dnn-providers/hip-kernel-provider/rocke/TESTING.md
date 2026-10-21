@@ -683,9 +683,14 @@ reference them, don't copy them here.*
 ## Pinned-reference documentation
 
 Detailed guides live in the reference harnesses' `docs/` directories under
-`library/tests/`. Start with [kernel compatibility and baseline lifecycle](library/tests/reference_common/docs/README.md).
+`library/tests/`. Kernel authors start with the
+[quickstart](library/tests/reference_common/docs/quickstart.md), which covers
+running the pinned suites and adding cases, architectures, and operations. The
+[documentation hub](library/tests/reference_common/docs/README.md) covers kernel
+compatibility, the baseline lifecycle, and a glossary.
 
 - [Adding or updating a reference: authoritative workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
+- [Triage a failing pinned test](library/tests/reference_common/docs/gpu-reference-workflow.md#triage)
 
 - [SDPA implementation and usage](library/tests/sdpa_reference/docs/sdpa-test-reference.md)
 - [Convolution implementation and usage](library/tests/conv_reference/docs/conv-test-reference.md)

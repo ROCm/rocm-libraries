@@ -53,6 +53,8 @@ from .source import snapshot
 from .targets import processor_from_target_id
 
 _WORKFLOW = "library/tests/reference_common/docs/gpu-reference-workflow.md"
+# The workflow's triage table says who acts on each failure and links its procedure.
+_TRIAGE = f"{_WORKFLOW}#triage"
 # Failures name the side that failed: verification replays the frozen baseline
 # and runs the current kernel; qualification runs a baseline source snapshot.
 _BASELINE = "frozen baseline (replay)"
@@ -65,7 +67,7 @@ _ARCHIVE_ERRORS = (EOFError, gzip.BadGzipFile, tarfile.TarError, zlib.error)
 
 def _triage(problem: str, cause: str, step: str) -> str:
     """Follow a failure with its likely cause and the next step to take."""
-    return f"{problem}\n  likely cause: {cause}\n  next step: {step}\n  see {_WORKFLOW}"
+    return f"{problem}\n  likely cause: {cause}\n  next step: {step}\n  see {_TRIAGE}"
 
 
 def _no_parameters(reference: np.ndarray) -> dict[str, Any]:

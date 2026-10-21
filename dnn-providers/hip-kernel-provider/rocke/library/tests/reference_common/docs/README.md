@@ -6,10 +6,15 @@ SPDX-License-Identifier: MIT
 # Pinned GPU reference tests
 
 The reference tests compare the current kernel with a frozen GPU baseline that
-was independently qualified against numerical oracles. Detailed documentation
-lives beside the reference harnesses:
+was independently qualified against numerical oracles. Kernel authors start
+with the [quickstart](quickstart.md). A failing pinned test points to
+[triage](gpu-reference-workflow.md#triage), and the [glossary](#glossary)
+defines the terms these guides use. Detailed documentation lives beside the
+reference harnesses:
 
+- [Quickstart: run, extend, and add references](quickstart.md)
 - [Qualification and publication workflow](gpu-reference-workflow.md)
+- [Triage a failing pinned test](gpu-reference-workflow.md#triage)
 - [SDPA contract, coverage, and replay](../../sdpa_reference/docs/sdpa-test-reference.md)
 - [Convolution contract, coverage, and replay](../../conv_reference/docs/conv-test-reference.md)
 - [Methodology and extension strategy](gpu-ci-pinned-rocke-test-reference-plan.md)
@@ -78,3 +83,22 @@ every old revision can be requalified forever. A future policy could require
 recent source revisions for baseline refreshes and retire those adapters while
 preserving published-bundle replay. The current gfx942 historical adapter remains
 supported; removing it would be a separate policy and code change.
+
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| Operation | A `library/tests/<operation>_reference/` package, such as `conv` or `sdpa`, with its numerical contract, adapters, and `run_<operation>_reference.py` command line |
+| Adapter | `<operation>_reference/architectures/<arch>/__init__.py`. It declares the architecture's cases and prepares and launches the current kernel through the production dispatch and launch path |
+| Cohort, enrolled case | An architecture is enrolled when its operation's `architectures/registry.json` lists it. Its cohort is the adapter's `CASES`, and each is an enrolled case. Verification requires a bundle to record exactly the cohort, matching each case by its complete case contract |
+| Independent reference | The operation's offline oracle, `independent_reference` in `contract.py`; both operations use float64 NumPy. Only qualification computes it, optionally cross-checked with Torch |
+| Baseline revision | The committed revision whose production kernels a bundle freezes. Qualification snapshots its sources, and the lock records it as `baseline_revision` |
+| Qualification | The offline GPU run, `qualify`, that executes the baseline revision's kernels for every enrolled case, requires bit-identical repeated outputs, bounds their error against the independent reference, and writes a candidate bundle with its `qualification-lock.json`. It is valid only on the processor it ran on |
+| Manifest | A bundle's `manifest.json`. It records the baseline revision, payload file digests, and for each case the case contract, input and output digests, budget and comparison limit, kernel and launch metadata, and device target. Other guides call a processor's qualified manifest its certificate |
+| Baseline lock | `<operation>_reference/architectures/<arch>/baseline_lock.json`, the reviewed copy of a candidate's `qualification-lock.json`. It pins the schema, baseline revision, and manifest digest; a bundle whose manifest differs is rejected |
+| Bundle, archive, DVC pointer | A bundle is the extracted directory: the manifest and a payload of frozen code objects, runtime, and worker, without tensors. The archive `reference_bundles/<operation>/<arch>.tar.gz` packs it. Git tracks only its DVC pointer, `<arch>.tar.gz.dvc`; `dvc pull` fetches the archive and `artifact.py unpack` extracts and authenticates it |
+| Published pair | An operation and architecture with a committed lock and pointer, listed in [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake). Only published pairs are installed and get a `rocke_<operation>_gpu_<arch>_pytest` CTest |
+| Replay | Running the bundle's frozen code object with its frozen runtime. Its output must match the qualified digest before the current kernel's output is compared with it |
+| Frozen and current ABI | The frozen ABI is the signature, launch geometry, and argument bindings that qualification recorded for the baseline code object; replay uses it unchanged. The current ABI is whatever the current kernel's launch path takes, which the adapter supplies. They may differ; see [kernel arguments](#kernel-arguments-and-compatibility) |
+| Tolerance, comparison limit | The tolerance `T` is a case's original error limit against the independent reference. Qualification bounds the baseline's error by `B`, and the comparison limit `C`, rounded strictly below `T-B`, limits the current output's distance from the replayed output. Within `C`, the current output is within `T` of the independent reference; see the [budget derivation](gpu-ci-pinned-rocke-test-reference-plan.md#1-preserve-the-original-accuracy-contract) |
+| Failure controls | The three GPU tests that show the comparison can fail: a perturbed current output must exceed the comparison limit, a perturbed replayed output must fail its qualified digest, and a suppressed launch must leave poisoned output that the worker rejects |

@@ -1517,6 +1517,7 @@ def test_bundle_commands_say_how_to_provide_the_rocke_platform(
 
 
 _WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
+_TRIAGE_DOC = f"{_WORKFLOW_DOC}#triage"
 
 
 def _published_pairs():
@@ -2254,7 +2255,7 @@ def test_verification_failures_name_side_values_cause_and_next_step(
     subject = f"{spec.label} {architecture} case {case.id}"
     assert subject in message
     assert "\n  likely cause: " in message and "\n  next step: " in message
-    assert message.endswith(_WORKFLOW_DOC)
+    assert message.endswith(_TRIAGE_DOC)
     if failure == "baseline-output":
         # The environment, not the current kernel, changed the frozen output.
         assert f"reference qualification failure for {subject}" in message
@@ -2326,11 +2327,29 @@ def test_worker_failures_say_which_side_failed_and_keep_the_log(
     assert message.startswith(
         f"{spec.label} {architecture} case {case.id}: the {side} worker failed\n"
     )
-    assert f"\n  see {_WORKFLOW_DOC}\n" in message
+    assert f"\n  see {_TRIAGE_DOC}\n" in message
     assert message.endswith(log)
     # Only the current side points at the adapter that calls production APIs.
     adapter = f"library/tests/{operation}_reference/architectures/{architecture}/"
     assert (adapter in message) == (mode == "source")
+
+
+def test_failures_point_at_the_workflow_triage_section():
+    """The section that failures link to exists in source and installed trees."""
+    import re
+
+    from reference_common import cli as common_cli
+
+    path, _, anchor = common_cli._TRIAGE.partition("#")
+    # The path is relative to the rocKE root, or to an installed tree's tests
+    # directory; both hold library/tests.
+    doc = Path(common_cli.__file__).resolve().parents[3] / path
+    headings = {
+        re.sub(r"[^\w\- ]", "", line.lstrip("#").strip().lower()).replace(" ", "-")
+        for line in doc.read_text().splitlines()
+        if re.match(r"#{1,6} ", line)
+    }
+    assert anchor in headings
 
 
 @pytest.mark.parametrize("persistent", [False, True])
@@ -2432,7 +2451,7 @@ def test_rejected_bundles_say_how_to_replace_them(
             f"at {installed} from the archive that the installed lock pins"
         ) in message
         assert "dvc pull" not in message
-        assert message.endswith(_WORKFLOW_DOC)
+        assert message.endswith(_TRIAGE_DOC)
     else:
         # Unpack does not replace a directory, so the stale one goes first.
         assert "stale (left from an earlier archive)" in message
@@ -2442,7 +2461,7 @@ def test_rejected_bundles_say_how_to_replace_them(
         assert f"dvc pull {pointer}\n" in message
         assert f"artifact.py unpack --operation {operation} --archive " in message
         assert f"--bundle {bundle.resolve()} --lock {lock.resolve()}" in message
-        assert message.endswith(_WORKFLOW_DOC)
+        assert message.endswith(_TRIAGE_DOC)
 
 
 def test_unpack_explains_a_stale_archive_or_extracted_bundle(tmp_path, operation):
