@@ -28,14 +28,10 @@ else()
     target_link_libraries(hipblaslt-rocroller PRIVATE roc::rocroller_interface)
 endif()
 target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common)
-# HIPBLASLT_USE_ROCROLLER says the build has rocRoller enabled and is public on
-# hipblaslt. HIPBLASLT_HAVE_ROCROLLER_HEADERS says the sources being compiled
-# are built against rocRoller's headers, which is true of this target alone; it
-# is what kernel_type.hpp reads to decide between those headers and hipBLASLt's
-# own declaration of the enumerations it needs.
-target_compile_definitions(hipblaslt-rocroller PRIVATE
-    HIPBLASLT_USE_ROCROLLER
-    HIPBLASLT_HAVE_ROCROLLER_HEADERS)
+# This is the only target whose sources are built against rocRoller's headers,
+# and kernel_type.hpp reads this definition to decide between those headers and
+# hipBLASLt's own declaration of the enumerations it needs.
+target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
 target_include_directories(hipblaslt-rocroller
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"

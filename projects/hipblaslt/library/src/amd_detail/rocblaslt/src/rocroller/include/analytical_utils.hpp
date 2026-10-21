@@ -9,7 +9,7 @@
 
 // See kernel_type.hpp for why this is a compile definition and not
 // __has_include.
-#ifdef HIPBLASLT_HAVE_ROCROLLER_HEADERS
+#ifdef HIPBLASLT_USE_ROCROLLER
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #else
 #include "rocroller_enums.hpp"
