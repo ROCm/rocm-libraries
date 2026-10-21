@@ -186,6 +186,78 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
+    // Queue model on: wmmaQueueDepth() is `depth` only when the cover is positive.
+    void runPassWithWmmaQueue(int depth, int coverCycles) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.wmmaQueueDepth = depth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = coverCycles;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
+    struct LoopHeadBarriers {
+        StinkyInstruction* headSignal = nullptr;
+        StinkyInstruction* headWait = nullptr;
+        StinkyInstruction* laterSignal = nullptr;
+        StinkyInstruction* laterWait = nullptr;
+    };
+
+    // Independent WMMAs, a before-only all-wave pair, ds_loads consuming its LDS token, then
+    // a later pair carrying that same token. This is the A -> ds_load -> B token chain.
+    LoopHeadBarriers buildLoopHeadBarrierCase() {
+        LoopHeadBarriers out;
+        for (int i = 0; i < 12; ++i)
+            createWmmaScaleF8(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+        std::tie(out.headSignal, out.headWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createMovableDsLoad(/*destReg=*/100 + i * 8, /*addrReg=*/800 + i, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/500 + i * 16, /*src0Start=*/100 + i * 8);
+        std::tie(out.laterSignal, out.laterWait) =
+            createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        createMovableDsLoad(/*destReg=*/180, /*addrReg=*/820, /*ldsToken=*/1);
+        createWmmaScaleF8(/*destStart=*/700, /*src0Start=*/180);
+        return out;
+    }
+
+    // The first pair is after-only because its matching ds_load precedes it. The second pair is
+    // before-only, but is in the middle of the loop region and must not use the loop-head rule.
+    LoopHeadBarriers buildMidLoopBarrierCase() {
+        LoopHeadBarriers out;
+        for (int i = 0; i < 12; ++i)
+            createWmmaScaleF8(/*destStart=*/1000 + i * 16, /*src0Start=*/3000 + i * 16);
+        createMovableDsLoad(/*destReg=*/100, /*addrReg=*/800, /*ldsToken=*/9);
+        createMovableWorkgroupBarrier(bb, /*ldsToken=*/9);
+        for (int i = 0; i < 8; ++i)
+            createWmmaScaleF8(/*destStart=*/500 + i * 16, /*src0Start=*/3400 + i * 16);
+        std::tie(out.headSignal, out.headWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createMovableDsLoad(/*destReg=*/200 + i * 8, /*addrReg=*/820 + i, /*ldsToken=*/0);
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/700 + i * 16, /*src0Start=*/200 + i * 8);
+        return out;
+    }
+
+    // Make bb the header of a reachable single-BB loop. This is the shape the scheduler's
+    // LoopAnalysis uses to attach a Loop* to the ready queue.
+    void makeCurrentBlockLoopHeader() {
+        bb->addSuccessor(bb);
+    }
+
+    static int wmmaCountBefore(const BasicBlock& block, const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : block) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) return count;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return -1;
+    }
+
     // Run with the tensor_load_to_lds credit-pool throttle enabled.
     // distributeGlobalRead routes tensor loads into globalReadQueue;
     // depth/latency configure the in-flight credit pool.
@@ -783,6 +855,45 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     }
     EXPECT_EQ(signals, 2);
     EXPECT_EQ(waits, 2);
+}
+
+// A loop-carried A -> ds_load -> B token chain promotes A at wmmaQueueDepth.
+TEST_F(DAGSchedulerPassTest, LoopCarriedWorkgroupBarrierUsesWmmaQueueDepth) {
+    constexpr int kDepth = 4;
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildLoopHeadBarrierCase();
+
+    runPassWithWmmaQueue(kDepth, /*coverCycles=*/32);
+
+    EXPECT_EQ(wmmaCountBefore(*bb, ir.headSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_GT(wmmaCountBefore(*bb, ir.laterSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, ir.headSignal), positionOf(*bb, ir.laterSignal)) << scheduleOrder(*bb);
+}
+
+// Same token chain with the queue model off (cover 0 => depth 1) keeps its later estimator
+// placement rather than using the queue-depth rule.
+TEST_F(DAGSchedulerPassTest, LoopCarriedWorkgroupBarrierStaysWithEstimatorWithoutWmmaQueue) {
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildLoopHeadBarrierCase();
+
+    runPassWithUnrollGemm();
+
+    EXPECT_GT(wmmaCountBefore(*bb, ir.headSignal), 4) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, ir.headSignal), positionOf(*bb, ir.laterSignal)) << scheduleOrder(*bb);
+}
+
+TEST_F(DAGSchedulerPassTest, BeforeOnlyBarrierWithoutLaterTokenPairDoesNotUseHeadThreshold) {
+    constexpr int kDepth = 4;
+    makeCurrentBlockLoopHeader();
+    const LoopHeadBarriers ir = buildMidLoopBarrierCase();
+
+    runPassWithWmmaQueue(kDepth, /*coverCycles=*/32);
+
+    EXPECT_GT(wmmaCountBefore(*bb, ir.headSignal), kDepth) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, ir.headWait), positionOf(*bb, ir.headSignal) + 1)
+        << scheduleOrder(*bb);
 }
 
 // A non-overlapping pair stays on one threshold and issues together.
