@@ -22,6 +22,10 @@ Timing categories form a hierarchy: parents contain their children's wall-clock
     structure.  Display grouping (e.g. grouping C++ phases into "C++ Client
     Setup", "Data Preparation", etc.) is a rendering concern handled by
     DISPLAY_GROUPS / CPP_PHASE_GROUPS and applied at print time only.
+
+By default the report regroups the same data by purpose (PURPOSE_OF / build_purpose_hierarchy):
+for example all of the CPU reference GEMM is one group, wherever it is called from, and the groups
+add up to the wall clock time. ``--legacy`` prints the tree as the timers are nested instead.
 """
 
 import argparse
@@ -346,6 +350,109 @@ DISPLAY_GROUPS = {
     "python_client_execution": CPP_PHASE_GROUPS,
 }
 
+# --- Purpose view ---------------------------------------------------------------------------
+#
+# TIMING_HIERARCHY mirrors how the timers are nested in the code, so the same kind of work shows up
+# in several places (the CPU reference GEMM is called from pre_problem *and* from pre_solution).
+# The default report regroups the very same data by what the time is spent on. Each category is
+# assigned to a purpose group below; categories that are not listed inherit the group of the
+# category that contains them. The time of every category is shown exactly once, so the groups add
+# up to the wall clock time.
+
+G_REFERENCE = "Reference GEMM (CPU)"
+G_VALIDATION = "Validation"
+G_INPUT = "Input data preparation"
+G_KERNEL = "Kernel launch & execution"
+G_BOOKKEEPING = "Per-solution bookkeeping & reporting"
+G_LAUNCH = "Client launch (startup, setup & teardown)"
+G_INSTRUMENTATION = "Instrumentation overhead"
+G_BUILD = "Solution generation & build (Python)"
+G_PY_BOOKKEEPING = "Python bookkeeping (cache & solution files)"
+G_DUCTILE = "Ductile GA search (Python)"
+G_LIBRARY_CLIENT = "Library client (Python)"
+G_LIBRARY_LOGIC = "Library logic (Python)"
+G_UNATTRIBUTED = "Unattributed (untracked time & timer overhead)"
+
+PURPOSE_OF = {
+    # Python side
+    "python_benchmark_problems": G_BUILD,
+    "python_cache_check": G_PY_BOOKKEEPING,
+    "python_write_cache": G_PY_BOOKKEEPING,
+    "python_solution_indexing": G_PY_BOOKKEEPING,
+    "python_write_solutions": G_PY_BOOKKEEPING,
+    "python_ductile_setup": G_DUCTILE,
+    "python_ductile_generate_solutions": G_DUCTILE,
+    "python_ductile_clear_artifacts": G_DUCTILE,
+    "python_ductile_read_scores": G_DUCTILE,
+    "python_ductile_initial_sampling": G_DUCTILE,
+    "python_ductile_ga_between_evaluations": G_DUCTILE,
+    "python_ductile_verification": G_DUCTILE,
+    "python_library_logic": G_LIBRARY_LOGIC,
+    "python_client_writer": G_LIBRARY_CLIENT,
+    # C++ client: one launch's setup and teardown
+    "python_client_execution": G_BOOKKEEPING,
+    "python_client_write_run_script": G_LAUNCH,
+    "process_startup": G_LAUNCH,
+    "hip_initialization": G_LAUNCH,
+    "library_loading": G_LAUNCH,
+    "code_object_loading": G_LAUNCH,
+    "lazy_loading_init": G_LAUNCH,
+    "data_init_setup": G_LAUNCH,
+    "solution_iterator_setup": G_LAUNCH,
+    "listener_setup": G_LAUNCH,
+    "reporter_setup": G_LAUNCH,
+    "main_parse_args": G_LAUNCH,
+    "main_problem_factory": G_LAUNCH,
+    "main_teardown_locals": G_LAUNCH,
+    "process_exit": G_LAUNCH,
+    # Cost of the measurement itself
+    "main_timing_calibration": G_INSTRUMENTATION,
+    "timing_overhead": G_INSTRUMENTATION,
+    "flush_timing_buffer": G_INSTRUMENTATION,
+    # Reference GEMM, wherever it is called from
+    "cpu_reference_gemm": G_REFERENCE,
+    "pre_solution_listener.ReferenceValidator": G_REFERENCE,
+    # Preparing the inputs
+    "pre_problem": G_INPUT,
+    "gpu_input_preparation": G_INPUT,
+    "gpu_input_reset": G_INPUT,
+    "rotating_buffer_preparation": G_INPUT,
+    "pre_solution_listener.DataInitialization": G_INPUT,
+    # Checking the results
+    "validate_warmups": G_VALIDATION,
+    # Running the kernels
+    "kernel_solving": G_KERNEL,
+    "warmup_events_setup": G_KERNEL,
+    "warmup_runs": G_KERNEL,
+    "benchmark_runs": G_KERNEL,
+    "validate_warmups_listener.BenchmarkTimer": G_KERNEL,  # waits for the warmup kernel to finish
+    # Everything else that happens around each solution / problem
+    "solution_selection": G_BOOKKEEPING,
+    "pre_solution": G_BOOKKEEPING,
+    "run_current_solution_check": G_BOOKKEEPING,
+    "post_solution": G_BOOKKEEPING,
+    "post_problem": G_BOOKKEEPING,
+    "problem_report_index": G_BOOKKEEPING,
+    "problem_teardown": G_BOOKKEEPING,
+    "solution_teardown": G_BOOKKEEPING,
+    "run_iteration_teardown": G_BOOKKEEPING,
+    "finalize_report": G_BOOKKEEPING,
+}
+
+# Containers that only hold other timers: they get no row of their own in the purpose view. Their
+# children are shown under their own groups, and whatever time is left over (their untracked time)
+# goes to the "Unattributed" group.
+PURPOSE_TRANSPARENT = {
+    "python_benchmark_problems",
+    "python_client_execution",
+    "python_client_writer",
+    "python_library_logic",
+    "pre_problem",
+    "pre_solution",
+    "post_solution",
+    "validate_warmups",
+}
+
 # --- Derived constants ---
 
 def _walk_hierarchy(d):
@@ -355,6 +462,17 @@ def _walk_hierarchy(d):
         yield from _walk_hierarchy(v)
 
 ALL_KNOWN_CATEGORIES = set(_walk_hierarchy(TIMING_HIERARCHY))
+
+def _categories_with_children(d, out=None):
+    """Names of the categories that have known sub-timers (only those can have untracked time)."""
+    out = set() if out is None else out
+    for name, children in d.items():
+        if children:
+            out.add(name)
+            _categories_with_children(children, out)
+    return out
+
+CATEGORIES_WITH_CHILDREN = _categories_with_children(TIMING_HIERARCHY)
 
 # Timers that wrap other timers (diagnostics added to localize untracked time).
 # python_client_subprocess = process_startup + main_total + flush + main_teardown_locals + process_exit
@@ -626,6 +744,78 @@ def build_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
     return top_nodes
 
 
+def build_purpose_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
+    """Regroup the timer hierarchy by purpose (see PURPOSE_OF) and return the top-level groups.
+
+    Starts from ``build_hierarchy`` (so totals are overhead-adjusted exactly as in the legacy
+    report) and moves every category under its purpose group. A row nested under a category of
+    another group is taken out of that category, whose row then only shows its own remaining time.
+    Each category's own time is counted once, so the groups sum to the wall clock time (to within
+    the 0.01 ms tolerance used for untracked rows).
+    """
+    groups: Dict[str, List[PhaseNode]] = {}
+    unattributed: List[PhaseNode] = []
+
+    def add_unattributed(label: str, ms: float):
+        if abs(ms) > 0.01:
+            unattributed.append(PhaseNode(label, None, ms, None, []))
+
+    def build(node: PhaseNode, parent_group: str, nest_into: Optional[List[PhaseNode]]) -> float:
+        """Place ``node`` and return the time it contributes to the row it is nested in."""
+        group = PURPOSE_OF.get(node.name, parent_group)
+        real = [c for c in node.children if c.name != "(untracked)"]
+        transparent = node.name in PURPOSE_TRANSPARENT
+        nested_rows: List[PhaseNode] = []
+        nested_ms = 0.0
+        for child in real:
+            same_group = PURPOSE_OF.get(child.name, group) == group
+            nested_ms += build(child, group, nested_rows if (same_group and not transparent) else None)
+
+        if node.name not in CATEGORIES_WITH_CHILDREN:
+            # A timer with no known sub-timers: all of its time is its own.
+            row = PhaseNode(node.name, node.count, node.total_ms, node.mean_ms, [])
+            if nest_into is not None:
+                nest_into.append(row)
+                return row.total_ms
+            groups.setdefault(group, []).append(row)
+            return 0.0
+
+        remainder = node.total_ms - sum(c.total_ms for c in real)
+        if transparent:
+            add_unattributed(f"(untracked in {node.name})" if remainder >= 0
+                             else f"(children exceed {node.name})", remainder)
+            return 0.0
+
+        children = sorted(nested_rows, key=lambda n: n.total_ms, reverse=True)
+        if remainder > 0.01:
+            children.append(PhaseNode("(untracked)", None, remainder, None, []))
+            shown = remainder + nested_ms
+        else:
+            add_unattributed(f"(children exceed {node.name})", remainder)
+            shown = nested_ms
+        mean = shown / node.count if node.count else None
+        row = PhaseNode(node.name, node.count, shown, mean, children)
+        if nest_into is not None:
+            nest_into.append(row)
+            return shown
+        groups.setdefault(group, []).append(row)
+        return 0.0
+
+    for top in build_hierarchy(timings):
+        build(top, PURPOSE_OF.get(top.name, G_UNATTRIBUTED), None)
+
+    if unattributed:
+        groups.setdefault(G_UNATTRIBUTED, []).extend(unattributed)
+
+    nodes = []
+    for name, rows in groups.items():
+        rows.sort(key=lambda n: n.total_ms, reverse=True)
+        nodes.append(PhaseNode(name, None, sum(r.total_ms for r in rows), None, rows))
+    # Largest first, with the unattributed leftovers always last.
+    nodes.sort(key=lambda n: (n.name == G_UNATTRIBUTED, -n.total_ms))
+    return nodes
+
+
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
     """Parse a TIMING: line and return a TimingRecord."""
     start_sentinel = 'TIMING:'
@@ -890,10 +1080,20 @@ def print_hierarchy_validation(totals: Dict[str, float]):
 # Summary output
 # ---------------------------------------------------------------------------
 
-def print_summary(timings: Dict[str, List[float]], problem_timings: List[ProblemTiming]):
-    """Print a summary of timing data."""
+def print_summary(timings: Dict[str, List[float]], problem_timings: List[ProblemTiming],
+                  legacy: bool = False):
+    """Print a summary of timing data.
+
+    By default the tree is grouped by purpose (``build_purpose_hierarchy``). With ``legacy=True``
+    it is the tree as the timers are nested in the code, with the original display groups.
+    """
     global TABLE_WIDTH
-    nodes = build_hierarchy(timings) if timings else []
+    if not timings:
+        nodes = []
+    elif legacy:
+        nodes = build_hierarchy(timings)
+    else:
+        nodes = build_purpose_hierarchy(timings)
 
     total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
 
@@ -971,8 +1171,8 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     def render_node(node: PhaseNode, depth: int, parent_ms: Optional[float],
                     wall_clock_ms: float, is_first: bool):
         """Recursively render a PhaseNode at a given depth."""
-        # Separators between siblings
-        if depth == 0:
+        # Separators between siblings (legacy view only: the purpose view has many sibling rows)
+        if depth == 0 or not legacy:
             pass  # handled by caller
         elif depth == 1:
             SEPARATORS[1]()
@@ -1058,12 +1258,18 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     print("KEY INSIGHTS (% of wall clock)")
     print("-" * TABLE_WIDTH)
-    print(f"  {'Python phases (code gen, compilation):':<43} {python_codegen_time / 1000:.2f}s ({as_percentage(python_codegen_time, wall_clock_ms):.1f}%)")
-    print(f"  {'Python I/O overhead (cache, YAML):':<43} {python_io_time / 1000:.2f}s ({as_percentage(python_io_time, wall_clock_ms):.1f}%)")
-    print(f"  {'C++ client setup & teardown (per launch):':<43} {client_setup_time / 1000:.2f}s ({as_percentage(client_setup_time, wall_clock_ms):.1f}%)")
-    print(f"  {'Data preparation (CPU init, GPU prep):':<43} {data_prep_time / 1000:.2f}s ({as_percentage(data_prep_time, wall_clock_ms):.1f}%)")
-    print(f"  {'Reference computation (CPU GEMM):':<43} {ref_time / 1000:.2f}s ({as_percentage(ref_time, wall_clock_ms):.1f}%)")
-    print(f"  {'Kernel execution (warmup, benchmark):':<43} {kernel_time / 1000:.2f}s ({as_percentage(kernel_time, wall_clock_ms):.1f}%)")
+    if not legacy:
+        label_width = max([43] + [len(group.name) for group in nodes])
+        for group in nodes:
+            print(f"  {group.name:<{label_width}} {group.total_ms / 1000:.2f}s "
+                  f"({as_percentage(group.total_ms, wall_clock_ms):.1f}%)")
+    else:
+        print(f"  {'Python phases (code gen, compilation):':<43} {python_codegen_time / 1000:.2f}s ({as_percentage(python_codegen_time, wall_clock_ms):.1f}%)")
+        print(f"  {'Python I/O overhead (cache, YAML):':<43} {python_io_time / 1000:.2f}s ({as_percentage(python_io_time, wall_clock_ms):.1f}%)")
+        print(f"  {'C++ client setup & teardown (per launch):':<43} {client_setup_time / 1000:.2f}s ({as_percentage(client_setup_time, wall_clock_ms):.1f}%)")
+        print(f"  {'Data preparation (CPU init, GPU prep):':<43} {data_prep_time / 1000:.2f}s ({as_percentage(data_prep_time, wall_clock_ms):.1f}%)")
+        print(f"  {'Reference computation (CPU GEMM):':<43} {ref_time / 1000:.2f}s ({as_percentage(ref_time, wall_clock_ms):.1f}%)")
+        print(f"  {'Kernel execution (warmup, benchmark):':<43} {kernel_time / 1000:.2f}s ({as_percentage(kernel_time, wall_clock_ms):.1f}%)")
     print()
 
     cpu_ref_time = total_time_by_category.get('cpu_reference_gemm', 0)
@@ -1111,11 +1317,14 @@ def main():
     )
     parser.add_argument('logfile', help='Log file containing timing output')
     parser.add_argument('--csv', help='Output CSV file for detailed data')
+    parser.add_argument('--legacy', action='store_true',
+                        help='Print the tree as the timers are nested in the code, with the original '
+                             'display groups, instead of grouping by purpose')
 
     args = parser.parse_args()
 
     timings, problem_timings = analyze_timing_file(args.logfile)
-    print_summary(timings, problem_timings)
+    print_summary(timings, problem_timings, legacy=args.legacy)
 
     if args.csv:
         with open(args.csv, 'w') as f:
