@@ -204,8 +204,10 @@ template<typename Op, typename T = void>
 inline constexpr bool is_cuda_minimum_maximum_v
     = is_cuda_maximum_v<Op, T> || is_cuda_minimum_v<Op, T>;
 
+namespace reduce
+{
 template<typename EnvT>
-HIPCUB_RUNTIME_FUNCTION
+            HIPCUB_RUNTIME_FUNCTION
 static inline constexpr void check_supported_determinism()
 {
     static_assert(
@@ -227,6 +229,7 @@ static inline constexpr void check_supported_determinism()
                                           _HIPCUB_LIBCXX_EXEC::determinism::gpu_to_gpu_t>,
                   "gpu_to_gpu determinism is not supported");
 }
+} // namespace reduce
 } // namespace detail
 
 class DeviceReduce
@@ -397,7 +400,7 @@ public:
         using ReductionOpT      = _HIPCUB_STD::plus<>;
         const auto reduction_op = ReductionOpT{};
 
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,
@@ -469,7 +472,7 @@ public:
     static hipError_t
         Min(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(
@@ -574,7 +577,7 @@ public:
                              NumItemsT            num_items,
                              EnvT                 env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,
@@ -631,7 +634,7 @@ public:
     static hipError_t
         Max(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(
@@ -742,7 +745,7 @@ public:
                              NumItemsT            num_items,
                              EnvT                 env = {})
     {
-        detail::check_supported_determinism<EnvT>();
+        detail::reduce::check_supported_determinism<EnvT>();
 
         // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,
