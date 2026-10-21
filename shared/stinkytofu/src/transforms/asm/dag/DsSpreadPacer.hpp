@@ -31,8 +31,9 @@ class DsSpreadPacer {
    public:
     struct Load {
         unsigned nodeId;
-        int start;  // WMMA index of the barrier the load waits behind (0 = none)
-        int end;    // WMMA index of the barrier it feeds (INT_MAX = the region end)
+        int start;         // WMMA index of the barrier the load waits behind (0 = none)
+        int end;           // WMMA index of the barrier it feeds (INT_MAX = the region end)
+        int earliest = 0;  // WMMA count the graph lets it issue at the soonest
     };
 
     void reset() {
@@ -44,14 +45,17 @@ class DsSpreadPacer {
 
     // loads: the region's ds_loads. wmmaTotal: the region's WMMAs. drainWindows: WMMAs kept free
     // in front of a barrier (not the region end) for the last load feeding it to return.
+    // maxPerBatch: the most loads the hardware takes in one batch (0 = not bounded), which caps
+    // what a batch that is behind its line may take.
     void plan(const std::vector<Load>& loads, int wmmaTotal, int batch, int catchUp,
-              int drainWindows) {
+              int drainWindows, int maxPerBatch = 0) {
         reset();
         if (loads.empty() || wmmaTotal <= 0) return;
         active_ = true;
         batch_ = std::max(1, batch);
         catchUp_ = std::max(0, catchUp);
         wmmaTotal_ = wmmaTotal;
+        maxPerBatch_ = std::max(0, maxPerBatch);
         std::map<std::pair<int, int>, int> index;
         for (const Load& l : loads) {
             const int start = std::clamp(l.start, 0, wmmaTotal);
@@ -63,11 +67,19 @@ class DsSpreadPacer {
             if (fresh) {
                 Stage st;
                 st.start = start;
-                st.batches = std::max(1, (end - start + batch_ - 1) / batch_);
+                st.end = end;
                 stages_.push_back(st);
             }
-            ++stages_[it->second].total;
+            Stage& cur = stages_[it->second];
+            ++cur.total;
+            cur.lastDs = std::max(cur.lastDs, l.earliest);
             stageOf_[l.nodeId] = it->second;
+        }
+        // The stage ends at the later of its planned end and where its last load can first issue
+        // (the dependencies fix that, the pacer cannot move it), so the plan is what happens.
+        for (Stage& st : stages_) {
+            if (st.lastDs > st.end) st.end = std::min(st.lastDs, wmmaTotal);
+            st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
         }
     }
 
@@ -113,6 +125,8 @@ class DsSpreadPacer {
    private:
     struct Stage {
         int start = 0;    // WMMA index the stage opens at
+        int end = 0;      // WMMA index the stage ends at
+        int lastDs = 0;   // WMMA count its last load can first issue at
         int batches = 1;  // batches between its start and its end minus the drain
         int total = 0;    // its loads
         int issued = 0;
@@ -131,7 +145,16 @@ class DsSpreadPacer {
     // catch-up step when the stage is behind that line.
     int allowFor(const Stage& st, int idx) const {
         const int quota = evenLine(st, idx + 1) - evenLine(st, idx);
-        return quota + (st.issued < evenLine(st, idx) ? catchUp_ : 0);
+        if (st.issued >= evenLine(st, idx)) return quota;
+        // Behind the line: the catch-up step, or what the stage needs to end on time if that is
+        // more, up to what the hardware takes in a batch.
+        int allow = quota + catchUp_;
+        if (maxPerBatch_ > 0) {
+            const int left = std::max(1, st.batches - idx);
+            const int need = (st.total - st.issued + left - 1) / left;
+            allow = std::max(allow, std::min(need, maxPerBatch_));
+        }
+        return allow;
     }
 
     // The stage's batch holding `wmmaIssued`. Counted from the stage's start, so every batch is a
@@ -141,6 +164,7 @@ class DsSpreadPacer {
         return std::max(0, wmmaIssued - st.start) / batch_;
     }
 
+    int maxPerBatch_ = 0;
     std::unordered_map<unsigned, int> stageOf_;
     std::vector<Stage> stages_;
     int batch_ = 1;
