@@ -17,6 +17,10 @@
 #ifndef CK_TILE_BP_PT_EXP_EARLY_KV
 #define CK_TILE_BP_PT_EXP_EARLY_KV 1
 #endif
+// Switch (default on): causal mask predicate without the row-validity test.
+#ifndef CK_TILE_BP_PT_EXP_ROW_MASK
+#define CK_TILE_BP_PT_EXP_ROW_MASK 1
+#endif
 
 namespace ck_tile {
 
@@ -166,6 +170,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     // only: for P16 the extra live state raises SGPR spills (D128 causal 32 -> 67, ~3% slower).
     static constexpr bool kEarlyKvPrologue =
         CK_TILE_BP_PT_EXP_EARLY_KV != 0 && PagedTransfer::kFragmentsPerWave == 1;
+
+    // Causal mask predicate without the row-validity test: rows at or past seqlen_q are never
+    // written out (the O view is bounded by seqlen_q), so their scores may be masked arbitrarily.
+    // Not for P16 D128, where it raises SGPR spills (32 -> 75) and is ~0.5% slower overall.
+    static constexpr bool kStoredRowMask =
+        CK_TILE_BP_PT_EXP_ROW_MASK != 0 &&
+        std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>> &&
+        !(PagedTransfer::kFragmentsPerWave == 2 && kQKHeaddim == 128);
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -958,10 +970,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                                     const auto col = k_origin.at(I0) + tile_idx.at(I1);
                                     // One unsigned compare per element instead of
                                     // three compares joined by SALU ORs of lane masks.
-                                    if constexpr((Policy::kUseUnsignedCausalMask || kLeanD64Loop) &&
-                                                 std::is_same_v<
-                                                     FmhaMask,
-                                                     SimplifiedGenericAttentionMask<true>>)
+                                    if constexpr(kStoredRowMask)
+                                        return mask.IsOutOfBoundUnsignedStoredRow(row, col);
+                                    else if constexpr((Policy::kUseUnsignedCausalMask ||
+                                                       kLeanD64Loop) &&
+                                                      std::is_same_v<
+                                                          FmhaMask,
+                                                          SimplifiedGenericAttentionMask<true>>)
                                         return mask.IsOutOfBoundUnsigned(row, col);
                                     else
                                         return mask.IsOutOfBound(row, col);
@@ -1020,6 +1035,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                                     const auto col = k_origin.at(I0) + tile_idx.at(I1);
                                     if constexpr(kHasSink)
                                         return mask.IsOutOfSinkBound(row, col);
+                                    else if constexpr(kStoredRowMask)
+                                        return mask.IsOutOfBoundUnsignedStoredRow(row, col);
                                     else if constexpr(Policy::kUseUnsignedCausalMask &&
                                                       std::is_same_v<
                                                           FmhaMask,
