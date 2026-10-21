@@ -1209,7 +1209,11 @@ the product as a whole as well as its parts. For a math library they become:
    boundary gets tested on both sides.
 7. **Every test earns its slot.** A test's value is its unique coverage of high-risk cases, its record
    of catching real defects, and its cost in runner time. Duplicates merge. A test that covers nothing
-   another test does not already cover retires, or moves to a slower tier.
+   another test does not already cover retires, or moves to a slower tier. Equal line coverage does
+   not make two tests duplicates, though: they can reach the same lines and catch different failures.
+   Before a case retires, the tests that remain must still exercise its heuristic decisions, its
+   numerical boundaries, its architecture-specific behavior and its side effects, and any known-defect
+   reproducer stays.
 8. **Every suppression is temporary and cleans itself up.** A quarantined case keeps running where the
    mechanism allows, names its ticket where a tool can read it, and fails loudly once its bug is fixed.
    The `_ROCM3994_XFAIL` marker described under
@@ -1383,7 +1387,8 @@ smoke profile is affordable only because fast_check checks a GEMM exactly in a f
 4. **Retire what it makes redundant.** Record which kernel every existing client case runs, compare
    that with corpus coverage, and run both side by side before retiring anything. Kernel-level cases
    then retire one pull request at a time, each with its evidence, as described under
-   [Who tests what](#who-tests-what).
+   [Who tests what](#who-tests-what). Running the same kernel is not enough on its own to retire a
+   case; philosophy rule 7 lists what the remaining tests must still exercise.
 
 **Which GPUs can reach which kernels.** Some solutions run only on one device, chosen by chip ID or by
 compute-unit count, and partition modes change the compute-unit count. The library skips those
@@ -1541,7 +1546,11 @@ each cadence fits its budget.
 the weekly cadence exists.
 
 - **Prune redundant numerical variants** (AIHPBLAS-5036) in the client suite to buy back runtime,
-  and spend it on architecture breadth per PR.
+  and spend it on architecture breadth per PR. An earlier C++ coverage experiment is the starting
+  point: on an MI210, 60 tests reached the same 5,347 host-source lines as all 24,992 candidates. Two
+  limits travel with that number. Failed tests still contributed coverage, and generated kernels were
+  outside the measurement, so it says nothing about kernel coverage. Equal lines are also not enough
+  on their own to prune a case (philosophy rule 7).
 - **Shard TheRock's `tensilelite-common` job** (AIHPBLAS-5040). gfx950 is on the pull-request path
   as of the TheRock pin of 2026-10-02, and the job still runs unsharded with a 180-minute timeout.
   gfx950 takes about two hours, so the job is already a two-hour gate on pull requests. Split the
@@ -1676,6 +1685,13 @@ migration has a target.
 - **Type checking on TensileLite** (AIHPBLAS-5038). No type checking exists today despite type hints
   being a documented style rule. A large dynamically typed code generator with no type verification
   is a standing risk.
+- **Record every result as evidence.** Give each test scenario a stable identity, and record with
+  each run the source and build versions, the GPU, the flags, why the scenario was selected, whether
+  it ran or was skipped, its runtime, any defect links, and its result artifacts, in a shared results
+  record. That is what lets a pruning or retirement decision cite evidence, and lets a defect be
+  traced back to what was supposed to catch it. Measure feedback time, from a change to its first
+  test signal, alongside escaped regressions, so a faster suite that catches less shows up as a
+  trade rather than a win. A ticket will be filed under AIHPBLAS-5028.
 
 ### How this plan develops
 
