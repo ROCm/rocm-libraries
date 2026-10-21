@@ -1,4 +1,51 @@
 {
-  "claims": {},
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "L12a_2d_i56x56_n4c128k128_f1x3_fp32_cl_relu6",
+          "L21_1d_i1024_n4c128k128_f2_fp32_cl_relu6",
+          "L21_2d_i56x56_n4c128k128_f2x2_fp32_cf_relu",
+          "L7_1d_i1024_n4c128k128g2_f3_fp32_cf_relu6",
+          "L8_1d_i1024_n4c128k128g4_f3_fp32_cl_relu_clamp",
+          "M2_2d_i56x56_n8c64k64_f3x3_fp32_cl_relu",
+          "S10_1d_i16_n1c16k32_f5_fp32_cl_relu6",
+          "S11_2d_i16x16_n1c3k16_f7x7_fp32_cf_relu_clamp",
+          "S12b_2d_i16x16_n1c16k32_f3x1_fp32_cf_relu6",
+          "S12b_2d_i16x16_n1c16k32_f3x1_fp32_cl_relu_clamp",
+          "S13a_1d_i16_n1c16k16g16_f3_fp32_cf_relu",
+          "S13a_3d_i16x16x16_n1c16k16g16_f3x3x3_fp32_cf_relu_clamp",
+          "S13b_2d_i16x16_n1c16k32g16_f3x3_fp32_cl_relu6",
+          "S14_1d_i15_n1c13k17_f3_fp32_cl_relu",
+          "S14_3d_i15x15x15_n1c13k17_f3x3x3_fp32_cf_relu6",
+          "S14_3d_i15x15x15_n1c13k17_f3x3x3_fp32_cl_relu_clamp",
+          "S15_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu",
+          "S16_3d_i32x32x32_n1c16k32_f3x3x3_fp32_cl_relu6",
+          "S17_2d_i16x16_n1c1k16_f3x3_fp32_cl_relu",
+          "S20_1d_i16_n1c16k32_f3_fp32_cf_relu_clamp",
+          "S20_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl_relu",
+          "S22_1d_i16_n1c16k32_f3_fp32_cf_relu6",
+          "S22_1d_i16_n1c16k32_f3_fp32_cl_relu_clamp",
+          "S22_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu_clamp",
+          "S2_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu6",
+          "S2_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu6",
+          "S2_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl_relu_clamp",
+          "S4_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu",
+          "S4_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl_relu6",
+          "S5_1d_i16_n1c16k32_f3_fp32_cf_relu_clamp",
+          "S6_2d_i16x8_n1c16k32_f3x3_fp32_cl_relu",
+          "S6_3d_i16x8x4_n1c16k32_f3x3x3_fp32_cf_relu",
+          "S8_1d_i16_n2c32k64g4_f3_fp32_cf_relu6",
+          "S8_1d_i16_n2c32k64g4_f3_fp32_cl_relu_clamp",
+          "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cl_relu"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

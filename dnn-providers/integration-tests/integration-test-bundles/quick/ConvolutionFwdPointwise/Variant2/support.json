@@ -1,4 +1,20 @@
 {
-  "claims": {},
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "S3_1d_i16_n1c16k32_f3_fp32_cf_relu6",
+          "S4_1d_i16_n1c16k32_f3_fp32_cl_relu_clamp",
+          "S4_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu_clamp",
+          "S6_3d_i16x8x4_n1c16k32_f3x3x3_fp32_cl_relu"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

@@ -39,6 +39,9 @@ from pathlib import Path
 
 import conv_fwd_plan as P
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import support_sidecar  # noqa: E402
+
 GENERATOR = "generate_conv_fwd_bundles.py"
 SCALE_CONST = 0.5
 # A constant tensor value must carry the type of its tensor (the backend rejects a mismatch).
@@ -822,8 +825,20 @@ def dump(obj):
     return json.dumps(obj, indent=2, sort_keys=False) + "\n"
 
 
-def support_json():
-    return json.dumps({"claims": {}, "version": 1}, indent=2, sort_keys=True) + "\n"
+def support_json(path, case_ids):
+    """The sidecar of a sweep. Claims are harvested, never written here: an
+    existing sidecar keeps the claims of cases that still exist, so regenerating
+    the bundles does not erase a harvest. A sweep with no sidecar gets an empty one."""
+    claims = (
+        {c for c in support_sidecar.load(path) if c.case in case_ids}
+        if path.exists()
+        else set()
+    )
+    return (
+        support_sidecar.render(path, claims)
+        if claims
+        else json.dumps({"claims": {}, "version": 1}, indent=2, sort_keys=True) + "\n"
+    )
 
 
 def write_tree(result, bundle_dir, dry_run):
@@ -859,7 +874,9 @@ def write_tree(result, bundle_dir, dry_run):
                 entries.append(e)
             files[rel / "graph.template.json"] = dump(tpl)
             files[rel / "sweep.json"] = dump({"version": 1, "cases": entries})
-            files[rel / "support.json"] = support_json()
+            files[rel / "support.json"] = support_json(
+                bundle_dir / rel / "support.json", {cid for _, cid in cs}
+            )
     if dry_run:
         return files
     for level in P.LEVELS:

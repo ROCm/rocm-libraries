@@ -1,4 +1,27 @@
 {
-  "claims": {},
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "S3_1d_i16_n1c16k32_f3_fp32_cl_relu6",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu6",
+          "S4_1d_i16_n1c16k32_f3_fp16_cf_relu_clamp",
+          "S4_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu_clamp",
+          "S4_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu_clamp",
+          "S6_2d_i16x8_n1c16k32_f3x3_fp16_cl_relu",
+          "S6_3d_i16x8x4_n1c16k32_f3x3x3_fp16_cf_relu",
+          "S7_1d_i16_n1c16k32g2_f3_bf16_cf_relu",
+          "S8_2d_i16x16_n2c32k64g4_f3x3_bf16_cl_relu6",
+          "S8_3d_i16x8x8_n2c32k64g4_f3x3x3_bf16_cf_relu6",
+          "S9_3d_i16x8x4_n8c16k32_f1x1x1_bf16_cl_relu_clamp"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

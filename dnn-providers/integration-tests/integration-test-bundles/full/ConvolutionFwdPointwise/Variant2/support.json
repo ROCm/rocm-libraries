@@ -1,4 +1,33 @@
 {
-  "claims": {},
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "S3_1d_i16_n1c16k32_f3_fp32_cf_relu",
+          "S3_1d_i16_n1c16k32_f3_fp32_cf_relu_clamp",
+          "S3_1d_i16_n1c16k32_f3_fp32_cl_relu",
+          "S3_1d_i16_n1c16k32_f3_fp32_cl_relu6",
+          "S3_1d_i16_n1c16k32_f3_fp32_cl_relu_clamp",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu6",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cf_relu_clamp",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu6",
+          "S3_2d_i16x16_n1c16k32_f3x3_fp32_cl_relu_clamp",
+          "S3_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu",
+          "S3_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu6",
+          "S3_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf_relu_clamp",
+          "S3_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl_relu",
+          "S3_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl_relu6",
+          "S3_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cl_relu_clamp"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }
