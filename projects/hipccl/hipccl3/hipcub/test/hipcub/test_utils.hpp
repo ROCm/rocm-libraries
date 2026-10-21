@@ -32,6 +32,7 @@
     #include <rocprim/iterator/counting_iterator.hpp>
     #include <rocprim/iterator/discard_iterator.hpp>
     #include <rocprim/iterator/transform_iterator.hpp>
+    #include <rocprim/iterator/transform_output_iterator.hpp>
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #include <cub/block/block_load.cuh>
     #include <cub/block/block_store.cuh>
@@ -45,6 +46,7 @@
     #include <thrust/iterator/counting_iterator.h>
     #include <thrust/iterator/discard_iterator.h>
     #include <thrust/iterator/transform_iterator.h>
+    #include <thrust/iterator/transform_output_iterator.h>
     #include <thrust/iterator/zip_iterator.h>
 #endif
 
@@ -735,6 +737,18 @@ inline auto make_discard_iterator() -> discard_iterator
     return discard_iterator(::rocprim::make_discard_iterator());
 }
 
+template<typename UnaryFunction, typename OutputIterator>
+using transform_output_iterator
+    = ::rocprim::transform_output_iterator<OutputIterator, UnaryFunction>;
+
+template<typename UnaryFunction, typename OutputIterator>
+HIPCUB_HOST_DEVICE
+inline auto make_transform_output_iterator(OutputIterator out, UnaryFunction func)
+    -> transform_output_iterator<UnaryFunction, OutputIterator>
+{
+    return ::rocprim::make_transform_output_iterator(out, func);
+}
+
 #elif defined(__HIP_PLATFORM_NVIDIA__)
 
 template<typename IndexType, std::size_t... Dims>
@@ -788,6 +802,18 @@ template<typename T = std::size_t>
 inline auto make_discard_iterator() -> ::thrust::discard_iterator<T>
 {
     return ::thrust::discard_iterator<T>();
+}
+
+template<typename UnaryFunction, typename OutputIterator>
+using transform_output_iterator
+    = ::thrust::transform_output_iterator<UnaryFunction, OutputIterator>;
+
+template<typename UnaryFunction, typename OutputIterator>
+HIPCUB_HOST_DEVICE
+inline auto make_transform_output_iterator(OutputIterator out, UnaryFunction func)
+    -> transform_output_iterator<UnaryFunction, OutputIterator>
+{
+    return ::thrust::make_transform_output_iterator(out, func);
 }
 
 #endif
