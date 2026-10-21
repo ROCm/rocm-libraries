@@ -1359,15 +1359,25 @@ int main(int argc, const char* argv[])
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
-                                    listeners.preSyncs();
+                                    {
+                                        ScopedTimer preSyncsTimer("benchmark_pre_syncs");
+                                        listeners.preSyncs();
+                                    }
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
+                                            // Declared first => destroyed last: times the event
+                                            // destruction at the end of the iteration (mark() below).
+                                            ScopeTeardownTimer eventsTeardownTimer(
+                                                "benchmark_events_teardown");
+                                            auto const eventsSetupStart = TimingClock::now();
                                             TimingEvents startEvents(devices, enq, eventCount);
                                             TimingEvents stopEvents(devices, enq, eventCount);
                                             std::vector<size_t> slots;
                                             for(size_t j = 0; j < std::min(enq, slotCount); j++)
                                                 slots.push_back((launchIdx + j) % slotCount);
+                                            recordTimingSince("benchmark_events_setup",
+                                                              eventsSetupStart);
 
                                             {
                                                 ScopedTimer kernelTimer("gpu_kernel_execution");
@@ -1390,11 +1400,19 @@ int main(int argc, const char* argv[])
 
                                                 listeners.postEnqueues(startEvents, stopEvents);
                                             }
-                                            listeners.validateEnqueues(
-                                                slots, startEvents, stopEvents);
+                                            {
+                                                ScopedTimer validateEnqueuesTimer(
+                                                    "benchmark_validate_enqueues");
+                                                listeners.validateEnqueues(
+                                                    slots, startEvents, stopEvents);
+                                            }
+                                            eventsTeardownTimer.mark();
                                         }
 
-                                    listeners.postSyncs();
+                                    {
+                                        ScopedTimer postSyncsTimer("benchmark_post_syncs");
+                                        listeners.postSyncs();
+                                    }
                                 }
 
                                 if(useUserArgs)
