@@ -9,9 +9,11 @@ with ``inputs`` / ``outputs`` / ``attributes`` maps of uids and values, plus
 the graph's ``tensors`` list. Golden bundles and the hipDNN engine share that
 format, so the case table and the C++ engine read one input.
 
-Mask resolution follows hipDNN's ``getMaskType`` precedence: both deprecated
-causal flags set is an error; either one alone wins over the bounds trio;
-otherwise the trio is used with an unset bound read as unbounded.
+Mask resolution follows hipDNN's resolvers: both deprecated causal flags set
+is an error; a flag sets ``right_bound = 0`` (and bottom-right alignment for
+``causal_mask_bottom_right``) and the stored ``left_bound``, ``right_bound``
+and ``diagonal_alignment`` are applied on top; an unset bound reads as
+unbounded.
 """
 
 from __future__ import annotations
@@ -161,7 +163,14 @@ def _sdpa_tensor(entry: Mapping) -> SdpaTensor:
 
 
 def _resolve_band(attrs: Mapping) -> tuple[str, int, int]:
-    """``(diagonal, left_bound, right_bound)`` under ``getMaskType`` precedence."""
+    """``(diagonal, left_bound, right_bound)``, merging the deprecated flags.
+
+    Follows hipDNN's resolvers (``extractDiagonalBandParams`` in the CPU
+    reference, ``resolveDiagonalBand`` in the asm SDPA engine): a deprecated
+    flag acts as if its setter ran first (right bound 0, plus bottom-right
+    alignment for ``causal_mask_bottom_right``), and the stored bounds and
+    alignment are applied on top. ``causal_mask`` keeps the stored alignment.
+    """
     causal = bool(attrs.get("causal_mask") or False)
     causal_br = bool(attrs.get("causal_mask_bottom_right") or False)
     if causal and causal_br:
@@ -169,20 +178,18 @@ def _resolve_band(attrs: Mapping) -> tuple[str, int, int]:
             "causal_mask and causal_mask_bottom_right are mutually exclusive "
             "but both are set"
         )
-    if causal:
-        return "top_left", -1, 0
-    if causal_br:
-        return "bottom_right", -1, 0
     alignment = str(attrs.get("diagonal_alignment") or "TOP_LEFT").upper()
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
         raise ValueError(f"unknown diagonal_alignment {alignment!r}")
     left = attrs.get("left_bound")
     right = attrs.get("right_bound")
-    return (
-        alignment.lower(),
-        -1 if left is None else int(left),
-        -1 if right is None else int(right),
-    )
+    left = -1 if left is None else int(left)
+    right = -1 if right is None else int(right)
+    if causal or causal_br:
+        right = right if right >= 0 else 0
+        if causal_br:
+            alignment = "BOTTOM_RIGHT"
+    return alignment.lower(), left, right
 
 
 def from_hipdnn(

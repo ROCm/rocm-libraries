@@ -117,7 +117,9 @@ def test_from_hipdnn_accepts_a_uid_mapping():
     assert from_hipdnn(graph["nodes"][0], tensors, "gfx950") == _request()
 
 
-# --- mask precedence: hipDNN getMaskType ---------------------------------------
+# --- mask resolution: the deprecated flags merge with the stored bounds ----------
+# Expected values are what hipDNN's resolvers return: ``extractDiagonalBandParams``
+# (test_sdk PlanUtils.hpp) and ``resolveDiagonalBand`` (asm SDPA engine).
 
 
 @pytest.mark.parametrize(
@@ -130,7 +132,21 @@ def test_from_hipdnn_accepts_a_uid_mapping():
             {"left_bound": 3, "right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
             ("bottom_right", 3, 0),
         ),
-        # A deprecated flag wins and the trio is ignored.
+        # A deprecated flag alone is causal.
+        ({"causal_mask": True}, ("top_left", -1, 0)),
+        ({"causal_mask_bottom_right": True}, ("bottom_right", -1, 0)),
+        # causal_mask keeps the stored alignment; the bottom-right flag forces it.
+        (
+            {"causal_mask": True, "diagonal_alignment": "BOTTOM_RIGHT"},
+            ("bottom_right", -1, 0),
+        ),
+        (
+            {"causal_mask_bottom_right": True, "diagonal_alignment": "TOP_LEFT"},
+            ("bottom_right", -1, 0),
+        ),
+        # The stored bounds apply on top of the flag: a sliding window, not causal.
+        ({"causal_mask_bottom_right": True, "left_bound": 3}, ("bottom_right", 3, 0)),
+        ({"causal_mask": True, "left_bound": 3}, ("top_left", 3, 0)),
         (
             {
                 "causal_mask": True,
@@ -138,18 +154,26 @@ def test_from_hipdnn_accepts_a_uid_mapping():
                 "right_bound": 2,
                 "diagonal_alignment": "BOTTOM_RIGHT",
             },
-            ("top_left", -1, 0),
+            ("bottom_right", 5, 2),
         ),
         (
             {"causal_mask_bottom_right": True, "left_bound": 5, "right_bound": 2},
-            ("bottom_right", -1, 0),
+            ("bottom_right", 5, 2),
         ),
+        # An unset right bound (-1) does not override the flag's right bound of 0.
+        ({"causal_mask": True, "right_bound": -1}, ("top_left", -1, 0)),
         ({"left_bound": -4, "right_bound": -9}, ("top_left", -1, -1)),
     ],
 )
-def test_mask_precedence_matches_get_mask_type(attributes, band):
+def test_mask_merges_deprecated_flags_like_hipdnn(attributes, band):
     req = _request(attributes=attributes)
     assert (req.diagonal, req.left_bound, req.right_bound) == band
+
+
+def test_flag_with_a_stored_left_bound_is_a_window_not_causal():
+    """The merged band is a sliding window, so a causal-only kernel must decline it."""
+    req = _request(attributes={"causal_mask_bottom_right": True, "left_bound": 3})
+    assert req.features() >= {"window"} and "causal_tl" not in req.features()
 
 
 def test_both_deprecated_causal_flags_are_rejected():
