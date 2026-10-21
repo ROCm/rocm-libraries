@@ -55,17 +55,15 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
     String repoUrl
     (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocalution", variable: 'CODECOV_TOKEN')])
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocm-libraries", variable: 'CODECOV_TOKEN')])
     {
         def command = """#!/usr/bin/env bash
-                    set -x
+                    set -ex
                     cd ${project.paths.project_build_prefix}/build/${dirmode}
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
                     export ROCALUTION_CODE_COVERAGE=1
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    curl -Os https://uploader.codecov.io/latest/linux/codecov
-                    chmod +x codecov
-                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocALUTION --sha ${commitSha}
+                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocm-libraries --flags rocALUTION --sha ${commitSha}
                 """
 
         platform.runCommand(this, command)
