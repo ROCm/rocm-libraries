@@ -705,6 +705,31 @@ processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole
 Any other value is a `ConfigError`; the key is rejected for every other kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
+A packaged `rocke` `kernel_source` (or `kernel_defaults`) may also set
+`launches: {<name>: {<overrides>}}` to declare the launches of a multi-stage kernel
+([RFC 0017 §15.1](../../docs/rfcs/0017_UniversalKernelDescriptor.md)). Each value is merged
+onto the base `kernel_source`: `{role: merge}` selects a companion kernel of the same
+builder's `KernelModule`, and a different `builder` and `spec` name another builder
+entirely. The generator then emits the authored descriptor with a `sources` map keyed by
+launch name, in place of `kernel_source`, and the descriptor declares UKD 1.1. Launch names
+are lowercase identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else
+is a `ConfigError`, and so is the key on any kind but `rocke`. A kernel's launches are part
+of its candidate identity, so two entries that differ only in their launches are not
+de-duplicated. A config with no `launches` key generates exactly what it did before.
+
+A launch's `spec` override **replaces** the spec for that launch and is never varied by
+`variants`, `axes` or `shape_axes`: it is the same static spec in every expanded kernel. It
+may not state a metadata field at a value that differs from the variant being generated,
+which is a `ConfigError` naming the variant and the field, so a launch whose spec depends
+on an expanded axis cannot be spelled this way. A launch with no `spec` override takes the
+variant's own expanded spec. The packer checks each declared consumer field against the
+launches that report it (see the packaging reference).
+
+The descriptor only lists the launches: the pack's native dispatch handler declares the
+names it launches and owns their order, and the provider drops a kernel whose launch names
+differ from the handler's when it builds its catalog. See the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
+
 ## The five pre-mint config-loader checks
 
 Run, in this order, **before any UUID is minted**:

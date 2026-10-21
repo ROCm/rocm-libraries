@@ -118,7 +118,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
-| Multi-kernel launch program (e.g. SDPA backward) | None | composition |
+| Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -2158,6 +2158,16 @@ sibling family member (d64) is one more kernel descriptor supplying its own sour
 same dispatch descriptor; because the dispatch descriptor holds the launch structure, a variant
 needing a different Launch count or wiring shares nothing at that level and belongs in its own
 pack.
+
+**Implementation status.** Only the kernel-descriptor half is implemented: a UKD (version 1.1) may
+carry a `sources` map keyed by launch name in place of `kernel_source`. It holds at least two
+entries, each a complete `kpack` kernel source, and an authored entry is a `rocke` source. The
+`launches[]` dispatch-descriptor program, its intermediates and the cross-step checks are not
+implemented. The pack's native dispatch handler launches the entries, in an order it owns, and
+owns workspace and the hand-off between them. Until `launches[]` exists the handler also declares
+the launch names it expects, and the provider's kernel state manager drops a kernel whose launch names
+differ from that set when it builds its catalog, so an accepted kernel is always launchable (§8.6). The
+default is no names, which is a single-launch handler that reads `kernel_source`.
 
 ### 15.2 One Graph Split Across Several Engines
 
