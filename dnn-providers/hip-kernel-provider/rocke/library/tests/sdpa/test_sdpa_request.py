@@ -176,6 +176,16 @@ def test_scale_is_one_unless_baked(source):
     assert req.scale == 1.0
 
 
+def test_baked_scale_of_one_is_the_default_source():
+    """One meaning, one spelling: hipDNN reads an unset scale as 1.0."""
+    baked = replace(BASE, scale_source="value", scale=1.0)
+    default = replace(BASE, scale_source="default")
+    assert baked.scale_source == "default" and baked == default
+    assert baked.normalized() == default.normalized()
+    # Any other baked value keeps its source.
+    assert replace(BASE, scale_source="value", scale=0.5).scale_source == "value"
+
+
 def test_bias_rank_and_broadcast_strides_have_one_spelling():
     rank2 = SdpaBias(packed((8, 8)))
     rank4 = SdpaBias(packed((1, 1, 8, 8)))

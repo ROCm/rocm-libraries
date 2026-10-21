@@ -16,7 +16,8 @@ The request is normalized on construction, so one meaning has one spelling and
 - a band bound is ``-1`` (unbounded) or ``>= 0``; hipDNN's resolvers reject
   anything below ``-1``, so this does too;
 - the scale has exactly one source, and ``scale`` is ``1.0`` unless that source is
-  ``"value"``;
+  ``"value"``; a baked ``1.0`` is the default source, because hipDNN reads an
+  unset scale as 1.0;
 - a bias is right-aligned to rank 4, and every size-1 bias dim has stride 0.
 
 Deprecated causal flags do not exist here: :func:`dispatch.sdpa.hipdnn.from_hipdnn`
@@ -399,6 +400,8 @@ class SdpaRequest(OperatorRequest):
         if self.scale_source != "value":
             object.__setattr__(self, "scale", 1.0)
         object.__setattr__(self, "scale", float(self.scale))
+        if self.scale_source == "value" and self.scale == 1.0:
+            object.__setattr__(self, "scale_source", "default")
         object.__setattr__(self, "alibi", bool(self.alibi))
         object.__setattr__(self, "padding_mask", bool(self.padding_mask))
 

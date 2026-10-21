@@ -281,8 +281,12 @@ def from_hipdnn(
         "scale": tensor(inputs, "dropout_scale_tensor_uid"),
         "rng_dump": tensor(outputs, "rng_dump_tensor_uid"),
     }
+    # An unset or zero probability with no dropout tensors is no dropout: the asm
+    # SDPA engine gates on "dropout_probability must be unset or zero". Treating
+    # 0.0 as a dropout request would decline a graph that null would dispatch.
     probability = attrs.get("dropout_probability")
-    if probability is not None or any(t is not None for t in dropout.values()):
+    has_probability = probability is not None and float(probability) != 0.0
+    if has_probability or any(t is not None for t in dropout.values()):
         kwargs["dropout"] = SdpaDropout(
             probability=0.0 if probability is None else probability, **dropout
         )

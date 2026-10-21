@@ -204,6 +204,32 @@ def test_scale_value():
     assert (req.scale_source, req.scale) == ("value", 0.125)
 
 
+def test_scale_value_one_is_the_default_scale():
+    """hipDNN reads an unset scale as 1.0, so a baked 1.0 is the same request."""
+    baked = _request(attributes={"attn_scale_value": 1.0})
+    assert (baked.scale_source, baked.scale) == ("default", 1.0)
+    assert baked == _request() and baked.normalized() == _request().normalized()
+
+
+@pytest.mark.parametrize("probability", [None, 0.0, 0])
+def test_zero_dropout_probability_is_no_dropout(probability):
+    """The asm SDPA engine gates on "unset or zero", so 0.0 is not a dropout request."""
+    req = _request(attributes={"dropout_probability": probability})
+    assert req.dropout is None and "dropout" not in req.features()
+    assert req == _request()
+
+
+def test_zero_probability_with_dropout_tensors_is_still_dropout():
+    """The tensors configure dropout, so a candidate must still decline it."""
+    seed = [_tensor(10, (1,), "int32")]
+    req = _request(
+        attributes={"dropout_probability": 0.0},
+        inputs={"seed_tensor_uid": 10},
+        tensors=seed,
+    )
+    assert req.dropout is not None and "dropout" in req.features()
+
+
 def test_scale_tensor():
     req = _request(
         inputs={"scale_tensor_uid": 10}, tensors=[_tensor(10, (1,), "float")]
