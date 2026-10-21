@@ -228,15 +228,11 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 // nnzsplit csrmv_info device-buffer lifecycle
 // ===========================================================================
 // Regression test for the device leak fixed by rocm-libraries PR #6595:
-// _rocsparse_csrmv_info::clear() must free nnzsplit.starting_ids, and
-// starting_block_ids (an interior pointer into that same allocation -- see
-// the single rocsparse_hipMallocAsync in
-// level2/rocsparse_csrmv_template_nnzsplit.cpp around line 383) must not be
-// freed a second time or left dangling. csrmv_subinfo_clear_null_safe above
-// only clears an already-null struct and would keep passing even if the
-// rocsparse_hipFree call were reverted out of
-// _rocsparse_nnzsplit_info::clear() -- it never allocates anything in the
-// first place. This test actually allocates the buffer first.
+// _rocsparse_csrmv_info::clear() must call nnzsplit.clear(), which frees
+// nnzsplit.starting_ids. starting_block_ids is an interior pointer into that
+// same allocation (level2/rocsparse_csrmv_template_nnzsplit.cpp), so it must
+// not be freed a second time. csrmv_subinfo_clear_null_safe above never
+// allocates, so it cannot tell whether that call is still there.
 //
 // The nnzsplit algorithm is reachable only through the public
 // rocsparse_spmv(..., rocsparse_spmv_alg_csr_nnzsplit, ...) entry point: the
@@ -357,9 +353,8 @@ TEST(internal_infostructs, csrmv_nnzsplit_info_clear_releases_device_buffer)
     csrmv_info->clear();
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    // These are what fail if the rocsparse_hipFree(this->starting_ids) call in
-    // _rocsparse_nnzsplit_info::clear() is reverted: clear() would then leave
-    // the pointers aimed at the still-allocated buffer instead of nulling them.
+    // These fail if _rocsparse_csrmv_info::clear() stops calling
+    // nnzsplit.clear(): the pointers would still aim at the live buffer.
     // Byte-counting with hipMemGetInfo cannot stand in for this -- a leak does
     // not make free device memory drop, it only fails to make it rise -- and on
     // a shared GPU the whole-device figure moves with other processes, the
