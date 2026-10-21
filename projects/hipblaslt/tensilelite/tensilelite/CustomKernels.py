@@ -120,6 +120,61 @@ def isCustomKernelConfig(config):
         return not ck.get("generated", False)
     return bool(config.get("CustomKernelName", ""))
 
+def customKernelNameOf(config):
+    """The custom kernel a solution state (or fork-parameter entry) names, else ""."""
+    ck = config.get("CustomKernel")
+    if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+        return ck["name"]
+    if config.get("name") and not config.get("generated", False):
+        return config["name"]
+    return config.get("CustomKernelName", "") or ""
+
+
+def isExternalCustomKernel(name, directory=None):
+    """Whether a kernel was captured from outside Tensile.
+
+    An external capture declares a ``Source`` block in its embedded
+    ``custom.config`` naming where it came from (``rocroller``, ``aiter``, ...);
+    a Tensile-generated kernel has no such block. This is the same split
+    ``validateCustomKernelMetadata`` keys its required-field set on.
+
+    Unreadable metadata counts as not external, which keeps the caller on the
+    conservative branch instead of failing the run.
+    """
+    if not name:
+        return False
+    try:
+        config = readCustomKernelConfig(name, directory)
+    except (RuntimeError, OSError):
+        return False
+    return "Source" in config
+
+
+def mxScalesArePackedForSolutions(solutions, directory=None):
+    """Whether the benchmark client should allocate MX scales with no padding.
+
+    A micro-scaled GEMM carries one scale byte per 32 elements along the
+    summation dimension, so one row of scales needs ceil(K/32) bytes. Tensile's
+    own generated kernels for gfx950 read a row pitch rounded up to a multiple
+    of 8 and need that slack allocated. An externally captured kernel -- every
+    rocRoller kernel, for instance -- instead indexes the caller's buffer with
+    the unrounded pitch, which is the layout the hipBLASLt public API specifies
+    and the only one a production caller ever allocates.
+
+    The benchmark client allocates one scale buffer per problem and shares it
+    across every kernel it measures, so the unpadded layout is safe only when
+    the whole run agrees on it. Return True only when ``solutions`` is non-empty
+    and every one of them is an external capture; a run containing even one
+    Tensile-generated kernel keeps the padded layout that kernel requires.
+    """
+    solutions = list(solutions or [])
+    if not solutions:
+        return False
+    return all(
+        isExternalCustomKernel(customKernelNameOf(s), directory) for s in solutions
+    )
+
+
 def supportsUserSgprKernargPreload(rocmVersion):
     """Return whether a ROCm version passes TensileLite's preload gate.
 

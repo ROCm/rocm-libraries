@@ -208,19 +208,20 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
 namespace
 {
     // A GEMM with MX block scales attached the way tensile_host.cpp does on gfx950,
-    // i.e. with setMXScaleA/B's default padScaleTensorFreeDim = true.
+    // i.e. with setMXScaleA/B's default MXScalePadding::Gfx950.
     //
     // packedScales mirrors the caller: hipBLASLt hands an external custom kernel the
     // user's own compactly packed scale buffer (true), while the TensileLite benchmark
     // client allocates the scale buffer from this padded descriptor and hands that very
     // buffer over (false).
-    ContractionProblemGemm mxScaleProblem(size_t M,
-                                          size_t N,
-                                          size_t K,
-                                          bool   transA,
-                                          bool   transB,
-                                          int    mxBlock      = 32,
-                                          bool   packedScales = true)
+    ContractionProblemGemm mxScaleProblem(size_t         M,
+                                          size_t         N,
+                                          size_t         K,
+                                          bool           transA,
+                                          bool           transB,
+                                          int            mxBlock      = 32,
+                                          bool           packedScales = true,
+                                          MXScalePadding padding = MXScalePadding::Gfx950)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(transA,
                                                             transB,
@@ -243,8 +244,8 @@ namespace
                                                             0.0);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
-        problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
-        problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
+        problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, padding);
+        problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, padding);
         problem.setCustomKernelMXScalesArePacked(packedScales);
         return problem;
     }
@@ -362,6 +363,65 @@ TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
     // B: bound dim is index 0, so the stride is the K-block count, padded to 8.
     EXPECT_EQ(problem.mxsb().strides()[1], 8u);
     EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), 4);
+}
+
+// The TensileLite benchmark client no longer allocates a padded scale buffer for
+// an externally captured kernel: ClientProblemFactory builds the descriptor with
+// MXScalePadding::Packed and says so with setCustomKernelMXScalesArePacked, so the
+// buffer, the descriptor and the stride all describe the same ceil(K/mxBlock)
+// bytes per row that a hipBLASLt caller hands over.
+//
+// This guards both halves at once. Revert the client to padding every scale
+// buffer and the descriptor expectations below fail; keep the packed buffer but
+// lose the matching stride and the emitted-stride expectations fail. K=128 is the
+// shape that separates them: ceil(128/32) = 4 against a padded 8.
+TEST(CustomKernelTest, PackedScalePaddingKeepsBufferAndStrideInStep)
+{
+    size_t const Ks[] = {128, 384, 256};
+
+    for(size_t K : Ks)
+    {
+        size_t const compact = (K + 31) / 32;
+
+        auto problem = mxScaleProblem(64,
+                                      64,
+                                      K,
+                                      /*transA*/ true,
+                                      /*transB*/ false,
+                                      /*mxBlock*/ 32,
+                                      /*packedScales*/ true,
+                                      MXScalePadding::Packed);
+
+        // No slack anywhere: the row pitch is the bare K-block count, and the
+        // free dimension is not rounded up to a multiple of 32 either.
+        EXPECT_EQ(problem.mxsa().strides()[1], compact) << "K=" << K;
+        EXPECT_EQ(problem.mxsb().strides()[1], compact) << "K=" << K;
+        EXPECT_EQ(problem.mxsa().sizes()[1], 64u) << "K=" << K;
+
+        // And the kernel is told exactly that.
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem),
+                  static_cast<int64_t>(compact))
+            << "K=" << K;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem),
+                  static_cast<int64_t>(compact))
+            << "K=" << K;
+    }
+
+    // The three modes stay distinct, so a regression that collapses any two of
+    // them cannot pass quietly. K=96 separates all three: ceil(96/32) = 3, the
+    // gfx1250 rule rounds that to a multiple of 128/32 = 4, and the gfx950 rule
+    // rounds it to a multiple of 8.
+    auto packed96 = mxScaleProblem(
+        64, 64, 96, true, false, 32, /*packedScales*/ true, MXScalePadding::Packed);
+    EXPECT_EQ(packed96.mxsa().strides()[1], 3u);
+
+    auto gfx1250 = mxScaleProblem(
+        64, 64, 96, true, false, 32, /*packedScales*/ false, MXScalePadding::Gfx1250);
+    EXPECT_EQ(gfx1250.mxsa().strides()[1], 4u);
+
+    auto gfx950 = mxScaleProblem(
+        64, 64, 96, true, false, 32, /*packedScales*/ false, MXScalePadding::Gfx950);
+    EXPECT_EQ(gfx950.mxsa().strides()[1], 8u);
 }
 
 namespace

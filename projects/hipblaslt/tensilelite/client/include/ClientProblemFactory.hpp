@@ -117,7 +117,12 @@ namespace TensileLite
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
-            bool                             m_padMXScaleTensorFreeDim;
+            // Layout of the MX scale buffers this client allocates, and the
+            // matching promise to ContractionSolution about what it allocated.
+            // The two must agree: the stride handed to a custom kernel is read
+            // back out of the descriptor these shape.
+            MXScalePadding                   m_mxScalePadding;
+            bool                             m_mxScalesPacked;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

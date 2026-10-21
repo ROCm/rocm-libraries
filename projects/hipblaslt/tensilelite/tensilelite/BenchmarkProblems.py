@@ -55,7 +55,7 @@ from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
 from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
-from .CustomKernels import getCustomKernelConfig
+from .CustomKernels import getCustomKernelConfig, mxScalesArePackedForSolutions
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from .Common import HR, print1, print2, IsaInfo, IsaVersion, \
@@ -164,6 +164,10 @@ def _computeCacheKey(benchmarkStep, cmdLineArchs):
 class CacheEntry(TypedDict):
     CodeObjectFiles: List[str]
     LibraryFile: str
+    # Whether the kernels in this step want MX scales allocated without padding.
+    # Decided from the solutions when they were compiled; a cached run has no
+    # solution list of its own to re-derive it from.
+    MXScalesPacked: bool
 
 
 def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[CacheEntry]:
@@ -181,7 +185,11 @@ def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[Cac
         return None
     try:
         if _cacheDataMatches(c, benchmarkStep):
-            return {"CodeObjectFiles": c["CodeObjectFiles"], "LibraryFile": c["LibraryFile"]}
+            # A cache written before MXScalesPacked existed predates the packed
+            # layout, so the padded default is the right reading of it.
+            return {"CodeObjectFiles": c["CodeObjectFiles"],
+                    "LibraryFile": c["LibraryFile"],
+                    "MXScalesPacked": c.get("MXScalesPacked", False)}
     except KeyError as e:
         printWarning(f"Ignoring incompatible cache entry {cachePath} (missing field {e})")
         return None
@@ -705,12 +713,16 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         with timing_context("python_cache_check"):
             cacheValid = False
             cachedLibraryFile = None
+            # Decided from the solutions when they were built; a cached run has
+            # no solution list of its own to re-derive it from.
+            cachedMXScalesPacked = False
             if useCache:
                 cacheEntry = _loadCacheIfMatches(cacheDir, benchmarkStep)
                 if cacheEntry is not None:
                     cacheValid = True
                     codeObjectFiles = cacheEntry["CodeObjectFiles"]
                     cachedLibraryFile = cacheEntry["LibraryFile"]
+                    cachedMXScalesPacked = cacheEntry.get("MXScalesPacked", False)
                 elif os.path.isdir(os.path.join(stepBaseDir, "caches")):
                     printWarning("Cache data does not match config: redoing solution generation")
 
@@ -773,7 +785,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                         "ParamGroups": benchmarkStep.paramGroups,
                         "CustomKernels": benchmarkStep.customKernels,
                         "InternalSupportParams": benchmarkStep.internalSupportParams,
-                        "CustomKernelWildcard": benchmarkStep.customKernelWildcard
+                        "CustomKernelWildcard": benchmarkStep.customKernelWildcard,
+                        "MXScalesPacked": mxScalesArePackedForSolutions(solutions)
                     }
                     LibraryIO.writeYAML(cachePath, cacheData)
 
@@ -810,7 +823,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                                     benchmarkStep.icacheFlushArgs, conProblemType,
                                     sourcePath, codeObjectFiles, resultsFileName,
                                     outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
-                                    gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap)
+                                    gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap,
+                                    mxScalesPacked=cachedMXScalesPacked)
 
             # I think the size portion of this yaml could be removed,
             # but for now it's needed, so we update it even in the cache case
