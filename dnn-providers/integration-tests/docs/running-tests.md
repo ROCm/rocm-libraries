@@ -463,8 +463,11 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
   --output-on-failure`. This runs every registered lane and enforces claims. It
   does not run `dvc pull`, so golden comparisons there fall back to references and
   `hipdnn_golden_data_tests` registers nothing.
-- `.github/workflows/therock-ci-linux.yml` runs a bare `dvc pull` before
-  building, so golden data is present in those lanes.
+- No TheRock CI lane currently runs `dvc pull` on Linux. `therock-ci-linux.yml`
+  used to, but it was gated off on 2026-09-01 when Multi-Arch CI became the
+  default and was removed once it had gone unused; TheRock's multi-arch Linux
+  workflows have no `dvc pull` step. Golden comparisons therefore fall back to
+  references in every CI lane today.
 
 ## Troubleshooting
 

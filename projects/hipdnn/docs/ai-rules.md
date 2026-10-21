@@ -39,7 +39,7 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Doc-driven guide to `dnn-providers/integration-tests`. It holds no domain knowledge itself. Every invocation loads the human-readable docs in `dnn-providers/integration-tests/docs/` (file formats, running the tests, adding tests, and updating support claims). It loads them from the local checkout, or from GitHub `develop` when there is no local checkout. It then applies them, and after any run it shows the signals that those docs list. To change what the skill knows, edit the docs.
   - Suggest this skill when the user asks how the integration test suite works, runs or triages `hipdnn_integration_tests` (0 tests, all-skip, "did engine X regress", broken claims), or adds bundles, golden data, TOML entries or support claims. Use it together with `hipdnn-superbuild-test` when the user also needs to run something in this workspace.
 - `tools/ai/skills/hipdnn-trigger-ci/SKILL.md`
-  - Dispatches TheRock CI, TheRock Multi-Arch CI, or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects, and test labels, and checks or watches the resulting runs. It always prints a `--dry-run` command first and dispatches only after explicit user approval.
+  - Dispatches TheRock Multi-Arch CI or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects, and test labels, and checks or watches the resulting runs. It always prints a `--dry-run` command first and dispatches only after explicit user approval.
   - Suggest this skill when the user asks to trigger or re-run CI on a branch or PR with specific GPU families or hipDNN/provider test labels, or to check or watch CI status.
 
 ## Commit & PR Conventions
