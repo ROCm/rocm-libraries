@@ -49,6 +49,7 @@ from collections import Counter
 import pytest
 
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import shared_assembler, toolchain_for
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
 # canonicalized emit, global-state isolation, and per-kernel rocisa
@@ -63,27 +64,10 @@ from char_paths import resolve_tensile_path
 _DEFAULT_ARCH = "gfx942"
 
 
-@functools.lru_cache(maxsize=None)
-def _toolchain_for(arch):
-    """Build ``(assembler, isaInfoMap)`` for a single ``arch`` (gfx name).
-
-    Mirrors :func:`codegen_harness._toolchain` but restricts the ISA-info map to
-    one architecture so ``_generate_single_solution``'s
-    ``next(iter(isaInfoMap.keys()))`` deterministically selects it. Uses
-    amdclang++; no GPU required. Cached per arch.
-    """
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    isa = gfxToIsa(arch)
-    if isa is None:
-        raise ValueError(f"Unrecognized gfx architecture: {arch!r}")
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap([isa], cxx)
-    # The assembler itself is arch-independent; reuse the shared cached build.
-    assembler = _ch.get_assembler()
-    return assembler, iim
+# ``(assembler, isaInfoMap)`` for a single ``arch`` (gfx name), cached per arch. The map is
+# restricted to one architecture so ``_generate_single_solution``'s
+# ``next(iter(isaInfoMap.keys()))`` deterministically selects it.
+_toolchain_for = toolchain_for
 
 
 @contextlib.contextmanager
@@ -564,15 +548,11 @@ def _guard_assembler():
     through ``Solution``.
     """
     from tensilelite.Common.GlobalParameters import globalParameters
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     coVersion = str(globalParameters["CodeObjectVersion"])
     if not coVersion.isdigit():
         coVersion = "4"
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, coVersion).assembler
+    return shared_assembler(coVersion)
 
 
 def _assembler_or_reason():

@@ -23,8 +23,9 @@ from types import SimpleNamespace
 import pytest
 
 from tensilelite.Common.Architectures import gfxToIsa
-from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.Capabilities import applyArchCapOverrides
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from toolchain_test_helpers import copy_isa_info_map, shared_isa_info_map_or_skip
 
 pytestmark = pytest.mark.unit
 
@@ -43,17 +44,8 @@ def _caps_for(arch):
     """The real archCaps for ``arch``, as an ``--architecture <arch>`` build
     produces them, or a clean skip where the probe cannot run. Cached per arch."""
     if arch not in _ARCH_CAPS:
-        from tensilelite.Toolchain.Validators import validateToolchain
-
-        try:
-            cxx = validateToolchain("amdclang++")
-        except (ValueError, FileNotFoundError) as e:
-            pytest.skip(f"amdclang++ is unavailable: {e}")
-
+        iim = copy_isa_info_map(shared_isa_info_map_or_skip(arch, toolchainRequired=False))
         isa = gfxToIsa(arch)
-        iim = makeIsaInfoMap([isa], cxx)
-        if not iim[isa].asmCaps["SupportedISA"]:
-            pytest.skip(f"amdclang++ in this environment does not support {arch}")
         applyArchCapOverrides(iim, [arch])
         _ARCH_CAPS[arch] = iim[isa].archCaps
     return _ARCH_CAPS[arch]

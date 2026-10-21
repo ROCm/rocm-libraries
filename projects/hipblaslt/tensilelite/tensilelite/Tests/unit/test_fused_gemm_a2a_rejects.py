@@ -53,45 +53,6 @@ _MI_MT64 = [16, 16, 32, 1, 1, 2, 4, 2, 2]
 # Module-scoped toolchain fixtures (real gfx942 caps + assembler).
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx942_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa(_ARCH)
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip(f"amdclang++ in this environment does not support {_ARCH}")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def gfx90a_iim():
-    """Capability map for an ISA the fused path does not support."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx90a")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx90a")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx942(gfx942_iim):
     """Assign process-global parameters for gfx942; restore after module."""
     from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters

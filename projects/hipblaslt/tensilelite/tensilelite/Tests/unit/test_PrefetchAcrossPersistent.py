@@ -1431,30 +1431,6 @@ def test_every_grouping_row_answers_without_a_new_branch(row, shares):
 # end-to-end. Mirrors test_halfplr_streamk_rejects.py's harness.
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     from tensilelite.Common.GlobalParameters import assignGlobalParameters
 
