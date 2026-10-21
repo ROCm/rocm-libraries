@@ -204,7 +204,13 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->sliding_window > 0)
+    /* fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
+     * transposed-32x32 combo; all other SW shapes keep their existing
+     * routing. */
+    if(p->sliding_window > 0
+       && !(p->head_size == 128
+            && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)
+            && p->block_size == 16))
     {
         return false;
     }
@@ -514,6 +520,12 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
     if(enable_combo_2d(p) && p->sliding_window > 0)
     {
         return p->block_size;
+    }
+    /* fp16 & bf16 D128 single-batch sliding-window: force T=64. */
+    if(enable_single_batch_combo(p) && p->sliding_window > 0 && p->head_size == 128
+       && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0))
+    {
+        return 64;
     }
     /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS, d64 -> 128. */
     if(enable_single_batch_combo(p))
