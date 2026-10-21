@@ -9,6 +9,32 @@
     "gfx12-generic": ["gfx1200", "gfx1201"]
   },
   "arches": {
+    "gfx908": {
+      "_comment": "CDNA1 (gfx908). Wave64, 64 KB LDS, no async_lds, no fp8/bf8 or f64 MFMA, none of the _1k bf16 MFMA forms. Unlike gfx90a, the VGPR and AGPR files are separate, 256 entries each per lane (public CDNA1 ISA reference). VMCNT is the full 6-bit field. Facts are compiler-checked (front end, instruction selection, link, register occupancy), not hardware-verified.",
+      "family": "cdna",
+      "target_family": "gfx9_mfma",
+      "wave_size": 64,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "async_lds_max_dwords": 0,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 16, "n": 16, "k": 4,  "op_id": "mfma_f32_16x16x4_f32"},
+        {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 32, "n": 32, "k": 2,  "op_id": "mfma_f32_32x32x2_f32"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"}
+      ]
+    },
     "gfx90a": {
       "_comment": "CDNA2 (gfx90a). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on gfx90a series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",
       "family": "cdna",
@@ -132,9 +158,45 @@
         {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_xf32", "emulation": {"recipe": "bf16x3", "physical_op_id": "mfma_f32_32x32x16_bf16"}}
       ]
     },
+    "gfx1100": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1100 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1101": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1101 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1102": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1102 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1103": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1103 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1150": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1150 by name.",
+      "facts_of": "gfx11-generic"
+    },
     "gfx1151": {
       "_comment": "RDNA3.5 (gfx1151). Takes its facts from gfx11-generic: every field this file records is identical, so the row only points there. Like every member of a supported generic target, it has a row because rocKE supports it by name. WAVE32, WMMA not MFMA. Datalayout/triple identical to CDNA on this ROCm. WMMA f16/bf16 16x16x16 ABI hardware-verified on gfx1151: llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16(<16 x half>,<16 x half>,<8 x float>)->-<8 x float>; A frag lane l=row l%16 (K=0..15), B frag lane l=col l%16 (K=0..15), D lane l slot i=(row 2i+l/16, col l%16).",
       "facts_of": "gfx11-generic"
+    },
+    "gfx1152": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1152 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1153": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1153 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1154": {
+      "_comment": "Member of gfx11-generic (generic_targets): every field this file records is gfx11-generic's, so the row only points there. It exists because rocKE supports gfx1154 by name.",
+      "facts_of": "gfx11-generic"
+    },
+    "gfx1200": {
+      "_comment": "Member of gfx12-generic (generic_targets): every field this file records is gfx12-generic's, so the row only points there. It exists because rocKE supports gfx1200 by name.",
+      "facts_of": "gfx12-generic"
     },
     "gfx1201": {
       "_comment": "RDNA4 (gfx1201). Takes its facts from gfx12-generic: every field this file records is identical, so the row only points there. Like every member of a supported generic target, it has a row because rocKE supports it by name. The f16/bf16 A/B/C lane maps are exercised on gfx1200/gfx1201 hardware by the WMMA attention numeric suite (library/tests/test_wmma_fmha_fwd_v2_numeric.py); examples/gfx1201/wmma_probe.py remains the per-atom probe.",

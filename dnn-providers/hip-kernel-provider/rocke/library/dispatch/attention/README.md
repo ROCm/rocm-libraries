@@ -395,9 +395,11 @@ on an axis or in an exemption.
 ## RDNA WMMA inference (gfx11 and gfx12)
 
 Two kernels serve every `gfx11-generic`, `gfx1151`, `gfx12-generic` and
-`gfx1201` request. Requests for a generic target compile one code object set
-that loads on every device of the generation (gfx1100-gfx1154, or
-gfx1200/gfx1201); map a device name with
+`gfx1201` request, and every request for a processor whose catalog row points at
+one of those generics (gfx1100-gfx1154, gfx1200): such a request runs its
+generic's route and tuning space under its own name. Requests for a generic
+target compile one code object set that loads on every device of the
+generation (gfx1100-gfx1154, or gfx1200/gfx1201); map a device name with
 `rocke.core.arch.generic_arch_from_target_id`. Other architecture defaults are
 unchanged.
 

@@ -26,22 +26,56 @@ _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
 
 class TestArchTarget(unittest.TestCase):
     def test_known_arches(self):
-        # CDNA MFMA (gfx90a CDNA2, gfx942/gfx950 CDNA3/4) + RDNA WMMA/wave32
-        # (gfx1151 RDNA3.5, gfx1201 RDNA4, gfx11-generic, gfx12-generic) + gfx1250-class
-        # CDNA/GFX12 WMMA.
+        # CDNA MFMA (gfx908 CDNA1, gfx90a CDNA2, gfx942/gfx950 CDNA3/4) + RDNA
+        # WMMA/wave32 (gfx11-generic and each of its members, gfx12-generic and
+        # each of its members) + gfx1250-class CDNA/GFX12 WMMA.
         self.assertEqual(
             set(known_arches()),
             {
+                "gfx908",
                 "gfx90a",
                 "gfx942",
                 "gfx950",
+                "gfx1100",
+                "gfx1101",
+                "gfx1102",
+                "gfx1103",
+                "gfx1150",
                 "gfx1151",
+                "gfx1152",
+                "gfx1153",
+                "gfx1154",
+                "gfx1200",
                 "gfx1201",
                 "gfx1250",
                 "gfx11-generic",
                 "gfx12-generic",
             },
         )
+
+    def test_gfx908_facts(self):
+        # gfx908 is wave64 MFMA like gfx90a, but its VGPR and AGPR files are
+        # separate 256-entry files per lane where gfx90a has one unified
+        # 512-entry file; kernels size their register budget from these limits.
+        t = ArchTarget.from_gfx("gfx908")
+        self.assertEqual(t.family, "cdna")
+        self.assertEqual(t.wave_size, 64)
+        self.assertEqual(t.lds_capacity_bytes, 65536)
+        self.assertEqual(t.vmcnt_bits, 6)
+        self.assertEqual(t.limits.vgprs, 256)
+        self.assertEqual(t.limits.agprs, 256)
+        self.assertEqual(t.limits.sgprs, 102)
+        self.assertEqual(ArchTarget.from_gfx("gfx90a").limits.vgprs, 512)
+        self.assertEqual(
+            sorted(op.op_id for op in t.mma.ops),
+            [
+                "mfma_f32_16x16x16_f16",
+                "mfma_f32_16x16x4_f32",
+                "mfma_f32_32x32x2_f32",
+                "mfma_f32_32x32x8_f16",
+            ],
+        )
+        self.assertIsInstance(backend_for("gfx908"), Gfx9MfmaBackend)
 
     def test_gfx1250_facts(self):
         t = ArchTarget.from_gfx("gfx1250")

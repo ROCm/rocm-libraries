@@ -106,6 +106,16 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_arch_target_identity)
 
+  # The C++ copies of the arch data files' facts, compared with the files.
+  # It reads the files from the source tree, so it runs from the build tree
+  # only and is not installed.
+  add_executable(rocke_arch_data_mirror core/arch_data_mirror.cpp)
+  target_link_libraries(rocke_arch_data_mirror PRIVATE rocke_core)
+  add_test(NAME rocke_arch_data_mirror
+           COMMAND rocke_arch_data_mirror
+                   "${CMAKE_CURRENT_SOURCE_DIR}/../python/rocke/core/arch/data")
+  set_tests_properties(rocke_arch_data_mirror PROPERTIES LABELS "ckc;unit;host")
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.

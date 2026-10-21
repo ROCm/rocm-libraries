@@ -161,10 +161,10 @@ processor's members, mirrored by `rocke_ati_generic_targets` in
 [`cpp/core/arch/data.cpp`](../../cpp/core/arch/data.cpp).
 `generic_arch_from_target_id()` (C++: `rocke_generic_arch_from_target_id()`)
 maps any device or processor name to that generic target.
-`base_arch_from_target_id()` uses the generic row only for a member without its
-own catalog row (gfx1100 -> `gfx11-generic`, gfx1200 -> `gfx12-generic`), so an
-explicit processor name with a row (`gfx1151`, `gfx1201`) still builds
-processor-specific code. Capability tables (`intrinsic_arch_domain.*.json`) need
+`base_arch_from_target_id()` keeps a processor that has a row of its own, and
+every member of a catalogued generic target has one (see below), so `gfx1100`
+lowers as `gfx1100`; only a processor with no row falls back to the generic row
+that lists it. Capability tables (`intrinsic_arch_domain.*.json`) need
 the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
 
 Every member of a generic target that rocKE supports gets a row of its own, so
@@ -200,8 +200,8 @@ The C++ side needs **two** rows: the `REGISTRY` table in
 `rocke_ll_backend_for` in
 [`cpp/core/lower_llvm/core.cpp`](../../cpp/core/lower_llvm/core.cpp).
 
-A backend row may legitimately land **before** the arch metadata — `gfx908` and
-`gfx90a` are such forward declarations today. `backend_for()` resolves the
+A backend row may legitimately land **before** the arch metadata (a forward
+declaration; none is registered today). `backend_for()` resolves the
 `ArchTarget` first, so that case reports "forward-declared but has no
 arch_specs.json metadata yet" instead of leaking a raw `KeyError`, and
 `wired_arches()` returns only the rows that can actually build a backend.

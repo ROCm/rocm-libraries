@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import ArchTarget, known_arches, listed_arch_for
+from rocke.core.arch.target import _load_generic_targets
 from rocke.dispatch import GemmRequest
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY
@@ -40,7 +41,11 @@ class TestDeclaredCoverage(unittest.TestCase):
         """The cross-architecture misroute, pinned for every arch we know of."""
         for dtype, registry in _REGISTRIES:
             for candidate in registry.candidates():
-                undeclared = set(known_arches()) - set(candidate.capability.arches)
+                undeclared = {
+                    arch
+                    for arch in known_arches()
+                    if listed_arch_for(arch, candidate.capability.arches) is None
+                }
                 for arch in sorted(undeclared):
                     with self.subTest(candidate=candidate.name, arch=arch):
                         for req in _requests(arch, dtype):
@@ -104,11 +109,13 @@ class TestDeclaredCoverage(unittest.TestCase):
                         {
                             c.name
                             for c in registry.candidates()
-                            if arch in c.capability.arches
+                            if listed_arch_for(arch, c.capability.arches)
                         },
                     )
 
     def test_coverage_manifest_lists_the_declared_arches(self):
+        """The lists stay as declared: a generic's members are served through
+        the generic's entry, never by being added to a list."""
         manifest = GEMM_FP16_REGISTRY.coverage()
         by_name = {c["name"]: c for c in manifest["candidates"]}
         self.assertEqual(
@@ -119,6 +126,45 @@ class TestDeclaredCoverage(unittest.TestCase):
             by_name["universal_gemm_fp16_rdna_wmma"]["capability"]["arches"],
             ["gfx11-generic", "gfx1151", "gfx1201"],
         )
+
+    def test_every_generic_member_gets_exactly_its_generics_candidates(self):
+        """A list that names a generic target covers each member pointing there.
+
+        Members have rows of their own, so a request keeps the processor's name.
+        A member no list names must reach exactly the candidates, and the specs,
+        a request for its generic reaches; a member a list names (gfx1151,
+        gfx1201) reaches those plus its own.
+        """
+        shapes = ((1, 4096, 4096), (64, 64, 64), (512, 1024, 256), (4096, 4096, 4096))
+        for dtype, registry in _REGISTRIES:
+            named = {a for c in registry.candidates() for a in c.capability.arches}
+            for generic, members in _load_generic_targets().items():
+                for member in members:
+                    with self.subTest(dtype=dtype, member=member):
+                        own = {
+                            c.name
+                            for c in registry.candidates()
+                            if member in c.capability.arches
+                        }
+                        self.assertEqual(
+                            {c.name for c in registry.for_arch(member)},
+                            {c.name for c in registry.for_arch(generic)} | own,
+                        )
+                    if member in named:
+                        continue
+                    for m, n, k in shapes:
+                        with self.subTest(dtype=dtype, member=member, shape=(m, n, k)):
+                            mine = GemmRequest(M=m, N=n, K=k, arch=member, dtype=dtype)
+                            its = GemmRequest(M=m, N=n, K=k, arch=generic, dtype=dtype)
+                            served = registry.supported(its)
+                            self.assertEqual(
+                                [c.name for c in registry.supported(mine)],
+                                [c.name for c in served],
+                            )
+                            for c in served:
+                                self.assertEqual(
+                                    c.select_spec(mine), c.select_spec(its)
+                                )
 
 
 class TestDecodeShapeGateAsData(unittest.TestCase):

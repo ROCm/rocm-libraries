@@ -20,7 +20,14 @@ from unittest import mock
 
 import pytest
 
-from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp, MmaScaleBlockK, MmaScaleDType
+from rocke.core.arch import (
+    ArchTarget,
+    MmaCatalog,
+    MmaOp,
+    MmaScaleBlockK,
+    MmaScaleDType,
+    known_arches,
+)
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
@@ -544,3 +551,31 @@ def test_gfx950_has_no_unscaled_fp4_or_fp6_mfma():
             k=k,
         )
         assert found is None
+
+
+@pytest.mark.parametrize("gfx", known_arches())
+def test_every_target_names_each_mma_contract_once(gfx):
+    # Selection answers one question per operand contract: op_for_shape and
+    # select_largest_k raise "ambiguous MMA query" when two ops of one target
+    # share a full contract, and the backend keys its lowering on op_id. So on
+    # every target both the op_id and the full contract (family, operand and
+    # accumulator dtypes, shape, scale contract) must name exactly one op.
+    ops = ArchTarget.from_gfx(gfx).mma.ops
+    op_ids = [op.op_id for op in ops]
+    contracts = [
+        (
+            op.family,
+            op.a_dtype,
+            op.b_dtype,
+            op.c_dtype,
+            op.m,
+            op.n,
+            op.k,
+            op.a_scale_dtype,
+            op.b_scale_dtype,
+            op.scale_block_k,
+        )
+        for op in ops
+    ]
+    assert sorted({x for x in op_ids if op_ids.count(x) > 1}) == []
+    assert [c for c in set(contracts) if contracts.count(c) > 1] == []

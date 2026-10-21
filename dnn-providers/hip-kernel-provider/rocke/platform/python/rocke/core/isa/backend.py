@@ -296,7 +296,7 @@ class Gfx950Backend(ISABackend):
 class Gfx9MfmaBackend(ISABackend):
     """CDNA gfx9 MFMA family (gfx908 / gfx90a / gfx942). Shares the gfx9/10
     waitcnt layout and (for the verified base GEMM path) the same datalayout /
-    triple as gfx950. Per-arch divergence (4-bit VMCNT fields, no
+    triple as gfx950. Per-arch divergence (the recorded VMCNT field width, no
     transpose-LDS) keys off ``self.arch``."""
 
 
@@ -685,19 +685,26 @@ class Gfx1250Backend(Gfx12RdnaBackend):
 # gfx -> backend class. Adding a CDNA gfx is one row here plus, when its codegen
 # actually diverges, a new subclass.
 #
-# Some rows are forward-declarations: the backend class is wired here before the
-# matching ``core/arch/data/arch_specs.json`` row exists (gfx908 / gfx90a reuse
-# ``Gfx9MfmaBackend`` and are kept for upcoming enablement). ``backend_for``
-# resolves the :class:`ArchTarget` first, so such a row reports a clean
-# "metadata not yet present" error from this layer rather than a raw arch-layer
-# ``KeyError``. ``wired_arches()`` returns only the rows that have arch metadata
-# and can actually build a backend today.
+# A row may be added before its ``core/arch/data/arch_specs.json`` row exists (a
+# forward-declaration). ``backend_for`` resolves the :class:`ArchTarget` first,
+# so such a row reports a clean "metadata not yet present" error from this layer
+# rather than a raw arch-layer ``KeyError``. ``wired_arches()`` returns only the
+# rows that have arch metadata and can actually build a backend today.
 BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx908": Gfx9MfmaBackend,
     "gfx90a": Gfx9MfmaBackend,
     "gfx942": Gfx9MfmaBackend,
     "gfx950": Gfx950Backend,
+    "gfx1100": Gfx11RdnaBackend,
+    "gfx1101": Gfx11RdnaBackend,
+    "gfx1102": Gfx11RdnaBackend,
+    "gfx1103": Gfx11RdnaBackend,
+    "gfx1150": Gfx11RdnaBackend,
     "gfx1151": Gfx11RdnaBackend,
+    "gfx1152": Gfx11RdnaBackend,
+    "gfx1153": Gfx11RdnaBackend,
+    "gfx1154": Gfx11RdnaBackend,
+    "gfx1200": Gfx12RdnaBackend,
     "gfx1201": Gfx12RdnaBackend,
     "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
@@ -733,9 +740,9 @@ def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
             target = ArchTarget.from_gfx(arch)
         except KeyError as exc:
             # Backend row exists but the arch metadata does not: a
-            # forward-declared target (e.g. gfx908 / gfx90a) that is not yet
-            # buildable. Report it as such instead of leaking the arch-layer
-            # "unknown gfx target" message.
+            # forward-declared target that is not yet buildable. Report it as
+            # such instead of leaking the arch-layer "unknown gfx target"
+            # message.
             raise KeyError(
                 f"ISA backend for {arch!r} is forward-declared but has no "
                 f"arch_specs.json metadata yet; buildable now: "

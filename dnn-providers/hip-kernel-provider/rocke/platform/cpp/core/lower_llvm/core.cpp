@@ -190,7 +190,16 @@ static const rocke_isa_backend_t LL_BACKEND_GFX950
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1100 = {.gfx = "gfx1100", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1101 = {.gfx = "gfx1101", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1102 = {.gfx = "gfx1102", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1103 = {.gfx = "gfx1103", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1150 = {.gfx = "gfx1150", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1152 = {.gfx = "gfx1152", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1153 = {.gfx = "gfx1153", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1154 = {.gfx = "gfx1154", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX1200 = {.gfx = "gfx1200", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
@@ -255,9 +264,45 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
     {
         base = &LL_BACKEND_GFX90A;
     }
+    else if(strcmp(arch, "gfx1100") == 0)
+    {
+        base = &LL_BACKEND_GFX1100;
+    }
+    else if(strcmp(arch, "gfx1101") == 0)
+    {
+        base = &LL_BACKEND_GFX1101;
+    }
+    else if(strcmp(arch, "gfx1102") == 0)
+    {
+        base = &LL_BACKEND_GFX1102;
+    }
+    else if(strcmp(arch, "gfx1103") == 0)
+    {
+        base = &LL_BACKEND_GFX1103;
+    }
+    else if(strcmp(arch, "gfx1150") == 0)
+    {
+        base = &LL_BACKEND_GFX1150;
+    }
     else if(strcmp(arch, "gfx1151") == 0)
     {
         base = &LL_BACKEND_GFX1151;
+    }
+    else if(strcmp(arch, "gfx1152") == 0)
+    {
+        base = &LL_BACKEND_GFX1152;
+    }
+    else if(strcmp(arch, "gfx1153") == 0)
+    {
+        base = &LL_BACKEND_GFX1153;
+    }
+    else if(strcmp(arch, "gfx1154") == 0)
+    {
+        base = &LL_BACKEND_GFX1154;
+    }
+    else if(strcmp(arch, "gfx1200") == 0)
+    {
+        base = &LL_BACKEND_GFX1200;
     }
     else if(strcmp(arch, "gfx1201") == 0)
     {

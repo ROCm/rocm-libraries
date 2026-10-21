@@ -1723,6 +1723,40 @@ def cases():
             32,
         ),
     )
+    # Every other member of gfx11-generic / gfx12-generic has a row of its own
+    # that points at its generic's facts; one case each, the gfx1151 / gfx1201
+    # t32x32x16 configuration, shows it lowers under its own name.
+    for member in (
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+        "gfx1200",
+    ):
+        add(
+            "gemm",
+            f"gemm/{member}/t32x32x16",
+            member,
+            build_gemm(
+                f"irhash_gemm_{member[3:]}_a",
+                member,
+                32,
+                32,
+                16,
+                2,
+                2,
+                16,
+                16,
+                16,
+                "mem",
+                "default",
+                32,
+            ),
+        )
     # gfx90a is wave64/MFMA like gfx942; mirror its 16x16x16 atom variants.
     add(
         "gemm",
@@ -1761,6 +1795,27 @@ def cases():
             8,
             "compv4",
             "cshuffle",
+            64,
+        ),
+    )
+    # gfx908 is wave64/MFMA with the same f16 16x16x16 atom as gfx90a.
+    add(
+        "gemm",
+        "gemm/gfx908/t64x64x16",
+        "gfx908",
+        build_gemm(
+            "irhash_gemm_908_a",
+            "gfx908",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            16,
+            "mem",
+            "default",
             64,
         ),
     )

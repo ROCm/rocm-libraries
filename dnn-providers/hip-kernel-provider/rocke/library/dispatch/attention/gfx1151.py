@@ -6,8 +6,8 @@ packed layouts.
 
 One kernel set per RDNA generation: requests name ``gfx11-generic`` (code
 objects load on gfx1100-gfx1154) or ``gfx12-generic`` (gfx1200/gfx1201). A
-request may still name ``gfx1151`` or ``gfx1201`` to build processor-specific
-objects.
+request may still name a processor to build processor-specific objects; every
+member of the two generics is admitted through its generic.
 
 Two kernels serve every RDNA request:
 
@@ -59,7 +59,11 @@ from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     wmma_fmha_fwd_v2_grid,
     wmma_fmha_fwd_v2_signature,
 )
-from rocke.core.arch import base_arch_from_target_id, generic_arch_from_target_id
+from rocke.core.arch import (
+    base_arch_from_target_id,
+    generic_arch_from_target_id,
+    listed_arch_for,
+)
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -130,7 +134,9 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return _DEFAULT_NUM_CUS
 
 
-# Every RDNA target the WMMA kernels are registered for.
+# Every RDNA target the WMMA kernels are registered for. A request admits a
+# target when this names the target or its generic (the row arch_specs.json
+# points the target at), and then runs that entry's objects and tuning space.
 RDNA_WMMA_ARCHES = ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201")
 PREFILL_ALGORITHM = "wmma_fmha_fwd_v2"
 DECODE_ALGORITHM = "wmma_fmha_decode"
@@ -646,9 +652,11 @@ def _make_auto_candidate(kind: str) -> KernelCandidate:
         if not candidate.admits(req)[0]:
             return ()
         assert isinstance(req, AttentionRequest)
-        return wmma_variants(
-            _wmma_space(req.arch, kind), _wmma_problem(req, make_spec(req))
-        )
+        # admits() passed, so a list entry covers req.arch.
+        listed = listed_arch_for(req.arch, RDNA_WMMA_ARCHES)
+        assert listed is not None
+        space = _wmma_space(listed, kind)
+        return wmma_variants(space, _wmma_problem(req, make_spec(req)))
 
     if decode:
 
