@@ -18,6 +18,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -51,6 +52,8 @@ from support_matrix_units import (
 
 GFX942 = ("gfx942", "linux")
 GFX90A = ("gfx90a", "linux")
+# Seconds a CLI under test may run; rendering the real tree takes a few.
+SUBPROCESS_TIMEOUT = 120
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -2125,28 +2128,32 @@ class TestRealBundleTree:
         Uses a Python one-liner instead of `head` for cross-platform support.
         """
         script = Path(__file__).with_name("render_support_matrix.py")
-        renderer = subprocess.Popen(
-            [sys.executable, str(script), "--output", "-"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        assert renderer.stdout is not None
-        # Read one line then close — equivalent to `head -1` but works on
-        # Windows where `head` is not available.
-        reader = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.stdout.buffer.write(sys.stdin.buffer.readline()); sys.exit(0)",
-            ],
-            stdin=renderer.stdout,
-            stdout=subprocess.PIPE,
-        )
-        renderer.stdout.close()
-        reader.communicate()
-        assert renderer.wait() == 0
-        assert renderer.stderr is not None
-        assert renderer.stderr.read() == b""
+        # stderr goes to a file, not a pipe: nothing drains a pipe until the
+        # renderer exits, so a renderer that reports errors would fill it and
+        # block forever instead of failing the test.
+        with tempfile.TemporaryFile() as stderr:
+            renderer = subprocess.Popen(
+                [sys.executable, str(script), "--output", "-"],
+                stdout=subprocess.PIPE,
+                stderr=stderr,
+            )
+            assert renderer.stdout is not None
+            # Read one line then close — equivalent to `head -1` but works on
+            # Windows where `head` is not available.
+            reader = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(sys.stdin.buffer.readline()); sys.exit(0)",
+                ],
+                stdin=renderer.stdout,
+                stdout=subprocess.PIPE,
+            )
+            renderer.stdout.close()
+            reader.communicate(timeout=SUBPROCESS_TIMEOUT)
+            assert renderer.wait(timeout=SUBPROCESS_TIMEOUT) == 0
+            stderr.seek(0)
+            assert stderr.read() == b""
 
     def test_write_stdout_survives_a_consumer_that_closes_early(self) -> None:
         """The guard itself, for every CLI that shares it.
@@ -2154,31 +2161,33 @@ class TestRealBundleTree:
         The feature CLIs' documents fit in a pipe buffer today, so only a
         document larger than any buffer is sure to hit the closed pipe.
         """
-        writer = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.path.insert(0, sys.argv[1]); "
-                "from support_matrix_units import write_stdout; "
-                "write_stdout('✅ line\\n' * 1_000_000)",
-                str(Path(__file__).parent),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        assert writer.stdout is not None
-        reader = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.stdout.buffer.write(sys.stdin.buffer.readline()); sys.exit(0)",
-            ],
-            stdin=writer.stdout,
-            stdout=subprocess.PIPE,
-        )
-        writer.stdout.close()
-        line, _ = reader.communicate()
-        assert line == "✅ line\n".encode("utf-8")
-        assert writer.wait() == 0
-        assert writer.stderr is not None
-        assert writer.stderr.read() == b""
+        # stderr goes to a file for the reason given in the test above.
+        with tempfile.TemporaryFile() as stderr:
+            writer = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.path.insert(0, sys.argv[1]); "
+                    "from support_matrix_units import write_stdout; "
+                    "write_stdout('✅ line\\n' * 1_000_000)",
+                    str(Path(__file__).parent),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=stderr,
+            )
+            assert writer.stdout is not None
+            reader = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(sys.stdin.buffer.readline()); sys.exit(0)",
+                ],
+                stdin=writer.stdout,
+                stdout=subprocess.PIPE,
+            )
+            writer.stdout.close()
+            line, _ = reader.communicate(timeout=SUBPROCESS_TIMEOUT)
+            assert line == "✅ line\n".encode("utf-8")
+            assert writer.wait(timeout=SUBPROCESS_TIMEOUT) == 0
+            stderr.seek(0)
+            assert stderr.read() == b""
