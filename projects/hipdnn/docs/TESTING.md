@@ -109,7 +109,7 @@ Climb only as far as you need.
 
 1. **Run the label locally.** Build the preset for the affected component and run `ctest -L '^standard$'` as in [Building and running tests](#building-and-running-tests). This matches what a PR runs, minus the GPU architecture.
 2. **Run the installed tree.** Install the build and run the `ctest --test-dir <install>/bin/<dir> ...` command above. This catches missing install rules and files that only exist in the build tree.
-3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `linux_test_labels: test:hipdnn`. Dispatch runs `quick`.
+3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `pr_labels: test:hipdnn`. Dispatch runs `quick`.
 
 Local and CI runs differ in:
 
