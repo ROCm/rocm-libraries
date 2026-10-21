@@ -24,9 +24,11 @@ def architecture_available(
     """
     # TheRock supplies comma-separated artifact targets independently of its
     # broader family name. Exact targets distinguish lanes within one family.
+    # Accept a CMake-style semicolon list too, so a local export cannot turn
+    # matching hardware into a single unknown target and skip the suite.
     exact_targets = {
         target.strip().split(":", 1)[0].lower()
-        for target in targets.split(",")
+        for target in targets.replace(";", ",").split(",")
         if target.strip()
     }
     if exact_targets and architecture not in exact_targets:

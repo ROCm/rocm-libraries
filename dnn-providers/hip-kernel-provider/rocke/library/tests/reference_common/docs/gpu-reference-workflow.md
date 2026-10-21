@@ -287,8 +287,9 @@ assembled generic and matching architecture artifacts when validating packaging.
 
 TheRock owns build-family membership and expands it into the job's
 `AMDGPU_TARGETS`. Reference tests consume that comma-separated list of concrete
-processors; they do not define their own family aliases or infer qualification
-from `AMDGPU_FAMILIES`. A family name describes build and artifact selection,
+processors, and also accept a CMake-style semicolon list for local runs; they do
+not define their own family aliases or infer qualification from
+`AMDGPU_FAMILIES`. A family name describes build and artifact selection,
 not a promise that every member has a qualified reference bundle.
 
 The shared test artifact contains CTest entries for all published reference

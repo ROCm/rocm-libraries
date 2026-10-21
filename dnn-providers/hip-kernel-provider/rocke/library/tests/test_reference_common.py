@@ -416,6 +416,8 @@ def test_negative_control():
         ("gfx1201", "gfx950", "gfx1200,gfx1201", "error"),
         ("gfx1151", "gfx1100", "gfx1100,gfx1151", "skip"),
         ("gfx942", "gfx942:sramecc+:xnack-", "gfx942", "run"),
+        ("gfx1201", "gfx1201", "gfx1200;gfx1201", "run"),
+        ("gfx1201", "gfx1200", "gfx1200;gfx1201", "skip"),
     ],
 )
 def test_reference_session_uses_hardware_target_identity(
@@ -445,7 +447,10 @@ def test_reference_session_uses_hardware_target_identity(
         with pytest.raises(pytest.UsageError, match=f"required {architecture} GPU"):
             start_reference_session(config)
     else:
-        start_reference_session(config)
+        try:
+            start_reference_session(config)
+        except pytest.exit.Exception:
+            pytest.fail("matching hardware must not skip as a different GPU lane")
 
 
 def test_reference_entry_skips_a_different_gpu_lane():
@@ -469,6 +474,31 @@ def test_reference_exact_targets_select_only_matching_cohorts():
     assert not architecture_available("gfx1201", "gfx1200", "gfx1200")
     # Downloading both artifacts does not mean both devices are present.
     assert not architecture_available("gfx1201", "gfx1200", "gfx1200,gfx1201")
+
+
+@pytest.mark.parametrize(
+    "targets",
+    ["gfx942;gfx1201", " gfx1201 ; gfx942 ", "gfx1201,gfx942;", ";gfx942;; ,gfx1201"],
+    ids=["semicolon", "spaced", "mixed", "empty-items"],
+)
+def test_reference_exact_targets_accept_cmake_lists(targets):
+    from reference_common.pytest_support import architecture_available
+
+    # A CMake-style list must not hide matching hardware as a different lane.
+    assert architecture_available("gfx942", "gfx942", targets)
+    assert not architecture_available("gfx942", "gfx1201", targets)
+    assert not architecture_available("gfx950", "gfx942", targets)
+    with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
+        architecture_available("gfx942", "gfx950", targets)
+
+
+def test_reference_empty_target_list_selects_by_processor():
+    from reference_common.pytest_support import architecture_available
+
+    assert architecture_available("gfx942", "gfx942", " ; , ")
+    assert not architecture_available("gfx942", "gfx950", " ; , ")
+    with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
+        architecture_available("gfx942", None, " ; , ")
 
 
 def test_reference_local_run_without_a_gpu_fails():
