@@ -373,7 +373,7 @@ it needs a validator binary this repo does not build by default: point
 The descriptors under `src/engines/kernel_ingestor_engine/descriptors/rocKE/<slug>/` are
 generated (never at build time) from the selection `configs/<slug>.yaml`, drawn from the
 registry space its manifest `configs/<slug>.engine.yaml` enumerates (RUNBOOK stages 2 and
-6). `tests/test_registry_regeneration.py` gates the three against each other. The gates
+6). `tests/test_registry_regeneration.py` gates the three against each other, once per `configs/*.engine.yaml`. The gates
 compare specs, not code: `hkp_pack` builds unshipped spec fields at their current default
 with the builder's current code, so review rocKE default and builder changes as changes to
 the shipped engine.
@@ -381,10 +381,11 @@ the shipped engine.
 | Gate | Fails when |
 |---|---|
 | g1 In registry | a selection kernel is not in the manifest's enumeration (name, shipped spec fields, metadata, `kernel_source` kind/source/builder, `default` marker), or ships an unshipped spec field off its dataclass default |
-| g2 Selection regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the selection (`catalog_diff --strict-spec`) |
+| g2 Selection regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the selection (`catalog_diff --strict-spec`, native symbols included) |
 | g3 Registry regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the manifest's enumeration, compared on the shipped spec fields |
 | g4 Header matches manifest | the selection's `engine`, `dialect`, `kernel_source_kind`, `workspace_policy`, `authored_subpath`, `kmd_fields`, `specialization` or `reduction` differs from the manifest's |
-| g5 Vocabulary matches the matcher | a `specialization.vocabulary.dtype` spelling is not one the C++ matcher compares, or the matcher's source or dtype literals can no longer be read |
+| g5 Vocabulary matches the matcher | a `specialization.vocabulary.dtype` spelling is not one the C++ matcher compares (or the matcher produces one the vocabulary lacks), or the matcher's source or dtype literals can no longer be read |
+| g6 Specs hydrate | an enumerated or shipped spec cannot be built by `hkp_pack`'s own `build_spec`, or the builder's support predicate declines it (the pack-time checks that need no comgr) |
 
 To update a catalog, from this directory: run the gates, diff the edited selection against
 the shipped bundle (the report is the change under review), and check with
