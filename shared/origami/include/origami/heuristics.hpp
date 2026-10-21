@@ -44,25 +44,25 @@ namespace origami {
 struct heuristic_defaults_t {
   // Latency Component Weights
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
-  static constexpr size_t CACHE_LINE_BYTES     = 128;
-  static constexpr size_t DRAM_SECTOR_BYTES    = 64;
-  static constexpr size_t LDS_XFER_BYTES       = 128;
+  static constexpr size_t CACHE_LINE_BYTES       = 128;
+  static constexpr size_t DRAM_SECTOR_BYTES      = 64;
+  static constexpr size_t LDS_XFER_BYTES         = 128;
   static constexpr double KERNEL_LAUNCH_OVERHEAD = 4.5 * 2200.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG = 256;
 
   // Empirical Constants
-  static constexpr double L2_AMP_CEILING_BATCHED           = 0.9;
-  static constexpr double L2_AMP_CEILING_K_SPLIT              = 0.4;
+  static constexpr double L2_AMP_CEILING_BATCHED = 0.9;
+  static constexpr double L2_AMP_CEILING_K_SPLIT = 0.4;
   // Vector-ALU instructions charged per edge-store bounds check and per AccVGPR read;
   // fractional because they absorb overlap with other work.
   static constexpr double EPILOGUE_VALU_INSTS_PER_BOUNDS_CHECK = 1.25;
   static constexpr double EPILOGUE_VALU_INSTS_PER_ACC_READ     = 0.25;
-  static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE = 16;  // buffer_store_dwordx4
-  static constexpr double EPILOGUE_NONSWAP_STORE_TRAFFIC      = 1.5;
-  static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
-  static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
+  static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE  = 16;  // buffer_store_dwordx4
+  static constexpr double EPILOGUE_NONSWAP_STORE_TRAFFIC       = 1.5;
+  static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM    = 4;
+  static constexpr double EPILOGUE_SALU_OVERHEAD               = 35.0;
   static constexpr double L_BARRIER                            = 100.0;
-  static constexpr double EPILOGUE_L_SMEM = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
+  static constexpr double EPILOGUE_L_SMEM       = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
   static constexpr size_t POSTGSU_COMPUTE_BYTES = 4;       // workspace partials stored as f32
 
   // Main Loop Efficiency
@@ -72,16 +72,16 @@ struct heuristic_defaults_t {
   static constexpr double TF32_ARITH_INTENSITY_THRESHOLD = 1000.0;
 
   // Model tuning constants (relocated from gemm.cpp)
-  static constexpr double TARGET_WG_SLOTS_PER_CU          = 2.0;
-  static constexpr double K_ITER_LOOP_OVERHEAD            = 500.0;
-  static constexpr double BATCHED_FILL_ITER_TARGET       = 4.0;
-  static constexpr double BATCHED_FILL_PENALTY            = 4.0;
-  static constexpr double TAIL_WASTE_PENALTY             = 4.0;
-  static constexpr double OVERSIZE_WASTE_WEIGHT           = 3.0;
-  static constexpr double M_EDGE_PENALTY                 = 2.0;
-  static constexpr size_t SUBMI_GEMV_K_MIN                = 256;
-  static constexpr double EPILOGUE_OCC_SATURATION         = 2.0;
-  static constexpr double SCALAR_STORE_EXPOSED_PENALTY    = 4.0;
+  static constexpr double TARGET_WG_SLOTS_PER_CU       = 2.0;
+  static constexpr double K_ITER_LOOP_OVERHEAD         = 500.0;
+  static constexpr double BATCHED_FILL_ITER_TARGET     = 4.0;
+  static constexpr double BATCHED_FILL_PENALTY         = 4.0;
+  static constexpr double TAIL_WASTE_PENALTY           = 4.0;
+  static constexpr double OVERSIZE_WASTE_WEIGHT        = 3.0;
+  static constexpr double M_EDGE_PENALTY               = 2.0;
+  static constexpr size_t SUBMI_GEMV_K_MIN             = 256;
+  static constexpr double EPILOGUE_OCC_SATURATION      = 2.0;
+  static constexpr double SCALAR_STORE_EXPOSED_PENALTY = 4.0;
 };
 
 /**
@@ -93,10 +93,10 @@ struct heuristic_defaults_t {
  * tuned in a follow-up PR.
  */
 struct streamk_hybrid_defaults_t {
-  static constexpr size_t MIN_TILES_FOR_DYNAMIC                  = 480;
-  static constexpr int    MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
-  static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY   = 8.41;
-  static constexpr size_t DYNAMIC_MAX_WGS_PER_CU                  = 3;
+  static constexpr size_t MIN_TILES_FOR_DYNAMIC                 = 480;
+  static constexpr int MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC  = 3;
+  static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY = 8.41;
+  static constexpr size_t DYNAMIC_MAX_WGS_PER_CU                = 3;
 };
 
 /**
