@@ -223,6 +223,9 @@ TEST(HostAuxiliaryBranches, copy_hyb_mat_every_datatype)
 
         // A second copy into the now populated destination must match exactly.
         EXPECT_EQ(rocsparse_copy_hyb_mat(dst.get, src.get), rocsparse_status_success) << dt;
+        EXPECT_EQ(dst.get->m, 3);
+        EXPECT_EQ(dst.get->n, 5);
+        EXPECT_EQ(dst.get->data_type_T, dt);
     }
 }
 
@@ -416,13 +419,17 @@ TEST(HostAuxiliaryBranches, spmat_null_and_uninitialized_both_debug_modes)
 
 TEST(HostAuxiliaryBranches, getters_null_outputs_both_debug_modes)
 {
-    Spmat coo_aos, ell, sell;
+    // Distinct addresses, so a getter returning the wrong pointer is caught.
+    void* const ptr0 = host_storage;
+    void* const ptr1 = host_storage + 8;
+    void* const ptr2 = host_storage + 16;
+    Spmat       coo_aos, ell, sell;
     ASSERT_EQ(rocsparse_create_coo_aos_descr(&coo_aos.get,
                                              4,
                                              4,
                                              2,
-                                             any_ptr,
-                                             any_ptr,
+                                             ptr0,
+                                             ptr1,
                                              rocsparse_indextype_i32,
                                              rocsparse_index_base_zero,
                                              rocsparse_datatype_f32_r),
@@ -430,8 +437,8 @@ TEST(HostAuxiliaryBranches, getters_null_outputs_both_debug_modes)
     ASSERT_EQ(rocsparse_create_ell_descr(&ell.get,
                                          4,
                                          4,
-                                         any_ptr,
-                                         any_ptr,
+                                         ptr0,
+                                         ptr1,
                                          2,
                                          rocsparse_indextype_i32,
                                          rocsparse_index_base_zero,
@@ -443,9 +450,9 @@ TEST(HostAuxiliaryBranches, getters_null_outputs_both_debug_modes)
                                           4,
                                           2,
                                           8,
-                                          any_ptr,
-                                          any_ptr,
-                                          any_ptr,
+                                          ptr0,
+                                          ptr1,
+                                          ptr2,
                                           rocsparse_indextype_i32,
                                           rocsparse_indextype_i32,
                                           rocsparse_index_base_zero,
@@ -469,17 +476,50 @@ TEST(HostAuxiliaryBranches, getters_null_outputs_both_debug_modes)
                             std::tuple{&r, &c, &n, &ss, &cs, &a, &b, &v, &t1, &t2, &ib, &dt});
     });
 
-    // Successful reads cover the non-failing side of every check above.
+    // Successful reads cover the non-failing side of every check above. Each
+    // read starts from values no getter returns for these descriptors.
+    const auto reset = [&] {
+        r = c = n = w = ss = cs = -1;
+        a = b = v = nullptr;
+        t1 = t2 = rocsparse_indextype_i64;
+        ib      = rocsparse_index_base_one;
+        dt      = rocsparse_datatype_f64_r;
+    };
+    const auto expect_common = [&] {
+        EXPECT_EQ(r, 4);
+        EXPECT_EQ(c, 4);
+        EXPECT_EQ(t1, rocsparse_indextype_i32);
+        EXPECT_EQ(ib, rocsparse_index_base_zero);
+        EXPECT_EQ(dt, rocsparse_datatype_f32_r);
+    };
+
+    reset();
     EXPECT_EQ(rocsparse_coo_aos_get(coo_aos.get, &r, &c, &n, &a, &v, &t1, &ib, &dt),
               rocsparse_status_success);
+    expect_common();
     EXPECT_EQ(n, 2);
+    EXPECT_EQ(a, ptr0);
+    EXPECT_EQ(v, ptr1);
+
+    reset();
     EXPECT_EQ(rocsparse_ell_get(ell.get, &r, &c, &a, &v, &w, &t1, &ib, &dt),
               rocsparse_status_success);
+    expect_common();
     EXPECT_EQ(w, 2);
+    EXPECT_EQ(a, ptr0);
+    EXPECT_EQ(v, ptr1);
+
+    reset();
     EXPECT_EQ(rocsparse_sell_get(sell.get, &r, &c, &n, &ss, &cs, &a, &b, &v, &t1, &t2, &ib, &dt),
               rocsparse_status_success);
+    expect_common();
+    EXPECT_EQ(n, 4);
     EXPECT_EQ(ss, 2);
     EXPECT_EQ(cs, 8);
+    EXPECT_EQ(a, ptr0);
+    EXPECT_EQ(b, ptr1);
+    EXPECT_EQ(v, ptr2);
+    EXPECT_EQ(t2, rocsparse_indextype_i32);
 }
 
 TEST(HostAuxiliaryBranches, create_descr_bad_args_both_debug_modes)

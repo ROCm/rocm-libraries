@@ -63,7 +63,7 @@ namespace rocsparse_ut
             var().set_debug_kernel_launch(m_kernel_launch);
         }
 
-        debug_state_guard(const debug_state_guard&)            = delete;
+        debug_state_guard(const debug_state_guard&) = delete;
         debug_state_guard& operator=(const debug_state_guard&) = delete;
 
     private:
@@ -88,8 +88,8 @@ namespace rocsparse_ut
     {
         D get = nullptr;
 
-        Owned()                        = default;
-        Owned(const Owned&)            = delete;
+        Owned()             = default;
+        Owned(const Owned&) = delete;
         Owned& operator=(const Owned&) = delete;
 
         ~Owned()
@@ -116,7 +116,7 @@ namespace rocsparse_ut
             std::filesystem::remove(path, ec);
         }
 
-        scoped_temp_file(const scoped_temp_file&)            = delete;
+        scoped_temp_file(const scoped_temp_file&) = delete;
         scoped_temp_file& operator=(const scoped_temp_file&) = delete;
     };
 }

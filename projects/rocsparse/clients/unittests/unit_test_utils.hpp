@@ -158,7 +158,9 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            (void)hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            const hipError_t status
+                = hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            EXPECT_EQ(status, hipSuccess) << hipGetErrorString(status);
         }
         return host;
     }
@@ -371,7 +373,7 @@ namespace rocsparse_ut
             }
         }
 
-        scoped_env(const scoped_env&)            = delete;
+        scoped_env(const scoped_env&) = delete;
         scoped_env& operator=(const scoped_env&) = delete;
 
     private:

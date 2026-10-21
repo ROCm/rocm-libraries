@@ -91,21 +91,28 @@ namespace
     // the library. Zero sizes return before any device work, which still
     // executes every line of the wrapper. bsrmv, gebsrmv and csrmm reject the
     // null handle before any launch. The csrsv header documents invalid_handle,
-    // but the library returns early for m == 0, so any status is accepted.
+    // but the m == 0 quick return runs before the handle check and succeeds, so
+    // both are accepted; a success must still write the (empty) buffer size.
     template <typename T>
     void expect_template_wrappers_reject_null_handle()
     {
-        size_t buffer_size = 1;
-        static_cast<void>(rocsparse_csrsv_buffer_size<T>(nullptr,
-                                                         rocsparse_operation_none,
-                                                         0,
-                                                         0,
-                                                         nullptr,
-                                                         nullptr,
-                                                         nullptr,
-                                                         nullptr,
-                                                         nullptr,
-                                                         &buffer_size));
+        size_t     buffer_size = 1;
+        const auto status      = rocsparse_csrsv_buffer_size<T>(nullptr,
+                                                           rocsparse_operation_none,
+                                                           0,
+                                                           0,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           nullptr,
+                                                           &buffer_size);
+        EXPECT_TRUE(status == rocsparse_status_invalid_handle || status == rocsparse_status_success)
+            << status;
+        if(status == rocsparse_status_success)
+        {
+            EXPECT_EQ(buffer_size, size_t(0));
+        }
 
         EXPECT_EQ(rocsparse_bsrmv<T>(nullptr,
                                      rocsparse_direction_row,
@@ -193,7 +200,7 @@ namespace
             handle->log_debug_os = saved_debug;
         }
 
-        LogStreams(const LogStreams&)            = delete;
+        LogStreams(const LogStreams&) = delete;
         LogStreams& operator=(const LogStreams&) = delete;
     };
 
@@ -359,7 +366,7 @@ namespace
             }
         }
 
-        scoped_stream(const scoped_stream&)            = delete;
+        scoped_stream(const scoped_stream&) = delete;
         scoped_stream& operator=(const scoped_stream&) = delete;
     };
 
@@ -386,6 +393,7 @@ namespace
     }
 
     // Calls every argument-descriptor getter with either null or real outputs.
+    // A live descriptor holds the record of rocsparse_create_handle(nullptr).
     void expect_argdescr_getters(const void* descr, bool null_outputs)
     {
         const char*      msg           = nullptr;
@@ -416,9 +424,16 @@ namespace
         }
         if(want == rocsparse_status_success)
         {
-            EXPECT_NE(msg, nullptr);
-            EXPECT_NE(name, nullptr);
-            EXPECT_NE(function_name, nullptr);
+            ASSERT_NE(msg, nullptr);
+            ASSERT_NE(name, nullptr);
+            ASSERT_NE(function_name, nullptr);
+            EXPECT_NE(std::string(msg).find("null"), std::string::npos) << msg;
+            EXPECT_EQ(status, rocsparse_status_invalid_pointer);
+            EXPECT_EQ(index, 0);
+            EXPECT_STREQ(name, "handle");
+            EXPECT_NE(std::string(function_name).find("rocsparse_create_handle"), std::string::npos)
+                << function_name;
+            EXPECT_GT(function_line, 0);
         }
     }
 
@@ -445,27 +460,31 @@ namespace
             bytes);
     }
 
-    rocsparse_status sldu_preprocess(rocsparse_handle    handle,
-                                     rocsparse_direction dir,
-                                     rocsparse_diag_type ldiag,
-                                     rocsparse_direction ldir,
-                                     rocsparse_diag_type udiag,
-                                     rocsparse_direction udir,
-                                     rocsparse_int*      scratch,
-                                     rocsparse_int*      lnnz_out,
-                                     rocsparse_int*      unnz_out)
+    rocsparse_status sldu_preprocess(rocsparse_handle            handle,
+                                     rocsparse_direction         dir,
+                                     rocsparse_diag_type         ldiag,
+                                     rocsparse_direction         ldir,
+                                     rocsparse_diag_type         udiag,
+                                     rocsparse_direction         udir,
+                                     rocsparse_int*              scratch,
+                                     rocsparse_int*              lnnz_out,
+                                     rocsparse_int*              unnz_out,
+                                     std::vector<rocsparse_int>* lptr_out = nullptr,
+                                     std::vector<rocsparse_int>* uptr_out = nullptr,
+                                     rocsparse_int               ptr0     = -7)
     {
-        device_vector<rocsparse_int> ptr{std::vector<rocsparse_int>{0, 1, 2}};
-        device_vector<rocsparse_int> ind{std::vector<rocsparse_int>{0, 1}};
-        device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
-        device_vector<rocsparse_int> lptr{(size_t)3};
-        device_vector<rocsparse_int> uptr{(size_t)3};
+        const std::vector<rocsparse_int> sentinel{ptr0, -7, -7};
+        device_vector<rocsparse_int>     ptr{std::vector<rocsparse_int>{0, 1, 2}};
+        device_vector<rocsparse_int>     ind{std::vector<rocsparse_int>{0, 1}};
+        device_vector<float>             val{std::vector<float>{1.0f, 1.0f}};
+        device_vector<rocsparse_int>     lptr{sentinel};
+        device_vector<rocsparse_int>     uptr{sentinel};
         if(!ptr.ptr || !ind.ptr || !val.ptr || !lptr.ptr || !uptr.ptr)
         {
             return rocsparse_status_memory_error;
         }
-        rocsparse_int          lnnz = 0;
-        rocsparse_int          unnz = 0;
+        rocsparse_int          lnnz = -1;
+        rocsparse_int          unnz = -1;
         const rocsparse_status status
             = rocsparse::csxsldu_preprocess_template<float, rocsparse_int, rocsparse_int>(
                 handle,
@@ -492,6 +511,10 @@ namespace
             *lnnz_out = lnnz;
         if(unnz_out)
             *unnz_out = unnz;
+        if(lptr_out)
+            *lptr_out = to_host(lptr);
+        if(uptr_out)
+            *uptr_out = to_host(uptr);
         return status;
     }
     class HostInternalBranches : public HandleTest
@@ -536,12 +559,33 @@ TEST_F(HostInternalBranches, swdev_csr_descr_argument_checks)
                                                        rocsparse_datatype_f32_r);
     };
 
-    // Empty and 1x1 matrices are created and destroyed.
+    // Empty and 1x1 matrices are created, read back and destroyed.
+    auto expect_csr = [](rocsparse_spmat_descr d, int64_t size, void* ptr, void* ind, void* val) {
+        int64_t              rows = -1, cols = -1, nnz = -1;
+        void *               p = &rows, *i = &rows, *v = &rows;
+        rocsparse_indextype  pt = rocsparse_indextype_i64, it = rocsparse_indextype_i64;
+        rocsparse_index_base base = rocsparse_index_base_one;
+        rocsparse_datatype   dt   = rocsparse_datatype_f64_r;
+        ASSERT_EQ(rocsparse_csr_get(d, &rows, &cols, &nnz, &p, &i, &v, &pt, &it, &base, &dt),
+                  rocsparse_status_success);
+        EXPECT_EQ(rows, size);
+        EXPECT_EQ(cols, size);
+        EXPECT_EQ(nnz, size);
+        EXPECT_EQ(p, ptr);
+        EXPECT_EQ(i, ind);
+        EXPECT_EQ(v, val);
+        EXPECT_EQ(pt, rocsparse_indextype_i32);
+        EXPECT_EQ(it, rocsparse_indextype_i32);
+        EXPECT_EQ(base, rocsparse_index_base_zero);
+        EXPECT_EQ(dt, rocsparse_datatype_f32_r);
+    };
     rocsparse_spmat_descr descr = nullptr;
     EXPECT_EQ(create(&descr, 0, 0, 0, nullptr, nullptr, nullptr), rocsparse_status_success);
+    expect_csr(descr, 0, nullptr, nullptr, nullptr);
     EXPECT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
     descr = nullptr;
     EXPECT_EQ(create(&descr, 1, 1, 1, &row_ptr, &col_ind, &value), rocsparse_status_success);
+    expect_csr(descr, 1, &row_ptr, &col_ind, &value);
     EXPECT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
 
     descr = nullptr;
@@ -619,7 +663,11 @@ TEST_F(HostInternalBranches, logging_streams_and_layer_mode)
         EXPECT_FLOAT_EQ(rocsparse::log_trace_scalar_value(handle, device_value.ptr), host_value);
         EXPECT_FLOAT_EQ(rocsparse::log_bench_scalar_value(handle, device_value.ptr), host_value);
         EXPECT_EQ(rocsparse_set_pointer_mode(handle, saved_mode), rocsparse_status_success);
-        EXPECT_FALSE(logs.sink.str().empty());
+        const std::string text = logs.sink.str();
+        for(const char* head : {"ut_trace", "ut_bench", "ut_debug"})
+        {
+            EXPECT_NE(text.find(head), std::string::npos) << head;
+        }
     }
 }
 
@@ -930,9 +978,31 @@ TEST_F(HostInternalBranches, csxsldu_directions)
     expect_split(rocsparse_diag_type_unit, rocsparse_diag_type_non_unit, 0, 2, {0, 0, 0, 0, 1, 2});
     expect_split(rocsparse_diag_type_non_unit, rocsparse_diag_type_unit, 2, 0, {0, 1, 2, 0, 0, 0});
 
+    // Factors in the input direction are written to lptr / uptr directly.
+    std::vector<rocsparse_int> lptr, uptr;
+    rocsparse_int              lnnz = -1, unnz = -1;
+    EXPECT_EQ(sldu_preprocess(handle,
+                              row,
+                              rocsparse_diag_type_unit,
+                              row,
+                              rocsparse_diag_type_non_unit,
+                              row,
+                              scratch.ptr,
+                              &lnnz,
+                              &unnz,
+                              &lptr,
+                              &uptr),
+              rocsparse_status_success);
+    EXPECT_EQ(lnnz, 0);
+    EXPECT_EQ(unnz, 2);
+    EXPECT_EQ(lptr, (std::vector<rocsparse_int>{0, 0, 0}));
+    EXPECT_EQ(uptr, (std::vector<rocsparse_int>{0, 1, 2}));
+
     auto*  raw          = reinterpret_cast<_rocsparse_handle*>(handle);
     size_t saved_buffer = raw->buffer_size;
     raw->buffer_size    = 0;
+    lnnz = unnz = -1;
+    // Library bug: the column path of csxsldu_preprocess never writes ptr[0] = base.
     EXPECT_EQ(sldu_preprocess(handle,
                               column,
                               rocsparse_diag_type_unit,
@@ -940,10 +1010,17 @@ TEST_F(HostInternalBranches, csxsldu_directions)
                               rocsparse_diag_type_unit,
                               column,
                               scratch.ptr,
-                              nullptr,
-                              nullptr),
+                              &lnnz,
+                              &unnz,
+                              &lptr,
+                              &uptr,
+                              0),
               rocsparse_status_success);
     raw->buffer_size = saved_buffer;
+    EXPECT_EQ(lnnz, 0);
+    EXPECT_EQ(unnz, 0);
+    EXPECT_EQ(lptr, (std::vector<rocsparse_int>{0, 0, 0}));
+    EXPECT_EQ(uptr, (std::vector<rocsparse_int>{0, 0, 0}));
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
@@ -989,33 +1066,61 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
               alloc(&info.lrb.n_rows_bins);
           };
 
-    auto write = [](void* device, int32_t value) {
-        ASSERT_EQ(hipMemcpy(device, &value, sizeof(value), hipMemcpyHostToDevice), hipSuccess);
+    auto write = [](void* device, int32_t value, size_t offset = 0) {
+        ASSERT_EQ(
+            hipMemcpy(
+                static_cast<char*>(device) + offset, &value, sizeof(value), hipMemcpyHostToDevice),
+            hipSuccess);
     };
-    auto read = [](const void* device) {
+    auto read = [](const void* device, size_t offset = 0) {
         int32_t value = 0;
-        EXPECT_EQ(hipMemcpy(&value, device, sizeof(value), hipMemcpyDeviceToHost), hipSuccess);
+        EXPECT_EQ(hipMemcpy(&value,
+                            static_cast<const char*>(device) + offset,
+                            sizeof(value),
+                            hipMemcpyDeviceToHost),
+                  hipSuccess);
         return value;
+    };
+    // The device arrays of an info, each written with a distinct pattern.
+    auto arrays = [](_rocsparse_csrmv_info& info) {
+        return std::vector<void*>{info.adaptive.row_blocks,
+                                  info.adaptive.wg_flags,
+                                  info.adaptive.wg_ids,
+                                  info.lrb.wg_flags,
+                                  info.lrb.rows_offsets_scratch,
+                                  info.lrb.rows_bins,
+                                  info.lrb.n_rows_bins};
+    };
+    auto expect_scalars = [](const _rocsparse_csrmv_info& d, const _rocsparse_csrmv_info& s) {
+        EXPECT_EQ(d.m, s.m);
+        EXPECT_EQ(d.n, s.n);
+        EXPECT_EQ(d.nnz, s.nnz);
+        EXPECT_EQ(d.max_rows, s.max_rows);
+        EXPECT_EQ(d.trans, s.trans);
+        EXPECT_EQ(d.adaptive.size, s.adaptive.size);
+        EXPECT_EQ(d.adaptive.first_row, s.adaptive.first_row);
+        EXPECT_EQ(d.adaptive.last_row, s.adaptive.last_row);
+        EXPECT_EQ(d.lrb.size, s.lrb.size);
+        EXPECT_EQ(d.index_type_I, s.index_type_I);
+        EXPECT_EQ(d.index_type_J, s.index_type_J);
     };
 
     _rocsparse_csrmv_info src;
     _rocsparse_csrmv_info dest;
     fill(src, rocsparse_indextype_i32, rocsparse_indextype_i32);
     const int32_t pattern = 0x13572468;
-    write(src.adaptive.row_blocks, pattern);
-    write(src.lrb.n_rows_bins, pattern);
+    for(size_t a = 0; a < arrays(src).size(); ++a)
+    {
+        write(arrays(src)[a], pattern + int32_t(a));
+    }
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest, &src), rocsparse_status_success);
-    EXPECT_EQ(dest.m, src.m);
-    EXPECT_EQ(dest.n, src.n);
-    EXPECT_EQ(dest.nnz, src.nnz);
-    EXPECT_EQ(dest.trans, src.trans);
-    EXPECT_EQ(dest.adaptive.size, src.adaptive.size);
-    EXPECT_EQ(dest.adaptive.first_row, src.adaptive.first_row);
-    EXPECT_EQ(dest.adaptive.last_row, src.adaptive.last_row);
-    EXPECT_NE(dest.adaptive.row_blocks, nullptr);
-    EXPECT_NE(dest.adaptive.row_blocks, src.adaptive.row_blocks);
-    EXPECT_EQ(read(dest.adaptive.row_blocks), pattern);
-    EXPECT_EQ(read(dest.lrb.n_rows_bins), pattern);
+    expect_scalars(dest, src);
+    for(size_t a = 0; a < arrays(dest).size(); ++a)
+    {
+        ASSERT_NE(arrays(dest)[a], nullptr) << a;
+        EXPECT_NE(arrays(dest)[a], arrays(src)[a]) << a;
+        EXPECT_EQ(read(arrays(dest)[a]), pattern + int32_t(a)) << a;
+    }
 
     // A second copy reuses the destination's arrays.
     void* const   kept_blocks = dest.adaptive.row_blocks;
@@ -1030,7 +1135,16 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
     _rocsparse_csrmv_info src64;
     _rocsparse_csrmv_info dest64;
     fill(src64, rocsparse_indextype_i64, rocsparse_indextype_i64);
+    // The last 4 bytes of each 64-bit-sized copy: row_blocks is I_size * size,
+    // n_rows_bins is J_size * 32.
+    write(src64.adaptive.row_blocks, pattern, 4);
+    write(src64.lrb.n_rows_bins, pattern, 252);
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest64, &src64), rocsparse_status_success);
+    expect_scalars(dest64, src64);
+    ASSERT_NE(dest64.adaptive.row_blocks, nullptr);
+    ASSERT_NE(dest64.lrb.n_rows_bins, nullptr);
+    EXPECT_EQ(read(dest64.adaptive.row_blocks, 4), pattern);
+    EXPECT_EQ(read(dest64.lrb.n_rows_bins, 252), pattern);
 }
 
 // Each debug switch is a full hit only when the value both changes and does not.
