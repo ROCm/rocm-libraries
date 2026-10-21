@@ -29,8 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
-#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -47,7 +47,7 @@ void testing_gebsr2gebsc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
-    hipsparseStatus_t              status;
+    hipsparseStatus_t      status;
     hipsparseLocalHandle_t handle;
 
     static const size_t safe_size = 1;

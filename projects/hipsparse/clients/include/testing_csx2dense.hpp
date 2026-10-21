@@ -29,8 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
-#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -47,12 +47,12 @@ template <hipsparseDirection_t DIRA, typename T, typename FUNC>
 void testing_csx2dense_bad_arg(FUNC& csx2dense)
 {
 #if(!defined(CUDART_VERSION))
-    static constexpr int           M  = 1;
-    static constexpr int           N  = 1;
-    static constexpr int           LD = M;
-    hipsparseLocalHandle_t handle;
-    std::unique_ptr<descr_struct>  unique_ptr_descr(new descr_struct);
-    hipsparseMatDescr_t            descr = unique_ptr_descr->descr;
+    static constexpr int          M  = 1;
+    static constexpr int          N  = 1;
+    static constexpr int          LD = M;
+    hipsparseLocalHandle_t        handle;
+    std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
+    hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
     auto m_csx_val         = hipsparse_unique_ptr{device_malloc(sizeof(T) * 1), device_free};
     auto m_dense_val       = hipsparse_unique_ptr{device_malloc(sizeof(T) * 1), device_free};

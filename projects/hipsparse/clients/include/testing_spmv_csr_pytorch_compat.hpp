@@ -40,9 +40,9 @@
  * 4. Compares against dense matmul: expected = csr.to_dense().matmul(vec)
  */
 
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
-#include "hipsparse_local_handle.hpp"
 #include "utility.hpp"
 
 #include "hipsparse-float16.h"

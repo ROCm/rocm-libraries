@@ -29,8 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
-#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -55,11 +55,11 @@ void testing_gebsr2gebsr_bad_arg(const Arguments& argus)
     hipsparseDirection_t dir             = HIPSPARSE_DIRECTION_ROW;
     hipsparseStatus_t    status;
 
-    hipsparseLocalHandle_t handle;
-    std::unique_ptr<descr_struct>  unique_ptr_descr_A(new descr_struct);
-    hipsparseMatDescr_t            descr_A = unique_ptr_descr_A->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_descr_C(new descr_struct);
-    hipsparseMatDescr_t            descr_C = unique_ptr_descr_C->descr;
+    hipsparseLocalHandle_t        handle;
+    std::unique_ptr<descr_struct> unique_ptr_descr_A(new descr_struct);
+    hipsparseMatDescr_t           descr_A = unique_ptr_descr_A->descr;
+    std::unique_ptr<descr_struct> unique_ptr_descr_C(new descr_struct);
+    hipsparseMatDescr_t           descr_C = unique_ptr_descr_C->descr;
 
     hipsparseSetMatIndexBase(descr_A, idx_base_A);
     hipsparseSetMatIndexBase(descr_C, idx_base_C);
@@ -909,11 +909,11 @@ void testing_gebsr2gebsr(Arguments argus)
     hipsparseDirection_t dir             = argus.dirA;
     std::string          filename        = argus.filename;
 
-    hipsparseLocalHandle_t handle(argus);
-    std::unique_ptr<descr_struct>  unique_ptr_descr_A(new descr_struct);
-    hipsparseMatDescr_t            descr_A = unique_ptr_descr_A->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_descr_C(new descr_struct);
-    hipsparseMatDescr_t            descr_C = unique_ptr_descr_C->descr;
+    hipsparseLocalHandle_t        handle(argus);
+    std::unique_ptr<descr_struct> unique_ptr_descr_A(new descr_struct);
+    hipsparseMatDescr_t           descr_A = unique_ptr_descr_A->descr;
+    std::unique_ptr<descr_struct> unique_ptr_descr_C(new descr_struct);
+    hipsparseMatDescr_t           descr_C = unique_ptr_descr_C->descr;
 
     hipsparseSetMatIndexBase(descr_A, idx_base_A);
     hipsparseSetMatIndexBase(descr_C, idx_base_C);

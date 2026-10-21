@@ -26,8 +26,8 @@
 #define TESTING_CSRU2CSR_HPP
 
 #include "hipsparse.hpp"
-#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
