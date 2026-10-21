@@ -147,8 +147,8 @@ TEST_F(ExtraBell, no_stored_blocks_scales_C)
 namespace
 {
     // rocsparse_dense_to_sparse into a blocked ELL matrix (not documented as supported,
-    // so any error is accepted), then spmm with the result is compared with the dense
-    // product.
+    // so the first call may return not_implemented; once it succeeds every stage must),
+    // then spmm with the result is compared with the dense product.
     template <typename T, typename I>
     void
         run_dense_to_bell(rocsparse_handle handle, rocsparse_order order, rocsparse_index_base base)
@@ -187,15 +187,16 @@ namespace
                                               base,
                                               dt),
                   rocsparse_status_success);
-        const auto alg = rocsparse_dense_to_sparse_alg_default;
-        size_t     bsz = 0;
-        if(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, nullptr)
-           != rocsparse_status_success)
+        const auto             alg = rocsparse_dense_to_sparse_alg_default;
+        size_t                 bsz = 0;
+        const rocsparse_status st
+            = rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, nullptr);
+        ASSERT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented) << st;
+        if(st == rocsparse_status_not_implemented)
             return;
         DevBuf<char> buffer(bsz);
-        if(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, nullptr, buffer.ptr)
-           != rocsparse_status_success)
-            return;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, nullptr, buffer.ptr),
+                  rocsparse_status_success);
 
         int64_t              rows = 0, cols = 0, block_dim = 0, ell_cols = -1;
         rocsparse_direction  dir;
@@ -221,9 +222,8 @@ namespace
         DevBuf<I> ind = up_idx<I>(std::vector<int64_t>(mb * (ell_cols / bd), -5));
         DevBuf<T> val = up_val<T>(std::vector<cplx>(m * ell_cols, cplx(-66.0, 0.0)));
         ASSERT_EQ(rocsparse_bell_set_pointers(sp.p, ind.ptr, val.ptr), rocsparse_status_success);
-        if(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, buffer.ptr)
-           != rocsparse_status_success)
-            return;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, buffer.ptr),
+                  rocsparse_status_success);
 
         const Dense   X   = random_dense<T>(k, n, rng);
         const Dense   C0  = random_dense<T>(m, n, rng);
