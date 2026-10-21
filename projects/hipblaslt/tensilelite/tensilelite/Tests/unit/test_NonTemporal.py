@@ -40,6 +40,7 @@ from Tensile.Components.NonTemporal import (
     _has_temporal_hint,
     decodeNonTemporal,
     forceCoherentNonTemporal,
+    tdmCacheModifiers,
 )
 
 
@@ -237,3 +238,65 @@ def test_force_coherent_gfx1250_ignores_nt_kwarg():
         False, False, False,
         CacheScope.SCOPE_DEV, TemporalHint.TH_RT, NonVolatile.NV_NONE,
     )
+
+
+# ---------------------------------------------------------------------------
+# tdmCacheModifiers - one tensor_load_to_lds per descriptor set
+# ---------------------------------------------------------------------------
+RT, NT, HT, NT_HT = TemporalHint.TH_RT, TemporalHint.TH_NT, TemporalHint.TH_HT, TemporalHint.TH_NT_HT
+NV, NO_NV = NonVolatile.NV, NonVolatile.NV_NONE
+
+
+def _fields(mods):
+    return None if mods is None else (mods.scope, mods.th, mods.nv)
+
+
+@pytest.mark.parametrize("caps", [None, {}, LEGACY_CAPS])
+def test_tdm_cache_modifiers_need_th_caps(caps):
+    assert tdmCacheModifiers(caps, [(3, NT, NV)]) is None
+
+
+def test_tdm_cache_modifiers_no_hints():
+    assert tdmCacheModifiers(GFX1250_CAPS, []) is None
+
+
+@pytest.mark.parametrize("nt_value", [0, 4])
+def test_tdm_cache_modifiers_defaults_emit_nothing(nt_value):
+    """SCOPE_CU / TH_RT / no nv encode as zero, so a default load keeps its old text."""
+    assert tdmCacheModifiers(GFX1250_CAPS, [(nt_value, RT, NO_NV)]) is None
+
+
+@pytest.mark.parametrize(
+    "hint, expected",
+    [
+        ((1, RT, NO_NV), (CacheScope.SCOPE_SE, TemporalHint.TH_NONE, NO_NV)),
+        ((2, NT, NO_NV), (CacheScope.SCOPE_DEV, NT, NO_NV)),
+        ((3, NT_HT, NV), (CacheScope.SCOPE_SYS, NT_HT, NV)),
+        ((0, HT, NO_NV), (CacheScope.SCOPE_NONE, HT, NO_NV)),
+        ((0, RT, NV), (CacheScope.SCOPE_NONE, TemporalHint.TH_NONE, NV)),
+        # bit2 (legacy nt) is ignored on gfx1250, as for buffer loads.
+        ((6, NT, NO_NV), (CacheScope.SCOPE_DEV, NT, NO_NV)),
+    ],
+)
+def test_tdm_cache_modifiers_single_tensor(hint, expected):
+    mods = tdmCacheModifiers(GFX1250_CAPS, [hint])
+    assert _fields(mods) == expected
+    assert mods.isStore is False
+
+
+def test_tdm_cache_modifiers_shared_set_agreeing_members():
+    hints = [(2, NT, NV), (2, NT, NV)]
+    assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints)) == (CacheScope.SCOPE_DEV, NT, NV)
+
+
+def test_tdm_cache_modifiers_shared_set_keeps_only_agreeing_fields():
+    """One instruction serves every member: a disagreeing field falls back to the default."""
+    hints = [(2, NT, NV), (2, HT, NO_NV)]
+    assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints)) == (
+        CacheScope.SCOPE_DEV, TemporalHint.TH_NONE, NO_NV)
+
+
+def test_tdm_cache_modifiers_shared_set_all_fields_disagree():
+    """The shipped gfx1250 TDM logic pattern (THA != THB on one set) stays byte-identical."""
+    hints = [(0, TemporalHint.TH_RT_NT, NV), (1, TemporalHint.TH_LU, NO_NV)]
+    assert tdmCacheModifiers(GFX1250_CAPS, hints) is None

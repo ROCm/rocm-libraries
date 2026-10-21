@@ -1344,8 +1344,9 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
       isSubtileIter = _isSubtileIterateMode(kernel, tc)
       group2 = sgpr("tdm%sGroup2" % tc, 4) if isSubtileIter else None
       group3 = sgpr("tdm%sGroup3" % tc, 4) if isSubtileIter else None
+      tensor = writer.tdmLoadModifiers(kernel, tc) if writer is not None else None
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
-                                 comment="TDM: global->LDS for %s" % tc))
+                                 comment="TDM: global->LDS for %s" % tc, tensor=tensor))
     return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)

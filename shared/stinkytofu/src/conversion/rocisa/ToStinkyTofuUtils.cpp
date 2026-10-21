@@ -233,6 +233,12 @@ stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers
                                        convertMUBUFScope(rocMod.scope));
 }
 
+stinkytofu::TENSORModifiers convertTENSORModifiers(const rocisa::TENSORModifiers& rocMod) {
+    return stinkytofu::TENSORModifiers(convertMUBUFScope(rocMod.scope),
+                                       convertTemporalHint(rocMod.th),
+                                       convertNonVolatile(rocMod.nv), rocMod.isStore);
+}
+
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
     // Convert DelayALUType to SDelayAluData::InstType
     auto convertType = [](rocisa::DelayALUType type) -> SDelayAluData::InstType {
@@ -743,6 +749,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
+        else TRY_ADD_MOD(rocisa::TensorLoadToLds, tensor, stinkytofu::TENSORModifiers, convertTENSORModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));

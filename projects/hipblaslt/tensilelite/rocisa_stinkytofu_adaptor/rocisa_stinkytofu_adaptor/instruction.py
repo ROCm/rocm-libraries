@@ -4326,17 +4326,26 @@ class SAtomicUmaxX2(Instruction):
         return dup
 
 
-# --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment) ---
+# --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment, tensor) ---
 def _make_tensor_load_class():
     def __init__(self, group0: Any = None, group1: Any = None,
                  group2: Any = None, group3: Any = None,
-                 comment: str = "", **kw):
+                 comment: str = "", tensor: Any = None, **kw):
         _ = kw
         CommonInstruction.__init__(
             self, instType=InstType.INST_NOTYPE, dst=group0,
             srcs=[group1, group2, group3], dpp=None, sdwa=None,
             vop3=None, comment=comment)
         self.setInst("tensor_load_to_lds")
+        self.tensor = tensor
+
+    def toString(self) -> str:
+        # rocisa prints 2 or 4 descriptor groups, never the absent ones.
+        parts = [_input_to_str(g) for g in [self.dst] + self.srcs if g is not None]
+        kstr = self.preStr() + " " + ", ".join(parts)
+        if self.tensor is not None and hasattr(self.tensor, "toString"):
+            kstr += self.tensor.toString()
+        return self.formatWithComment(kstr)
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
@@ -4355,6 +4364,10 @@ def _make_tensor_load_class():
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             **kwargs)
+        tensor = getattr(self, "tensor", None)
+        if tensor is not None:
+            logical.set_tensor(scope=int(tensor.scope), th=int(tensor.th),
+                               nv=int(tensor.nv) != 0, is_store=bool(tensor.isStore))
         return logical
 
     def __deepcopy__(self, memo):
@@ -4362,6 +4375,7 @@ def _make_tensor_load_class():
 
     cls = type("TensorLoadToLds", (CommonInstruction,), {
         "__init__": __init__,
+        "toString": toString,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
         "issueLatency": staticmethod(lambda: 1),

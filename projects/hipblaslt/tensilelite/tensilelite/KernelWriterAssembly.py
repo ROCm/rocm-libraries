@@ -94,7 +94,7 @@ from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgp
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
-from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
+from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -490,6 +490,30 @@ class KernelWriterAssembly(KernelWriter):
     if not self.isTdmWaveSeparated(kernel):
       return "A" if tc in ("A", "B") else "MXSA"
     return tdmSetOwner(kernel, tc)
+
+  def tdmLoadModifiers(self, kernel, tc: str):
+    """TENSORModifiers for the tensor_load_to_lds that issues `tc`'s descriptor set, or None.
+
+    A wave-separated set is moved by one instruction for all of its live members,
+    so their cache hints are merged (see tdmCacheModifiers).
+    """
+    members = (tc,)
+    if self.isTdmWaveSeparated(kernel) and not kernel.get("UseSubtileImpl"):
+      group = tdmSetGroup(kernel, tc)
+      if group is not None:
+        members = tuple(m for m in group if tdmMemberIsLive(kernel, m))
+    hints = []
+    for m in members:
+      tP = self._tdmTensorParameters(m)
+      hints.append((tP["NonTemporal"], TemporalHint(tP["TemporalHint"]), _nonVolatile(kernel, m)))
+    return tdmCacheModifiers(self.states.asmCaps, hints)
+
+  def _tdmTensorParameters(self, tc: str):
+    """Tensor parameters of TDM member `tc` (A, B, MXSA, MXSB or Metadata)."""
+    if tc == "Metadata":
+      return self.tPA["tpsMetadata"] if self.tPA["is_sparse"] else self.tPB["tpsMetadata"]
+    tP = self.tPA if tc in ("A", "MXSA") else self.tPB
+    return tP["MX"] if tc in ("MXSA", "MXSB") else tP
 
   def tdmLastIterDisableSgprs(self, kernel) -> list:
     """Tensors that share a descriptor set share its group0 enable word."""
@@ -12012,7 +12036,8 @@ class KernelWriterAssembly(KernelWriter):
       tdmAGroup3 = "tdmAGroup3" if isIterA else None
       if not rapTdmDead:
         imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmAGroup0+0"))
-        imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+        imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3,
+                                       tensor=self.tdmLoadModifiers(kernel, tc)))
       # TODO: Embed metadata TDM issueLoad here (mirrors non-TDM pattern where globalReadBody(tP["tpsMetadata"])
       # is called after globalReadBody(tP) for the sparse tensor). This would allow _splitTdmLoad in SIA.py
       # to extract and defer both A and metadata TDM loads together, eliminating the separate globalReadMetadata
@@ -12074,7 +12099,8 @@ class KernelWriterAssembly(KernelWriter):
                                           h1, sIter)
             comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
             if not rapTdmDead:
-              imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+              imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3,
+                                             tensor=self.tdmLoadModifiers(kernel, tc)))
             imod.middle.add(comp.setTensorDim1(group1, h0, self))
             if needIterCount:
               self._emitTdmSplitIterCount(imod.middle, kernel, splitIterConsts, group2,
@@ -12082,7 +12108,8 @@ class KernelWriterAssembly(KernelWriter):
         else:
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
           if not rapTdmDead:
-            imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+            imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3,
+                                           tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
@@ -12103,7 +12130,8 @@ class KernelWriterAssembly(KernelWriter):
             imod.middle.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
         if not rapTdmDead:
           imod.middle.add(self.rapNullTdmDescriptorForEvenWaves(kernel, "tdmMXSAGroup0+0"))
-          imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
+          imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None,
+                                         tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod
 
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
@@ -12115,11 +12143,13 @@ class KernelWriterAssembly(KernelWriter):
         self._emitTdmWaveParitySCCAuto(guardedLoad, kernel, comment="metadata WaveSeparated: check wave parity (odd -> skip load)",
                                       tmpTag="tdmMetadataIssueParity")
         guardedLoad.add(SCBranchSCC1(labelName=skipMetadataLabel.getLabelName(), comment="odd wave: skip metadata load"))
-        guardedLoad.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
+        guardedLoad.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
+                                       tensor=self.tdmLoadModifiers(kernel, tc)))
         guardedLoad.add(skipMetadataLabel)
         imod.add(guardedLoad)
       else:
-        imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
+        imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
+                                tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
@@ -12134,7 +12164,8 @@ class KernelWriterAssembly(KernelWriter):
         isIterB = kernel.get("_TDMIterateModeB", False)
         tdmBGroup2 = "tdmBGroup2" if isIterB else None
         tdmBGroup3 = "tdmBGroup3" if isIterB else None
-        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
+        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3,
+                                       tensor=self.tdmLoadModifiers(kernel, tc)))
         return imod
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if numWaves == 1:
@@ -12157,7 +12188,8 @@ class KernelWriterAssembly(KernelWriter):
         isIterB = kernel.get("_TDMIterateModeB", False)
         tdmBGroup2 = "tdmBGroup2" if isIterB else None
         tdmBGroup3 = "tdmBGroup3" if isIterB else None
-        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
+        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3,
+                                       tensor=self.tdmLoadModifiers(kernel, tc)))
         # TODO: Embed metadata TDM issueLoad here (mirrors non-TDM pattern where globalReadBody(tP["tpsMetadata"])
         # is called after globalReadBody(tP) for the sparse tensor). This would allow _splitTdmLoad in SIA.py
         # to extract and defer both B and metadata TDM loads together, eliminating the separate globalReadMetadata
@@ -12171,7 +12203,8 @@ class KernelWriterAssembly(KernelWriter):
           imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
           imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
-          imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
+          imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3,
+                                         tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod
 
     if tc == "MXSB" and kernel["enableTDMB"]:
@@ -12188,7 +12221,8 @@ class KernelWriterAssembly(KernelWriter):
               imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
           else:
             imod.middle.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
-        imod.middle.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None))
+        imod.middle.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None,
+                                       tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod
 
     # sizeK % LOCAL_DEPTHU

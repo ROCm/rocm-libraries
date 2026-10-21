@@ -215,6 +215,26 @@ bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     return true;
 }
 
+// TENSORModifiers — th / scope / nv of the gfx1250 tensor ops (tensor_load_to_lds).
+// TH_NONE / SCOPE_NONE / NV_NONE are omitted.
+bool serializeVisit(const TENSORModifiers& mod, std::ostream& os) {
+    os << ", mod.tensor = {";
+    const char* sep = " ";
+    if (hasTemporalHint(mod.th)) {
+        os << sep << "th = \"" << toString(mod.th, mod.isStore) << "\"";
+        sep = ", ";
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << sep << "scope = \"" << toString(mod.scope) << "\"";
+        sep = ", ";
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << sep << "nv = \"" << toString(mod.nv) << "\"";
+    }
+    os << " }";
+    return true;
+}
+
 // MUBUFModifiers
 bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
     os << ", mod.mubuf = {";
@@ -507,12 +527,12 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 }  // namespace
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
-    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
-                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
-                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
-                          SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
-                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
-                          CallTargetData>(mod, os);
+    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, TENSORModifiers,
+                          MUBUFModifiers, CacheScopeModifiers, SMEMModifiers, SDWAModifiers,
+                          DPPModifiers, VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC,
+                          SWaitCntData, SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData,
+                          SDelayAluData, SWaitAluData, MFMAModifiers, MatrixFmtModifiers,
+                          MemTokenData, LabelData, CallTargetData>(mod, os);
 }
 
 /*
@@ -537,6 +557,11 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
                                           parseTemporalHint(getStr(fields, "th", "")),
                                           parseMUBUFScope(getStr(fields, "scope", ""))));
+    } else if (attrKey == "mod.tensor") {
+        inst->addModifier(TENSORModifiers(parseMUBUFScope(getStr(fields, "scope", "")),
+                                          parseTemporalHint(getStr(fields, "th", "")),
+                                          parseNonVolatile(getStr(fields, "nv", "")),
+                                          getStr(fields, "th", "").rfind("TH_STORE_", 0) == 0));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));

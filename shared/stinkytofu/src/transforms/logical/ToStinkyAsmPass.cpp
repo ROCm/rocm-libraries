@@ -353,6 +353,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->mubuf.has_value()) {
         asmInst->addModifier<MUBUFModifiers>(irInst->mubuf.value());
     }
+    if (irInst->tensor.has_value()) {
+        asmInst->addModifier<TENSORModifiers>(irInst->tensor.value());
+    }
     if (irInst->dpp.has_value()) {
         asmInst->addModifier<DPPModifiers>(irInst->dpp.value());
     }
