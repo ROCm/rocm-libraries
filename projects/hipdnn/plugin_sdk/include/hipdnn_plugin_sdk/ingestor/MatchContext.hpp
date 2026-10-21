@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <variant>
 
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
@@ -33,14 +35,27 @@ inline constexpr DeviceId NO_DEVICE = -1;
 using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
 /// The catalog cache key. Excludes the handle: unrelated to a plan's validity.
+///
+/// RFC 0019 §9.2's engine id is implicit in the cache's location, and @ref engineVersion
+/// replaces its inventory generation counter, since nothing re-scans the inventory.
 struct CatalogKey
 {
     GraphId graphId;
     DeviceId deviceId;
+    /// `EngineDescriptor::revision` of the descriptor set that ranked this catalog. Constant
+    /// in-process; keyed so an entry can never be served to a newer engine version.
+    // Explicit init avoids -Wmissing-field-initializers on partial CatalogKey{graph, device}.
+    // NOLINTNEXTLINE(readability-redundant-member-init) - see above
+    hipdnn_data_sdk::utilities::Version engineVersion{};
+    /// The ranking metric the order was computed for (RFC 0019 §11.4): every cache of a
+    /// ranked order is keyed by metric, or a `time` request is served a `tflops` order.
+    /// Always a registered name, so it views the registry's static storage.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 
     bool operator==(const CatalogKey& other) const noexcept
     {
-        return graphId == other.graphId && deviceId == other.deviceId;
+        return graphId == other.graphId && deviceId == other.deviceId
+               && engineVersion == other.engineVersion && rankingMetric == other.rankingMetric;
     }
 };
 
@@ -54,7 +69,15 @@ struct CatalogKeyHash
             hash ^= static_cast<size_t>(byte);
             hash *= 1099511628211ULL;
         }
-        hash ^= static_cast<size_t>(key.deviceId) + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
+        const auto mix = [&hash](size_t value) {
+            hash ^= value + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
+        };
+        mix(static_cast<size_t>(key.deviceId));
+        // Mixed per component: a packed major*1000+minor fold would collide 1.10.0 and 2.0.0.
+        mix(static_cast<size_t>(key.engineVersion.major));
+        mix(static_cast<size_t>(key.engineVersion.minor));
+        mix(static_cast<size_t>(key.engineVersion.patch));
+        mix(std::hash<std::string_view>{}(key.rankingMetric));
         return hash;
     }
 };
@@ -84,6 +107,10 @@ struct MatchContext
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
     DeviceId deviceId;
     const DeviceProperties& deviceProperties;
+    /// Registered ranking metric for the request (RFC 0019 §11.4); selects the
+    /// `sort_kernel_catalog` UHD and keys ranked-order caches. A view: must outlive the
+    /// context, and caches key on the registry's copy of the name, never on this view.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 };
 
 /// nullopt when absent or non-v4 (both mean "cannot cache").

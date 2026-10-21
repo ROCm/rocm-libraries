@@ -133,7 +133,7 @@ namespace TensileLite
                                 .cache_hints_d             = solution->sizeMapping.NonTemporalD,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                                .stream_k                  = solution->sizeMapping.streamK,
+                                .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
                                 .index                     = local_index,
                                 .grvw_a                    = static_cast<std::size_t>(
                                     solution->sizeMapping.grvwA),
@@ -158,6 +158,8 @@ namespace TensileLite
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
+                    // Once per library load. rank_configs reads the flags.
+                    origami::memoize_non_temporal_availability(lib.origami_config_list);
                 }
             }
             const static bool flow = false;
