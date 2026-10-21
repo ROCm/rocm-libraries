@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.BenchmarkProblems — cache helper layer.
+# Characterization tests for tensilelite.BenchmarkProblems — cache helper layer.
 #
 # ADD-ONLY. BenchmarkProblems.py is a benchmark build/run orchestrator that pulls
 # in KernelWriter / ClientWriter / KernelWriterAssembly / Assembler (codegen +
@@ -18,7 +18,7 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.BenchmarkProblems")
+M = importlib.import_module("tensilelite.BenchmarkProblems")
 
 
 def _step(**over):

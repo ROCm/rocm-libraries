@@ -133,10 +133,16 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 # instead of skipping: (env var, CTest name, label).
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
     (
         "ROCKE_NONTEMPORAL_HIP_TEST",
         "rocke_nontemporal_hip",
         "native nontemporal HIP parity",
+    ),
+    (
+        "ROCKE_UNSIGNED_INT_OPS_CLI",
+        "rocke_unsigned_int_ops",
+        "native unsigned integer op C API parity",
     ),
 )
 
@@ -190,9 +196,12 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     # it; an explicit caller override still wins.
     archive = env.get("ROCKE_TEST_ENGINE_ARCHIVE")
     if not archive:
-        candidate = build_root / "librocke_core.a"
-        if candidate.is_file():
-            archive = str(candidate.resolve())
+        # Multi-config generators put archives in the selected configuration.
+        for directory in (build_root / config, build_root):
+            candidate = directory / "librocke_core.a"
+            if candidate.is_file():
+                archive = str(candidate.resolve())
+                break
     if archive:
         path = Path(archive).resolve()
         if not path.is_file():

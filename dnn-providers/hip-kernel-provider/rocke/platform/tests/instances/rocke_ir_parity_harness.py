@@ -403,12 +403,10 @@ def build_attention_3d(
     **kw,
 ):
     def _build():
-        from kernels import (
-            UnifiedAttention3DTiledSpec,
-            build_unified_attention_3d_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttention3DTiledSpec(
+        SpecCls, _, build_fn, _, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             block_size=block_size,
             num_query_heads=num_query_heads,
@@ -420,7 +418,7 @@ def build_attention_3d(
             num_segments=num_segments,
             **kw,
         )
-        return build_unified_attention_3d_tiled(spec)
+        return build_fn(spec, arch=arch)
 
     return _build
 
@@ -429,19 +427,17 @@ def build_attention_reduce(
     name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
 ):
     def _build():
-        from kernels import (
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_reduce_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttentionReduceTiledSpec(
+        _, SpecCls, _, build_fn, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
             num_segments=num_segments,
         )
-        return build_unified_attention_reduce_tiled(spec)
+        return build_fn(spec, arch=arch)
 
     return _build
 
@@ -575,6 +571,33 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
         except KeyError as exc:
             raise ValueError(f"unknown gfx942 KDA kernel kind {kind!r}") from exc
         return builder(spec_type(**over), arch=arch)
+
+    return _build
+
+
+def build_lightning_indexer_case(arch, **over):
+    """Build one representative lightning-indexer kernel for ``arch``.
+
+    The kernel is arch-neutral (gfx942/gfx950); ``arch`` only selects the lowering
+    target. Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted
+    into the tile spec so the case table stays flat.
+    """
+
+    def _build():
+        from kernels.common.lightning_indexer import (
+            IndexerSpec,
+            IndexerTileSpec,
+            build_lightning_indexer,
+        )
+
+        opts = dict(over)
+        block_size = opts.pop("block_size", None)
+        tile = (
+            IndexerTileSpec(block_size=block_size)
+            if block_size is not None
+            else IndexerTileSpec()
+        )
+        return build_lightning_indexer(IndexerSpec(tile=tile, **opts), arch=arch)
 
     return _build
 
@@ -3423,6 +3446,21 @@ def cases():
                 **_kw,
             ),
         )
+    # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5, so the
+    # magic sum carries a real multiply-high term (a power-of-two ratio has multiplier 1).
+    for _dim, _three_d in (("2d", False), ("3d", True)):
+        add(
+            "attention",
+            f"attention/gfx950/scalar{_dim}_fp16_d128_q40_kv8",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar{_dim}_q40_kv8",
+                "gfx950",
+                three_d=_three_d,
+                num_query_heads=40,
+                num_kv_heads=8,
+            ),
+        )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
     # 4-warp GQA V-transpose (gfx942) routes.
@@ -4183,6 +4221,73 @@ def cases():
         "gfx1201",
         build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
     )
+
+    # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
+    # arch-neutral (no arch-specific atom, intrinsic, or LDS), so both lower the
+    # same specs (scalar-v1 model-shaped cases: DeepSeek H_I=64, GLM H_I=32, a
+    # small case; plus the MFMA body on 16-aligned shapes). The emitted IR is
+    # currently identical across arches, so the two per-arch goldens hold the same
+    # SHAs; the split is kept to catch future arch-specific divergence (fp8, wider
+    # atoms) the moment it appears.
+    for _arch in ("gfx942", "gfx950"):
+        for _case_id, _over in (
+            (
+                "deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "small",
+                {
+                    "n_index_heads": 4,
+                    "index_head_dim": 16,
+                    "seqlen_q": 8,
+                    "seqlen_k": 32,
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+        ):
+            add(
+                "lightning_indexer",
+                f"lightning_indexer/{_arch}/{_case_id}",
+                _arch,
+                build_lightning_indexer_case(_arch, **_over),
+            )
 
     return out
 
