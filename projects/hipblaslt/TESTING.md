@@ -1713,9 +1713,10 @@ TensileLite together.
 the plan would put it, and a proposed disposition (keep, merge, migrate, demote, retire, or review)
 with a rationale. Every target and disposition in it is a proposal; a retirement needs the owning
 team's agreement first. Building it surfaced three lanes this document does not describe yet (the
-GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow), and one
-place where the two documents disagree, on whether Math CI measures C++ coverage. Those are recorded
-in the inventory as `review` items rather than settled here.
+GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow). Those are
+recorded in the inventory as `review` items rather than settled here. It also surfaced a
+disagreement between the two documents on whether Math CI measures C++ coverage. It does, as
+[Coverage](#coverage) now describes.
 
 The second file, a coverage model of the space of ways the library gets called with a risk rating on
 each part of it, follows in a later change, so that "are we testing the odd ways this library gets
