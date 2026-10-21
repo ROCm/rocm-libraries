@@ -39,13 +39,16 @@ static inline const char* rocke_scaled_mfma_error(const char* id, rocke_value_t*
     if(!id || !rocke_arch_mma_op_id_family(id)
        || strcmp(rocke_arch_mma_op_id_family(id), "mfma_scaled") != 0)
         return NULL;
+    /* One refusal for a wrong count or a wrong type, as mfma_scale.py compares
+     * the whole operand type list. */
+    const char* error = "scaled MFMA requires two vec<i32x8> payloads, vec<f32x16> "
+                        "accumulator and two i32 E8M0 scales";
     const char* types[] = {"vec<i32x8>", "vec<i32x8>", "vec<f32x16>", "i32", "i32"};
     if(n != 5)
-        return "scaled MFMA requires five operands";
+        return error;
     for(int i = 0; i < 5; ++i)
         if(!args[i] || strcmp(args[i]->type->name, types[i]) != 0)
-            return "scaled MFMA requires two vec<i32x8> payloads, vec<f32x16> "
-                   "accumulator and two i32 E8M0 scales";
+            return error;
     return NULL;
 }
 #endif

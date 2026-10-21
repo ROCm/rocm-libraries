@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.choose_multiplier``.
+``tensilelite.Common.Utilities.choose_multiplier``.
 
 ``choose_multiplier(d, N, p)`` computes the magic-division constants used by the
 assembly kernel writer:
@@ -28,7 +28,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 choose_multiplier = U.choose_multiplier
 
 pytestmark = pytest.mark.unit

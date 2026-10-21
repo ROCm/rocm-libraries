@@ -13,7 +13,9 @@
 # non-grouped DirectNongroupedConvSpec, from index 66 specs both engines
 # must reject, from index 71 the runtime-channel DirectConvWgradSpec and from
 # index 75 the parametric DirectConvSpec and the MFMA dgrad weight transforms,
-# baked and runtime-channel), builds the kernel
+# baked and runtime-channel, from index 95 the split-C non-grouped
+# DirectNongroupedConvSpec and its DirectSplitReduceSpec second pass, and from
+# index 103 its grouped / group-merge mode), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -52,7 +54,9 @@ from kernels.common.conv_direct_grouped import (
 )
 from kernels.common.conv_direct_nongrouped import (
     DirectNongroupedConvSpec,
+    DirectSplitReduceSpec,
     build_direct_conv_nongrouped,
+    build_direct_conv_split_reduce,
 )
 
 try:
@@ -90,6 +94,12 @@ _REJECT_CFG_BASE = 66
 # transpose / reorganize transforms baked and with runtime channels.
 # ---------------------------------------------------------------------------
 _GENERIC_CFG_BASE = 75
+# Split-C non-grouped configs (split_c > 1) and the DirectSplitReduceSpec fold
+# follow the 20 generic ones.
+_NONGROUPED_SPLIT_CFG_BASE = 95
+# Grouped (grouped=True, group_merge) DirectNongroupedConvSpec configs follow the
+# 8 split-C ones.
+_NONGROUPED_GROUPED_CFG_BASE = 103
 
 
 def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
@@ -332,6 +342,276 @@ _NONGROUPED_BASE = dict(
 
 def _nongrouped_s(problem, **kw):
     return DirectNongroupedConvSpec(problem=problem, **{**_NONGROUPED_BASE, **kw})
+
+
+def _nongrouped_split_spec(idx: int):
+    """Return (kind, spec, arch) for split-C config ``idx`` (emitted as
+    ``_NONGROUPED_SPLIT_CFG_BASE + idx``), or None past the last one. The
+    non-grouped ones pin the split grid decode, the per-split chunk range, the
+    split-offset prefetch and the fp32 workspace epilogue; 5 and 6 pin the
+    reduction pass and 7 a split both engines must reject."""
+    if idx == 0:
+        # bf16, stride 1, swizzled, two splits; partial W and H tiles.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(2, 14, 14, 256, 128), split_c=2),
+            "gfx950",
+        )
+    if idx == 1:
+        # fp16, stride 2, double-buffered LDS, four splits.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 24, 24, 128, 64, stride=2, dtype="fp16"),
+                ck=16,
+                double_buffer=True,
+                split_c=4,
+            ),
+            "gfx950",
+        )
+    if idx == 2:
+        # bf16, no swizzle, sixteen one-chunk splits, waves_per_eu.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 7, 7, 512, 64),
+                chiplet_swizzle=False,
+                waves_per_eu=3,
+                split_c=16,
+            ),
+            "gfx950",
+        )
+    if idx == 3:
+        # fp16, 12-row tile over four waves (three rows each), 16-wide atom
+        # (one accumulator quad), splits that do not divide the chunk count.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 12, 12, 320, 64, dtype="fp16"),
+                tile_h=12,
+                tile_w=16,
+                waves_n=4,
+                atom="16x16x32",
+                split_c=4,
+            ),
+            "gfx950",
+        )
+    if idx == 4:
+        # gfx942 32x32x8, fp16, double buffer (one channel tile per wave to fit
+        # the 64 KiB LDS), no swizzle, two splits.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _nongrouped_p(1, 28, 28, 256, 64, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x8",
+                ck=16,
+                double_buffer=True,
+                chiplet_swizzle=False,
+                split_c=2,
+            ),
+            "gfx942",
+        )
+    if idx == 5:
+        # The fold: fp16, two slabs, default block.
+        return (
+            "split_reduce",
+            DirectSplitReduceSpec(dtype="fp16", split_c=2),
+            "gfx950",
+        )
+    if idx == 6:
+        # The fold: bf16, eight slabs, a 128-thread block.
+        return (
+            "split_reduce",
+            DirectSplitReduceSpec(dtype="bf16", split_c=8, threads=128),
+            "gfx950",
+        )
+    if idx == 7:
+        # Must reject: 16 splits of a C that has only 8 chunks of ck=32.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(1, 7, 7, 256, 64), split_c=16),
+            "gfx950",
+        )
+    return None
+
+
+def _grouped_p(N, H, W, groups, cpg, kpg, *, stride=1, dtype="bf16"):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=3,
+        KW=3,
+        PAD=1,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _nongrouped_grouped_spec(idx: int):
+    """Return (kind, spec, arch) for grouped config ``idx`` (emitted as
+    ``_NONGROUPED_GROUPED_CFG_BASE + idx``), or None past the last one. They pin
+    the runtime cpg / kpg, the merged-group cell axis, the A channel base, both
+    weight paths (group_merge 1, and the per-4-channel pieces masked per chunk
+    for group_merge > 1) and the epilogue channel offset; 7..10 are specs both
+    engines must reject."""
+    if idx == 0:
+        # group_merge 1, fp16, cpg 32: plain weight path; tile_k above the
+        # merged K, so the K_M masks bite.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(2, 14, 20, 4, 32, 32, dtype="fp16"),
+                grouped=True,
+                group_merge=1,
+            ),
+            "gfx950",
+        )
+    if idx == 1:
+        # group_merge 8 of cpg 4, bf16, 16x16x32 (two 4-channel pieces per
+        # fragment), ck 32: one merged block per chunk.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 16, 4, 4),
+                tile_k=32,
+                atom="16x16x32",
+                ck=32,
+                grouped=True,
+                group_merge=8,
+            ),
+            "gfx950",
+        )
+    if idx == 2:
+        # group_merge 4 of cpg 8, fp16, stride 2, 32x32x16, ck 16: two chunks
+        # per merged block.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 24, 24, 8, 8, 8, stride=2, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x16",
+                ck=16,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx950",
+        )
+    if idx == 3:
+        # group_merge 4 of cpg 12, bf16, 16x16x16 (one piece per fragment):
+        # 16-channel chunks straddle the 12-channel groups; two channel tiles.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 8, 12, 12),
+                tile_k=32,
+                atom="16x16x16",
+                ck=16,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx950",
+        )
+    if idx == 4:
+        # Grouped + split_c 2 + double-buffered LDS: the split chunk range over
+        # the merged C and the fp32 workspace at the group's channel offset.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 14, 14, 4, 64, 32, dtype="fp16"),
+                double_buffer=True,
+                split_c=2,
+                grouped=True,
+                group_merge=2,
+            ),
+            "gfx950",
+        )
+    if idx == 5:
+        # Grouped without the chiplet swizzle (plain k_tile / cell decode),
+        # waves_per_eu, bf16, group_merge 2 of cpg 16.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(2, 12, 20, 6, 16, 16),
+                tile_k=32,
+                waves_m=1,
+                chiplet_swizzle=False,
+                waves_per_eu=3,
+                grouped=True,
+                group_merge=2,
+            ),
+            "gfx950",
+        )
+    if idx == 6:
+        # gfx942 32x32x8, fp16, group_merge 4 of cpg 8 (one piece per
+        # fragment), ck 16.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 20, 20, 8, 8, 8, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x8",
+                ck=16,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx942",
+        )
+    if idx == 7:
+        # Must reject: group_merge 3 does not divide 8 groups.
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 8, 8, 8),
+                tile_k=32,
+                grouped=True,
+                group_merge=3,
+            ),
+            "gfx950",
+        )
+    if idx == 8:
+        # Must reject: cpg 6 is not a whole number of 4-channel weight loads
+        # (merged C 24 and K 32 pass their own checks).
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 4, 6, 8, dtype="fp16"),
+                tile_k=32,
+                waves_m=1,
+                atom="32x32x8",
+                ck=8,
+                grouped=True,
+                group_merge=4,
+            ),
+            "gfx950",
+        )
+    if idx == 9:
+        # Must reject: group_merge without grouped=True.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(1, 16, 16, 64, 64), group_merge=2),
+            "gfx950",
+        )
+    if idx == 10:
+        # Must reject: grouped=True with no groups (0 % group_merge is 0).
+        return (
+            "nongrouped",
+            _nongrouped_s(
+                _grouped_p(1, 16, 16, 0, 8, 8),
+                tile_k=32,
+                grouped=True,
+                group_merge=1,
+            ),
+            "gfx950",
+        )
+    return None
 
 
 def _reject_spec(idx: int):
@@ -1111,6 +1391,16 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _NONGROUPED_GROUPED_CFG_BASE:
+        sel = _nongrouped_grouped_spec(idx - _NONGROUPED_GROUPED_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_SPLIT_CFG_BASE:
+        sel = _nongrouped_split_spec(idx - _NONGROUPED_SPLIT_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _GENERIC_CFG_BASE:
         sel = _generic_spec(idx - _GENERIC_CFG_BASE)
         if sel is not None:
@@ -1250,6 +1540,8 @@ def main() -> int:
         kernel = build_direct_reorganize_weights(spec, arch=arch)
     elif kind == "dw_tiled":
         kernel = build_direct_depthwise_tiled(spec, arch=arch)
+    elif kind == "split_reduce":
+        kernel = build_direct_conv_split_reduce(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":

@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 2a55cecaa190559a46c74d60e7fae25b6ffdc797.
+# TheRock ref: pinned to ROCm/TheRock commit 47434387de730d51788b705e5600602dd6064997.
 
 on:
   schedule:
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows).
@@ -43,12 +43,11 @@ jobs:
       # gfx1250 codegen ahead of hardware becoming available.
       linux_amdgpu_families: 'gfx94X,gfx950,gfx125X'
       windows_amdgpu_families: 'gfx1151'
-      linux_test_labels: ''
-      windows_test_labels: ''
+      pr_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
       repository: ROCm/TheRock
-      ref: 2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+      ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
       # event_name tells TheRock this is a schedule/workflow_dispatch run with no
       # meaningful diff, so it always runs CI. Without it, TheRock falls back to
       # `git diff HEAD^` against a depth-1 checkout, which fails.
@@ -56,7 +55,16 @@ jobs:
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
-          "event_name": "${{ github.event_name }}"
+          "event_name": "${{ github.event_name }}",
+          "family_overrides": {
+            "gfx125x": {
+              "linux": {
+                "test-runs-on": "",
+                "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
+                "fetch-gfx-targets": ["gfx1250"]
+              }
+            }
+          }
         }
 
   log_therock_ref:
@@ -83,7 +91,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -96,7 +104,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: 2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+      ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     permissions:
       contents: read
       id-token: write
@@ -109,7 +117,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -120,7 +128,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: 2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+      ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
     permissions:
       contents: read
       id-token: write
@@ -138,7 +146,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 2a55cecaa190559a46c74d60e7fae25b6ffdc797 # 2026-10-14
+          ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
