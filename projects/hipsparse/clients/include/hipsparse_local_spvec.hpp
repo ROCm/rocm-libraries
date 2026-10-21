@@ -62,7 +62,7 @@ public:
         }
     }
 
-    hipsparseLocalSpVec(const hipsparseLocalSpVec&)            = delete;
+    hipsparseLocalSpVec(const hipsparseLocalSpVec&) = delete;
     hipsparseLocalSpVec& operator=(const hipsparseLocalSpVec&) = delete;
 
     operator hipsparseSpVecDescr_t() const
