@@ -10,11 +10,11 @@ a node with ``inputs`` / ``outputs`` / ``attributes`` and a ``tensors`` list.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from dispatch.sdpa import SdpaRequest, from_hipdnn, from_hipdnn_graph
+from tests.sdpa import hipdnn_assets
 
 B, H, S, D = 2, 4, 8, 16
 
@@ -383,16 +383,10 @@ def test_unknown_keys_are_rejected_not_dropped(graph_edit):
         from_hipdnn_graph(graph, "gfx950")
 
 
-_SDPA_GRAPH_TEMPLATE = (
-    Path(__file__).resolve().parents[6]
-    / "projects/hipdnn/tools/IngestorGenerator/configs/templates"
-    / "attention_sdpa_fwd.graph.json"
-)
+_SDPA_GRAPH_TEMPLATE = hipdnn_assets.sdpa_graph_template()
 
 
-@pytest.mark.skipif(
-    not _SDPA_GRAPH_TEMPLATE.is_file(), reason="IngestorGenerator not in this tree"
-)
+@pytest.mark.skipif(_SDPA_GRAPH_TEMPLATE is None, reason=hipdnn_assets.SKIP_REASON)
 def test_key_sets_match_the_ingestor_sdpa_graph_template():
     """The ingestor's SDPA graph template carries every key hipDNN writes."""
     from dispatch.sdpa import hipdnn
@@ -406,20 +400,11 @@ def test_key_sets_match_the_ingestor_sdpa_graph_template():
 
 # --- the checked-in hipDNN golden bundles ------------------------------------------
 
-_BUNDLES = (
-    Path(__file__).resolve().parents[5]
-    / "integration-tests"
-    / "integration-test-bundles"
-)
-_GRAPHS = sorted(
-    p
-    for p in _BUNDLES.glob("*/SdpaFwd*/**/*.json")
-    if not p.name.endswith(("meta.json", "support.json", "sweep.json"))
-    and "Default" not in p.parts
-)
+_BUNDLES = hipdnn_assets.golden_bundle_root()
+_GRAPHS = hipdnn_assets.sdpa_fwd_golden_graphs()
 
 
-@pytest.mark.skipif(not _GRAPHS, reason="hipDNN SDPA golden bundles not in this tree")
+@pytest.mark.skipif(not _GRAPHS, reason=hipdnn_assets.SKIP_REASON)
 @pytest.mark.parametrize("path", _GRAPHS, ids=lambda p: str(p.relative_to(_BUNDLES)))
 def test_golden_bundle_graphs_translate(path):
     graph = json.loads(path.read_text())
