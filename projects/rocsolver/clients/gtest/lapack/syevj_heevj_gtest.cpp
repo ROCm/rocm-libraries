@@ -69,6 +69,9 @@ const vector<vector<int>> size_range = {
 // for daily_lapack tests
 const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}};
 
+// for weekly_lapack tests (large batch_count)
+const vector<vector<int>> large_batch_size_range = {{1, 1}};
+
 Arguments syevj_heevj_setup_arguments(syevj_heevj_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
@@ -95,7 +98,8 @@ Arguments syevj_heevj_setup_arguments(syevj_heevj_tuple tup)
     return arg;
 }
 
-class SYEVJ_HEEVJ : public ::TestWithParam<syevj_heevj_tuple>
+template <int BATCH_COUNT = 3>
+class SYEVJ_HEEVJ_BASE : public ::TestWithParam<syevj_heevj_tuple>
 {
 protected:
     void TearDown() override
@@ -106,15 +110,22 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = syevj_heevj_setup_arguments(GetParam());
+        Arguments arg = syevj_heevj_setup_arguments(this->GetParam());
 
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<char>("evect") == 'N'
            && arg.peek<char>("uplo") == 'L')
             testing_syevj_heevj_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_syevj_heevj<BATCHED, STRIDED, T>(arg);
     }
+};
+
+int constexpr SYEVJ_HEEVJ_BCOUNT = 64 * 1024 + 1;
+int constexpr SYEVJ_HEEVJ_BCOUNT_SMALL = 3;
+
+class SYEVJ_HEEVJ : public SYEVJ_HEEVJ_BASE<SYEVJ_HEEVJ_BCOUNT_SMALL>
+{
 };
 
 class SYEVJ : public SYEVJ_HEEVJ
@@ -122,6 +133,18 @@ class SYEVJ : public SYEVJ_HEEVJ
 };
 
 class HEEVJ : public SYEVJ_HEEVJ
+{
+};
+
+class SYEVJ_HEEVJ_LARGE_BATCH : public SYEVJ_HEEVJ_BASE<SYEVJ_HEEVJ_BCOUNT>
+{
+};
+
+class SYEVJ_LARGE_BATCH : public SYEVJ_HEEVJ_LARGE_BATCH
+{
+};
+
+class HEEVJ_LARGE_BATCH : public SYEVJ_HEEVJ_LARGE_BATCH
 {
 };
 
@@ -191,13 +214,6 @@ TEST_P(HEEVJ, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
-// daily_lapack tests normal execution with medium to large sizes
-INSTANTIATE_TEST_SUITE_P(daily_lapack, SYEVJ, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+// large batch_count tests
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, HEEVJ, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
-
-// checkin_lapack tests normal execution with small sizes, invalid sizes,
-// quick returns, and corner cases
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEVJ, Combine(ValuesIn(size_range), ValuesIn(op_range)));
-
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEVJ, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+TEST_P(SYEVJ_LARGE

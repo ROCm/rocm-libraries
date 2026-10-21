@@ -24,6 +24,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed failure of GESVDJ, SYEVJ/HEEVJ, and GESDD for batch_count > 64 * 1024
 * Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
@@ -681,8 +682,4 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 - Switched to use all rocBLAS types and enumerations
 - Major library refactoring to achieve better integration and rocBLAS support
-- hip-clang is now default compiler
-
-### Deprecated
-- rocSOLVER types and enumerations
-- hcc compiler support
+- hip-clang is now default compi

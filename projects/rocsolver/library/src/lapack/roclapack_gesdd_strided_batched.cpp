@@ -36,37 +36,52 @@ rocblas_status rocsolver_gesdd_strided_batched_impl(rocblas_handle handle,
                                                     const rocblas_svect right_svect,
                                                     const rocblas_int m,
                                                     const rocblas_int n,
-                                                    W A,
+                                                    W A_arg,
                                                     const rocblas_int lda,
                                                     const rocblas_stride strideA,
-                                                    SS* S,
+                                                    SS* S_arg,
                                                     const rocblas_stride strideS,
-                                                    T* U,
+                                                    T* U_arg,
                                                     const rocblas_int ldu,
                                                     const rocblas_stride strideU,
-                                                    T* V,
+                                                    T* V_arg,
                                                     const rocblas_int ldv,
                                                     const rocblas_stride strideV,
-                                                    rocblas_int* info,
-                                                    const rocblas_int batch_count)
+                                                    rocblas_int* info_arg,
+                                                    const rocblas_int batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("gesdd_strided_batched", "--left_svect", left_svect, "--right_svect",
                         right_svect, "-m", m, "-n", n, "--lda", lda, "--strideA", strideA,
                         "--strideS", strideS, "--ldu", ldu, "--strideU", strideU, "--ldv", ldv,
-                        "--strideV", strideV, "--batch_count", batch_count);
+                        "--strideV", strideV, "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const S = S_arg;
+        auto const U = U_arg;
+        auto const V = V_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_gesdd_argCheck(handle, left_svect, right_svect, m, n, A, lda, S,
-                                                 U, ldu, V, ldv, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st = rocsolver_gesdd_argCheck(handle, left_svect, right_svect, m, n, A, lda,
+                                                     S, U, ldu, V, ldv, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
     rocblas_int shiftA = 0;
+
+    // break up large batch_count into multiple invocations, each with
+    // batch_count no larger than max_batch_count
+    rocblas_int const max_batch_count = 64 * 1024 - 1;
+    rocblas_int const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    rocblas_int const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -77,10 +92,13 @@ try
     size_t size_UVtmpZ, size_work1, size_work2, size_work3, size_work4, size_work5_ipiv,
         size_splits, size_tmptau_W, size_tau, size_workArr, size_workArr2;
 
-    rocsolver_gesdd_getMemorySize<false, T, SS>(
-        handle, left_svect, right_svect, m, n, strideS, batch_count, &size_VUtmp, &size_UVtmpZ,
-        &size_scalars, &size_work1, &size_work2, &size_work3, &size_work4, &size_work5_ipiv,
-        &size_splits, &size_tmptau_W, &size_tau, &size_workArr, &size_workArr2);
+    {
+        rocblas_int const batch_count = bid_inc;
+        rocsolver_gesdd_getMemorySize<false, T, SS>(
+            handle, left_svect, right_svect, m, n, strideS, batch_count, &size_VUtmp, &size_UVtmpZ,
+            &size_scalars, &size_work1, &size_work2, &size_work3, &size_work4, &size_work5_ipiv,
+            &size_splits, &size_tmptau_W, &size_tau, &size_workArr, &size_workArr2);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_VUtmp, size_UVtmpZ, size_scalars,
@@ -114,11 +132,29 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_gesdd_template<false, true, T>(
-        handle, left_svect, right_svect, m, n, A, shiftA, lda, strideA, S, strideS, U, ldu, strideU,
-        V, ldv, strideV, info, batch_count, (T*)VUtmp, UVtmpZ, (T*)scalars, work1, work2, work3,
-        work4, work5_ipiv, splits, tmptau_W, tau, workArr, workArr2);
+    for(rocblas_int isweep = 0; isweep < nsweep; isweep++)
+    {
+        rocblas_int const bid = isweep * bid_inc;
+        rocblas_int const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        rocblas_int const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
+        auto const S = (S_arg == nullptr) ? nullptr : S_arg + bid * strideS;
+        auto const U = (U_arg == nullptr) ? nullptr : U_arg + bid * strideU;
+        auto const V = (V_arg == nullptr) ? nullptr : V_arg + bid * strideV;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        rocblas_status const istat = rocsolver_gesdd_template<false, true, T>(
+            handle, left_svect, right_svect, m, n, A, shiftA, lda, strideA, S, strideS, U, ldu,
+            strideU, V, ldv, strideV, info, batch_count, (T*)VUtmp, UVtmpZ, (T*)scalars, work1,
+            work2, work3, work4, work5_ipiv, splits, tmptau_W, tau, workArr, workArr2);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    } // end for isweep
+    return (rocblas_status_success);
 }
 catch(...)
 {
@@ -207,28 +243,4 @@ rocblas_status rocsolver_cgesdd_strided_batched(rocblas_handle handle,
         strideV, info, batch_count);
 }
 
-rocblas_status rocsolver_zgesdd_strided_batched(rocblas_handle handle,
-                                                const rocblas_svect left_svect,
-                                                const rocblas_svect right_svect,
-                                                const rocblas_int m,
-                                                const rocblas_int n,
-                                                rocblas_double_complex* A,
-                                                const rocblas_int lda,
-                                                const rocblas_stride strideA,
-                                                double* S,
-                                                const rocblas_stride strideS,
-                                                rocblas_double_complex* U,
-                                                const rocblas_int ldu,
-                                                const rocblas_stride strideU,
-                                                rocblas_double_complex* V,
-                                                const rocblas_int ldv,
-                                                const rocblas_stride strideV,
-                                                rocblas_int* info,
-                                                const rocblas_int batch_count)
-{
-    return rocsolver::rocsolver_gesdd_strided_batched_impl<rocblas_double_complex>(
-        handle, left_svect, right_svect, m, n, A, lda, strideA, S, strideS, U, ldu, strideU, V, ldv,
-        strideV, info, batch_count);
-}
-
-} // extern C
+rocblas_status rocsolver_zgesdd_strided_ba
