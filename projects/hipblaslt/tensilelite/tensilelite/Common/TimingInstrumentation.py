@@ -66,6 +66,16 @@ def timing_context(category_name):
         yield
 
 
+def record_timing(category_name, duration_ms):
+    """Record a duration that was computed by hand (e.g. a difference of two measurements).
+
+    Use this for time that cannot be wrapped in a single ``timing_context`` scope, such as the
+    part of an outer call that is not spent inside a callback it makes.
+    """
+    if globalParameters.get("TimingInstrumentation", False):
+        _timing_buffer.append((category_name, max(0.0, duration_ms)))
+
+
 def flush_timing_buffer():
     """Write all buffered timing records and reset."""
     for category, duration_ms in _timing_buffer:
