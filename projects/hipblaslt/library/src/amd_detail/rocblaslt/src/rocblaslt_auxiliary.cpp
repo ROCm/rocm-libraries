@@ -2868,7 +2868,9 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
-    bool uniformSummationOrderEnabled = uniformSummationOrder != -1 ? uniformSummationOrder : (handle && handle->uniform_summation_order);
+    bool uniformSummationOrderEnabled = handle ? handle->uniform_summation_order : true;
+    if(uniformSummationOrder != -1)
+        uniformSummationOrderEnabled = uniformSummationOrder;
     applyUniformSummationOrder(gemmData, gemmType, uniformSummationOrderEnabled);
     rocblaslt_status status = rocblaslt_status_success;
     try
