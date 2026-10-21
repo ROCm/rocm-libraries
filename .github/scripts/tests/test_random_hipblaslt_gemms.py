@@ -56,7 +56,7 @@ class RandomGemmTests(unittest.TestCase):
         self.assertEqual(inputs(3, 0), inputs(3, 42))
         self.assertEqual(
             [(p["M"], p["N"], p["K"], p["a_type"]) for p in inputs(3, 0)],
-            [(1, 1, 1, "f32_r"), (2, 2, 2, "bf16_r"), (3, 3, 3, "f32_r")],
+            [(11, 11, 11, "f32_r"), (12, 12, 12, "bf16_r"), (13, 13, 13, "f32_r")],
         )
 
     def test_missing_wrong_failed_or_nonfinite_results_cannot_pass(self):
@@ -67,7 +67,7 @@ class RandomGemmTests(unittest.TestCase):
         for bad_text, bad_race in (
             ("", race),
             (text + text, race),
-            (text.replace("1,1,1,1", "2,1,1,1"), race),
+            (text.replace("11,11,11,1", "12,11,11,1"), race),
             (bench_result(problem, norm="nan"), race),
             (bench_result(problem, atol="failed"), race),
             (text, ""),
@@ -90,12 +90,14 @@ class RandomGemmTests(unittest.TestCase):
             emulator = root / "rocjitsu"
             emulator.write_text(
                 f"#!{sys.executable}\n"
-                "import json, sys\nfrom pathlib import Path\n"
+                "import json, sys, time\nfrom pathlib import Path\n"
                 "p = {k: json.loads(v) for k, v in (line.lstrip('- ').split(': ', 1) "
                 "for line in Path(sys.argv[-1]).read_text().splitlines())}\n"
                 "d = Path(json.loads(Path(sys.argv[2]).read_text())['sinks']['dir'])\n"
+                "started = time.monotonic()\ntime.sleep(0.1)\n"
+                "(d / 'interval.json').write_text(json.dumps([started, time.monotonic()]))\n"
                 "(d / 'race.log').write_text('[rocjitsu] Kernel dispatch: symbol=\"gemm_kernel\"\\n' "
-                "+ ('RACE found\\n' if p['M'] == 2 else ''))\n"
+                "+ ('RACE found\\n' if p['M'] == 12 else ''))\n"
                 f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
                 "from test_random_hipblaslt_gemms import bench_result\n"
                 "print(bench_result(p))\n"
@@ -125,7 +127,7 @@ class RandomGemmTests(unittest.TestCase):
                     summary["sampled"],
                     summary["passed"],
                     summary["failed"],
-                    summary["blacklisted"],
+                    summary["known_failures"],
                 ),
                 (3, 2, 1, 0),
             )
@@ -133,6 +135,69 @@ class RandomGemmTests(unittest.TestCase):
                 "race reported", (output / "case-0002/result.json").read_text()
             )
             self.assertIn("passed", (output / "case-0003/result.json").read_text())
+
+            for threads, early_stop in ((3, False), (2, True)):
+                with self.subTest(threads=threads, early_stop=early_stop):
+                    output = root / f"threads-{threads}"
+                    command = [
+                        "--count",
+                        "8",
+                        "--threads",
+                        str(threads),
+                        "--bench",
+                        str(bench),
+                        "--rocjitsu",
+                        str(emulator),
+                        "--config",
+                        str(config),
+                        "--output",
+                        str(output),
+                    ]
+                    if early_stop:
+                        command.append("--stop-on-failure")
+                    self.assertEqual(runner.main(command), 1)
+                    summary = json.loads((output / "summary.json").read_text())
+                    self.assertEqual(summary["failed"], 1)
+                    self.assertEqual(
+                        summary["sampled"], summary["passed"] + summary["failed"]
+                    )
+                    self.assertEqual(summary["complete"], not early_stop)
+                    if early_stop:
+                        self.assertLess(summary["sampled"], 8)
+                    else:
+                        self.assertEqual(summary["sampled"], 8)
+                    intervals = [
+                        json.loads(p.read_text())
+                        for p in output.glob("case-*/interval.json")
+                    ]
+                    self.assertTrue(
+                        any(
+                            max(a[0], b[0]) < min(a[1], b[1])
+                            for i, a in enumerate(intervals)
+                            for b in intervals[i + 1 :]
+                        )
+                    )
+
+    def test_threads_do_not_change_generated_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for threads in (1, 4):
+                runner.main(
+                    [
+                        "--dry-run",
+                        "--count",
+                        "8",
+                        "--threads",
+                        str(threads),
+                        "--output",
+                        str(root / str(threads)),
+                    ]
+                )
+            for iteration in range(1, 9):
+                name = f"case-{iteration:04d}/input.yaml"
+                self.assertEqual(
+                    (root / "1" / name).read_text(), (root / "4" / name).read_text()
+                )
 
     def test_timeout_terminates_case_and_returns_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
