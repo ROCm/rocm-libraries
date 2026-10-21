@@ -3219,6 +3219,48 @@ _AOT_WGRAD_CASES = [
         dict(N=2, H=16, W=32, groups=8, cpg=1, kpg=1, KH=9, KW=9, PAD=4),
         dict(channels=8, strip=8, threads=64, target_blocks=9),
     ),
+    # Depthwise 4x4x4 MFMA, 7x7 in row chunks, a partial channel tile.
+    (
+        "dw_mfma_7x7_chunks",
+        "direct_wgrad_dw_mfma",
+        dict(N=2, H=17, W=23, groups=72, cpg=1, kpg=1, KH=7, KW=7, PAD=3),
+        dict(q_tiles=4, rows_per_chunk=7, prefetch=2, target_blocks=1024, unfold_n=1),
+    ),
+    # Whole images per unit (the PAD-row prologue), one staging buffer.
+    (
+        "dw_mfma_7x7_whole",
+        "direct_wgrad_dw_mfma",
+        dict(N=3, H=9, W=30, groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3),
+        dict(q_tiles=8, rows_per_chunk=14, prefetch=1, target_blocks=1024, unfold_n=1),
+    ),
+    # Three 7x7 images packed in one tile, a batch that leaves one short.
+    (
+        "dw_mfma_unfold3",
+        "direct_wgrad_dw_mfma",
+        dict(N=5, H=7, W=7, groups=128, cpg=1, kpg=1, KH=7, KW=7, PAD=3),
+        dict(q_tiles=8, rows_per_chunk=14, prefetch=2, target_blocks=1024, unfold_n=3),
+    ),
+    # 3x3 valid padding: no preshift, both prologue bodies differ.
+    (
+        "dw_mfma_3x3_pad0",
+        "direct_wgrad_dw_mfma",
+        dict(N=2, H=12, W=18, groups=64, cpg=1, kpg=1, PAD=0),
+        dict(q_tiles=4, rows_per_chunk=7, prefetch=2, target_blocks=2048, unfold_n=1),
+    ),
+    # Grouped 4x4x4 MFMA, 4 channels per group.
+    (
+        "grouped_mfma_c4",
+        "direct_wgrad_grouped_mfma",
+        dict(N=2, H=13, W=21, groups=32, cpg=4, kpg=4),
+        dict(waves_q=4, wave_q4=2, rows_per_chunk=28, prefetch=2, target_blocks=1024),
+    ),
+    # 8 channels per group, a partial channel tile.
+    (
+        "grouped_mfma_c8",
+        "direct_wgrad_grouped_mfma",
+        dict(N=2, H=13, W=21, groups=9, cpg=8, kpg=8),
+        dict(waves_q=2, wave_q4=1, rows_per_chunk=28, prefetch=3, target_blocks=1024),
+    ),
 ]
 
 
@@ -3252,6 +3294,8 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=0, kpg=0)
     elif variant == "direct_wgrad_gather":
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=0)
+    elif variant == "direct_wgrad_grouped_mfma":
+        caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=p.kpg)
     else:
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=1, kpg=1)
     probe = probe_problem(caps, p.dtype, variant, knobs)
@@ -3268,7 +3312,7 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
     torch.manual_seed(7)
     td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
     total_c, total_k = p.groups * p.cpg, p.groups * p.kpg
-    if folded and variant != "direct_wgrad_gather":
+    if folded and p.cpg == 1 and p.kpg == 1:
         total_k = total_c = p.groups  # depthwise
     X = torch.empty(p.N, p.H, p.W, total_c, dtype=td).uniform_(-0.5, 0.5)
     dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=td).uniform_(-0.5, 0.5)
@@ -3326,7 +3370,7 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
                 arch=arch,
             )
             channels = (
-                spec.fold_channels() if variant == "direct_wgrad_gather" else p.groups
+                spec.fold_channels() if hasattr(spec, "fold_channels") else p.groups
             )
             fgrid, fblock = fold_spec.launch_geometry(channels)
             fold = KernelLauncher(

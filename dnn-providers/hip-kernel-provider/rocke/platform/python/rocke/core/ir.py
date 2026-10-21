@@ -3302,6 +3302,16 @@ class IRBuilder:
         """
         return self.mma("mfma_f32_4x4x4_f16", a, b, c)
 
+    def mfma_f32_4x4x4_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """The bf16 twin of :meth:`mfma_f32_4x4x4_f16` (CDNA2+).
+
+        Per lane: A `<4 x bfloat>`, B `<4 x bfloat>`, acc `<4 x float>`; 16
+        independent 4x4x4 products per wave, batch ``lane / 4``. Lowers to
+        `@llvm.amdgcn.mfma.f32.4x4x4bf16.1k` with the operands bitcast to
+        `<4 x i16>`, like the other bf16 `_1k` atoms.
+        """
+        return self.mma("mfma_f32_4x4x4_bf16", a, b, c)
+
     # ----- vector type casts (for packed buffer-load + LDS reads) -----
 
     def vec_bitcast(self, v: Value, target: Type) -> Value:

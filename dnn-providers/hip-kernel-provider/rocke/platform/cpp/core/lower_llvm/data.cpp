@@ -262,6 +262,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.4x4x4f16",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16(<4 x half>, <4 x half>, <4 x float>, i32 "
      "immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.4x4x4bf16.1k",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>, <4 x i16>, <4 x float>, "
+     "i32 immarg, i32 immarg, i32 immarg)"},
     {"mfma.f32.16x16x32.fp8.fp8",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(<2 x i32>, <2 x i32>, <4 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},

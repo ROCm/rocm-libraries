@@ -142,6 +142,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `tile.mfma_f32_32x32x8_f16`      | `<4xhalf>`, `<4xhalf>`, `<16xfloat>` | `<16xfloat>`   |
 | `tile.mfma_f32_32x32x16_f16`     | `<8xhalf>`, `<8xhalf>`, `<16xfloat>` | `<16xfloat>`   |
 | `tile.mfma_f32_4x4x4_f16`        | `<4xhalf>`, `<4xhalf>`, `<4xfloat>` | `<4xfloat>`     |
+| `tile.mfma_f32_4x4x4_bf16`       | `<4xbfloat>`, same, `<4xfloat>`  | `<4xfloat>`        |
 
 All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the LLVM level.
 
