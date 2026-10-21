@@ -204,6 +204,15 @@ using Fp8Shape = ck_tile::TileFmhaShape<ck_tile::sequence<64, 128, 128, 128, 128
 using Fp8DataTypes =
     TestProblemWithDataTypes<SelectionBaseProblem, ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::fp8_t>;
 using Fp8Problem = TestProblemWithShape<Fp8DataTypes, Fp8Shape>;
+// The bm0=128 crossover tile: two M iterations per warp over the same K/V rows, so the
+// K/V arena and its padding are unchanged.
+using Fp8M128Shape   = ck_tile::TileFmhaShape<ck_tile::sequence<128, 128, 128, 128, 128, 128>,
+                                              ck_tile::sequence<4, 1, 1>,
+                                              ck_tile::sequence<16, 16, 128>,
+                                              ck_tile::sequence<4, 1, 1>,
+                                              ck_tile::sequence<16, 16, 128>,
+                                              true>;
+using Fp8M128Problem = TestProblemWithShape<Fp8DataTypes, Fp8M128Shape>;
 // Each dtype is admitted only at its own geometry, so the two cross cases stay disabled: fp8
 // at the bf16 tile (Fp8DataTypes keeps TestFmhaShape's 16x16x32), and half at the fp8 tile.
 using HalfAtFp8ShapeProblem = TestProblemWithShape<SelectionBaseProblem, Fp8Shape>;
@@ -238,6 +247,9 @@ using Fp8Pad = ck_tile::detail::LdsPaddingConfig<true, 128, 16>;
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8Problem>::Q, NoPad>);
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8Problem>::K, Fp8Pad>);
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8Problem>::V, Fp8Pad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8M128Problem>::Q, NoPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8M128Problem>::K, Fp8Pad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8M128Problem>::V, Fp8Pad>);
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<Fp8DataTypes>>());
 static_assert(
     is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<HalfAtFp8ShapeProblem>>());

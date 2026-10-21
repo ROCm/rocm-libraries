@@ -171,7 +171,7 @@ float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_a
     }}
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));
+    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_kattr}>(k_{{}}, grids, blocks, 0, kargs));
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -742,9 +742,9 @@ class FmhaFwdApiPool:
                     ]
                     if not traits:
                         continue
-                    tiles = {
-                        (t.bm0, t.bn0, t.bk0, t.bn1, t.bk1, t.bk0max) for t in traits
-                    }
+                    # kKVScaleAlign reads kN0, kK1 and gemm0's N warp tile, never kM0,
+                    # so a bm0 crossover pair still tabulates as one row.
+                    tiles = {(t.bn0, t.bk0, t.bn1, t.bk1, t.bk0max) for t in traits}
                     if len(tiles) != 1:
                         raise ValueError(
                             f"{arch.name}/{dtype}/d{hdim}x{hdim_v}: BLOCKSCALE instances of "
@@ -830,12 +830,24 @@ class FmhaFwdKernel:
         else:
             return "fmha_fwd_create_kargs_and_grids"
 
+    def _kernel_attr(self) -> str:
+        # Packed fp32 needs a scalar as a VGPR pair; fp8 qr_tdm kept up to 7 copies of
+        # scale_s that way and spilled at bm0=128. VOPD takes it straight from an SGPR.
+        if self.F_pipeline.tag == "qr_tdm" and self.F_dtype in (
+            "fp8",
+            "fp8bf16",
+            "fp8fp32",
+        ):
+            return f"ck_tile::kernel_attr_for<{self.F_arch.tag}, ck_tile::kernel_attr<true>>"
+        return self.F_arch.tag
+
     def render(self) -> str:
         body = type(self)._get_kernel_header(self.F_pipeline.tag) + type(
             self
         )._KERNEL_BODY_TEMPLATE.format(
             F_kname=self.name,
             F_arch=self.F_arch,
+            F_kattr=self._kernel_attr(),
             F_hdim=self.F_hdim,
             F_dtype=FWD_DTYPE_MAP[self.F_dtype],
             F_bm0=self.F_tile.F_bm0,
@@ -1591,15 +1603,17 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
                               FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
-                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
+                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
+                              FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
                 #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8FP32:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
-                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
+                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
+                              FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")

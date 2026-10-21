@@ -227,8 +227,9 @@ inline constexpr bool is_qr_tdm_fp8_padding_enabled_problem_v =
     is_qr_tdm_padding_supported_arch_v && std::is_same_v<typename Problem::QDataType, fp8_t> &&
     std::is_same_v<typename Problem::KDataType, fp8_t> &&
     std::is_same_v<typename Problem::VDataType, fp8_t> && Problem::BlockFmhaShape::NumWarps == 4 &&
-    Problem::BlockFmhaShape::kM0 == 64 && Problem::BlockFmhaShape::kN0 == 128 &&
-    Problem::BlockFmhaShape::kK0 == 128 && Problem::BlockFmhaShape::kK1 == 128 &&
+    (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
+    Problem::BlockFmhaShape::kN0 == 128 && Problem::BlockFmhaShape::kK0 == 128 &&
+    Problem::BlockFmhaShape::kK1 == 128 &&
     Problem::BlockFmhaShape::kSubQKHeaddim == Problem::BlockFmhaShape::kQKHeaddim &&
     Problem::BlockFmhaShape::kQKHeaddim < 256 &&
     (Problem::BlockFmhaShape::kQKHeaddim * sizeof(typename Problem::KDataType)) %
