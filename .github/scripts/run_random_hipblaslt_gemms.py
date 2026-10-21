@@ -32,7 +32,7 @@ def bench_input(problem):
         "scale_type": "f32_r",
         "compute_input_typeA": problem["a_type"],
         "compute_input_typeB": problem["b_type"],
-        "initialization": problem.get("initialization", "rand_int"),
+        "initialization": "rand_int",
         "norm_check": 1,
         "norm_check_assert": True,
         "allclose_check": 1,
@@ -57,66 +57,14 @@ def write_input(path, problem):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def load_explicit_cases(path):
-    cases = json.loads(path.read_text(encoding="utf-8")) if path else []
-    if not isinstance(cases, list):
-        raise ValueError("explicit cases must be a JSON list")
-    required = set(sample_gemm(random.Random(0)))
-    allowed = required | {
-        "initialization",
-        "lda",
-        "ldb",
-        "ldc",
-        "ldd",
-        "stride_a",
-        "stride_b",
-        "stride_c",
-        "stride_d",
-    }
-    names = set()
-    for case in cases:
-        if not isinstance(case, dict) or set(case) != {
-            "id",
-            "description",
-            "problem",
-        }:
-            raise ValueError("each explicit case needs id, description and problem")
-        name = case["id"]
-        if (
-            not isinstance(name, str)
-            or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name)
-            or name in names
-        ):
-            raise ValueError("explicit case IDs must be unique lowercase names")
-        names.add(name)
-        problem = case["problem"]
-        if not isinstance(problem, dict) or not required <= set(problem) <= allowed:
-            raise ValueError(f"{name}: missing or unknown problem fields")
-        for key in ("M", "N", "K", "batch_count"):
-            if type(problem[key]) is not int or problem[key] <= 0:
-                raise ValueError(f"{name}: {key} must be positive")
-        for key in ("alpha", "beta"):
-            if not isinstance(problem[key], (int, float)) or not math.isfinite(
-                problem[key]
-            ):
-                raise ValueError(f"{name}: {key} must be finite")
-        if problem["alpha"] == 0 or any(
-            problem[key] not in ("N", "T") for key in ("transA", "transB")
-        ):
-            raise ValueError(f"{name}: requires nonzero alpha and N/T transposes")
-        if not isinstance(case["description"], str) or not case["description"]:
-            raise ValueError(f"{name}: description required")
-    return cases
-
-
 def write_case_report(directory, records):
     records = sorted(records, key=lambda record: record["id"])
     write_json(directory / "cases.json", records)
     lines = [
         "# GEMM inputs and outcomes",
         "",
-        "| Case | Source | Input | Outcome | Observation | Purpose |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Case | Input | Outcome | Observation |",
+        "| --- | --- | --- | --- |",
     ]
     for record in records:
         result = record["result"]
@@ -124,11 +72,8 @@ def write_case_report(directory, records):
         reason = (result.get("reason") or "numerics and race detection passed").replace(
             "|", "\\|"
         )
-        purpose = record.get("description", "Fixed-seed random sample").replace(
-            "|", "\\|"
-        )
         lines.append(
-            f"| [{record['id']}]({record['id']}/input.yaml) | {record['source']} | `{problem}` | {result['outcome']} | {reason} | {purpose} |"
+            f"| [{record['id']}]({record['id']}/input.yaml) | `{problem}` | {result['outcome']} | {reason} |"
         )
     (directory / "cases.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -180,18 +125,6 @@ def check_result(problem, text, race_log):
         for key in ("M", "N", "K", "batch_count"):
             if int(row[key.lower()]) != problem[key]:
                 return "bench result dimensions differ from input"
-        for key in (
-            "lda",
-            "ldb",
-            "ldc",
-            "ldd",
-            "stride_a",
-            "stride_b",
-            "stride_c",
-            "stride_d",
-        ):
-            if key in problem and int(row[key]) != problem[key]:
-                return "bench result layout differs from input"
         for key in ("a_type", "b_type", "c_type", "d_type", "transA", "transB"):
             if row[key] != problem[key]:
                 return "bench result types or transposes differ from input"
@@ -298,18 +231,7 @@ def positive_int(value):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--count",
-        type=int,
-        default=100,
-        help="number of random samples; zero runs explicit cases only",
-    )
-    parser.add_argument(
-        "--explicit-cases",
-        type=Path,
-        help="JSON list of required GEMMs, additional to --count",
-    )
-    parser.add_argument(
-        "--explicit-case", help="run only this ID from --explicit-cases"
+        "--count", type=positive_int, default=100, help="number of random GEMMs"
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -334,24 +256,6 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    if args.count < 0:
-        parser.error("--count must be nonnegative")
-    try:
-        explicit_cases = load_explicit_cases(args.explicit_cases)
-    except (ValueError, OSError) as error:
-        parser.error(str(error))
-    if args.explicit_case:
-        explicit_cases = [
-            case for case in explicit_cases if case["id"] == args.explicit_case
-        ]
-        if not explicit_cases or args.case:
-            parser.error(
-                "--explicit-case requires a matching ID and cannot combine with --case"
-            )
-    elif args.case:
-        explicit_cases = []
-    if not args.count and not explicit_cases:
-        parser.error("at least one random or explicit case is required")
     if args.case and args.case > args.count:
         parser.error("--case must be within --count")
     config = None
@@ -381,8 +285,7 @@ def main(argv=None):
         "sampler": SAMPLER_VERSION,
         "architecture": "gfx950",
         "seed": args.seed,
-        "requested": (0 if args.explicit_case else 1 if args.case else args.count)
-        + len(explicit_cases),
+        "requested": 1 if args.case else args.count,
         "sampled": 0,
         "passed": 0,
         "failed": 0,
@@ -392,16 +295,11 @@ def main(argv=None):
         "threads": args.threads,
         "dry_run": args.dry_run,
         "complete": False,
-        "sources": {
-            source: {key: 0 for key in ("started", "passed", "failed", "unsupported")}
-            for source in ("random", "explicit")
-        },
     }
     rng = random.Random(args.seed)
     lock = threading.Lock()
     stop = threading.Event()
-    iterations = iter(range(1, (0 if args.explicit_case else args.count) + 1))
-    pending_explicit = iter(explicit_cases)
+    iterations = iter(range(1, args.count + 1))
     records = []
     started = time.perf_counter()
 
@@ -411,22 +309,14 @@ def main(argv=None):
             with lock:
                 if stop.is_set():
                     return
-                case = next(pending_explicit, None)
-                if case:
-                    problem = case["problem"]
-                    name = "explicit-" + case["id"]
-                    source = "explicit"
+                for iteration in iterations:
+                    problem = sample_gemm(rng)
+                    if not args.case or iteration == args.case:
+                        break
                 else:
-                    for iteration in iterations:
-                        problem = sample_gemm(rng)
-                        if not args.case or iteration == args.case:
-                            break
-                    else:
-                        return
-                    name = f"case-{iteration:04d}"
-                    source = "random"
-                    summary["sampled"] += 1
-                summary["sources"][source]["started"] += 1
+                    return
+                name = f"case-{iteration:04d}"
+                summary["sampled"] += 1
                 categories = {
                     "family": problem["family"],
                     "transpose": problem["transA"] + problem["transB"],
@@ -456,7 +346,6 @@ def main(argv=None):
                 write_json(directory / "result.json", result)
                 with lock:
                     summary[result["outcome"]] += 1
-                    summary["sources"][source][result["outcome"]] += 1
                     if args.stop_on_failure and result["outcome"] != "passed":
                         stop.set()
                 print(
@@ -467,11 +356,9 @@ def main(argv=None):
                 records.append(
                     {
                         "id": name,
-                        "source": source,
                         "problem": problem,
                         "bench_input": bench_input(problem),
                         "result": result,
-                        **({"description": case["description"]} if case else {}),
                     }
                 )
 
@@ -484,19 +371,11 @@ def main(argv=None):
                 except BaseException:
                     stop.set()
                     raise
-        summary["complete"] = (
-            sum(counts["started"] for counts in summary["sources"].values())
-            == summary["requested"]
-        )
+        summary["complete"] = summary["sampled"] == summary["requested"]
     finally:
-        random_counts = summary["sources"]["random"]
-        completed_random = sum(
-            random_counts[key] for key in ("passed", "failed", "unsupported")
-        )
+        completed = sum(summary[key] for key in ("passed", "failed", "unsupported"))
         summary["random_no_solution_rate"] = (
-            random_counts["unsupported"] / completed_random
-            if completed_random
-            else None
+            summary["unsupported"] / completed if completed else None
         )
         summary["elapsed_seconds"] = time.perf_counter() - started
         write_json(args.output / "summary.json", summary)
