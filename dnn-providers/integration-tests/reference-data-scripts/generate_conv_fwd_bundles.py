@@ -41,6 +41,13 @@ import conv_fwd_plan as P
 
 GENERATOR = "generate_conv_fwd_bundles.py"
 SCALE_CONST = 0.5
+# A constant tensor value must carry the type of its tensor (the backend rejects a mismatch).
+VALUE_TYPE = {
+    "float": "Float32Value",
+    "half": "Float16Value",
+    "bfloat16": "BFloat16Value",
+    "double": "Float64Value",
+}
 
 
 # --------------------------------------------------------------------------
@@ -351,7 +358,7 @@ def case_values(c):
             patches.append(
                 {
                     "uid": u["scale"],
-                    "set": {"value": SCALE_CONST, "value_type": "Float64Value"},
+                    "set": {"value": SCALE_CONST, "value_type": VALUE_TYPE[c["xt"]]},
                 }
             )
         elif c["scale"] == "runtime":

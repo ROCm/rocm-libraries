@@ -178,7 +178,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -360,7 +360,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -542,7 +542,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -724,7 +724,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -906,7 +906,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -1088,7 +1088,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -1270,7 +1270,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -1452,7 +1452,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -1634,7 +1634,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -1816,7 +1816,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -1998,7 +1998,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -2180,7 +2180,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -2362,7 +2362,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -2544,7 +2544,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -2726,7 +2726,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -2908,7 +2908,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -3090,7 +3090,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -3272,7 +3272,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -3454,7 +3454,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -3656,7 +3656,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -3858,7 +3858,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -4060,7 +4060,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -4262,7 +4262,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -4464,7 +4464,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -4666,7 +4666,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -4868,7 +4868,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -5070,7 +5070,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -5272,7 +5272,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -5474,7 +5474,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -5676,7 +5676,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -5878,7 +5878,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -6080,7 +6080,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -6282,7 +6282,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -6484,7 +6484,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -6686,7 +6686,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -6888,7 +6888,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -7090,7 +7090,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -7292,7 +7292,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -7494,7 +7494,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -7696,7 +7696,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -7898,7 +7898,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -8100,7 +8100,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -8302,7 +8302,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -8524,7 +8524,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -8746,7 +8746,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -8968,7 +8968,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -9190,7 +9190,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -9412,7 +9412,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -9634,7 +9634,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -9856,7 +9856,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -10078,7 +10078,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -10300,7 +10300,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -10522,7 +10522,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -10744,7 +10744,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -10966,7 +10966,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -11188,7 +11188,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -11410,7 +11410,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -11632,7 +11632,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -11854,7 +11854,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -12076,7 +12076,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "BFloat16Value"
           }
         }
       ]
@@ -12298,7 +12298,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -12520,7 +12520,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float32Value"
           }
         }
       ]
@@ -12742,7 +12742,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
@@ -12964,7 +12964,7 @@
           "uid": 4,
           "set": {
             "value": 0.5,
-            "value_type": "Float64Value"
+            "value_type": "Float16Value"
           }
         }
       ]
