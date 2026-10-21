@@ -21,6 +21,7 @@ from pathlib import Path
 
 import yaml
 
+from codegen import provenance
 from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH, ConfigError, load_config
 from codegen import prior_ids
 from codegen.generator import IdReport, IdResolution, IngestorGenerator, resolve_ids
@@ -174,6 +175,13 @@ def main() -> None:
         required=True,
         type=Path,
         help="Path to YAML config file (e.g., configs/conv_fwd.yaml)",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="The engine manifest the config was built from "
+        "(configs/<engine>.engine.yaml). Recorded in provenance.generated_from on "
+        "each KDP; omitted from the record when not given.",
     )
     parser.add_argument(
         "--output-dir",
@@ -341,6 +349,7 @@ def main() -> None:
                 siblings,
                 fresh=args.new_ids,
                 also_from=also_from,
+                generated_from=provenance.generated_from(args.manifest, args.config),
             )
         except ValueError as e:
             # Naming another source cannot cure a refusal about the tree read.
