@@ -187,21 +187,18 @@ def _is_published_pair(archive: Path, lock: Path, *, operation: str) -> bool:
 
     Fetching the archive again repairs only that pairing. A candidate archive,
     a candidate lock, or another architecture's lock does not belong with the
-    archive, and no fetch makes them agree.
+    archive, and no fetch makes them agree. An architecture's archive holds its
+    one published variant, whose lock is ``<arch>/<variant>/baseline_lock.json``.
     """
     architecture = archive.name.removesuffix(".tar.gz")
     tracked = _TESTS / "reference_bundles" / operation / f"{architecture}.tar.gz"
-    committed = (
-        _TESTS
-        / f"{operation}_reference"
-        / "architectures"
-        / architecture
-        / "baseline_lock.json"
-    )
+    adapters = _TESTS / f"{operation}_reference" / "architectures" / architecture
+    lock = lock.resolve()
     return (
         tracked.with_name(f"{tracked.name}.dvc").is_file()
         and archive.resolve() == tracked.resolve()
-        and lock.resolve() == committed.resolve()
+        and lock.name == "baseline_lock.json"
+        and lock.parent.parent == adapters.resolve()
     )
 
 

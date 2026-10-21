@@ -23,7 +23,7 @@ from reference_common.numeric import (
     write_json,
 )
 from sdpa_reference import cli, torch_reference
-from sdpa_reference.architectures import get_architecture
+from sdpa_reference.architectures import get_adapter
 from sdpa_reference.contract import Case, independent_reference
 
 
@@ -44,7 +44,7 @@ def test_qualification_bounds_all_enabled_references(
             "files": payload_digests(baseline / "source"),
         },
     )
-    target = get_architecture("gfx942")
+    target = get_adapter("gfx942")
     case = Case("fp16", 2, 2, 1, False, True, sequence_length=2)
     monkeypatch.setattr(target, "CASES", (case,))
     measured = {}

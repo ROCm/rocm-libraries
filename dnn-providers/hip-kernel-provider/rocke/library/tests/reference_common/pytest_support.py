@@ -62,6 +62,10 @@ def start_reference_session(config) -> None:
     registry = importlib.import_module(f"{operation}_reference.architectures")
     try:
         registry.get_architecture(architecture)
+        if bundle or lock:
+            # An override replaces one variant's bundle, so the architecture
+            # must have exactly one variant.
+            registry.resolve_variant(architecture)
     except ValueError as error:
         raise pytest.UsageError(str(error)) from error
     from .targets import get_device_processor

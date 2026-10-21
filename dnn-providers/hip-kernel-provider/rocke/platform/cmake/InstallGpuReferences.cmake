@@ -58,11 +58,22 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
             "manifest_operation its bundles declare.")
   endif()
   foreach(_arch IN LISTS ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
-    set(_lock "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}/baseline_lock.json")
-    set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_operation}/${_arch}.tar.gz")
-    if(NOT EXISTS "${_lock}")
-      message(FATAL_ERROR "No qualified ${_operation} baseline lock for ${_arch}: ${_lock}")
+    # A variant's committed lock publishes it. An architecture has one archive
+    # and installed bundle, so it may publish only one variant.
+    set(_variants "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}")
+    file(GLOB _lock "${_variants}/*/baseline_lock.json")
+    list(LENGTH _lock _lock_count)
+    if(_lock_count EQUAL 0)
+      message(FATAL_ERROR
+              "No qualified ${_operation} baseline lock for ${_arch}: "
+              "${_variants}/<variant>/baseline_lock.json")
+    elseif(_lock_count GREATER 1)
+      string(REPLACE ";" ", " _lock "${_lock}")
+      message(FATAL_ERROR
+              "${_operation_upper} architecture ${_arch} has ${_lock_count} variant "
+              "baseline locks, but its reference archive holds one variant: ${_lock}")
     endif()
+    set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_operation}/${_arch}.tar.gz")
     if(NOT EXISTS "${_archive}")
       message(FATAL_ERROR
               "${_operation_upper} reference archive missing. Run dvc pull for "

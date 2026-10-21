@@ -22,6 +22,8 @@ _OPERATIONS = sorted(
     registry.parents[1].name.removesuffix("_reference")
     for registry in (_LIBRARY / "tests").glob("*_reference/architectures/registry.json")
 )
+# The variant that each fixture architecture publishes with its committed lock.
+_VARIANT = "family"
 
 
 @pytest.fixture
@@ -61,7 +63,7 @@ def project(tmp_path):
         }
         encoded = json.dumps(manifest).encode()
         (bundle / "manifest.json").write_bytes(encoded)
-        lock = package / "architectures/gfx942/baseline_lock.json"
+        lock = package / f"architectures/gfx942/{_VARIANT}/baseline_lock.json"
         lock.parent.mkdir(parents=True)
         lock.write_text(
             json.dumps(
@@ -214,7 +216,7 @@ def test_disabled_references_need_neither_python_nor_bundles(project):
     # Operations are still discovered so their host CTests stay registered.
     tests = project / "library/tests"
     shutil.rmtree(tests / "reference_bundles")
-    for path in tests.glob("*_reference/architectures/*/baseline_lock.json"):
+    for path in tests.glob("*_reference/architectures/*/*/baseline_lock.json"):
         path.unlink()
     (tests / "reference_common/artifact.py").unlink()
     result = configure(project, enabled=False, python=False)
@@ -225,12 +227,12 @@ def test_disabled_references_need_neither_python_nor_bundles(project):
 def test_shared_code_payloads_install_under_separate_processor_directories(project):
     """Artifact routing follows the qualification processor, not shared code bytes."""
     tests = project / "library/tests"
+    published = tests / "sdpa_reference/architectures/gfx942" / _VARIANT
     for architecture in ("gfx1200", "gfx1201"):
-        lock_dir = tests / f"sdpa_reference/architectures/{architecture}"
-        lock_dir.mkdir()
+        lock_dir = tests / "sdpa_reference/architectures" / architecture / _VARIANT
+        lock_dir.mkdir(parents=True)
         shutil.copyfile(
-            tests / "sdpa_reference/architectures/gfx942/baseline_lock.json",
-            lock_dir / "baseline_lock.json",
+            published / "baseline_lock.json", lock_dir / "baseline_lock.json"
         )
         shutil.copyfile(
             tests / "reference_bundles/sdpa/gfx942.tar.gz",
@@ -258,7 +260,8 @@ def test_shared_code_payloads_install_under_separate_processor_directories(proje
 )
 def test_required_reference_prerequisites_fail_configuration(project, problem):
     library = project / "library/tests"
-    lock = library / "conv_reference/architectures/gfx942/baseline_lock.json"
+    variants = library / "conv_reference/architectures/gfx942"
+    lock = variants / _VARIANT / "baseline_lock.json"
     if problem == "archive":
         (library / "reference_bundles/conv/gfx942.tar.gz").unlink()
     elif problem == "lock":
@@ -289,6 +292,26 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
     if problem == "lock":
         assert "baseline_lock.json" in output
         assert "Traceback" not in output
+
+
+def test_an_architecture_publishes_one_variant(project):
+    """Its archive and installed bundle hold one variant, so a second lock fails."""
+    variants = project / "library/tests/conv_reference/architectures/gfx942"
+    (variants / "second").mkdir()
+    shutil.copyfile(
+        variants / _VARIANT / "baseline_lock.json",
+        variants / "second/baseline_lock.json",
+    )
+    result = configure(project)
+    assert result.returncode != 0
+    # CMake wraps long messages.
+    output = " ".join((result.stdout + result.stderr).split())
+    assert (
+        "CONV architecture gfx942 has 2 variant baseline locks, but its reference "
+        "archive holds one variant: "
+    ) in output
+    for variant in (_VARIANT, "second"):
+        assert str(variants / variant / "baseline_lock.json") in output
 
 
 @pytest.mark.parametrize("missing", ["package", "publication", "metadata"])
@@ -411,7 +434,10 @@ def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
         supported = json.loads((root / "registry.json").read_text())
         assert set(architectures) <= set(supported)
         for architecture in architectures:
-            lock = json.loads((root / architecture / "baseline_lock.json").read_text())
+            # The architecture's archive holds the one variant with a lock.
+            (path,) = (root / architecture).glob("*/baseline_lock.json")
+            assert (path.parent / "__init__.py").is_file()
+            lock = json.loads(path.read_text())
             assert lock["schema"] == 2
             assert len(bytes.fromhex(lock["baseline_revision"])) == 20
             assert len(bytes.fromhex(lock["cohort_sha256"])) == 32

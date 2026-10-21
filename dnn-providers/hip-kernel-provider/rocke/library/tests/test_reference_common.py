@@ -902,6 +902,7 @@ def test_reference_fixture_selects_explicit_paths(
     from rocke.runtime import hip_module
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    variant = gpu_tests.OPERATION.architectures.resolve_variant(architecture)
     options = {
         "--rocke-reference-operation": operation if candidate else None,
         "--rocke-reference-bundle": tmp_path if candidate else None,
@@ -917,20 +918,27 @@ def test_reference_fixture_selects_explicit_paths(
     )
     calls = []
 
-    def load(bundle, lock, *, architecture):
-        calls.append((bundle, lock, architecture))
+    def load(bundle, lock, *, architecture, variant):
+        calls.append((bundle, lock, architecture, variant))
         return {"candidate": candidate}
 
     monkeypatch.setattr(gpu_tests, "load_bundle", load)
     config = SimpleNamespace(getoption=options.get)
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
-        target, bundle, manifest = next(fixture)
+        open_slot = next(fixture)
+        target, bundle, manifest = open_slot(architecture, variant)
+        assert target is gpu_tests.OPERATION.architectures.get_adapter(
+            architecture, variant
+        )
         assert (target.NAME, bundle, manifest) == (
             architecture,
             tmp_path,
             {"candidate": candidate},
         )
-    assert calls == [(tmp_path, options["--rocke-reference-lock"], architecture)]
+        # The open slot is reused, not loaded again.
+        assert open_slot(architecture, variant)[1:] == (bundle, manifest)
+    lock = options["--rocke-reference-lock"]
+    assert calls == [(tmp_path, lock, architecture, variant)]
     if candidate:
         options["--rocke-reference-operation"] = _another_operation(operation)
         calls.clear()
@@ -962,6 +970,28 @@ def test_reference_path_options_require_explicit_scope(options, message):
     from reference_common.pytest_support import start_reference_session
 
     with pytest.raises(pytest.UsageError, match=message):
+        start_reference_session(SimpleNamespace(getoption=options.get))
+
+
+def test_reference_path_options_require_a_single_variant(monkeypatch):
+    """An override replaces one variant's bundle, which must be unambiguous."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+
+    registry = import_module("sdpa_reference.architectures")
+    # A second variant of the processor, as a second kernel family would enroll.
+    monkeypatch.setattr(registry._REGISTRY, "variants", lambda name: ("dense", "wide"))
+    options = {
+        "--rocke-reference-operation": "sdpa",
+        "--rocke-reference-arch": "gfx942",
+        "--rocke-reference-bundle": "candidate",
+    }
+    with pytest.raises(
+        pytest.UsageError,
+        match="^SDPA gfx942 needs a selected reference variant; enrolled: dense, wide$",
+    ):
         start_reference_session(SimpleNamespace(getoption=options.get))
 
 
@@ -1028,7 +1058,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
     monkeypatch.setattr(
         spec.architectures,
         "baseline_lock",
-        lambda name: locks / name / "baseline_lock.json",
+        lambda name, variant=None: locks / name / "baseline_lock.json",
     )
     lock = spec.architectures.baseline_lock(architecture)
     pointer = tests / f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
@@ -1039,8 +1069,10 @@ def test_reference_missing_bundle_fails_only_when_selected(
             _track(tests, operation, architecture)
     options = {"--rocke-reference-operation": operation if selected else None}
     config = SimpleNamespace(getoption=options.get)
+    variant = spec.architectures.resolve_variant(architecture)
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
-        outcome, message = _outcome(lambda: next(fixture))
+        open_slot = next(fixture)
+        outcome, message = _outcome(lambda: open_slot(architecture, variant))
     # A selected suite without its bundle must fail, so that it cannot pass
     # in CI without running a comparison.
     assert outcome == ("fail" if selected else "skip")
@@ -1100,15 +1132,16 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
     fixture = gpu_tests.reference_bundle.__wrapped__(
         SimpleNamespace(getoption=options.get)
     )
+    variant = registry.resolve_variant(architecture)
     with closing(fixture):
-        outcome, message = _outcome(lambda: next(fixture))
+        outcome, message = _outcome(lambda: next(fixture)(architecture, variant))
     assert outcome == "fail"
     assert "reference bundle is missing" in message.splitlines()[0]
     (extract,) = _commands(message)
     args = _unpacked(extract)
     assert (args.command, args.operation) == ("unpack", operation)
     assert _same(args.archive, archive)
-    assert _same(args.lock, registry.baseline_lock(architecture))
+    assert _same(args.lock, registry.baseline_lock(architecture, variant))
     # The pytest option, not the CLI's --bundle, then selects the directory
     # that the command extracts beside the archive.
     passed = _passed(message, "--rocke-reference-bundle")
@@ -1168,7 +1201,8 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
     hint = spec.bundle_hint("gfx942", tmp_path / "missing")
     archive = root / "rocke/library/tests/reference_bundles" / operation
     archive /= "gfx942.tar.gz"
-    lock = installed / f"{operation}_reference/architectures/gfx942/baseline_lock.json"
+    lock = installed / f"{operation}_reference/architectures/gfx942"
+    lock /= f"{spec.architectures.resolve_variant('gfx942')}/baseline_lock.json"
     assert hint == (
         "fetch and extract it with dvc pull and artifact.py unpack:\n"
         f'    dvc pull "{archive}.dvc"\n'
@@ -1177,6 +1211,69 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
         rf'--bundle "D:\build root\rocke $1\missing" --lock {lock}'
     )
     assert "'" not in hint
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_reference_fixture_keeps_one_slot_open_at_a_time(
+    operation, tmp_path, monkeypatch
+):
+    """Another processor's slot skips untouched; another variant replaces the open one.
+
+    So the tests, which run slot by slot, never keep two slots' workers alive.
+    """
+    from contextlib import closing, contextmanager
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from reference_common import pinned_tests
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    registry = gpu_tests.OPERATION.architectures
+    architecture, other = registry.ARCHITECTURES[:2]
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+    # Two variants of this processor, as a second kernel family would enroll.
+    monkeypatch.setattr(
+        registry,
+        "get_adapter",
+        lambda name, variant: SimpleNamespace(NAME=name, variant=variant),
+    )
+    monkeypatch.setattr(
+        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path
+    )
+    loads, workers = [], []
+
+    def load(bundle, lock, *, architecture, variant):
+        loads.append(variant)
+        return {"variant": variant}
+
+    @contextmanager
+    def reuse_workers(module):
+        workers.append("open")
+        try:
+            yield
+        finally:
+            workers[workers.index("open")] = "closed"
+
+    monkeypatch.setattr(gpu_tests, "load_bundle", load)
+    monkeypatch.setattr(pinned_tests, "reuse_workers", reuse_workers)
+    config = SimpleNamespace(getoption=lambda option: None)
+    with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+        open_slot = next(fixture)
+        assert open_slot(architecture, "first")[2] == {"variant": "first"}
+        with pytest.raises(pytest.skip.Exception) as skip:
+            open_slot(other, "first")
+        assert str(skip.value) == (
+            f"not selected: this {other} first reference runs only on a {other} "
+            f"GPU, and this GPU is {architecture}"
+        )
+        assert open_slot(architecture, "first")[0].variant == "first"
+        assert (loads, workers) == (["first"], ["open"])
+        assert open_slot(architecture, "second")[0].variant == "second"
+        assert (loads, workers) == (["first", "second"], ["closed", "open"])
+    assert workers == ["closed", "closed"]
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1190,6 +1287,7 @@ def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("mode", ["source", "replay"])
 @pytest.mark.parametrize(
     "architecture,device_target,accepted",
     [
@@ -1202,7 +1300,7 @@ def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
     ],
 )
 def test_reference_worker_requires_the_physical_processor(
-    operation, architecture, device_target, accepted, tmp_path, monkeypatch
+    operation, mode, architecture, device_target, accepted, tmp_path, monkeypatch
 ):
     """A generic catalog row (gfx1200 -> gfx12-generic) must not hide the device."""
     from importlib import import_module
@@ -1218,12 +1316,15 @@ def test_reference_worker_requires_the_physical_processor(
         worker, "get_architecture", lambda name: SimpleNamespace(NAME=name)
     )
     monkeypatch.setattr(
+        worker, "get_adapter", lambda name, variant: SimpleNamespace(NAME=name)
+    )
+    monkeypatch.setattr(
         hip_module, "get_device_target_id", lambda device=0: device_target
     )
     request = {
         "architecture": architecture,
         "platform_root": str(Path(rocke.__file__).resolve().parent),
-        "mode": "source",
+        "mode": mode,
         "repetitions": 1,
     }
     # An accepted device proceeds to decode the case this request omits.
@@ -1232,6 +1333,38 @@ def test_reference_worker_requires_the_physical_processor(
         match="case" if accepted else f"HIP-visible {architecture} device",
     ):
         worker.run(request, tmp_path)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_reference_worker_imports_an_adapter_only_in_source_mode(
+    operation, tmp_path, monkeypatch
+):
+    """Replay reads only the processor's name, so it never imports an adapter.
+
+    Source mode runs the requested variant's adapter, and rejects a variant
+    that is not enrolled before running anything.
+    """
+    from importlib import import_module
+
+    worker = import_module(f"{operation}_reference.worker")
+    registry = import_module(f"{operation}_reference.architectures")
+    architecture = registry.ARCHITECTURES[0]
+    variant = registry.resolve_variant(architecture)
+    targets = []
+    monkeypatch.setattr(
+        worker, "run_case", lambda operation, target, *args: targets.append(target)
+    )
+    request = {"architecture": architecture, "variant": "unenrolled"}
+    with monkeypatch.context() as patch:
+        # A None entry makes any import of the adapter fail.
+        adapter = f"{registry.__name__}.{architecture}.{variant}"
+        patch.setitem(sys.modules, adapter, None)
+        worker.run(dict(request, mode="replay"), tmp_path)
+    assert targets == [registry.get_architecture(architecture)]
+    with pytest.raises(ValueError, match="reference variant is not enrolled"):
+        worker.run(dict(request, mode="source"), tmp_path)
+    worker.run(dict(request, mode="source", variant=variant), tmp_path)
+    assert targets[1:] == [registry.get_adapter(architecture, variant)]
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1260,9 +1393,11 @@ def test_operation_packages_plug_into_the_shared_plumbing(operation):
 def test_enrollment_rejects_unlisted_names_before_importing(operation, monkeypatch):
     """Each package enrolls exactly its registry.json through the shared registry.
 
-    A lock resolves beside its enrolled adapter. Any other name is rejected
-    with the operation's label before an adapter import is attempted.
+    Each enrolled processor has a variant adapter, and a variant's lock
+    resolves beside it. Any other name is rejected with the operation's label
+    before an adapter import is attempted.
     """
+    import re
     from importlib import import_module
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
@@ -1272,19 +1407,98 @@ def test_enrollment_rejects_unlisted_names_before_importing(operation, monkeypat
     assert registry.ARCHITECTURES == tuple(listed)
     for architecture in registry.ARCHITECTURES:
         assert registry.get_architecture(architecture).NAME == architecture
-        assert registry.baseline_lock(architecture) == (
-            root / architecture / "baseline_lock.json"
-        )
-    # common is the adapters' shared helper module, not an adapter. A None
-    # entry makes any import of a name fail with ImportError instead.
+        assert registry.variants(architecture)
+        for variant in registry.variants(architecture):
+            assert registry.get_adapter(architecture, variant).NAME == architecture
+            assert registry.baseline_lock(architecture, variant) == (
+                root / architecture / variant / "baseline_lock.json"
+            )
+        # A None entry makes any import of a name fail with ImportError instead.
+        for name in ("missing", "../" + registry.variants(architecture)[0]):
+            monkeypatch.setitem(
+                sys.modules, f"{registry.__name__}.{architecture}.{name}", None
+            )
+            for lookup in (registry.get_adapter, registry.baseline_lock):
+                with pytest.raises(
+                    ValueError,
+                    match=f"^{spec.label} {architecture} reference variant is not "
+                    f"enrolled: {re.escape(name)}; enrolled: ",
+                ):
+                    lookup(architecture, name)
+    # common is the adapters' shared helper module, not an adapter.
     for name in ("gfx1100", "../gfx942", "common"):
         monkeypatch.setitem(sys.modules, f"{registry.__name__}.{name}", None)
-        for lookup in (registry.get_architecture, registry.baseline_lock):
+        for lookup in (
+            registry.get_architecture,
+            registry.variants,
+            registry.resolve_variant,
+            registry.get_adapter,
+            registry.baseline_lock,
+        ):
             with pytest.raises(
                 ValueError,
                 match=f"^{spec.label} reference architecture is not enrolled: ",
             ):
                 lookup(name)
+
+
+def test_registry_finds_variants_and_defaults_only_a_sole_one(tmp_path, monkeypatch):
+    """A variant is a processor subpackage; only a sole variant is a default."""
+    from reference_common.registry import AdapterRegistry
+
+    root = tmp_path / "fictional_reference/architectures"
+    root.mkdir(parents=True)
+    for package in (root.parent, root):
+        (package / "__init__.py").touch()
+    (root / "registry.json").write_text('["gfx942", "gfx950"]\n')
+    for architecture in ("gfx942", "gfx950"):
+        (root / architecture).mkdir()
+        (root / architecture / "__init__.py").write_text(f"NAME = {architecture!r}\n")
+    for package in ("gfx942/wide", "gfx942/narrow", "gfx950/wide"):
+        (root / package).mkdir()
+        (root / package / "__init__.py").write_text("from .. import NAME\n")
+    # Neither a cache nor a directory without a package marker is a variant.
+    for directory in ("gfx942/__pycache__", "gfx942/notes"):
+        (root / directory).mkdir()
+    monkeypatch.syspath_prepend(str(tmp_path))
+    registry = AdapterRegistry(
+        "fictional_reference.architectures", root, label="Fictional"
+    )
+    try:
+        assert registry.variants("gfx942") == ("narrow", "wide")
+        assert registry.resolve_variant("gfx950") == "wide"
+        assert (
+            registry.baseline_lock("gfx950") == root / "gfx950/wide/baseline_lock.json"
+        )
+        assert registry.baseline_lock("gfx942", "narrow") == (
+            root / "gfx942/narrow/baseline_lock.json"
+        )
+        assert registry.get_architecture("gfx942").NAME == "gfx942"
+        # Neither lookups nor the processor's package import its variants.
+        assert {name for name in sys.modules if name.startswith("fictional_")} == {
+            "fictional_reference",
+            "fictional_reference.architectures",
+            "fictional_reference.architectures.gfx942",
+        }
+        adapter = registry.get_adapter("gfx942", "wide")
+        assert (adapter.__name__, adapter.NAME) == (
+            "fictional_reference.architectures.gfx942.wide",
+            "gfx942",
+        )
+        for lookup in (
+            registry.resolve_variant,
+            registry.get_adapter,
+            registry.baseline_lock,
+        ):
+            with pytest.raises(
+                ValueError,
+                match="^Fictional gfx942 needs a selected reference variant; "
+                "enrolled: narrow, wide$",
+            ):
+                lookup("gfx942")
+    finally:
+        for name in [name for name in sys.modules if name.startswith("fictional_")]:
+            del sys.modules[name]
 
 
 def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
@@ -1557,7 +1771,7 @@ def _qualified_cohort(tmp_path, operation, index=0):
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     architecture = spec.architectures.ARCHITECTURES[index]
-    target = spec.architectures.get_architecture(architecture)
+    target = spec.architectures.get_adapter(architecture)
     bundle = tmp_path / "bundle"
     (bundle / "payload").mkdir(parents=True)
     (bundle / "payload/kernel.hsaco").write_bytes(b"host cohort fixture")
@@ -1617,7 +1831,7 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
     script = Path(__file__).with_name(f"run_{operation}_reference.py")
     registry = import_module(f"{operation}_reference.architectures")
     for architecture in registry.ARCHITECTURES:
-        cases = registry.get_architecture(architecture).CASES
+        cases = registry.get_adapter(architecture).CASES
         result = subprocess.run(
             [sys.executable, str(script), "cases", "--arch", architecture, "--json"],
             check=False,
@@ -1661,7 +1875,7 @@ def test_diff_reports_every_difference_that_verification_rejects(
     from dataclasses import asdict
 
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
-    target = spec.architectures.get_architecture(architecture)
+    target = spec.architectures.get_adapter(architecture)
     cases = target.CASES
     source = bundle
     if form == "archive":
@@ -1751,7 +1965,9 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
     monkeypatch.setattr(
         common_cli, "default_bundle_path", lambda *args, **kwargs: published
     )
-    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    monkeypatch.setattr(
+        spec.architectures, "baseline_lock", lambda name, variant=None: lock
+    )
     if fetched is None:
         with pytest.raises(SystemExit) as exit:
             spec.main(["diff", "--arch", architecture])
@@ -1868,27 +2084,28 @@ def _documented(key):
     return any(f"`{key}`" in row.split(" | ")[0] for row in rows)
 
 
-def _published_pairs():
-    """Every operation/architecture pair with a committed lock.
+def _published_variants():
+    """Every operation, architecture, and variant with a committed lock.
 
-    Configuration requires a lock for each published pair, and installed trees
-    carry the locks but not the CMake publication list, so these pairs cover
-    every published pair in both layouts. Lock paths come from the registry
-    directory, not ``baseline_lock``, which imports the adapter: a broken
-    adapter must fail its own tests, not this module's collection.
+    Configuration requires a lock for each published architecture, and
+    installed trees carry the locks but not the CMake publication list, so
+    these variants cover every published one in both layouts. Variants and
+    their locks are found in the registry's directories without importing an
+    adapter: a broken adapter must fail its own tests, not this module's
+    collection.
     """
     from importlib import import_module
 
-    pairs = []
+    published = []
     for operation in OPERATIONS:
         registry = import_module(f"{operation}_reference.architectures")
-        root = Path(registry.__file__).parent
-        pairs += [
-            (operation, architecture)
+        published += [
+            (operation, architecture, variant)
             for architecture in registry.ARCHITECTURES
-            if (root / architecture / "baseline_lock.json").is_file()
+            for variant in registry.variants(architecture)
+            if registry.baseline_lock(architecture, variant).is_file()
         ]
-    return pairs
+    return published
 
 
 def _published_bundle_data(spec, architecture):
@@ -1916,7 +2133,7 @@ def _published_bundle_data(spec, architecture):
     return bundle
 
 
-def _check_published_cohort(operation, architecture):
+def _check_published_cohort(operation, architecture, variant):
     """Fail when the published bundle does not record the enrolled cohort.
 
     Verification rejects every case of such a bundle, so otherwise only a
@@ -1927,11 +2144,13 @@ def _check_published_cohort(operation, architecture):
     from importlib import import_module
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    name = f"{spec.label} {architecture}"
+    name = f"{spec.label} {architecture} {variant}"
     bundle = _published_bundle_data(spec, architecture)
     unusable = None
     try:
-        differences = spec.diff_bundle(bundle, architecture=architecture)
+        differences = spec.diff_bundle(
+            bundle, architecture=architecture, variant=variant
+        )
     except (ValueError, OSError) as error:
         # Fail outside the handler so pytest reports the message only once.
         unusable = str(error)
@@ -1956,13 +2175,17 @@ def _check_published_cohort(operation, architecture):
         )
 
 
-@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
-def test_published_bundles_record_the_enrolled_cohorts(operation, architecture):
+@pytest.mark.parametrize(
+    ("operation", "architecture", "variant"), _published_variants()
+)
+def test_published_bundles_record_the_enrolled_cohorts(
+    operation, architecture, variant
+):
     """A cohort edit cannot pass host tests while its published bundle lags."""
-    _check_published_cohort(operation, architecture)
+    _check_published_cohort(operation, architecture, variant)
 
 
-def _check_locked_cohort(operation, architecture):
+def _check_locked_cohort(operation, architecture, variant):
     """Fail when the committed lock does not pin the enrolled cohort's digest.
 
     Configuration checks the lock's ``cohort_sha256`` against the manifest
@@ -1975,8 +2198,8 @@ def _check_locked_cohort(operation, architecture):
     from importlib import import_module
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    name = f"{spec.label} {architecture}"
-    path = spec.architectures.baseline_lock(architecture)
+    name = f"{spec.label} {architecture} {variant}"
+    path = spec.architectures.baseline_lock(architecture, variant)
     locked = json.loads(path.read_text()).get("cohort_sha256")
     if locked is None:
         pytest.fail(
@@ -1986,7 +2209,7 @@ def _check_locked_cohort(operation, architecture):
             "reference_common/artifact.py, of the manifest that it pins",
             pytrace=False,
         )
-    enrolled = spec.enrolled_cohort_digest(architecture)
+    enrolled = spec.enrolled_cohort_digest(architecture, variant)
     if enrolled != locked:
         script = Path(__file__).with_name(f"run_{operation}_reference.py")
         pytest.fail(
@@ -2002,10 +2225,12 @@ def _check_locked_cohort(operation, architecture):
         )
 
 
-@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
-def test_committed_locks_pin_the_enrolled_cohorts(operation, architecture):
+@pytest.mark.parametrize(
+    ("operation", "architecture", "variant"), _published_variants()
+)
+def test_committed_locks_pin_the_enrolled_cohorts(operation, architecture, variant):
     """A cohort edit fails without bundle data, so every host and CI job sees it."""
-    _check_locked_cohort(operation, architecture)
+    _check_locked_cohort(operation, architecture, variant)
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2016,19 +2241,22 @@ def test_locked_cohort_check_names_the_lock_and_the_requalification(
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     architecture = spec.architectures.ARCHITECTURES[0]
-    target = spec.architectures.get_architecture(architecture)
+    variant = spec.architectures.resolve_variant(architecture)
+    target = spec.architectures.get_adapter(architecture, variant)
     lock = tmp_path / "baseline_lock.json"
-    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    monkeypatch.setattr(
+        spec.architectures, "baseline_lock", lambda name, variant=None: lock
+    )
     pinned = {"schema": 2, "baseline_revision": "a" * 40, "manifest_sha256": "0" * 64}
     lock.write_text(json.dumps(pinned))
 
     def check():
-        return _outcome(lambda: _check_locked_cohort(operation, architecture))
+        return _outcome(lambda: _check_locked_cohort(operation, architecture, variant))
 
     outcome, message = check()
     assert outcome == "fail"
     assert _mentions(message, lock) and "records no cohort_sha256" in message
-    locked = spec.enrolled_cohort_digest(architecture)
+    locked = spec.enrolled_cohort_digest(architecture, variant)
     lock.write_text(json.dumps(dict(pinned, cohort_sha256=locked)))
     assert check() == ("pass", "")
 
@@ -2046,24 +2274,27 @@ def test_locked_cohort_check_names_the_lock_and_the_requalification(
     assert (args.command, args.arch) == ("diff", architecture)
 
 
-def test_published_pairs_are_listed_without_importing_adapters(monkeypatch):
+def test_published_variants_are_listed_without_importing_adapters(monkeypatch):
     """A broken adapter cannot stop the shared tests from collecting."""
     from importlib import import_module
 
     expected = []
     for operation in OPERATIONS:
         registry = import_module(f"{operation}_reference.architectures")
+        root = Path(registry.__file__).parent
         expected += [
-            (operation, architecture)
+            (operation, lock.parent.parent.name, lock.parent.name)
             for architecture in registry.ARCHITECTURES
-            if registry.baseline_lock(architecture).is_file()
+            for lock in sorted((root / architecture).glob("*/baseline_lock.json"))
         ]
-        # A None entry makes any import of the adapter fail, as a broken one would.
+        # A None entry makes any import of a processor's package or adapter
+        # fail, as a broken one would.
         for architecture in registry.ARCHITECTURES:
-            monkeypatch.setitem(
-                sys.modules, f"{registry.__name__}.{architecture}", None
-            )
-    assert _published_pairs() == expected
+            package = f"{registry.__name__}.{architecture}"
+            monkeypatch.setitem(sys.modules, package, None)
+            for variant in registry.variants(architecture):
+                monkeypatch.setitem(sys.modules, f"{package}.{variant}", None)
+    assert _published_variants() == expected
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2079,12 +2310,15 @@ def test_published_cohort_check_names_unqualified_cases(
     from reference_common.paths import default_bundle_path
 
     registry = import_module(f"{operation}_reference.architectures")
-    target = registry.get_architecture(registry.ARCHITECTURES[0])
+    variant = registry.resolve_variant(registry.ARCHITECTURES[0])
+    target = registry.get_adapter(registry.ARCHITECTURES[0], variant)
     cases = target.CASES
     # The bundle was qualified before the author enrolled the last case.
     monkeypatch.setattr(target, "CASES", cases[:-1])
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
-    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    monkeypatch.setattr(
+        spec.architectures, "baseline_lock", lambda name, variant=None: lock
+    )
     tests = tmp_path / (
         "bin/hip_kernel_provider/tests/library/tests"
         if layout == "installed"
@@ -2116,7 +2350,9 @@ def test_published_cohort_check_names_unqualified_cases(
         bundle.rename(published)
 
     def check():
-        return _outcome(lambda: _check_published_cohort(operation, architecture))
+        return _outcome(
+            lambda: _check_published_cohort(operation, architecture, variant)
+        )
 
     assert check() == ("pass", "")
     monkeypatch.setattr(target, "CASES", cases)
@@ -2271,14 +2507,16 @@ class KernelLauncher:
 
 
 # A request can gain keys that published runners predate, such as the selected
-# variant. An unenrolled name fails any runner that resolves the key, so the
-# key passes only when the runner ignores it.
+# variant that verification now sends. An unenrolled name fails any runner that
+# resolves the key, so the key passes only when the runner ignores it.
 @pytest.mark.parametrize(
     "added", [{}, {"variant": "unenrolled"}], ids=["current-request", "variant-key"]
 )
-@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
+@pytest.mark.parametrize(
+    ("operation", "architecture", "variant"), _published_variants()
+)
 def test_published_runners_replay_the_current_request(
-    tmp_path, monkeypatch, operation, architecture, added
+    tmp_path, monkeypatch, operation, architecture, variant, added
 ):
     """Every published frozen runner accepts the request that verification sends.
 
@@ -2298,10 +2536,10 @@ def test_published_runners_replay_the_current_request(
     spec = import_module(f"{operation}_reference.cli").OPERATION
     bundle = _published_bundle_data(spec, architecture)
     if bundle.is_file():
-        lock = spec.architectures.baseline_lock(architecture)
+        lock = spec.architectures.baseline_lock(architecture, variant)
         unpack(bundle, tmp_path / "bundle", lock, operation=operation)
         bundle = tmp_path / "bundle"
-    manifest = spec.load_bundle(bundle, architecture=architecture)
+    manifest = spec.load_bundle(bundle, architecture=architecture, variant=variant)
     runtime = tmp_path / "runtime"
     for name, source in _STUB_RUNTIME.items():
         (runtime / name).parent.mkdir(parents=True, exist_ok=True)
@@ -2321,13 +2559,19 @@ def test_published_runners_replay_the_current_request(
         raise Replayed(request, result)
 
     def check_replay(case):
-        key = spec.manifest_key(manifest, case, architecture=architecture)
+        key = spec.manifest_key(
+            manifest, case, architecture=architecture, variant=variant
+        )
         (runtime / "rocke/runtime/device_target").write_text(
             manifest["cases"][key]["device_target"]
         )
         with pytest.raises(Replayed) as replayed:
             spec.verify_case(
-                case, bundle=bundle, manifest=manifest, architecture=architecture
+                case,
+                bundle=bundle,
+                manifest=manifest,
+                architecture=architecture,
+                variant=variant,
             )
         request, result = replayed.value.args
         if isinstance(result, Exception):
@@ -2344,7 +2588,7 @@ def test_published_runners_replay_the_current_request(
         assert not any(output.any() for output in result[0])
 
     monkeypatch.setattr(common_cli, "run_worker", replay)
-    cases = spec.architectures.get_architecture(architecture).CASES
+    cases = spec.architectures.get_adapter(architecture, variant).CASES
     # Without a worker session, run_worker runs the worker module as a script.
     check_replay(cases[0])
     # Verification reuses one worker per bundle, which calls the module's run().
@@ -2367,7 +2611,7 @@ import rocke
 import rocke.helpers
 import rocke.runtime
 
-operation, architecture, source, output = sys.argv[1:]
+operation, architecture, variant, source, output = sys.argv[1:]
 source = Path(source).resolve()
 
 
@@ -2384,8 +2628,8 @@ class KernelLauncher:
 
 rocke.compile_kernel = rocke.helpers.compile_kernel = compile_kernel
 rocke.runtime.KernelLauncher = KernelLauncher
-target = import_module(f"{operation}_reference.architectures").get_architecture(
-    architecture
+target = import_module(f"{operation}_reference.architectures").get_adapter(
+    architecture, variant
 )
 failures = {}
 for case in target.CASES:
@@ -2479,7 +2723,7 @@ def locked_baseline_sources():
         yield sources
 
 
-def _check_baseline_preparation(operation, architecture, source, revision):
+def _check_baseline_preparation(operation, architecture, variant, source, revision):
     """Fail unless the adapter prepares every enrolled case with ``source``.
 
     ``source`` holds the ``platform/python`` and ``library`` trees of baseline
@@ -2494,7 +2738,7 @@ def _check_baseline_preparation(operation, architecture, source, revision):
     from reference_common.session import _NO_TORCH
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
-    name = f"{spec.label} {architecture}"
+    name = f"{spec.label} {architecture} {variant}"
     paths = (source / "platform/python", source / "library", Path(__file__).parent)
     with tempfile.TemporaryDirectory(prefix=f"rocke-{operation}-prepare-") as work:
         result = Path(work) / "prepared.json"
@@ -2506,6 +2750,7 @@ def _check_baseline_preparation(operation, architecture, source, revision):
                 _NO_TORCH + _PREPARE_ENROLLED_CASES,
                 operation,
                 architecture,
+                variant,
                 str(source),
                 str(result),
             ],
@@ -2544,7 +2789,7 @@ def _check_baseline_preparation(operation, architecture, source, revision):
             errors.setdefault(error, []).append(case_id)
         adapter = (
             f"library/tests/{operation}_reference/architectures/{architecture}/"
-            "__init__.py"
+            f"{variant}/__init__.py"
         )
         pytest.fail(
             f"{name}: the current adapter cannot prepare "
@@ -2560,9 +2805,11 @@ def _check_baseline_preparation(operation, architecture, source, revision):
         )
 
 
-@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
+@pytest.mark.parametrize(
+    ("operation", "architecture", "variant"), _published_variants()
+)
 def test_adapters_prepare_against_their_locked_baselines(
-    operation, architecture, locked_baseline_sources
+    operation, architecture, variant, locked_baseline_sources
 ):
     """An adapter port cannot silently drop its locked baseline's API.
 
@@ -2573,10 +2820,10 @@ def test_adapters_prepare_against_their_locked_baselines(
     from importlib import import_module
 
     registry = import_module(f"{operation}_reference.architectures")
-    lock = json.loads(registry.baseline_lock(architecture).read_text())
+    lock = json.loads(registry.baseline_lock(architecture, variant).read_text())
     revision = lock["baseline_revision"]
     _check_baseline_preparation(
-        operation, architecture, locked_baseline_sources(revision), revision
+        operation, architecture, variant, locked_baseline_sources(revision), revision
     )
 
 
@@ -2588,7 +2835,8 @@ def test_baseline_preparation_check_names_what_failed(tmp_path, operation, broke
 
     registry = import_module(f"{operation}_reference.architectures")
     architecture = registry.ARCHITECTURES[0]
-    cases = registry.get_architecture(architecture).CASES
+    variant = registry.resolve_variant(architecture)
+    cases = registry.get_adapter(architecture, variant).CASES
     # A stand-in baseline whose production packages no longer match the adapter.
     source = tmp_path / "source"
     for package in ("rocke", "rocke/helpers", "rocke/runtime"):
@@ -2609,7 +2857,9 @@ def test_baseline_preparation_check_names_what_failed(tmp_path, operation, broke
         )
     revision = "a" * 40
     outcome, message = _outcome(
-        lambda: _check_baseline_preparation(operation, architecture, source, revision)
+        lambda: _check_baseline_preparation(
+            operation, architecture, variant, source, revision
+        )
     )
     assert outcome == "fail"
     if broken == "prepare":
@@ -2621,7 +2871,7 @@ def test_baseline_preparation_check_names_what_failed(tmp_path, operation, broke
         assert f"\n  {ids}:\n    ImportError: kernels moved\n" in message
         assert (
             f"Extend library/tests/{operation}_reference/architectures/"
-            f"{architecture}/__init__.py for that baseline's API"
+            f"{architecture}/{variant}/__init__.py for that baseline's API"
         ) in message
     elif broken == "isolation":
         assert message.endswith(
@@ -2713,7 +2963,9 @@ def test_verify_reports_an_unusable_lock_or_bundle_once(
 
     # An architecture with no published bundle has no committed lock.
     unpublished = (tmp_path / "unpublished/baseline_lock.json").resolve()
-    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: unpublished)
+    monkeypatch.setattr(
+        spec.architectures, "baseline_lock", lambda name, variant=None: unpublished
+    )
     for selected in (bundle, archive):
         error = refused(selected)
         assert (
@@ -2724,7 +2976,7 @@ def test_verify_reports_an_unusable_lock_or_bundle_once(
         assert "artifact.py" not in error
     assert f"lock not found: {unpublished}" in refused(bundle, "--lock", unpublished)
     # load_bundle rejects a cohort the bundle does not record and stale data.
-    target = spec.architectures.get_architecture(architecture)
+    target = spec.architectures.get_adapter(architecture)
     cases = target.CASES
     monkeypatch.setattr(target, "CASES", cases[1:])
     error = refused(bundle, "--lock", lock)
@@ -2743,7 +2995,7 @@ def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
     from reference_common.cli import ReferenceOperation
 
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
-    cases = spec.architectures.get_architecture(architecture).CASES
+    cases = spec.architectures.get_adapter(architecture).CASES
     ran = []
 
     def verify_case(self, case, **kwargs):
@@ -2828,7 +3080,7 @@ def _verifiable_case(monkeypatch, operation, index=0):
 
     spec = import_module(f"{operation}_reference.cli").OPERATION
     architecture = spec.architectures.ARCHITECTURES[index]
-    target = spec.architectures.get_architecture(architecture)
+    target = spec.architectures.get_adapter(architecture)
     case = target.CASES[0]
     monkeypatch.setattr(target, "CASES", (case,))
     inputs = spec.contract.make_inputs(case)
@@ -3002,7 +3254,11 @@ def test_worker_failures_say_which_side_failed_and_keep_the_log(
     assert f"\n  see {_TRIAGE_DOC}\n" in message
     assert message.endswith(log)
     # Only the current side points at the adapter that calls production APIs.
-    adapter = f"library/tests/{operation}_reference/architectures/{architecture}/"
+    variant = spec.architectures.resolve_variant(architecture)
+    adapter = (
+        f"library/tests/{operation}_reference/architectures/{architecture}/"
+        f"{variant}/__init__.py"
+    )
     assert (adapter in message) == (mode == "source")
 
 
@@ -3078,7 +3334,9 @@ def test_rejected_bundles_say_how_to_replace_them(
         monkeypatch.setattr(
             spec.architectures,
             "baseline_lock",
-            lambda name: lock if name == architecture else tmp_path / f"{name}.json",
+            lambda name, variant=None: (
+                lock if name == architecture else tmp_path / f"{name}.json"
+            ),
         )
     # The problem names these paths and values.
     paths, values = [], []
@@ -3233,14 +3491,15 @@ def test_unpack_suggests_a_fetch_only_for_a_published_pair(
     for architecture in ("gfx942", "gfx950"):
         pack(bundle, archives / f"{architecture}.tar.gz", lock, operation=operation)
         (archives / f"{architecture}.tar.gz.dvc").write_text("outs:\n")
-        committed = package / "architectures" / architecture / "baseline_lock.json"
-        committed.parent.mkdir()
+        # The architecture's archive holds its one published variant.
+        committed = package / f"architectures/{architecture}/family/baseline_lock.json"
+        committed.parent.mkdir(parents=True)
         committed.write_text(newer)
     candidate = tmp_path / "candidate.tar.gz"
     pack(bundle, candidate, lock, operation=operation)
     candidate_lock = tmp_path / "qualification-lock.json"
     candidate_lock.write_text(newer)
-    gfx942_lock = package / "architectures/gfx942/baseline_lock.json"
+    gfx942_lock = package / "architectures/gfx942/family/baseline_lock.json"
     archive, selected = {
         "published": (archives / "gfx942.tar.gz", gfx942_lock),
         "another-architecture": (archives / "gfx950.tar.gz", gfx942_lock),
@@ -3340,19 +3599,24 @@ def test_pinned_correctness_verifies_with_the_selected_lock(
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     registry = gpu_tests.OPERATION.architectures
     architecture = registry.ARCHITECTURES[0]
-    target = registry.get_architecture(architecture)
+    variant = registry.resolve_variant(architecture)
+    target = registry.get_adapter(architecture, variant)
     lock = tmp_path / "qualification-lock.json" if candidate else None
-    locks = []
+    calls = []
 
     def verify_case(self, case, **kwargs):
-        locks.append(kwargs["lock"])
+        calls.append((kwargs["lock"], kwargs["architecture"], kwargs["variant"]))
         return {"torch_imported": False, "old_launches": 2, "current_launches": 2}
+
+    def open_slot(*slot):
+        assert slot == (architecture, variant)
+        return target, tmp_path, {}
 
     monkeypatch.setattr(ReferenceOperation, "verify_case", verify_case)
     config = SimpleNamespace(getoption={"--rocke-reference-lock": lock}.get)
     test = getattr(gpu_tests, f"test_{operation}_correctness_against_qualified_rocke")
-    test(architecture, target.CASES[0], (target, tmp_path, {}), config)
-    assert locks == [lock]
+    test(architecture, variant, target.CASES[0], open_slot, config)
+    assert calls == [(lock, architecture, variant)]
 
 
 @pytest.mark.parametrize(
@@ -3381,12 +3645,19 @@ def test_pinned_correctness_failures_show_the_reported_values(
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
     registry = gpu_tests.OPERATION.architectures
     architecture = registry.ARCHITECTURES[0]
-    target = registry.get_architecture(architecture)
+    variant = registry.resolve_variant(architecture)
+    target = registry.get_adapter(architecture, variant)
     monkeypatch.setattr(
         ReferenceOperation, "verify_case", lambda self, case, **kwargs: report
     )
     config = SimpleNamespace(getoption={"--rocke-reference-lock": None}.get)
     test = getattr(gpu_tests, f"test_{operation}_correctness_against_qualified_rocke")
     with pytest.raises(AssertionError) as error:
-        test(architecture, target.CASES[0], (target, tmp_path, {}), config)
+        test(
+            architecture,
+            variant,
+            target.CASES[0],
+            lambda *slot: (target, tmp_path, {}),
+            config,
+        )
     assert expected in str(error.value)

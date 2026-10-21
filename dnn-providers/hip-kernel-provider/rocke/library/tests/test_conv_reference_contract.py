@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from conv_reference import cli, contract
-from conv_reference.architectures import ARCHITECTURES, get_architecture
+from conv_reference.architectures import ARCHITECTURES, get_adapter, variants
 from conv_reference.contract import (
     Case,
     INPUT_GENERATOR,
@@ -116,7 +116,10 @@ def test_spatial_reference_matches_explicit_patch_sums(stride, dilation, padding
     # Architectures share most geometries; check each distinct case once.
     tuple(
         dict.fromkeys(
-            case for name in ARCHITECTURES for case in get_architecture(name).CASES
+            case
+            for name in ARCHITECTURES
+            for variant in variants(name)
+            for case in get_adapter(name, variant).CASES
         )
     ),
     ids=lambda c: c.id,
@@ -175,7 +178,7 @@ def test_invalid_frozen_scale_rejected(scale):
 
 def _manifest():
     entries = {}
-    for case in get_architecture("gfx942").CASES:
+    for case in get_adapter("gfx942").CASES:
         arrays = make_inputs(case)
         budget = ErrorBudget(case.tolerance, 0.001)
         output = encode(np.ones(case.output_shape), case.dtype)
@@ -218,7 +221,7 @@ def _manifest():
 )
 def test_locked_bundle_rejects_invalid_contracts(tmp_path, change):
     manifest = _manifest()
-    case = get_architecture("gfx942").CASES[0]
+    case = get_adapter("gfx942").CASES[0]
     entry = manifest["cases"][case.id]
     if change == "cohort":
         del manifest["cases"][case.id]
@@ -275,7 +278,7 @@ def test_bundle_target_is_the_physical_processor(device_target, accepted):
 @pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
 def test_bundle_must_record_the_enrolled_cohort_one_to_one(change):
     manifest = _manifest()
-    case = get_architecture("gfx942").CASES[0]
+    case = get_adapter("gfx942").CASES[0]
     entry = manifest["cases"][case.id]
     if change == "missing":
         del manifest["cases"][case.id]
@@ -291,7 +294,7 @@ def test_bundle_must_record_the_enrolled_cohort_one_to_one(change):
 
 
 def test_colliding_case_ids_cannot_share_an_entry(monkeypatch):
-    target = get_architecture("gfx942")
+    target = get_adapter("gfx942")
     # Adapters index ids on import, so a collision fails instead of dropping a case.
     assert list(target.CASE_BY_ID.values()) == list(target.CASES)
     case = target.CASES[0]
@@ -303,7 +306,7 @@ def test_colliding_case_ids_cannot_share_an_entry(monkeypatch):
 @pytest.mark.parametrize("recorded", [None, "gfx942", "gfx9-4-generic"])
 def test_adapter_compiler_target_must_match_the_bundle(monkeypatch, recorded):
     """An adapter that compiles a family code object pins its compiler target."""
-    target = get_architecture("gfx942")
+    target = get_adapter("gfx942")
     monkeypatch.setattr(target, "COMPILER_TARGET", "gfx9-4-generic", raising=False)
     manifest = _manifest()
     if recorded is not None:
@@ -328,7 +331,7 @@ def test_verification_uses_gpu_outputs_and_frozen_scale_only(
     tmp_path, monkeypatch, failure
 ):
     manifest = _manifest()
-    case = get_architecture("gfx942").CASES[0]
+    case = get_adapter("gfx942").CASES[0]
     calls = []
 
     def worker(request, **kwargs):
@@ -373,7 +376,7 @@ def _qualified_cases(architecture):
 
 def _assert_keeps_qualified_cases(architecture):
     """Allow additions, but name any qualified case the cohort no longer has."""
-    ids = [case.id for case in get_architecture(architecture).CASES]
+    ids = [case.id for case in get_adapter(architecture).CASES]
     duplicates = sorted({case_id for case_id in ids if ids.count(case_id) > 1})
     assert not duplicates, f"{architecture} conv case ids repeat: {duplicates}"
     missing = sorted({case.id for case in _qualified_cases(architecture)} - set(ids))
@@ -389,7 +392,7 @@ def _assert_keeps_qualified_cases(architecture):
 def test_cohort_check_allows_additions_and_names_lost_cases(
     monkeypatch, architecture, change
 ):
-    target = get_architecture(architecture)
+    target = get_adapter(architecture)
     # Start from exactly the qualified ids so this checks the guard, not the cohort.
     cases = _qualified_cases(architecture)
     changed = {
@@ -415,7 +418,7 @@ def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
     from dispatch.grouped_convolution import dispatch_conv_grouped, launch_plan_for
     from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
 
-    target = get_architecture(architecture)
+    target = get_adapter(architecture)
     _assert_keeps_qualified_cases(architecture)
     for case in target.CASES:
         if architecture == "gfx942":
@@ -473,7 +476,7 @@ def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
     [
         (architecture, case)
         for architecture in ("gfx942", "gfx950")
-        for case in get_architecture(architecture).CASES
+        for case in get_adapter(architecture).CASES
     ],
     ids=lambda value: value.id if isinstance(value, Case) else value,
 )
@@ -507,7 +510,7 @@ def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(
 
     monkeypatch.setattr(rocke, "compile_kernel", compile_kernel)
     monkeypatch.setattr(rocke.runtime, "KernelLauncher", Launcher)
-    target = get_architecture(architecture)
+    target = get_adapter(architecture)
     prepared = target.prepare(case, str(Path(kernels.__file__).parent.parent))
     target.launch(prepared, {"a": 11, "b": 22, "out": 33})
     code, metadata = target.exported_kernel(prepared)
@@ -547,7 +550,7 @@ def test_qualification_freezes_self_contained_replay_support(
     import sys
 
     baseline = _baseline_snapshot(tmp_path)
-    target = get_architecture("gfx942")
+    target = get_adapter("gfx942")
     case = Case("tiny", "fp16", Hi=1, Wi=1, C=1, K=1, Y=1, X=1, pH=0, pW=0)
     monkeypatch.setattr(target, "CASES", (case,))
 
@@ -596,10 +599,14 @@ from pathlib import Path
 root = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(root))
 import conv_reference.worker
-from conv_reference.architectures import get_architecture
+from conv_reference.architectures import (
+    ARCHITECTURES, get_adapter, get_architecture, variants
+)
 
-get_architecture('gfx942')
-get_architecture('gfx950')
+for architecture in ARCHITECTURES:
+    assert get_architecture(architecture).NAME == architecture
+    for variant in variants(architecture):
+        assert get_adapter(architecture, variant).NAME == architecture
 for name, module in tuple(sys.modules.items()):
     if name.split(".")[0] in ("conv_reference", "reference_common"):
         assert Path(module.__file__).resolve().is_relative_to(root), name
@@ -622,7 +629,7 @@ def test_qualification_failures_name_the_snapshot_case_and_cause(
     tmp_path, monkeypatch, failure
 ):
     baseline = _baseline_snapshot(tmp_path)
-    target = get_architecture("gfx942")
+    target = get_adapter("gfx942")
     case = Case("tiny", "fp16", Hi=1, Wi=1, C=1, K=1, Y=1, X=1, pH=0, pW=0)
     monkeypatch.setattr(target, "CASES", (case,))
 
@@ -642,7 +649,10 @@ def test_qualification_failures_name_the_snapshot_case_and_cause(
     assert "likely cause: " in message and "next step: " in message
     if failure == "worker":
         assert "(qualification) worker failed" in message
-        assert "conv_reference/architectures/gfx942/__init__.py" in message
+        assert (
+            "conv_reference/architectures/gfx942/implicit_gemm_fwd/__init__.py"
+            in message
+        )
         assert message.endswith("worker log")
     else:
         assert "produced 2 different outputs in 2 executions" in message

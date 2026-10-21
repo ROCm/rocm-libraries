@@ -117,7 +117,7 @@ def cross_check(
 
 def main() -> None:
     """Audit reference agreement without a baseline GPU run or bundle promotion."""
-    from .architectures import ARCHITECTURES, get_architecture
+    from .architectures import ARCHITECTURES, get_adapter
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", choices=ARCHITECTURES, required=True)
@@ -126,7 +126,7 @@ def main() -> None:
     args = parser.parse_args()
     validate_device(args.device, args.arch)
     results = {}
-    for case in get_architecture(args.arch).CASES:
+    for case in get_adapter(args.arch).CASES:
         inputs = make_inputs(case)
         results[case.id] = {
             "input_digests": {

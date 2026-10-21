@@ -133,10 +133,12 @@ class ReferenceOperation:
     ``label`` names the operation in messages and ``description`` documents its
     command line. ``contract`` provides ``SCHEMA_VERSION``, ``INPUT_GENERATOR``,
     ``make_inputs``, and ``independent_reference``; ``architectures`` provides
-    ``ARCHITECTURES``, ``get_architecture``, and ``baseline_lock``. ``reference``
-    describes the independent reference's implementation, metric, and input
-    generator in each manifest. Without ``torch``, qualification bounds only the
-    independent reference and offers no ``--torch-reference`` option.
+    ``ARCHITECTURES``, ``resolve_variant``, ``get_adapter``, and ``baseline_lock``.
+    A ``variant`` argument selects one of an architecture's adapters and
+    defaults to its only one. ``reference`` describes the independent
+    reference's implementation, metric, and input generator in each manifest.
+    Without ``torch``, qualification bounds only the independent reference and
+    offers no ``--torch-reference`` option.
     """
 
     name: str
@@ -185,15 +187,17 @@ class ReferenceOperation:
             # parent's own traceback would only repeat it.
             kind = TimeoutError if isinstance(error, TimeoutError) else RuntimeError
             raise kind(
-                self._worker_failure(case, request["architecture"], side, error)
+                self._worker_failure(
+                    case, request["architecture"], request["variant"], side, error
+                )
             ) from None
 
     def _worker_failure(
-        self, case: Any, architecture: str, side: str, error: Exception
+        self, case: Any, architecture: str, variant: str, side: str, error: Exception
     ) -> str:
         adapter = (
             f"library/tests/{self.name}_reference/architectures/{architecture}/"
-            "__init__.py"
+            f"{variant}/__init__.py"
         )
         if side == _BASELINE:
             cause = (
@@ -252,15 +256,17 @@ class ReferenceOperation:
             ),
         )
 
-    def enrolled_cohort_digest(self, architecture: str) -> str:
-        """Digest an architecture's enrolled cohort as its lock's ``cohort_sha256``.
+    def enrolled_cohort_digest(
+        self, architecture: str, variant: str | None = None
+    ) -> str:
+        """Digest a variant's enrolled cohort as its lock's ``cohort_sha256``.
 
         Each case contributes its contract, generated input digests, and
         tolerance, as qualification records them in the manifest. Generating
         inputs needs NumPy but no GPU or bundle data, so a host can tell that
         the adapter's cases are no longer the cohort that the lock pins.
         """
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         return cohort_digest(
             {
                 "case": asdict(case),
@@ -292,10 +298,12 @@ class ReferenceOperation:
         repetitions: int,
         architecture: str = "gfx942",
         *,
+        variant: str | None = None,
         torch_reference: str | None = None,
     ) -> None:
         """Measure the old version's bounds and require deterministic old outputs."""
-        target = self.architectures.get_architecture(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
+        target = self.architectures.get_adapter(architecture, variant)
         if torch_reference is not None:
             if self.torch is None:
                 raise ValueError(f"{self.label} qualification has no Torch reference")
@@ -337,6 +345,7 @@ class ReferenceOperation:
                     {
                         "mode": "source",
                         "architecture": architecture,
+                        "variant": variant,
                         "case": asdict(case),
                         "inputs": str(input_file),
                         "input_digests": input_digests,
@@ -438,28 +447,37 @@ class ReferenceOperation:
         lock_path: Path | None = None,
         *,
         architecture: str = "gfx942",
+        variant: str | None = None,
     ) -> dict:
         """Require the independently pinned manifest, payload, and exact case cohort."""
-        manifest = self._authenticated_manifest(bundle, lock_path, architecture)
-        self.validate_cases(manifest, architecture)
+        manifest = self._authenticated_manifest(
+            bundle, lock_path, architecture, variant
+        )
+        self.validate_cases(manifest, architecture, variant)
         return manifest
 
     def _authenticated_manifest(
-        self, bundle: Path, lock_path: Path | None, architecture: str
+        self,
+        bundle: Path,
+        lock_path: Path | None,
+        architecture: str,
+        variant: str | None = None,
     ) -> dict:
         """Require the pinned manifest and payload; the cohort is checked separately.
 
         A bundle the lock rejects, such as one extracted from an earlier archive,
         fails with the commands that replace it.
         """
-        self.architectures.get_architecture(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
         schema = self.contract.SCHEMA_VERSION
-        lock_path = lock_path or self.architectures.baseline_lock(architecture)
+        lock_path = lock_path or self.architectures.baseline_lock(architecture, variant)
         lock = json.loads(lock_path.read_text())
         if lock["schema"] != schema:
             raise ValueError(f"unsupported {self.label} lock schema")
         if bundle.is_file():
-            raise ValueError(self.bundle_hint(architecture, bundle, lock_path))
+            raise ValueError(
+                self.bundle_hint(architecture, bundle, lock_path, variant=variant)
+            )
         manifest_path = bundle / "manifest.json"
         if not manifest_path.is_file():
             raise ValueError(
@@ -468,6 +486,7 @@ class ReferenceOperation:
                     architecture,
                     bundle,
                     lock_path,
+                    variant,
                 )
             )
         digest = file_digest(manifest_path)
@@ -480,6 +499,7 @@ class ReferenceOperation:
                     architecture,
                     bundle,
                     lock_path,
+                    variant,
                 )
             )
         manifest = json.loads(manifest_path.read_text())
@@ -508,6 +528,7 @@ class ReferenceOperation:
                     architecture,
                     bundle,
                     lock_path,
+                    variant,
                 )
             )
         expected = manifest_operation(self.name)
@@ -528,13 +549,18 @@ class ReferenceOperation:
         return manifest
 
     def _rejected_bundle(
-        self, problem: str, architecture: str, bundle: Path, lock: Path
+        self,
+        problem: str,
+        architecture: str,
+        bundle: Path,
+        lock: Path,
+        variant: str | None = None,
     ) -> str:
         return _triage(
             problem,
             "the extracted bundle is stale (left from an earlier archive), partly "
             "extracted, or modified, or the lock does not belong to it",
-            self.bundle_hint(architecture, bundle, lock, stale=True),
+            self.bundle_hint(architecture, bundle, lock, variant=variant, stale=True),
         )
 
     def bundle_hint(
@@ -543,6 +569,7 @@ class ReferenceOperation:
         bundle: Path,
         lock: Path | None = None,
         *,
+        variant: str | None = None,
         stale: bool = False,
         option: str = "--bundle",
     ) -> str:
@@ -557,9 +584,10 @@ class ReferenceOperation:
         without a committed lock in an installed tree, is unpublished and needs
         a qualified candidate. ``stale`` asks for the directory's removal first,
         since neither unpack nor installation replaces an existing bundle.
-        ``option`` names the setting that selects a bundle.
+        ``option`` names the setting that selects a bundle. ``variant`` selects
+        the committed lock.
         """
-        committed = self.architectures.baseline_lock(architecture)
+        committed = self.architectures.baseline_lock(architecture, variant)
         lock = lock or committed
         if bundle.is_file():
             return self._unpack_hint(bundle, lock, option=option)
@@ -610,10 +638,12 @@ class ReferenceOperation:
             f"    {self._unpack_command(archive, bundle, lock)}"
         )
 
-    def validate_cases(self, manifest: dict, architecture: str) -> None:
+    def validate_cases(
+        self, manifest: dict, architecture: str, variant: str | None = None
+    ) -> None:
         """Preserve the cohort and budgets across qualification and verification."""
         policy = _budget_policy(manifest)
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         keys = match_manifest_cases(manifest["cases"], target.CASES, label=self.label)
         for case in target.CASES:
             entry = manifest["cases"][keys[case.id]]
@@ -621,7 +651,9 @@ class ReferenceOperation:
             if problem is not None:
                 raise ValueError(f"{self.label} {problem}")
 
-    def cohort_differences(self, manifest: dict, architecture: str) -> list[str]:
+    def cohort_differences(
+        self, manifest: dict, architecture: str, variant: str | None = None
+    ) -> list[str]:
         """Describe every way the enrolled cohort differs from a manifest's cases.
 
         This applies ``validate_cases``'s contract matching and per-case checks,
@@ -630,7 +662,7 @@ class ReferenceOperation:
         empty list means verification accepts the manifest's cases.
         """
         policy = _budget_policy(manifest)
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         comparison = compare_manifest_cases(
             manifest["cases"], target.CASES, label=self.label
         )
@@ -687,7 +719,12 @@ class ReferenceOperation:
         return None
 
     def diff_bundle(
-        self, bundle: Path, lock_path: Path | None = None, *, architecture: str
+        self,
+        bundle: Path,
+        lock_path: Path | None = None,
+        *,
+        architecture: str,
+        variant: str | None = None,
     ) -> list[str]:
         """Compare the enrolled cohort with a bundle directory or packed archive.
 
@@ -697,9 +734,9 @@ class ReferenceOperation:
         decompressed or read as tar, such as a truncated fetch or a DVC pointer,
         raises ``ValueError`` with the step that replaces it.
         """
-        lock = lock_path or self.architectures.baseline_lock(architecture)
+        lock = lock_path or self.architectures.baseline_lock(architecture, variant)
         if bundle.is_dir():
-            manifest = self._authenticated_manifest(bundle, lock, architecture)
+            manifest = self._authenticated_manifest(bundle, lock, architecture, variant)
         else:
             with tempfile.TemporaryDirectory(
                 prefix=f"rocke-{self.name}-diff-"
@@ -711,8 +748,10 @@ class ReferenceOperation:
                     raise ValueError(
                         self._unreadable_archive(bundle, architecture, error)
                     ) from None
-                manifest = self._authenticated_manifest(staged, lock, architecture)
-        return self.cohort_differences(manifest, architecture)
+                manifest = self._authenticated_manifest(
+                    staged, lock, architecture, variant
+                )
+        return self.cohort_differences(manifest, architecture, variant)
 
     def _unreadable_archive(
         self, archive: Path, architecture: str, error: Exception
@@ -758,14 +797,19 @@ class ReferenceOperation:
         return archive if archive.is_file() else directory
 
     def manifest_key(
-        self, manifest: dict, case: Any, *, architecture: str = "gfx942"
+        self,
+        manifest: dict,
+        case: Any,
+        *,
+        architecture: str = "gfx942",
+        variant: str | None = None,
     ) -> str:
         """Return the manifest key, which also names the payload directory, for a case.
 
         Published bundles may key cases by an earlier id format; the recorded case
         contract, not the key, identifies the entry.
         """
-        target = self.architectures.get_architecture(architecture)
+        target = self.architectures.get_adapter(architecture, variant)
         keys = match_manifest_cases(manifest["cases"], target.CASES, label=self.label)
         return keys[case.id]
 
@@ -791,6 +835,7 @@ class ReferenceOperation:
         current_root: Path | None = None,
         repetitions: int = 2,
         architecture: str = "gfx942",
+        variant: str | None = None,
     ) -> dict:
         """Run old/current in separate interpreters and check every current output.
 
@@ -803,16 +848,22 @@ class ReferenceOperation:
         """
         if repetitions < 1:
             raise ValueError("verification must execute at least once")
-        target = self.architectures.get_architecture(architecture)
+        variant = self.architectures.resolve_variant(architecture, variant)
+        target = self.architectures.get_adapter(architecture, variant)
         if case not in target.CASES:
             raise ValueError("case is not enrolled for the selected architecture")
-        key = self.manifest_key(manifest, case, architecture=architecture)
+        key = self.manifest_key(
+            manifest, case, architecture=architecture, variant=variant
+        )
         entry = manifest["cases"][key]
         subject = f"{self.label} {architecture} case {case.id}"
         payload = bundle / "payload"
         case_dir = payload / "cases" / key
+        # Source mode runs the variant's adapter. Replay reads only the
+        # processor, so published runners, which predate the variant, ignore it.
         base = {
             "architecture": architecture,
+            "variant": variant,
             "case": asdict(case),
             "input_digests": entry["input_digests"],
             "repetitions": repetitions,
@@ -904,7 +955,7 @@ class ReferenceOperation:
                 budget.check(distance, metric=self.metric.name)
             except AssertionError as error:
                 rerun = self._rerun_command(
-                    case, architecture, bundle, lock, current_root
+                    case, architecture, variant, bundle, lock, current_root
                 )
                 raise AssertionError(
                     _triage(
@@ -1126,7 +1177,7 @@ class ReferenceOperation:
             self._verify(parser, args)
 
     def _list_cases(self, architecture: str, *, as_json: bool) -> None:
-        cases = self.architectures.get_architecture(architecture).CASES
+        cases = self.architectures.get_adapter(architecture).CASES
         if as_json:
             listing = {
                 "operation": self.name,
@@ -1200,7 +1251,7 @@ class ReferenceOperation:
                 )
         with self._bundle_errors(parser, args.command):
             differences = self.diff_bundle(bundle, lock, architecture=args.arch)
-        cases = self.architectures.get_architecture(args.arch).CASES
+        cases = self.architectures.get_adapter(args.arch).CASES
         if not differences:
             print(
                 f"{self.label} {args.arch}: all {len(cases)} enrolled cases match "
@@ -1228,7 +1279,7 @@ class ReferenceOperation:
             parser.error(self._unpack_hint(bundle, lock))
         if not bundle.is_dir():
             parser.error(f"bundle directory not found: {_shown(bundle)}")
-        target = self.architectures.get_architecture(args.arch)
+        target = self.architectures.get_adapter(args.arch)
         cases = target.CASES
         if args.cases:
             unknown = sorted(set(args.cases) - {case.id for case in cases})
@@ -1279,6 +1330,7 @@ class ReferenceOperation:
         self,
         case: Any,
         architecture: str,
+        variant: str,
         bundle: Path,
         lock: Path | None,
         current_root: Path | None,
@@ -1290,7 +1342,7 @@ class ReferenceOperation:
         installed beside the operation package, so its path is valid in source
         and installed trees.
         """
-        committed = self.architectures.baseline_lock(architecture)
+        committed = self.architectures.baseline_lock(architecture, variant)
         candidate = (
             []
             if lock is None or lock.resolve() == committed.resolve()

@@ -14,4 +14,7 @@ _REGISTRY = AdapterRegistry(
 )
 ARCHITECTURES = _REGISTRY.architectures
 get_architecture = _REGISTRY.get_architecture
+variants = _REGISTRY.variants
+resolve_variant = _REGISTRY.resolve_variant
+get_adapter = _REGISTRY.get_adapter
 baseline_lock = _REGISTRY.baseline_lock
