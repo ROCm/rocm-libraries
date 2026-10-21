@@ -177,9 +177,11 @@ at one tier — e.g., `./hipsparse-test --gtest_filter=*quick*csrmv*` should fin
 | CUDA version gate | n/a | 12.8 → `cuda/12.8/`; 13.x → `cuda/13/`; otherwise no test data is generated |
 | Jenkins lane | `precheckin.groovy` (`*checkin*`) | `precheckin-cuda.groovy` (`./install.sh -c --cuda`, filter `*checkin*csrmv*`) |
 
-**Test data / matrices:** `cmake/ClientMatrices.cmake` downloads **19 SuiteSparse** matrices (e.g.
-`scircuit`, `nos1`–`nos7`, `amazon0312`, `webbase-1M`) as `.bin` (mirror overridable via
-`HIPSPARSE_TEST_MIRROR`). Runtime resolution: installed data path `../share/hipsparse/test/` or the
+**Test data / matrices:** `cmake/ClientMatrices.cmake` converts **19 SuiteSparse** matrices (e.g.
+`scircuit`, `nos1`–`nos7`, `amazon0312`, `webbase-1M`) to `.bin`. The `.tar.gz` archives are stored
+with DVC in `clients/matrices/` (remote `sparse-matrices`; run
+`dvc pull -R projects/hipsparse/clients/matrices`). Only with `ALLOW_FETCH_DEPS=ON` are missing
+archives downloaded from SuiteSparse (mirror overridable via `HIPSPARSE_TEST_MIRROR`). Runtime resolution: installed data path `../share/hipsparse/test/` or the
 executable directory, and matrices via `--matrices-dir` or `HIPSPARSE_CLIENTS_MATRICES_DIR`.
 
 **What requires GPU hardware:** all numerical-correctness cases.

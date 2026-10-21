@@ -46,7 +46,12 @@ To download ROCm CMake and GoogleTest when they aren't installed, configure with
 This requires network access during configuration.
 If GoogleTest isn't installed, you can instead build it from a local source tree without network access
 by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
-Building the tests still downloads the test matrices unless ``CMAKE_MATRICES_DIR`` points at a directory that contains them.
+
+The tests need 19 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
+Before building the tests, run ``dvc pull -R projects/hipsparse/clients/matrices`` from the root of the rocm-libraries repository.
+Reading from the DVC storage doesn't require credentials.
+Alternatively, point ``CMAKE_MATRICES_DIR`` at a directory with the converted ``.bin`` files,
+or configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
 
 Downloading hipSPARSE
 -------------------------
