@@ -401,6 +401,16 @@ namespace
             size["streamKForceDPOnly"] = object(policy.legacyForceDP);
         }
 
+        /// A selector equal to what an absent key means is not written at all,
+        /// so presence is only required of the other values.
+        void expectSelector(const char* key, const char* value, const char* absent)
+        {
+            if(std::string(value) == absent)
+                EXPECT_EQ(size.count(key), 0u) << key << " means " << absent << " when absent";
+            else
+                EXPECT_EQ(size.at(key).template as<std::string>(), value);
+        }
+
         void expectPolicy(const SizeMapping& value, const PolicyCase& policy)
         {
             EXPECT_EQ(std::string(toString(value.tileProcessingStrategy)), policy.strategy);
@@ -456,8 +466,8 @@ namespace
         auto decoded = readSize();
         expectPolicy(decoded, GetParam());
         size = output(decoded);
-        EXPECT_EQ(size.at("tileProcessingStrategy").as<std::string>(), GetParam().strategy);
-        EXPECT_EQ(size.at("workAssignment").as<std::string>(), GetParam().assignment);
+        expectSelector("tileProcessingStrategy", GetParam().strategy, "None");
+        expectSelector("workAssignment", GetParam().assignment, "StaticGrid");
         EXPECT_EQ(size.count("streamK"), 0u);
         EXPECT_EQ(size.count("streamKForceDPOnly"), 0u);
         expectPolicy(readSize(), GetParam());

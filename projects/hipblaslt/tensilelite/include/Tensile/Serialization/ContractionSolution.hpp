@@ -142,15 +142,15 @@ namespace TensileLite
                 iot::mapRequired(io, "workGroupMapping", s.workGroupMapping);
 
                 iot::mapOptional(io, "packBatchDims", s.packBatchDims);
-                iot::mapOptional(io, "packSummationDims", s.packSummationDims);
+                iot::mapOptional(io, "packSummationDims", s.packSummationDims, 0);
                 iot::mapOptional(io, "magicDivAlg", s.magicDivAlg);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
                 bool hasStrategy = !iot::outputting(io) && iot::hasKey(io, "tileProcessingStrategy");
                 bool hasAssignment = !iot::outputting(io) && iot::hasKey(io, "workAssignment");
                 std::string strategy = iot::outputting(io) ? toString(s.tileProcessingStrategy) : "None";
                 std::string assignment = iot::outputting(io) ? toString(s.workAssignment) : "StaticGrid";
-                iot::mapOptional(io, "tileProcessingStrategy", strategy);
-                iot::mapOptional(io, "workAssignment", assignment);
+                iot::mapOptional(io, "tileProcessingStrategy", strategy, std::string("None"));
+                iot::mapOptional(io, "workAssignment", assignment, std::string("StaticGrid"));
                 if(!iot::outputting(io))
                 {
                     // Validate names before ignoring inactive assignments or
@@ -193,8 +193,8 @@ namespace TensileLite
                     s.validateExecutionPolicy();
                 }
                 iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);
-                iot::mapOptional(io, "persistentKernel", s.persistentKernel);
-                iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch);
+                iot::mapOptional(io, "persistentKernel", s.persistentKernel, 0);
+                iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch, false);
                 iot::mapRequired(io, "sourceKernel", s.sourceKernel);
 
                 iot::mapRequired(io, "globalAccumulation", s.globalAccumulation);
@@ -223,7 +223,7 @@ namespace TensileLite
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
-                iot::mapOptional(io, "SourceSwap", s.SourceSwap);
+                iot::mapOptional(io, "SourceSwap", s.SourceSwap, false);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
                 iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
                 iot::mapRequired(io, "WaveSeparateGlobalReadB", s.WaveSeparateGlobalReadB);
