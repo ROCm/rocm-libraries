@@ -171,6 +171,37 @@ CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 # which have no factor of 9 to chase, and widening all three directions costs
 # several times the disk for no measured gain.
 CACHE_WGRAD_EXTRA_TILE_MN: Tuple[int, ...] = (144, 192)
+
+# ---- wave32 (WMMA) wgrad geometries ---------------------------------------
+# The WMMA wgrad cache is built on these (tile_m, tile_n, tile_k, warp_m,
+# warp_n) only, not on the whole ladder above. Profiling the wgrad layers of
+# the reference corpora over a pruned grid (tile_m 32..256 bounded by kpg,
+# tile_n 64..256, tile_k 32/64, 4 or 8 waves), with the cached kernels
+# (split_k = 1 default epilogue, split-K cshuffle), each of these was the
+# fastest geometry of at least one layer, and together they hold the fastest
+# measured time of every layer. The rest of the ladder never won one; the JIT
+# sweep still walks it.
+CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
+    (32, 64, 32, 2, 4),
+    (32, 64, 64, 2, 2),
+    (32, 64, 64, 2, 4),
+    (32, 128, 32, 2, 2),
+    (32, 128, 64, 1, 4),
+    (32, 128, 64, 1, 8),
+    (32, 256, 32, 1, 8),
+    (32, 256, 64, 1, 4),
+    (64, 64, 64, 2, 4),
+    (64, 64, 64, 4, 2),
+    (64, 128, 64, 2, 2),
+    (64, 128, 64, 2, 4),
+    (128, 64, 64, 4, 2),
+    (128, 128, 32, 1, 4),
+    (128, 128, 32, 2, 2),
+    (128, 128, 64, 2, 2),
+    (128, 128, 64, 4, 2),
+    (256, 64, 64, 4, 2),
+    (256, 128, 64, 4, 2),
+)
 CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
@@ -436,6 +467,13 @@ def _geometries(
         if warp_m * wt > tile_m or warp_n * wt > tile_n:
             continue
         if tile_m % (warp_m * wt) or tile_n % (warp_n * wt):
+            continue
+        if (
+            direction == "wgrad"
+            and mma_family == "wmma"
+            and (tile_m, tile_n, tile_k, warp_m, warp_n)
+            not in CACHE_WGRAD_WMMA_GEOMETRIES
+        ):
             continue
         acc_regs = (tile_m // warp_m) * (tile_n // warp_n) // target.wave_size
         if acc_regs > _MAX_ACC_REGS:

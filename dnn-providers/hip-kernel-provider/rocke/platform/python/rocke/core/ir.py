@@ -565,6 +565,14 @@ def _check_i32(op: str, field: str, value: int) -> int:
     return v
 
 
+# gfx12+ atomic cache-policy immediate (bits [2:0] th, [4:3] scope) for a
+# device-scope cascade add: th = TH_ATOMIC_CASCADE (4), scope = SCOPE_DEV (2).
+# The WGP and L2 caches accumulate the adds locally and write the sum back
+# once, which sheds most of the global RMW traffic of a cross-workgroup
+# reduction. The destination must be pre-zeroed.
+CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3)
+
+
 def _check_cachepolicy(op: str, value: int) -> int:
     """Validate the gfx12+ five-bit cache-policy immediate."""
     v = int(value)
@@ -5526,6 +5534,31 @@ class IRBuilder:
             "tile.buffer_store_vN_f32",
             [rsrc, voffset, soffset, value],
             attrs={"dwords": int(n)},
+        )
+
+    def buffer_atomic_fadd_f32(
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """f32 atomic add through a buffer resource (``raw_ptr_buffer_atomic_fadd``).
+
+        ``voffset`` / ``soffset`` are byte offsets; an out-of-range voffset is
+        dropped by the resource's range check. ``cachepolicy`` is the raw
+        immediate the intrinsic takes -- on gfx12+ bits [2:0] are th and [4:3]
+        scope, e.g. :data:`CPOL_ATOMIC_CASCADE_DEV`. The returned pre-add value
+        is discarded, so the backend selects the no-return form.
+        """
+        self._op(
+            "tile.buffer_atomic_fadd_f32",
+            [rsrc, voffset, soffset, value],
+            attrs={
+                "cachepolicy": _check_cachepolicy("buffer_atomic_fadd_f32", cachepolicy)
+            },
         )
 
     def zero_vec_f16(self, n: int) -> Value:

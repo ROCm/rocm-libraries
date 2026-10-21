@@ -119,6 +119,7 @@
     "minnum.f64": "llvm.minnum.f64",
     "mov.dpp8.f32": "llvm.amdgcn.mov.dpp8.f32",
     "mov.dpp8.i32": "llvm.amdgcn.mov.dpp8.i32",
+    "raw.ptr.buffer.atomic.fadd.f32": "llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32",
     "raw.ptr.buffer.load.async.lds": "llvm.amdgcn.raw.ptr.buffer.load.async.lds",
     "raw.ptr.buffer.load.f16": "llvm.amdgcn.raw.ptr.buffer.load.f16",
     "raw.ptr.buffer.load.i16": "llvm.amdgcn.raw.ptr.buffer.load.i16",
@@ -4576,6 +4577,40 @@
         "verified_on": "llvm23"
       }
     },
+    "raw.ptr.buffer.atomic.fadd.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
     "raw.ptr.buffer.load.async.lds": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Do not know how to expand this operator's operand!",
@@ -7698,7 +7733,7 @@
       "gfx942",
       "gfx950"
     ],
-    "clang": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 8f497e0992fb7513f7f78a6f6b6f1056c375e961)",
+    "clang": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git d177931e65e6057dca59f1c5b95e643d29876db3)",
     "flavor": "llvm23",
     "generator": 6,
     "probe_cflags": [

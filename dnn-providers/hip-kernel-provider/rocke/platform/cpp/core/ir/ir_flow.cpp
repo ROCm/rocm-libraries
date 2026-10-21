@@ -1419,6 +1419,34 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_F32, ops, 4, NULL);
 }
 
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "buffer_atomic_fadd_f32 cachepolicy must be in 0..31, got %d",
+                        cachepolicy);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", (int64_t)cachepolicy);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32, ops, 4, &attrs);
+}
+
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,

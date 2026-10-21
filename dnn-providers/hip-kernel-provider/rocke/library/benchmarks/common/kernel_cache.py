@@ -136,6 +136,8 @@ _DIRECTION_DIRS: Dict[str, str] = {
     # The split-C reduction of the non-grouped forward kernel, found the same
     # way from a split entry.
     "direct_fwd_helper": "conv_direct_fwd_helpers",
+    # Stage 2 fold of the two-stage direct wgrad kernels, found the same way.
+    "direct_wgrad_helper": "conv_direct_wgrad_helpers",
 }
 
 

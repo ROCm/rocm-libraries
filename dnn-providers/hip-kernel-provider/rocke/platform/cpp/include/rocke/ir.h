@@ -475,6 +475,10 @@ typedef enum rocke_opcode
     /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
     ROCKE_OP_ARITH_FDOT2,
 
+    /* tile.buffer_atomic_fadd_f32 (raw_ptr_buffer_atomic_fadd with a cache
+     * policy). Appended so no existing opcode index shifts. */
+    ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1596,6 +1600,14 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+/* IRBuilder.buffer_atomic_fadd_f32: f32 atomic add through a buffer resource;
+ * cachepolicy is the raw immediate (0..31; gfx12+: th bits [2:0], scope [4:3]). */
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy);
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,

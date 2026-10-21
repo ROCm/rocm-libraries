@@ -29,12 +29,17 @@ __all__ = [
     "DIRECT_MFMA_DGRAD",
     "DIRECT_MFMA_HELPERS",
     "DIRECT_SPLIT_REDUCE",
+    "DIRECT_WGRAD_REDUCE",
+    "DIRECT_WGRAD_TWO_STAGE",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
     "direct_spec_for_problem",
     "direct_wgrad_fold_knobs",
     "direct_uses_coalesced_weights",
+    "direct_wgrad_reduce_spec",
+    "direct_wgrad_replicas",
+    "direct_wgrad_workspaces",
     "make_direct_spec",
     "select_direct_kernel_builder",
     "validate_direct_spec",
@@ -84,6 +89,19 @@ _HELPERS = (
     DIRECT_DGRAD_TRANSPOSE_RTC,
     DIRECT_DGRAD_REORGANIZE_RTC,
     DIRECT_WGRAD_FOLD,
+)
+# Stage 2 of the two-stage direct wgrad kernels: folds the ws_replicas fp32
+# scratch slabs into dW. Cached as its own entry (one per replica count) and
+# found by exact identity, like the dgrad weight transforms.
+DIRECT_WGRAD_REDUCE = "direct_wgrad_reduce"
+# Wgrad variants that write a replicated scratch which DIRECT_WGRAD_REDUCE
+# folds (when their ws_replicas > 1). Each one's scratch is
+# ``[groups][ws_replicas][wg_M][wg_N]`` fp32 (direct_wgrad_reduce_dims).
+DIRECT_WGRAD_TWO_STAGE = (
+    "direct_wgrad",
+    "direct_wgrad_small_c",
+    "direct_depthwise_wgrad",
+    "direct_depthwise_wgrad_hankel",
 )
 # Register budget for the MFMA dgrad fprop pass's preloaded weights and
 # accumulators (see direct_mfma_knobs_reason): three quarters of the 512-VGPR
@@ -273,6 +291,26 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return DwWgradFoldSpec(name="rocke_direct_wgrad_fold", **knobs)
     if variant == DIRECT_SPLIT_REDUCE:
         return dn.DirectSplitReduceSpec(dtype=problem.dtype, **knobs)
+    if variant == "direct_wgrad_small_c":
+        # Bakes its channel counts: the im2col decode walks the (s, c) run.
+        return dc.DirectConvWgradSpec(
+            problem=problem,
+            name="rocke_direct_conv_wgrad_sc",
+            wave_size=32,
+            mfma_k=32,
+            small_c=True,
+            **knobs,
+        )
+    if variant == "direct_depthwise_wgrad":
+        return dc.DirectDepthwiseWgradSpec(
+            problem=problem, name="rocke_direct_dw_wgrad", **knobs
+        )
+    if variant == "direct_depthwise_wgrad_hankel":
+        return dc.DirectDepthwiseWgradHankelSpec(
+            problem=problem, name="rocke_direct_dw_wgrad_hankel", **knobs
+        )
+    if variant == DIRECT_WGRAD_REDUCE:
+        return direct_wgrad_reduce_spec("direct_wgrad", problem, knobs["ws_replicas"])
     if variant == DIRECT_DGRAD_TRANSPOSE:
         return dc.DirectTransposeWeightsDgradSpec(problem=problem)
     if variant == DIRECT_DGRAD_REORGANIZE:
@@ -401,6 +439,55 @@ def direct_dgrad_workspaces(problem, knobs: dict) -> dict[str, int]:
     return workspaces
 
 
+def direct_wgrad_replicas(spec) -> int:
+    """Scratch replicas a wgrad ``spec`` writes; 1 means it adds into dW itself."""
+    return getattr(spec, "ws_replicas", 1)
+
+
+def direct_wgrad_reduce_dims(variant: str, problem) -> tuple[int, int, int]:
+    """``(wg_M, wg_N, groups)`` of a two-stage wgrad ``variant``'s scratch.
+
+    One slab per replica is dW's own layout: KRSC rows of ``kpg`` by
+    ``KH * KW * cpg`` per group, or ``C`` by ``KH * KW`` for the depthwise
+    kernels, which index the channel as the row of a single group.
+    """
+    if variant in ("direct_depthwise_wgrad", "direct_depthwise_wgrad_hankel"):
+        return problem.groups, problem.KH * problem.KW, 1
+    return problem.kpg, problem.KH * problem.KW * problem.cpg, problem.groups
+
+
+def direct_wgrad_reduce_spec(variant: str, problem, ws_replicas: int):
+    """The Stage 2 spec folding ``variant``'s scratch for ``problem`` into dW.
+
+    The fold reads its extents from the kernargs, so its code depends on the
+    replica count alone; the problem sets the launch grid (and the name of a
+    fresh build). dW stays fp32, the direct wgrad's output.
+    """
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+    from kernels.common.conv_wgrad_workspace_reduce import WgradReduceSpec
+
+    wg_m, wg_n, groups = direct_wgrad_reduce_dims(variant, problem)
+    view = ConvProblem(
+        N=1, Hi=1, Wi=1, C=wg_n * groups, K=wg_m * groups, Y=1, X=1, groups=groups
+    )
+    return WgradReduceSpec(
+        problem=view,
+        dtype_d="fp32",
+        name="rocke_direct_wgrad_reduce",
+        groups=groups,
+        ws_replicas=ws_replicas,
+    )
+
+
+def direct_wgrad_workspaces(variant: str, spec) -> dict[str, int]:
+    """Scratch buffer -> bytes of a two-stage wgrad ``spec`` (none at R == 1)."""
+    replicas = direct_wgrad_replicas(spec)
+    if replicas == 1:
+        return {}
+    wg_m, wg_n, groups = direct_wgrad_reduce_dims(variant, spec.problem)
+    return {"ws_wgrad": 4 * groups * replicas * wg_m * wg_n}
+
+
 def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
     """``(ok, reason)`` for ``spec`` on ``arch``, from the kernel's own validator."""
     from kernels.common import conv_direct_grouped as dc
@@ -437,7 +524,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
         if variant == "direct_grouped_dgrad_4c":
             spec.validate()
             return dc.is_valid_spec_4c(spec, arch=arch)
-        if variant == "direct_wgrad":
+        if variant in ("direct_wgrad", "direct_wgrad_small_c"):
             spec.validate()
             return dc.is_valid_wgrad_spec(spec, arch=arch)
         if variant == "direct_wgrad_tiled":
@@ -470,7 +557,13 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             )
 
             return is_valid_grouped_wgrad_mfma_spec(spec, arch=arch)
-        if variant in _HELPERS:
+        if variant == "direct_depthwise_wgrad":
+            spec.validate()
+            return dc.is_valid_depthwise_wgrad_spec(spec, arch=arch)
+        if variant == "direct_depthwise_wgrad_hankel":
+            spec.validate()
+            return dc.is_valid_depthwise_wgrad_hankel_spec(spec, arch=arch)
+        if variant in _HELPERS or variant == DIRECT_WGRAD_REDUCE:
             return True, "ok"
         if variant == DIRECT_SPLIT_REDUCE:
             spec.validate()
@@ -497,6 +590,9 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_nongrouped as dn
     from kernels.common import conv_direct_wgrad_gather as wg
     from kernels.common import conv_direct_wgrad_tiled as wt
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        build_conv_wgrad_workspace_reduce,
+    )
 
     builders = {
         DIRECT_DGRAD_WMMA: dwm.build_direct_dgrad_wmma,
@@ -522,6 +618,10 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_grouped_dgrad_4c": dc.build_direct_conv_4c,
         "direct_grouped_dgrad_fused": dc.build_direct_conv,
         "direct_wgrad": dc.build_direct_conv_wgrad,
+        "direct_wgrad_small_c": dc.build_direct_conv_wgrad,
+        "direct_depthwise_wgrad": dc.build_direct_depthwise_wgrad,
+        "direct_depthwise_wgrad_hankel": dc.build_direct_depthwise_wgrad_hankel,
+        DIRECT_WGRAD_REDUCE: build_conv_wgrad_workspace_reduce,
         DIRECT_DGRAD_TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
         DIRECT_DGRAD_REORGANIZE: dc.build_direct_reorganize_weights,
         DIRECT_DGRAD_TRANSPOSE_RTC: dc.build_direct_transpose_weights_dgrad,

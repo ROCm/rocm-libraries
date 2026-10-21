@@ -146,6 +146,9 @@ def test_every_capability_row_is_built(jobs):
             # No tuning for this arch at all (see the gfx1250 test below).
             assert not any(True for _ in _knob_grid(variant, _ARCH, "fp16"))
             continue
+        if not any(True for _ in _knob_grid(variant, _ARCH, "fp16")):
+            # A wave32-only wgrad variant (see the gfx1250 wgrad tests below).
+            continue
         for c in caps_list:
             assert (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg) in built, (variant, c)
 
@@ -1709,3 +1712,144 @@ def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
         (step,) = plan.steps
         waves = json.loads(plan.identity.knobs)["block_waves"]
         assert step.block == (waves * 32, 1, 1), plan.identity.label()
+
+
+# ---------------------------------------------------------------------------
+# gfx1250 (wave32) wgrad: image-per-block, small-C stems and depthwise, all
+# two-stage (replicated fp32 scratch + a cached reduce helper)
+# ---------------------------------------------------------------------------
+
+_W32 = "gfx1250"
+_W32_WGRAD = (
+    "direct_wgrad",
+    "direct_wgrad_small_c",
+    "direct_depthwise_wgrad",
+    "direct_depthwise_wgrad_hankel",
+)
+
+
+@pytest.fixture(scope="module")
+def w32_jobs():
+    return dks.enumerate_direct_jobs(
+        arch=_W32, target=ArchTarget.from_gfx(_W32), directions=("wgrad",)
+    )
+
+
+@pytest.fixture
+def w32_cache(tmp_path, w32_jobs):
+    c = KernelCache(tmp_path, _W32)
+    for job in w32_jobs:
+        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
+    return c
+
+
+def test_w32_wgrad_rows_are_built_with_their_reduce_helpers(w32_jobs):
+    from kernels.conv.direct_variants import DIRECT_WGRAD_REDUCE
+
+    built = {
+        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        + (j.identity.stride_h, j.identity.cpg, j.identity.kpg)
+        for j in w32_jobs
+    }
+    for variant in _W32_WGRAD:
+        for c in dks.DIRECT_CAPABILITIES[variant][1]:
+            row = (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+            if variant == "direct_wgrad" and c.KH > 3:
+                # The image kernel's accumulators and fragments of a 5x5 tap
+                # set already pass its VGPR budget: wave32 serves 3x3 only.
+                assert row not in built, row
+                continue
+            assert row in built, row
+    replicas = {
+        json.loads(j.identity.knobs).get("ws_replicas", 1)
+        for j in w32_jobs
+        if j.identity.algorithm in _W32_WGRAD
+    }
+    helpers = {
+        json.loads(j.identity.knobs)["ws_replicas"]
+        for j in w32_jobs
+        if j.identity.algorithm == DIRECT_WGRAD_REDUCE
+    }
+    assert helpers == replicas - {1}
+    for job in w32_jobs:
+        # Every job reads back off its identity (what --compile-all rebuilds).
+        assert dks.direct_job_for_identity(job.identity) == job
+
+
+@pytest.mark.parametrize(
+    "problem,variant",
+    [
+        (_problem(groups=1, cpg=64, kpg=64), "direct_wgrad"),
+        (_problem(groups=4, cpg=32, kpg=32, PAD=0), "direct_wgrad"),
+        (
+            DirectConvProblem(
+                N=2, H=64, W=64, groups=1, cpg=3, kpg=64, KH=7, KW=7, PAD=3, stride=2
+            ),
+            "direct_wgrad_small_c",
+        ),
+        (
+            DirectConvProblem(
+                N=2, H=32, W=32, groups=96, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+            ),
+            "direct_depthwise_wgrad",
+        ),
+        (
+            DirectConvProblem(
+                N=2, H=32, W=32, groups=6, cpg=1, kpg=1, KH=11, KW=11, PAD=5, stride=1
+            ),
+            "direct_depthwise_wgrad_hankel",
+        ),
+    ],
+)
+def test_w32_two_stage_wgrad_plans(w32_cache, problem, variant):
+    """A two-stage kernel writes the zeroed scratch, the reduce helper folds it
+    into dW, and both steps pack against their signatures."""
+    from kernels.conv.direct_variants import direct_wgrad_reduce_dims
+
+    plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+    plans = [p for p in plans if p.identity.algorithm == variant]
+    assert plans
+    wg_m, wg_n, groups = direct_wgrad_reduce_dims(variant, problem)
+    names = ("dy", "x", "dw", "ws_wgrad")
+    ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
+    sizes = {n: 1 << 20 for n in names}
+    for plan in plans:
+        replicas = json.loads(plan.identity.knobs).get("ws_replicas", 1)
+        if replicas == 1:
+            (step,) = plan.steps
+            assert step.buffers == ("dy", "x", "dw")
+            continue
+        conv, fold = plan.steps
+        assert conv.buffers == ("dy", "x", "ws_wgrad")
+        assert fold.buffers == ("ws_wgrad", None, "dw")
+        assert plan.zeroed == ("ws_wgrad",)
+        assert plan.workspaces["ws_wgrad"] == 4 * groups * replicas * wg_m * wg_n
+        assert dict(fold.scalars) == {"wg_M": wg_m, "wg_N": wg_n, "groups": groups}
+        for step in plan.steps:
+            compile_packer(step.signature)(dks.launch_values(step, ptrs, sizes))
+            assert all(g > 0 for g in step.grid)
+
+
+def test_w32_depthwise_wgrad_channels_are_runtime(w32_cache):
+    """One depthwise binary serves every channel count its lane width divides."""
+    seen = []
+    for groups in (96, 384, 1536):
+        problem = DirectConvProblem(
+            N=2, H=16, W=16, groups=groups, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=1
+        )
+        plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+        seen.append({p.identity for p in plans if "depthwise" in p.identity.algorithm})
+    assert seen[0] and seen[0] == seen[1] == seen[2]
+
+
+def test_w32_small_c_serves_only_its_stems(w32_cache):
+    stem = dict(N=2, H=64, W=64, groups=1, cpg=3, KH=3, KW=3, PAD=1, stride=2)
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=32, **stem), "wgrad", _W32
+    )
+    assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+    # A K the cache has no stem row for (channels are baked).
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=40, **stem), "wgrad", _W32
+    )
+    assert not any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
