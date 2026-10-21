@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from reference_common.cases import match_manifest_cases
 from reference_common.source import snapshot
 from reference_common.runner import run_worker
 from reference_common.targets import processor_from_target_id
@@ -234,10 +235,9 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
     if policy not in (None, "max-reference-bound-v1"):
         raise ValueError("unsupported reference budget policy")
     target = get_architecture(architecture)
-    if set(manifest["cases"]) != {case.id for case in target.CASES}:
-        raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
+    keys = match_manifest_cases(manifest["cases"], target.CASES, label="SDPA")
     for case in target.CASES:
-        entry = manifest["cases"][case.id]
+        entry = manifest["cases"][keys[case.id]]
         if processor_from_target_id(entry["device_target"]) != architecture:
             raise ValueError(f"SDPA bundle targets a different architecture: {case.id}")
         compiler_target = getattr(target, "COMPILER_TARGET", None)
@@ -246,8 +246,6 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
             and entry["kernel"].get("compiler_target") != compiler_target
         ):
             raise ValueError(f"SDPA bundle has a different compiler target: {case.id}")
-        if entry["case"] != asdict(case):
-            raise ValueError(f"SDPA case contract changed: {case.id}")
         budget = ErrorBudget(**entry["budget"])
         if (
             budget.tolerance != case.tolerance
@@ -255,6 +253,17 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
             or entry["comparison_limit"] != budget.comparison_limit
         ):
             raise ValueError(f"SDPA tolerance or budget changed: {case.id}")
+
+
+def manifest_key(manifest: dict, case: Case, *, architecture: str = "gfx942") -> str:
+    """Return the manifest key, which also names the payload directory, for a case.
+
+    Published bundles may key cases by an earlier id format; the recorded case
+    contract, not the key, identifies the entry.
+    """
+    target = get_architecture(architecture)
+    keys = match_manifest_cases(manifest["cases"], target.CASES, label="SDPA")
+    return keys[case.id]
 
 
 def _current_paths(current_root: Path | None) -> tuple[Path, Path]:
@@ -283,9 +292,10 @@ def verify_case(
     target = get_architecture(architecture)
     if case not in target.CASES:
         raise ValueError("case is not enrolled for the selected architecture")
-    entry = manifest["cases"][case.id]
+    key = manifest_key(manifest, case, architecture=architecture)
+    entry = manifest["cases"][key]
     payload = bundle / "payload"
-    case_dir = payload / "cases" / case.id
+    case_dir = payload / "cases" / key
     base = {
         "architecture": architecture,
         "case": asdict(case),

@@ -238,6 +238,116 @@ def test_even_a_new_lock_cannot_silently_change_the_test_contract(tmp_path, chan
         load_bundle(tmp_path, tmp_path / "lock.json")
 
 
+def test_case_ids_name_batch_and_sequence_length():
+    case = CASES[0]
+    assert case.id == "fp16-d128-h16-kv4-default-causal-b1-s512"
+    variants = (case, replace(case, batch=2), replace(case, sequence_length=1024))
+    assert len({variant.id for variant in variants}) == len(variants)
+
+
+@pytest.mark.parametrize("architecture", ARCHITECTURES)
+def test_every_enrolled_case_has_a_distinct_id(architecture):
+    from reference_common.cases import index_cases
+
+    # Adapters index ids on import, so a collision fails instead of dropping a case.
+    target = get_architecture(architecture)
+    assert list(target.CASE_BY_ID.values()) == list(target.CASES)
+    with pytest.raises(ValueError, match="duplicate SDPA case id"):
+        index_cases((*target.CASES, target.CASES[0]), label="SDPA")
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
+def test_bundle_must_record_the_enrolled_cohort_one_to_one(tmp_path, change):
+    manifest = _bundle(tmp_path)
+    case = CASES[0]
+    entry = manifest["cases"][case.id]
+    if change == "missing":
+        del manifest["cases"][case.id]
+        expected = rf"missing: {case.id} \(.*sequence_length=512\); extra: none"
+    elif change == "extra":
+        variant = asdict(replace(case, sequence_length=1024))
+        manifest["cases"]["variant"] = dict(entry, case=variant)
+        expected = r"missing: none; extra: variant \(.*sequence_length=1024\)"
+    else:
+        manifest["cases"]["copy"] = entry
+        expected = rf"records case {case.id} more than once: copy, {case.id}$"
+    _lock(tmp_path, manifest)
+    with pytest.raises(ValueError, match=expected):
+        load_bundle(tmp_path, tmp_path / "lock.json")
+
+
+def _published_id(case):
+    """The id format of the published bundles, which omits batch and length."""
+    grid = "persistent" if case.persistent else "default"
+    mask = "causal" if case.causal else "full"
+    return (
+        f"{case.dtype}-d{case.head_dim}-h{case.query_heads}"
+        f"-kv{case.kv_heads}-{grid}-{mask}"
+    )
+
+
+@pytest.mark.parametrize("architecture", ARCHITECTURES)
+def test_bundle_keyed_by_published_ids_loads_and_replays(
+    tmp_path, monkeypatch, architecture
+):
+    from sdpa_reference import cli
+
+    manifest = _bundle(tmp_path, architecture)
+    cases = get_architecture(architecture).CASES
+    manifest["cases"] = {
+        _published_id(case): manifest["cases"][case.id] for case in cases
+    }
+    _lock(tmp_path, manifest)
+    assert (
+        load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
+        == manifest
+    )
+    case = cases[-1]
+    key = _published_id(case)
+    assert cli.manifest_key(manifest, case, architecture=architecture) == key
+    entry = manifest["cases"][key]
+    entry["input_digests"] = {
+        name: array_digest(a) for name, a in make_inputs(case).items()
+    }
+    out = np.zeros(case.shape, dtype="<f2" if case.dtype == "fp16" else "<u2")
+    entry["output_digest"] = array_digest(out)
+    requests = []
+
+    def worker(request, **kwargs):
+        requests.append(request)
+        return [out], {
+            "device_target": entry["device_target"],
+            "launches": 1,
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(cli, "_worker", worker)
+    verify_case(
+        case,
+        bundle=tmp_path,
+        manifest=manifest,
+        current_root=tmp_path,
+        repetitions=1,
+        architecture=architecture,
+    )
+    # Frozen runners receive the request protocol they were qualified with.
+    replay, source = requests
+    assert source == {
+        "architecture": architecture,
+        "case": asdict(case),
+        "input_digests": entry["input_digests"],
+        "repetitions": 1,
+        "inputs": source["inputs"],
+        "mode": "source",
+    }
+    assert replay == dict(
+        source,
+        mode="replay",
+        kernel=entry["kernel"],
+        hsaco=str(tmp_path / "payload/cases" / key / "kernel.hsaco"),
+    )
+
+
 def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypatch):
     from sdpa_reference import cli
 

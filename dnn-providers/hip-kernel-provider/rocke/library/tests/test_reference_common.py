@@ -942,3 +942,33 @@ def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
     manifest["budget_policy"] = "unknown"
     with pytest.raises(ValueError, match="unsupported reference budget policy"):
         cli._validate_cases(manifest, "gfx942")
+
+
+def test_manifest_cases_match_by_contract_and_ids_cannot_collide():
+    from dataclasses import dataclass
+
+    from reference_common.cases import index_cases, match_manifest_cases
+
+    @dataclass(frozen=True)
+    class Case:
+        name: str
+        size: int = 1
+
+        @property
+        def id(self) -> str:
+            return self.name
+
+    cases = (Case("a"), Case("b", 2))
+    entries = {
+        "earlier-a": {"case": {"name": "a", "size": 1}},
+        "earlier-b": {"case": {"name": "b", "size": 2}},
+    }
+    assert match_manifest_cases(entries, cases, label="test") == {
+        "a": "earlier-a",
+        "b": "earlier-b",
+    }
+    # An id that omits a contract field must not let one case shadow another.
+    with pytest.raises(ValueError, match="duplicate test case id: a"):
+        index_cases((*cases, Case("a", 3)), label="test")
+    with pytest.raises(ValueError, match="duplicate test case id: a"):
+        match_manifest_cases(entries, (*cases, Case("a", 3)), label="test")

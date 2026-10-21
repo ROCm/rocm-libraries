@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from reference_common.cases import index_cases
+
 from ...contract import Case
 from ...implementations import dense
 from ..common import attention_request, validate_library_root
@@ -30,7 +32,7 @@ CASES = tuple(
         ("fp16", 128, 16, 4, False, False),
     )
 )
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="SDPA")
 
 
 def prepare(case: Case, library_root: str) -> Gfx942AttentionDenseSpec:

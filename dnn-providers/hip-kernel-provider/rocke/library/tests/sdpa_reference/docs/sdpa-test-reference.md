@@ -488,7 +488,7 @@ Its schema-2 bundle contains:
 ```text
 manifest.json
 qualification-lock.json
-payload/cases/<case-id>/kernel.hsaco
+payload/cases/<case-key>/kernel.hsaco
 payload/runtime/rocke/
 payload/runner/sdpa_reference/
 ```
@@ -498,6 +498,13 @@ independent-reference digests, bounds, launch metadata, source/compiler/target
 identity, Python/NumPy versions, and payload hashes. The source lock authenticates
 the manifest; the bundled lock alone is not the trust anchor. Temporary NPZ files
 can be used for worker transport, but tensor files are rejected from the archive.
+
+Each case's manifest key also names its payload directory. Loading matches
+entries to the enrolled cases by their full recorded case definition, not by
+key, and requires exactly one entry per enrolled case and no others. New
+qualifications key cases by id, such as `fp16-d128-h16-kv4-default-causal-b1-s512`.
+The published bundles keep their original keys, which omit batch (`-b`) and
+sequence length (`-s`); they load and replay unchanged.
 
 The gfx942 baseline source revision is
 `dd77374194a3ea1a7258cd54f87af6747b6362a5`; manifest SHA-256 is

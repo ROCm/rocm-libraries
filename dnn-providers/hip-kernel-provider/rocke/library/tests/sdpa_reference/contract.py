@@ -43,11 +43,14 @@ class Case:
 
     @property
     def id(self) -> str:
+        # Qualification keys new manifests by this id. Bundles are matched by
+        # the full case contract, so published keys without -b/-s stay valid.
         grid = "persistent" if self.persistent else "default"
         mask = "causal" if self.causal else "full"
         return (
             f"{self.dtype}-d{self.head_dim}-h{self.query_heads}"
             f"-kv{self.kv_heads}-{grid}-{mask}"
+            f"-b{self.batch}-s{self.sequence_length}"
         )
 
     @property

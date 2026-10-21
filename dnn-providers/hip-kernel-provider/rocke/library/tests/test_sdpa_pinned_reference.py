@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from sdpa_reference.cli import load_bundle, verify_case
+from sdpa_reference.cli import load_bundle, manifest_key, verify_case
 from sdpa_reference.contract import checked_inputs
 from reference_common.numeric import decode, encode
 from sdpa_reference.architectures import ARCHITECTURES, get_architecture
@@ -101,8 +101,9 @@ def test_sdpa_rejects_missing_gpu_launch(reference_bundle, monkeypatch, tmp_path
 
     target, bundle, manifest = reference_bundle
     case = target.CASES[0]
-    entry = manifest["cases"][case.id]
-    case_dir = bundle / "payload/cases" / case.id
+    key = manifest_key(manifest, case, architecture=target.NAME)
+    entry = manifest["cases"][key]
+    case_dir = bundle / "payload/cases" / key
     input_file = tmp_path / "inputs.npz"
     np.savez(input_file, **checked_inputs(case, entry["input_digests"]))
     monkeypatch.setattr(
