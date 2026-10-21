@@ -157,5 +157,23 @@ void tensorBindings(nb::module_& m)
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)
+        .def("get_alignment", &TensorAttributes::get_alignment)
+        .def("set_alignment", &TensorAttributes::set_alignment, nb::rv_policy::reference_internal)
+        .def("get_ragged_offset_multiplier", &TensorAttributes::get_ragged_offset_multiplier)
+        .def("set_ragged_offset_multiplier",
+             &TensorAttributes::set_ragged_offset_multiplier,
+             nb::rv_policy::reference_internal)
+        .def("has_ragged_offset_multiplier", &TensorAttributes::has_ragged_offset_multiplier)
+        .def("clear_value", &TensorAttributes::clear_value, nb::rv_policy::reference_internal)
+        .def("set_as_runtime_parameter",
+             &TensorAttributes::set_as_runtime_parameter,
+             nb::rv_policy::reference_internal)
+        .def("get_has_compile_time_constant", &TensorAttributes::get_has_compile_time_constant)
+        .def("has_ragged_offset", &TensorAttributes::has_ragged_offset)
+        .def("get_ragged_offset", &TensorAttributes::get_ragged_offset)
+        .def("set_ragged_offset",
+             &TensorAttributes::set_ragged_offset,
+             nb::arg("value").none(),
+             nb::rv_policy::reference_internal)
         .def("validate", &TensorAttributes::validate);
 }
