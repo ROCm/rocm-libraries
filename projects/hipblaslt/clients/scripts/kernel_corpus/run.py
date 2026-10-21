@@ -91,20 +91,28 @@ class Tool:
         env.setdefault("OMP_NUM_THREADS", "8")
         return env
 
-    def device(self) -> dict:
-        """The device line hipblaslt-test prints at startup: name, arch and library version."""
-        out = subprocess.run(
-            [str(self.test_bin), "--gtest_list_tests", "--gtest_filter=-*"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            env=self.env(),
-        ).stdout
-        info = {"device": None, "arch": None, "hipblaslt_git_version": None}
-        match = _DEVICE.search(out)
-        if match:
-            info["device"], info["arch"] = match.group(1).strip(), match.group(2)
-        match = _VERSION.search(out)
+    def device(self, attempts: int = 3) -> dict:
+        """The device line hipblaslt-test prints at startup: name, arch and library version.
+        A GPU just released by an earlier job can fail the first query, so it retries."""
+        info = {"device": None, "arch": None, "hipblaslt_git_version": None, "output": ""}
+        for attempt in range(attempts):
+            proc = subprocess.run(
+                [str(self.test_bin), "--gtest_list_tests", "--gtest_filter=-*"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                timeout=300,
+                env=self.env(),
+            )
+            info["output"] = proc.stdout
+            match = _DEVICE.search(proc.stdout)
+            if match:
+                info["device"], info["arch"] = match.group(1).strip(), match.group(2)
+                break
+            if attempt + 1 < attempts:
+                time.sleep(15)
+        match = _VERSION.search(info["output"])
         if match:
             info["hipblaslt_git_version"] = match.group(1)
         return info
@@ -534,8 +542,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     device = tool.device()
     arch = args.arch or device["arch"]
     if not arch:
-        print("error: could not detect the GPU architecture; pass --arch", file=sys.stderr)
-        return EXIT_USAGE
+        print(
+            "error: could not detect the GPU architecture; pass --arch. hipblaslt-test said:",
+            file=sys.stderr,
+        )
+        print(device["output"][-3000:], file=sys.stderr)
+        return EXIT_GPU_UNHEALTHY
     lib_dir = corpus_index.library_dir(tool.rocm_dir, arch)
     if not lib_dir.is_dir():
         print(f"error: no hipBLASLt library for {arch} at {lib_dir}", file=sys.stderr)
