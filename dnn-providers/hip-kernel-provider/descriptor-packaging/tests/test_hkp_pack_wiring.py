@@ -198,7 +198,9 @@ def test_the_registered_suites_collect_tests_rocke_only_with_rocke(
     consumer.register_tests(enable_rocke)
     consumer.configure(python=sys.executable)
     commands = consumer.registered_commands()
-    assert set(commands) == {
+    # The IngestorGenerator suite is a third entry, registered only when the generator tree
+    # and its PyYAML/Jinja2 requirements are present; it is not part of this split.
+    assert set(commands) - {"hip-kernel-provider-ingestor-generator"} == {
         "hip-kernel-provider-hkp-pack-quick",
         "hip-kernel-provider-hkp-pack",
     }
