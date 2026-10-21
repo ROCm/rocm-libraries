@@ -70,7 +70,8 @@ const vector<vector<int>> size_range = {
 const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}};
 
 // for weekly_lapack tests (large batch_count)
-const vector<vector<int>> large_batch_size_range = {{1, 1}};
+// each size_range vector is a {n, lda}
+const vector<vector<int>> large_batch_size_range = {{7, 7},{17,17}};
 
 Arguments syevj_heevj_setup_arguments(syevj_heevj_tuple tup)
 {
@@ -216,4 +217,62 @@ TEST_P(HEEVJ, strided_batched__double_complex)
 
 // large batch_count tests
 
-TEST_P(SYEVJ_LARGE
+TEST_P(SYEVJ_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEVJ_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(HEEVJ_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVJ_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(SYEVJ_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEVJ_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(HEEVJ_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVJ_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+// daily_lapack tests normal execution with medium to large sizes
+INSTANTIATE_TEST_SUITE_P(daily_lapack, SYEVJ, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, HEEVJ, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+// checkin_lapack tests normal execution with small sizes, invalid sizes,
+// quick returns, and corner cases
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEVJ, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEVJ, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+// weekly_lapack tests with batch_count > 64 * 1024
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYEVJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         HEEVJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(op_range)));
