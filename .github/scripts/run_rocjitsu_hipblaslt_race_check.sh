@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # The workflow that calls this script fetches hipBLASLt/TensileLite artifacts
@@ -37,7 +39,16 @@ TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/tensilelite/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
+RANDOM_GEMM_COUNT="${RANDOM_GEMM_COUNT:-0}"
+RANDOM_GEMM_SEED="${RANDOM_GEMM_SEED:-0}"
+RANDOM_GEMM_THREADS="${RANDOM_GEMM_THREADS:-8}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
+
+if [[ ! "${RANDOM_GEMM_COUNT}" =~ ^[0-9]+$ ||
+      ! "${RANDOM_GEMM_THREADS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "RANDOM_GEMM_COUNT must be nonnegative and RANDOM_GEMM_THREADS positive" >&2
+  exit 1
+fi
 
 # Map TheRock's artifact-group name to the concrete GPU target used by both
 # rocjitsu and TensileLite. The workflow pins one rocm-systems revision, so the
@@ -124,20 +135,31 @@ if [[ ! -x "${HIPBLASLT_BENCH}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
-  echo "TensileLite artifacts not found: ${TENSILELITE_ROOT}" >&2
-  echo "Expected TheRock BLAS test artifacts to contain share/hipblaslt/tensilelite" >&2
-  exit 1
+if [[ "${RANDOM_GEMM_COUNT}" != "0" ]]; then
+  for helper in hipblaslt_gentest.py hipblaslt_common.yaml hipblaslt_template.yaml; do
+    if [[ ! -f "$(dirname "${HIPBLASLT_BENCH}")/${helper}" ]]; then
+      echo "Bench input helper missing: ${helper}" >&2
+      exit 1
+    fi
+  done
 fi
 
-if [[ ! -f "${TENSILE_DRIVER}" ]]; then
-  echo "Tensile driver not found: ${TENSILE_DRIVER}" >&2
-  exit 1
-fi
+if [[ "${RANDOM_GEMM_COUNT}" == "0" ]]; then
+  if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
+    echo "TensileLite artifacts not found: ${TENSILELITE_ROOT}" >&2
+    echo "Expected TheRock BLAS test artifacts to contain share/hipblaslt/tensilelite" >&2
+    exit 1
+  fi
 
-if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
-  echo "tensilelite-client not found or not executable: ${TENSILELITE_CLIENT}" >&2
-  exit 1
+  if [[ ! -f "${TENSILE_DRIVER}" ]]; then
+    echo "Tensile driver not found: ${TENSILE_DRIVER}" >&2
+    exit 1
+  fi
+
+  if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
+    echo "tensilelite-client not found or not executable: ${TENSILELITE_CLIENT}" >&2
+    exit 1
+  fi
 fi
 
 # The compiler artifact layout depends on whether TheRock enables LLVM's host
@@ -243,6 +265,7 @@ run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
 # LD_PRELOAD runtime, and the separately loaded race and logging plugins.
 run_timed "build rocjitsu" \
   cmake --build "${ROCJITSU_BUILD_DIR}" \
+  --parallel "${RANDOM_GEMM_THREADS}" \
   --target \
     rocjitsu_bin \
     rocjitsu_shared \
@@ -508,6 +531,22 @@ run_tensilelite_client_check() {
 }
 
 run_timed "rocjitsu version" show_rocjitsu_version
+
+if [[ "${RANDOM_GEMM_COUNT}" != "0" ]]; then
+  if [[ "${ROCJITSU_GPU_TARGET}" != "gfx950" ]]; then
+    echo "The random GEMM sampler requires gfx950" >&2
+    exit 1
+  fi
+  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  run_timed "random hipblaslt GEMMs" \
+    python3 "${SCRIPT_DIR}/run_random_hipblaslt_gemms.py" \
+      --bench "${HIPBLASLT_BENCH}" --rocjitsu "${ROCJITSU_BIN}" \
+      --config "${ROCJITSU_CONFIG}" --count "${RANDOM_GEMM_COUNT}" \
+      --seed "${RANDOM_GEMM_SEED}" --threads "${RANDOM_GEMM_THREADS}" \
+      --timeout "${RACE_TIMEOUT_SECONDS}" \
+      --output "${RACE_REPORT_DIR}/random-gemms"
+  exit 0
+fi
 
 check_status=0
 
