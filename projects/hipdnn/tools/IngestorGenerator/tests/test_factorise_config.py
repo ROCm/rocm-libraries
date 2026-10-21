@@ -108,6 +108,17 @@ class TestRoundTrip:
             k.kernel_source.spec for k in want
         ]
 
+    def test_a_vocabulary_field_outside_the_spec_round_trips(self, tmp_path):
+        """A vocabulary field the spec does not carry reaches the compact form as a
+        matcher-spelling `resolved` value, which the expansion must accept."""
+        long_form = copy.deepcopy(SAMPLE)
+        for kernel in long_form["packs"][0]["kernels"]:
+            del kernel["kernel_source"]["spec"]["dtype"]
+        got = _expand(tmp_path, _compact(long_form))
+        want = _enumerate(tmp_path, long_form)
+        assert [k.name for k in got] == [k.name for k in want]
+        assert [k.metadata for k in got] == [k.metadata for k in want]
+
     def test_spec_key_order_survives(self, tmp_path):
         """Key order reaches the emitted descriptor, so it is part of the bytes."""
         got = _expand(tmp_path, _compact())
@@ -226,7 +237,7 @@ class TestTriState:
 
 #: The SAME four kernels as `SAMPLE`, with the policy-decided knob PRESENT AND None
 #: rather than omitted. Both spellings mean the kernel's policy decides at build time:
-#: a hand-authored spec omits the key, while `dispatch_parity.build_config` dumps the
+#: a hand-authored spec omits the key, while `registry_enumerator.build_config` dumps the
 #: builder's dataclass wholesale, so every declared-but-unset knob arrives as None.
 SAMPLE_NONE_SPELLING = _enumerated(
     [
@@ -554,3 +565,33 @@ class TestTheSpecializationDeclarationSurvives:
         )
         assert yaml.safe_load(out.read_text())["specialization"] == self.DECLARATION
         assert load_config(out).specialization == self.DECLARATION
+
+
+class TestTheReductionCarriersSurvive:
+    REDUCTION = {
+        "fields": {
+            "feature": ["dtype", "seqlen_q"],
+            "performance": [{"name": "block_m", "divides": "seqlen_q"}],
+            "ignored": [],
+        },
+        "aot_budget_per_arch": 1000,
+    }
+
+    def test_main_keeps_the_block_and_every_marker(self, tmp_path):
+        source = copy.deepcopy(SAMPLE)
+        source["reduction"] = copy.deepcopy(self.REDUCTION)
+        source["packs"][0]["kernels"][0]["default"] = True
+        source["packs"][0]["kernels"][3]["default"] = True
+        path = tmp_path / "long.yaml"
+        path.write_text(yaml.safe_dump(source, sort_keys=False))
+        out = tmp_path / "compact.yaml"
+        argv = ["--config", str(path), "--out", str(out), "--knobs", ",".join(KNOBS)]
+        assert factorise_config.main(argv + ["--vocabulary", "dtype:bf16=BF16"]) == 0
+        compact = load_config(out)
+        assert compact.reduction == self.REDUCTION
+        assert [k.default for k in compact.packs[0].kernels] == [
+            True,
+            False,
+            False,
+            True,
+        ]

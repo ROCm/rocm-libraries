@@ -23,7 +23,7 @@ Programmatic use (import the framework; drive it from the library-side
 attention driver ``dsl_probe_attention_demos.py`` for attention specs):
 
     from probe_intrinsic_counts import count_intrinsics
-    text = lower_kernel_to_llvm(kdef)
+    text = lower_kernel_to_llvm(kdef, arch="gfx950")
     counts = count_intrinsics(text)
 """
 
@@ -138,7 +138,7 @@ def probe_intrinsic_counts(
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            ir = lower_kernel_to_llvm(kdef)
+            ir = lower_kernel_to_llvm(kdef, arch="gfx950")
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === LOWER-FAIL: {type(e).__name__}: {e}")
             continue
