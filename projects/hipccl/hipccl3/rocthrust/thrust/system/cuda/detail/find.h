@@ -20,10 +20,12 @@
 
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/system/cuda/detail/cdp_dispatch.h>
-#  include <thrust/system/cuda/detail/dispatch.h>
 #  include <thrust/system/cuda/detail/execution_policy.h>
 #  include <thrust/system/cuda/detail/get_value.h>
 #  include <thrust/system/cuda/detail/util.h>
+
+#  include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 
 #  include <cuda/std/__iterator/distance.h>
 
@@ -84,7 +86,7 @@ find_if_n_impl(execution_policy<Derived>& policy, InputIt first, Size num_items,
 }
 } // namespace detail
 
-_CCCL_EXEC_CHECK_DISABLE
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class Size, class Predicate>
 InputIt _CCCL_HOST_DEVICE
 find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
