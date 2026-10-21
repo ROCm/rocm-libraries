@@ -134,9 +134,16 @@ class RandomGemmTests(unittest.TestCase):
                 self.assertEqual(
                     runner.main(
                         [
-                            "--count", "2", "--bench", sys.executable,
-                            "--rocjitsu", sys.executable, "--config", str(config),
-                            "--output", str(root / "launch-failure"),
+                            "--count",
+                            "2",
+                            "--bench",
+                            sys.executable,
+                            "--rocjitsu",
+                            sys.executable,
+                            "--config",
+                            str(config),
+                            "--output",
+                            str(root / "launch-failure"),
                         ]
                     ),
                     1,
@@ -145,7 +152,9 @@ class RandomGemmTests(unittest.TestCase):
             self.assertTrue(failure["complete"])
             self.assertEqual(failure["failed"], 2)
             self.assertEqual(
-                json.loads((root / "launch-failure/cases.json").read_text())[0]["result"]["reason"],
+                json.loads((root / "launch-failure/cases.json").read_text())[0][
+                    "result"
+                ]["reason"],
                 "execution error: cannot launch",
             )
             runner.main(["--count", "3", "--dry-run", "--output", str(root / "random")])
@@ -224,6 +233,9 @@ class RandomGemmTests(unittest.TestCase):
             Path(__file__).parent.parent / "hipblaslt_explicit_gemms.json"
         )
         self.assertEqual(len({case["id"] for case in cases}), len(cases))
+        runner.load_explicit_cases(
+            Path(__file__).parent.parent / "hipblaslt_diagnostic_gemms.json"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"
             for data in (

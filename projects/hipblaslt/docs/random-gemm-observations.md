@@ -2,8 +2,9 @@
 
 CPU-only gfx950 exploration on 2026-10-21 used rocJITsu `29656a8dcc05` and the
 [matched build artifacts](https://github.com/ROCm/rocm-libraries/actions/runs/39535282903).
-Every nonpassing input is listed below. The [complete input records](random-gemm-observations.json)
-include initialization, leading dimensions, strides and all benchmark controls.
+The tables record every nonpassing exploratory input. Execution uses the
+[nightly runner](nightly-random-gemm.md): ordinary heuristic selection, one
+launch, no warmups, strict norm validation and allclose checks.
 
 `unsupported` means the loaded library supplied no heuristic solution for that
 exact configuration. It does not prove that the public API forbids the input.
@@ -77,57 +78,21 @@ missing solutions are treated as emulator blacklist entries. Eight exploratory
 INT8/FP64 inputs initially had incorrect compute-input options; after correcting
 those harness settings, all eight passed and are omitted from the failure table.
 
-The [required-case list](../../../.github/scripts/hipblaslt_explicit_gemms.json)
-also contains BF16 TN shapes associated with
-[the prefetch ordering race](https://github.com/ROCm/rocm-libraries/pull/14147).
-Those tests use normal heuristic selection. Passing a shape does not establish
-that the specific custom-schedule kernel from that report executed; the selected
-kernel is recorded in each result. The reported one-solution regression remains
-the evidence for that exact schedule.
-
 A later run with the explicit list produced one additional nonpassing case:
 
 | Case | M×N×K | Types; transpose; batch | Alpha; beta; epilogue | Observation |
 | --- | --- | --- | --- | --- |
 | explicit-and-random-100/case-0072 | 32×416×224 | FP32 throughout; TT; 1 | 0.5; -1; FP32 bias+ReLU | `SET_EVENT_MISS: event_id=6 events_.size()=19` after numerical completion; bench exits 0, runner fails. One serial replay passes without the warning. |
 
-This warning remains unclassified and has no blacklist entry. The full input
-is included in the machine-readable records above.
+This warning remains unclassified and has no blacklist entry. It uses packed layout, FP32 computation and `rand_int` initialization.
 
-## Earlier explicit-corpus validation against the shipping payload
+## Retained explicit input
 
-The earlier 14-case list ran alongside 100 random samples. All 114 inputs
-were attempted: 108 passed, five failed numerical validation, and one random
-case emitted the shutdown warning documented above. No race was reported.
-The original BF16 batched case also passed an independent replay in 102 seconds.
-The current list retains only `bf16-tn-prefetch-k192` from these nine BF16
-inputs, alongside the five numerical-validation reproducers.
-
-| Required case | M×N×K; batch | Result |
-| --- | --- | --- |
-| bf16-tn-prefetch-k128 | 256×160×128; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k129 | 256×160×129; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k192 | 256×160×192; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k193 | 256×160×193; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k256 | 256×160×256; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k512 | 256×160×512; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k64 | 256×160×64; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-k65 | 256×160×65; 1 | passed: numerics and race detection passed |
-| bf16-tn-prefetch-reported | 1024×4096×4096; 2 | passed: numerics and race detection passed |
-| fp16-gelu-near-zero | 4×1×64; 1 | failed: bench exited 1 |
-| mxfp8-fp16-overflow-k2048 | 32×32×2048; 1 | failed: bench exited 1 |
-| mxfp8-fp16-overflow-k4096 | 32×32×4096; 1 | failed: bench exited 1 |
-| mxfp8-fp16-overflow-seed42-case503 | 32×32×4096; 1 | failed: bench exited 1 |
-| mxfp8-fp16-overflow-seed42-case683 | 32×32×4096; 1 | failed: bench exited 1 |
-
-All BF16 TN cases use BF16 operands/output, FP32 computation, alpha1, beta0,
-no epilogue or block scales, and `hpl` initialization. The reduced K192 case
-selects a 32×16 kernel and the original shape selects a 256×128 kernel; neither
-is the 256×160 custom schedule in #14147. These passes therefore establish
-shape execution, not a before/after verification of that particular race.
-
-The builds also differ: the race reproducer records source version `1ae074b37e89`,
-while the shipping benchmark prints Git version `4126b24e`. The reproducer
-explicitly selects the reported kernel from a one-solution library; these runs
-use heuristic selection from the full library. No comparison with the same
-version and selection method has isolated the effect of the version difference.
+The [required-case list](../../../.github/scripts/hipblaslt_explicit_gemms.json)
+contains the BF16 TN 256×160×192 input from
+[the prefetch race report](https://github.com/ROCm/rocm-libraries/pull/14147).
+It uses batch1, FP32 computation, alpha1, beta0, no epilogue and `hpl`
+initialization. Its numerical and race checks passed locally through normal
+heuristic selection. The selected kernel has a 32×16 output tile, so this
+provides shape coverage without guaranteeing execution of the report's faulty
+256×160 custom schedule.
