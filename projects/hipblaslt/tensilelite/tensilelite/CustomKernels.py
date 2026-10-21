@@ -226,16 +226,26 @@ def _customConfigYaml(contents):
 
     The entry runs until the next line that starts in column 0 with something
     other than a comment.
+
+    The scan continues to the end of the block, and a second column-0
+    "custom.config:" line makes the result None. PyYAML keeps the last of two
+    duplicate keys, and the same line can sit inside a multi-line quoted scalar
+    of an earlier key, so the first match is not safe to slice on its own; the
+    whole block decides instead.
     """
     section = None
+    inEntry = False
     for line in _embeddedYamlLines(contents):
-        if section is None:
-            if _CUSTOM_CONFIG_KEY.match(line):
-                section = [line]
-        elif line and line[0] not in " \t#":
-            break
-        else:
-            section.append(line)
+        if _CUSTOM_CONFIG_KEY.match(line):
+            if section is not None:
+                return None
+            section = [line]
+            inEntry = True
+        elif inEntry:
+            if line and line[0] not in " \t#":
+                inEntry = False
+            else:
+                section.append(line)
     return None if section is None else "\n".join(section)
 
 def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
@@ -248,7 +258,8 @@ def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
     customConfigOnly parses just the custom.config entry, a few KB inside a
     block that can be 1 MB (rocRoller's serialized kernel graph). The rest of
     the block is not parsed, so errors in it go unnoticed. The whole block is
-    parsed when custom.config is not found in its usual form.
+    parsed when custom.config is not found in its usual form or appears more
+    than once.
     """
     contents = getCustomKernelContents(name, directory)
     text = _customConfigYaml(contents) if customConfigOnly else None

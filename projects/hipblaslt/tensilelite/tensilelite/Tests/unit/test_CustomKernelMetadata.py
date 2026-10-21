@@ -1134,6 +1134,31 @@ def test_read_custom_kernel_config_quoted_key_takes_the_whole_block_path(tmp_pat
         """)
     assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
 
+def test_read_custom_kernel_config_duplicate_entry_takes_the_whole_block_path(tmp_path):
+    # PyYAML keeps the last of two duplicate keys, so slicing on the first one
+    # would return a different config from a whole-block parse.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          A: 1
+        other: 0
+        custom.config:
+          A: 2
+        """)
+    contents = ck_mod.getCustomKernelContents("k", str(tmp_path))
+    assert ck_mod._customConfigYaml(contents) is None
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 2}
+
+def test_read_custom_kernel_config_key_text_inside_a_quoted_scalar_takes_the_whole_block_path(tmp_path):
+    # The first column-0 "custom.config:" line is part of a multi-line quoted
+    # scalar, not a key.
+    _write_metadata(tmp_path / "k.s", """\
+        note: "text
+        custom.config: not a key"
+        custom.config:
+          A: 1
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
 def test_read_custom_kernel_config_without_the_entry_still_raises(tmp_path):
     _write_metadata(tmp_path / "k.s", "amdhsa.kernels: []\n")
     with pytest.raises(RuntimeError, match="has no custom.config"):
