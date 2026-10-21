@@ -455,20 +455,19 @@ namespace rocsparse_clients
 
         void set(rocsparse_handle handle)
         {
-            rocsparse_error p_error[1] = {nullptr};
             CHECK_ROCSPARSE_THROW_ERROR(rocsparse_sptrsv_set_input(handle,
                                                                    this->m_descr,
                                                                    rocsparse_sptrsv_input_operation,
                                                                    &config.operation,
                                                                    sizeof(config.operation),
-                                                                   p_error));
+                                                                   nullptr));
 
             CHECK_ROCSPARSE_THROW_ERROR(rocsparse_sptrsv_set_input(handle,
                                                                    this->m_descr,
                                                                    rocsparse_sptrsv_input_alg,
                                                                    &config.alg,
                                                                    sizeof(config.alg),
-                                                                   p_error));
+                                                                   nullptr));
 
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(handle,
@@ -476,7 +475,7 @@ namespace rocsparse_clients
                                            rocsparse_sptrsv_input_scalar_datatype,
                                            &config.scalar_datatype,
                                            sizeof(config.scalar_datatype),
-                                           p_error));
+                                           nullptr));
 
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(handle,
@@ -484,7 +483,7 @@ namespace rocsparse_clients
                                            rocsparse_sptrsv_input_compute_datatype,
                                            &config.compute_datatype,
                                            sizeof(config.compute_datatype),
-                                           p_error));
+                                           nullptr));
 
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(handle,
@@ -492,20 +491,19 @@ namespace rocsparse_clients
                                            rocsparse_sptrsv_input_analysis_policy,
                                            &config.apol,
                                            sizeof(config.apol),
-                                           p_error));
+                                           nullptr));
         }
 
         void set_solve_mode(rocsparse_solve_mode solve_mode)
         {
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-            rocsparse_error p_error[1] = {nullptr};
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(this->m_handle,
                                            this->m_descr,
                                            rocsparse_sptrsv_input_solve_mode,
                                            &solve_mode,
                                            sizeof(solve_mode),
-                                           p_error));
+                                           nullptr));
 #else
             (void)solve_mode;
 #endif
@@ -514,19 +512,28 @@ namespace rocsparse_clients
         void set_diagonal_modifier(rocsparse_diagonal_modifier diagonal_modifier)
         {
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-            rocsparse_error p_error[1] = {nullptr};
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(this->m_handle,
                                            this->m_descr,
                                            rocsparse_sptrsv_input_diagonal_modifier,
                                            &diagonal_modifier,
                                            sizeof(diagonal_modifier),
-                                           p_error));
+                                           nullptr));
 #else
             (void)diagonal_modifier;
 #endif
         }
 
+    private:
+        explicit sptrsv_descr(rocsparse_handle handle)
+            : m_handle(handle)
+        {
+            ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+            CHECK_ROCSPARSE_THROW_ERROR(
+                rocsparse_sptrsv_descr_create(handle, &this->m_descr, nullptr));
+        }
+
+    public:
         sptrsv_descr(rocsparse_handle                handle,
                      int64_t                         batch_count,
                      const rocsparse_operation       operation,
@@ -534,38 +541,18 @@ namespace rocsparse_clients
                      const rocsparse_datatype        scalar_datatype,
                      const rocsparse_datatype        compute_datatype,
                      const rocsparse_analysis_policy apol)
-            : m_handle(handle)
-            , config({operation, alg, scalar_datatype, compute_datatype, apol})
+            : sptrsv_descr(handle)
         {
-            ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-            rocsparse_error*       p_error = nullptr;
-            const rocsparse_status status
-                = rocsparse_sptrsv_descr_create(handle, &this->m_descr, p_error);
-            if(status != rocsparse_status_success)
-            {
-                throw(status);
-            }
-            try
-            {
-                this->set(handle);
-            }
-            catch(...)
-            {
-                rocsparse_error* p_error = nullptr;
-                rocsparse_clients_log_rocsparse_error(
-                    "rocsparse_sptrsv_descr_destroy",
-                    rocsparse_sptrsv_descr_destroy(this->m_handle, this->m_descr, p_error));
-                throw;
-            }
+            this->config = {operation, alg, scalar_datatype, compute_datatype, apol};
+            this->set(handle);
         }
 
         ~sptrsv_descr()
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-            rocsparse_error* p_error = nullptr;
             rocsparse_clients_log_rocsparse_error(
                 "rocsparse_sptrsv_descr_destroy",
-                rocsparse_sptrsv_descr_destroy(this->m_handle, this->m_descr, p_error));
+                rocsparse_sptrsv_descr_destroy(this->m_handle, this->m_descr, nullptr));
         }
 
         inline operator rocsparse_sptrsv_descr&()
