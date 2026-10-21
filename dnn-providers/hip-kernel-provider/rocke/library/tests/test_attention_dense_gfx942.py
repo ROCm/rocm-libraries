@@ -2146,14 +2146,14 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     GPU only.
 
     The values are checked two ways: equal to
-    :func:`rocke.helpers.transforms.calculate_magic_numbers` for the divisor (magic
+    :func:`rocke.helpers.magic_division.calculate_magic_numbers` for the divisor (magic
     packed as its two's-complement i32), and -- through the host model of the
     in-kernel divide -- exact for dividends up to just under the 2**30 bound. Non-pow2
     divisors throughout (B=3, NQB=13, Hq=40, gqa=5), so the magic is not the trivial
     pow2 one; hq_minor_swz pairs query blocks under causal masking, so it takes
     NQB=14.
     """
-    from rocke.helpers.transforms import calculate_magic_numbers
+    from rocke.helpers.magic_division import calculate_magic_numbers
 
     nqb = 14 if decode == "hq_minor_swz" else 13
     spec = _persistent_spec(

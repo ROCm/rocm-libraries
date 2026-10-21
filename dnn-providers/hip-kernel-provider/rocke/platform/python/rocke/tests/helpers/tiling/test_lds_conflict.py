@@ -504,9 +504,9 @@ def test_render_simulated_is_watermarked_and_needs_no_hardware(tmp_path):
 # the arch has a validated read model and the access is in envelope, and GEOMETRY-with-a-refusal
 # otherwise -- the honesty gate, not just a feature.
 # --------------------------------------------------------------------------------------------------
-def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
-    """The MMA-operand read is vw=1 f16 -- HALF a dword. store_datum's `vw // per_dword` floors to 0
-    and yields an EMPTY map (a silent no-analysis). read_datum must map it."""
+def test_a_sub_dword_access_is_mapped_by_both_datum_builders():
+    """The MMA-operand read is vw=1 f16 -- HALF a dword. Each access still touches one dword, so
+    neither map may come back empty (a silent no-analysis)."""
     descs = _a_descs()
     _acc, vw, store_shaped = lc.store_datum(
         descs.wave_read,
@@ -517,9 +517,9 @@ def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
         origin=(0, 0),
         lds_swizzle=False,
     )
-    assert (
-        vw == 1 and store_shaped == {}
-    ), "guard: this IS the sub-dword case store_datum drops"
+    assert vw == 1, "guard: this IS the sub-dword case"
+    assert store_shaped, "store_datum must not silently return an empty map"
+    assert all(0 <= bank < lc.GFX90A.NB for (_k, _f, _d, bank) in store_shaped.values())
 
     _acc, vw, datum = lc.read_datum(
         descs.wave_read,
@@ -532,6 +532,29 @@ def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
     )
     assert datum, "read_datum must not silently return an empty map"
     assert all(0 <= bank < lc.GFX90A.NB for (_k, _f, _d, bank) in datum.values())
+
+
+def test_an_odd_stride_f16_store_is_one_dword_per_element():
+    """An f16 buffer padded by one element per row ((K, free) strides (TILE_FREE + 1, 1)) narrows the store to one
+    element per access; every access still writes one dword, so every lane appears in the map with
+    one dword per register."""
+    descs = _a_descs()
+    acc, vw, datum = lc.store_datum(
+        descs.coop_store,
+        TILE_FREE,
+        lc.GFX90A,
+        (TILE_FREE + 1, 1),
+        "f16",
+        origin=(0, 0),
+        lds_swizzle=False,
+    )
+    assert vw == 1
+    assert len(datum) == len(acc)
+    assert {lane for lane, _phase in datum} == {a["lane"] for a in acc}
+    for a in acc:
+        assert a["base"] // 2 in {
+            d for (lane, _p), (_r, _c, d, _b) in datum.items() if lane == a["lane"]
+        }
 
 
 def test_analyze_read_refuses_a_cost_for_an_arch_with_no_read_model():

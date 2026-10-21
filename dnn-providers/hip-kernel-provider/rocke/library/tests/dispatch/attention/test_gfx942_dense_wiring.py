@@ -46,7 +46,7 @@ from kernels.gfx942.attention_dense import (
     build_attention_dense,
     supports_attention_dense,
 )
-from rocke.helpers.transforms import calculate_magic_numbers
+from rocke.helpers.magic_division import calculate_magic_numbers
 
 _NAME = "attention_gfx942_dense"
 _SPEC_ID = "gfx942_dense"

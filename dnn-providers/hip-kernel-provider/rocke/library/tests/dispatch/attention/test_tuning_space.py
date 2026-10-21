@@ -44,7 +44,12 @@ from dispatch.attention.unified_rules import (
     unified_space,
 )
 from rocke.core.arch import ArchTarget
-from kernels.common.attention_unified import _tiled_2d_impl, _tiled_3d_impl
+from kernels.common.attention_unified import (
+    _num_segments,
+    _tiled_2d_impl,
+    _tiled_3d_impl,
+    _tiled_3d_spec_from_problem,
+)
 from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
     supports_attention_dense as supports_gfx942,
@@ -104,6 +109,9 @@ _GEOMETRY_FIELDS = frozenset(
     }
 )
 
+# Inert 3D spec fields, kept so saved specs that set them still load.
+_INERT_3D_FIELDS = frozenset({"use_invariant_hoist"})
+
 
 class TestTuningSpace(unittest.TestCase):
     def test_every_kernel_tuning_field_is_swept(self):
@@ -133,6 +141,7 @@ class TestTuningSpace(unittest.TestCase):
                         - swept
                         - codepath
                         - KNOWN_WRONG_KNOBS[arch]
+                        - (_INERT_3D_FIELDS if path == "3d" else frozenset())
                     )
                     self.assertFalse(missing, sorted(missing))
 
@@ -154,7 +163,96 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
-        self.assertEqual(len(specs), 5)
+        # waves_per_eu (5) x kv_cache_policy ("stream" or "all") x
+        # use_kv_lds_swizzle x use_wave_page_id_load.
+        self.assertEqual(len(specs), 40)
+
+    def test_3d_cache_policy_base_follows_the_problem(self):
+        """The 3D builder resolves the K/V cache policy per problem
+        (``_kv_cache_policy_3d``): restating it names the default kernel, the
+        other value stays reachable, and every id records the policy built."""
+        for arch in ("gfx950", "gfx942"):
+            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+                    prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
+                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    specs = _sampled(prefix, 1000, **kw)
+                    kernels = {repr(s.kernel_spec) for s in specs}
+                    self.assertEqual(len(kernels), len(specs))
+                    self.assertEqual(
+                        {s.kernel_spec.kv_cache_policy for s in specs},
+                        {"stream", "all"},
+                    )
+                    for s in specs:
+                        self.assertEqual(
+                            dict(s.knobs)["kv_cache_policy"],
+                            s.kernel_spec.kv_cache_policy,
+                        )
+                    candidate, req, _ = _specs_for(prefix, n=1, **kw)
+                    default = tuning_spec_with_knobs(req, candidate.spec_id, {})
+                    self.assertEqual(default.kernel_spec.kv_cache_policy, auto)
+                    others = {k: v for k, v in default.knobs if k != "kv_cache_policy"}
+                    restated = tuning_spec_with_knobs(
+                        req, candidate.spec_id, {**others, "kv_cache_policy": auto}
+                    )
+                    self.assertEqual(restated.tuning_id, default.tuning_id)
+                    for policy in ("stream", "all"):
+                        pinned = tuning_spec_with_knobs(
+                            req, candidate.spec_id, {"kv_cache_policy": policy}
+                        )
+                        self.assertEqual(pinned.kernel_spec.kv_cache_policy, policy)
+
+    def test_3d_auto_segment_variant_defaults_to_the_dispatched_spec(self):
+        """At the dispatcher's tile, an auto-segment variant's default spec is
+        the 3D kernel the dispatcher builds: same segments and K/V layout knobs."""
+        cus = {"gfx950": 256, "gfx942": 304}
+        for arch, batch, head_size, seqlen_k in (
+            ("gfx950", 1, 128, 32768),  # 64-token tiles, swizzle, page ids
+            ("gfx950", 16, 128, 8192),
+            ("gfx950", 64, 128, 4096),
+            ("gfx942", 1, 128, 4096),  # wide loads, swizzle, page ids
+            ("gfx942", 32, 128, 8192),
+            ("gfx942", 4, 256, 8192),  # async copies, swizzle, page ids
+        ):
+            with self.subTest(arch=arch, batch=batch, head_size=head_size):
+                kw = dict(
+                    arch=arch,
+                    batch=batch,
+                    hdim_q=head_size,
+                    hdim_v=head_size,
+                    seqlen_q=1,
+                    seqlen_k=seqlen_k,
+                    num_cus=cus[arch],
+                )
+                problem = _problem(_request(**kw))
+                want = _tiled_3d_spec_from_problem(problem, arch)
+                tile = want.tile_size // problem.block_size
+                prefix = f"attention_{arch}_u3d_splitkv_segauto_t{tile}xb"
+                candidate, req, _ = _specs_for(prefix, n=1, **kw)
+                got = tuning_spec_with_knobs(req, candidate.spec_id, {})
+                self.assertEqual(got.kernel_spec, want)
+
+    def test_3d_auto_segment_variant_records_and_checks_its_count(self):
+        prefix = "attention_gfx950_u3d_splitkv_segauto_t1xb"
+        kw = dict(batch=16, seqlen_q=1, seqlen_k=8192, num_cus=256)
+        candidate, req, _ = _specs_for(prefix, n=1, **kw)
+        rule = _num_segments(_problem(req), "gfx950")
+        default = tuning_spec_with_knobs(req, candidate.spec_id, {})
+        self.assertEqual(dict(default.knobs)["num_segments"], rule)
+        self.assertEqual(default.kernel_spec.num_segments, rule)
+        again = tuning_spec_with_knobs(req, candidate.spec_id, dict(default.knobs))
+        self.assertEqual(again.tuning_id, default.tuning_id)
+        with self.assertRaisesRegex(ValueError, "split rule"):
+            tuning_spec_with_knobs(
+                req,
+                candidate.spec_id,
+                {**dict(default.knobs), "num_segments": rule + 1},
+            )
+        # The same knobs on a device where the rule splits differently.
+        _c, smaller, _ = _specs_for(prefix, n=1, **{**kw, "num_cus": 128})
+        self.assertNotEqual(_num_segments(_problem(smaller), "gfx950"), rule)
+        with self.assertRaisesRegex(ValueError, "split rule"):
+            tuning_spec_with_knobs(smaller, candidate.spec_id, dict(default.knobs))
 
     def test_tuning_ids_are_unique_and_hashed(self):
         _candidate, _req, specs = _specs_for(

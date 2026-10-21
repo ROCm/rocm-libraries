@@ -41,9 +41,7 @@ from typing import Optional, Tuple
 
 from rocke.core.ir import (
     BF16,
-    CACHE_ALL,
-    CACHE_GLOBAL,
-    CACHE_STREAM,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -52,10 +50,10 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    NON_TEMPORAL,
     Type,
     Value,
     VectorType,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
@@ -778,9 +776,9 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "8-wave mw32 v1 requires direct-Q + cfvst to stay within LDS"
                 )
-        if self.kv_cache_policy not in ("all", "global", "stream", "nt"):
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
             raise ValueError(
-                "kv_cache_policy must be one of 'all', 'global', 'stream', 'nt' "
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
                 f"(got {self.kv_cache_policy!r})"
             )
         if self.use_k_hbm_direct:
@@ -1445,12 +1443,7 @@ def build_unified_attention_2d_tiled(
     _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
-    kv_cache_aux = {
-        "all": CACHE_ALL,
-        "global": CACHE_GLOBAL,
-        "stream": CACHE_STREAM,
-        "nt": NON_TEMPORAL,
-    }[spec.kv_cache_policy]
+    kv_cache_aux = cache_policy_from_name(spec.kv_cache_policy)
 
     # gfx942 32x32x8 wide-fragment path (correctness-first flash foundation).
     # ``use_mfma_32x32`` (K=16) stays rejected in the spec; ``use_mfma_32x32x8``
