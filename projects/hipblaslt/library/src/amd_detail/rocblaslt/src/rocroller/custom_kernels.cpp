@@ -91,18 +91,18 @@ std::string getKernelName(const std::string& baseName, bool nonTemporalA, bool n
 void preloadCustomKernels(SolutionCache& cache)
 {
     KernelType mxfp4Kernel;
-    mxfp4Kernel.typeA                     = rocRoller::DataType::FP4;
-    mxfp4Kernel.typeB                     = rocRoller::DataType::FP4;
-    mxfp4Kernel.typeC                     = rocRoller::DataType::BFloat16;
-    mxfp4Kernel.typeD                     = rocRoller::DataType::BFloat16;
+    mxfp4Kernel.typeA                     = hipblaslt::DataType::FP4;
+    mxfp4Kernel.typeB                     = hipblaslt::DataType::FP4;
+    mxfp4Kernel.typeC                     = hipblaslt::DataType::BFloat16;
+    mxfp4Kernel.typeD                     = hipblaslt::DataType::BFloat16;
     mxfp4Kernel.transA                    = true;
     mxfp4Kernel.transB                    = false;
-    mxfp4Kernel.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
+    mxfp4Kernel.scaleTypeA.mode           = hipblaslt::ScaleMode::Separate;
     mxfp4Kernel.scaleTypeA.blockRowSize   = 32;
     mxfp4Kernel.scaleTypeA.blockColSize   = 1;
     mxfp4Kernel.scaleTypeA.preSwizzleTile = {32, 8, 4};
     mxfp4Kernel.scaleTypeA.preTile        = {32, 8};
-    mxfp4Kernel.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
+    mxfp4Kernel.scaleTypeB.mode           = hipblaslt::ScaleMode::Separate;
     mxfp4Kernel.scaleTypeB.blockRowSize   = 1;
     mxfp4Kernel.scaleTypeB.blockColSize   = 32;
     mxfp4Kernel.scaleTypeB.preSwizzleTile = {32, 8, 4};

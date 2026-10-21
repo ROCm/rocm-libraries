@@ -115,8 +115,8 @@ std::shared_ptr<SolutionParameters>
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if(kernelType.scaleTypeA.mode != rocRoller::Operations::ScaleMode::Separate
-       || kernelType.scaleTypeB.mode != rocRoller::Operations::ScaleMode::Separate)
+    if(kernelType.scaleTypeA.mode != hipblaslt::ScaleMode::Separate
+       || kernelType.scaleTypeB.mode != hipblaslt::ScaleMode::Separate)
     {
         gemm->swizzleScale   = false;
         gemm->prefetchScale  = false;
@@ -169,12 +169,12 @@ std::shared_ptr<SolutionParameters>
         gemm->streamK = rocRoller::StreamKMode::TwoTile;
 
     // Direct To LDS only supported in certain situations
-    if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
+    if(kernelType.typeA == hipblaslt::DataType::FP6 || kernelType.typeA == hipblaslt::DataType::BF6)
         gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-    if(kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6)
+    if(kernelType.typeB == hipblaslt::DataType::FP6 || kernelType.typeB == hipblaslt::DataType::BF6)
         gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-    if((kernelType.typeA == rocRoller::DataType::FP4
-        || kernelType.typeB == rocRoller::DataType::FP4)
+    if((kernelType.typeA == hipblaslt::DataType::FP4
+        || kernelType.typeB == hipblaslt::DataType::FP4)
        && (solutionIndexParameters.workgroupTile.m <= 64
            || solutionIndexParameters.workgroupTile.n <= 64))
     {

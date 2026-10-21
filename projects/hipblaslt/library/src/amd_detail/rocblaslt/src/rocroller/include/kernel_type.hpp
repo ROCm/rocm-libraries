@@ -3,8 +3,12 @@
 
 #pragma once
 
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Operations/Command.hpp>
+#include "kernel_data_types.hpp"
+
+#include <compare>
+#include <cstddef>
+#include <functional>
+#include <vector>
 
 /**
  * @brief ScaleType
@@ -16,12 +20,12 @@
  */
 struct ScaleType
 {
-    rocRoller::Operations::ScaleMode mode;
-    size_t                           blockRowSize = 32u;
-    size_t                           blockColSize = 1u;
-    rocRoller::DataType              type         = rocRoller::DataType::E8M0;
-    std::vector<size_t> preSwizzleTile; // {tileMN, tileK, subTileK} for pre-swizzled scale data
-    std::vector<size_t> preTile;        
+    hipblaslt::ScaleMode mode;
+    size_t               blockRowSize = 32u;
+    size_t               blockColSize = 1u;
+    hipblaslt::DataType  type         = hipblaslt::DataType::E8M0;
+    std::vector<size_t>  preSwizzleTile; // {tileMN, tileK, subTileK} for pre-swizzled scale data
+    std::vector<size_t>  preTile;
 
     auto operator<=>(const ScaleType& other) const = default;
 };
@@ -44,10 +48,10 @@ struct std::hash<ScaleType>
     size_t operator()(const ScaleType& s) const noexcept
     {
         size_t seed = 0;
-        detail::hash_combine(seed, std::hash<rocRoller::Operations::ScaleMode>{}(s.mode));
+        detail::hash_combine(seed, std::hash<hipblaslt::ScaleMode>{}(s.mode));
         detail::hash_combine(seed, std::hash<size_t>{}(s.blockRowSize));
         detail::hash_combine(seed, std::hash<size_t>{}(s.blockColSize));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(s.type));
+        detail::hash_combine(seed, std::hash<hipblaslt::DataType>{}(s.type));
 
         for(const auto& elem : s.preSwizzleTile)
         {
@@ -72,11 +76,11 @@ struct std::hash<ScaleType>
  */
 struct KernelType
 {
-    rocRoller::DataType typeA;
-    rocRoller::DataType typeB;
-    rocRoller::DataType typeC;
-    rocRoller::DataType typeD;
-    rocRoller::DataType typeAcc = rocRoller::DataType::Float;
+    hipblaslt::DataType typeA;
+    hipblaslt::DataType typeB;
+    hipblaslt::DataType typeC;
+    hipblaslt::DataType typeD;
+    hipblaslt::DataType typeAcc = hipblaslt::DataType::Float;
 
     bool transA;
     bool transB;
@@ -96,11 +100,11 @@ struct std::hash<KernelType>
     size_t operator()(const KernelType& k) const noexcept
     {
         size_t seed = 0;
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeA));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeB));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeC));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeD));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeAcc));
+        detail::hash_combine(seed, std::hash<hipblaslt::DataType>{}(k.typeA));
+        detail::hash_combine(seed, std::hash<hipblaslt::DataType>{}(k.typeB));
+        detail::hash_combine(seed, std::hash<hipblaslt::DataType>{}(k.typeC));
+        detail::hash_combine(seed, std::hash<hipblaslt::DataType>{}(k.typeD));
+        detail::hash_combine(seed, std::hash<hipblaslt::DataType>{}(k.typeAcc));
         detail::hash_combine(seed, std::hash<ScaleType>{}(k.scaleTypeA));
         detail::hash_combine(seed, std::hash<ScaleType>{}(k.scaleTypeB));
         detail::hash_combine(seed, std::hash<bool>{}(k.transA));

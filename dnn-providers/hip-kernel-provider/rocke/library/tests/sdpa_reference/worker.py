@@ -21,6 +21,33 @@ import numpy as np
 from .architectures import get_architecture
 from .contract import Case
 from reference_common.numeric import array_digest, decode, file_digest, write_json
+from reference_common.targets import get_device_processor
+
+
+def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
+    """Bind frozen WMMA or legacy dense arguments without initializing HIP."""
+    abi = metadata.get("abi", "dense-v1")
+    if abi in ("wmma-strided-v1", "wmma-strided-v2"):
+        from .implementations.wmma import replay_values as wmma_replay_values
+
+        values = wmma_replay_values(metadata, buffers)
+    elif abi == "dense-v1":
+        values = {
+            "q_ptr": buffers["q"],
+            "k_ptr": buffers["k"],
+            "v_ptr": buffers["v"],
+            "o_ptr": buffers["out"],
+            "scale": case.scale,
+        }
+        if metadata["runtime_shape"]:
+            values.update(
+                batch=case.batch,
+                seqlen_q=case.sequence_length,
+                seqlen_kv=case.sequence_length,
+            )
+    else:
+        raise ValueError(f"unsupported SDPA replay ABI: {abi}")
+    return values
 
 
 def run(request: dict, output: Path) -> None:
@@ -29,12 +56,12 @@ def run(request: dict, output: Path) -> None:
 
     import rocke
     from rocke.runtime import DeviceMem, KernelLauncher, LaunchConfig, Runtime
-    from rocke.runtime.hip_module import get_device_arch, get_device_target_id
+    from rocke.runtime.hip_module import get_device_target_id
 
     root = Path(request["platform_root"]).resolve()
     if not Path(rocke.__file__).resolve().is_relative_to(root):
         raise RuntimeError("worker imported rocKE outside its selected source/runtime")
-    if get_device_arch() != target.NAME:
+    if get_device_processor() != target.NAME:
         raise RuntimeError(
             f"SDPA correctness requires a HIP-visible {target.NAME} device"
         )
@@ -97,19 +124,7 @@ def run(request: dict, output: Path) -> None:
                 if request["mode"] == "source":
                     target.launch(spec, buffers, case.scale)
                 else:
-                    values = {
-                        "q_ptr": buffers["q"],
-                        "k_ptr": buffers["k"],
-                        "v_ptr": buffers["v"],
-                        "o_ptr": buffers["out"],
-                        "scale": case.scale,
-                    }
-                    if metadata["runtime_shape"]:
-                        values.update(
-                            batch=case.batch,
-                            seqlen_q=case.sequence_length,
-                            seqlen_kv=case.sequence_length,
-                        )
+                    values = replay_values(metadata, buffers, case)
                     launcher(
                         values,
                         config=LaunchConfig(
