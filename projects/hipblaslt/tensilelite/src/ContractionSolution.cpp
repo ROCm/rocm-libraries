@@ -3249,16 +3249,28 @@ namespace TensileLite
         // (rocblaslt/src/rocroller/custom_kernels.cpp) -- so compact makes the two
         // launchers agree rather than diverge.  Open for PR review: if a
         // pre-swizzled custom kernel ever ships through this path, revisit.
-        auto compactScaleStride
-            = [&](TensorDescriptor const& dataDesc, size_t boundIdx, size_t mxBlock, size_t idx) {
-                  std::vector<size_t> sizes = dataDesc.sizes();
-                  if(mxBlock && boundIdx < sizes.size())
-                      sizes[boundIdx] = CeilDivide(sizes[boundIdx], mxBlock);
-                  size_t stride = 1;
-                  for(size_t i = 0; i < idx && i < sizes.size(); i++)
-                      stride *= sizes[i];
-                  return stride;
-              };
+        //
+        // It IS gated on the caller: only a caller whose scale buffer really is
+        // packed may take this path.  hipBLASLt hands the custom kernel the user's
+        // raw Block_32_UE8M0 pointer, which is packed; the TensileLite benchmark
+        // client allocates the scale buffer from the padded descriptor itself and
+        // hands that same buffer over, so for it the descriptor is the truth and
+        // the compact value would mis-address every odd scale row.
+        auto scaleStrideFor = [&](TensorDescriptor const& scaleDesc,
+                                  TensorDescriptor const& dataDesc,
+                                  size_t                  boundIdx,
+                                  size_t                  mxBlock,
+                                  size_t                  idx) -> size_t {
+            if(!problem.customKernelMXScalesArePacked())
+                return scaleDesc.strides()[idx];
+            std::vector<size_t> sizes = dataDesc.sizes();
+            if(mxBlock && boundIdx < sizes.size())
+                sizes[boundIdx] = CeilDivide(sizes[boundIdx], mxBlock);
+            size_t stride = 1;
+            for(size_t i = 0; i < idx && i < sizes.size(); i++)
+                stride *= sizes[i];
+            return stride;
+        };
         void const*  aAddress = sparseA ? inputs.compressed : inputs.a;
         void const*  bAddress = sparseB ? inputs.compressed : inputs.b;
 
@@ -3401,10 +3413,11 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideScaleA0:
                 {
-                    size_t scaleStride = compactScaleStride(problem.a(),
-                                                            problem.boundIndices()[0].a,
-                                                            problem.mxBlockA(),
-                                                            descriptorStrideAB);
+                    size_t scaleStride = scaleStrideFor(problem.mxsa(),
+                                                        problem.a(),
+                                                        problem.boundIndices()[0].a,
+                                                        problem.mxBlockA(),
+                                                        descriptorStrideAB);
                     rv.args.appendCustomType("StrideScaleA0", scaleStride, arg.type);
                     break;
                 }
@@ -3417,10 +3430,11 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB0:
                 {
-                    size_t scaleStride = compactScaleStride(problem.b(),
-                                                            problem.boundIndices()[0].b,
-                                                            problem.mxBlockB(),
-                                                            descriptorStrideAB);
+                    size_t scaleStride = scaleStrideFor(problem.mxsb(),
+                                                        problem.b(),
+                                                        problem.boundIndices()[0].b,
+                                                        problem.mxBlockB(),
+                                                        descriptorStrideAB);
                     rv.args.appendCustomType("StrideScaleB0", scaleStride, arg.type);
                     break;
                 }
