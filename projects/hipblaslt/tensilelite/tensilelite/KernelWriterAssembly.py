@@ -74,7 +74,9 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
-from .Common.MxScaleLayout import mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM
+from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
+  mxLraFreeShift
+from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
@@ -6515,6 +6517,10 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def _lraFanOut(self, kernel, tc, numLra):
     module = Module("lraFanOut")
+    if tc in ("MXSA", "MXSB") and mxFreePhase(kernel, tc):
+      # 2D phase: +1.. are per-vector addresses, not +64K copies of +0. Every
+      # update applies to all of them instead (_mxPhaseLraUpdate).
+      return module
     maxOff = self.states.regCaps["maxLDSConstOffset"]
     if tc == "B" and kernel.get("LDSSegmentBRotate"):
       # +0 already carries the pair offset; +1 = +0 + per-wave delta (see lraDeclareAddresses).
@@ -6525,6 +6531,71 @@ class KernelWriterAssembly(KernelWriter):
     for i in range(1, numLra):
       module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=(i * maxOff), \
         src1=vgpr("LocalReadAddr%s"%tc), comment="Final Offset Plus %uK"%((i * maxOff) / 1024)))
+    return module
+
+  ##############################################################################
+  # Local Read Addresses: 2D MXS workgroup phase
+  ##############################################################################
+  def mxPhaseLraFixup(self, kernel, tP):
+    """Give each 2D MXS WaveTile vector the scale row its workgroup needs.
+
+    Tile wg starts (wg*MT) % MXBlockFree into a scale row (the phase), so the
+    vector at free offset m + v*vStep reads row (phase + m + v*vStep) /
+    MXBlockFree. That is not a fixed immediate per vector, so each vector has
+    its own LocalReadAddr+v. LRA left +0 at row 0 because the workgroup is
+    not final until graWorkGroup; this runs after it, once per tile. +1.. are
+    built from +0 first, +0 is moved last.
+    """
+    tc = tP["tensorChar"]
+    module = Module("mxPhaseLraFixup %s" % tc)
+    if not mxFreePhase(kernel, tc) or kernel["DirectToVgpr%s" % tc]:
+      return module
+
+    mxTile = mxFreeTile(kernel, tc)
+    mxShift = mxLraFreeShift(mxTile)
+    mt = kernel["MacroTile%s" % tc]
+    tile01 = tP["tile01Idx"]
+    mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlock%s" % tc[3]]
+    # mx2dFreeOffset counts free elements only when the LDS tile-stride is 1.
+    assert mxUnit == 1 and kernel.get("MXScaleFormat") in ("InMemorySwizzle", "HostPreSwizzle"), \
+      "MXS 2D phase needs a swizzled scale with MatrixInstK == MXBlock"
+    assert not kernel["UseSubtileImpl"] and not kernel["PrefetchAcrossPersistent"], \
+      "MXS 2D phase: LRA must be rebuilt by setupNewTile every tile"
+    numLra = self.states.mxsa.numVgprLocalReadAddr if tc == "MXSA" else self.states.mxsb.numVgprLocalReadAddr
+    # Same vector step as localReadMX: blockStep * MIWaveGroupShape.
+    miWaveGroupShape = [kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
+                        kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
+    tileSpan = Component.LocalRead.find(self).getMxsTileSpanInfo(kernel, tc, tile01, self.states.asmCaps) is not None
+    vStep = (2 if tileSpan else 1) * miWaveGroupShape[tile01]
+
+    module.addComment1("MXS 2D phase: per-vector scale-row LocalReadAddr%s" % tc)
+    offReg = self.vgprPool.checkOut(1, tag="mxPhaseLraFixup_off")
+    rowReg = self.vgprPool.checkOut(1, tag="mxPhaseLraFixup_row")
+    dummy = self.vgprPool.checkOut(1, tag="mxPhaseLraFixup_dummy")
+    tmpVgpr = self.vgprPool.checkOutAligned(2, 2, tag="mxPhaseLraFixup_tmpVgpr")
+    freeOffset, _ = mx2dFreeOffset(self, kernel, tP, offReg, dummy, ContinuousRegister(tmpVgpr, 2))
+    module.add(freeOffset)
+    with self.allocTmpSgpr(1, tag="mxPhaseLraFixup_phase") as tmpSgprInfo:
+      phase = sgpr(tmpSgprInfo.idx)
+      module.add(SMulI32(dst=phase, src0=sgpr("WorkGroup%u" % tP["idx"]), src1=mt, \
+                         comment="wg * MT(%u)" % mt))
+      module.add(SAndB32(dst=phase, src0=phase, src1=mxTile - 1, \
+                         comment="phase = (wg * MT) %% MXBlockFree(%u)" % mxTile))
+      module.add(VAddU32(dst=vgpr(offReg), src0=phase, src1=vgpr(offReg), \
+                         comment="free offset += phase"))
+    for v in reversed(range(numLra)):
+      if v:
+        module.add(VAddU32(dst=vgpr(rowReg), src0=v * vStep, src1=vgpr(offReg), \
+                           comment="vector %u: + %u * vStep(%u)" % (v, v, vStep)))
+      module.add(VLShiftRightB32(dst=vgpr(rowReg), shiftHex=hex(mxShift), src=vgpr(rowReg if v else offReg), \
+                                 comment="vector %u: scale row = / MXBlockFree(%u)" % (v, mxTile)))
+      module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u" % (tc, v)), src0=vgpr(rowReg), \
+                         src1=vgpr("LocalReadAddr%s+0" % tc), \
+                         comment="LocalReadAddr%s+%u = +0 + scale row" % (tc, v)))
+    self.vgprPool.checkIn(tmpVgpr)
+    self.vgprPool.checkIn(dummy)
+    self.vgprPool.checkIn(rowReg)
+    self.vgprPool.checkIn(offReg)
     return module
 
   ##############################################################################
@@ -14011,6 +14082,9 @@ class KernelWriterAssembly(KernelWriter):
     else:
       raise Exception(f"unsupport tc %s{tc}")
 
+    mxPhase = tc in ("MXSA", "MXSB") and mxFreePhase(kernel, tc)
+    assert not (mxPhase and (self.states.IncLdsBufSwitch or kernel["StoreSwapAddr"])), \
+      "MXS 2D phase: per-vector LocalReadAddr only supports the XOR buffer swap"
     if self.states.IncLdsBufSwitch:
       # IncLdsBufSwitch case, we do not use xor. Instead, use add and max check for round back
       # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) and the non-DTL TDM TDMPlusLdsBuf path)
@@ -14045,11 +14119,12 @@ class KernelWriterAssembly(KernelWriter):
           src1=vgpr("LocalReadAddr%s"%tc), \
           comment="swap Red Blk"))
     else:
-      module.add(VXorB32(
-        dst=vgpr("LocalReadAddr%s"%tc), \
-        src0=hex(kernel["LdsOffsetA_Blk"]), \
-        src1=vgpr("LocalReadAddr%s"%tc), \
-        comment="swap Red Blk"))
+      for i in range(numLra if mxPhase else 1):
+        module.add(VXorB32(
+          dst=vgpr("LocalReadAddr%s+%u"%(tc, i)) if mxPhase else vgpr("LocalReadAddr%s"%tc), \
+          src0=hex(kernel["LdsOffsetA_Blk"]), \
+          src1=vgpr("LocalReadAddr%s+%u"%(tc, i)) if mxPhase else vgpr("LocalReadAddr%s"%tc), \
+          comment="swap Red Blk"))
 
     module.add(self._lraFanOut(kernel, tc, numLra))
     return module
@@ -14111,11 +14186,13 @@ class KernelWriterAssembly(KernelWriter):
                       comment="Set LRA to first buffer offset"))
       self.vgprPool.checkIn(tmpvgpr)
     else:
-      module.add(VAndB32(
-        dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], 0)), \
-        src0=hex(kernel["LdsOffsetA_Blk"]-1), \
-        src1=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], 0)), \
-        comment="reset Red,Blk -> Red"))
+      mxPhase = tc in ("MXSA", "MXSB") and mxFreePhase(kernel, tc)
+      for i in range(numLra if mxPhase else 1):
+        module.add(VAndB32(
+          dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], i)), \
+          src0=hex(kernel["LdsOffsetA_Blk"]-1), \
+          src1=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], i)), \
+          comment="reset Red,Blk -> Red"))
 
     numLra = 0
     if tP["isA"]:
@@ -14152,11 +14229,13 @@ class KernelWriterAssembly(KernelWriter):
         numLra = self.states.mxsb.numVgprLocalReadAddr
       elif tP["isM"]:
         numLra = self.states.m.numVgprLocalReadAddr
-      module.add(VAndB32(
-        dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], 0)), \
-        src0=hex(kernel["LdsOffset%s_Blk"%tP["tensorChar"]]-1), \
-        src1=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], 0)), \
-        comment="init Red,Blk -> Red"))
+      mxPhase = tc in ("MXSA", "MXSB") and mxFreePhase(kernel, tc)
+      for i in range(numLra if mxPhase else 1):
+        module.add(VAndB32(
+          dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], i)), \
+          src0=hex(kernel["LdsOffset%s_Blk"%tP["tensorChar"]]-1), \
+          src1=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], i)), \
+          comment="init Red,Blk -> Red"))
       module.add(self._lraFanOut(kernel, tc, numLra))
     return module
 

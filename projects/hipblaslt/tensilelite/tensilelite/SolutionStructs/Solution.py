@@ -65,7 +65,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from ..Common.MxScaleLayout import mxFreeTile, mxLdsAlign, mxLdsNumBytes
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -248,6 +248,43 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
           f"got {vectorWidth}")
       return False
 
+  return True
+
+
+def _validateMXFreePhase(state, printRejectionReason):
+  """Reject 2D MX tiles whose workgroup phase the kernel cannot index.
+
+  A MacroTile that is neither a multiple nor a divisor of MXBlockFree starts
+  workgroups partway into a scale row (e.g. MT=224 puts WG1 at N=224, 96 into
+  row 1). KernelWriterAssembly.mxPhaseLraFixup adds that phase per tile and
+  gives each WaveTile vector its own LocalReadAddr. It counts free elements,
+  so it needs a one-byte LDS tile-stride (swizzled, MatrixInstK == MXBlock),
+  needs LRA rebuilt by setupNewTile every tile, and keeps one scale per
+  vector, so a vector's MI * VW columns must not straddle a row at any phase.
+  """
+  for tc in ("A", "B"):
+    mxTc = "MXS" + tc
+    mxBlock = state["ProblemType"]["MXBlock%s" % tc]
+    if not mxBlock or not mxFreePhase(state, mxTc):
+      continue
+    mxTile = mxFreeTile(state, mxTc)
+    mt = state["MacroTile%s" % mxTc]
+    why = None
+    if state["MXScaleFormat"] not in ("InMemorySwizzle", "HostPreSwizzle") \
+        or state["MatrixInstK"] // mxBlock != 1:
+      why = "a swizzled scale with MatrixInstK == MXBlock%s" % tc
+    elif state["UseSubtileImpl"] or state["PrefetchAcrossPersistent"] or state["DirectToVgpr%s" % mxTc]:
+      why = "no UseSubtileImpl, PrefetchAcrossPersistent or DirectToVgpr%s" % mxTc
+    else:
+      miT = state["MatrixInstM"] * state["MatrixInstBM"] if tc == "A" else state["MatrixInstN"] * state["MatrixInstBN"]
+      vecCols = miT * state["VectorWidth%s" % tc]
+      if math.gcd(mt, mxTile) % vecCols:
+        why = "WaveTile vectors (%u columns) dividing gcd(MT, MXBlockFree) = %u" % (vecCols, math.gcd(mt, mxTile))
+    if why:
+      reject(state, printRejectionReason,
+             "MacroTile%s %u is not aligned to MXBlockFree%s %u; the workgroup phase needs %s"
+             % (tc, mt, tc, mxTile, why))
+      return False
   return True
 
 
@@ -4720,6 +4757,9 @@ class Solution(collections.abc.Mapping):
 
       if not _validateMXLocalReadWidth(
           state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
+
+      if not _validateMXFreePhase(state, printRejectionReason):
         return
 
       # An explicitly wide local read cannot be reduced by the auto-width

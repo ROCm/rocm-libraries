@@ -33,8 +33,71 @@ from rocisa.functions import vectorStaticRemainder, \
 from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
-from ..Common.MxScaleLayout import mxFreeTile, mxLraFreeShift
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLraFreeShift
 from dataclasses import dataclass
+
+
+def mx2dFreeOffset(writer, kernel, tP, dstReg, dummy, tmpVgprRes, dividendReg="Serial"):
+    """Free-dim offset (M for MXSA, N for MXSB) of a lane's first 2D MXS read.
+
+    Returns (module, label): label names the offset in the shift comment, None
+    when it is 0 (one wave along the free dim). The scale row is this offset /
+    MXBlockFree; LRA shifts it once, mxPhaseLraFixup adds the workgroup phase
+    first. TileSpan
+    uses the same 1D geometry gate: wave-split adds hiOffset (M-elements *
+    strideTile) before the shift; after / MXBlockFree a small partnerΔ maps
+    both half-waves onto the same scale row. Non-split uses nIdx=wtid so lanes
+    MI..2MI-1 do the same.
+    """
+    module = Module("mx2dFreeOffset")
+    tc = tP["tensorChar"]
+    tile01 = tP["tile01Idx"]
+    tileSpan = LocalRead.find(writer).getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps) is not None
+    tileSpanWaveSplit = tileSpan and (kernel["MIWaveGroup"][tile01] > 1)
+    waveWidth = kernel["WavefrontSize"]
+    matrixInstT = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
+    num1DBlocks = kernel["MatrixInstBM"] if tile01 == 0 else kernel["MatrixInstBN"]
+    num1DWaves = kernel["MIWaveGroup"][tile01]
+    dividedForWaveId = waveWidth if tile01 == 0 else (waveWidth * kernel["MIWaveGroup"][0])
+    vectorWidth = kernel["VectorWidth%s" % tc]
+    # MX scale LDS tile-stride, as in LraTileAssignmentCode
+    if kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle"):
+        strideTile = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlock%s" % tc[3]]
+    else:
+        LdsPad = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
+        strideTile = kernel["_DepthU%s" % tc] + LdsPad if kernel["UnrollMajorLDS%s" % tc] else 1
+    strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
+
+    if tileSpan and not tileSpanWaveSplit:
+        with writer.allocTmpSgpr(1, tag="mx2dFreeOffset_tmpSgprInfo") as tmpSgprInfo:
+            module.add(vectorStaticRemainder(dummy, dstReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo,
+                "MXS 2D TileSpan non-split: nIdx = wtid"))
+            module.add(vectorStaticMultiply(vgpr(dstReg), vgpr(dstReg), strideTile, tmpSgprInfo,
+                "MXS 2D TileSpan non-split: nOffset = nIdx * nStride(%u)" % strideTile))
+            module.add(vectorStaticMultiply(vgpr(dstReg), vgpr(dstReg), vectorWidth, tmpSgprInfo,
+                "MXS 2D TileSpan non-split: nOffset *= vw(%u)" % vectorWidth))
+        return module, "nOffset"
+    if num1DWaves > 1:
+        with writer.allocTmpSgpr(1, tag="mx2dFreeOffset_tmpSgprInfo") as tmpSgprInfo:
+            module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes,
+                "MXS 2D: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
+            module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo,
+                "MXS 2D: wtid0 = wtid %% num1DWaves(%u)" % num1DWaves))
+            module.add(vectorStaticMultiply(vgpr(dstReg), vgpr(dummy), strideWave, tmpSgprInfo,
+                "MXS 2D: wave M offset = wtid0 * W0Stride(%u)" % strideWave))
+            if tileSpanWaveSplit:
+                hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
+                tileDim = "M" if tile01 == 0 else "N"
+                module.add(vectorStaticDivide(dummy, dividendReg, matrixInstT, tmpVgprRes,
+                    "MXS 2D TileSpan wave-split: hiSel = tid / MI_dim(%u)" % matrixInstT))
+                module.add(VAndB32(dst=vgpr(dummy), src0=1, src1=vgpr(dummy),
+                    comment="MXS 2D TileSpan wave-split: hi = (tid / MI_dim) & 1"))
+                module.add(vectorStaticMultiplyAdd(vgpr(dstReg), vgpr(dummy), hiOffset, vgpr(dstReg), tmpSgprInfo,
+                    "MXS 2D TileSpan wave-split: + hi * hiOffset(%u) (%s); then / MXBlockFree" % (hiOffset, tileDim)))
+        return module, "wave offset"
+    module.add(VMovB32(dst=vgpr(dstReg), src=0,
+        comment="MXS 2D: one wave along free dim, scale row 0"))
+    return module, None
 
 @dataclass
 class LraTilePropertiesMFMA(LraTileProperties):
@@ -923,45 +986,20 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         mxTile = mxFreeTile(kernel, tc)
         mxShift = mxLraFreeShift(mxTile)
 
-        if mxShift:
+        if mxShift and mxFreePhase(kernel, tc):
+            # The scale row depends on the workgroup's phase, which is not
+            # final until graWorkGroup. mxPhaseLraFixup adds it per tile and
+            # fills one LocalReadAddr per WaveTile vector.
+            module.add(VMovB32(dst=vgpr(tReg), src=0,
+                comment="MXS 2D phase: scale row added per tile (mxPhaseLraFixup)"))
+        elif mxShift:
             # 2D: scale row = floor(M_off / MXBlockFree). Extra WaveTiles are
-            # localReadMX vIdx * MIWGShape / MXBlockFree. TileSpan uses the same
-            # 1D geometry gate: wave-split adds hiOffset (M-elements * strideTile)
-            # before the shift; after / MXBlockFree a small partnerΔ maps both
-            # half-waves onto the same scale row. Non-split uses nIdx=wtid so
-            # lanes MI..2MI-1 do the same.
-            if tileSpan and not tileSpanWaveSplit:
-                with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
-                    module.add(vectorStaticRemainder(dummy, tReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo,
-                        "MXS 2D TileSpan non-split: nIdx = wtid"))
-                    module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo,
-                        "MXS 2D TileSpan non-split: nOffset = nIdx * nStride(%u)" % strideTile))
-                    module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo,
-                        "MXS 2D TileSpan non-split: nOffset *= vw(%u)" % vectorWidth))
-                    module.add(VLShiftRightB32(dst=vgpr(tReg), shiftHex=hex(mxShift), src=vgpr(tReg),
-                        comment="MXS 2D: scale row = nOffset / MXBlockFree(%u)" % mxTile))
-            elif num1DWaves > 1:
-                with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
-                    module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes,
-                        "MXS 2D: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                    module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo,
-                        "MXS 2D: wtid0 = wtid %% num1DWaves(%u)" % num1DWaves))
-                    module.add(vectorStaticMultiply(vgpr(tReg), vgpr(dummy), strideWave, tmpSgprInfo,
-                        "MXS 2D: wave M offset = wtid0 * W0Stride(%u)" % strideWave))
-                    if tileSpanWaveSplit:
-                        hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
-                        tileDim = "M" if tile01 == 0 else "N"
-                        module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes,
-                            "MXS 2D TileSpan wave-split: hiSel = tid / MI_dim(%u)" % matrixInstTO))
-                        module.add(VAndB32(dst=vgpr(dummy), src0=1, src1=vgpr(dummy),
-                            comment="MXS 2D TileSpan wave-split: hi = (tid / MI_dim) & 1"))
-                        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), hiOffset, vgpr(tReg), tmpSgprInfo,
-                            "MXS 2D TileSpan wave-split: + hi * hiOffset(%u) (%s); then / MXBlockFree" % (hiOffset, tileDim)))
-                    module.add(VLShiftRightB32(dst=vgpr(tReg), shiftHex=hex(mxShift), src=vgpr(tReg),
-                        comment="MXS 2D: scale row = wave offset / MXBlockFree(%u)" % mxTile))
-            else:
-                module.add(VMovB32(dst=vgpr(tReg), src=0,
-                    comment="MXS 2D: one wave along free dim, scale row 0"))
+            # localReadMX vIdx * MIWGShape / MXBlockFree.
+            freeOffset, label = mx2dFreeOffset(writer, kernel, tP, tReg, dummy, tmpVgprRes, dividendReg)
+            module.add(freeOffset)
+            if label:
+                module.add(VLShiftRightB32(dst=vgpr(tReg), shiftHex=hex(mxShift), src=vgpr(tReg),
+                    comment="MXS 2D: scale row = %s / MXBlockFree(%u)" % (label, mxTile)))
 
         if not mxShift:
           with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
