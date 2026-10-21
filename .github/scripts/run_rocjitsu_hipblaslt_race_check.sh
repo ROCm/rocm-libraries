@@ -543,6 +543,7 @@ if [[ "${RANDOM_GEMM_COUNT}" != "0" ]]; then
       --bench "${HIPBLASLT_BENCH}" --rocjitsu "${ROCJITSU_BIN}" \
       --config "${ROCJITSU_CONFIG}" --count "${RANDOM_GEMM_COUNT}" \
       --seed "${RANDOM_GEMM_SEED}" --threads "${RANDOM_GEMM_THREADS}" \
+      --explicit-cases "${SCRIPT_DIR}/hipblaslt_explicit_gemms.json" \
       --timeout "${RACE_TIMEOUT_SECONDS}" \
       --output "${RACE_REPORT_DIR}/random-gemms"
   exit 0

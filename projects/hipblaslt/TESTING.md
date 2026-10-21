@@ -605,7 +605,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
-| Random GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts or workflows change. See [random GEMM testing](docs/nightly-random-gemm.md) |
+| Random and required GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs plus the required-case list for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts, required cases or workflows change. See [random GEMM testing](docs/nightly-random-gemm.md) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -788,7 +788,8 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
 
 - **Random GEMMs under CPU rocJITsu.** The Multi-Arch nightly sidecar checks 1,000
   fixed-seed gfx950 GEMMs, including MXFP8 and MXFP4, using the nightly run's BLAS
-  artifacts. It uses the same seed and sampler as the 100-case per-PR sidecar.
+  artifacts. It uses the same seed and sampler as the 100-case per-PR sidecar,
+  and both run the same required-case list in addition to their random samples.
   Both are advisory, require no GPU, and retain every case's input and logs.
   Manual artifact replay and local validation are documented in
   [random GEMM testing](docs/nightly-random-gemm.md).
