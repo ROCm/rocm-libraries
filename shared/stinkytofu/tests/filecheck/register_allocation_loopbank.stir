@@ -1,0 +1,37 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact+greedy-compact-loopbank+legacy,classes=v,report,apply,choose --vgpr-msb-mode=msb8 --InsertVgprMsbPass --LoopRegionRemarkPass --remarks --print-output 2>&1
+#
+# greedy-compact-loopbank moves an address into the bank of the pinned matrix
+# operand it sits next to.
+#
+# ProducerPinMatrix keeps the WMMA's operands where the producer put them: A
+# at v512, in bank 2, and B, C and D in bank 0. The prefetch after it names
+# its address through the same slot as A, src0, and uses no other. So the loop
+# sets the byte once, after its label, only if the address is in bank 2 too;
+# anywhere else the prefetch and the WMMA disagree on src0 and the loop pays
+# twice. The producer put the address at v300, in bank 1, and compacting puts
+# it at v8, in bank 0. Banking puts it at the bottom of bank 2's free part.
+# Every colouring keeps A at v512, so none has a wave over the others.
+
+# CHECK: chose greedy-compact-loopbank (waves=1 loopMsb=1 highest=521) over greedy-compact (waves=1 loopMsb=2 highest=519), legacy (waves=1 loopMsb=2 highest=519)
+# CHECK: loopMsb=2->1
+# CHECK: loop 'label_loop' summary: {{[0-9]+}} insts, 1 s_set_vgpr_msb,
+# CHECK: ^label_loop:
+# CHECK: "st.global_prefetch_b8"(v[520:521], off)
+
+st.func @address_follows_the_pinned_matrix_operand() {
+^entry:
+  v[512:515] = "st.ds_load_b128"(v40, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[516:519] = "st.ds_load_b128"(v40, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false } }
+  v[16:19] = "st.ds_load_b128"(v40, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false } }
+  v[20:23] = "st.ds_load_b128"(v40, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false } }
+  v300 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  v301 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop
+^label_loop:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[512:519], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.global_prefetch_b8"(v[300:301], off) { issueCycles = 1, latencyCycles = 1, mod.global = { offset = 0, th = "TH_LOAD_NT", scope = "SCOPE_SE" } }
+  "st.s_cbranch_scc0"(label_loop, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop, ^label_end
+^label_end:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

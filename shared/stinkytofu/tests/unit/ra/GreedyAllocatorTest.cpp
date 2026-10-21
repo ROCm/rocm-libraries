@@ -22,9 +22,11 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1105,9 +1107,33 @@ TEST_F(GreedyAllocatorTest, ThePlacementTableHasARowPerBlockAndMarksTheRefusal) 
     for (std::string line; std::getline(in, line);) lines.push_back(line);
     ASSERT_EQ(lines.size(), 5u) << "a header and the four blocks";
     EXPECT_TRUE(lines[0].starts_with("class\tleader\twidth")) << lines[0];
+    const auto fields = [](const std::string& line) {
+        std::vector<std::string> out;
+        std::istringstream row(line);
+        for (std::string field; std::getline(row, field, '\t');) out.push_back(field);
+        return out;
+    };
+    const std::vector<std::string> header = fields(lines[0]);
+    const size_t column = std::find(header.begin(), header.end(), "refused") - header.begin();
+    ASSERT_LT(column, header.size()) << lines[0];
     size_t refused = 0;
     for (size_t i = 1; i < lines.size(); ++i) {
-        if (lines[i].ends_with("\t1")) ++refused;
+        const std::vector<std::string> row = fields(lines[i]);
+        ASSERT_EQ(row.size(), header.size()) << lines[i];
+        if (row[column] == "1") ++refused;
     }
     EXPECT_EQ(refused, 1u);
+}
+
+TEST_F(GreedyAllocatorTest, LoopBankingWithoutALoopCostColoursAsGreedyCompactDoes) {
+    // A context with no LoopMsbCost has no loop to bank for, so the result
+    // has to be greedy-compact's, register for register.
+    overlappingPath(block("entry"));
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+    ASSERT_EQ(setup.context().loopMsb, nullptr);
+
+    CompactingGreedyAllocator compact;
+    LoopBankGreedyAllocator loopBank;
+    EXPECT_EQ(colourWith(loopBank, setup).toString(), colourWith(compact, setup).toString());
 }

@@ -59,6 +59,7 @@ def test_any_config_is_named_by_its_mode_alone(make):
 @pytest.mark.parametrize("value", [
     0, 3, "shadow", "apply,classes=vs,allocator=greedy-compact-program+greedy-compact,quadrant=prefer",
     "apply,allocator=greedy-compact+greedy-compact-program+greedy-compact-largest+legacy,choose",
+    "apply,allocator=greedy-compact+greedy-compact-loopbank+legacy,choose",
 ])
 def test_validation_accepts_modes_and_config_strings(value):
     checkParametersAreValid((KEY, [value]), validParameters)

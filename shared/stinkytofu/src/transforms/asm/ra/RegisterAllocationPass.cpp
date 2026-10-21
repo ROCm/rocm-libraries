@@ -609,6 +609,7 @@ Expected<Colouring> colour(const ColouringRun& run, RegisterAllocator& allocator
                                   run.loops, run.rules,         scope};
         context.preferProducerQuadrant =
             options.quadrant == RegisterAllocationOptions::Quadrant::Prefer;
+        context.loopMsb = &run.loopMsb;
         if (!options.blockDumpPrefix.empty()) {
             context.blockDumpPath = options.blockDumpPrefix + allocator.name() + "." +
                                     unbankableOperandsName(attempt) + ".tsv";

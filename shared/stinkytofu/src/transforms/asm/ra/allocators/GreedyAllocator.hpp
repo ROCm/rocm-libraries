@@ -108,4 +108,21 @@ class LargestFirstGreedyAllocator : public RegisterAllocator {
     Expected<AllocationResult> allocate(const AllocationContext& context) override;
 };
 
+/// Compacting placement in weight order, with the values the loops name kept
+/// in the banks that cost their loops the fewest s_set_vgpr_msb, registered as
+/// "greedy-compact-loopbank".
+///
+/// Each value a loop names through a bank slot gets a bank, chosen by the
+/// loop's own count with the pinned operands where they are (loopBankings),
+/// and those values are placed ahead of the queue, in the order they start.
+/// One whose bank is full spills over like any block. Each banking the search
+/// offers is placed, and the colouring whose loops cost least is kept. Without
+/// a loop it colours as greedy-compact does. See LoopBanking.cpp.
+class LoopBankGreedyAllocator : public RegisterAllocator {
+   public:
+    const char* name() const override;
+    AllocatorCapabilities capabilities() const override;
+    Expected<AllocationResult> allocate(const AllocationContext& context) override;
+};
+
 }  // namespace stinkytofu

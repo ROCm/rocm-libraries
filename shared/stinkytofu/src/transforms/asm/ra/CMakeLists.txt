@@ -19,6 +19,7 @@ target_sources(stinkytofu_objs PRIVATE
     allocators/GreedyAllocator.cpp
     allocators/FreedomOrderedGreedyAllocator.cpp
     allocators/OrderedGreedyAllocators.cpp
+    allocators/LoopBanking.cpp
 )
 
 add_subdirectory(target)

@@ -40,6 +40,7 @@
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/LoopMsbCost.hpp"
 #include "stinkytofu/transforms/asm/ra/PhysRegMatrix.hpp"
 
 namespace stinkytofu {
@@ -155,7 +156,7 @@ class Greedy {
         if (!buildBlocks()) return fail(error_);
         if (mayFoldPairs_) foldPairs();
         measure();
-        const bool placedAll = place();
+        const bool placedAll = policy_.banksLoopValues ? placeLoopBanked() : place();
         if (!context_.blockDumpPath.empty()) dumpBlocks();
         if (!placedAll) return fail(error_);
 
@@ -884,6 +885,55 @@ class Greedy {
         return occupants;
     }
 
+    /// Place once per banking loopBankings offers and keep the colouring the
+    /// loops pay least for, the first on a tie. The search behind a banking
+    /// counts room per slot, and a bank can have that while no one register in
+    /// it is free for a value's whole life, so only placing says what a banking
+    /// costs. When every banking is refused, place with none, as greedy-compact
+    /// does.
+    bool placeLoopBanked() {
+        const std::vector<LoopBanking> bankings = loopBankings(context_, blocks_, blockIndexOf_);
+        const std::vector<Block> unplaced = blocks_;
+        const auto placeWith = [&](const LoopBanking* banking) {
+            blocks_ = unplaced;
+            refused_ = nullptr;
+            if (banking != nullptr) {
+                for (size_t index = 0; index < blocks_.size(); ++index)
+                    blocks_[index].preferredBank = (*banking)[index];
+            }
+            return place();
+        };
+        std::optional<size_t> best;
+        uint64_t bestCount = 0;
+        for (size_t choice = 0; choice < bankings.size(); ++choice) {
+            if (!placeWith(&bankings[choice])) continue;
+            const uint64_t count = loopCount();
+            if (best.has_value() && count >= bestCount) continue;
+            best = choice;
+            bestCount = count;
+        }
+        if (!best.has_value()) return placeWith(nullptr);
+        // Placement is deterministic, so placing the winner again reproduces it.
+        if (*best + 1 != bankings.size()) return placeWith(&bankings[*best]);
+        return true;
+    }
+
+    /// What the loops pay for the current placement, main loop first, as the
+    /// bank search counts it.
+    uint64_t loopCount() const {
+        std::vector<std::optional<uint32_t>> indexOf(context_.function.ssaArena().valueCount() + 1);
+        for (const Block& block : blocks_) {
+            if (block.regClass != RegType::V) continue;
+            for (const Member& member : block.members)
+                indexOf[member.value] = block.base + member.offset;
+        }
+        return context_.loopMsb->mainLoopFirstCount(
+            [&](SSAValueID value, const StinkyRegister& reg) -> uint32_t {
+                return value < indexOf.size() && indexOf[value].has_value() ? *indexOf[value]
+                                                                            : reg.reg.idx;
+            });
+    }
+
     bool place() {
         matrix_ = PhysRegMatrix(context_.target);
 
@@ -944,6 +994,20 @@ class Greedy {
             return policy_.placesBefore(blocks_[a], blocks_[b]);
         });
         for (size_t index : queue) blocks_[index].rank = nextRank++;
+
+        // Banked loop values next, while their banks still have the room they
+        // were chosen for, in the order they start. The search counted room per
+        // slot, and placing left to right is what lets one value take the
+        // register another has just left, so a bank the count says has room
+        // mostly does. One that finds none takes its turn in the queue.
+        std::vector<size_t> banked;
+        for (size_t index : queue) {
+            if (blocks_[index].preferredBank.has_value()) banked.push_back(index);
+        }
+        std::stable_sort(banked.begin(), banked.end(), [this](size_t a, size_t b) {
+            return blocks_[a].start < blocks_[b].start;
+        });
+        for (size_t index : banked) tryPlace(blocks_[index]);
 
         uint32_t evictionBudget = static_cast<uint32_t>(blocks_.size()) * kMaxEvictionsPerBlock + 1;
         std::vector<size_t> worklist(queue.rbegin(), queue.rend());
@@ -1042,12 +1106,16 @@ class Greedy {
     template <typename Acceptable>
     std::optional<uint32_t> pickBase(const Block& block, Acceptable acceptable) const {
         const uint32_t indexes = context_.target.indexCount(block.regClass);
-        // The producer's bank first, lowest base first, and the whole file only
-        // when it has no room. Staying in that bank outranks any pairing, so
-        // nothing is scored inside it.
-        if (context_.preferProducerQuadrant && block.regClass == RegType::V &&
-            block.hintBase.has_value()) {
-            const uint32_t bankStart = *block.hintBase / kVgprBankSize * kVgprBankSize;
+        // A preferred bank first, lowest base first, and the whole file only
+        // when it has no room: the block's loop bank, or else, under
+        // quadrant=prefer, the producer's. Staying in that bank outranks any
+        // pairing, so nothing is scored inside it.
+        std::optional<uint32_t> bank = block.preferredBank;
+        if (!bank.has_value() && context_.preferProducerQuadrant && block.regClass == RegType::V &&
+            block.hintBase.has_value())
+            bank = *block.hintBase / kVgprBankSize;
+        if (bank.has_value()) {
+            const uint32_t bankStart = *bank * kVgprBankSize;
             const uint32_t bankEnd = std::min(indexes, bankStart + kVgprBankSize);
             for (uint32_t base = bankStart; base + block.width <= bankEnd; ++base) {
                 if (acceptable(base)) return base;
@@ -1101,7 +1169,7 @@ class Greedy {
         std::ofstream out(context_.blockDumpPath);
         if (!out) return;
         out << "class\tleader\twidth\tmembers\tstart\tspan\tweight\tfreedom\tcapped\tpinned\thint"
-               "\tplaced\tbase\tevictions\trank\trefused\n";
+               "\tplaced\tbase\tevictions\trank\trefused\tbank\n";
         for (const Block& block : blocks_) {
             out << regTypeToString(block.regClass) << '\t' << block.leader << '\t' << block.width
                 << '\t' << block.members.size() << '\t' << block.start << '\t' << block.span << '\t'
@@ -1110,7 +1178,10 @@ class Greedy {
                 << (block.pinReason != nullptr ? 1 : 0) << '\t'
                 << (block.hintBase.has_value() ? static_cast<int64_t>(*block.hintBase) : -1) << '\t'
                 << (block.placed ? 1 : 0) << '\t' << block.base << '\t' << block.evictions << '\t'
-                << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\n';
+                << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\t'
+                << (block.preferredBank.has_value() ? static_cast<int64_t>(*block.preferredBank)
+                                                    : -1)
+                << '\n';
         }
     }
 

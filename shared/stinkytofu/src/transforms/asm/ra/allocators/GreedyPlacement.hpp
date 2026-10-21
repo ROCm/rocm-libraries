@@ -73,6 +73,10 @@ struct Block {
     /// last member's range ends. What the program and largest-first orders sort on.
     SlotIndex start = 0;
     SlotIndex span = 0;
+    /// The VGPR bank to search first, set by a policy that banks loop values
+    /// (PlacementPolicy::banksLoopValues). A block with one is placed ahead of
+    /// the queue, and still takes any base when its bank has no room.
+    std::optional<uint32_t> preferredBank;
     /// Position in placement order: 0 for pinned blocks, then counting up from 1
     /// through the early phase and the queue. Read only by the placement dump.
     uint32_t rank = 0;
@@ -103,7 +107,31 @@ struct PlacementPolicy {
     /// Whether \p evictor has a stronger claim than \p occupant on a register
     /// they both want.
     bool (*mayEvict)(const Block& evictor, const Block& occupant) = nullptr;
+
+    /// Give the blocks the loops name a bank each (loopBankings), place those
+    /// blocks ahead of the queue, and keep the banking whose colouring the
+    /// loops pay least for.
+    bool banksLoopValues = false;
 };
+
+/// A bank to search first for each block, by index into the blocks; empty for
+/// a block no loop names.
+using LoopBanking = std::vector<std::optional<uint32_t>>;
+
+/// Banks for the movable VGPR blocks an innermost loop names through a bank
+/// slot, so the loop needs as few s_set_vgpr_msb as the pinned operands allow.
+///
+/// Block by block, the bank that lowers AllocationContext::loopMsb's count is
+/// kept, while the block still fits beside the pinned and capped blocks and
+/// the blocks already there, and only among the banks the live peak and the
+/// pinned values need. The search runs twice, from the banks the producer used
+/// and from the lowest bank each block fits, and offers what each ends on:
+/// room is counted per slot, so only placing a banking says what it costs.
+/// Without a loop, or without loopMsb, it offers none. Defined in
+/// LoopBanking.cpp.
+std::vector<LoopBanking> loopBankings(const AllocationContext& context,
+                                      const std::vector<Block>& blocks,
+                                      const std::vector<size_t>& blockOf);
 
 /// Heaviest first, with capped blocks taken in a phase ahead of the queue.
 /// Defined in GreedyAllocator.cpp.
@@ -120,6 +148,10 @@ const PlacementPolicy& programPolicy();
 /// Most register-time first (width times live span), with capped blocks in a
 /// phase ahead of the queue. Defined in OrderedGreedyAllocators.cpp.
 const PlacementPolicy& largestPolicy();
+
+/// Weight order with the loop values banked and placed first. Defined in
+/// OrderedGreedyAllocators.cpp.
+const PlacementPolicy& loopBankPolicy();
 
 /// Colour \p context, with \p policy deciding what is placed when.
 ///

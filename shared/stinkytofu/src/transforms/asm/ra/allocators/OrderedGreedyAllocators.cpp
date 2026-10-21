@@ -1,12 +1,13 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Placement in program order, and largest block first.
+// Placement in program order, largest block first, and loop-banked.
 //
-// Two more orders for the shared engine in GreedyAllocator.cpp. Each keeps the
+// More policies for the shared engine in GreedyAllocator.cpp. Each keeps the
 // weight policy's early phase, so capped blocks still claim the one bank they
 // can reach before anything that could have gone anywhere, and borrows an
-// existing policy's answer to who may evict whom. Only the queue order is new.
+// existing policy's answer to who may evict whom. The first two only change
+// the queue order; loopbank keeps weight order and banks the loop values.
 
 #include <cstdint>
 #include <memory>
@@ -42,6 +43,8 @@ struct OrderedRegistrar {
         AllocatorRegistry::registerAllocator("greedy-compact-largest", [] {
             return std::make_unique<LargestFirstGreedyAllocator>();
         });
+        AllocatorRegistry::registerAllocator(
+            "greedy-compact-loopbank", [] { return std::make_unique<LoopBankGreedyAllocator>(); });
     }
 };
 static OrderedRegistrar s_orderedRegistrar;
@@ -61,6 +64,15 @@ const PlacementPolicy& programPolicy() {
 const PlacementPolicy& largestPolicy() {
     static const PlacementPolicy policy{"largest", weightPolicy().placesEarly, largestPlacesBefore,
                                         weightPolicy().mayEvict};
+    return policy;
+}
+
+/// Weight order for whatever the banked phase leaves to the queue, and its
+/// eviction rule throughout.
+const PlacementPolicy& loopBankPolicy() {
+    static const PlacementPolicy policy{"loopbank", weightPolicy().placesEarly,
+                                        weightPolicy().placesBefore, weightPolicy().mayEvict,
+                                        /*banksLoopValues=*/true};
     return policy;
 }
 
@@ -87,6 +99,18 @@ AllocatorCapabilities LargestFirstGreedyAllocator::capabilities() const {
 
 Expected<AllocationResult> LargestFirstGreedyAllocator::allocate(const AllocationContext& context) {
     return runGreedyPlacement(context, /*followHints=*/false, largestPolicy());
+}
+
+const char* LoopBankGreedyAllocator::name() const {
+    return "greedy-compact-loopbank";
+}
+
+AllocatorCapabilities LoopBankGreedyAllocator::capabilities() const {
+    return {};
+}
+
+Expected<AllocationResult> LoopBankGreedyAllocator::allocate(const AllocationContext& context) {
+    return runGreedyPlacement(context, /*followHints=*/false, loopBankPolicy());
 }
 
 // Without this the linker drops the translation unit from the static library,

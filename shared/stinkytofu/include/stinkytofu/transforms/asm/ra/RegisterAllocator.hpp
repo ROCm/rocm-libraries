@@ -44,6 +44,8 @@
 
 namespace stinkytofu {
 
+class LoopMsbCost;
+
 /// Everything an allocator may read. Const on purpose: no allocator mutates IR.
 struct AllocationContext {
     const Function& function;
@@ -70,6 +72,11 @@ struct AllocationContext {
     /// When non-empty, the file a policy may write its placement table to
     /// (RegisterAllocationOptions::blockDumpPrefix).
     std::string blockDumpPath;
+
+    /// What a colouring costs in s_set_vgpr_msb per loop iteration, by the rule
+    /// InsertVgprMsbPass will emit with. Null when the driver built none; a
+    /// policy that reads it then has no loop to place for.
+    const LoopMsbCost* loopMsb = nullptr;
 };
 
 /// What lowering must support for this allocator's output to be applicable.

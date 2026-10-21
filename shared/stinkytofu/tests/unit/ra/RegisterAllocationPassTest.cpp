@@ -1048,3 +1048,51 @@ TEST_F(RegisterAllocationChooseTest, WithoutChooseTheFirstThatColoursStillWins) 
     EXPECT_TRUE(contains(text, "with test-split")) << text;
     EXPECT_FALSE(contains(text, "chose")) << text;
 }
+
+class RegisterAllocationLoopBankTest : public RegisterAllocationPassTest {
+   protected:
+    /// Two held operands in bank 1 meet the two values a loop computes:
+    ///   entry: v300 = v0, v301 = v1                     (held)
+    ///   loop:  v600 = v300 + v301; v601 = v300 + v600   (back to loop)
+    ///   exit:  v602 = v600 + v601
+    /// Compacting puts v600 and v601 in bank 0, so the two adds disagree on
+    /// src1's bank and the loop switches twice per iteration.
+    void SetUp() override {
+        RegisterAllocationPassTest::SetUp();
+        BasicBlock* entry = block("entry");
+        BasicBlock* loop = block("loop");
+        BasicBlock* exit = block("exit");
+        func->addEdge(entry, loop);
+        func->addEdge(loop, loop);
+        func->addEdge(loop, exit);
+        vMov(entry, 300, 0);
+        vMov(entry, 301, 1);
+        createVAddInBlock(loop, kRaTestArch, 600, 300, 301);
+        createVAddInBlock(loop, kRaTestArch, 601, 300, 600);
+        createVAddInBlock(exit, kRaTestArch, 602, 600, 601);
+        ASSERT_TRUE(liftForAllocation(*func));
+    }
+
+    std::string colour(const std::string& allocator) {
+        RegisterAllocationOptions options = legacyApply();
+        options.allocator = allocator;
+        options.pinRegisters = {{RegType::V, 300, 301}};
+        options.report = true;
+        return runPassCapturingRemarks(*func, options);
+    }
+};
+
+TEST_F(RegisterAllocationLoopBankTest, CompactingSwitchesTwicePerIteration) {
+    const std::string text = colour("greedy-compact");
+
+    EXPECT_TRUE(contains(text, "loopMsb=2->2")) << text;
+}
+
+TEST_F(RegisterAllocationLoopBankTest, TheLoopsValuesJoinTheHeldOperandsBank) {
+    const std::string text = colour("greedy-compact-loopbank");
+
+    EXPECT_TRUE(contains(text, "loopMsb=2->1")) << text;
+    const std::string ir = physicalIR(*func);
+    EXPECT_TRUE(contains(ir, "v256 = \"st.v_add_f32\"(v300, v301)")) << ir;
+    EXPECT_TRUE(contains(ir, "v257 = \"st.v_add_f32\"(v300, v256)")) << ir;
+}

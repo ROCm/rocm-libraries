@@ -20,19 +20,23 @@ LoopMsbCost::LoopMsbCost(const Function& function, const std::vector<Loop>& loop
         if (loop.headerBB == nullptr) continue;
         bodies[loop.headerBB].insert(loop.bodyBBs.begin(), loop.bodyBBs.end());
     }
-    std::unordered_set<const BasicBlock*> walked;
+    // Each block of an innermost loop, with the loop it belongs to.
+    std::unordered_map<const BasicBlock*, const BasicBlock*> loopOf;
     for (const auto& [header, body] : bodies) {
         const bool innermost = std::none_of(bodies.begin(), bodies.end(), [&](const auto& other) {
             return other.first != header && body.count(other.first) != 0;
         });
-        if (innermost) walked.insert(body.begin(), body.end());
+        if (!innermost) continue;
+        for (const BasicBlock* block : body) loopOf.emplace(block, header);
     }
-    if (walked.empty()) return;
+    if (loopOf.empty()) return;
 
     // In function order, so a count does not depend on how the loops were found.
     const RegClassSet& lifted = function.ssaArena().liftedClasses();
+    std::vector<const BasicBlock*> loopOfStep;
     for (const BasicBlock& block : function) {
-        if (walked.count(&block) == 0) continue;
+        const auto found = loopOf.find(&block);
+        if (found == loopOf.end()) continue;
         steps_.push_back({});
         for (const IRBase& ir : block) {
             const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
@@ -46,12 +50,26 @@ LoopMsbCost::LoopMsbCost(const Function& function, const std::vector<Loop>& loop
                                                ? operandGroupsOf(*instruction, lifted)
                                                : OperandGroups{}});
         }
+        loopOfStep.resize(steps_.size(), found->second);
     }
     size_t runEnd = steps_.size();
     for (size_t i = steps_.size(); i-- > 0;) {
         if (steps_[i].instruction == nullptr) runEnd = i;
         steps_[i].runEnd = runEnd;
     }
+    // The main loop is the innermost loop with the most instructions, the
+    // first in function order on a tie. Weighting its switches above the count
+    // of all the others makes mainLoopFirstCount lexicographic.
+    std::unordered_map<const BasicBlock*, uint64_t> sizeOf;
+    const BasicBlock* main = nullptr;
+    for (size_t i = 0; i < steps_.size(); ++i) {
+        if (steps_[i].instruction == nullptr) continue;
+        const uint64_t size = ++sizeOf[loopOfStep[i]];
+        if (main == nullptr || size > sizeOf[main]) main = loopOfStep[i];
+    }
+    const uint64_t mainWeight = steps_.size() + 1;
+    for (size_t i = 0; i < steps_.size(); ++i)
+        steps_[i].weight = loopOfStep[i] == main ? mainWeight : 1;
 }
 
 uint32_t LoopMsbCost::of(const AllocationResult& colouring) const {
