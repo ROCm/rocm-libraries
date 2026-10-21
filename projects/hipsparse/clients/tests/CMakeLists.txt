@@ -8,8 +8,6 @@ if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/T
   set(HIPSPARSE_HAS_CTEST_CATEGORIES ON)
 endif()
 
-find_package(GTest REQUIRED)
-
 # Download or copy client matrices
 if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
     # Download matrices
