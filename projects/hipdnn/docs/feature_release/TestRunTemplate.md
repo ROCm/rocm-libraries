@@ -252,6 +252,7 @@ For each GPU family, record the results file name and paste the comparison again
 - **Results file**: `<headline-<version>-<arch>.json>`
 - **dnn-benchmarking version**: `<commit or tag>`
 - **Baseline**: `<previous release's results file for the same GPU family>`
+- **PyTorch validation** (`--validate pytorch`): `<passed, or the failed rows with an explanation or issue link>`
 
 ```bash
 dnn-benchmark compare headline-<previous-version>-<arch>.json headline-<version>-<arch>.json

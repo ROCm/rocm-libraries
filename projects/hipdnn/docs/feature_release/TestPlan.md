@@ -180,16 +180,16 @@ The workload tarballs are tracked with DVC, so a fresh clone holds only `.dvc` p
 dvc pull -R Workloads/headline
 ```
 
-Run the headline workloads, the curated regression set described in its [README](https://github.com/ROCm/dnn-benchmarking#workload-files), and write one results file. The set takes about an hour on one GPU:
+Run the headline workloads, the curated regression set described in its [README](https://github.com/ROCm/dnn-benchmarking#workload-files), and write one results file. Add `--validate pytorch` to compare each engine's output with a PyTorch reference: the `full` tier is the correctness gate, and this gives extra correctness signal on the benchmark workloads. It also adds a timed `reference` row for each graph. The set takes about an hour on one GPU without validation:
 
 ```bash
-dnn-benchmark -g Workloads/headline/*.tar.gz -o headline-<version>-<arch>.json
+dnn-benchmark -g Workloads/headline/*.tar.gz --validate pytorch -o headline-<version>-<arch>.json
 ```
 
 Windows (PowerShell) expands the workload files itself:
 
 ```powershell
-dnn-benchmark -g (Get-ChildItem Workloads\headline\*.tar.gz).FullName -o headline-<version>-<arch>.json
+dnn-benchmark -g (Get-ChildItem Workloads\headline\*.tar.gz).FullName --validate pytorch -o headline-<version>-<arch>.json
 ```
 
 Compare it with the previous release's results file for the same GPU family ([how `compare` reports changes](https://github.com/ROCm/dnn-benchmarking/blob/main/docs/usage.md#compare)):
@@ -202,6 +202,6 @@ Ahead of release branching, also run the larger `Workloads/microbench/` and `Wor
 
 #### Expected Results
 
-- `dnn-benchmark` exits 0.
+- `dnn-benchmark` exits 0. Exit code 3 means an engine row failed validation against PyTorch; explain it or track it as an issue.
 - Every regression that `compare` flags is explained or has a tracked issue.
 - Release performance is tracked by running dnn-benchmarking each release and comparing the results with the previous release's; the results file is the baseline for the next release.

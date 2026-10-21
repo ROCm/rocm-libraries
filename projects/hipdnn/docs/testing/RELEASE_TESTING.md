@@ -21,7 +21,7 @@ The hipDNN team owns release testing: it runs the `full` tier, runs the benchmar
 
 ## Performance corpus (manual)
 
-[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) holds the benchmark corpus. Before a release the team runs the full corpus. Runs are ordered by importance of the op and by risk, meaning the ops changed most since the last release go first. Each release's results are compared with the previous release's, which is the proposed process for tracking performance. Approach: [Performance](TESTING_STRATEGY.md#performance). Automation direction: [Roadmap](../Roadmap.md#benchmarking--performance-testing-2).
+[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) holds the benchmark corpus. Before a release the team runs the full corpus. Runs are ordered by importance of the op and by risk, meaning the ops changed most since the last release go first. The run also validates engine outputs against PyTorch (`--validate pytorch`), for correctness signal beyond the `full` tier. Each release's results are compared with the previous release's, which is the proposed process for tracking performance. Approach: [Performance](TESTING_STRATEGY.md#performance). Automation direction: [Roadmap](../Roadmap.md#benchmarking--performance-testing-2).
 
 ## Sanitizers
 
