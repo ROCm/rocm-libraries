@@ -43,6 +43,8 @@
  *  29  N8H56W56C64_K64Y3X3, a16x16x16, gfx942, streamk persistent workspace fp16
  *  30  N4H14W14C64_K96Y3X3G2 pad1, a32x32x16, gfx950, streamk dp_sk linear fp16, lds_k_outer
  *  (21-30 carry a CTA pool, but it is a launch parameter and leaves the IR as is.)
+ *  31-48  prefetch_addr=true on a base config (pfa_base below); 45-47 pair it
+ *         with async_dma / unroll_k / WMMA and must be rejected by both engines
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +55,18 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
+
+/* prefetch_addr configs 31-48: the base config each one flips the flag on.
+ * Must match _PFA_BASES in the Python emitter. -1 = not a prefetch_addr index. */
+static int pfa_base(int idx)
+{
+    static const int bases[] = {1, 11, 4, 13, 7, 11, 15, 19, 14, 3, 8, 16, 0, 10, 12, 18, 5, 4};
+    if(idx < 31 || idx >= 31 + (int)(sizeof(bases) / sizeof(bases[0])))
+        return -1;
+    return bases[idx - 31];
+}
+
+static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch);
 
 /* Stream-K fields of configs 21-29 (Python _STREAMK_CFGS). */
 static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
@@ -92,6 +106,27 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    int base = pfa_base(idx);
+    if(base < 0)
+        return make_base_cfg(idx, spec, arch);
+    if(make_base_cfg(base, spec, arch) != 0)
+        return -1;
+    spec->prefetch_addr = true;
+    if(idx == 36)
+        spec->split_k = 2; /* split-K packed fp16 atomic on the K-outer cshuffle base */
+    if(idx == 43)
+        spec->pipeline = "compv3";
+    if(idx == 48)
+    {
+        /* C = K = 3 on the 128x128x64 base: both operands load scalar, so
+         * more carried offsets than accumulators */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 3, 3, 3);
+    }
+    return 0;
+}
+
+static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
     spec->tile_m = 64;

@@ -43,18 +43,21 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
+import math
 import os
 import random
 import re
 import sys
 from dataclasses import dataclass
+from dataclasses import replace as dc_replace
+from collections.abc import Sequence
 from typing import NamedTuple
 from typing import List
 
 # hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
-# is the only launch in this driver that can reach the limit. Mirrors
-# dispatch.grouped_convolution._MAX_GRID_DIM_Z -- this file is a standalone
-# sweep driver that deliberately does not import the dispatcher.
+# is the only launch in this driver that can reach the limit. The z extent is
+# a 16-bit field in the dispatch packet on every arch rocke targets, so this is
+# an architectural constant rather than a per-device query.
 _MAX_GRID_DIM_Z = 65535
 
 # Suppress the "fell back to Python lowerer" warning — expected in environments
@@ -64,9 +67,10 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # ---------------------------------------------------------------------------
 # Swept parameter grids
 #
-# All axes are imported from the AOT cache grid (kernel_sweep.py CACHE_*) so
-# the two stay in sync: a kernel found fastest by this JIT sweep will always
-# have a cached counterpart that --run-from-cache can offer.
+# All axes are imported from the AOT cache grid (the CACHE_* of
+# kernels.conv.aot_jobs) so the two stay in sync: a kernel found fastest
+# by this JIT sweep will always have a cached counterpart that --run-from-cache
+# can offer.
 #
 # gfx1250 extensions (tile=512, warp=16) go beyond what gfx950/942 can use
 # and are defined locally; they are skipped automatically by the spec
@@ -77,8 +81,8 @@ from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
     add_early_stop_arg,
 )
-from benchmarks.common.kernel_sweep import _AOT_ALIAS_PIPELINES  # noqa: E402
-from benchmarks.common.kernel_sweep import (  # noqa: E402
+from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
+from kernels.conv.aot_jobs import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
     CACHE_TILE_K as _TILE_K,
@@ -107,9 +111,154 @@ _DTYPES = ("fp16", "bf16", "fp32")
 # ... and the ones --compile-all builds when --dtype names none.
 _COMPILE_DTYPES = ("fp16", "bf16")
 
-# Group-merge degrees swept for depthwise wgrad. Powers of two only: the
-# merged index math uses shifts and an xor.
-_GROUP_MERGE_SWEEP = (2, 4, 8, 16)
+# Group-merge degrees swept for depthwise wgrad and fwd. Powers of two only:
+# the merged index math splits the reduction index with a mask and a shift
+# (wgrad additionally uses an xor), and both gates enumerate the same set.
+#
+# Reaches 64 because that is what the fwd gate accepts. It is not free for
+# wgrad: its merged block filters on ``Gm <= tile_m`` and ``Z*Y*X*Gm <= tile_n``,
+# which rejects 32/64 for every filter bigger than 1x1 but does admit them on
+# pointwise depthwise, so a wgrad 1x1 sweep grows. That is the intended
+# behaviour -- the degrees were capped at 16 by nothing more than the fwd path
+# not existing yet -- and ``--sample`` is the lever if the count bites.
+_GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
+
+
+# Analytic merge-degree model for depthwise fwd. It centres the sweep's
+# per-tile degree window (_group_merge_window); it does not pick what ships --
+# the AOT cache carries every admissible degree and the timed run chooses.
+#
+# The functional form is hand-derived from the four things that move when Gm
+# changes -- K padding, A-load vector width, cache-line utilisation, and the
+# CTA's A working set. Only the weights are fitted, by random search over a
+# measured depthwise corpus (the objective is an argmin over degrees, so it is
+# piecewise constant in the constants and has no gradient). The cost has no
+# physical unit -- only ratios between degrees are compared -- so a constant's
+# absolute magnitude says nothing about its influence. Scope: gfx950, forward;
+# refit before relying on it elsewhere. Method and fitting tooling are described
+# in examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
+_FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
+_FWD_MERGE_CONSTS = (
+    # Cost of issuing the A load per K step, divided by the achieved vector
+    # width, so narrow loads cost more issue.
+    0.014175,  # b_aload_issue
+    # Weight of the DRAM bucket against the compute bucket.
+    0.00030657,  # w_memory
+    # Share of the W-direction halo reuse the cache actually delivers.
+    0.4249,  # r_reuse
+    # Per-CTA overhead no degree can avoid (launch, prologue, epilogue).
+    1.9548e6,  # d_cta_fixed
+    # Effective CTAs resident machine-wide; turns the CTA count into waves.
+    558.42,  # cupar
+    # Footprint scale of the per-CTA A working-set brake, in elements -- the
+    # only term that argues against merging.
+    130.64,  # c_footprint
+    # Exponent on cache-line utilisation (partial lines also burn requests).
+    2.7279,  # a_util
+    # Exponent on the brake; above 1 it can overturn the halved CTA count.
+    1.6812,  # q_brake
+)
+# Machine constants, not fitted: a 128-byte cache line, a 16-byte widest load.
+_FWD_MERGE_LINE_BYTES = 128
+_FWD_MERGE_VEC_BYTES = 16
+
+
+def _fwd_merge_pick(
+    groups: int,
+    m: int,
+    tile_m: int,
+    tile_n: int,
+    y: int,
+    x: int,
+    stride: int,
+    esize: int = 2,
+    tile_k: int = 64,
+) -> int:
+    """Merge degree the cost model prefers for one depthwise fwd geometry.
+
+    Evaluates the cost at every admissible degree and returns the argmin; ties
+    go to the smaller degree. Pointwise (``Y*X == 1``) returns 1, matching the
+    emitter gate.
+    """
+    B, W, r, D, P, F, A, q = _FWD_MERGE_CONSTS
+    if y * x <= 1:
+        return 1
+    m = max(int(m), 1)
+    stride = max(int(stride), 1)
+    tile_m = max(int(tile_m), 1)
+    best, best_cost = 1, None
+    for gm in _FWD_MERGE_DEGREES:
+        if gm > tile_n or groups % gm != 0:
+            continue
+        ctas = -(-m // tile_m) * (groups // gm)
+        kpad = tile_k * -(-(y * x * gm) // tile_k)
+        vw = min(gm, _FWD_MERGE_VEC_BYTES // esize)
+        u = min(1.0, gm * esize / _FWD_MERGE_LINE_BYTES)
+        footprint = tile_m * y * x * gm * esize
+        reuse = (1.0 + (x - 1) / stride) ** r
+        compute = kpad * (1.0 + B / vw)
+        memory = kpad * tile_m * esize * W / max(u**A * reuse, 1e-30)
+        per_cta = (compute + memory) * (1.0 + footprint / F) ** q + D
+        cost = math.ceil(ctas / P) * per_cta
+        if best_cost is None or cost < best_cost * (1.0 - 1e-9):
+            best, best_cost = gm, cost
+    return best
+
+
+def _group_merge_window(
+    groups: int,
+    m: int,
+    tile_m: int,
+    tile_n: int,
+    radius: int,
+    y: int,
+    x: int,
+    stride: int,
+    esize: int = 2,
+) -> tuple:
+    """Merge degrees worth sweeping for one tile geometry.
+
+    The full degree axis is a free cross-product: six degrees multiply the whole
+    tile/warp/pipeline/epilogue grid. The cost model (:func:`_fwd_merge_pick`)
+    already predicts where the optimum sits from the geometry, so the sweep only
+    has to confirm that pick and its immediate neighbours, not rediscover the
+    whole curve.
+
+    So: centre a window of ``2 * radius + 1`` degrees on the model's pick for
+    this geometry. ``radius = 0`` sweeps the pick alone; the default 1 brackets
+    it on both sides, which is what lets the sweep still *disagree* with the policy
+    (it can report that a neighbour won) rather than merely ratifying it.
+
+    The window is taken over the degrees admissible for this geometry, not over
+    ``_FWD_MERGE_DEGREES`` positions: ``G = 72`` admits only 2/4/8, and a window
+    indexed on the raw list would spend two of its three slots on 16 and 32, which
+    the gate rejects anyway. Clipping at both ends keeps the width at
+    ``2 * radius + 1`` whenever that many degrees are admissible at all.
+
+    Returns degrees in descending order. Empty when
+    no degree is admissible -- the shape then sweeps unmerged only, which is what
+    the emitter gate would force regardless.
+    """
+    admissible = [
+        gm
+        for gm in sorted(_GROUP_MERGE_SWEEP, reverse=True)
+        if groups % gm == 0 and gm <= tile_n
+    ]
+    if not admissible:
+        return ()
+    pick = _fwd_merge_pick(groups, m, tile_m, tile_n, y, x, stride, esize)
+    if pick <= 1:
+        # The cost model prefers unmerged (or Y*X == 1, where merging buys
+        # nothing). The gate still admits some degrees, and the sweep is where a
+        # wrong pick should show up, so fall back to the smallest admissible
+        # degrees rather than nothing.
+        idx = len(admissible) - 1
+    else:
+        idx = admissible.index(pick) if pick in admissible else len(admissible) - 1
+    width = 2 * radius + 1
+    lo = max(0, min(idx - radius, len(admissible) - width))
+    return tuple(admissible[lo : lo + width])
+
 
 # Scratch replica counts swept when --ws-replicas 0 is passed. Powers of two
 # because the Stage 1 slab pick is `blockIdx.z % R`; 1 is the degenerate
@@ -120,6 +269,32 @@ _WS_REPLICAS_SWEEP = (1, 2, 4, 8, 16, 32)
 # ---------------------------------------------------------------------------
 # Result record
 # ---------------------------------------------------------------------------
+
+
+class FwdCombo(NamedTuple):
+    """One point in the forward sweep.
+
+    Was a bare 8-tuple from ``itertools.product`` until ``group_merge`` was
+    added. A NamedTuple for the reason :class:`WgradCombo` records below: two
+    sites unpack this positionally, and a 9th field appended to a bare tuple
+    breaks whichever one is not updated in the same change -- quietly, because
+    the extra element only exists on the depthwise leg.
+
+    ``group_merge`` is defaulted so every non-merged construction site stays
+    correct without knowing the field is there.
+    """
+
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_tile_mn: int
+    pipeline: str
+    epilogue: str
+    # Conv groups folded into one GEMM tile. > 1 only for depthwise, where the
+    # per-group channel count is 1 and every access would otherwise be scalar.
+    group_merge: int = 1
 
 
 class WgradCombo(NamedTuple):
@@ -201,13 +376,23 @@ class Result:
 
 
 def _grid_for_spec(spec, p):
-    """Derive launch grid from spec and problem."""
-    M = p.M
-    N_gemm = p.N_gemm
+    """Derive the forward launch grid from spec and problem.
+
+    Reads ``spec.grid_*`` rather than ``p`` directly, for the same reason
+    :func:`_grid_for_wgrad_spec` does: under ``group_merge`` one workgroup owns
+    ``Gm`` conv groups, so the GEMM-N extent is ``Gm x`` larger and there are
+    ``Gm x`` fewer group slices. Taking either off the true problem is
+    host/device divergence -- and a silent one, because the true ``N_gemm`` is 1
+    on depthwise, so ``gx`` would stay 1 while the kernel writes ``Gm`` columns
+    and ``Gm x`` redundant CTAs raced on the same outputs. All three are equal
+    to the unmerged value when ``group_merge == 1``.
+    """
+    M = spec.grid_M
+    N_gemm = spec.grid_N_gemm
     gx = (N_gemm + spec.tile_n - 1) // spec.tile_n
     gy = (M + spec.tile_m - 1) // spec.tile_m
     # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm)
-    return (gx, gy, p.groups)
+    return (gx, gy, spec.grid_groups)
 
 
 def _grid_for_wgrad_spec(spec, split_k: int):
@@ -232,6 +417,105 @@ def _sample_combos(combos: list, frac: float, seed: int) -> list:
     n = max(1, round(len(combos) * frac))
     rng = random.Random(seed)
     return rng.sample(combos, min(n, len(combos)))
+
+
+# How many exact-tile combos _run_wgrad_sweep appends at most. These are
+# appended after --sample, so they are never thinned; the cap is what keeps
+# that from inflating a sampled run without bound.
+_EXACT_TILE_CAP = 1200
+
+
+def _wgrad_exact_tile_combos(
+    wg_M: int,
+    wg_N: int,
+    wave_size: int,
+    degrees_fn,
+    legs,
+    cap: int = _EXACT_TILE_CAP,
+) -> list:
+    """Tiles that cover the wgrad GEMM with no partial tile, plus their warps.
+
+    ``_TILE_MN`` and ``_WARP_MN`` are power-of-two ladders. A wgrad GEMM's free
+    dims are ``K`` and ``Z*Y*X*(C/groups)``, which routinely are not powers of
+    two, so a tile off that ladder either wastes lanes on a partial tile or is
+    not expressible at all -- and the wasted lanes are what decide the winner
+    once the kernel is re-fetch bound, because tile area is the only lever on
+    bytes-per-flop. Measured on gfx942: the best configurations found anywhere
+    for the shapes checked used tile edges and a warp split that the cartesian
+    grid cannot express at all, since ``_TILE_MN`` is powers of two and
+    ``_WARP_MN`` has no odd entry above 1.
+
+    Rather than widen the ladders -- which multiplies the whole grid and then
+    hides the good points behind ``--sample`` -- this derives a small set from
+    the actual GEMM dims. The call site appends it after sampling so it is
+    always measured in full.
+
+    Warp splits are enumerated, not taken from ``_WARP_MN``: the constraint is
+    ``tile % (warps * warp_tile) == 0``, which admits splits the power-of-two
+    ladder has no entry for. They are deliberately *not* ranked by block size
+    -- both measured winners sat at a middling block, so a "widest first" cut
+    drops exactly the configurations this function exists to reach.
+
+    The pipeline axis is pinned instead, to ``basic`` and ``mem``: the full
+    grid already sweeps pipelines thoroughly and they separated by very little
+    at fixed geometry, so spending the budget there would buy nothing.
+    Geometry is where the new information is.
+    """
+    if cap <= 0:
+        return []
+
+    def _divisors(n: int, lo: int, hi: int) -> list:
+        return [d for d in range(lo, min(n, hi) + 1) if d % 16 == 0 and n % d == 0]
+
+    pow2 = set(_TILE_MN)
+    # Both dims >= 64: a tile thin in either direction has a low area-to-edge
+    # ratio, which is the quantity this whole set is trying to raise.
+    tiles = [
+        (tm, tn)
+        for tm in _divisors(wg_M, 64, 256)
+        for tn in _divisors(wg_N, 64, 512)
+        if not (tm in pow2 and tn in pow2) and tm * tn <= 98304
+    ]
+    grouped: dict = {}
+    for tm, tn in tiles:
+        for wt in _WARP_TILE_MN:
+            if tm % wt or tn % wt:
+                continue
+            for wm in range(1, 9):
+                if tm % (wm * wt):
+                    continue
+                for wn in range(1, 17):
+                    if tn % (wn * wt):
+                        continue
+                    if not (256 <= wm * wn * wave_size <= 1024):
+                        continue
+                    for tk in _TILE_K:
+                        key = (tm, tn, tk, wm, wn, wt)
+                        variants = grouped.setdefault(key, [])
+                        for pipe, adma in legs:
+                            if adma or pipe not in ("basic", "mem"):
+                                continue
+                            for ep in _EPILOGUES:
+                                for sk in degrees_fn(pipe, adma):
+                                    variants.append(
+                                        WgradCombo(
+                                            tm, tn, tk, wm, wn, wt, pipe, ep, adma, sk
+                                        )
+                                    )
+    # Round-robin across geometries so the cap keeps one variant of every
+    # geometry before it keeps a second of any -- truncating a sorted-by-tile
+    # list would spend the whole budget on the first few tiles.
+    out: list = []
+    depth = 0
+    while True:
+        layer = [v[depth] for v in grouped.values() if len(v) > depth]
+        if not layer:
+            break
+        out.extend(layer)
+        if len(out) >= cap:
+            break
+        depth += 1
+    return out[:cap]
 
 
 def _verify_kernel(
@@ -367,6 +651,7 @@ def _verify_kernel(
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "fp16",  # int8 not supported; fall back to fp16 and warn
@@ -557,6 +842,10 @@ def parse_miopen_cmd(cmd: str):
     driver_kw = None
     driver_idx = None
     for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
         key = t.split("/")[-1].lower()
         if key in _MIOPEN_DTYPE_MAP:
             driver_kw = key
@@ -863,6 +1152,49 @@ def main() -> int:
         help="RNG seed used by --sample (default: 0)",
     )
     parser.add_argument(
+        "--exact-tiles",
+        type=int,
+        default=_EXACT_TILE_CAP,
+        metavar="N",
+        help=(
+            "wgrad only: cap on the exact-tile combos appended to the sweep -- "
+            "tiles derived from the GEMM dims that divide them with no partial "
+            "tile, which the power-of-two ladders cannot express. Appended "
+            "after --sample so they are never thinned. 0 disables "
+            f"(default: {_EXACT_TILE_CAP})"
+        ),
+    )
+    parser.add_argument(
+        "--group-merge-window",
+        type=int,
+        default=1,
+        dest="group_merge_window",
+        metavar="RADIUS",
+        help=(
+            "depthwise fwd only: sweep only the merge degrees within RADIUS of "
+            "the cost model's pick for each tile geometry, instead of "
+            "all of %(sweep)s. RADIUS=0 sweeps the pick alone, 1 (default) "
+            "brackets it on both sides so the sweep can still report that a "
+            "neighbour beat the pick, -1 restores the exhaustive degree axis. "
+            "Sweeping the degree as a free cross-product multiplies the whole "
+            "tile/warp/pipeline grid by the size of the degree axis."
+        ).replace("%(sweep)s", str(list(_GROUP_MERGE_SWEEP))),
+    )
+    parser.add_argument(
+        "--unmerged-frac",
+        type=float,
+        default=0.10,
+        dest="unmerged_frac",
+        metavar="FRAC",
+        help=(
+            "depthwise fwd only: fraction of the unmerged (Gm=1) combos to keep "
+            "(default: 0.10). On depthwise the unmerged leg is a baseline rather "
+            "than the expected winner, and it is the slower leg to compile "
+            "(scalar activation loads), so sampling it keeps the sweep short. "
+            "Use 1.0 to restore the exhaustive baseline. Seeded by --seed."
+        ),
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="verify first valid kernel against torch reference before sweep",
@@ -904,7 +1236,11 @@ def main() -> int:
             "0 = sweep all degrees in %(auto)s, "
             "1 = disabled, "
             ">1 = fixed degree, "
-            "-1 = auto (CK formula per tile config)"
+            "-1 = auto (CK formula per tile config). "
+            "Applies to --run-from-cache too, where the degree is a kernarg "
+            "and the cached binary is launched at whichever degree this "
+            "selects; there 1 selects nothing, since the non-split-K kernel "
+            "is a separate binary."
         ).replace("%(auto)s", str(list(_SPLIT_K_AUTO))),
     )
 
@@ -996,10 +1332,12 @@ def main() -> int:
         dest="split_k_prune",
         metavar="PCT",
         help=(
-            "Only effective with --split-k 0 (sweep). "
+            "Only effective with --split-k 0 (sweep) or --run-from-cache. "
             "If a kernel's TFLOPS at a given split-K degree drops by at least PCT%% "
             "relative to its best split-K seen so far, skip all remaining split-K "
             "degrees for that tile/warp/pipeline/epilogue configuration. "
+            "With --run-from-cache a degree early-stopped after another was "
+            "measured prunes the rest too. "
             "Example: --split-k-prune 15 prunes when performance drops by >=15%%."
         ),
     )
@@ -1191,6 +1529,10 @@ def main() -> int:
         print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
         return 2
 
+    if args.ckprofiler is not None and args.ckprofiler_script is None:
+        print("error: --ckprofiler requires --ckprofiler-script", file=sys.stderr)
+        return 2
+
     if args.streamk == "off" and (
         args.streamk_reductions != ",".join(_STREAMK_REDUCTIONS)
         or args.streamk_ctas != -1
@@ -1364,6 +1706,11 @@ def main() -> int:
         "pipeline",
         "epilogue",
         "split_k",
+        # Merge degree (fwd depthwise; 1 = unmerged). It is recoverable from the
+        # ``_gm{N}`` suffix on ``kernel_name``, but only as a regex over a symbol
+        # whose format is not a contract -- and the merged/unmerged split is the
+        # axis a before/after comparison is grouped by, so it gets a real column.
+        "group_merge",
         "rocke_ms",
         "rocke_tflops",
         "rocke_gbps",
@@ -1392,8 +1739,6 @@ def main() -> int:
         _csv_writer = csv.DictWriter(_csv_file, fieldnames=_csv_fields)
         _csv_writer.writeheader()
         _csv_file.flush()
-
-    _INT32_MAX = 2**31 - 1
 
     n_csv_rows = 0
     try:
@@ -1521,6 +1866,7 @@ def main() -> int:
                             "pipeline": r.pipeline,
                             "epilogue": r.epilogue,
                             "split_k": r.split_k,
+                            "group_merge": r.group_merge,
                             "rocke_ms": r.ms,
                             "rocke_tflops": r.tflops,
                             "rocke_gbps": r.gbps,
@@ -1565,7 +1911,20 @@ def _build_fwd_one(args_tuple):
     invalid/unsupported.  Must live at module level for pickle.
     """
     combo, problem, dtype, arch, mma_family, wave_size = args_tuple
-    tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
+    # Re-wrap: pickling round-trips the NamedTuple fine, but the caller is free
+    # to hand us a plain tuple and the defaulted field must still resolve.
+    combo = FwdCombo(*combo)
+    (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+    ) = combo[:8]
+    group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import (
@@ -1605,6 +1964,7 @@ def _build_fwd_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         groups=problem.groups,
+        group_merge=group_merge,
     )
     ok, _ = is_valid_spec_for_problem(spec, problem, arch)
     if not ok:
@@ -1673,6 +2033,18 @@ def _build_wgrad_one(args_tuple):
         warp_tile_n=warp_tile_mn,
         wave_size=target.wave_size,
     )
+    # Likewise deduced per combo: the M-outer row stride is a function of
+    # tile_k, which is a sweep axis. None means "no derivation for this
+    # regime", and the spec keeps its own default.
+    lds_k_pad = WgradConvSpec.default_lds_k_pad(
+        arch=arch,
+        tile_k=tile_k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
+        wave_size=target.wave_size,
+    )
     if split_k == -1:
         from rocke.helpers.split_k import select_split_k_wgrad
 
@@ -1716,7 +2088,21 @@ def _build_wgrad_one(args_tuple):
         split_k=resolved_split_k,
         group_merge=group_merge,
         lds_k_outer=lds_k_outer,
+        lds_k_pad=lds_k_pad,
         async_dma=async_dma,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        # Stream-K never reaches the K loop prefetch_addr rewrites, so it is
+        # left off there.
+        prefetch_addr=combo.streamk == "off"
+        and WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
+        ),
         # Stream-K leg: the launch mode and reduction pick the kernel; the CTA
         # pool stays at -1 here (it is a kernarg, resolved at launch).
         **(
@@ -1826,6 +2212,17 @@ def _build_wgrad_two_stage_one(args_tuple):
 
     from dataclasses import replace as dc_replace
 
+    # Hoisted out of the constructor below so the row-stride derivation can see
+    # it: an explicit pad is rejected under the K-outer tile.
+    _ts_k_outer = WgradConvSpec.default_lds_k_outer(
+        arch=arch,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        wave_size=target.wave_size,
+    )
+
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad_2s",
@@ -1856,13 +2253,30 @@ def _build_wgrad_two_stage_one(args_tuple):
         # kernels while the atomic leg builds K-outer ones, so the two sets of
         # timings the driver prints side by side are not comparable and the
         # K-outer win is never measured on the deterministic path.
-        lds_k_outer=WgradConvSpec.default_lds_k_outer(
+        lds_k_outer=_ts_k_outer,
+        # Same reasoning again: both legs must take the same LDS row stride.
+        lds_k_pad=WgradConvSpec.default_lds_k_pad(
             arch=arch,
+            tile_k=tile_k,
             dtype_a=dtype,
             dtype_b=dtype,
-            warp_tile_m=warp_tile_mn,
-            warp_tile_n=warp_tile_mn,
+            lds_k_outer=_ts_k_outer,
+            async_dma=async_dma,
             wave_size=target.wave_size,
+        ),
+    )
+    # Same per-combo policy as the single-stage leg, so the two legs stay
+    # comparable.
+    spec = dc_replace(
+        spec,
+        prefetch_addr=WgradConvSpec.default_prefetch_addr(
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            lds_k_outer=spec.lds_k_outer,
+            wave_size=target.wave_size,
+            async_dma=async_dma,
         ),
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
@@ -1994,6 +2408,10 @@ def _build_dgrad_one(args_tuple):
         # The default epilogue stores scalar; the validator rejects any wider
         # vector_size_c with it.
         vector_size_c=1 if epilogue == "default" else vec_c,
+        # Per-combo, from the same policy the AOT cache generator uses.
+        uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+            arch=arch, wave_size=target.wave_size, pipeline=pipeline
+        ),
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
     if not ok:
@@ -2291,7 +2709,7 @@ def _run_sweep(
     _tile_mn = _TILE_MN_GFX1250 if arch == "gfx1250" else _TILE_MN
     _warp_mn = _WARP_MN_GFX1250 if arch == "gfx1250" else _WARP_MN
     combos = [
-        c
+        FwdCombo(*c)
         for c in itertools.product(
             _tile_mn,
             _tile_mn,
@@ -2306,6 +2724,90 @@ def _run_sweep(
         # subprocesses — combos that fail this are rejected by is_valid_spec anyway.
         if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
     ]
+
+    # Depthwise (cpg == kpg == 1) additionally sweeps group-merged instances.
+    # This is the one shape class where the unmerged sweep has nothing to find:
+    # the GEMM-N extent is a single element, so every activation load and every
+    # store is scalar no matter which tile/pipeline/epilogue wins. Merging folds
+    # Gm groups onto GemmN and GemmK so both regain a Gm-wide run.
+    _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
+    if _depthwise:
+        # The unmerged leg is a *baseline* here rather than the expected
+        # winner, and it is the slower leg to compile (scalar activation loads
+        # keep the B tile wide), so sweeping it exhaustively spends the budget on
+        # the baseline. Sample it by default; --unmerged-frac 1.0 restores the
+        # exhaustive baseline.
+        if args.unmerged_frac < 1.0:
+            _n_unmerged = len(combos)
+            combos = _sample_combos(combos, args.unmerged_frac, args.seed + case_idx)
+            print(
+                f"  depthwise: sampling {len(combos)}/{_n_unmerged} unmerged "
+                f"(Gm=1) combos — on depthwise this leg is the baseline, not a "
+                f"candidate. --unmerged-frac 1.0 restores all of it.",
+                flush=True,
+            )
+
+        # Merge degree swept per tile geometry rather than as a free
+        # cross-product. See _group_merge_window; --group-merge-window -1
+        # restores the exhaustive degree axis.
+        _full_degrees = args.group_merge_window < 0
+        _all_degrees = tuple(sorted(_GROUP_MERGE_SWEEP, reverse=True))
+        _windows = {
+            (_tm, _tn): (
+                _all_degrees
+                if _full_degrees
+                else _group_merge_window(
+                    p.groups,
+                    p.M,
+                    _tm,
+                    _tn,
+                    args.group_merge_window,
+                    p.Y,
+                    p.X,
+                    p.sW,
+                    2 if dtype in ("fp16", "bf16") else 4,
+                )
+            )
+            for _tm in _tile_mn
+            for _tn in _tile_mn
+        }
+        _gm_combos = [
+            FwdCombo(*c, _gm)
+            for c in itertools.product(
+                _tile_mn,
+                _tile_mn,
+                _TILE_K,
+                _warp_mn,
+                _warp_mn,
+                _WARP_TILE_MN,
+                _PIPELINES,
+                _EPILOGUES,
+            )
+            if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
+            for _gm in _windows[(c[0], c[1])]
+            # Mirrors fwd_group_merge_available so the pool is not spun up for
+            # combos the gate rejects anyway. ``Gm <= tile_n`` because the merged
+            # GEMM-N extent *is* Gm; a larger degree would put group columns
+            # outside the tile the diagonal mask is written against. The
+            # ``default`` epilogue is dropped rather than filtered late: merging
+            # takes the store vector past 1, which is_valid_spec answers with
+            # "default epilogue is not supported with vector size c".
+            # Redundant against _group_merge_window's own filter, kept because
+            # the --group-merge-window -1 path bypasses that filter entirely.
+            if p.groups % _gm == 0 and _gm <= c[1] and c[7] != "default"
+        ]
+        combos = combos + _gm_combos
+        _swept_degrees = sorted({_gm for _w in _windows.values() for _gm in _w})
+        print(
+            f"  depthwise: +{len(_gm_combos)} group-merged combos "
+            f"(Gm in {_swept_degrees or [1]}"
+            f"{'' if _full_degrees else ', windowed per tile on the cost-model pick'}"
+            f") swept alongside the unmerged ones. "
+            f"Merging divides the grid by Gm and multiplies GemmK by it, so "
+            f"MFMA issue is unchanged and the redundant MACs land in lanes that "
+            f"were idle.",
+            flush=True,
+        )
 
     if args.sample is not None:
         total = len(combos)
@@ -2343,6 +2845,12 @@ def _run_sweep(
     # ---------------------------------------------------------------------------
     from rocke.runtime.hip_module import HipError
 
+    # Private, deliberately: the reported load width has to be the one the
+    # emitter picked, and a second copy of the tile-geometry clamp here would
+    # drift from it silently -- the ranked table is what the Gm policy gets
+    # tuned against.
+    from kernels.common.conv_implicit_gemm import _choose_load_vec
+
     rt = Runtime()
     results: List[Result] = []
 
@@ -2378,7 +2886,18 @@ def _run_sweep(
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, artifact in pending:
-        tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
+        combo = FwdCombo(*combo)
+        (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_tile_mn,
+            pipeline,
+            epilogue,
+        ) = combo[:8]
+        group_merge = combo.group_merge
         warp_tile_k = spec.warp_tile_k
 
         try:
@@ -2458,7 +2977,22 @@ def _run_sweep(
         cur_gbps = (bytes_xfer / ms) * 1e-6
         n_run += 1
 
-        _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(p.C, p.K, dtype)
+        # Mirrors the builder (conv_implicit_gemm.py ~:1185 and ~:2190): the
+        # access widths come from the *merged per-group* channel counts, not
+        # from C/K. On depthwise cpg == kpg == 1, so this reads (Gm, Gm) under
+        # merge and (1, 1) without -- which is the whole thing being measured.
+        # Reading p.C/p.K here printed vec=8/8/8 for every row of a G=144 sweep,
+        # making the merged and unmerged legs indistinguishable in the table.
+        _pl = spec.merged_problem
+        _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(
+            _pl.cpg, _pl.kpg, dtype
+        )
+        _tile_vec = _choose_load_vec(spec)
+        _va = min(_va, _tile_vec)
+        # B is only 1/Gm dense under merge and the diagonal mask is per-element,
+        # so the builder forces it scalar; a vector load takes one predicate for
+        # the whole run and cannot express that.
+        _vb = 1 if group_merge > 1 else min(_vb, _tile_vec)
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -2479,6 +3013,7 @@ def _run_sweep(
                 vec_b=_vb,
                 vec_c=_vc,
                 passed=kernel_passed,
+                group_merge=group_merge,
             )
         )
 
@@ -2488,6 +3023,7 @@ def _run_sweep(
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} "
             f"vec={_va}/{_vb}/{_vc} "
+            f"{f'gm{group_merge} ' if group_merge > 1 else ''}"
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -2739,6 +3275,28 @@ def _run_wgrad_sweep(
             flush=True,
         )
 
+    # Appended after sampling, deliberately: these are derived from the GEMM
+    # dims rather than drawn from the power-of-two ladders, so there are few of
+    # them and thinning them would defeat the point of deriving them.
+    _exact = _wgrad_exact_tile_combos(
+        wg_M=p.kpg,
+        wg_N=(p.Z if getattr(p, "is_3d", False) else 1) * p.Y * p.X * p.cpg,
+        wave_size=target.wave_size,
+        degrees_fn=_degrees,
+        legs=_legs,
+        cap=args.exact_tiles,
+    )
+    if _exact:
+        _seen = set(combos)
+        _exact = [c for c in _exact if c not in _seen]
+        combos = combos + _exact
+        print(
+            f"  +{len(_exact)} exact-tile combos (tiles that divide "
+            f"{p.kpg}x{(p.Z if getattr(p, 'is_3d', False) else 1) * p.Y * p.X * p.cpg} "
+            f"with no partial tile; off the power-of-two ladder).",
+            flush=True,
+        )
+
     _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
     print(
         f"Sweeping {len(combos)} wgrad combinations for {arch} {dtype} {p.short()} "
@@ -2761,20 +3319,35 @@ def _run_wgrad_sweep(
     work = [(combo, problem, dtype, arch) for combo in combos]
     pending = _build_ir_parallel(work, _build_and_compile_wgrad_one, jobs)
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
-    # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
+    # so the descending degree order is preserved for --split-k-prune.
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
     n_built = len(pending)
 
     # Two-stage path: build + compile Stage 1 and Stage 2 in one pass.
     _cpg_is_odd = (p.C // p.groups) % 2 != 0
+    # Exact tiles are the other trigger: Stage 1 stores f32 straight to the
+    # scratch, so it carries no cshuffle C tile in LDS, and the LDS freed is
+    # what lets the wide exact tiles run at a K depth the cshuffle leg cannot
+    # afford. Those tiles are the reason the set exists, so measure them on
+    # both legs.
     _run_two_stage = args.two_stage == "always" or (
-        args.two_stage == "auto" and _cpg_is_odd
+        args.two_stage == "auto" and (_cpg_is_odd or bool(_exact))
     )
+    # When only the exact tiles triggered it, run the second leg on just those
+    # rather than on the whole cartesian grid -- the grid has already been
+    # measured on the atomic leg and doubling it buys nothing.
+    _two_stage_src = combos if (args.two_stage == "always" or _cpg_is_odd) else _exact
     if _run_two_stage:
-        if args.two_stage == "auto":
+        if args.two_stage == "auto" and _cpg_is_odd:
             print(
                 f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
+                flush=True,
+            )
+        elif args.two_stage == "auto":
+            print(
+                f"  running the {len(_two_stage_src)} exact-tile combos on the "
+                "two-stage leg as well (no cshuffle C tile in LDS).",
                 flush=True,
             )
         # The replica axis is expanded here rather than in `combos` because
@@ -2788,7 +3361,7 @@ def _run_wgrad_sweep(
             _ws_reps = (args.ws_replicas,)
         work_2s = [
             (combo._replace(ws_replicas=_r), problem, dtype, arch)
-            for combo in combos
+            for combo in _two_stage_src
             for _r in _ws_reps
         ]
         if len(_ws_reps) > 1:
@@ -3925,15 +4498,29 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         case_direction = case[2] if len(case) > 2 else args.direction
 
         for direction in directions or (case_direction,):
+            try:
+                batch_chunks = _batch_chunks(direction, problem, case_dtype)
+            except ValueError as e:
+                print(
+                    f"Case {case_idx} {problem.short()} {case_dtype} {direction}: {e}",
+                    flush=True,
+                )
+                overall_rc = 1
+                continue
+            # A kernel launches on one batch slice at a time, so it is offered
+            # against the largest slice: the grid limits apply to that.
+            fit_problem = dc_replace(problem, N=batch_chunks[0][1])
             candidates = [
                 (ident, path, meta)
-                for ident, path, meta in cache.compatible(problem, direction=direction)
+                for ident, path, meta in cache.compatible(
+                    fit_problem, direction=direction
+                )
                 if ident.dtype_a == case_dtype
             ]
             if not candidates:
                 _, why = next(
                     (
-                        (i, cache.supports_problem(i, problem)[1])
+                        (i, cache.supports_problem(i, fit_problem)[1])
                         for i, _ in cache.list_all(direction)
                     ),
                     (None, "cache has no kernels for this direction"),
@@ -3945,6 +4532,27 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
                 continue
 
+            if (
+                direction == "wgrad"
+                and problem.cpg == problem.kpg == 1 < problem.groups
+            ):
+                # Depthwise: the non-split kernel leaves one workgroup per
+                # group and cannot fill the device, so -- as in the JIT
+                # sweep -- only split-K kernels are offered. Stream-K
+                # kernels (split_k = 1, but K partitioned over the CTA pool)
+                # stay.
+                candidates = [
+                    c for c in candidates if c[0].split_k > 1 or c[0].streamk != "off"
+                ]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel (depthwise runs split-K and "
+                        f"stream-K kernels only; the cache has none for this "
+                        f"shape)",
+                        flush=True,
+                    )
+                    continue
             if direction == "wgrad" and args.two_stage != "always":
                 # Same rule as the JIT sweep's --two-stage: by default the
                 # two-stage (scratch + reduce) kernels only run when C/groups
@@ -4017,6 +4625,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 ),
                 flush=True,
             )
+            if len(batch_chunks) > 1:
+                print(
+                    f"  operands exceed the kernels' 2^31-byte addressing: each "
+                    f"kernel runs as {len(batch_chunks)} launches over batch "
+                    f"slices of N={', '.join(str(n) for _, n in batch_chunks)} "
+                    f"and is timed over all of them",
+                    flush=True,
+                )
 
             torch_dt = _TORCH_DT[case_dtype]
             torch.manual_seed(42)
@@ -4059,6 +4675,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             n_failed = 0
 
             n_cand = len(candidates)
+            # Device scratch of the launch configs in flight (two-stage
+            # workspaces, dgrad sub-GEMM tables): one per (kernel, degree),
+            # so it is freed as the sweep goes rather than per case.
+            live_extras: list = []
             for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
@@ -4104,22 +4724,49 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     sk_bound = (sk_run, sk_label)
 
                 # A split-K wgrad binary is one kernel for every degree > 1
-                # (the degree is a kernarg), so it is timed at each degree it
-                # can use.
+                # (the degree is a kernarg), so --split-k decides whether it
+                # is timed at one degree or at each degree it can use.
                 if direction == "wgrad" and ident.split_k > 1:
-                    degrees = _runtime_split_ks(problem, ident)
+                    degrees = _runtime_split_ks(problem, ident, args.split_k)
                     if not degrees:
                         print(
-                            f"  [skip] {ident.label()}: no split-K degree > 1 "
-                            f"fits this problem",
+                            f"  [skip] {ident.label()}: "
+                            + (
+                                "no split-K degree > 1 fits this problem"
+                                if args.split_k == 0
+                                else f"--split-k {args.split_k} does not fit "
+                                f"this problem (degree 1 is a separate "
+                                f"non-split-K binary)"
+                            ),
                             flush=True,
                         )
                         continue
                 else:
                     degrees = (None,)
 
+                # --split-k-prune, as in the JIT sweep: degrees run from the
+                # largest down, and once this kernel is PCT% off its best
+                # degree (or early-stopped after one was measured) the
+                # smaller degrees are not tried. A degree that is
+                # early-stopped before any was measured does not prune: the
+                # largest splits can be the slowest (K slices of a tile or
+                # two, all contending on the output atomics) on a kernel
+                # whose best degree is several steps down.
+                kernel_best_ms = None
+                _prune_stop = False
                 for split_k in degrees:
-                    bound = sk_bound or _cached_bind(
+                    if _prune_stop:
+                        break
+                    # Free the previous launch config's scratch before
+                    # allocating the next. Every path that gets here has
+                    # drained the device after its last launch: _verify_kernel
+                    # fences its launches and copies the output back,
+                    # time_launches drains whether it returns or raises (an
+                    # early-stopped kernel returns from it too), and both
+                    # exception handlers below drain before skipping a kernel.
+                    _free_extras(rt, live_extras)
+                    bound = sk_bound or _cached_bind_batch(
+                        batch_chunks,
                         direction,
                         problem,
                         ident,
@@ -4134,6 +4781,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         stage2_kernels,
                         KernelLauncher,
                         LaunchConfig,
+                        live_extras,
                     )
                     if bound is None:
                         continue
@@ -4141,21 +4789,37 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     if ref_out is not None:
                         # The output is zeroed first: the atomic split-K
                         # epilogues accumulate into it. A kernel that fails is
-                        # reported and not timed, so it can never rank.
-                        stopped, passed = _verify_kernel(
-                            rt=rt,
-                            launch_fn=run,
-                            out_dev=D_dev,
-                            out_t=D_t,
-                            zero_init_out=True,
-                            ref_out=ref_out,
-                            kernel_name=label,
-                            dump_fail=args.dump_fail,
-                            u8=_u8,
-                            arch=arch,
-                            compute_dtype=case_dtype,
-                        )
+                        # reported and not timed, so it can never rank; so is
+                        # one whose launch fails.
+                        try:
+                            stopped, passed = _verify_kernel(
+                                rt=rt,
+                                launch_fn=run,
+                                out_dev=D_dev,
+                                out_t=D_t,
+                                zero_init_out=True,
+                                ref_out=ref_out,
+                                kernel_name=label,
+                                dump_fail=args.dump_fail,
+                                u8=_u8,
+                                arch=arch,
+                                compute_dtype=case_dtype,
+                            )
+                        except (HipError, RuntimeError) as e:
+                            print(f"  verify {label}: FAIL({e})", flush=True)
+                            # A launch that raised can leave work queued
+                            # before it (e.g. the two-stage scratch clear) in
+                            # flight on this config's scratch. A drain that
+                            # fails here ends the sweep: the device is in an
+                            # error state and the scratch cannot be freed.
+                            synchronize_and_release()
+                            stopped, passed = False, False
                         if stopped:
+                            _free_extras(rt, live_extras)
+                            if sk_free is not None:
+                                sk_free()
+                            for buf in (A_dev, B_dev, D_dev):
+                                rt.free(buf)
                             return 1
                         if not passed:
                             n_failed += 1
@@ -4170,10 +4834,28 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         )
                     except (HipError, RuntimeError) as e:
                         print(f"  [skip] {ident.label()}: {e}", flush=True)
+                        # time_launches drained before raising, but it does
+                        # not raise a failed drain (the launch error is the
+                        # one it reports). Drain again so a failed drain ends
+                        # the sweep here rather than freeing this config's
+                        # scratch with launches possibly still using it.
+                        synchronize_and_release()
                         continue
                     if ms is None:
                         _stop.report(label)
+                        if args.split_k_prune is not None and (
+                            kernel_best_ms is not None
+                        ):
+                            break
                         continue
+                    if args.split_k_prune is not None and split_k is not None:
+                        # TFLOPS down PCT% from this kernel's best degree.
+                        if kernel_best_ms is not None and kernel_best_ms <= ms * (
+                            1.0 - args.split_k_prune / 100.0
+                        ):
+                            _prune_stop = True
+                        if kernel_best_ms is None or ms < kernel_best_ms:
+                            kernel_best_ms = ms
                     results.append(
                         (flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, label)
                     )
@@ -4189,6 +4871,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     sk_free()
 
             synchronize_and_release()
+            _free_extras(rt, live_extras)
+            for buf in (A_dev, B_dev, D_dev):
+                rt.free(buf)
             if ref_out is not None:
                 print(
                     f"  verify: {n_failed} of the launched kernels failed",
@@ -4215,6 +4900,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
+
+
+def _free_extras(rt, live_extras: list) -> None:
+    """Free the device buffers :func:`_extras_and_grid` allocated, and forget them."""
+    for extras in live_extras:
+        for key in ("ws_ptr", "sub_gemm_buf"):
+            if key in extras:
+                rt.free(extras[key])
+    live_extras.clear()
 
 
 def _widest_vector_sizes(candidates):
@@ -4563,13 +5257,24 @@ def _cached_streamk_run(
     return run, free, f"{ident.label()} @streamk_ctas={pool}"
 
 
-def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
+def _split_k_degrees(
+    problem,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    candidates: Sequence[int] | None = None,
+) -> tuple:
     """Split-K degrees to launch a wgrad split-K kernel with.
 
     The degree is a kernarg, so one split-K binary is timed at every degree of
     ``_SPLIT_K_AUTO`` that is > 1 (degree 1 is the separate non-atomic
     kernel), does not exceed the number of K tiles (a larger degree only adds
     empty slices), and keeps ``groups * degree`` inside the grid's z limit.
+
+    ``candidates`` replaces the ladder, for a caller that has already picked a
+    degree. The validity rules still apply to it -- they are a property of the
+    problem, not of how the degree was chosen -- so a pinned degree the shape
+    cannot take drops out here rather than failing at launch.
     """
     from kernels.common.conv_args import ConvArgs
 
@@ -4584,14 +5289,145 @@ def _split_k_degrees(problem, tile_m: int, tile_n: int, tile_k: int) -> tuple:
     groups = max(1, problem.groups)
     return tuple(
         sk
-        for sk in _SPLIT_K_AUTO
+        for sk in (_SPLIT_K_AUTO if candidates is None else candidates)
         if 1 < sk <= k_tiles and groups * sk <= _MAX_GRID_DIM_Z
     )
 
 
-def _runtime_split_ks(problem, ident) -> tuple:
-    """:func:`_split_k_degrees` for a cached split-K wgrad binary."""
-    return _split_k_degrees(problem, ident.tile_m, ident.tile_n, ident.tile_k)
+def _runtime_split_ks(problem, ident, requested: int = 0) -> tuple:
+    """Degrees to launch a cached split-K wgrad binary at.
+
+    ``requested`` is ``--split-k``, with the same meaning it has on the JIT
+    sweep: 0 sweeps the ladder, -1 resolves the CK formula for this tile
+    config, and a positive value pins that degree. The cache records
+    ``split_k=2`` only as a marker that the binary is the split-K one -- the
+    degree itself is a kernarg -- so nothing here is baked in and every mode
+    is reachable at launch.
+
+    Degree 1 is not among them: that is the separate non-atomic kernel, a
+    different binary, so ``--split-k 1`` yields no degree and the caller skips
+    the entry rather than silently timing it at some other degree.
+    """
+    if requested == 0:
+        return _split_k_degrees(problem, ident.tile_m, ident.tile_n, ident.tile_k)
+    if requested == -1:
+        from kernels.common.conv_args import ConvArgs
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        if ident.group_merge > 1:
+            from dataclasses import replace as dc_replace
+
+            # Resolve and validate against the geometry the cached kernel launches.
+            problem = dc_replace(problem, groups=problem.groups // ident.group_merge)
+        args_ = ConvArgs.from_problem(
+            problem,
+            direction="wgrad",
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+        )
+        degree = select_split_k_wgrad(
+            wg_M=args_.gemm_m,
+            wg_N=args_.gemm_n,
+            wg_K=args_.gemm_k,
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+            arch=ident.arch,
+            groups=problem.groups,
+            block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+        ).split_k
+        # Same clamp the JIT path applies after resolving: groups * degree has
+        # to fit gridDim.z.
+        degree = max(1, min(degree, _MAX_GRID_DIM_Z // max(1, problem.groups)))
+    else:
+        degree = requested
+    return _split_k_degrees(
+        problem, ident.tile_m, ident.tile_n, ident.tile_k, (degree,)
+    )
+
+
+_INT32_MAX = 2**31 - 1
+
+
+def _batch_chunks(direction, problem, dtype) -> list:
+    """``[(n0, n), ...]``: the batch slices one launch each covers.
+
+    An AOT conv kernel takes its operand byte sizes as i32 kernargs and
+    addresses each operand through a buffer resource whose out-of-bounds
+    sentinel is the i32 maximum, so no operand it is launched on may exceed
+    2^31 - 1 bytes. fwd and dgrad compute every image independently, and N is
+    a kernarg: a batch whose activations are larger runs as consecutive
+    launches of the same binary over equal slices of N, at offset pointers.
+    wgrad reduces over N, so it cannot be split that way; neither can a weight
+    tensor, which has no batch.
+
+    Raises ``ValueError`` for a problem no split can bring into range.
+    """
+    elem = 4 if dtype == "fp32" else 2
+    spatial_in = (problem.Di or 1) * problem.Hi * problem.Wi
+    spatial_out = (problem.Do if problem.is_3d else 1) * problem.Ho * problem.Wo
+    per_image = max(spatial_in * problem.C, spatial_out * problem.K) * elem
+    weights = problem.K * (problem.Z or 1) * problem.Y * problem.X * problem.cpg * elem
+    if weights > _INT32_MAX:
+        raise ValueError(
+            f"the weight tensor ({weights} bytes) exceeds the kernels' "
+            f"2^31-byte operand addressing"
+        )
+    if per_image * problem.N <= _INT32_MAX:
+        return [(0, problem.N)]
+    if direction == "wgrad":
+        raise ValueError(
+            f"the activations ({per_image * problem.N} bytes) exceed the "
+            f"kernels' 2^31-byte operand addressing, and wgrad reduces over the "
+            f"batch, so it cannot run as batch slices"
+        )
+    if per_image > _INT32_MAX:
+        raise ValueError(
+            f"one image's activations ({per_image} bytes) exceed the kernels' "
+            f"2^31-byte operand addressing"
+        )
+    n_chunks = -(-problem.N // (_INT32_MAX // per_image))
+    step = -(-problem.N // n_chunks)
+    return [(n0, min(step, problem.N - n0)) for n0 in range(0, problem.N, step)]
+
+
+def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
+    """:func:`_cached_bind` over the batch slices of :func:`_batch_chunks`.
+
+    ``rest`` is the rest of :func:`_cached_bind`'s arguments. One slice binds
+    the problem as is; several bind one launch each -- the A and D operands
+    (the activations; B is the weights) offset to the slice's first image --
+    and ``run`` issues them in order.
+    """
+    if len(batch_chunks) == 1:
+        return _cached_bind(direction, problem, ident, *rest)
+    (meta, rt, launcher, case_dtype, split_k, ptrs, sizes, *tail) = rest
+    a_image, d_image = sizes[0] // problem.N, sizes[2] // problem.N
+    runs = []
+    for n0, n in batch_chunks:
+        bound = _cached_bind(
+            direction,
+            dc_replace(problem, N=n),
+            ident,
+            meta,
+            rt,
+            launcher,
+            case_dtype,
+            split_k,
+            (ptrs[0] + n0 * a_image, ptrs[1], ptrs[2] + n0 * d_image),
+            (n * a_image, sizes[1], n * d_image),
+            *tail,
+        )
+        if bound is None:
+            return None
+        runs.append(bound[0])
+
+    def run(runs=tuple(runs)):
+        for launch in runs:
+            launch()
+
+    return run, bound[1]
 
 
 def _cached_bind(
@@ -4609,11 +5445,14 @@ def _cached_bind(
     stage2_kernels,
     KernelLauncher,
     LaunchConfig,
+    live_extras: list,
 ):
     """``(run, label)`` of a cached (non-stream-K) binary at ``split_k``.
 
-    ``ptrs`` / ``sizes`` are the A, B, D buffers. Returns None, after saying
-    why, when the binary cannot launch ``problem``.
+    ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
+    launch config allocates is appended to ``live_extras`` (freed by
+    :func:`_free_extras`). Returns None, after saying why, when the binary
+    cannot launch ``problem``.
     """
     from benchmarks.common.kernel_sweep import _launch_values_for
 
@@ -4624,6 +5463,7 @@ def _cached_bind(
     except ValueError as e:
         print(f"  [skip] {ident.label()}: {e}", flush=True)
         return None
+    live_extras.append(extras)
     values = _launch_values_for(direction, problem, ident, ptrs, sizes, extras)
     cfg = LaunchConfig(
         grid=grid,
@@ -4776,7 +5616,10 @@ def _grid_for(direction, problem, ident, split_k=None):
         return ConvArgs.from_problem(
             problem, direction="dgrad", tile_m=tm, tile_n=tn
         ).grid()
-    return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).grid()
+    gx, gy, gz = ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).grid()
+    # A group-merged fwd kernel runs one workgroup per Gm groups. Its merged
+    # GEMM-N (Gm) fits one tile, as the true one (kpg = 1) does, so gx agrees.
+    return gx, gy, gz // max(1, ident.group_merge)
 
 
 if __name__ == "__main__":

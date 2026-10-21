@@ -37,6 +37,7 @@ def test_interleaved_wait_preserves_unconsumed_loads(bias, sav, multi_du):
         _plsinFusedSkipBias=lambda kernel: False,
         _plsinFusedSkipEpilogueMul=lambda: False,
     )
+    writer.ss = SimpleNamespace(emitGateResidual=False)
     writer.beta = writer.loadE = False
     writer.biasLoadIssued = writer.scaleAlphaVecLoadIssued = [1, 2]
     writer.storesIssued = 0

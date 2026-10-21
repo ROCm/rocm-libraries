@@ -185,16 +185,22 @@ class GFX950Params(BaseOptimizationParams):
         return self._make_param("1LDSBuffer", [1])
 
     @param
-    def stream_k(self, ctx: SizeContext) -> ForkParameter:
+    def tile_processing_strategy(self, ctx: SizeContext) -> ForkParameter:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamK", [3])
-        return self._make_param("StreamK", [0])
+            return self._make_param("TileProcessingStrategy", ["StreamK"])
+        return self._make_param("TileProcessingStrategy", ["None"])
 
     @param
-    def stream_k_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
+    def work_assignment(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamKXCCMapping", [0, 8])
-        return self._make_param("StreamKXCCMapping", [0])
+            return self._make_param("WorkAssignment", ["StaticGrid"])
+        return None
+
+    @param
+    def persistent_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
+        if self.config.get("StreamK", False):
+            return self._make_param("PersistentXCCMapping", [0, 8])
+        return self._make_param("PersistentXCCMapping", [0])
 
     @param
     def use_sgpr_for_gro(self, ctx: SizeContext) -> ForkParameter:
@@ -363,15 +369,21 @@ class GFX950GAParams(BaseOptimizationParams):
         return [-1, -2] + list(valid[valid.index(min_grvw):valid.index(max_grvw) + 1])
 
     @param
-    def stream_k(self, ctx: SizeContext) -> Optional[ForkParameter]:
+    def tile_processing_strategy(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamK", [3])
+            return self._make_param("TileProcessingStrategy", ["StreamK"])
         return None
 
     @param
-    def stream_k_xcc_mapping(self, ctx: SizeContext) -> Optional[ForkParameter]:
+    def work_assignment(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamKXCCMapping", [0, 4, 8])
+            return self._make_param("WorkAssignment", ["StaticGrid"])
+        return None
+
+    @param
+    def persistent_xcc_mapping(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        if self.config.get("StreamK", False):
+            return self._make_param("PersistentXCCMapping", [0, 4, 8])
         return None
 
     @param
@@ -574,17 +586,21 @@ class GFX950SubtileParams(BaseOptimizationParams):
         return self._make_param("PrefetchGlobalRead", [0, 1, 2])
 
     @param
-    def stream_k(self, ctx: SizeContext) -> ForkParameter:
+    def tile_processing_strategy(self, ctx: SizeContext) -> ForkParameter:
         if not self.config.get("StreamK", False):
             warnings.warn(
-                "StreamK is disabled but subtile requires StreamK=3; forcing StreamK=3.",
+                "StreamK is disabled but subtile requires TileProcessingStrategy=StreamK; forcing it.",
                 stacklevel=2,
             )
-        return self._make_param("StreamK", [3])
+        return self._make_param("TileProcessingStrategy", ["StreamK"])
 
     @param
-    def stream_k_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("StreamKXCCMapping", [0])
+    def work_assignment(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("WorkAssignment", ["StaticGrid"])
+
+    @param
+    def persistent_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("PersistentXCCMapping", [0])
 
     @param
     def direct_to_vgpr_a(self, ctx: SizeContext) -> ForkParameter:

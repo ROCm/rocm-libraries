@@ -30,6 +30,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <origami/hardware.hpp>
@@ -1984,4 +1985,105 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     const std::string baseLine = collapseSpaces(osb.str());
     EXPECT_NE(baseLine.find("changedBy = none"), std::string::npos);
     EXPECT_NE(baseLine.find("fixedGrid = no"), std::string::npos);
+}
+
+// AIHPBLAS-5190: scheduling, workspace queries, and packed arguments must agree.
+class ClusterStreamKTest : public ::testing::Test
+{
+protected:
+    AnalyticalEnv env;
+    ContractionSolution solution;
+    ContractionProblemGemm problem = makeGemmProblem(640, 896, 16384); // 35 tiles
+    static constexpr size_t partialTileBytes = 128 * 128 * 4;
+
+    void SetUp() override
+    {
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.clusterDim = TensileLite::dim3(4, 1, 1);
+        solution.sizeMapping.globalSplitU = 0;
+        solution.sizeMapping.workGroupMapping = 1;
+        solution.sizeMapping.workGroupMappingXCC = 1;
+        solution.internalArgsSupport.version = 3;
+        solution.internalArgsSupport.useUniversalArgs = true;
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        env.device.persistentDynamicGrid = 0;
+        env.device.persistentFixedGrid = 86;
+    }
+
+    void expectLaunch(size_t logicalGrid, size_t physicalGrid, size_t workspace)
+    {
+        auto launch = solution.resolvePersistentSettings(problem, env.device);
+        ASSERT_EQ(launch.grid, logicalGrid);
+        EXPECT_EQ(launch.workspaceBytes, workspace);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), workspace);
+        ContractionInputs inputs;
+        inputs.alpha = 1.0f;
+        inputs.beta = 0.0f;
+        auto invocation = solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{});
+        EXPECT_EQ(invocation.numWorkGroups.x, physicalGrid);
+        auto arg = KernelArguments::const_iterator(invocation.args, "skGrid");
+        ASSERT_NE(arg, invocation.args.end());
+        uint32_t packedGrid = 0;
+        ASSERT_EQ((*arg).second, sizeof(packedGrid));
+        std::memcpy(&packedGrid, (*arg).first, sizeof(packedGrid));
+        EXPECT_EQ(packedGrid, logicalGrid);
+    }
+};
+
+TEST_F(ClusterStreamKTest, AlignsWorkersBeforeScheduling)
+{
+    // Reported grid, aligned control, minimum cluster, and the later flag clamp.
+    for(auto [requested, expected] : {std::pair<int, size_t>{86, 84}, {84, 84},
+                                     {4, 4}, {100000, StreamKFlagElements}})
+    {
+        SCOPED_TRACE(requested);
+        env.device.persistentFixedGrid = requested;
+        expectLaunch(expected, expected, partialTileBytes * expected);
+    }
+}
+
+TEST_F(ClusterStreamKTest, RejectsBudgetSmallerThanCluster)
+{
+    env.device.persistentFixedGrid = 3;
+    problem.setWorkspaceSize(0); // Rejection must precede whole-tile fallback.
+    for(int policy : {0, 6}) // Tree and parallel reduction.
+    {
+        SCOPED_TRACE(policy);
+        env.device.persistentDynamicGrid = policy;
+        EXPECT_THROW(solution.resolvePersistentSettings(problem, env.device), std::invalid_argument);
+        Task task(env.device, problem, solution);
+        Predicates::Contraction::WorkspaceCheck predicate;
+        EXPECT_FALSE(predicate(task));
+        std::ostringstream diagnostic;
+        EXPECT_FALSE(predicate.debugEval(task, diagnostic));
+        EXPECT_NE(diagnostic.str().find("budget 3 is smaller than ClusterDim=[4,1]; at least 4"),
+                  std::string::npos);
+    }
+}
+
+TEST_F(ClusterStreamKTest, WholeTileFallbackPadsOnlyPhysicalGrid)
+{
+    for(bool uniform : {false, true})
+    {
+        SCOPED_TRACE(uniform);
+        problem.setWorkspaceSize(uniform ? std::numeric_limits<size_t>::max() : 0);
+        problem.setParams().setUniformSummationOrder(uniform);
+        expectLaunch(35, 36, 0);
+    }
+}
+
+TEST_F(ClusterStreamKTest, ParallelAlignmentPreservesIntegralSplits)
+{
+    env.device.persistentDynamicGrid = 6;
+    ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel);
+    env.device.persistentFixedGrid = 400;
+    expectLaunch(280, 280, partialTileBytes * 280); // Eight workers per tile, in full clusters.
+    EXPECT_EQ(solution.resolvePersistentSettings(problem, env.device).reduction,
+              origami::reduction_t::parallel);
+    env.device.persistentFixedGrid = 86; // No integral clustered split fits; use whole tiles.
+    expectLaunch(35, 36, 0);
+    EXPECT_EQ(solution.resolvePersistentSettings(problem, env.device).reduction,
+              origami::reduction_t::tree);
 }

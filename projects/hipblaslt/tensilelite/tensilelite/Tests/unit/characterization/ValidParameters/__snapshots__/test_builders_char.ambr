@@ -1379,6 +1379,7 @@
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
+    'ClusterAIDMapping',
     'ClusterDim',
     'ClusterLocalRead',
     'CompactLoopStore',
@@ -1413,6 +1414,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
@@ -1685,6 +1687,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'ClusterAIDMapping': dict({
+      'head': list([
+        -2,
+        -1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'ClusterDim': dict({
       'head': list([
         list([
@@ -1953,7 +1963,7 @@
           patch=0,
         ),
       ]),
-      'len': 23,
+      'len': 25,
       'type': 'list',
     }),
     'InitCIterWmma': dict({
@@ -1988,6 +1998,14 @@
         'Assembly',
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'LDSSegmentBRotate': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'LDSSegmentInterleave': dict({

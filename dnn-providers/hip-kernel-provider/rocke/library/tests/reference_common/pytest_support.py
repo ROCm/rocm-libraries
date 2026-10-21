@@ -13,12 +13,15 @@ import pytest
 
 def architecture_available(
     architecture: str,
-    families: tuple[str, ...],
     detected: str | None,
-    declared: str,
     targets: str = "",
 ) -> bool:
-    """Skip a different GPU lane; fail when the intended lane lacks its GPU."""
+    """Select a processor's cohort within TheRock's requested artifact targets.
+
+    TheRock owns family expansion. AMDGPU_FAMILIES describes build/artifact
+    grouping, not reference enrollment, so do not infer coverage from its name.
+    Without exact targets, select by the actual processor alone.
+    """
     # TheRock supplies comma-separated artifact targets independently of its
     # broader family name. Exact targets distinguish lanes within one family.
     exact_targets = {
@@ -28,19 +31,13 @@ def architecture_available(
     }
     if exact_targets and architecture not in exact_targets:
         return False
-    if detected == architecture:
-        return True
-    if detected in exact_targets:
-        # A job may fetch multiple target artifacts but run on one of them.
-        return False
-    expected = bool(exact_targets) or any(
-        family.lower() in declared.lower() for family in families
-    )
-    if expected or (not detected and not declared):
+    if not detected or (exact_targets and detected not in exact_targets):
         raise RuntimeError(
             f"required {architecture} GPU unavailable; detected {detected!r}"
         )
-    return False
+    # A supported processor may have no published reference for this operation.
+    # Another processor's suite must skip before accessing its packaged bundle.
+    return detected == architecture
 
 
 def start_reference_session(config) -> None:
@@ -62,17 +59,19 @@ def start_reference_session(config) -> None:
         )
     registry = importlib.import_module(f"{operation}_reference.architectures")
     try:
-        target = registry.get_architecture(architecture)
+        registry.get_architecture(architecture)
     except ValueError as error:
         raise pytest.UsageError(str(error)) from error
-    from rocke.runtime.hip_module import get_device_arch
+    from .targets import get_device_processor
+
+    # Match the processor against artifact targets. get_device_arch() returns
+    # a catalog name (e.g. gfx12-generic for gfx1200), losing that identity.
+    detected = get_device_processor()
 
     try:
         available = architecture_available(
             architecture,
-            target.FAMILIES,
-            get_device_arch(),
-            os.environ.get("AMDGPU_FAMILIES", ""),
+            detected,
             os.environ.get("AMDGPU_TARGETS", ""),
         )
     except RuntimeError as error:
