@@ -49,6 +49,7 @@ from tensilelite.Common.ValidParameters import (
     validParameters,
 )
 from tensilelite.CustomKernels import (
+    _readEmbeddedYaml,
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -1085,7 +1086,76 @@ def test_read_custom_kernel_config_non_mapping_raises(tmp_path):
     with pytest.raises(RuntimeError, match="must be a YAML mapping"):
         readCustomKernelConfig("k", str(tmp_path))
 
+def _write_metadata(path, yaml_text):
+    path.write_text(".amdgpu_metadata\n---\n" + dedent(yaml_text) + "...\ns_nop 0\n")
 
+def test_read_custom_kernel_config_parses_only_the_config_section(tmp_path):
+    # The rest of the metadata can be 1 MB of rocRoller kernel graph, so only
+    # custom.config is parsed. A broken amdhsa section is not noticed by this
+    # read; parsing the whole block still reports it.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          InternalSupportParams:
+            KernArgsVersion: 0
+        amdhsa.kernels: [unclosed
+        """)
+    expected = {"InternalSupportParams": {"KernArgsVersion": 0}}
+    assert readCustomKernelConfig("k", str(tmp_path)) == expected
+    with pytest.raises(RuntimeError, match="Failed to parse YAML"):
+        _readEmbeddedYaml("k", str(tmp_path))
+
+def test_read_custom_kernel_config_entry_with_comments_blank_lines_and_neighbours(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        amdhsa.version: [1, 2]
+        custom.config:
+          # a comment
+          A: 1
+
+          B:
+            - x
+            - y
+        # a comment in column 0 does not end the entry
+          C: {d: 2}
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1, "B": ["x", "y"], "C": {"d": 2}}
+
+def test_read_custom_kernel_config_flow_style_entry(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config: {A: 1, B: [2, 3]}
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1, "B": [2, 3]}
+
+def test_read_custom_kernel_config_quoted_key_takes_the_whole_block_path(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        "custom.config":
+          A: 1
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+def test_read_custom_kernel_config_without_the_entry_still_raises(tmp_path):
+    _write_metadata(tmp_path / "k.s", "amdhsa.kernels: []\n")
+    with pytest.raises(RuntimeError, match="has no custom.config"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+def test_read_custom_kernel_config_error_inside_the_entry_is_reported(tmp_path):
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config:
+          A: [1
+        """)
+    with pytest.raises(RuntimeError, match="Failed to parse YAML"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+def test_read_custom_kernel_config_matches_a_full_parse_of_shipped_kernels():
+    # Kernels under 600 KB (101: tensile, aiter, rocblas, triton, wave) keep
+    # the whole-block comparison cheap. The 1 MB rocRoller kernels are read
+    # through the same slice by validate_all in test_custom_kernel_cli.
+    paths = [p for p in iterCustomKernelFiles() if os.path.getsize(p) < 600_000]
+    assert paths
+    for path in paths:
+        name = os.path.basename(path)[:-2]
+        assert readCustomKernelConfig(name) == _readEmbeddedYaml(name)["custom.config"], name
 def test_build_from_metadata_non_dict_yaml_raises():
     with pytest.raises(RuntimeError, match="no parseable .amdgpu_metadata"):
         _buildCustomKernelFromMetadata("k", None, {"MatrixInstruction": [16, 16, 16, 1]})

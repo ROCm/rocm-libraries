@@ -207,31 +207,60 @@ def getCustomKernelSource(name, rocmVersion, directory=None):
         if "amdhsa_user_sgpr_kernarg_preload" not in line
     )
 
-def _readEmbeddedYaml(name, directory=None):
-    """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
+_CUSTOM_CONFIG_KEY = re.compile(r"custom\.config:(\s|$)")
 
-    The .s files emitted under this branch contain exactly one such block;
-    we stop at the first '...' and return whatever the safe loader returns
-    (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
-    """
-    contents = getCustomKernelContents(name, directory)
+def _embeddedYamlLines(contents):
+    """Lines between '---' and the first '...' of the .amdgpu_metadata block."""
     inYaml = False
-    yamlLines = []
     for line in contents.splitlines():
         if line == "---":
             inYaml = True
             continue
         if line == "..." and inYaml:
-            break
+            return
         if inYaml:
-            yamlLines.append(line)
+            yield line
+
+def _customConfigYaml(contents):
+    """Text of the top-level custom.config entry, or None if it is not found.
+
+    The entry runs until the next line that starts in column 0 with something
+    other than a comment.
+    """
+    section = None
+    for line in _embeddedYamlLines(contents):
+        if section is None:
+            if _CUSTOM_CONFIG_KEY.match(line):
+                section = [line]
+        elif line and line[0] not in " \t#":
+            break
+        else:
+            section.append(line)
+    return None if section is None else "\n".join(section)
+
+def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
+    """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
+
+    The .s files emitted under this branch contain exactly one such block;
+    we stop at the first '...' and return whatever the safe loader returns
+    (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
+
+    customConfigOnly parses just the custom.config entry, a few KB inside a
+    block that can be 1 MB (rocRoller's serialized kernel graph). The rest of
+    the block is not parsed, so errors in it go unnoticed. The whole block is
+    parsed when custom.config is not found in its usual form.
+    """
+    contents = getCustomKernelContents(name, directory)
+    text = _customConfigYaml(contents) if customConfigOnly else None
+    if text is None:
+        text = "\n".join(_embeddedYamlLines(contents))
     try:
-        return yaml.load("\n".join(yamlLines), Loader=SafeLoader)
+        return yaml.load(text, Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
 def readCustomKernelConfig(name, directory=None):
-    return _customConfigFrom(name, _readEmbeddedYaml(name, directory))
+    return _customConfigFrom(name, _readEmbeddedYaml(name, directory, customConfigOnly=True))
 
 def _customConfigFrom(name, parsed):
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
