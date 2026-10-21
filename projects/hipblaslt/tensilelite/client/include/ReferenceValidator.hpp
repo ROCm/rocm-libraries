@@ -37,6 +37,8 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace TensileLite
 {
@@ -133,6 +135,7 @@ namespace TensileLite
                                       bool hasZeroElements) const;
 
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
+            std::vector<std::vector<uint8_t>>           m_referenceRecvs;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
@@ -167,7 +170,7 @@ namespace TensileLite
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
             void validateSlots(std::vector<size_t> const& slots);
-            bool recvMatches(size_t dst, ContractionInputs const& inputs);
+            void referenceRecvs(ContractionProblemGemm const& problem);
         };
     } // namespace Client
 } // namespace TensileLite
