@@ -57,30 +57,30 @@
 // kernel, the wait occupies no GPU resources and is known to the runtime.
 // Construct instances before blocking any stream: the constructor allocates memory,
 // which may synchronize with the device.
-struct blocking_kernel
+struct stream_blocker
 {
-	blocking_kernel(const hipStream_t& stream)
+	stream_blocker(const hipStream_t& stream)
 	  : m_stream(stream)
 	{
-		// hipStreamWaitValue32 requires signal memory, which is 8 bytes.
-		HIP_CHECK(hipExtMallocWithFlags((void**)&m_flag, sizeof(uint64_t), hipMallocSignalMemory));
+		// Note: hipStreamWaitValue64 requires signal memory, which must be at least 8 bytes in size.
+		HIP_CHECK(hipExtMallocWithFlags((void**)&m_flag, sizeof(*m_flag), hipMallocSignalMemory));
 		__atomic_store_n(m_flag, 0u, __ATOMIC_RELEASE);
 	}
-	~blocking_kernel()
+	~stream_blocker()
 	{
 		// Release the stream in case a failed assertion skipped unblock()
 		__atomic_store_n(m_flag, 1u, __ATOMIC_RELEASE);
 		HIP_CHECK(hipFree(m_flag));
 	}
 
-	blocking_kernel(const blocking_kernel&) = delete;
-	blocking_kernel& operator=(const blocking_kernel&) = delete;
+	stream_blocker(const stream_blocker&) = delete;
+	stream_blocker& operator=(const stream_blocker&) = delete;
 
 	void block()
 	{
 		printf("Blocking Stream %lld\n", (long long) m_stream);
 		__atomic_store_n(m_flag, 0u, __ATOMIC_RELEASE);
-		HIP_CHECK(hipStreamWaitValue32(m_stream, m_flag, 1, hipStreamWaitValueEq));
+		HIP_CHECK(hipStreamWaitValue64(m_stream, m_flag, 1, hipStreamWaitValueEq));
 	}
 
 	void unblock()
@@ -90,7 +90,7 @@ struct blocking_kernel
 	}
 
 private:
-	uint32_t* m_flag{};
+	uint64_t* m_flag{};
 	hipStream_t m_stream{0};
 };
 
@@ -123,13 +123,13 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     HIP_CHECK(hipGetDeviceCount(&num_gpus));
     HIP_CHECK(hipGetDevice(&initial_gpu));
 
-    // blocking_kernel relies on hipStreamWaitValue32
+    // stream_blocker relies on hipStreamWaitValue64
     int can_use_stream_wait_value = 0;
     HIP_CHECK(hipDeviceGetAttribute(&can_use_stream_wait_value,
                                     hipDeviceAttributeCanUseStreamWaitValue,
                                     initial_gpu));
     if (!can_use_stream_wait_value) {
-        GTEST_SKIP() << "Skipping test: device does not support hipStreamWaitValue32";
+        GTEST_SKIP() << "Skipping test: device does not support hipStreamWaitValue64";
     }
 
     // Create default allocator (caches up to 6MB in device allocations per GPU)
@@ -145,9 +145,21 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     HIP_CHECK(hipStreamCreateWithFlags(&other_stream, hipStreamNonBlocking));
 
     // Create the stream blockers up front, while no stream is blocked
-    blocking_kernel block_0_a(0);
-    blocking_kernel block_0_b(0);
-    blocking_kernel block_other(other_stream);
+    stream_blocker block_0_a(0);
+    stream_blocker block_0_b(0);
+    stream_blocker block_other(other_stream);
+
+    // Release every stream before any blocker frees its flag in its destructor (hipFree synchronizes the device)
+    // Note: this is used to prevent deadlock if an assertion below fails.
+    struct unblock_all_guard
+    {
+        stream_blocker* blockers[3];
+        ~unblock_all_guard()
+        {
+            for(auto* b : blockers)
+                b->unblock();
+        }
+    } unblock_all{{&block_0_a, &block_0_b, &block_other}};
 
     // Allocate 999 bytes on the current gpu in stream0
     char *d_999B_stream0_a;
