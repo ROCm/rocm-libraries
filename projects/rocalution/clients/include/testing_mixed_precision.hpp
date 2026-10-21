@@ -78,7 +78,7 @@ bool testing_mixed_precision(Arguments argus)
         }
     }
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Allocate x, b and e
     x.Allocate("x", A.GetN());
@@ -113,6 +113,9 @@ bool testing_mixed_precision(Arguments argus)
 
     // Build solver
     mp.Build();
+
+    // Matrix format
+    A.ConvertTo(format, format == BCSR ? argus.blockdim : 1);
 
     // Verbosity output
     mp.Verbose(1);

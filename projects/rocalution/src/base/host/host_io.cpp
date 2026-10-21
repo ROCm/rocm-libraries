@@ -2999,13 +2999,10 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_index_base file_base;
-        uint64_t               file_nrow;
-        uint64_t               file_ncol;
-        rocsparseio_type       file_row_type;
-        rocsparseio_type       file_ind_type;
-        rocsparseio_type       file_val_type;
-        rocsparseio_order      file_order;
+        uint64_t          file_nrow;
+        uint64_t          file_ncol;
+        rocsparseio_type  file_val_type;
+        rocsparseio_order file_order;
 
         //
         // Read meta-data from file.

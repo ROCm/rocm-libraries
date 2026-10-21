@@ -45,15 +45,12 @@ bool testing_chebyshev(Arguments argus)
     init_rocalution();
 
     // rocALUTION structures
-    LocalMatrix<T>  A;
-    LocalVector<T>  x;
-    LocalVector<T>  b;
-    LocalVector<T>  b_old;
-    LocalVector<T>* b_k;
-    LocalVector<T>* b_k1;
-    LocalVector<T>* b_tmp;
-    LocalVector<T>  e;
-    LocalVector<T>  rhs;
+    LocalMatrix<T> A;
+    LocalVector<T> x;
+    LocalVector<T> b;
+    LocalVector<T> b_old;
+    LocalVector<T> e;
+    LocalVector<T> rhs;
 
     // Generate A
     int* csr_ptr = NULL;
@@ -85,7 +82,7 @@ bool testing_chebyshev(Arguments argus)
         }
     }
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     if(!disable_accelerator)
@@ -194,6 +191,9 @@ bool testing_chebyshev(Arguments argus)
         ls.ReBuildNumeric();
         ls.Set(lambda_min, lambda_max);
     }
+
+    // Matrix format
+    A.ConvertTo(format, format == BCSR ? argus.blockdim : 1);
 
     // Solve A x = rhs
     ls.Solve(rhs, &x);

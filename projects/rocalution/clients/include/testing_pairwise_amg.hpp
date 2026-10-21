@@ -422,8 +422,6 @@ bool testing_pairwise_amg_3(Arguments argus)
     int nrow = gen_2d_laplacian(ndim, &csr_ptr, &csr_col, &csr_val);
     int nnz  = csr_ptr[nrow];
 
-    T* csr_val2 = NULL;
-
     mat.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
 
     // Move objects to accelerator

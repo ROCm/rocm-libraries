@@ -170,6 +170,14 @@ int main(int argc, char* argv[])
         std::cout << "||e - x||_2 = " << error << std::endl;
     }
 
+    // Stop time measurement
+    end = rocalution_time();
+
+    if(rank == 0)
+    {
+        std::cout << "Total runtime: " << (end - start) / 1e6 << " sec" << std::endl;
+    }
+
     // Stop rocALUTION platform
     stop_rocalution();
 

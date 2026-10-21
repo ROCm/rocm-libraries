@@ -7007,8 +7007,7 @@ namespace rocalution
             prolong->MoveToHost();
 
             // Convert to CSR
-            unsigned int format   = mat_host.GetFormat();
-            int          blockdim = mat_host.GetBlockDimension();
+            unsigned int format = mat_host.GetFormat();
             mat_host.ConvertToCSR();
 
             if(mat_host.matrix_->AMGSmoothedAggregationProlongNnz(

@@ -245,7 +245,6 @@ namespace rocalution
 
             free_host(&offsets);
 
-            int x_offset = 0;
             for(int i = 0; i < this->num_blocks_; ++i)
             {
                 this->diag_block_[i] = new VectorType;
@@ -260,8 +259,6 @@ namespace rocalution
                 this->x_block_[i]->CloneBackend(*this->op_); // clone backend
                 this->x_block_[i]->Allocate("MultiColored Preconditioner x_block_",
                                             this->block_sizes_[i]);
-
-                x_offset += this->block_sizes_[i];
 
                 Jacobi<OperatorType, VectorType, ValueType>* jacobi
                     = new Jacobi<OperatorType, VectorType, ValueType>;

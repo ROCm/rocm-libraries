@@ -73,7 +73,7 @@ bool testing_itsolver(Arguments argus)
     }
     int nnz = csr_ptr[nrow];
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     if(!disable_accelerator)
@@ -128,6 +128,9 @@ bool testing_itsolver(Arguments argus)
     // Build solver
     fp.Build();
 
+    // Matrix format
+    A.ConvertTo(format, format == BCSR ? argus.blockdim : 1);
+
     // Verbosity output
     fp.Verbose(1);
 
@@ -141,14 +144,14 @@ bool testing_itsolver(Arguments argus)
     // Solve A x = b
     fp.Solve(b, &x);
 
-    int           niter_preconditioner;
-    const double* history = p.GetConvergenceHistory(&niter_preconditioner);
+    int niter_preconditioner;
+    p.GetConvergenceHistory(&niter_preconditioner);
 
-    auto res_final = fp.GetCurrentResidual();
+    fp.GetCurrentResidual();
     //auto res_init      = fp.GetInitialResidual();
     //auto niter         = fp.GetNumIterations();
-    auto status_solver = fp.GetSolverStatus();
-    auto ind           = fp.GetAmaxResidualIndex();
+    fp.GetSolverStatus();
+    fp.GetAmaxResidualIndex();
     // Clear solver
     fp.Clear();
 

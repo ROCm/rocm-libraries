@@ -74,7 +74,7 @@ bool testing_local_matrix_lusolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
@@ -172,7 +172,7 @@ bool testing_local_matrix_llsolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
@@ -284,7 +284,7 @@ bool testing_local_matrix_lsolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();
@@ -390,7 +390,7 @@ bool testing_local_matrix_usolve(Arguments argus)
     assert(csr_col != NULL);
     assert(csr_val != NULL);
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     A.MoveToAccelerator();

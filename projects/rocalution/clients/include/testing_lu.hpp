@@ -82,7 +82,7 @@ bool testing_lu(Arguments argus)
     }
     int nnz = csr_ptr[nrow];
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Allocate x, b and e
     x.Allocate("x", A.GetN());
