@@ -186,7 +186,7 @@ example:
 | `__init__.py` | The package marker, which qualification freezes with `contract.py` and `worker.py` |
 | `operation.json` | The operation id its bundle manifests declare, such as `{"manifest_operation": "conv-fwd"}` |
 | `contract.py` | A frozen `Case` dataclass with `id`, `dtype`, `tolerance`, `input_shapes`, and `output_shape`; `SCHEMA_VERSION`; `INPUT_GENERATOR`; deterministic quantized `make_inputs(case)`; and the independent reference, `independent_reference(case, inputs)` |
-| `architectures/` | `__init__.py` with `ARCHITECTURES`, `get_architecture`, and `baseline_lock`; `registry.json`; and an adapter per processor, as for a new architecture |
+| `architectures/` | `__init__.py`, which binds `ARCHITECTURES`, `get_architecture`, and `baseline_lock` from a `reference_common.registry.AdapterRegistry`; `registry.json`; and an adapter per processor, as for a new architecture |
 | `implementations/` | Code that adapters share. Qualification freezes this directory, so it must exist |
 | `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation`, with module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
 | `worker.py` | `run(request, output)`, which passes a `WorkerOperation` and the requested adapter to `reference_common.worker.run_case` |

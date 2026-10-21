@@ -1256,6 +1256,37 @@ def test_operation_packages_plug_into_the_shared_plumbing(operation):
         assert callable(getattr(gpu_tests, f"test_{operation}_{name}"))
 
 
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_enrollment_rejects_unlisted_names_before_importing(operation, monkeypatch):
+    """Each package enrolls exactly its registry.json through the shared registry.
+
+    A lock resolves beside its enrolled adapter. Any other name is rejected
+    with the operation's label before an adapter import is attempted.
+    """
+    from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    registry = spec.architectures
+    root = Path(registry.__file__).resolve().parent
+    listed = json.loads((root / "registry.json").read_text())
+    assert registry.ARCHITECTURES == tuple(listed)
+    for architecture in registry.ARCHITECTURES:
+        assert registry.get_architecture(architecture).NAME == architecture
+        assert registry.baseline_lock(architecture) == (
+            root / architecture / "baseline_lock.json"
+        )
+    # common is the adapters' shared helper module, not an adapter. A None
+    # entry makes any import of a name fail with ImportError instead.
+    for name in ("gfx1100", "../gfx942", "common"):
+        monkeypatch.setitem(sys.modules, f"{registry.__name__}.{name}", None)
+        for lookup in (registry.get_architecture, registry.baseline_lock):
+            with pytest.raises(
+                ValueError,
+                match=f"^{spec.label} reference architecture is not enrolled: ",
+            ):
+                lookup(name)
+
+
 def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
     values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
     encoded = encode(values.view(np.float32), "bf16")

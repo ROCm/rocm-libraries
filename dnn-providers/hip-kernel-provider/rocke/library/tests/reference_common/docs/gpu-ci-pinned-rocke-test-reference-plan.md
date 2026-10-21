@@ -291,6 +291,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
 | `operation.json` | Operation id that bundle manifests declare; a package with `architectures/registry.json` is registered as an operation without any shared list |
 | `architectures/registry.json` | Processors enrolled for qualification, verification, and the `cases` and `diff` commands; enrollment does not publish a pair |
+| `../reference_common/registry.py` | Enrollment and lock lookup that each `architectures/__init__.py` delegates to; frozen into every bundle's runner, so it uses only the standard library |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
 | `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; `wmma.py` also defines the cohort shared by the gfx1151, gfx1200, and gfx1201 adapters, so editing it requires requalifying every published WMMA pair. Dense adapters retain their own cohorts, and every adapter its candidate selection |

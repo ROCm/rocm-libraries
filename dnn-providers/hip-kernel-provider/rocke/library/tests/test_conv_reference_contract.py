@@ -604,6 +604,7 @@ for name, module in tuple(sys.modules.items()):
     if name.split(".")[0] in ("conv_reference", "reference_common"):
         assert Path(module.__file__).resolve().is_relative_to(root), name
 assert "reference_common.worker" in sys.modules
+assert "reference_common.registry" in sys.modules
 assert 'kernels' not in sys.modules
 assert 'dispatch' not in sys.modules
 assert 'torch' not in sys.modules
