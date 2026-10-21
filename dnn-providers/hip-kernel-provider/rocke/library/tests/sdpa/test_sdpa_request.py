@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from collections import Counter
+from dataclasses import fields, is_dataclass, replace
 
 import pytest
 
@@ -167,6 +168,72 @@ def test_bottom_right_on_per_sequence_lengths_moves(name):
     assert "causal_tl" not in causal.features()
     window = replace(base, diagonal="bottom_right", left_bound=2, right_bound=0)
     assert "window_br" in window.features()
+
+
+# --- ragged and alignment cover every operand, not only Q/K/V/O ----------------
+
+
+def _f32(dims, **kw):
+    strides = [1]
+    for d in reversed(dims[1:]):
+        strides.insert(0, strides[0] * d)
+    return SdpaTensor("fp32", dims, tuple(strides), **kw)
+
+
+# name -> a request field holding that operand, built from BASE (B=2, H=4, S=8)
+_AUX_OPERANDS = {
+    "bias": lambda **kw: {"bias": SdpaBias(_f32((1, 1, 8, 8), **kw))},
+    "block_mask": lambda **kw: {"block_mask": _f32((2, 1, 8, 8), **kw)},
+    "sink_token": lambda **kw: {"sink_token": _f32((1, 4, 1, 1), **kw)},
+    "seq_len_q": lambda **kw: {"seq_len_q": _f32((2, 1, 1, 1), **kw)},
+    "seq_len_kv": lambda **kw: {"seq_len_kv": _f32((2, 1, 1, 1), **kw)},
+    "stats": lambda **kw: {"stats": _f32((2, 4, 8, 1), **kw)},
+    "max": lambda **kw: {"max": _f32((2, 4, 8, 1), **kw)},
+    "sum_exp": lambda **kw: {"sum_exp": _f32((2, 4, 8, 1), **kw)},
+}
+
+
+@pytest.mark.parametrize("operand", sorted(_AUX_OPERANDS))
+def test_ragged_auxiliary_operand_reports_ragged(operand):
+    assert "ragged" not in replace(BASE, **_AUX_OPERANDS[operand]()).features()
+    req = replace(BASE, **_AUX_OPERANDS[operand](ragged=True))
+    assert "ragged" in req.features()
+
+
+@pytest.mark.parametrize("operand", sorted(_AUX_OPERANDS))
+def test_underaligned_auxiliary_operand_reports_unaligned(operand):
+    assert "unaligned" not in replace(BASE, **_AUX_OPERANDS[operand]()).features()
+    req = replace(BASE, **_AUX_OPERANDS[operand](alignment=2))
+    assert "unaligned" in req.features()
+
+
+def test_by_value_operand_is_exempt_from_alignment():
+    """hipDNN gives a pass-by-value scalar alignment 0: it is a host pointer."""
+    scale = _f32((1,), by_value=True, alignment=0)
+    req = replace(BASE, scale_source="tensor", scale_tensor=scale)
+    assert "unaligned" not in req.features()
+    # A device-buffer scale tensor with the same alignment is under-aligned.
+    device = replace(scale, by_value=False)
+    assert (
+        "unaligned"
+        in replace(BASE, scale_source="tensor", scale_tensor=device).features()
+    )
+
+
+def _walk_tensors(value):
+    if isinstance(value, SdpaTensor):
+        yield value
+    elif is_dataclass(value) and not isinstance(value, type):
+        for f in fields(value):
+            yield from _walk_tensors(getattr(value, f.name))
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_operands_cover_every_tensor_on_the_request(name):
+    """A tensor field added to the request or to a group (bias, dropout, paged,
+    fp8) but missing from ``_operands`` would be invisible to ragged/unaligned."""
+    req = CASES[name]
+    assert Counter(req._operands()) == Counter(_walk_tensors(req))
 
 
 @pytest.mark.parametrize("source", ["default", "tensor"])

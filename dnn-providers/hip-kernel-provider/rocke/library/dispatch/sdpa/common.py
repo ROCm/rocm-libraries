@@ -516,6 +516,38 @@ class SdpaRequest(OperatorRequest):
             "gqa_ratio": self.h_q // self.h_k,
         }
 
+    def _operands(self) -> tuple[SdpaTensor, ...]:
+        """Every tensor operand present on the request, required and optional.
+
+        Optional groups (bias, dropout, paged, fp8) are read through their
+        dataclass fields, so a tensor added to one of them is covered without
+        touching this method.
+        """
+        found: list[SdpaTensor] = [self.q, self.k, self.v, self.o]
+        for value in (
+            self.scale_tensor,
+            self.block_mask,
+            self.sink_token,
+            self.seq_len_q,
+            self.seq_len_kv,
+            self.stats,
+            self.max,
+            self.sum_exp,
+            self.bias,
+            self.dropout,
+            self.paged,
+            self.fp8,
+        ):
+            if isinstance(value, SdpaTensor):
+                found.append(value)
+            elif value is not None:
+                found.extend(
+                    t
+                    for f in fields(value)
+                    if isinstance(t := getattr(value, f.name), SdpaTensor)
+                )
+        return tuple(found)
+
     def features(self) -> frozenset[str]:
         active: set[str] = set()
         primaries = (self.q, self.k, self.v, self.o)
@@ -541,7 +573,11 @@ class SdpaRequest(OperatorRequest):
             active.add("batch_stride")
         if any(t.dims[3] > 1 and t.strides[3] != 1 for t in primaries):
             active.add("d_stride")
-        if any(t.alignment < _BASE_ALIGNMENT for t in primaries):
+        # Every operand counts, not just Q/K/V/O: a kernel that vector-loads an
+        # under-aligned bias, or reads a ragged mask, is wrong on that operand too.
+        # A by-value tensor is a host pointer, which hipDNN exempts from alignment.
+        operands = self._operands()
+        if any(t.alignment < _BASE_ALIGNMENT for t in operands if not t.by_value):
             active.add("unaligned")
 
         if self.scale_source == "tensor":
@@ -566,8 +602,7 @@ class SdpaRequest(OperatorRequest):
             or self.seq_len_kv is not None
         ):
             active.add("padded")
-        outputs = (self.stats, self.max, self.sum_exp)
-        if any(t.ragged for t in primaries + tuple(t for t in outputs if t)):
+        if any(t.ragged for t in operands):
             active.add("ragged")
         if self.dropout is not None:
             active.add("dropout")
