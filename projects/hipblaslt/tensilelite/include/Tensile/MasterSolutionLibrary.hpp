@@ -174,9 +174,10 @@ namespace TensileLite
             solutionSources;
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
-        // Consulted by the master the caller queries. Shard masters hold the
-        // same pointer but are never queried: placeholders call their inner
-        // library directly.
+        // Consulted by the master the caller queries, for GEMM queries only:
+        // the grouped GEMM ones go to the shipped library alone. Shard masters
+        // hold the same pointer but are never queried: placeholders call their
+        // inner library directly.
         std::shared_ptr<LocalKernelLibrary<MyProblem, MySolution>> localLibrary
             = globalLocalKernelLibrary<MyProblem, MySolution>();
 #endif

@@ -162,9 +162,15 @@ namespace TensileLite
 
     /**
      * Kernels registered at runtime. The top-level MasterSolutionLibrary
-     * consults this once per query, ahead of the shipped library, so a mapped
-     * kernel is chosen for its shape regardless of how the shipped library is
-     * split into shards.
+     * consults this once per GEMM query (findBestSolution, findTopSolutions
+     * and findAllSolutions), ahead of the shipped library, so a mapped kernel
+     * is chosen for its shape regardless of how the shipped library is split
+     * into shards.
+     *
+     * Grouped GEMM is not covered yet: findAllSolutionsGroupedGemm and
+     * findTopSolutionsGroupedGemm query the shipped library alone, so a
+     * grouped GEMM kernel registered and mapped here is never listed or
+     * chosen.
      */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     class LocalKernelLibrary
