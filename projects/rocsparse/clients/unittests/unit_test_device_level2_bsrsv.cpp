@@ -268,7 +268,8 @@ namespace
             position = to_host(dposition)[0];
         if(singular)
         {
-            EXPECT_GE(position, 0);
+            // Every diagonal block is missing, so the first zero pivot is block row 0.
+            EXPECT_EQ(position, c.base);
             ASSERT_EQ(rocsparse_bsrsv_clear(handle, info.d), rocsparse_status_success);
             return;
         }

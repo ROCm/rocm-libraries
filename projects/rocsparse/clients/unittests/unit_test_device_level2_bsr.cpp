@@ -29,23 +29,12 @@
 // Every call is compared with a host reference of y = alpha * A * x + beta * y.
 //
 // rocsparse_bsrmv / rocsparse_bsrxmv route every block dimension to the
-// general kernel when handle->wavefront_size == 32 (gfx1201). The kernels
-// specialised for 2x2, 3x3, 4x4, 5x5, 8x8, 16x16 and 17..32 are selected only
-// for another wavefront size, so the tests report wavefront 64 on the handle
-// while the call runs (a no-op on a GPU whose wavefront really is 64: the same
-// kernels are then reached by the unmodified handle). The kernels do not depend
-// on the wave size, except:
-//   * blocks_per_row >= 64 selects a 64-lane logical wavefront (bsrxmv 2x2, 3x3,
-//     4x4 and gebsrmv with a row block dimension of 2, 3 or 4) which does not exist
-//     on a wave32 GPU, so that test only runs on a GPU whose wavefront is 64;
-//   * the 8x8 kernels (all precisions) and the 5x5 kernels of double and complex
-//     data reduce through shared memory without a barrier and need a real 64
-//     lane wavefront, so they are not run under the forced wavefront;
-//   * the float 5x5 kernel does work under the forced wavefront and is checked.
+// general kernel on a GPU whose wavefront is 32. The kernels specialised for
+// 2x2, 3x3, 4x4, 5x5, 8x8, 16x16 and 17..32, and the 64-lane kernels selected by
+// blocks_per_row >= 64, are only reached on a GPU whose wavefront is 64, so those
+// tests skip elsewhere.
 //
 #include "unit_test_device_level2_common.hpp"
-
-#include "rocsparse_handle.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -56,28 +45,6 @@ using namespace level2;
 
 namespace
 {
-    // Reports another wavefront size on the handle while it is alive.
-    struct scoped_wavefront
-    {
-        rocsparse_handle handle;
-        int              saved;
-
-        scoped_wavefront(rocsparse_handle h, int wavefront)
-            : handle(h)
-            , saved(h->wavefront_size)
-        {
-            handle->wavefront_size = wavefront;
-        }
-
-        ~scoped_wavefront()
-        {
-            handle->wavefront_size = saved;
-        }
-
-        scoped_wavefront(const scoped_wavefront&)            = delete;
-        scoped_wavefront& operator=(const scoped_wavefront&) = delete;
-    };
-
     inline std::string
         describe(const char* what, int32_t rbd, int32_t cbd, int32_t bpr, int dir, int base)
     {
@@ -511,37 +478,21 @@ namespace
         sweep_xmv<rocsparse_double_complex>({2, 7, 17}, {4});
     }
 
-    TEST_F(L2DeviceBsrxmv, specialised_kernels_wave64_dispatch)
+    TEST_F(L2DeviceBsrxmv, specialised_kernels_wave64)
     {
+        if(rocsparse_ut::device_warp_size() != 64)
+            GTEST_SKIP() << "needs a GPU with a wavefront of 64";
         // Dimensions 2, 3 and 4: blocks per row 2, 10, 20 and 40 select the 4, 8,
         // 16 and 32 lane kernels.
-        const scoped_wavefront wave(handle, 64);
         sweep_xmv<float>({2, 3, 4}, {2, 10, 20, 40});
         sweep_xmv<double>({2, 3, 4}, {3, 17});
         sweep_xmv<rocsparse_float_complex>({2, 3, 4}, {5});
         sweep_xmv<rocsparse_double_complex>({2, 3, 4}, {12});
-    }
-
-    TEST_F(L2DeviceBsrxmv, specialised_kernels_wave64_dispatch_large_blocks)
-    {
-        const scoped_wavefront wave(handle, 64);
-        // 16x16 and 17..32 do not depend on the wavefront size, float included. The
-        // 8x8 kernels and the 5x5 kernels of double and complex data reduce through
-        // shared memory without a barrier and need a real 64 lane wavefront, so they
-        // are not run (the float 5x5 kernel is run below).
+        sweep_xmv<float>({5, 8}, {3, 9});
         sweep_xmv<float>({16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}, {3});
-        sweep_xmv<double>({16, 19, 32}, {7});
-        sweep_xmv<rocsparse_float_complex>({16, 17, 25}, {2});
-        sweep_xmv<rocsparse_double_complex>({16, 18, 30}, {2});
-    }
-
-    TEST_F(L2DeviceBsrxmv, float_5x5_wave64_dispatch)
-    {
-        // The single precision 5x5 kernel works under the forced wavefront (the 8x8
-        // kernel and the 5x5 kernels of the other precisions need a real 64 lane
-        // wavefront and are not run).
-        const scoped_wavefront wave(handle, 64);
-        sweep_xmv<float>({5}, {3, 9});
+        sweep_xmv<double>({5, 8, 16, 19, 32}, {7});
+        sweep_xmv<rocsparse_float_complex>({5, 8, 16, 17, 25}, {2});
+        sweep_xmv<rocsparse_double_complex>({5, 8, 16, 18, 30}, {2});
     }
 
     TEST_F(L2DeviceBsrxmv, wave64_long_rows)
@@ -718,17 +669,15 @@ namespace
     {
     };
 
-    TEST_F(L2DeviceBsrmv, specialised_kernels_wave64_dispatch)
+    TEST_F(L2DeviceBsrmv, specialised_kernels_wave64)
     {
-        const scoped_wavefront wave(handle, 64);
+        if(rocsparse_ut::device_warp_size() != 64)
+            GTEST_SKIP() << "needs a GPU with a wavefront of 64";
         sweep_mv<float>({2, 3, 4}, {2, 10, 20});
-        sweep_mv<float>({16, 17, 20, 25, 32}, {3});
-        // The 5x5 and 8x8 kernels (except the float 5x5 one) reduce through shared
-        // memory without a barrier; they need a real 64 lane wavefront and are not run
-        // here.
-        sweep_mv<double>({2, 3, 4, 16, 18}, {6});
-        sweep_mv<rocsparse_float_complex>({3, 4}, {3});
-        sweep_mv<rocsparse_double_complex>({2, 17}, {3});
+        sweep_mv<float>({5, 8, 16, 17, 20, 25, 32}, {3});
+        sweep_mv<double>({2, 3, 4, 5, 8, 16, 18}, {6});
+        sweep_mv<rocsparse_float_complex>({3, 4, 5, 8}, {3});
+        sweep_mv<rocsparse_double_complex>({2, 5, 8, 17}, {3});
     }
 
     TEST_F(L2DeviceBsrmv, with_analysis)

@@ -299,7 +299,7 @@ namespace
         return st != rocsparse_status_success
                    ? st
                    : rocsparse_spmat_set_attribute(
-                         A, rocsparse_spmat_diag_type, &diag, sizeof(diag));
+                       A, rocsparse_spmat_diag_type, &diag, sizeof(diag));
     }
 
     // A dense matrix in either order with distinct entries (zeros for a negative seed);
@@ -955,7 +955,7 @@ namespace
         o.alpha       = &alpha;
         o.diagonal    = c.diagonal_solve;
         o.unsupported = c.unsupported;
-        if(run_sptrsv(handle, A.d, x.d, y.d, o) && !c.unsupported)
+        if(run_sptrsv(handle, A.d, x.d, y.d, o))
             expect_near(solve_reference(m.a, {c.fill, c.diag, c.op, c.diagonal_solve}, alpha, m.x0),
                         to_host(m.y),
                         "sptrsv");
@@ -1010,8 +1010,8 @@ namespace
         ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
         ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
         ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
-        const float          alpha_host = 2.0f;
-        device_vector<float> alpha_device(std::vector<float>(1, 2.0f));
+        const float           alpha_host = 2.0f;
+        device_vector<double> alpha_device(std::vector<double>(1, 2.0));
         ASSERT_TRUE(alpha_device.ptr);
 
         sptrsv_options o;
@@ -1024,13 +1024,17 @@ namespace
                 expect_near(
                     solve_reference(m.a, {lo, nu, op_n, false}, 2.0, m.x0), to_host(m.y), "sptrsv");
         }
-        // The library takes the scalar of a device pointer mode from the handle here, so
-        // the product is not checked: this call only reaches the conversion.
+        // An f32 scalar in device pointer mode is not run: rocsparse_sptrsv solves with
+        // handle->alpha instead of the converted user alpha.
         scoped_pointer_mode device(handle, true);
+        o.scalar = f64;
         o.op     = op_t;
         o.policy = rocsparse_analysis_policy_force;
         o.alpha  = alpha_device.ptr;
-        EXPECT_TRUE(run_sptrsv(handle, A.d, x.d, y.d, o));
+        if(run_sptrsv(handle, A.d, x.d, y.d, o))
+            expect_near(solve_reference(m.a, {lo, nu, op_t, false}, 2.0, m.x0),
+                        to_host(m.y),
+                        "sptrsv device alpha");
     }
 
     // ----- SpTRSM ----------------------------------------------------------------------
@@ -1172,7 +1176,7 @@ namespace
         o.alpha       = &alpha;
         o.diagonal    = c.diagonal_solve;
         o.unsupported = c.unsupported;
-        if(run_sptrsm(handle, A.d, X.desc.d, Y.desc.d, o) && !c.unsupported)
+        if(run_sptrsm(handle, A.d, X.desc.d, Y.desc.d, o))
             expect_near(
                 solve_columns(
                     m.a, {lo, nu, c.op_a, c.diagonal_solve}, alpha, X, c.op_x, Y, op_n, c.nrhs),
@@ -1210,7 +1214,10 @@ namespace
         o.unsupported = true;
         {
             scoped_pointer_mode host(handle, false);
-            run_sptrsm(handle, A.d, X.desc.d, Y.desc.d, o);
+            if(run_sptrsm(handle, A.d, X.desc.d, Y.desc.d, o))
+                expect_near(solve_columns(m.a, {lo, un, op_c, false}, 2.0, X, op_n, Y, op_n, 2),
+                            to_host(Y.data),
+                            "sptrsm op_c");
         }
         ASSERT_TRUE(Y.upload());
         scoped_pointer_mode device(handle, true);
@@ -1272,8 +1279,8 @@ namespace
     };
 
     // Each operation, fill mode, diagonal type and analysis policy; nrhs = 1 stays on
-    // the csrsv path. The conjugate transpose is documented as not implemented, so its
-    // result is not checked.
+    // the csrsv path. The conjugate transpose is documented as not implemented; a
+    // solve that succeeds anyway is checked.
     std::vector<csrsm_case> csrsm_cases()
     {
         std::vector<csrsm_case> v{{0, op_t, op_t, up, nu, force},
@@ -1384,12 +1391,10 @@ namespace
         rocsparse_int pivot = 0;
         ASSERT_EQ(rocsparse_csrsm_zero_pivot(handle, info, &pivot), rocsparse_status_success);
         EXPECT_EQ(pivot, -1);
-        if(!unsupported)
-            expect_near(
-                solve_columns(
-                    a, {c.fill, c.diag, c.op_a, false}, alpha, B, c.op_b, B, c.op_b, c.nrhs),
-                to_host(B.data),
-                "csrsm");
+        expect_near(
+            solve_columns(a, {c.fill, c.diag, c.op_a, false}, alpha, B, c.op_b, B, c.op_b, c.nrhs),
+            to_host(B.data),
+            "csrsm");
         EXPECT_EQ(rocsparse_csrsm_clear(handle, info), rocsparse_status_success);
     }
 

@@ -163,9 +163,9 @@ namespace level2
             if(d)
                 (void)destroy(d);
         }
-        created(const created&)            = delete;
+        created(const created&) = delete;
         created& operator=(const created&) = delete;
-        operator D() const
+                 operator D() const
         {
             return d;
         }
@@ -175,9 +175,9 @@ namespace level2
     template <typename D, auto destroy>
     struct owned
     {
-        D d                            = nullptr;
-        owned()                        = default;
-        owned(const owned&)            = delete;
+        D d                 = nullptr;
+        owned()             = default;
+        owned(const owned&) = delete;
         owned& operator=(const owned&) = delete;
         ~owned()
         {
@@ -222,7 +222,7 @@ namespace level2
 
         scoped_pointer_mode(rocsparse_handle h, bool device)
             : scoped_pointer_mode(
-                  h, device ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host)
+                h, device ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host)
         {
         }
 
@@ -231,7 +231,7 @@ namespace level2
             (void)rocsparse_set_pointer_mode(handle, saved);
         }
 
-        scoped_pointer_mode(const scoped_pointer_mode&)            = delete;
+        scoped_pointer_mode(const scoped_pointer_mode&) = delete;
         scoped_pointer_mode& operator=(const scoped_pointer_mode&) = delete;
     };
 

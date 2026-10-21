@@ -249,8 +249,8 @@ namespace
         void sweep(bool all_trans)
         {
             const rocsparse_operation                     ops[] = {rocsparse_operation_none,
-                                                                   rocsparse_operation_transpose,
-                                                                   rocsparse_operation_conjugate_transpose};
+                                               rocsparse_operation_transpose,
+                                               rocsparse_operation_conjugate_transpose};
             std::set<std::tuple<int, int, int, int, int>> seen;
             int                                           n = 0;
             for(const auto mtype :

@@ -190,17 +190,14 @@ namespace
                           dy);
         }
         // rocsparse_csrmv.h documents not_implemented for a matrix type other than
-        // general, so the symmetric product is not checked.
+        // general; a symmetric product that succeeds is checked.
         if(sym)
-        {
-            EXPECT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented)
+            ASSERT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented)
                 << st;
-        }
         else
-        {
             ASSERT_EQ(st, rocsparse_status_success);
+        if(st == rocsparse_status_success)
             EXPECT_TRUE(expect_near(want, to_host(dy), "csrmv y"));
-        }
         EXPECT_EQ(rocsparse_csrmv_clear(handle, info), rocsparse_status_success);
     }
 
