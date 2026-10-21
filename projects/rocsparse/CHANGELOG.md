@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.3.0
 
 ### Resolved issues
-* Fixed `rocsparse_csrgemm` and `rocsparse_spgemm` rejecting rows whose hash table exactly fills the device shared-memory limit. The 8192-entry bucket was not checked, so 64-bit column indices requested 64 KiB of dynamic LDS, and a hash equal to the opt-in limit was still launched. Both now fall back to the bitmap path. This showed up as `rocsparse_status_internal_error` in the `GemmCalcGrids` csrgemm tests.
+* Fixed `rocsparse_csrgemm` and `rocsparse_spgemm` failures when a row's hash table reached the device shared-memory limit. Previously, hash tables at the limit could result in an unsupported shared-memory request. The issue appeared as `rocsparse_status_internal_error` in the `GemmCalcGrids csrgemm` tests. Affected cases now use the bitmap fallback.
 
 ## (Unreleased) rocSPARSE 5.2.0
 
