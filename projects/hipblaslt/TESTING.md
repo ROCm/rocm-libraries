@@ -638,7 +638,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
-| Random and required GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs plus the required-case list (1,000 random GEMMs nightly) for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts, required cases or workflows change. See [random GEMM testing](docs/nightly-random-gemm.md) |
+| Random and required GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs plus the required-case list (1,000 random GEMMs nightly) for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts, required cases or workflows change. See [random GEMM testing](docs/rocjitsu-gemm-race-testing.md) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -831,7 +831,7 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
   and both run the same required-case list in addition to their random samples.
   Both are advisory, require no GPU, and retain every case's input and logs.
   Manual artifact replay and local validation are documented in
-  [random GEMM testing](docs/nightly-random-gemm.md).
+  [random GEMM testing](docs/rocjitsu-gemm-race-testing.md).
 - **Additional hardware.** This repository's own nightly runs the same Linux families as a pull
   request (gfx94X and gfx950) plus Windows gfx1151. TheRock's nightly, which tests rocm-libraries at
   the commit TheRock pins, adds more families (gfx90a, gfx103X, gfx110X, gfx115X, gfx120X).

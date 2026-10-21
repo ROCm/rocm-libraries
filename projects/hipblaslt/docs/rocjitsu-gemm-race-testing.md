@@ -1,9 +1,9 @@
-# Nightly random GEMMs
+# GEMM race testing with rocJITsu
 
 This prototype [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py)
 tests GEMMs through rocJITsu on CPUs, checking numerics and detecting races.
 No physical GPU is required. The benchmark chooses its kernel through the
-ordinary heuristic.
+ordinary heuristic (i.e. no explicit solution index is used).
 
 The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) has separate
 functions for numerics, shapes, layouts, scalars and epilogues. M, N and K are
@@ -28,19 +28,16 @@ and gfx950 MX tests; they cover a useful subset of supported combinations.
 
 Alpha is sampled from `{-2, -1, 0.5, 1, 2}` and beta from
 `{-2, -1, 0, 0.5, 1, 2}`. Epilogues sample none, bias, ReLU, bias+ReLU, GELU
-and bias+GELU, with FP32 bias. The fixed seed reproduces the sequence across
-thread counts. Alpha stays nonzero so every case exercises multiplication.
+and bias+GELU, with FP32 bias. Alpha stays nonzero so every case exercises
+multiplication. For a given seed and sample number, the GEMM input is the same
+regardless of `--threads`. Workers take cases from a shared sequence; worker
+assignment and completion order can vary.
 
-The fixed distribution passed 5,000 local samples against the
-[matched gfx950 artifacts](https://github.com/ROCm/rocm-libraries/actions/runs/39535282903)
-with no missing solutions.
-That evidence applies to the tested library build: normal heuristic selection
-can still return `error: NO solution found!` for another configuration or build.
-The runner records that outcome as `unsupported`, retains its input and logs,
-and fails the run. The missing-solution rate measures how many samples could
-execute; it has no percentage cutoff. Cases are never replaced.
-[Exploratory observations](random-gemm-observations.md) document individual
-inputs and failures outside the default distribution.
+If the heuristic returns `error: NO solution found!`, the runner records the
+case as `unsupported`, retains its input and logs, and fails the run. This means
+heuristic selection found no solution for that input; it does not establish
+that the input is forbidden or that no suitable kernel exists. The summary
+reports the missing-solution rate, and cases are never replaced.
 
 ## Running
 
@@ -87,7 +84,7 @@ retain five observed numerical-validation failures near zero or FP16 overflow.
 They are available through `--count 0 --explicit-cases` using that file, with
 the same strict checks and no exemptions. They are outside the initial CI
 workload because they exercise validation edge cases documented in the
-[observation table](random-gemm-observations.md).
+[test results](rocjitsu-gemm-race-results.md).
 
 ## CI and pre-merge validation
 
@@ -103,8 +100,9 @@ and 1,001 nightly inputs.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
 but they do not change the required Multi-Arch summary. Every sample is
-attempted. Runner unit tests execute on a
-small GitHub-hosted runner when the runner or its workflows change.
+attempted. Runner unit tests execute on a small GitHub-hosted runner when
+the runner or its workflows change. See [test results](rocjitsu-gemm-race-results.md)
+for validation of the current workload.
 
 For local validation of the CI driver, fetch the BLAS and test artifacts with
 TheRock's `install_rocm_from_artifacts.py --blas --tests`. Use the workflow's
