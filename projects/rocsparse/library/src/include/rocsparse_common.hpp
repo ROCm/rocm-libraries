@@ -60,12 +60,6 @@
 
 namespace rocsparse
 {
-    template <typename J>
-    static uint16_t get_batch_grid_size(J batch_count)
-    {
-        return (batch_count > 65535) ? 65535 : batch_count;
-    }
-
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
     template <uint32_t N>
     struct log2_pow2
@@ -218,17 +212,33 @@ namespace rocsparse
                                         __shfl_down(std::imag(var), src_lane, width));
     }
 
+    // __builtin_amdgcn_readfirstlane is a 32-bit op. Wider types must be
+    // broadcast one 32-bit half at a time; floating-point types go through
+    // their bit pattern so they are not rounded to int.
+    __device__ __forceinline__ uint32_t read_first_lane_b32(uint32_t var)
+    {
+        return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int32_t>(var)));
+    }
+    __device__ __forceinline__ uint64_t read_first_lane_b64(uint64_t var)
+    {
+        const uint32_t lo = read_first_lane_b32(static_cast<uint32_t>(var));
+        const uint32_t hi = read_first_lane_b32(static_cast<uint32_t>(var >> 32));
+        return (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo);
+    }
+
     __device__ __forceinline__ _Float16 read_first_lane(_Float16 var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        const uint32_t bits
+            = read_first_lane_b32(static_cast<uint32_t>(__builtin_bit_cast(uint16_t, var)));
+        return __builtin_bit_cast(_Float16, static_cast<uint16_t>(bits));
     }
     __device__ __forceinline__ float read_first_lane(float var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(float, read_first_lane_b32(__builtin_bit_cast(uint32_t, var)));
     }
     __device__ __forceinline__ double read_first_lane(double var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(double, read_first_lane_b64(__builtin_bit_cast(uint64_t, var)));
     }
     __device__ __forceinline__ int8_t read_first_lane(int8_t var)
     {
@@ -240,7 +250,7 @@ namespace rocsparse
     }
     __device__ __forceinline__ int64_t read_first_lane(int64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return static_cast<int64_t>(read_first_lane_b64(static_cast<uint64_t>(var)));
     }
     __device__ __forceinline__ uint8_t read_first_lane(uint8_t var)
     {
@@ -248,11 +258,11 @@ namespace rocsparse
     }
     __device__ __forceinline__ uint32_t read_first_lane(uint32_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b32(var);
     }
     __device__ __forceinline__ uint64_t read_first_lane(uint64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b64(var);
     }
 
     __device__ __forceinline__ int any(int predicate)
@@ -782,29 +792,30 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T atomic_load(const T* ptr, int order, int scope)
     {
-        return __hip_atomic_load(ptr, order, scope);
+        return __scoped_atomic_load_n(ptr, order, scope);
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
     {
-        return rocsparse_float_complex(__hip_atomic_load((const float*)ptr, order, scope),
-                                       __hip_atomic_load((const float*)ptr + 1, order, scope));
+        return rocsparse_float_complex(__scoped_atomic_load_n((const float*)ptr, order, scope),
+                                       __scoped_atomic_load_n((const float*)ptr + 1, order, scope));
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex
         atomic_load(const rocsparse_double_complex* ptr, int order, int scope)
     {
-        return rocsparse_double_complex(__hip_atomic_load((const double*)ptr, order, scope),
-                                        __hip_atomic_load((const double*)ptr + 1, order, scope));
+        return rocsparse_double_complex(
+            __scoped_atomic_load_n((const double*)ptr, order, scope),
+            __scoped_atomic_load_n((const double*)ptr + 1, order, scope));
     }
 
     template <typename T>
     __device__ __forceinline__ void atomic_store(T* ptr, T val, int order, int scope)
     {
-        __hip_atomic_store(ptr, val, order, scope);
+        __scoped_atomic_store_n(ptr, val, order, scope);
     }
 
     template <>
@@ -813,8 +824,8 @@ namespace rocsparse
                                                  int                      order,
                                                  int                      scope)
     {
-        __hip_atomic_store((float*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((float*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <>
@@ -823,8 +834,8 @@ namespace rocsparse
                                                  int                       order,
                                                  int                       scope)
     {
-        __hip_atomic_store((double*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((double*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <typename T1, typename T2>
@@ -868,6 +879,13 @@ namespace rocsparse
         // Check bounds
         if(idx >= 0 && idx < size)
         {
+            // Halves are paired by 32-bit word, so index from the 4-byte aligned
+            // address at or below base_ptr; base_ptr may be only 2-byte aligned,
+            // e.g. a per-batch pointer with an odd batch stride.
+            const int64_t shift = (reinterpret_cast<uintptr_t>(base_ptr) >> 1) & 1;
+            base_ptr -= shift;
+            idx += shift;
+            size += shift;
 
             half* addr      = &base_ptr[idx];
             int   is_second = (idx & 1);
@@ -977,6 +995,13 @@ namespace rocsparse
         // Check bounds
         if(idx >= 0 && idx < size)
         {
+            // Halves are paired by 32-bit word, so index from the 4-byte aligned
+            // address at or below base_ptr; base_ptr may be only 2-byte aligned,
+            // e.g. a per-batch pointer with an odd batch stride.
+            const int64_t shift = (reinterpret_cast<uintptr_t>(base_ptr) >> 1) & 1;
+            base_ptr -= shift;
+            idx += shift;
+            size += shift;
 
             rocsparse_bfloat16* addr      = &base_ptr[idx];
             int                 is_second = (idx & 1);
@@ -2785,7 +2810,7 @@ namespace rocsparse
     template <bool SLEEP>
     __device__ __forceinline__ int32_t spin_loop(int32_t* __restrict__ done, int scope)
     {
-        int32_t  local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+        int32_t  local_done    = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         uint32_t times_through = 0;
         while(!local_done)
         {
@@ -2801,9 +2826,129 @@ namespace rocsparse
                     ++times_through;
                 }
             }
-            local_done = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+            local_done = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         }
         return local_done;
+    }
+
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
+    // Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire
+    // and release fences therefore invalidate and write back the whole L2. Kernels that hand
+    // results from one row to another through done flags exchange these results with device scope
+    // atomic loads and stores (sc1) instead, which are coherent across the XCD L2s. This is
+    // correct only if every such result is written and read through the done row helpers below,
+    // and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for flat
+    // stores), so waiting for all counters to reach zero completes them. Newer architectures count
+    // stores separately and must not be added here without changing the waits. See the GFX942
+    // memory model in the LLVM AMDGPUUsage documentation.
+    static constexpr bool has_noncoherent_xcd_l2 = true;
+#else
+    static constexpr bool has_noncoherent_xcd_l2 = false;
+#endif
+
+    // Waits until all stores of the calling wavefront have completed. Only valid where
+    // has_noncoherent_xcd_l2 is true, because s_waitcnt 0 covers the stores only with the gfx9 wait
+    // counters. The builtin has side effects, which the compiler treats as reading and writing all
+    // memory, so memory operations stay on their side of it. The workgroup release fence makes
+    // this ordering explicit and emits no cache maintenance.
+    __device__ __forceinline__ void wait_store_completion()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+        __builtin_amdgcn_s_waitcnt(0);
+    }
+
+    // Orders the reads of the results of the rows the caller has waited for after the done flag
+    // loads. The caller must have seen each done flag set with a relaxed device scope atomic load,
+    // either through spin_loop with __MEMORY_SCOPE_DEVICE or its own loop, and has to read the
+    // results with load_done_row_data. With non-coherent XCD L2s the results are read with device
+    // scope atomics, so only the compiler has to keep them after the flag loads; a workgroup scope
+    // fence does that and emits no cache maintenance (outside threadgroup split mode, which
+    // rocSPARSE does not use).
+    __device__ __forceinline__ void acquire_done_rows()
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+        }
+        else
+        {
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+        }
+    }
+
+    // Reads a result that another row published before setting its done flag.
+    template <typename T>
+    __device__ __forceinline__ T load_done_row_data(const T* ptr)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            return rocsparse::atomic_load(ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        }
+        else
+        {
+            return *ptr;
+        }
+    }
+
+    // Writes a result that other rows read with load_done_row_data once the done flag is set.
+    template <typename T>
+    __device__ __forceinline__ void store_done_row_data(T* ptr, T val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        }
+        else
+        {
+            *ptr = val;
+        }
+    }
+
+    // Like store_done_row_data, for a final result the calling wavefront does not read again.
+    // Other architectures store it nontemporally.
+    template <typename T>
+    __device__ __forceinline__ void store_done_row_result(T* ptr, T val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::store_done_row_data(ptr, val);
+        }
+        else
+        {
+            rocsparse::nontemporal_store(val, ptr);
+        }
+    }
+
+    // Completes all results the calling wavefront stored with store_done_row_data. Other
+    // wavefronts of the workgroup may set the done flag after a following __syncthreads().
+    __device__ __forceinline__ void release_done_row_data()
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            // The stores are device scope already, they only have to complete.
+            rocsparse::wait_store_completion();
+        }
+        else
+        {
+            __threadfence();
+        }
+    }
+
+    // Sets a done flag after the results of the calling wavefront have been stored with
+    // store_done_row_data. With non-coherent XCD L2s the results are device scope stores already,
+    // so waiting for them to complete before the relaxed flag store makes them visible to every
+    // row that has seen the flag.
+    __device__ __forceinline__ void set_done_flag(int32_t* ptr, int32_t val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::wait_store_completion();
+            rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        }
+        else
+        {
+            rocsparse::atomic_store(ptr, val, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+        }
     }
 
     template <typename T>
@@ -2813,39 +2958,30 @@ namespace rocsparse
     __device__ __forceinline__ double assign_ilu0_boost_value(const double& value,
                                                               const double& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const double abs_value = rocsparse::abs(value);
         const double abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.0) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ float assign_ilu0_boost_value(const float& value,
                                                              const float& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const float abs_value = rocsparse::abs(value);
         const float abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.f) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex assign_ilu0_boost_value(
         const rocsparse_float_complex& value, const rocsparse_float_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2854,16 +2990,12 @@ namespace rocsparse
         return (abs_value > static_cast<float>(0))
                    ? (static_cast<rocsparse_float_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_float_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex assign_ilu0_boost_value(
         const rocsparse_double_complex& value, const rocsparse_double_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2872,9 +3004,5 @@ namespace rocsparse
         return (abs_value > static_cast<double>(0))
                    ? (static_cast<rocsparse_double_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_double_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
-
 }

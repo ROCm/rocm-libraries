@@ -254,7 +254,7 @@ RppStatus hip_exec_flip_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr, Rpp
                                RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                rpp::Handle& handle) {
     if (roiType == RpptRoiType::XYWH)
-        roiTensorPtrSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
@@ -331,7 +331,7 @@ RppStatus hip_exec_flip_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
                                      Rpp32u* verticalTensor, RpptROIPtr roiTensorPtrSrc,
                                      RpptRoiType roiType, rpp::Handle& handle) {
     if (roiType == RpptRoiType::XYWH)
-        roiTensorPtrSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

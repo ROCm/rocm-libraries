@@ -85,6 +85,21 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 // Forward declarations
 class ITensor;
 
+namespace detail
+{
+
+inline int64_t raggedSeqExtent(const std::vector<int64_t>& rowOffsets, int64_t seqStride, int64_t b)
+{
+    if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
+    {
+        return 0;
+    }
+    const auto bIdx = static_cast<size_t>(b);
+    return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+}
+
+} // namespace detail
+
 /**
  * @brief Snapshot of the state a ragged tensor iterator needs to traverse its buffer.
  *
@@ -97,6 +112,43 @@ struct RaggedIterationInfo
     std::vector<int64_t> rowOffsets;
     int seqAxis;
     int64_t seqStride;
+
+    /**
+     * @brief Number of sequence rows stored for batch `b`.
+     *
+     * @param b Batch index.
+     * @return `(rowOffsets[b+1] - rowOffsets[b]) / seqStride`, or 0 when `b` is outside
+     *         `[0, B)`.
+     */
+    int64_t seqExtent(int64_t b) const
+    {
+        return detail::raggedSeqExtent(rowOffsets, seqStride, b);
+    }
+
+    /**
+     * @brief Whether a logical index lies past its batch's stored sequence rows.
+     *
+     * Out-of-block positions have no storage of their own: they alias another batch's
+     * rows or run past the end of the buffer, so they must not be dereferenced.
+     *
+     * @param indices Full logical index; `indices[0]` is the batch.
+     * @return True if `indices[seqAxis] >= seqExtent(indices[0])`.
+     */
+    bool isOutOfBlock(const std::vector<int64_t>& indices) const
+    {
+        return indices[static_cast<size_t>(seqAxis)] >= seqExtent(indices[0]);
+    }
+
+    bool operator==(const RaggedIterationInfo& other) const
+    {
+        return rowOffsets == other.rowOffsets && seqAxis == other.seqAxis
+               && seqStride == other.seqStride;
+    }
+
+    bool operator!=(const RaggedIterationInfo& other) const
+    {
+        return !(*this == other);
+    }
 };
 
 template <bool IsConst = false>
@@ -418,15 +470,9 @@ public:
             return static_cast<int64_t>(rowOffsets.size()) - 1;
         }
 
-        // Per-batch sequence extent: number of sequence rows in batch b.
         int64_t seqExtent(int64_t b) const
         {
-            if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
-            {
-                return 0;
-            }
-            const auto bIdx = static_cast<size_t>(b);
-            return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+            return detail::raggedSeqExtent(rowOffsets, seqStride, b);
         }
     };
 
@@ -439,9 +485,26 @@ private:
         }
     }
 
+    /// True iff walking memory linearly visits the elements in index order, i.e. the
+    /// strides are the packed row-major strides for these dims.
+    ///
+    /// This is a question about ORDER. isPacked() is a question about EXTENT, and the
+    /// two are independent: any permutation of the strides spans the same memory, so it
+    /// is packed while visiting out of index order. RFC 0014 §7.2 proposes the same
+    /// split from the ragged-tensor side.
+    ///
+    /// An axis of extent 1 is exempt, because its index is always 0 and its stride
+    /// therefore never reaches an offset. NHWC activations with 1x1 spatial extent rely
+    /// on this: they carry a spatial stride of C rather than 1.
+    ///
+    /// Defined out-of-line below: ITensor is only forward-declared at this point.
+    static bool visitsInIndexOrder(const ITensor& tensor);
+
     IndexType makeIndex(TensorType tensor, bool isEnd)
     {
-        if(tensor.get().isPacked())
+        // Both predicates are required. isPacked() keeps ragged tensors off this path
+        // (RFC 0014 §4.5.7), and visitsInIndexOrder keeps stride permutations off it.
+        if(tensor.get().isPacked() && visitsInIndexOrder(tensor.get()))
         {
             return LinearIndex(tensor, isEnd);
         }
@@ -523,6 +586,10 @@ public:
     virtual ITensorIterator<true> cbegin() const = 0;
     virtual ITensorIterator<true> cend() const = 0;
 
+    /// True iff the elements occupy the memory span with no gaps, i.e.
+    /// elementCount == elementSpace. This says nothing about the ORDER in which a
+    /// linear walk of that span visits them; a permutation of the strides is packed
+    /// too, and iterating one linearly visits the right addresses in the wrong order.
     virtual bool isPacked() const = 0;
 
     virtual void markHostModified() = 0;
@@ -557,6 +624,47 @@ protected:
         return index;
     }
 };
+
+/// @brief A callable that fills underlying tensor memory with user defined values.
+///
+/// Signature: void(T* data, size_t count)
+/// The generator is called once per tensor fill and must fill `count` elements of
+/// the `data` pointer. If `fillWithValues` sets `hostFill` to true, then the data
+/// pointer will be a pointer to a host memory allocation. Otherwise, if `hostFill`
+/// was set to false, then this is a pointer to a device allocation. `count` is
+/// the element space of the tensor, i.e. it will contain padding elements if the
+/// tensor is not packed.
+///
+/// It is not the responsibility of the generator to mark the tensor as host or
+/// device modified.
+///
+/// For device fills the operation must be complete before the generator returns,
+/// or use the same HIP stream as the migratable memory object backing the tensor.
+template <typename T>
+using ValueGenerator = std::function<void(T* data, size_t count)>;
+
+template <bool IsConst>
+bool ITensorIterator<IsConst>::visitsInIndexOrder(const ITensor& tensor)
+{
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
+    if(dims.size() != strides.size())
+    {
+        return false;
+    }
+
+    int64_t expected = 1;
+    for(size_t axis = dims.size(); axis-- > 0;)
+    {
+        // Extent 1 pins the index to 0, so this stride never reaches an offset.
+        if(dims[axis] != 1 && strides[axis] != expected)
+        {
+            return false;
+        }
+        expected *= dims[axis];
+    }
+    return true;
+}
 
 template <typename T>
 class TensorBase : public ITensor
@@ -594,6 +702,7 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
+    // BOOLEAN has no out-of-band value; its sentinel is true and cannot detect an unwritten mask.
     void fillWithSentinelValue() override
     {
         if constexpr(std::numeric_limits<T>::has_quiet_NaN)
@@ -663,6 +772,31 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+
+    void fillWithValues(const ValueGenerator<T>& generator, bool hostFill)
+    {
+        if(!generator)
+        {
+            throw std::invalid_argument(
+                "generator must not be nullptr when calling TensorBase::fillWithValues");
+        }
+
+        MigratableMemoryBase<T>& migratableMem = memory();
+        if(hostFill)
+        {
+            // Call will overwrite the whole allocation, mark host modified before getting the pointer
+            // to avoid synchronizing device-to-host copy when calling `hostData()`
+            migratableMem.markHostModified();
+            generator(migratableMem.hostData(), migratableMem.count());
+        }
+        else
+        {
+            // Call will overwrite the whole allocation, mark device modified before getting
+            // the pointer to avoid synchronizing host-to-device copy when calling `deviceData()`
+            migratableMem.markDeviceModified();
+            generator(static_cast<T*>(migratableMem.deviceData()), migratableMem.count());
+        }
+    }
 
     ITensorIterator<false> begin() override
     {

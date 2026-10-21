@@ -17,11 +17,18 @@
  * Phase functions (emit_load_phase / emit_mfma_phase) are peers reached through
  * the internal header; this TU touches only ctx + the builder it carries.
  */
+#include "rocke/helper_rocke.helpers.pipeline.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
  * drivers write the ctx slot the epilogue reads. */
+/* Every driver now walks a runtime [k_lo, k_hi) range with an scf.for, so the
+ * old build-time tile-offset helper (const_i32(it*block_k), plus the slice base
+ * for wgrad) has no callers left: the loop induction variable *is* the offset.
+ */
+
 static void
     rocke_conv_set_final_accs(rocke_conv_build_ctx_t* ctx, rocke_value_t* const* accs, int num_accs)
 {
@@ -29,6 +36,23 @@ static void
     ctx->num_final_accs = num_accs;
     for(i = 0; i < num_accs; ++i)
         ctx->final_accs[i] = accs[i];
+}
+
+/* Mirrors the Python ping-pong's odd-tail guard: with ctx->kloop_k_zero_fill
+ * set, a prefetch offset at or past k_hi is redirected to it (a tile that
+ * reads as zero), so a split-K slice with an odd tile count cannot pull in the
+ * next slice's first tile. Without it the offset passes through unchanged and
+ * nothing is emitted. */
+static rocke_value_t* rocke_conv_kloop_guard_prefetch(rocke_conv_build_ctx_t* ctx,
+                                                      rocke_value_t* k,
+                                                      rocke_value_t* k_hi)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* in_slice;
+    if(ctx->kloop_k_zero_fill == NULL)
+        return k;
+    in_slice = rocke_b_cmp_lt(b, k, k_hi);
+    return rocke_b_select(b, in_slice, k, ctx->kloop_k_zero_fill);
 }
 
 /* ===================================================================== *
@@ -43,140 +67,77 @@ static void
 void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
-    int it, i;
+    int i;
 
-    /* current_accs = [v for _, v in accs] */
-    rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
+    rocke_for_t for_op;
+    rocke_value_t* iter_vars[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* accs_a[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* accs_b[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* c_2block_k;
+    rocke_value_t* k_lo;
+    rocke_value_t* k_hi;
 
-    /* bufs = [(A_smem, B_smem), (A_smem2, B_smem2)] */
-    rocke_value_t* buf_a[2];
-    rocke_value_t* buf_b[2];
-    buf_a[0] = ctx->A_smem;
-    buf_b[0] = ctx->B_smem;
-    buf_a[1] = ctx->A_smem2;
-    buf_b[1] = ctx->B_smem2;
+    k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    k_hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+    c_2block_k = rocke_b_const_i32(b, 2 * block_k);
 
-    for(i = 0; i < num_accs; ++i)
-        current_accs[i] = ctx->acc_inits[i];
-
-    /* Prologue: stage tile 0 into buffer 0 and publish it.
-     *   emit_load_phase(b.const_i32(0), bufs[0][0], bufs[0][1]) */
-    rocke_conv_emit_load_phase(ctx, rocke_b_const_i32(b, 0), buf_a[0], buf_b[0]);
+    /* Prologue: stage tile 0 into buf0 and publish it. */
+    rocke_conv_emit_load_phase(ctx, k_lo, ctx->A_smem, ctx->B_smem);
     rocke_b_sync(b);
 
-    for(it = 0; it < K_iters; ++it)
-    {
-        int cur = it % 2;
-        if(it + 1 < K_iters)
-        {
-            int nxt = (it + 1) % 2;
-            /* emit_load_phase(b.const_i32((it + 1) * block_k), nxt[0], nxt[1]) */
-            rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)(it + 1) * block_k), buf_a[nxt], buf_b[nxt]);
-        }
-        /* The prefetch above clobbered k_off_capture with tile it+1's offset.
-         * Restore tile it's offset so an a_operand_override (if any) addresses
-         * the tile actually consumed by this MFMA.
-         *   k_off_capture[0] = b.const_i32(it * block_k) */
-        ctx->k_off_capture = rocke_b_const_i32(b, (int64_t)it * block_k);
-        /* current_accs = emit_mfma_phase(cur[0], cur[1], current_accs) */
-        rocke_conv_emit_mfma_phase(ctx, buf_a[cur], buf_b[cur], current_accs, num_accs, new_accs);
-        for(i = 0; i < num_accs; ++i)
-            current_accs[i] = new_accs[i];
-        rocke_b_sync(b);
-    }
-
-    /* final_accs = current_accs */
-    rocke_conv_set_final_accs(ctx, current_accs, num_accs);
-}
-
-/* ===================================================================== *
- * rocke_conv_emit_kloop_basic
- *
- * CK pipeline_basic: single-buffer, global-read/compute overlap.
- * Mirrors the Python ``elif spec.pipeline == "basic":`` branch.
- *
- * Per-iteration order (byte-identical to Python):
- *   emit_global_read(it+1)   buffer_load_vN (VMEM, in flight)
- *   sync()                   s_waitcnt(lgkmcnt=0) + s_barrier
- *                            (drains prior ds_write; tile it RAW-safe)
- *   k_off_capture = it       descriptor uses tile it's offset for mfma
- *   emit_mfma_phase          ds_read(A_smem,B_smem) + mfma
- *   sync()                   s_waitcnt(lgkmcnt=0) + s_barrier
- *                            (drains ds_reads; A_smem WAR-safe)
- *   emit_lds_write(staged)   smem_store_vN (safe to write now)
- * ===================================================================== */
-void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
-{
-    rocke_ir_builder_t* b = ctx->b;
-    const rocke_conv_problem_t* p = ctx->p;
-    int block_k = ctx->block_k;
-    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
-    int num_accs = ctx->num_accs;
-    int it, i;
-
-    rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
-
-    /* pending_staged_{a,b}: staging buffers for the next tile's VGPRs.
-     * has_pending mirrors Python `pending_staged is not None`. */
-    rocke_ctl_staged_t pending_a;
-    rocke_ctl_staged_t pending_b;
-    rocke_value_t* pending_k_off;
-    int has_pending;
-
-    /* staged_{a,b}_0: prologue staging buffers (tile 0). */
-    rocke_ctl_staged_t staged_a0;
-    rocke_ctl_staged_t staged_b0;
-    rocke_value_t* k0_val;
-
     for(i = 0; i < num_accs; ++i)
-        current_accs[i] = ctx->acc_inits[i];
-
-    /* Prologue: global read for tile 0 then write to LDS immediately.
-     *   staged0 = emit_global_read(b.const_i32(0))
-     *   emit_lds_write(staged0, A_smem, B_smem) */
-    k0_val = rocke_b_const_i32(b, 0);
-    rocke_conv_emit_global_read(ctx, k0_val, &staged_a0, &staged_b0);
-    rocke_conv_emit_lds_write(ctx, k0_val, &staged_a0, &staged_b0, ctx->A_smem, ctx->B_smem);
-
-    has_pending = 0;
-    pending_k_off = NULL;
-
-    for(it = 0; it < K_iters; ++it)
     {
-        /* Issue buffer_load for tile it+1 BEFORE the sync. */
-        if(it + 1 < K_iters)
-        {
-            pending_k_off = rocke_b_const_i32(b, (int64_t)(it + 1) * block_k);
-            rocke_conv_emit_global_read(ctx, pending_k_off, &pending_a, &pending_b);
-            has_pending = 1;
-        }
-        /* Drain prior ds_write then barrier. */
-        rocke_b_sync(b);
-        /* Set k offset for mfma descriptors. */
-        ctx->k_off_capture = rocke_b_const_i32(b, (int64_t)it * block_k);
-        /* ds_read + mfma for the current tile. */
-        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, current_accs, num_accs, new_accs);
-        for(i = 0; i < num_accs; ++i)
-            current_accs[i] = new_accs[i];
-        /* Drain ds_reads before the next smem_store_vN. */
-        rocke_b_sync(b);
-        /* Commit the next tile's staged VGPRs to LDS. */
-        if(has_pending)
-        {
-            rocke_conv_emit_lds_write(
-                ctx, pending_k_off, &pending_a, &pending_b, ctx->A_smem, ctx->B_smem);
-            has_pending = 0;
-        }
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
     }
 
-    rocke_conv_set_final_accs(ctx, current_accs, num_accs);
+    /* AOT: the trip count is runtime, so bufs[it % 2] cannot be evaluated --
+     * an LDS allocation is a build-time value. The body is unrolled twice and
+     * steps by 2*block_k instead, which binds each phase to a build-time
+     * buffer while still alternating them. An odd tile count needs no guard:
+     * the trailing phase addresses k >= K, whose coords fall outside the
+     * descriptor's padded bounds, so the buffer resource returns zero. */
+    for_op = rocke_b_scf_for_iter(b,
+                                  k_lo,
+                                  k_hi,
+                                  c_2block_k,
+                                  iter_args,
+                                  num_accs,
+                                  "k_unroll",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/true);
+    for(i = 0; i < for_op.num_iter_vars; ++i)
+        iter_vars[i] = for_op.iter_vars[i];
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* k_odd = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_value_t* k_nxt_pair = rocke_b_add(b, for_op.iv, c_2block_k);
+        rocke_value_t* k_odd_load = rocke_conv_kloop_guard_prefetch(ctx, k_odd, k_hi);
+
+        /* Phase A: prefetch tile k+1 into buf1, MFMA tile k out of buf0. */
+        rocke_conv_emit_load_phase(ctx, k_odd_load, ctx->A_smem2, ctx->B_smem2);
+        ctx->k_off_capture = for_op.iv;
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, iter_vars, for_op.num_iter_vars, accs_a);
+        /* Publishes buf1 and drains buf0's ds_reads. */
+        rocke_b_sync(b);
+
+        /* Phase B: the buffers swap roles. */
+        rocke_conv_emit_load_phase(ctx, k_nxt_pair, ctx->A_smem, ctx->B_smem);
+        ctx->k_off_capture = k_odd;
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem2, ctx->B_smem2, accs_a, for_op.num_iter_vars, accs_b);
+        rocke_b_sync(b);
+
+        rocke_b_scf_yield(b, accs_b, for_op.num_iter_vars);
+    }
+    rocke_b_region_leave(b);
+
+    rocke_conv_set_final_accs(ctx, for_op.op->results, for_op.op->num_results);
 }
 
 /* ===================================================================== *
@@ -204,8 +165,12 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
         iter_args[i].init = ctx->acc_inits[i];
     }
 
+    /* Start at the slice base, not at a bare zero: wgrad hands the drivers a
+     * runtime k_lo and only the forward conv leaves it NULL. Reading ctx->c0
+     * here worked while wgrad aliased the two, and silently restarted every
+     * split-K slice from 0 once they came apart. */
     for_op = rocke_b_scf_for_iter(b,
-                                  ctx->c0,
+                                  (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0,
                                   ctx->c_K_gemm,
                                   ctx->c_block_k,
                                   iter_args,
@@ -238,152 +203,321 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
 }
 
 /* ===================================================================== *
- * rocke_conv_emit_kloop_async   (Python lines 1320-1347)
+ * rocke_conv_emit_kloop_async
  *
- * async_dma path: SoftwarePipeline.run_ping_pong over the AsyncTileLoader path.
- * SoftwarePipeline is a peer port; until it lands, this driver reproduces the
- * run_ping_pong sequencing inline (helpers/pipeline.py, run_ping_pong) for the
- * exact policy the conv builder constructs:
+ * async_dma path: SoftwarePipeline.run_ping_pong_dynamic over the
+ * AsyncTileLoader path, through the helper port
+ * (helper_rocke.helpers.pipeline.h) with the policy the conv builders
+ * construct:
  *
- *   SoftwarePipeline(num_iters=K_iters, double_buffer=double_buffer,
- *                    wait_vmcnt=True, sync_after_wait=True,
+ *   SoftwarePipeline(wait_vmcnt=True, sync_after_wait=True,
  *                    sync_before_issue=True, overlap_vmcnt=True)
- *   issue_load(it, buf)      = emit_load_phase(const_i32(it*block_k), buf[0], buf[1])
- *   compute(it, buf, state)  = emit_mfma_phase(buf[0], buf[1], state)
+ *   issue_load(k, buf)      = emit_load_phase(k, buf[0], buf[1])
+ *   compute(k, buf, state)  = emit_mfma_phase(buf[0], buf[1], state)
  *   buffers = [(A_smem,B_smem),(A_smem2,B_smem2)]
  *   schedule = ctx->schedule
- *
- * Constructed flags: wait_vmcnt=True, sync_after_wait=True,
- * sync_before_issue=True, overlap_vmcnt=True; num_buffers unset (0) =>
- * nb derived from double_buffer. The two buffer pairs supplied bound nb<=2.
+ *   k_zero_fill = ctx->kloop_k_zero_fill (wgrad: wg_K under split-K)
  * ===================================================================== */
+static void kloop_async_issue_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* k_offset,
+                                   const rocke_buffer_pair_t* buf,
+                                   void* user)
+{
+    (void)b;
+    rocke_conv_emit_load_phase((rocke_conv_build_ctx_t*)user, k_offset, buf->a, buf->b);
+}
+
+static void kloop_async_compute(rocke_ir_builder_t* b,
+                                rocke_value_t* k_offset,
+                                const rocke_buffer_pair_t* buf,
+                                rocke_value_t* const* state_in,
+                                int num_state,
+                                rocke_value_t** state_out,
+                                void* user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)user;
+    (void)b;
+    ctx->k_off_capture = k_offset;
+    rocke_conv_emit_mfma_phase(ctx, buf->a, buf->b, state_in, num_state, state_out);
+}
+
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const rocke_conv_problem_t* p = ctx->p;
-    int block_k = ctx->block_k;
-    int num_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
-    int it, i, pp;
+    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* results[ROCKE_CONV_MAX_ACCS];
+    rocke_software_pipeline_t pipe;
+    rocke_buffer_pair_t buffers[2];
 
-    /* Pipeline flags (the conv builder's SoftwarePipeline(...) ctor). */
-    const bool wait_vmcnt = true;
-    const bool sync_after_wait = true;
-    const bool sync_before_issue = true;
-    const bool overlap_vmcnt = true;
-    const int num_buffers = 0; /* 0 => derive from double_buffer */
-    const bool double_buffer = ctx->double_buffer;
-
-    /* buffers = [(A_smem,B_smem),(A_smem2,B_smem2)] */
-    rocke_value_t* buf_a[2];
-    rocke_value_t* buf_b[2];
-    int n_bufs = 2;
-
-    /* state = initial_state = [v for _, v in accs] */
-    rocke_value_t* state[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* new_state[ROCKE_CONV_MAX_ACCS];
-
-    int nb; /* derived buffer count                     */
-    bool rotating; /* nb > 1                                    */
-    int prefetch_depth;
-
-    buf_a[0] = ctx->A_smem;
-    buf_b[0] = ctx->B_smem;
-    buf_a[1] = ctx->A_smem2;
-    buf_b[1] = ctx->B_smem2;
-
-    for(i = 0; i < num_accs; ++i)
-        state[i] = ctx->acc_inits[i];
-
-    /* if self.num_iters <= 0: return initial_state */
-    if(num_iters <= 0)
+    for(int i = 0; i < num_accs; ++i)
     {
-        rocke_conv_set_final_accs(ctx, state, num_accs);
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    pipe.wait_vmcnt = true;
+    /* The accumulators only ever see a zero tile past the extent. */
+    pipe.mask_tail_state = false;
+    pipe.sync_after_wait = true;
+    pipe.sync_before_issue = true;
+    pipe.overlap_vmcnt = true;
+    buffers[0].a = ctx->A_smem;
+    buffers[0].b = ctx->B_smem;
+    buffers[1].a = ctx->A_smem2;
+    buffers[1].b = ctx->B_smem2;
+
+    if(!rocke_software_pipeline_run_ping_pong_dynamic(
+           &pipe,
+           b,
+           (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm,
+           ctx->block_k,
+           (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0,
+           ctx->kloop_k_zero_fill,
+           buffers,
+           iter_args,
+           num_accs,
+           kloop_async_issue_load,
+           kloop_async_compute,
+           ctx,
+           &ctx->schedule,
+           results))
+    {
         return;
     }
-    /* `buffers` is always non-empty here (two pairs supplied). */
+    rocke_conv_set_final_accs(ctx, results, num_accs);
+}
 
-    /* Derive buffer count: prefer explicit num_buffers, fall back to the legacy
-     * double_buffer boolean. */
-    if(num_buffers > 0)
-        nb = num_buffers;
-    else if(double_buffer)
-        nb = 2;
-    else
-        nb = 1;
+/* ===================================================================== *
+ * rocke_conv_emit_kloop_wavelet   (Python lines 1539-1797)
+ *
+ * Dedicated load-wave / math-wave split pipeline (CK Tile #8009).
+ *
+ * The workgroup is split into two roles identified by warp_id:
+ *   math waves  [0,         n_math_warps)  -- LDS reads + WMMA/MFMA + epilogue
+ *   load waves  [n_math_warps, total_warps) -- DRAM→register fetch + LDS write
+ *
+ * Two sub-paths:
+ *
+ *   WMMA path (ctx->is_wmma == true, e.g. gfx1250):
+ *     Uses scf_if_else (br i1) with a shared join block.  Both branches emit
+ *     s_barrier calls; the shared join prevents simplifycfg from removing them.
+ *
+ *   MFMA path (ctx->is_wmma == false, e.g. gfx942):
+ *     Uses exec-mask instructions (exec_and_saveexec / exec_xor /
+ *     exec_or_saveexec / exec_or) to flat-sequentially encode the split.
+ *     LLVM divergent branches would deadlock the barriers; exec-mask avoids
+ *     that by keeping all threads in one basic block while suppressing VGPR
+ *     writes for the inactive side.
+ *
+ * Barrier protocol (must be bit-identical in both branches):
+ *
+ *   MATH branch:
+ *     barrier_0
+ *     for i in 0..K_iters-2:
+ *       MFMA(LDS)
+ *       barrier_A   <- math done reading LDS
+ *       barrier_B   <- wait for load to write next tile
+ *     MFMA(LDS)     <- tail, no barriers
+ *     [epilogue -- emits epi_barriers barriers]
+ *
+ *   LOAD branch:
+ *     fetch tile 0 -> regs
+ *     store regs -> LDS
+ *     barrier_0
+ *     for i in 0..K_iters-2:
+ *       fetch tile i+1 -> regs    <- overlaps math MFMA
+ *       barrier_A                 <- wait for math to release LDS
+ *       store regs -> LDS
+ *       barrier_B                 <- signal LDS ready
+ *     [epilogue stub -- epi_barriers bare barriers, no stores]
+ * ===================================================================== */
 
-    /* if nb > len(buffers): raise. len(buffers) == 2 here. */
-    /* (Reproduced as a clamp guard; the conv builder always supplies 2 pairs.) */
-    if(nb > n_bufs)
-        nb = n_bufs;
+/* wavelet_fetch: issue buffer_load_vN for A and B into VGPR staging using
+ * load_tid (load-wave-relative thread index). Sets k_off_capture.
+ * Mirrors Python wavelet_fetch = a_wavelet_loader.fetch(b, k_off, load_tid). */
+static void wavelet_fetch(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* k_off,
+                          rocke_ctl_staged_t* a_staged,
+                          rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->a_wavelet_loader,
+                                            ctx->wavelet_load_tid,
+                                            rocke_conv_a_descriptor,
+                                            ctx,
+                                            ctx->a_rsrc,
+                                            NULL,
+                                            a_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->b_wavelet_loader,
+                                            ctx->wavelet_load_tid,
+                                            rocke_conv_b_descriptor,
+                                            ctx,
+                                            ctx->b_rsrc,
+                                            NULL,
+                                            b_staged);
+}
 
-    rotating = nb > 1;
-    prefetch_depth = nb - 1;
+/* wavelet_store: write staged VGPRs to LDS.
+ * Mirrors Python wavelet_store = a_wavelet_loader.store_fetched(b, a_regs, A_smem). */
+static void wavelet_store(rocke_conv_build_ctx_t* ctx,
+                          const rocke_ctl_staged_t* a_staged,
+                          const rocke_ctl_staged_t* b_staged,
+                          rocke_value_t* A_smem,
+                          rocke_value_t* B_smem)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_wavelet_loader, A_smem, a_staged);
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_wavelet_loader, B_smem, b_staged);
+}
 
-    /* Prologue: issue the first prefetch_depth loads.
-     *   for p in range(min(prefetch_depth, num_iters)):
-     *       issue_load(p, buffers[p % nb]) */
+void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int num_accs = ctx->num_accs;
+    const int epi_barriers = ctx->wavelet_epi_barriers;
+    int i;
+
+    /* The wavelet driver emits the epilogue inline (inside the math branch).
+     * Signal the build driver to skip its epilogue call. */
+    ctx->epilogue_already_emitted = true;
+
+    rocke_value_t* A_smem = ctx->A_smem;
+    rocke_value_t* B_smem = ctx->B_smem;
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* k_hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+    rocke_value_t* c_block_k;
+    rocke_value_t* c_nmath;
+    rocke_value_t* warp_id_s;
+
+    rocke_ctl_staged_t a_staged;
+    rocke_ctl_staged_t b_staged;
+
+    /* Python emits this prologue at the top of emit_wavelet_kloop_dynamic, so
+     * it lands after the D descriptor. c_block_k is a fresh constant there,
+     * not the one the build prologue already made. */
+    c_block_k = rocke_b_const_i32(b, ctx->block_k);
+    c_nmath = rocke_b_const_i32(b, ctx->wavelet_n_math_warps);
+    /* warp_id is tid/wave_size -- a VGPR. Materialise it as a scalar via
+     * readfirstlane so the branch lowers to s_cmp + s_cbranch (uniform) rather
+     * than v_cmpx (exec-masked), which would make barrier placement inside the
+     * branch accidentally legal. */
+    warp_id_s = rocke_b_readfirstlane(b, ctx->warp_id);
+    ctx->wavelet_is_math = rocke_b_cmp_lt(b, warp_id_s, c_nmath);
+    ctx->wavelet_load_tid
+        = rocke_b_sub(b, ctx->tid, rocke_b_const_i32(b, ctx->wavelet_math_block_size));
+
+    if(ctx->is_wmma)
     {
-        int prologue_n = prefetch_depth < num_iters ? prefetch_depth : num_iters;
-        for(pp = 0; pp < prologue_n; ++pp)
-        {
-            int slot = pp % nb;
-            rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)pp * block_k), buf_a[slot], buf_b[slot]);
-        }
-    }
+        /* ----------------------------------------------------------------
+         * WMMA path: scf_if_else (gfx1250).
+         *
+         * gfx1250 has separate VMEM and WMMA issue slots, so load and math
+         * waves truly overlap without exec-mask interleaving. The LLVM br i1
+         * divergent branch is fine here — the hardware concurrency comes
+         * from the distinct issue queues, not from hardware scheduling at
+         * s_barrier.
+         * ---------------------------------------------------------------- */
+        rocke_if_else_t ife = rocke_b_scf_if_else(b, ctx->wavelet_is_math);
 
-    for(it = 0; it < num_iters; ++it)
-    {
-        int cur = rotating ? (it % nb) : 0;
-        int issue_idx = it + prefetch_depth;
-        bool has_next = rotating && (issue_idx < num_iters);
+        /* ---- MATH WAVE branch ---- */
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
 
-        if(has_next)
+        rocke_b_region_enter(b, ife.then_region);
         {
-            int nxt = issue_idx % nb;
-            if(it > 0 && sync_before_issue)
+            /* AOT: the reduction extent is a kernarg, so the compile-time
+             * peel of the final tile is gone. Every iteration now emits the
+             * full barrier pair, and the load branch below runs the same trip
+             * count -- guarding the barriers instead would make the two wave
+             * groups emit different counts and hang the workgroup. */
+            rocke_iter_arg_t m_args[ROCKE_CONV_MAX_ACCS];
+            rocke_for_t for_m;
+            rocke_value_t* m_vars[ROCKE_CONV_MAX_ACCS];
+
+            rocke_b_sync(b); /* barrier_0 */
+
+            for(i = 0; i < num_accs; ++i)
             {
-                if(overlap_vmcnt)
-                    rocke_b_sync_lds_only(b);
-                else
-                    rocke_b_sync(b);
+                m_args[i].name = ctx->acc_names[i];
+                m_args[i].init = ctx->acc_inits[i];
             }
-            /* issue_load(issue_idx, nxt) */
-            rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)issue_idx * block_k), buf_a[nxt], buf_b[nxt]);
-        }
+            for_m = rocke_b_scf_for_iter(b,
+                                         k_lo,
+                                         k_hi,
+                                         c_block_k,
+                                         m_args,
+                                         num_accs,
+                                         "k_math",
+                                         /*unroll=*/false,
+                                         /*elide_trailing_barrier=*/true);
+            for(i = 0; i < for_m.num_iter_vars; ++i)
+                m_vars[i] = for_m.iter_vars[i];
 
-        if(wait_vmcnt)
-        {
-            if(overlap_vmcnt && has_next)
-                rocke_b_s_waitcnt(b, /*vmcnt=*/prefetch_depth, /*lgkmcnt=*/-1, /*expcnt=*/-1);
-            else
-                rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/-1, /*expcnt=*/-1);
-        }
+            rocke_b_region_enter(b, for_m.body);
+            {
+                ctx->k_off_capture = for_m.iv;
+                rocke_conv_emit_mfma_phase(
+                    ctx, A_smem, B_smem, m_vars, for_m.num_iter_vars, new_accs);
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_sync(b); /* barrier_B */
+                rocke_b_scf_yield(b, new_accs, for_m.num_iter_vars);
+            }
+            rocke_b_region_leave(b);
 
-        if(sync_after_wait)
+            rocke_conv_set_final_accs(ctx, for_m.op->results, for_m.op->num_results);
+            rocke_conv_emit_epilogue(ctx);
+        }
+        rocke_b_region_leave(b);
+
+        /* ---- LOAD WAVE branch ---- */
+        rocke_b_region_enter(b, ife.else_region);
         {
-            if(overlap_vmcnt && has_next)
-                rocke_b_sync_lds_only(b);
-            else
+            /* fetch tile k_lo -> regs, store -> LDS, barrier_0 */
+            rocke_for_t for_l;
+
+            wavelet_fetch(ctx, k_lo, &a_staged, &b_staged);
+            rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+            wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+            rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+            rocke_b_sync(b); /* barrier_0 */
+
+            /* Same trip count as the math branch -- that is what keeps the two
+             * wave groups' barrier counts equal. The trailing iteration
+             * prefetches a tile past the extent; its coords fall outside the
+             * descriptor bounds, so the buffer resource returns zero. */
+            for_l = rocke_b_scf_for(b, k_lo, k_hi, c_block_k, "k_load");
+            rocke_b_region_enter(b, for_l.body);
+            {
+                wavelet_fetch(ctx, rocke_b_add(b, for_l.iv, c_block_k), &a_staged, &b_staged);
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+                wavelet_store(ctx, &a_staged, &b_staged, A_smem, B_smem);
+                rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+                rocke_b_sync(b); /* barrier_B */
+            }
+            rocke_b_region_leave(b);
+
+            /* epilogue stub: N_epi bare barriers matching the math branch */
+            for(i = 0; i < epi_barriers; ++i)
                 rocke_b_sync(b);
         }
-
-        /* schedule is not None for the conv path. */
-        rocke_schedule_policy_emit_compute_prologue(&ctx->schedule, b);
-
-        /* state = compute(it, cur, state) = emit_mfma_phase(cur[0], cur[1], state) */
-        rocke_conv_emit_mfma_phase(ctx, buf_a[cur], buf_b[cur], state, num_accs, new_state);
-        for(i = 0; i < num_accs; ++i)
-            state[i] = new_state[i];
-
-        rocke_schedule_policy_emit_compute_epilogue(&ctx->schedule, b);
-
-        if(!rotating)
-            rocke_b_sync(b);
+        rocke_b_region_leave(b);
     }
-
-    /* return state */
-    rocke_conv_set_final_accs(ctx, state, num_accs);
+    else
+    {
+        /* The exec-mask MFMA wavelet path has a data race: the math section reads
+         * a single-buffer LDS that the load section overwrites every K iteration.
+         * True concurrent execution (different SIMD units) is required, but this
+         * driver emits flat sequential code with no cross-section barriers, so
+         * math reads garbage after iteration 0.
+         * is_valid_spec blocks wavelet on MFMA targets, so this branch is
+         * unreachable in normal use. Emit an error and bail. */
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "pipeline='wavelet' is not supported for MFMA/CDNA targets: "
+                        "the exec-mask split path has a data race (single LDS buffer "
+                        "overwritten each K iteration with no cross-section barriers).");
+    }
 }

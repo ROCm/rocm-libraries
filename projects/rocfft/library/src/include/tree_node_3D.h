@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -230,7 +230,7 @@ protected:
     }
 
 public:
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -258,7 +258,7 @@ protected:
     }
 
 public:
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -288,7 +288,7 @@ protected:
 
 public:
     bool CreateDevKernelArgs() override;
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }

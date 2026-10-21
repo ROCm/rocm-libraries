@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1228,6 +1228,24 @@ namespace rocalution
                                   bool                     FF1,
                                   LocalMatrix<ValueType>*  prolong) const;
 
+        /** \brief Ruge Stueben Ext+i Interpolation, in matrix-matrix formulation */
+        ROCALUTION_EXPORT
+        void RSMMExtPIInterpolation(const LocalVector<int>&  CFmap,
+                                    const LocalVector<bool>& S,
+                                    LocalMatrix<ValueType>*  prolong) const;
+
+        /** \brief Ruge Stueben Ext+e Interpolation, in matrix-matrix formulation */
+        ROCALUTION_EXPORT
+        void RSMMExtPEInterpolation(const LocalVector<int>&  CFmap,
+                                    const LocalVector<bool>& S,
+                                    LocalMatrix<ValueType>*  prolong) const;
+
+        /** \brief Truncate an interpolation operator, keeping at most \p max_elmts entries
+        * per row and dropping those below \p trunc_factor times the largest magnitude of
+        * their row. Surviving entries are rescaled to preserve the row sum. */
+        ROCALUTION_EXPORT
+        void RSInterpolationTruncation(float trunc_factor, int max_elmts);
+
         /** \brief Ruge Stueben Prolongation matrix non-zeros */
         void RSExtPIProlongNnz(int64_t                       global_column_begin,
                                int64_t                       global_column_end,
@@ -1332,6 +1350,11 @@ namespace rocalution
         virtual bool is_accel_(void) const;
 
     private:
+        void RSMMExtInterpolation_(const LocalVector<int>&  CFmap,
+                                   const LocalVector<bool>& S,
+                                   bool                     ext_pe,
+                                   LocalMatrix<ValueType>*  prolong) const;
+
         // Pointer from the base matrix class to the current
         // allocated matrix (host_ or accel_)
         BaseMatrix<ValueType>* matrix_;

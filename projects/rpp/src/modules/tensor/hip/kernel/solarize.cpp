@@ -228,7 +228,7 @@ RppStatus hip_exec_solarize_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                    rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     Rpp32s globalThreads_x = (dstDescPtr->w + 7) >> 3;
     Rpp32s globalThreads_y = dstDescPtr->h;

@@ -324,7 +324,7 @@ RppStatus hip_exec_warp_affine_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstP
                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                       rpp::Handle& handle) {
     if (roiType == RpptRoiType::XYWH)
-        roiTensorPtrSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

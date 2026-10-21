@@ -1250,7 +1250,7 @@ RppStatus hip_exec_tensor_sum(T* srcPtr, RpptDescPtr srcDescPtr, U* tensorSumArr
                               RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                               rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;
@@ -1328,7 +1328,7 @@ RppStatus hip_exec_tensor_sum(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp64u* ten
                               RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                               rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;
@@ -1402,7 +1402,7 @@ RppStatus hip_exec_tensor_sum(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp64s* ten
                               RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                               rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;

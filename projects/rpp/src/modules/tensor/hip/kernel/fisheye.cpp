@@ -252,7 +252,7 @@ RppStatus hip_exec_fisheye_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                   RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                                   RpptRoiType roiType, rpp::Handle& handle) {
     if (roiType == RpptRoiType::XYWH)
-        roiTensorPtrSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     Rpp32s globalThreads_x = (dstDescPtr->w + 7) >> 3;
     Rpp32s globalThreads_y = dstDescPtr->h;

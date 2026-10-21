@@ -49,6 +49,7 @@ from typing import List, Tuple, Sequence
 from threading import Lock
 
 from geko.utils import run_silent_command, parse_devices
+from geko.bench.utils import ensure_scale_columns
 from geko.concurrency import parallel_for
 from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
@@ -58,12 +59,12 @@ from geko.library import _bank
 logger = logging.getLogger("GEKO")
 
 try:
-    DEFAULT_YAML_LOADER = yaml.CSafeLoader
+    SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
     logger.warning("yaml.CSafeLoader not found, using yaml.SafeLoader")
     logger.warning("Please update the yaml package to the latest version")
     logger.warning("You can do this by running: pip install --upgrade pyyaml")
-    DEFAULT_YAML_LOADER = yaml.SafeLoader
+    SafeLoader = yaml.SafeLoader
 
 
 __all__ = [
@@ -91,7 +92,7 @@ def load_library(path: str | Path) -> Library:
     """
     logger.debug(f"Loading library file: {path}")
     with open(path) as f:
-        data = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        data = yaml.load(f, Loader=SafeLoader)
     return Library(data, Path(path).name)
 
 
@@ -118,9 +119,10 @@ def load_collection(lib_dir: str | Path) -> LibraryCollection:
 
 
 def _library_supports_epilogues(lib: Library) -> bool:
-    """Return False for f64 (DGEMM) libraries; Tensile epilogues are not supported."""
+    """Return False for f64 and complex libraries; epilogues are not supported."""
+    _NO_EPILOGUE_TYPES = ("f64_r", "f32_c", "f64_c")
     data_type = lib.problem.get("DataType")
-    return INDEX_TYPE_MAP.get(data_type) != "f64_r"
+    return INDEX_TYPE_MAP.get(data_type) not in _NO_EPILOGUE_TYPES
 
 
 def merge_solutions(
@@ -240,7 +242,7 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     df = df.sort_values(["m", "n", "batch_count", "k"])
 
     with open(match_table_path) as f:
-        match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        match_table = yaml.load(f, Loader=SafeLoader)
 
     lib_paths = set()
     for idx in df["solutionIdx"]:
@@ -318,7 +320,7 @@ def merge(
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
     logger.info(f"Calling TensileMergeLibrary on '{inc_dir}'")
-    cmd = [str(hipblaslt_path / "tensilelite/Tensile/bin/TensileMergeLibrary")]
+    cmd = [str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileMergeLibrary")]
     if not eff:
         cmd += ["--no_eff"]
     cmd += ["--force_merge", str(force), orig_dir, inc_dir, output_dir]
@@ -347,12 +349,12 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     if len(lib_paths) == 0:
         raise ValueError(f"No valid libraries found in '{library_dir}'")
 
-    arch = load_library(lib_paths[0]).arch
+    arch = load_library(lib_paths[0]).schedule
 
     logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
     run_silent_command(
         [
-            str(hipblaslt_path / "tensilelite/Tensile/bin/TensileCreateLibrary"),
+            str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileCreateLibrary"),
             "--code-object-version",
             version,
             "--library-format",
@@ -389,13 +391,13 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         sys.path.append(str(hipblaslt_path / "tensilelite"))
 
     try:
-        from Tensile import LibraryIO
-        from Tensile.CustomYamlLoader import load_yaml_stream
-        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite import LibraryIO
+        from tensilelite.CustomYamlLoader import load_yaml_stream
+        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
-        raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+        raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     
-    data = load_yaml_stream(library_path, DEFAULT_YAML_LOADER)
+    data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):
         raise ValueError(f"Library file '{library_path}' is not in list format.")
 
@@ -439,7 +441,7 @@ def from_dataframe(
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 
@@ -520,12 +522,12 @@ def from_full_dataframe(
     if "solutionIdx_reference" not in df.columns:
         raise ValueError(f"Each GEMM must contain the solutionIdx_reference column")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 
     with open(match_table_path) as f:
-        match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        match_table = yaml.load(f, Loader=SafeLoader)
 
     lib_dir = Path(lib_dir)
     n_sols = len(df)

@@ -1,0 +1,121 @@
+operation:
+  name: "MoeGroupedMatmulBwd"
+  class_name: "MoeGroupedMatmulBwdOperationDescriptor"
+  fbs_table: "MoeGroupedMatmulBwdAttributes"
+  fbs_generated_header: "moe_grouped_matmul_bwd_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD"
+
+  error_label: "MoE grouped matmul backward"
+  packer_operation_label: "MoE grouped matmul backward"
+  packer_finalize_label: "MoE grouped matmul backward"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT"
+
+  frontend:
+    packer_function: "createMoeGroupedMatmulBwdOperation"
+    unpacker_function: "unpackMoeGroupedMatmulBwdOperation"
+    node_class: "MoeGroupedMatmulBwdNode"
+    attributes_class: "MoeGroupedMatmulBwdAttributes"
+    generate_node: false
+
+    inputs:
+      - name: "doutput"
+        enum_name: "DOUTPUT"
+        required: true
+        getter_name: "get_doutput"
+        setter_name: "set_doutput"
+      - name: "token"
+        enum_name: "TOKEN"
+        required: true
+        getter_name: "get_token"
+        setter_name: "set_token"
+      - name: "first_token_offset"
+        enum_name: "FIRST_TOKEN_OFFSET"
+        required: true
+        getter_name: "get_first_token_offset"
+        setter_name: "set_first_token_offset"
+    outputs:
+      - name: "dweight"
+        enum_name: "DWEIGHT"
+        required: true
+        getter_name: "get_dweight"
+        setter_name: "set_dweight"
+    graph_method_name: "moe_grouped_matmul_bwd"
+    graph_method_params:
+      - name: "dOutput"
+        tensor_name: "doutput"
+      - name: "token"
+        tensor_name: "token"
+      - name: "firstTokenOffset"
+        tensor_name: "first_token_offset"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "dweight"
+    node_type_enum: "NodeType::MOE_GROUPED_MATMUL_BWD"
+    node_attributes_union_type: "MoeGroupedMatmulBwdAttributes"
+
+  # NOTE: node is hand-maintained at
+  # frontend/include/hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp; do not run
+  # `--mode frontend` for this op.
+  infer_properties:
+    strategy: "stub"
+    dimension_formula: "dweight = [first_token_offset.dim[0], token.dim[2], doutput.dim[2]] (inferred when unset, validated when caller-supplied)"
+
+  validation:
+    required_input_tensors:
+      - "doutput"
+      - "token"
+      - "first_token_offset"
+      - "dweight"
+    required_input_dims:
+      - "doutput"
+      - "token"
+      - "first_token_offset"
+    custom_checks:
+      - "Validate doutput dim[1] (token count) matches token dim[1]"
+      - "Validate first_token_offset has rank 3 with shape [experts, 1, 1] and a positive expert count"
+      - "Infer dweight as [first_token_offset.dim[0], token.dim[2], doutput.dim[2]] when its dims are unset, otherwise validate the caller-supplied dims match (infer_properties_node, mirroring the forward op)"
+
+  tensor_fields:
+    - name: "doutput"
+      fbs_field: "doutput_tensor_uid"
+      attr_suffix: "DOUTPUT_DESC"
+      required: true
+    - name: "token"
+      fbs_field: "token_tensor_uid"
+      attr_suffix: "TOKEN_DESC"
+      required: true
+    - name: "first_token_offset"
+      fbs_field: "first_token_offset_tensor_uid"
+      attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
+      required: true
+      expected_data_type: "INT32"
+    - name: "dweight"
+      fbs_field: "dweight_tensor_uid"
+      attr_suffix: "DWEIGHT_DESC"
+      required: true
+
+  data_fields: []
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC"
+
+  test_data:
+    tensor_const_prefix: "K_MOE_GROUPED_MATMUL_BWD_"
+    tensor_uids:
+      doutput: 1910
+      token: 1911
+      first_token_offset: 1912
+      dweight: 1913
+    tensor_configs:
+      doutput: { dims: [1, 8, 32], strides: [256, 32, 1] }
+      token: { dims: [1, 8, 16], strides: [128, 16, 1] }
+      first_token_offset: { dims: [2, 1, 1], strides: [1, 1, 1], data_type: INT32 }
+      # Column-major [K*N, 1, K], matching the layout inferred for dweight.
+      dweight: { dims: [2, 16, 32], strides: [512, 1, 16] }
+    field_values: {}

@@ -29,8 +29,9 @@ SOFTWARE.
 
 // Both conversion helpers below read the caller's ROI tensor and write the converted result into
 // a scratch buffer owned by the handle (mem.mgpu.roiConversionScratchHip), instead of mutating the
-// caller's buffer in place. The returned RpptROIPtr (pointing at the scratch buffer) is what the
-// rest of the calling function should use for its kernel launches.
+// caller's buffer in place. On success, roiTensorPtrSrc (taken by reference) is redirected to point
+// at the scratch buffer, so the rest of the calling function transparently uses the converted ROI
+// for its kernel launches without ever writing through the caller's original ROI pointer.
 
 // LTRB to XYWH
 
@@ -44,8 +45,8 @@ SOFTWARE.
     *(int4*)&roiTensorPtrDst[id_x] = roi_i4;
 }
 
-[[maybe_unused]] static RpptROIPtr hip_exec_roi_conversion_ltrb_to_xywh(RpptROIPtr roiTensorPtrSrc,
-                                                                        rpp::Handle& handle) {
+[[maybe_unused]] static RppStatus hip_exec_roi_conversion_ltrb_to_xywh(RpptROIPtr& roiTensorPtrSrc,
+                                                                       rpp::Handle& handle) {
     RpptROIPtr roiTensorPtrDst = handle.GetInitHandle()->mem.mgpu.roiConversionScratchHip;
 
     int localThreads_x = 256;
@@ -61,13 +62,10 @@ SOFTWARE.
                             ceil((float)globalThreads_z / localThreads_z)),
                        dim3(localThreads_x, localThreads_y, localThreads_z), 0, handle.GetStream(),
                        (int*)roiTensorPtrSrc, (int*)roiTensorPtrDst);
+    HIP_CHECK_LAUNCH_RETURN();
 
-    hipError_t status = hipGetLastError();
-    if (status != hipSuccess)
-        fprintf(stderr, "HIP kernel launch error: returned %d at %s:%d", status, __FILE__,
-                __LINE__);
-
-    return roiTensorPtrDst;
+    roiTensorPtrSrc = roiTensorPtrDst;
+    return RPP_SUCCESS;
 }
 
 // XYWH to LTRB
@@ -82,8 +80,8 @@ SOFTWARE.
     *(int4*)&roiTensorPtrDst[id_x] = roi_i4;
 }
 
-[[maybe_unused]] static RpptROIPtr hip_exec_roi_conversion_xywh_to_ltrb(RpptROIPtr roiTensorPtrSrc,
-                                                                        rpp::Handle& handle) {
+[[maybe_unused]] static RppStatus hip_exec_roi_conversion_xywh_to_ltrb(RpptROIPtr& roiTensorPtrSrc,
+                                                                       rpp::Handle& handle) {
     RpptROIPtr roiTensorPtrDst = handle.GetInitHandle()->mem.mgpu.roiConversionScratchHip;
 
     int localThreads_x = 256;
@@ -99,13 +97,10 @@ SOFTWARE.
                             ceil((float)globalThreads_z / localThreads_z)),
                        dim3(localThreads_x, localThreads_y, localThreads_z), 0, handle.GetStream(),
                        (int*)roiTensorPtrSrc, (int*)roiTensorPtrDst);
+    HIP_CHECK_LAUNCH_RETURN();
 
-    hipError_t status = hipGetLastError();
-    if (status != hipSuccess)
-        fprintf(stderr, "HIP kernel launch error: returned %d at %s:%d", status, __FILE__,
-                __LINE__);
-
-    return roiTensorPtrDst;
+    roiTensorPtrSrc = roiTensorPtrDst;
+    return RPP_SUCCESS;
 }
 
 #endif  // RPP_HIP_ROI_CONVERSION_H

@@ -10,6 +10,7 @@
      * CMake
      * Ninja
      * ROCm (for HIP runtime)
+     * GoogleTest including GoogleMock, for the separately built example engine plugin's tests
    - A ROCm-compatible GPU is required to run the samples
 
 2. **Build Samples:** From this `samples` directory:
@@ -18,7 +19,21 @@
    cmake -G Ninja ..
    ninja
    ```
-   - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.
+   - In the [developer image](../dockerfiles/README.md), GoogleTest/GoogleMock and spdlog are installed automatically in `/usr/local`, so no manual dependency download, install, additional prefix, or fetch flag is needed for those packages.
+
+Outside the image, use a complete set of installed packages. From the `samples/build` directory, choose one configuration:
+
+```bash
+# Installed packages only, using absolute paths.
+cmake -G Ninja -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+
+# Alternatively, let the nested example plugin fetch missing GoogleTest.
+cmake -G Ninja -DALLOW_FETCH_DEPS=ON \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+```
+
+The combined prefixes must provide the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), HIP/HIPRTC, and GoogleTest including GoogleMock. A custom hipDNN install prefix alone is not necessarily sufficient. You can use `GTest_DIR` for an installed GoogleTest package instead of adding its prefix. The `ON` alternative only fetches GoogleTest, not hipDNN, HIP, or other SDK dependencies. This separate samples configure does not inherit the fetch setting from a previous hipDNN build; it forwards its own `ALLOW_FETCH_DEPS` to the nested plugin, including an explicit `OFF`.
 
 The sample executables will be created in the `build` directory.
 
@@ -356,7 +371,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
 - For query `Q`, key `K`, and value `V` tensors of shape `(B, H, S, D)`, the attention output is computed as:
 
     ```python
-    O = softmax(Q @ K^T / sqrt(D)) @ V
+    O = softmax(scale * Q @ K^T) @ V
     ```
 
     where:
@@ -364,6 +379,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
     - `H` = number of attention heads
     - `S` = sequence length
     - `D` = head dimension
+    - `scale` = the attention scale; the sample sets `1/sqrt(D)`. A graph that sets no scale gets 1.0 (no scaling).
 
 - Supports both `BHSD` (row-major) and `BSHD` (sequence-major) memory layouts via strides.
 - Configurations without engine support are gracefully skipped.
@@ -417,3 +433,14 @@ Demonstrates how to use hipDNN's engine configuration knobs system for runtime p
 
 > [!NOTE]
 > This sample is educational and demonstrates the knobs API. It is not a performance benchmark or validation test.
+
+## cuDNN Compatibility Shim Samples
+
+Built only with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. They use cuDNN frontend spellings through the shim; see the [cuDNN shim guide](../docs/cudnn-shim.md).
+
+- [`cudnn_shim/ConvFprop.cpp`](./cudnn_shim/ConvFprop.cpp): builds and validates a convolution forward graph (host only).
+- [`cudnn_shim/Matmul.cpp`](./cudnn_shim/Matmul.cpp): builds and validates a batched matmul graph (host only).
+- [`cudnn_shim/Layernorm.cpp`](./cudnn_shim/Layernorm.cpp): builds and validates a layernorm forward graph (host only).
+- [`cudnn_shim/Pointwise.cpp`](./cudnn_shim/Pointwise.cpp): builds and validates a binary pointwise graph (host only).
+- [`cudnn_shim/SdpaRoundTrip.cpp`](./cudnn_shim/SdpaRoundTrip.cpp): builds and validates an SDPA forward graph (host only; also needs `HIPDNN_ENABLE_SDPA`).
+- [`cudnn_shim/HipifyConvFprop.cpp`](./cudnn_shim/HipifyConvFprop.cpp): a cuDNN frontend convolution forward program after textual hipify, with each rewritten line marked `// cuDNN:`. Runs on a GPU and checks the output.

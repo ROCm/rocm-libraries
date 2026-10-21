@@ -728,7 +728,7 @@ RppStatus hip_exec_resize_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                  RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                  rpp::Handle& handle) {
     if (roiType == RpptRoiType::XYWH)
-        roiTensorPtrSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle));
 
     if (interpolationType == RpptInterpolationType::NEAREST_NEIGHBOR) {
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
@@ -942,7 +942,8 @@ RppStatus hip_exec_resize_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                        RpptDescPtr dstDescPtr, RpptImagePatchPtr dstImgSize,
                                        RpptInterpolationType interpolationType, RpptROIPtr roiSrc,
                                        RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::XYWH) roiSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiSrc, handle);
+    if (roiType == RpptRoiType::XYWH)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_xywh_to_ltrb(roiSrc, handle));
 
     if (interpolationType == RpptInterpolationType::NEAREST_NEIGHBOR) {
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;

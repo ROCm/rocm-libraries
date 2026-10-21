@@ -155,22 +155,26 @@ namespace rocisa
             return std::make_shared<MFMAInstruction>(*this);
         }
 
-        // Workaround for gfx1250: low-precision WMMA must use _scale instruction with scale=0
-        // to avoid Base layer issue where VOP3PX2/VOP3PX3 instructions may not execute atomically
+        // Workaround for gfx1250 V0/strict silicon: low-precision WMMA must use the
+        // _scale instruction with scale=0 to avoid a Base layer issue where
+        // VOP3PX2/VOP3PX3 instructions may not execute atomically. This is NOT needed
+        // on the base gfx1250 build, so it is gated on a per-build toggle set only for
+        // gfx1250-strict / gfx1250v0 (see rocIsa::setForceScaledWMMA, driven from
+        // StinkyTofuArchName in KernelWriter) rather than on the shared ISA (12,5,0),
+        // which cannot tell the steppings apart.
         bool forceScaledWMMA() const
         {
-            bool        isWMMA      = !getAsmCaps()["HasMFMA"];
-            auto        isaVersion  = rocIsa::getInstance().getKernel().isaVersion;
+            bool        isWMMA      = !capOrDefault(getAsmCaps(), "HasMFMA");
             std::string instTypeStr = typeConvert(instType);
             // Affected instructions: v_wmma_f32_16x16x128_f8f6f4, v_wmma_f32_32x16x128_f4
             bool isLowPrecision = (instTypeStr == "f8f6f4") || (instTypeStr == "f4");
-            return isWMMA && (isaVersion == std::array<int, 3>{12, 5, 0}) && isLowPrecision;
+            return isWMMA && rocIsa::getInstance().getForceScaledWMMA() && isLowPrecision;
         }
 
         std::string typeConvert(InstType iType) const
         {
-            size_t f8f6f4_k = getAsmCaps()["HasWMMA_V3"] ? 128 : 64;
-            size_t f4_t     = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
+            size_t f8f6f4_k = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 128 : 64;
+            size_t f4_t     = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
 
             switch(iType)
             {
@@ -232,7 +236,7 @@ namespace rocisa
         std::vector<InstructionInput> getParams() const override
         {
             std::string negStr
-                = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
+                = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             return {acc, a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), negStr};
         }
 
@@ -256,7 +260,7 @@ namespace rocisa
         {
             std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
                                      + "x" + std::to_string(variant[2]);
-            if(getAsmCaps()["HasMFMA_explictB"] && !mfma1k)
+            if(capOrDefault(getAsmCaps(), "HasMFMA_explictB") && !mfma1k)
             {
                 std::string strB = variant[3] > 1 ? std::to_string(variant[3]) + "b_" : "";
                 return "v_mfma_" + typeConvert(accType) + "_" + variantStr + "_" + strB
@@ -264,7 +268,7 @@ namespace rocisa
             }
             else
             {
-                bool        is_mfma         = getAsmCaps()["HasMFMA"];
+                bool        is_mfma         = capOrDefault(getAsmCaps(), "HasMFMA");
                 std::string instructionName = is_mfma ? "mfma" : "wmma";
                 std::string instructionStep = is_mfma ? "" : "_";
                 std::string mfma_1k         = mfma1k ? "_1k" : "";
@@ -280,12 +284,12 @@ namespace rocisa
 
         std::string getArgStr() const
         {
-            size_t      f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
+            size_t      f4_t = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
             std::string negStr
-                = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
+                = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
-            if(getAsmCaps()["HasMFMA_f8f6f4"])
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4"))
             {
                 switch(instType)
                 {
@@ -344,7 +348,7 @@ namespace rocisa
                     break;
                 }
             }
-            else if(getAsmCaps()["HasWMMA_f8f6f4"])
+            else if(capOrDefault(getAsmCaps(), "HasWMMA_f8f6f4"))
             {
                 switch(instType)
                 {
@@ -675,7 +679,7 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
-            if(getAsmCaps()["HasMFMA"])
+            if(capOrDefault(getAsmCaps(), "HasMFMA"))
                 return {acc, a, b, acc2, mxsa, mxsb};
             return {acc, a, b, acc2, mxsa, mxsb, block};
         }
@@ -695,7 +699,7 @@ namespace rocisa
         {
             std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
                                      + "x" + std::to_string(variant[2]);
-            if(getAsmCaps()["HasMFMA"])
+            if(capOrDefault(getAsmCaps(), "HasMFMA"))
             {
                 return "v_mfma_scale_f32_" + variantStr + "_f8f6f4";
             }
@@ -708,7 +712,7 @@ namespace rocisa
 
         std::string mfmaInputPermuteStr() const
         {
-            if(getAsmCaps()["HasMFMA_f8f6f4"] && variant[2] > 32)
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4") && variant[2] > 32)
             {
                 switch(instType)
                 {
@@ -945,7 +949,7 @@ namespace rocisa
                 scaleSelStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
             if(mxScaleBSel)
                 scaleSelStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
-            if(getAsmCaps()["HasMFMA"])
+            if(capOrDefault(getAsmCaps(), "HasMFMA"))
             {
                 std::string mxsaStr = mxsa ? mxsa->toString() : "";
                 std::string mxsbStr = mxsb ? mxsb->toString() : "";
@@ -1091,7 +1095,7 @@ namespace rocisa
         {
             if(variant.size() == 4)
             {
-                bool is_smfma = getAsmCaps()["HasSMFMA"];
+                bool is_smfma = capOrDefault(getAsmCaps(), "HasSMFMA");
                 std::string instructionName = is_smfma ? "smfmac" : "swmmac";
                 std::string variantStr = std::to_string(variant[0]) + "x"
                                          + std::to_string(variant[1]) + "x"

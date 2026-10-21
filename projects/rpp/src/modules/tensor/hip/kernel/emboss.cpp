@@ -2115,6 +2115,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
                            0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (kernelSize == 5) {
         hipLaunchKernelGGL(create_emboss_kernel_5x5,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X_1DIM),
@@ -2122,6 +2123,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
                            0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (kernelSize == 7) {
         hipLaunchKernelGGL(create_emboss_kernel_7x7,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X_1DIM),
@@ -2129,6 +2131,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
                            0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (kernelSize == 9) {
         hipLaunchKernelGGL(create_emboss_kernel_9x9,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X_1DIM),
@@ -2136,6 +2139,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
                            0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+        HIP_CHECK_LAUNCH_RETURN();
     }
 
     return RPP_SUCCESS;
@@ -2149,7 +2153,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                  RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                  rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
@@ -2163,7 +2167,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     // Create a filter of size (kernel size x kernel size)
     float* filterTensor = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
-    hip_exec_create_emboss_kernel(filterTensor, kernelSize, strength, handle);
+    RPP_RETURN_IF_ERROR(hip_exec_create_emboss_kernel(filterTensor, kernelSize, strength, handle));
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         globalThreads_x = (dstDescPtr->strides.hStride / 3 + 7) >> 3;
@@ -2178,6 +2182,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                 srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                 dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                 padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (kernelSize == 5) {
             hipLaunchKernelGGL(
                 emboss_5x5_pkd_tensor,
@@ -2188,6 +2193,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                 srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                 dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                 padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (kernelSize == 7) {
             hipLaunchKernelGGL(
                 emboss_7x7_pkd_tensor,
@@ -2198,6 +2204,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                 srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                 dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                 padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (kernelSize == 9) {
             hipLaunchKernelGGL(
                 emboss_9x9_pkd_tensor,
@@ -2208,6 +2215,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                 srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                 dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                 padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW)) {
@@ -2224,6 +2232,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (kernelSize == 5) {
             hipLaunchKernelGGL(emboss_5x5_pln_tensor,
                                dim3(ceil((float)globalThreads_x / tileSize.x),
@@ -2237,6 +2246,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (kernelSize == 7) {
             hipLaunchKernelGGL(emboss_7x7_pln_tensor,
                                dim3(ceil((float)globalThreads_x / tileSize.x),
@@ -2250,6 +2260,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         } else if (kernelSize == 9) {
             hipLaunchKernelGGL(emboss_9x9_pln_tensor,
                                dim3(ceil((float)globalThreads_x / tileSize.x),
@@ -2263,6 +2274,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                           dstDescPtr->strides.hStride),
                                dstDescPtr->c, padLength, tileSize, roiTensorPtrSrc, filterTensor);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
@@ -2278,6 +2290,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                     make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (kernelSize == 5) {
                 hipLaunchKernelGGL(
                     emboss_5x5_pkd3_pln3_tensor,
@@ -2290,6 +2303,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                     make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (kernelSize == 7) {
                 hipLaunchKernelGGL(
                     emboss_7x7_pkd3_pln3_tensor,
@@ -2302,6 +2316,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                     make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (kernelSize == 9) {
                 hipLaunchKernelGGL(
                     emboss_9x9_pkd3_pln3_tensor,
@@ -2314,6 +2329,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                     make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             }
         } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
@@ -2331,6 +2347,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                srcDescPtr->strides.hStride),
                     dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (kernelSize == 5) {
                 hipLaunchKernelGGL(
                     emboss_5x5_pln3_pkd3_tensor,
@@ -2343,6 +2360,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                srcDescPtr->strides.hStride),
                     dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (kernelSize == 7) {
                 hipLaunchKernelGGL(
                     emboss_7x7_pln3_pkd3_tensor,
@@ -2355,6 +2373,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                srcDescPtr->strides.hStride),
                     dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             } else if (kernelSize == 9) {
                 hipLaunchKernelGGL(
                     emboss_9x9_pln3_pkd3_tensor,
@@ -2367,6 +2386,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                srcDescPtr->strides.hStride),
                     dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                     padLength, tileSize, roiTensorPtrSrc, filterTensor);
+                HIP_CHECK_LAUNCH_RETURN();
             }
         }
     }

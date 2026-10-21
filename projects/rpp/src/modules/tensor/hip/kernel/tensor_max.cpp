@@ -373,7 +373,7 @@ RppStatus hip_exec_tensor_max(T* srcPtr, RpptDescPtr srcDescPtr, U* maxArr,
                               RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                               rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (srcDescPtr->w + 7) >> 3;
     int globalThreads_y = srcDescPtr->h;

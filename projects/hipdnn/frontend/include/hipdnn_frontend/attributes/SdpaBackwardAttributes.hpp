@@ -29,8 +29,11 @@ namespace hipdnn_frontend::graph
  * SdpaBackwardAttributes configures the backward pass of scaled dot-product
  * attention, computing gradients with respect to Q, K, and V:
  * @code
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
  * @endcode
+ *
+ * `scale` is attn_scale_value or the Attn_scale tensor, and 1.0 (no scaling) when neither
+ * is set, as in cuDNN. It must match the forward pass.
  *
  * **Required inputs:**
  * - Q: Query tensor from forward pass [B, H, S_q, D]
@@ -50,7 +53,7 @@ namespace hipdnn_frontend::graph
  * - Additive attention bias gradient (dBias)
  * - Dropout (probability + seed/offset tensors, or explicit mask)
  * - ALiBi positional encoding
- * - Attention scale override (attn_scale_value)
+ * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
  *
  * @code{.cpp}
  * SdpaBackwardAttributes attr;
@@ -105,8 +108,15 @@ public:
     // Boolean flags
     bool alibi_mask = false;
     bool padding_mask = false;
-    bool causal_mask = false; // Deprecated
-    bool causal_mask_bottom_right = false; // Deprecated
+    /**
+     * @brief Deprecated; kept for graphs persisted before the causal setters changed. Do not set
+     * directly: use set_causal_mask*() or the diagonal-band setters. Backends resolve them as if
+     * the matching setter ran before every bound and alignment setter, so left_bound, a
+     * right_bound >= 0 or (for causal_mask) diagonal_alignment refines them. Setting both, or any
+     * bound below -1, is invalid.
+     */
+    bool causal_mask = false;
+    bool causal_mask_bottom_right = false;
 
     // Scalar attributes
     std::optional<float> dropout_probability;
@@ -436,16 +446,43 @@ public:
         padding_mask = value;
         return *this;
     }
+    /**
+     * @brief Request a top-left causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to TOP_LEFT and right_bound to 0. The deprecated causal_mask
+     * member is not modified, and later bound or alignment setters take precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_causal_mask(bool value)
     {
-        causal_mask = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
+    /**
+     * @brief Request a bottom-right causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to BOTTOM_RIGHT and right_bound to 0. The deprecated
+     * causal_mask_bottom_right member is not modified, and later bound or alignment setters take
+     * precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_causal_mask_bottom_right(bool value)
     {
-        causal_mask_bottom_right = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -477,6 +514,31 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Custom equality hook for SDPA-backward-specific attributes
+     *
+     * Compares masking flags, dropout probability, attention scale,
+     * diagonal band bounds, and diagonal alignment — all of which define
+     * the mathematical semantics of the backward pass rather than tensor
+     * layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const SdpaBackwardAttributes& other) const
+    {
+        return alibi_mask == other.alibi_mask && padding_mask == other.padding_mask
+               && causal_mask == other.causal_mask
+               && causal_mask_bottom_right == other.causal_mask_bottom_right
+               && dropout_probability == other.dropout_probability
+               && attn_scale_value == other.attn_scale_value && left_bound == other.left_bound
+               && right_bound == other.right_bound
+               && diagonal_alignment == other.diagonal_alignment;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const SdpaBackwardAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
     // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more
     // than a straight rename of a native setter (overload merge, one-to-many

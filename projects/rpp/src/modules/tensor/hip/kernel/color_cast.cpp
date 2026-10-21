@@ -184,7 +184,7 @@ RppStatus hip_exec_color_cast_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPt
                                      Rpp32f* alphaTensor, RpptROIPtr roiTensorPtrSrc,
                                      RpptRoiType roiType, rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;

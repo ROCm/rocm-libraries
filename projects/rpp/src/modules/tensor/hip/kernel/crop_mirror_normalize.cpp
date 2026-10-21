@@ -362,7 +362,7 @@ RppStatus hip_exec_crop_mirror_normalize_tensor(T* srcPtr, RpptDescPtr srcDescPt
                                                 RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                                 rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;

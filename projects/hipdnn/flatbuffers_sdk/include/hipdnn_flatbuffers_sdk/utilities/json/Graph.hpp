@@ -17,10 +17,13 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/CustomOpAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/GdnAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/KdaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/LayernormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/LayernormBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormBackwardAttributes.hpp>
@@ -59,6 +62,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ResampleFwdAttributes, "ResampleFwdAttributes"},
      {NodeAttributes::ResampleBwdAttributes, "ResampleBwdAttributes"},
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
+     {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
+     {NodeAttributes::GdnAttributes, "GdnAttributes"},
+     {NodeAttributes::KdaAttributes, "KdaAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -135,8 +141,18 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::ResampleBwdAttributes:
         nodeJson = *node.attributes_as_ResampleBwdAttributes();
+        break;
     case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
         nodeJson = *node.attributes_as_MoeGroupedMatmulAttributes();
+        break;
+    case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+        nodeJson = *node.attributes_as_MoeGroupedMatmulBwdAttributes();
+        break;
+    case data_objects::NodeAttributes::GdnAttributes:
+        nodeJson = *node.attributes_as_GdnAttributes();
+        break;
+    case data_objects::NodeAttributes::KdaAttributes:
+        nodeJson = *node.attributes_as_KdaAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -232,6 +248,12 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ResampleBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
             return to<data_objects::MoeGroupedMatmulAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+            return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::GdnAttributes:
+            return to<data_objects::GdnAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::KdaAttributes:
+            return to<data_objects::KdaAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<data_objects::Node>(): "
                                      "Unsupported NodeAttributes type: "

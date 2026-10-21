@@ -2031,7 +2031,7 @@ RppStatus hip_exec_median_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* ds
                                         RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                         rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + kernelSize + 7) >> 3;
     int globalThreads_y = dstDescPtr->h + kernelSize;
@@ -2187,7 +2187,7 @@ RppStatus hip_exec_median_filter_single_image(T* srcPtr, RpptDescPtr srcDescPtr,
                                               RpptROIPtr roiPtrSrc, RpptRoiType roiType,
                                               rpp::Handle& handle) {
     if (roiType == RpptRoiType::LTRB)
-        roiPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiPtrSrc, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiPtrSrc, handle));
 
     int globalThreads_x = (dstDescPtr->strides.hStride + kernelSize + 7) >> 3;
     int globalThreads_y = dstDescPtr->h + kernelSize;
