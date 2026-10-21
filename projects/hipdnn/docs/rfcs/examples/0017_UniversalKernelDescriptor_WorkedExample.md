@@ -223,48 +223,45 @@ two schema tables — the op's `SdpaAttributes` and the `Node` table's own scala
     ]},
 
     // --- the mask-mode classifier. Section 3 derives it; it is spliced in here whole, the
-    //     contradiction check and the mode disjunction together, as one element of this outer
-    //     `and`. Splicing only the inner `or` would make the contradiction check a sibling
-    //     disjunct, letting a graph with both deprecated causal booleans set pass by satisfying
-    //     another arm. Every arm restates the negation of the arms above it, because the C++ it
-    //     inverts is first-match-wins; §3 derives why, and what goes wrong without it. ---
+    //     guard and the mode disjunction together, as one element of this outer `and`.
+    //     Splicing only the inner `or` would make the guard a sibling disjunct, letting a graph
+    //     with both deprecated causal booleans set pass by satisfying another arm. Every arm
+    //     carries the resolution of the deprecated booleans into the band rather than testing a
+    //     raw boolean; §3 derives why, and what goes wrong without it. ---
     {"and": [
       {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
+      {">=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+      {">=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
 
       {"or": [
-        // A REAL LEFT BOUND OUTRANKS THE DEPRECATED BOOLEANS. The booleans can only pick
-        // top-left from bottom-right; they cannot express a window, so a graph that sets one
-        // AND carries a left bound is asking for a band and resolves to sliding_window.
+        // A REAL LEFT BOUND OUTRANKS THE DEPRECATED BOOLEANS. They can only pick top-left from
+        // bottom-right; they cannot express a window, so a graph that sets one AND carries a
+        // left bound is asking for a band and resolves to sliding_window.
         {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-                 {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]}]},
-
-        {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
-                 "$sdpa_fwd.causal_mask"]},
-
-        {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
-                 {"!": ["$sdpa_fwd.causal_mask"]},
-                 "$sdpa_fwd.causal_mask_bottom_right"]},
+                 {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]}]},
 
         {"and": [{"==": ["$kernel.mask_mode", "none"]},
                  {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
                  {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
                  {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]},
 
+        // R0: the resolved right bound is 0, either stored or supplied by a deprecated boolean.
         {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
-                 {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
                  {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
-                 {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]},
+                 {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+                         {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+                                  {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
+                 {"or": ["$sdpa_fwd.causal_mask_bottom_right",
+                         {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
         {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
-                 {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
                  {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+                 {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+                         {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+                                  {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
+                 {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
                  {"!": [{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
 
         {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-                 {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
                  {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
                  {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
                  {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}
@@ -289,55 +286,55 @@ A third real spec field, `sliding_window: int`, requires `causal=True` and
 `sliding_window` nonzero today, so this pack's kernel vector does not (yet) ship a sliding-window
 instance.
 
-The classifier this maps onto is a 5-input **precedence machine** (`causal_mask`,
-`causal_mask_bottom_right`, `left_bound`, `right_bound`, `diagonal_alignment`; first match wins;
-both deprecated booleans set is a contradiction). Its canonical form is
-`asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType`, reproduced in the gfx942
-`attention_dense` pack as `maskTypeFor`, and its order is:
+The classifier this maps onto is **resolve, then classify** over five inputs (`causal_mask`,
+`causal_mask_bottom_right`, `left_bound`, `right_bound`, `diagonal_alignment`). Its canonical form
+is `asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType`, which the gfx950 `attention_dense`
+pack's `maskTypeFor` (`Gfx950AttentionDenseNative.cpp`) calls. `resolveDiagonalBand` first folds
+the deprecated booleans into the band as if their setter ran before every bound and alignment
+setter: either one turns an unbounded right bound into `R' = 0`, `causal_mask_bottom_right` forces
+BOTTOM_RIGHT, and `causal_mask` keeps the stored alignment. Both booleans set, or any bound below
+-1, is a contradiction and declines. The resolved band then classifies:
 
-1. both deprecated booleans set — contradiction, decline.
-2. **`left_bound != -1` — sliding window, whatever the booleans say.**
-3. `causal_mask` — top-left causal.
-4. `causal_mask_bottom_right` — bottom-right causal.
-5. `right_bound == -1` — no mask.
-6. `right_bound == 0` — causal, bottom-right or top-left by `diagonal_alignment`.
-7. otherwise — sliding window.
+| Resolved band | Mask mode |
+|---|---|
+| `L == -1` ∧ `R' == -1` | none |
+| `L == -1` ∧ `R' == 0` | causal, bottom-right or top-left by the resolved alignment |
+| anything else | sliding window |
 
-**Step 2 outranks the booleans, and that ordering is load-bearing rather than stylistic.** The
+**A left bound outranks a bare boolean, and that is load-bearing rather than stylistic.** The
 deprecated pair can only pick top-left from bottom-right; neither can express a band. A graph
 setting `causal_mask = true` *and* `left_bound = 128` is asking for a windowed mask, and reporting
 it as plain causal discards the window: the kernel then attends the whole causal triangle instead
-of the band, in bounds, with no fault. This is not hypothetical. `maskTypeFor` records that the
-function returned on the boolean first, that five gpt_oss graphs in hipDNN's own corpus are
-exactly that shape, and that they were served wrongly until the order was fixed. Nothing
-downstream catches it, because `sliding_window` is declined while `causal_top_left` is served — so
-the defect converts a decline into a wrong answer.
+of the band, in bounds, with no fault. This is not hypothetical. An earlier classifier returned on
+the boolean first; five gpt_oss graphs in hipDNN's corpus had exactly that shape and were served
+wrongly until the order was fixed. Nothing downstream caught it, because `sliding_window` is
+declined while `causal_top_left` is served — so the defect converted a decline into a wrong
+answer. The resolution keeps the left bound, so those graphs still classify as a sliding window.
 
-**Inverting a first-match-wins machine therefore requires each arm to negate its predecessors.**
-Transcribing the arms in source order, guarding each only by its own condition, does not encode
-the same function: it encodes whatever precedence the reader assumed. An earlier revision of this
-document did exactly that — its first arm was `mask_mode == causal_top_left AND causal_mask`, with
-no bound consulted — and reproduced the fixed defect verbatim, because the `sliding_window` arm
-that would have caught the graph was guarded by `{"!": ["$sdpa_fwd.causal_mask"]}` and unreachable
-for precisely those graphs. The arms below carry `left_bound == -1` down from step 2, and
-`{"!": ["$sdpa_fwd.causal_mask"]}` down from step 3, so each arm states its own condition *and*
-the failure of everything above it.
+**Inverting the classifier therefore requires each arm to carry the resolution, not the raw
+boolean.** Guarding an arm by a boolean alone does not encode the same function: it encodes
+whatever precedence the reader assumed. An earlier revision of this document did exactly that —
+its first arm was `mask_mode == causal_top_left AND causal_mask`, with no bound consulted — and
+reproduced the fixed defect verbatim, because the `sliding_window` arm that would have caught the
+graph was guarded by `{"!": ["$sdpa_fwd.causal_mask"]}` and unreachable for precisely those
+graphs. The arms below consult the booleans only through the resolved right bound and alignment,
+so each arm states exactly the resolved band it covers.
 
-With `L = value_or_default($sdpa_fwd.left_bound, -1)` and
-`R = value_or_default($sdpa_fwd.right_bound, -1)`, the seven steps become seven arms:
+With `L = value_or_default($sdpa_fwd.left_bound, -1)`,
+`R = value_or_default($sdpa_fwd.right_bound, -1)`, `CM`/`CBR` the two deprecated booleans and
+`R0 := R == 0 ∨ (R == -1 ∧ (CM ∨ CBR))`, the three outcomes become five arms, all under the guard
+`¬(CM ∧ CBR) ∧ L >= -1 ∧ R >= -1`:
 
 | `$kernel.mask_mode` | Arm condition |
 |---|---|
 | `sliding_window` | `L != -1` |
-| `causal_top_left` | `L == -1` ∧ `causal_mask` |
-| `causal_bottom_right` | `L == -1` ∧ `¬causal_mask` ∧ `causal_mask_bottom_right` |
-| `none` | `L == -1` ∧ neither boolean ∧ `R == -1` |
-| `causal_bottom_right` | `L == -1` ∧ neither boolean ∧ `R == 0` ∧ `diagonal_alignment == BOTTOM_RIGHT` |
-| `causal_top_left` | `L == -1` ∧ neither boolean ∧ `R == 0` ∧ `diagonal_alignment != BOTTOM_RIGHT` |
-| `sliding_window` | `L == -1` ∧ neither boolean ∧ `R ∉ {-1, 0}` |
+| `none` | `L == -1` ∧ `R == -1` ∧ `¬CM` ∧ `¬CBR` |
+| `causal_bottom_right` | `L == -1` ∧ `R0` ∧ (`CBR` ∨ `diagonal_alignment == BOTTOM_RIGHT`) |
+| `causal_top_left` | `L == -1` ∧ `R0` ∧ `¬CBR` ∧ `diagonal_alignment != BOTTOM_RIGHT` |
+| `sliding_window` | `L == -1` ∧ `R ∉ {-1, 0}` |
 
-The arms are mutually exclusive and total over the five inputs, which is what makes the `or` an
-inversion of the machine rather than a paraphrase of it. The inversion holds for any kernel
+The arms are mutually exclusive and total under the guard, which is what makes the `or` an
+inversion of the classifier rather than a paraphrase of it. The inversion holds for any kernel
 family: the classifier reasons purely about the graph's mask attributes, not about which kernel
 serves the result. What changes per family is which modes its kernel vector covers: only `none`
 and `causal_top_left` have real, buildable `AttentionDenseSpec` instances today (`causal=False`
@@ -350,50 +347,48 @@ and Case D what happens to one that resolves to `sliding_window`.
 `left_bound` and `right_bound` are optional (`long = null`), and the C++ they mirror treats an
 absent bound as unbounded, i.e. `-1`. Written out, each arm below would need
 `{"or": [{"not_present": ["$sdpa_fwd.left_bound"]}, {"==": ["$sdpa_fwd.left_bound", -1]}]}`
-wherever it means "left unbounded", correct but unreadable seven times over. The arms below instead
+wherever it means "left unbounded", correct but unreadable in every arm. The arms below instead
 use `value_or_default` to normalize an absent bound to `-1` first and then compare. The two
 spellings are equivalent; this one is legible.
 
 ```jsonc
-// The contradiction check and the classifier, derived below and spliced into §2's criteria as
-// one conjunct. Pasting only the inner `or` would make the contradiction check a disjunct
-// instead, so a graph with both deprecated causal booleans set could pass by satisfying
-// another arm.
+// The guard and the classifier, derived above and spliced into §2's criteria as one conjunct.
+// Pasting only the inner `or` would make the guard a disjunct instead, so a graph with both
+// deprecated causal booleans set, or a bound below -1, could pass by satisfying another arm.
 {"and": [
   {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
+  {">=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+  {">=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
 
   {"or": [
-    // Step 2: a real left bound outranks the deprecated booleans.
+    // A REAL LEFT BOUND OUTRANKS THE DEPRECATED BOOLEANS. They can only pick top-left from
+    // bottom-right; they cannot express a window, so a graph that sets one AND carries a
+    // left bound is asking for a band and resolves to sliding_window.
     {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-             {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]}]},
-
-    {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
-             "$sdpa_fwd.causal_mask"]},
-
-    {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound", -1]}, -1]},
-             {"!": ["$sdpa_fwd.causal_mask"]},
-             "$sdpa_fwd.causal_mask_bottom_right"]},
+             {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]}]},
 
     {"and": [{"==": ["$kernel.mask_mode", "none"]},
              {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
              {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
              {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]},
 
+    // R0: the resolved right bound is 0, either stored or supplied by a deprecated boolean.
     {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
-             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
              {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
-             {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]},
+             {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+                     {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+                              {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
+             {"or": ["$sdpa_fwd.causal_mask_bottom_right",
+                     {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
     {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
-             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
              {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+             {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+                     {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+                              {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
+             {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
              {"!": [{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
 
     {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
              {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
              {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
              {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}
@@ -449,14 +444,14 @@ kernel builds a `causal=False` kernel today (`AttentionDenseSpec(causal=False, .
 buildable spec), so adding a `mask_mode="none"` UKD to this pack needs one more
 `kernelDescriptors` entry and no matcher change.
 
-**Case D: precedence decline.** Same graph as Case A, `causal_mask=true`, plus
-`left_bound=128` — a causal graph asking for a 128-wide band. Step 2 of §3's precedence outranks
-the boolean, so `mask_mode` resolves to `sliding_window`, no UKD in §6's vector declares it, and
+**Case D: window decline.** Same graph as Case A, `causal_mask=true`, plus
+`left_bound=128` — a causal graph asking for a 128-wide band. §3's resolution keeps the left
+bound, so `mask_mode` resolves to `sliding_window`, no UKD in §6's vector declares it, and
 the graph declines at the catalog exactly as Case C does. This case is here because it is the one
-the arms get wrong when transcribed in source order: guard the `causal_top_left` arm by
+the arms get wrong when they test the raw boolean: guard the `causal_top_left` arm by
 `causal_mask` alone and this graph is *served*, by a kernel that attends the whole triangle and
 silently ignores the window. Five graphs of this exact shape sit in hipDNN's own corpus, and the
-native gfx942 pack declines all five ([§3](#3-encoding-the-mask-classifier)).
+native gfx950 pack declines all five ([§3](#3-encoding-the-mask-classifier)).
 
 ## 5. Dispatch Geometry from `$kernel.*`
 

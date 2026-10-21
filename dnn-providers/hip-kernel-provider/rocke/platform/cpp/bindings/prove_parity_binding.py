@@ -17,9 +17,9 @@ rejects) is reported separately and does NOT count toward a family being
 least one buildable config and ALL its buildable configs match NON-EMPTY.
 
 Freshness / stale-build guard:
-  The .so and the standalone emitters MUST come from the same engine source
-  snapshot. When the emit dir was built it records the engine build-id it was
-  linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
+  The .so and the standalone emitters MUST come from the same portable-IR native
+  bundle snapshot. When the emit dir was built it records the bundle build-id it
+  was linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
   asserts rocke_engine.build_id() (from the loaded .so) equals that file. On a
   mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
   reporting a flood of spurious 'mismatched' configs (the exact trap that once
@@ -54,7 +54,7 @@ def _assert_build_id_match():
     if not os.path.exists(bid_path):
         print(
             f"WARNING: no {bid_path} -- cannot verify the emitters and the .so "
-            f"were built from the same engine source. .so build-id={so_id}. "
+            f"were built from the same native bundle. .so build-id={so_id}. "
             "Build the emitters with a driver that writes <EMIT>/BUILD_ID "
             "(see ci/tiers/tier2_differential.sh) to enable the stale-build guard.",
             file=sys.stderr,
@@ -930,7 +930,294 @@ def cfgs_gfx1201_wmma_fmha_fwd():
     # by dtype. Without the bf16 rows a dropped or misparsed ``dtype`` in the
     # binding would still report VALIDATED on this arch, because fp16 is what an
     # unset dtype falls back to.
-    return cfgs_gfx1151_wmma_fmha_fwd()[:12]
+    #
+    # The gfx1151 list holds (config, arch) pairs. This family sets its arch in
+    # FAMILIES, so it takes plain configs: keep each config, drop its arch.
+    return [config for config, _arch in cfgs_gfx1151_wmma_fmha_fwd()[:12]]
+
+
+def cfgs_gfx1151_wmma_fmha_fwd_v2():
+    # mirrors gfx1151_wmma_fmha_fwd_v2_emit.{py,c} index for index; (dict, arch).
+    archs = ("gfx11-generic", "gfx12-generic")
+    dtypes = ("fp16", "bf16")
+    buckets = ((64, 64), (96, 96), (128, 128), (192, 128), (256, 128), (256, 256))
+    masks = ("none", "causal")
+    out = []
+    for arch in archs:
+        for dt in dtypes:
+            for hd, hdv in buckets:
+                for mask in masks:
+                    out.append(
+                        (dict(dtype=dt, head_dim=hd, head_dim_v=hdv, mask=mask), arch)
+                    )
+    for arch in archs:
+        for dt in dtypes:
+            for hd, hdv, mask in (
+                (64, 64, "causal"),
+                (128, 128, "none"),
+                (256, 256, "causal"),
+            ):
+                for bias in ("f32", "q"):
+                    out.append(
+                        (
+                            dict(
+                                dtype=dt,
+                                head_dim=hd,
+                                head_dim_v=hdv,
+                                mask=mask,
+                                bias=bias,
+                            ),
+                            arch,
+                        )
+                    )
+    g12 = "gfx12-generic"
+    for dt in dtypes:
+        for hd in (192, 256):
+            for mask in masks:
+                out.append(
+                    (
+                        dict(
+                            dtype=dt,
+                            head_dim=hd,
+                            head_dim_v=128,
+                            mask=mask,
+                            wave_pair=False,
+                        ),
+                        g12,
+                    )
+                )
+    out.append(
+        (
+            dict(
+                dtype="bf16",
+                head_dim=256,
+                head_dim_v=128,
+                mask="causal",
+                bias="q",
+                wave_pair=False,
+            ),
+            g12,
+        )
+    )
+    out.append(
+        (
+            dict(
+                dtype="fp16",
+                head_dim=192,
+                head_dim_v=128,
+                mask="none",
+                bias="f32",
+                wave_pair=False,
+            ),
+            g12,
+        )
+    )
+    knobs = (
+        dict(head_dim=64, head_dim_v=64, block_n=64),
+        dict(block_n=16),
+        dict(block_m=64),
+        dict(waves_per_eu=0),
+        dict(scheduler_strategy="max-ilp"),
+        dict(lazy_rescale=False),
+        dict(k_pad=0, v_pad=16),
+        dict(cta_order="hbq"),
+        dict(wave_pair=True),
+        dict(head_dim=256, head_dim_v=256, block_m=32),
+    )
+    for arch in archs:
+        for knob in knobs:
+            out.append(
+                (
+                    dict(
+                        dict(dtype="bf16", head_dim=128, head_dim_v=128, mask="causal"),
+                        **knob,
+                    ),
+                    arch,
+                )
+            )
+    out.append((dict(dtype="fp16", head_dim=64, head_dim_v=64, mask="none"), "gfx1151"))
+    out.append(
+        (
+            dict(dtype="bf16", head_dim=128, head_dim_v=128, mask="causal", bias="q"),
+            "gfx1151",
+        )
+    )
+    out.append((dict(dtype="fp16", head_dim=64, head_dim_v=64, mask="none"), "gfx1201"))
+    out.append(
+        (
+            dict(
+                dtype="bf16",
+                head_dim=256,
+                head_dim_v=128,
+                mask="causal",
+                wave_pair=False,
+            ),
+            "gfx1201",
+        )
+    )
+    # Feature configs: (dtype, hd, hdv, mask, bias, flags, layout, page size,
+    # block_n, wave_pair); flags c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8.
+    feats = (
+        ("fp16", 128, 128, "none", None, "c", "dense", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "c", "dense", 0, 32, None),
+        ("bf16", 64, 64, "causal", None, "s", "dense", 0, 32, None),
+        ("fp16", 128, 128, "none", None, "s", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "a", "dense", 0, 32, None),
+        ("fp16", 128, 128, "none", None, "a", "dense", 0, 32, None),
+        ("fp16", 128, 128, "causal", None, "q", "dense", 0, 32, None),
+        ("bf16", 64, 64, "none", None, "q", "dense", 0, 32, None),
+        ("bf16", 128, 128, "none", None, "8", "dense", 0, 32, None),
+        ("fp16", 64, 64, "causal", None, "8", "dense", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "8", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "ragged", 0, 32, None),
+        ("fp16", 64, 64, "none", None, "", "ragged", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "paged", 16, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "paged", 32, 32, None),
+        ("fp16", 64, 64, "none", None, "", "paged", 64, 32, None),
+        ("bf16", 64, 64, "causal", None, "", "paged", 8, 32, None),
+        ("bf16", 256, 256, "causal", None, "", "paged", 16, 32, None),
+        ("bf16", 64, 64, "causal", None, "s", "paged", 16, 32, None),
+        ("bf16", 128, 128, "causal", None, "8", "ragged", 0, 32, None),
+        ("fp16", 128, 128, "causal", None, "8", "paged", 32, 32, None),
+        ("bf16", 128, 128, "causal", None, "sa", "paged", 16, 32, None),
+        ("fp16", 128, 128, "causal", None, "q", "ragged", 0, 32, None),
+        ("bf16", 128, 128, "none", None, "ca", "dense", 0, 32, None),
+        ("fp16", 64, 64, "causal", "f32", "s", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", "q", "csaq8", "paged", 16, 32, None),
+        ("bf16", 256, 256, "causal", None, "cs", "dense", 0, 32, None),
+        ("bf16", 64, 64, "causal", None, "", "paged", 32, 64, None),
+        ("bf16", 64, 64, "causal", None, "s", "paged", 64, 64, None),
+        ("bf16", 128, 128, "causal", None, "8", "ragged", 0, 16, None),
+    )
+    feats_gfx12 = (
+        ("bf16", 192, 128, "causal", None, "c8", "dense", 0, 32, False),
+        ("fp16", 256, 128, "none", None, "s", "paged", 32, 32, False),
+    )
+
+    def feat(row):
+        dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
+        return dict(
+            dtype=dt,
+            head_dim=hd,
+            head_dim_v=hdv,
+            mask=mask,
+            bias=bias,
+            use_softcap="c" in flags,
+            use_sinks="s" in flags,
+            use_alibi="a" in flags,
+            use_qq_bias="q" in flags,
+            layout=layout,
+            page_block_size=ps,
+            kv_dtype="fp8e4m3" if "8" in flags else "",
+            block_n=bn,
+            wave_pair=pair,
+        )
+
+    for arch in archs:
+        for row in feats:
+            out.append((feat(row), arch))
+    for row in feats_gfx12:
+        out.append((feat(row), g12))
+    out.append((feat(feats[2]), "gfx1151"))
+    out.append((feat(feats[8]), "gfx1201"))
+    return out
+
+
+def cfgs_gfx1151_wmma_fmha_decode():
+    # mirrors gfx1151_wmma_fmha_decode_emit.{py,c} index for index; (dict, arch).
+    # "kind": "merge" selects the merge kernel.
+    archs = ("gfx11-generic", "gfx12-generic")
+    dtypes = ("fp16", "bf16")
+    out = []
+    for arch in archs:
+        for dt in dtypes:
+            for hs in (64, 128, 256):
+                for bias in ("", "q", "f32"):
+                    out.append((dict(head_size=hs, dtype=dt, bias=bias), arch))
+    for arch in archs:
+        for dt in dtypes:
+            for layout in ("dense", "ragged"):
+                out.append(
+                    (dict(kind="merge", head_size=64, dtype=dt, layout=layout), arch)
+                )
+    feats = (
+        ("fp16", 128, "", "c", "dense", 0),
+        ("bf16", 256, "", "c", "dense", 0),
+        ("bf16", 64, "", "s", "dense", 0),
+        ("fp16", 128, "", "a", "dense", 0),
+        ("bf16", 64, "", "q", "dense", 0),
+        ("bf16", 64, "", "8", "dense", 0),
+        ("fp16", 128, "", "8", "dense", 0),
+        ("bf16", 256, "", "8", "dense", 0),
+        ("bf16", 128, "", "", "ragged", 0),
+        ("fp16", 64, "", "", "paged", 16),
+        ("bf16", 128, "", "", "paged", 8),
+        ("bf16", 256, "", "", "paged", 64),
+        ("bf16", 64, "", "s8", "paged", 16),
+        ("fp16", 128, "", "ca", "dense", 0),
+        ("bf16", 128, "", "aq", "ragged", 0),
+        ("bf16", 256, "", "cs8", "ragged", 0),
+        ("bf16", 64, "q", "csaq8", "paged", 16),
+        ("fp16", 128, "f32", "s", "ragged", 0),
+        ("bf16", 64, "f32", "ac8", "paged", 32),
+        ("fp16", 256, "q", "q", "paged", 4),
+    )
+
+    def feat(row):
+        dt, hs, bias, flags, layout, ps = row
+        return dict(
+            head_size=hs,
+            dtype=dt,
+            bias=bias,
+            softcap="c" in flags,
+            sinks="s" in flags,
+            alibi="a" in flags,
+            qq_bias="q" in flags,
+            kv_dtype="fp8e4m3" if "8" in flags else "",
+            layout=layout,
+            page_block_size=ps,
+        )
+
+    knobs = (
+        dict(num_waves=2),
+        dict(num_waves=8, head_size=64),
+        dict(num_waves=1),
+        dict(waves_per_eu=1),
+        dict(scheduler_strategy="default"),
+        dict(scheduler_strategy="max-ilp", head_size=256),
+        dict(dv_split=2),
+        dict(q_mode="lds"),
+        dict(q_mode="reg", head_size=256),
+        dict(v_store_early=True),
+        dict(v_store_early=False),
+        dict(prefetch=True),
+        dict(prefetch=False, head_size=64),
+        dict(lockstep=True),
+        dict(lockstep=False),
+        dict(fp8_cvt=True, kv_dtype="fp8e4m3"),
+        dict(fp8_cvt=False, kv_dtype="fp8e4m3", head_size=64),
+        dict(tanh_fast=True, softcap=True, head_size=256),
+        dict(tanh_fast=False, softcap=True),
+    )
+    for arch in archs:
+        for row in feats:
+            out.append((feat(row), arch))
+    for arch in archs:
+        for knob in knobs:
+            d = dict(head_size=128, dtype="bf16")
+            d.update(knob)
+            out.append((d, arch))
+    out.append((dict(head_size=128, dtype="bf16"), "gfx1151"))
+    out.append(
+        (dict(kind="merge", head_size=64, dtype="fp16", layout="ragged"), "gfx1151")
+    )
+    out.append((feat(feats[12]), "gfx1151"))
+    out.append((dict(head_size=64, dtype="fp16", bias="q"), "gfx1201"))
+    out.append((feat(feats[15]), "gfx1201"))
+    out.append(
+        (dict(kind="merge", head_size=64, dtype="bf16", layout="dense"), "gfx1201")
+    )
+    return out
 
 
 def cfgs_attention_unified():
@@ -1141,6 +1428,17 @@ def cfgs_sparse_attention():
             max_blocks_per_q=24,
             use_wave_ballot_scatter=False,
         ),
+        dict(
+            kind="jenga",
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            dtype="f16",
+            seqlen_q=48,
+            seqlen_k=144,
+            block_q=3,
+            block_k=48,
+        ),
     ]
 
 
@@ -1248,6 +1546,20 @@ def cfgs_sage_attention():
             seqlen_q=32,
             seqlen_k=128,
         ),
+        dict(
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            block_size_q=16,
+            block_size_k=64,
+            dtype="f16",
+            mask_mode="none",
+            quant_mode="fp16_bf16",
+            q_scale=pb(48, 128, 8, 1),
+            k_scale=pb(48, 128, 8, 1),
+            seqlen_q=96,
+            seqlen_k=144,
+        ),
     ]
 
 
@@ -1346,7 +1658,7 @@ def cfgs_fmha_varlen():
 
 
 def cfgs_fmha_splitkv_decode():
-    # mirrors fmha_splitkv_decode_emit.c make_spec (0..5); harness compares the
+    # mirrors fmha_splitkv_decode_emit.c make_spec (0..6); harness compares the
     # segment phase (the emitter's `<idx> ll` => mode=ll/phase=seg). The binding
     # defaults to "seg" so no explicit phase key is needed.
     rows = [
@@ -1356,6 +1668,7 @@ def cfgs_fmha_splitkv_decode():
         (256, 32, 4, "f16", "sliding_window", 2048, 1, 32, True),
         (64, 12, 3, "bf16", "none", 0, 8, 64, True),
         (128, 16, 8, "f16", "causal", 0, 2, 128, True),
+        (128, 40, 8, "f16", "none", 0, 2, 8, True),
     ]
     out = []
     for h, q, kv, dt, m, sw, b, segs, mfma in rows:
@@ -2038,6 +2351,18 @@ FAMILIES = [
         "gfx1151_wmma_fmha_fwd_lower_llvm",
         cfgs_gfx1201_wmma_fmha_fwd(),
         "gfx1201",
+    ),
+    (
+        "gfx1151_wmma_fmha_fwd_v2",
+        "gfx1151_wmma_fmha_fwd_v2_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_fwd_v2(),
+        None,
+    ),
+    (
+        "gfx1151_wmma_fmha_decode",
+        "gfx1151_wmma_fmha_decode_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_decode(),
+        None,
     ),
     (
         "gfx1201_wmma_gemm",
