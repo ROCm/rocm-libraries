@@ -200,6 +200,27 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 
 ---
 
+## 5. gfx942 MLA prefill — Python-only kernel builder
+
+**Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
+
+The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
+spec, or dispatch selector; it is built and selected in Python only. This
+follows the gfx942/gfx950 `attention_dense` family, which also ships without a
+C++ builder mirror.
+
+**What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
+against the Python lowerer is checked on every MLA golden case at every
+`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1`
+(`library/tests/test_attention_ir_cpp_parity.py::test_mla_prefill_ir_cpp_python_byte_identity`).
+The Python IR itself is pinned by the MLA IR golden through `check_golden`
+(`library/tests/test_mla_prefill_gfx942_golden.py`).
+
+**What unblocks a C++ twin:** a decision to restore per-family C++ builder
+mirrors; until then, keep emission changes gated by the two tests above.
+
+---
+
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single

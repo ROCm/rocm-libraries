@@ -122,7 +122,7 @@ compiled.
 
 ```bash
 build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
-    --gtest_filter='Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/*'
+    --gtest_filter='Smoke/IntegrationGpuResampleBackwardFp16.Correctness/*'
 
 find /tmp/captured -name '*.json' ! -name '*.meta.json' | while read -r graph; do
     python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \

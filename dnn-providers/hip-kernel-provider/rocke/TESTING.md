@@ -594,7 +594,10 @@ The existing replay CLI target is `rocke_portable_ir_replay_cli`; its installed
 location is `tests/portable_ir/`. `ROCKE_REPLAY_CLI` is the single launcher setting
 for native CLI replay, including TF32 and the portable-IR suites. Installed CTest
 supplies the relative executable path once for the pytest run, enabling all
-consumers of that artifact.
+consumers of that artifact. It also supplies `ROCKE_PROVENANCE_MANIFEST`, a
+build-generated version/build-ID record installed beside the CLI. Source-less
+tests validate the CLI against that independent expectation instead of trying
+to hash or build from unavailable sources.
 
 For source execution, build the target first and supply its executable through
 `ROCKE_REPLAY_CLI`. Reuse this setting for new replay consumers rather than adding
