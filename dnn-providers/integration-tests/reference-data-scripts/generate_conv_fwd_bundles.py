@@ -365,8 +365,6 @@ def case_values(c):
             patches.append(
                 {"uid": u["scale"], "set": {"is_runtime_pass_by_value": True}}
             )
-    if c["y_inferred"]:
-        patches.append({"uid": u["y"], "remove": ["dims", "strides"]})
     return values, patches
 
 
@@ -493,10 +491,6 @@ def v_override(c):
     return with_(c, ("F35",), override=True)
 
 
-def v_inferred(c):
-    return with_(c, ("F12inf",), y_inferred=True)
-
-
 def v_act(c, name):
     return with_(c, (), act=name)
 
@@ -619,7 +613,6 @@ def rules(lv):
         add(v_vals(S3(), "const"))
         add(v_vals(S3(P.PAIRS[2]), "large"))
         add(v_override(S3()))
-        add(v_inferred(S3()))
         for i, h in enumerate(P.H_SHAPES):
             add(b.H(h, 2, P.PAIRS[i % 6]))
         for i, m in enumerate(P.M_PR):
@@ -674,7 +667,6 @@ def rules(lv):
                 for cls in ("zero", "const", "large", "tiny"):
                     add(v_vals(b.S("S3", r, ("cf", dt)), cls))
                 add(v_override(b.S("S3", r, ("cf", dt))))
-                add(v_inferred(b.S("S3", r, ("cf", dt))))
             for pair in P.PAIRS:
                 for name in list(P.EXTRA_TYPES) + list(P.MIXED_TYPES):
                     add(v_type(b.S("S3", r, pair), name))
@@ -756,7 +748,6 @@ def rules(lv):
                 add(v_nonpacked(base(5), ("fast", "chan", "plane")[i % 3]))
                 add(v_vals(base(0), ("zero", "const", "large", "tiny")[i % 4]))
                 add(v_override(base(1)))
-                add(v_inferred(base(2)))
         # core x feature: values and activations, complete
         for r in P.RANKS:
             for pair in P.PAIRS:

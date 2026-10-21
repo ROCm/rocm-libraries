@@ -57291,13 +57291,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -1.88e+18,
+            "lo": 0.0,
             "hi": 1.88e+18,
             "seed": 1451242729
           },
           "2": {
             "kind": "free",
-            "lo": -1.88e+18,
+            "lo": 0.0,
             "hi": 1.88e+18,
             "seed": 551155128
           }
@@ -57498,112 +57498,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_1d_i16_n1c16k32_f3_fp32_cf",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1
-          ],
-          "post_padding": [
-            1
-          ],
-          "pre_padding": [
-            1
-          ],
-          "stride": [
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3
-            ],
-            "strides": [
-              48,
-              3,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 786505223,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2027984163
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 548429094
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F15_1d_i16_n1c16k32_f3_fp16_xclwclycf",
@@ -58364,13 +58258,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -26.1,
+            "lo": 0.0,
             "hi": 26.1,
             "seed": 1826867646
           },
           "2": {
             "kind": "free",
-            "lo": -26.1,
+            "lo": 0.0,
             "hi": 26.1,
             "seed": 1249567089
           }
@@ -58571,112 +58465,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_1d_i16_n1c16k32_f3_fp16_cf",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1
-          ],
-          "post_padding": [
-            1
-          ],
-          "pre_padding": [
-            1
-          ],
-          "stride": [
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3
-            ],
-            "strides": [
-              48,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 625226447,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 923032117
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1182732026
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F15_1d_i16_n1c16k32_f3_bf16_xcfwclycl",
@@ -59437,13 +59225,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -1.88e+18,
+            "lo": 0.0,
             "hi": 1.88e+18,
             "seed": 255501889
           },
           "2": {
             "kind": "free",
-            "lo": -1.88e+18,
+            "lo": 0.0,
             "hi": 1.88e+18,
             "seed": 747074595
           }
@@ -59644,112 +59432,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_1d_i16_n1c16k32_f3_bf16_cf",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1
-          ],
-          "post_padding": [
-            1
-          ],
-          "pre_padding": [
-            1
-          ],
-          "stride": [
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3
-            ],
-            "strides": [
-              48,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 1544724305,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1531671103
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2070642022
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F19_1d_i16_n1c16k32_f3_f8e4m3_wf8e4m3_yfp32_cf",
@@ -62941,13 +62623,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -1.09e+18,
+            "lo": 0.0,
             "hi": 1.09e+18,
             "seed": 959881535
           },
           "2": {
             "kind": "free",
-            "lo": -1.09e+18,
+            "lo": 0.0,
             "hi": 1.09e+18,
             "seed": 1841411998
           }
@@ -64023,122 +63705,6 @@
       }
     },
     {
-      "id": "S3_F12inf_2d_i16x16_n1c16k32_f3x3_fp16_cf",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 2084011111,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1998540802
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 249104428
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
-    },
-    {
       "id": "S3_F15_2d_i16x16_n1c16k32_f3x3_bf16_xclwcfycf",
       "values": {
         "io_data_type": "bfloat16",
@@ -64977,13 +64543,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -1.08e+18,
+            "lo": 0.0,
             "hi": 1.08e+18,
             "seed": 2064482857
           },
           "2": {
             "kind": "free",
-            "lo": -1.08e+18,
+            "lo": 0.0,
             "hi": 1.08e+18,
             "seed": 699129460
           }
@@ -65204,122 +64770,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_2d_i16x16_n1c16k32_f3x3_bf16_cf",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 363162269,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 280381384
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1703272156
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F19_2d_i16x16_n1c16k32_f3x3_f8e4m3_wf8e4m3_yfp32_cl",
@@ -68002,13 +67452,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -6.27e+17,
+            "lo": 0.0,
             "hi": 6.27e+17,
             "seed": 879239966
           },
           "2": {
             "kind": "free",
-            "lo": -6.27e+17,
+            "lo": 0.0,
             "hi": 6.27e+17,
             "seed": 1777052864
           }
@@ -68249,132 +67699,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_3d_i16x16x16_n1c16k32_f3x3x3_fp32_cf",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1,
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              131072,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 388989027,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1558835893
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 114148521
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F15_3d_i16x16x16_n1c16k32_f3x3x3_fp16_xcfwclycl",
@@ -69295,13 +68619,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -8.71,
+            "lo": 0.0,
             "hi": 8.71,
             "seed": 599258801
           },
           "2": {
             "kind": "free",
-            "lo": -8.71,
+            "lo": 0.0,
             "hi": 8.71,
             "seed": 232277000
           }
@@ -69542,132 +68866,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_3d_i16x16x16_n1c16k32_f3x3x3_fp16_cf",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1,
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              131072,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 175604811,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1568732512
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 839183115
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F15_3d_i16x16x16_n1c16k32_f3x3x3_bf16_xcfwclycf",
@@ -70588,13 +69786,13 @@
         "inputs": {
           "1": {
             "kind": "free",
-            "lo": -6.25e+17,
+            "lo": 0.0,
             "hi": 6.25e+17,
             "seed": 1260267821
           },
           "2": {
             "kind": "free",
-            "lo": -6.25e+17,
+            "lo": 0.0,
             "hi": 6.25e+17,
             "seed": 2136178985
           }
@@ -70835,132 +70033,6 @@
         },
         "notes": "probe: F35 override shape"
       }
-    },
-    {
-      "id": "S3_F12inf_3d_i16x16x16_n1c16k32_f3x3x3_bf16_cf",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1,
-            1
-          ]
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              32,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              131072,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              32,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd",
-        "plan_items": [
-          "S3",
-          "F12inf"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 611997623,
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1250753922
-          },
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1009392680
-          }
-        },
-        "notes": "probe: F12 inferred output"
-      },
-      "tensor_patches": [
-        {
-          "uid": 0,
-          "remove": [
-            "dims",
-            "strides"
-          ]
-        }
-      ]
     },
     {
       "id": "S3_F19_3d_i16x16x16_n1c16k32_f3x3x3_f8e4m3_wf8e4m3_yfp32_cf",

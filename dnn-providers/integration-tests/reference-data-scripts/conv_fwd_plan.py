@@ -153,7 +153,6 @@ DEFAULTS = dict(
     scale="const",  # F27: const | runtime | channel
     conv_y_virtual=True,  # F30
     inter_t=None,  # F31: virtual intermediate type; None resolves
-    y_inferred=False,  # F12
     override=False,  # F35: is_override_shape_enabled
     vals="uniform",
     ids=(),  # plan item ids this case implements
@@ -337,8 +336,6 @@ def probe_reasons(c):
             why.append("F19/F20 data types")
     if c["comp"] != "float" and c["xt"] in CORE_DTYPES:
         why.append("F20 compute type")
-    if c["y_inferred"]:
-        why.append("F12 inferred output")
     if c["override"]:
         why.append("F35 override shape")
     if c["vals"] != "uniform":
@@ -694,8 +691,10 @@ def value_recipes(c):
     if cls == "const":
         return dict(x=("fixed", 1.0), w=("fixed", 1.0))
     if cls == "large":
+        # Non-negative, so the sum cannot cancel: outputs sit near the dtype maximum
+        # and a rounding error stays small relative to them.
         a = float(f"{math.sqrt(0.5 * DTYPE_MAX[t] / accum_len(c)):.3g}")
-        return dict(x=("free", -a, a), w=("free", -a, a))
+        return dict(x=("free", 0.0, a), w=("free", 0.0, a))
     if cls == "tiny":
         a = 3e-3 if t == "half" else 1e-20
         return dict(x=("free", -a, a), w=("free", -a, a))

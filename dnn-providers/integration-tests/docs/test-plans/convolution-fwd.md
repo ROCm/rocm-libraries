@@ -123,7 +123,7 @@ tensor. Every generated case sets its fills explicitly: x and w are uniform in
 
 | Id | Feature | Values to cover | Oracle | Earliest level |
 |---|---|---|---|---|
-| F21 | Input distribution | uniform [−1, 1] (default); all zero x; constant (x = w = 1, exact result); large magnitude (amplitude a = √(½·max/accumulation), outputs near the dtype maximum); tiny (fp32/bf16 ±1e-20, fp16 ±3e-3: products are subnormal or underflow). Not expressible yet: subnormal inputs, zero-excluded, sparse, cancelling by construction (I4). | ready for the five above | PR |
+| F21 | Input distribution | uniform [−1, 1] (default); all zero x; constant (x = w = 1, exact result); large magnitude (x, w uniform in [0, a] with a = √(½·max/accumulation), so outputs approach the dtype maximum and cannot cancel to near zero, where a rounding error of the large intermediates would exceed any absolute tolerance); tiny (fp32/bf16 ±1e-20, fp16 ±3e-3: products are subnormal or underflow). Not expressible yet: subnormal inputs, zero-excluded, sparse, cancelling by construction (I4). | ready for the five above | PR |
 | F22 | Special values | NaN and ±Inf in x or w must propagate to the right outputs | needs I4 and the `allclose_matching_infinities` validator | — |
 | F23 | Accumulation length | reduction length C/G × filter volume: 1, ~100, ≥ 4096 (A1: C 512 × 3×3 = 4,608), 3,456 (A2, 3D), 18,432 (X4) | ready | N |
 | F24 | Determinism | repeated execution gives bitwise-identical output when a deterministic plan is requested | **C++ test** (I5) | — |
@@ -543,5 +543,5 @@ reads, so there is one copy of the legality rules.
 | Axes | `RANKS`, `LAYOUTS`, `CORE_DTYPES`, `EXTRA_TYPES`, `MIXED_TYPES`, `ACTS`, `TOPOLOGIES`, and the case fields of `DEFAULTS` | every feature of §2 |
 | Legality | `legal()` | the frontend validation of §2 and §2.7 |
 | Shape ranges | rank 1–4; N 1–256; C, K 1–2048; G dividing C and K; spatial 1–16000 (1D), 1–224 (2D), 1–64 (3D); filter 1–31; stride and dilation 1–4; padding 0 – filter; size budget: x + w + y ≤ 1 GiB in the exhaustive run |
-| Value domains | `value_recipes()` and `VALUE_CLASSES` | uniform [−1, 1], zero, constant, large (a = √(½ · max / accumulation)), tiny; NaN, Inf, subnormal and sparse once I4 lands |
+| Value domains | `value_recipes()` and `VALUE_CLASSES` | uniform [−1, 1], zero, constant, large (non-negative, a = √(½ · max / accumulation)), tiny; NaN, Inf, subnormal and sparse once I4 lands |
 | Return path | minimized reproducers become `regression` cases written by the generator; oracle bugs become G-B golden candidates |
