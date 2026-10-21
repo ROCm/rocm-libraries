@@ -137,6 +137,7 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "mla_decode_signature",
     "mla_decode_workspace_shapes",
     "check_mla_decode_extents",
+    "check_mla_decode_block_table",
     "mla_decode_max_num_seg",
     "mla_decode_combine_spec",
     "build_mla_decode",
@@ -445,6 +446,25 @@ def check_mla_decode_extents(spec: MlaDecodeSpec, *, total_q: int) -> tuple[bool
         return False, (
             f"total_q={total_q} x num_heads={spec.num_heads} x {widest} elements "
             "overflows the decode kernels' i32 offsets"
+        )
+    return True, ""
+
+
+def check_mla_decode_block_table(
+    *, num_seqs: int, pitch: int, pages: int
+) -> tuple[bool, str]:
+    """Whether a block table of row pitch ``pitch`` stays i32-addressable.
+
+    The kernel takes the pitch as an i32 scalar and forms ``seq * pitch +
+    slot`` in i32; the last sequence's last page slot is the farthest element
+    it reads. Returns ``(ok, reason)``; ``reason`` is empty when ``ok``.
+    """
+    last = (int(num_seqs) - 1) * int(pitch) + int(pages) - 1
+    if max(pitch, last) >= INT32_LIMIT:
+        return False, (
+            f"block_table row pitch {pitch} (last element read {last}) does "
+            f"not fit the kernel's i32 offsets (< {INT32_LIMIT}); pass a "
+            "block table with a smaller row pitch"
         )
     return True, ""
 

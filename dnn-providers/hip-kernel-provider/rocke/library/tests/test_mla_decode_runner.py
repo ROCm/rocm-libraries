@@ -163,6 +163,44 @@ class TestInputChecks:
         with pytest.raises(ValueError, match=match):
             _check(_uncompiled_runner(_result()), _inputs(**{name: bad}))
 
+    def test_block_table_pitch_past_i32_is_refused(self):
+        # seq * pitch + slot is i32 in the kernel: a 2**30 pitch puts row 3
+        # past it. Meta tensors carry the stride without the storage.
+        t = {k: v.to("meta") for k, v in _inputs().items()}
+        t["block_table"] = torch.empty_strided(
+            (B, PAGES), (2**30, 1), dtype=torch.int32, device="meta"
+        )
+        with pytest.raises(ValueError, match="kernel's i32 offsets"):
+            _check(_uncompiled_runner(_result()), t)
+
+    @staticmethod
+    def _check_pitch(pitch, num_seqs):
+        """_check_inputs on meta tensors for a num_seqs-row table of ``pitch``."""
+        result = _result(total_q=1, num_seqs=num_seqs)
+        meta = dict(dtype=torch.bfloat16, device="meta")
+        t = {k: v.to("meta") for k, v in _inputs().items()}
+        t["qa"] = torch.empty(1, H, 576, **meta)
+        t["out"] = torch.empty(1, H, 512, **meta)
+        t["lse"] = torch.empty(1, H, dtype=torch.float32, device="meta")
+        for name in ("cu_seqlens_q", "cu_seqlens_k"):
+            t[name] = torch.empty(num_seqs + 1, dtype=torch.int32, device="meta")
+        t["block_table"] = torch.empty_strided(
+            (num_seqs, PAGES), (pitch, 1), dtype=torch.int32, device="meta"
+        )
+        _check(_uncompiled_runner(result), t)
+
+    def test_block_table_pitch_alone_past_i32_is_refused(self):
+        # One sequence: the last element read is pages - 1, so only the pitch
+        # itself (passed to the kernel as an i32) can overflow.
+        with pytest.raises(ValueError, match="row pitch 2147483648"):
+            self._check_pitch(2**31, num_seqs=1)
+
+    def test_block_table_pitch_i32_boundary(self):
+        # Last element read = pitch + PAGES - 1: 2**31 - 1 fits, 2**31 does not.
+        self._check_pitch(2**31 - PAGES, num_seqs=2)
+        with pytest.raises(ValueError, match="kernel's i32 offsets"):
+            self._check_pitch(2**31 - PAGES + 1, num_seqs=2)
+
     def test_contents_must_respect_the_request(self):
         runner = _uncompiled_runner(_result())
         t = _inputs()
@@ -180,6 +218,14 @@ class TestInputChecks:
         shifted = torch.tensor([2, 3, 3, 4, 5], dtype=torch.int32)
         with pytest.raises(ValueError, match="total_q=3"):
             runner.check_contents(shifted, t["cu_seqlens_k"])
+        # In range and one query per sequence, but row 2 is never written.
+        short = torch.tensor([0, 1, 1, 2, 2], dtype=torch.int32)
+        with pytest.raises(ValueError, match=r"must span \[0"):
+            runner.check_contents(short, t["cu_seqlens_k"])
+        # Ends at total_q, but starts at 1: row 0 is never written.
+        late = torch.tensor([1, 1, 2, 2, 3], dtype=torch.int32)
+        with pytest.raises(ValueError, match=r"must span \[0"):
+            runner.check_contents(late, t["cu_seqlens_k"])
 
     def test_contents_check_used_page_ids_only(self):
         runner = _uncompiled_runner(_result())
@@ -193,6 +239,12 @@ class TestInputChecks:
 
 
 class TestNumSegOverride:
+    @pytest.mark.parametrize("num_seg", [1.9, True, "2"])
+    def test_non_int_override_is_refused(self, num_seg):
+        # 1.9 would truncate to 1: a single-pass binary, not the split asked for.
+        with pytest.raises(ValueError, match="num_seg must be an int"):
+            mla_decode_launch(_result()).with_num_seg(num_seg)
+
     def test_override_past_the_i32_workspace_is_refused(self):
         # 2000 tokens x 128 heads x 512 x 64 segments overflows i32 offsets;
         # dispatch would have clamped it, and the override must not bypass that.
@@ -291,6 +343,54 @@ class TestTorchStages:
             "thr,hrv->thv", latent.astype(np.float64), w_uk[:, :, self.D_NOPE :]
         )
         np.testing.assert_allclose(out.numpy(), want, rtol=1e-5, atol=1e-5)
+
+
+class TestForwardChecks:
+    """forward() checks the projections before any GEMM: [A] and [D] split
+    ``w_uk`` at ``q_nope``'s width, which the fixed-width ``qa`` check cannot
+    see. Runs on CPU: the refusal comes before any stream is touched."""
+
+    def _args(self, **overrides):
+        t = _inputs()
+        args = dict(
+            q_nope=torch.zeros(T, H, 128, dtype=torch.bfloat16),
+            q_rope=torch.zeros(T, H, 64, dtype=torch.bfloat16),
+            w_uk=torch.zeros(H, 512, 256, dtype=torch.bfloat16),
+            c_kv=t["c_kv"],
+            k_rope=t["k_rope"],
+            cu_seqlens_q=t["cu_seqlens_q"],
+            cu_seqlens_k=t["cu_seqlens_k"],
+            block_table=t["block_table"],
+            scale=0.1,
+        )
+        args.update(overrides)
+        return args
+
+    @pytest.mark.parametrize(
+        "name, bad",
+        [
+            # 64 + 192 = 256 still matches w_uk: the split would move silently.
+            ("q_nope", torch.zeros(T, H, 64, dtype=torch.bfloat16)),
+            ("q_rope", torch.zeros(T, H, 32, dtype=torch.bfloat16)),
+            ("w_uk", torch.zeros(H, 512, 192, dtype=torch.bfloat16)),
+            ("w_uk", torch.zeros(H, 256, 256, dtype=torch.bfloat16)),
+            ("q_nope", torch.zeros(T + 1, H, 128, dtype=torch.bfloat16)),
+        ],
+    )
+    def test_mismatched_projection_shapes_are_refused(self, name, bad):
+        runner = _uncompiled_runner(_result())
+        with pytest.raises(ValueError, match=f"{name} has shape"):
+            runner.forward(**self._args(**{name: bad}))
+
+    @pytest.mark.parametrize(
+        "name, shape",
+        [("q_nope", (T, H, 128)), ("q_rope", (T, H, 64)), ("w_uk", (H, 512, 256))],
+    )
+    def test_projection_dtype_is_checked(self, name, shape):
+        runner = _uncompiled_runner(_result())
+        bad = torch.zeros(*shape, dtype=torch.float32)
+        with pytest.raises(ValueError, match=f"{name} must be torch.bfloat16"):
+            runner.forward(**self._args(**{name: bad}))
 
 
 class TestBindLatent:

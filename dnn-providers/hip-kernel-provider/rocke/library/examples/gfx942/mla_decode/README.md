@@ -82,7 +82,9 @@ Preconditions the kernel cannot check (the runner checks the shapes, and the
 contents on request):
 
 - at most one query per sequence -- the kernel computes each sequence's first
-  token only -- and `cu_seqlens_q` within `total_q`;
+  token only -- and `cu_seqlens_q` covering `[0, total_q)` exactly (an
+  uncovered row is never written, and split, the combine reads stale
+  workspace);
 - every page id a sequence uses is inside the cache; slots past a sequence's
   last page are never read, and a sequence with `S_k = 0` reads no page;
 - the latent launch and the combine run in order on one stream, with the

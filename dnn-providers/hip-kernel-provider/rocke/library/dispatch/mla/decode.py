@@ -392,8 +392,14 @@ class MlaDecodeLaunch:
     def with_num_seg(self, num_seg: int) -> MlaDecodeLaunch:
         """This launch with the split count forced (parity sweeps), gated as
         dispatch gates its own choice; the result's identity follows the spec."""
+        # Exact int: 1.9 would truncate to a single-pass binary with another
+        # signature, and True would pass as 1.
+        if type(num_seg) is not int:
+            raise ValueError(
+                f"num_seg must be an int, got {type(num_seg).__name__} {num_seg!r}"
+            )
         req, cand = self.result.request, self.result.candidate
-        spec = dataclasses.replace(self.spec, num_seg=int(num_seg))
+        spec = dataclasses.replace(self.spec, num_seg=num_seg)
         ok, why = _decode_spec_gate(spec, req)
         if not ok:
             raise ValueError(f"num_seg={num_seg}: {why}")

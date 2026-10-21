@@ -31,6 +31,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from dispatch.mla import mla_decode_launch
+from kernels.mla.mla_decode import check_mla_decode_block_table
 
 if TYPE_CHECKING:
     import torch
@@ -242,6 +243,11 @@ class MlaDecodeRunner:
                 f"block_table has {block_table.shape[1]} columns; max_seqlen_k="
                 f"{req.max_seqlen_k} needs {pages}"
             )
+        ok, why = check_mla_decode_block_table(
+            num_seqs=req.num_seqs, pitch=block_table.stride(0), pages=pages
+        )
+        if not ok:
+            raise ValueError(why)
 
     def check_contents(
         self,
@@ -254,23 +260,27 @@ class MlaDecodeRunner:
         """Check the offsets and page ids against the request (host sync).
 
         The request's ``total_q``, ``max_seqlen_q`` / ``max_seqlen_k`` and the
-        cache's page count are preconditions the kernel cannot check: a query
-        offset past ``total_q`` writes out of bounds, a second query in a
-        sequence is left unwritten, a key range past ``max_seqlen_k`` reads
-        past the block-table width :meth:`latent` checks, and a page id
-        outside the cache reads out of bounds. Slots past a sequence's last
-        page are not page ids and are not checked. This reads the arrays back,
-        so it is opt-in.
+        cache's page count are preconditions the kernel cannot check: query
+        offsets past ``total_q`` write out of bounds and offsets short of
+        ``[0, total_q)`` leave output rows unwritten (split, the combine then
+        reads their stale workspace), a second query in a sequence is left
+        unwritten, a key range past ``max_seqlen_k`` reads past the
+        block-table width :meth:`latent` checks, and a page id outside the
+        cache reads out of bounds. Slots past a sequence's last page are not
+        page ids and are not checked. This reads the arrays back, so it is
+        opt-in.
         """
         req = self.request
         cu_q, cu_k = cu_seqlens_q.cpu(), cu_seqlens_k.cpu()
         q_lens, k_lens = cu_q[1:] - cu_q[:-1], cu_k[1:] - cu_k[:-1]
         if int(q_lens.min()) < 0 or int(k_lens.min()) < 0:
             raise ValueError("cu_seqlens arrays must be non-decreasing")
-        if int(cu_q[0]) < 0 or int(cu_q[-1]) > req.total_q:
+        # As the reference requires: every output row belongs to a sequence.
+        if int(cu_q[0]) != 0 or int(cu_q[-1]) != req.total_q:
             raise ValueError(
-                f"cu_seqlens_q spans [{int(cu_q[0])}, {int(cu_q[-1])}); the "
-                f"dispatched request has total_q={req.total_q} output rows"
+                f"cu_seqlens_q spans [{int(cu_q[0])}, {int(cu_q[-1])}); it must "
+                f"span [0, total_q={req.total_q}), the dispatched request's "
+                "output rows"
             )
         if int(q_lens.max()) > req.max_seqlen_q:
             raise ValueError(
@@ -485,16 +495,32 @@ class MlaDecodeRunner:
         """
         import torch
 
+        # [A] and [D] split ``w_uk`` at ``q_nope``'s width, which the latent
+        # check never sees (``qa`` is fixed-width): check the projections
+        # against the request before any GEMM runs.
+        req, spec = self.request, self.spec
+        for name, t, shape in (
+            ("q_nope", q_nope, (req.total_q, spec.num_heads, req.d_nope)),
+            ("q_rope", q_rope, (req.total_q, spec.num_heads, spec.d_rope)),
+            ("w_uk", w_uk, (spec.num_heads, spec.r_kv, req.d_nope + req.d_v)),
+        ):
+            if tuple(t.shape) != shape:
+                raise ValueError(
+                    f"{name} has shape {tuple(t.shape)}, the dispatched request "
+                    f"needs {shape}"
+                )
+            if t.dtype != torch.bfloat16:
+                raise ValueError(f"{name} must be torch.bfloat16, got {t.dtype}")
         device = q_nope.device
         if stream:
             torch_stream = torch.cuda.ExternalStream(stream, device=device)
         else:
             torch_stream = torch.cuda.current_stream(device)
             stream = int(torch_stream.cuda_stream)
-        total_q, num_heads, d_nope = q_nope.shape
+        total_q, num_heads, d_nope = req.total_q, spec.num_heads, req.d_nope
         with torch.cuda.stream(torch_stream):
             qa = torch.empty(
-                total_q, num_heads, self.spec.qa_cols, dtype=q_nope.dtype, device=device
+                total_q, num_heads, spec.qa_cols, dtype=q_nope.dtype, device=device
             )
             bmm_absorb_query(q_nope=q_nope, q_rope=q_rope, w_uk=w_uk, out=qa)
             latent, lse = self.latent(
@@ -511,7 +537,7 @@ class MlaDecodeRunner:
             out = torch.empty(
                 total_q,
                 num_heads,
-                w_uk.shape[2] - d_nope,
+                req.d_v,
                 dtype=q_nope.dtype,
                 device=device,
             )
