@@ -123,13 +123,19 @@ namespace convut
     {
     };
 
+    template <typename T>
+    inline constexpr bool is_complex_v = false;
+    template <>
+    inline constexpr bool is_complex_v<rocsparse_float_complex> = true;
+    template <>
+    inline constexpr bool is_complex_v<rocsparse_double_complex> = true;
+
     // Value with the given real and imaginary parts (the imaginary part is ignored for
     // real types).
     template <typename T>
     T make_val(int re, int im = 0)
     {
-        if constexpr(std::is_same_v<T, rocsparse_float_complex>
-                     || std::is_same_v<T, rocsparse_double_complex>)
+        if constexpr(is_complex_v<T>)
         {
             return T(re, im);
         }
@@ -169,7 +175,7 @@ namespace convut
         {
             EXPECT_EQ(hipFree(m_ptr), hipSuccess);
         }
-        DevBuf(const DevBuf&)            = delete;
+        DevBuf(const DevBuf&) = delete;
         DevBuf& operator=(const DevBuf&) = delete;
 
         T* get() const
@@ -183,7 +189,14 @@ namespace convut
         // The first `count` elements (all allocated elements by default).
         std::vector<T> read(size_t count = size_t(-1)) const
         {
-            return to_host(m_ptr, std::min(count, m_n));
+            std::vector<T> host(std::min(count, m_n));
+            if(!host.empty())
+            {
+                EXPECT_EQ(
+                    hipMemcpy(host.data(), m_ptr, host.size() * sizeof(T), hipMemcpyDeviceToHost),
+                    hipSuccess);
+            }
+            return host;
         }
     };
 
@@ -203,7 +216,7 @@ namespace convut
                 EXPECT_EQ(DESTROY(m_h), st_ok);
             }
         }
-        Owned(const Owned&)            = delete;
+        Owned(const Owned&) = delete;
         Owned& operator=(const Owned&) = delete;
 
         H* operator&()
@@ -304,13 +317,12 @@ namespace convut
     template <typename T>
     T make_special(bool nan)
     {
-        using R   = std::conditional_t<std::is_same_v<T, float>
-                                           || std::is_same_v<T, rocsparse_float_complex>,
-                                       float,
-                                       double>;
+        using R = std::conditional_t<
+            std::is_same_v<T, float> || std::is_same_v<T, rocsparse_float_complex>,
+            float,
+            double>;
         const R v = nan ? std::numeric_limits<R>::quiet_NaN() : std::numeric_limits<R>::infinity();
-        if constexpr(std::is_same_v<T, rocsparse_float_complex>
-                     || std::is_same_v<T, rocsparse_double_complex>)
+        if constexpr(is_complex_v<T>)
             return T(v, 1);
         else
             return v;

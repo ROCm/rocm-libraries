@@ -90,13 +90,13 @@ namespace
                                 int                 base,
                                 rocsparse_datatype  dt)
     {
-        return (csc ? rocsparse_create_csc_descr : rocsparse_create_csr_descr)(
-            &m, rows, cols, nnz, ptr, ind, val, ptr_type, ind_type, base_of(base), dt);
+        const auto create = csc ? rocsparse_create_csc_descr : rocsparse_create_csr_descr;
+        return create(&m, rows, cols, nnz, ptr, ind, val, ptr_type, ind_type, base_of(base), dt);
     }
 
     // Extracts the part of the matrix given by (ptr, ind) and checks it. For a unit
-    // diagonal only the bounds of the number of entries are checked (whether the diagonal
-    // is part of the result is not documented).
+    // diagonal the result may keep or drop the diagonal (the header does not say which);
+    // it must match one of the two references exactly.
     template <typename P, typename J>
     void run_extract(rocsparse_handle      handle,
                      bool                  csc,
@@ -113,10 +113,14 @@ namespace
                      + std::to_string(fill) + " diag " + std::to_string(diag));
         const int64_t nnz = ind.size();
         const size_t  vs  = value_size(dt);
-        DevBuf<P>     d_ptr(ptr), t_ptr(ptr.size());
-        DevBuf<J>     d_ind(ind), t_ind(ind.size());
-        DevBuf<char>  d_val(std::vector<char>(nnz * vs, 0x3f)), t_val(nnz * vs);
-        Spmat         source, target;
+        // Entry k holds the byte 0x3f + k in every byte, a finite value of every datatype.
+        std::vector<char> val;
+        for(int64_t k = 0; k < nnz; ++k)
+            val.insert(val.end(), vs, char(0x3f + k));
+        DevBuf<P>    d_ptr(ptr), t_ptr(std::vector<P>(ptr.size(), P(-7)));
+        DevBuf<J>    d_ind(ind), t_ind(ind.size());
+        DevBuf<char> d_val(val), t_val(nnz * vs);
+        Spmat        source, target;
         ASSERT_EQ(create_csx(source,
                              csc,
                              rows,
@@ -168,30 +172,34 @@ namespace
                   st_ok);
         stage(rocsparse_extract_stage_compute);
 
-        // Host reference: the entries on or below (above) the diagonal.
-        std::vector<P> want_ptr{static_cast<P>(base)};
-        std::vector<J> want_ind;
-        for(int64_t outer = 0; outer + 1 < static_cast<int64_t>(ptr.size()); ++outer)
+        // Host references: the entries below (above) the diagonal, with the diagonal
+        // (strict = 0) and without it (strict = 1).
+        std::vector<P>    want_ptr[2];
+        std::vector<J>    want_ind[2];
+        std::vector<char> want_val[2];
+        for(int strict = 0; strict < 2; ++strict)
         {
-            for(int64_t k = ptr[outer] - base; k < ptr[outer + 1] - base; ++k)
+            want_ptr[strict] = {static_cast<P>(base)};
+            for(int64_t outer = 0; outer + 1 < static_cast<int64_t>(ptr.size()); ++outer)
             {
-                const int64_t i = csc ? ind[k] - base : outer, j = csc ? outer : ind[k] - base;
-                if(fill == rocsparse_fill_mode_lower ? j <= i : j >= i)
-                    want_ind.push_back(ind[k]);
+                for(int64_t k = ptr[outer] - base; k < ptr[outer + 1] - base; ++k)
+                {
+                    const int64_t i = csc ? ind[k] - base : outer, j = csc ? outer : ind[k] - base;
+                    if(i == j ? !strict : (fill == rocsparse_fill_mode_lower) == (j < i))
+                    {
+                        want_ind[strict].push_back(ind[k]);
+                        want_val[strict].insert(want_val[strict].end(), vs, char(0x3f + k));
+                    }
+                }
+                want_ptr[strict].push_back(base + want_ind[strict].size());
             }
-            want_ptr.push_back(base + want_ind.size());
         }
-        if(diag == rocsparse_diag_type_unit)
-        {
-            EXPECT_GE(target_nnz, 0);
-            EXPECT_LE(target_nnz, static_cast<int64_t>(want_ind.size()));
-            return;
-        }
-        ASSERT_EQ(target_nnz, static_cast<int64_t>(want_ind.size()));
-        EXPECT_EQ(t_ptr.read(ptr.size()), want_ptr);
-        EXPECT_EQ(t_ind.read(target_nnz), want_ind);
-        for(char byte : t_val.read(target_nnz * vs))
-            EXPECT_EQ(byte, 0x3f);
+        const int strict = diag == rocsparse_diag_type_unit
+                           && target_nnz != static_cast<int64_t>(want_ind[0].size());
+        ASSERT_EQ(target_nnz, static_cast<int64_t>(want_ind[strict].size()));
+        EXPECT_EQ(t_ptr.read(ptr.size()), want_ptr[strict]);
+        EXPECT_EQ(t_ind.read(target_nnz), want_ind[strict]);
+        EXPECT_EQ(t_val.read(target_nnz * vs), want_val[strict]);
     }
 
     // A 3x3 matrix with entries on and off the diagonal, so that the lower and the upper
@@ -236,16 +244,8 @@ namespace
         const std::vector<int64_t> ptr64{0, 2, 3, 5}, ptr64_one{1, 3, 4, 6},
             ind64_one{1, 2, 2, 1, 3};
         const std::vector<int32_t> col32(s_ind);
-        run_extract(handle,
-                    false,
-                    3,
-                    3,
-                    0,
-                    f32,
-                    ptr64,
-                    col32,
-                    rocsparse_fill_mode_upper,
-                    rocsparse_diag_type_unit);
+        for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+            run_extract(handle, false, 3, 3, 0, f32, ptr64, col32, rocsparse_fill_mode_upper, diag);
         run_extract(handle,
                     false,
                     3,

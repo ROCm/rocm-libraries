@@ -61,8 +61,7 @@ namespace
     T pv(size_t i)
     {
         const float v = 1.0f + static_cast<float>((i * 7) % 61) * 0.25f;
-        if constexpr(std::is_same_v<T, rocsparse_float_complex>
-                     || std::is_same_v<T, rocsparse_double_complex>)
+        if constexpr(is_complex_v<T>)
         {
             return T(v, -v);
         }
@@ -360,7 +359,8 @@ namespace
                                         ptr,
                                         ind);
         };
-        EXPECT_EQ(call(handle, dir_r, rbd, cbd), st_ok);
+        ASSERT_EQ(call(handle, dir_r, rbd, cbd), st_ok);
+        expect_csr_dense(ptr, ind, val, 0, m, g.nb * cbd, to_dense(g, m, g.nb * cbd));
         EXPECT_EQ(call(nullptr, dir_r, rbd, cbd), rocsparse_status_invalid_handle);
         // An invalid direction is not documented; the library convention is invalid_value.
         EXPECT_STATUS_IN(
@@ -480,7 +480,7 @@ namespace
         ASSERT_EQ(nnzb_c, expected_nnzb);
 
         DevBuf<I> ind_c(nnzb_c);
-        DevBuf<T> val_c(size_t(nnzb_c) * rbd_c * cbd_c);
+        DevBuf<T> val_c(std::vector<T>(size_t(nnzb_c) * rbd_c * cbd_c, make_val<T>(-99)));
         ASSERT_EQ(pick<T>(rocsparse_sgebsr2gebsr,
                           rocsparse_dgebsr2gebsr,
                           rocsparse_cgebsr2gebsr,
@@ -705,7 +705,7 @@ namespace
         ASSERT_EQ(nnzb, expected_nnzb);
 
         DevBuf<I> bsr_ind(nnzb);
-        DevBuf<T> bsr_val(size_t(nnzb) * rbd * cbd);
+        DevBuf<T> bsr_val(std::vector<T>(size_t(nnzb) * rbd * cbd, make_val<T>(-99)));
         ASSERT_EQ(pick<T>(rocsparse_scsr2gebsr,
                           rocsparse_dcsr2gebsr,
                           rocsparse_ccsr2gebsr,
@@ -732,9 +732,10 @@ namespace
     // csr2gebsr over a grid of block sizes covering the buckets of the kernel dispatch
     // for both directions (square blocks go through the BSR path, a row block dimension
     // above 64 takes the fallback). The index bases, pointer modes, handle buffer
-    // situations and value types are varied across the grid; the row block
-    // dimension 1 (for even column block dimensions) and the largest ones always run without the handle buffer, which makes
-    // the temporary storage of their kernels come from the allocator.
+    // situations and value types are varied across the grid; the row block dimension 1
+    // (for even column block dimensions) and the largest ones always run without the
+    // handle buffer, which makes the temporary storage of their kernels come from the
+    // allocator.
     TEST_F(ConvGebsr, Csr2GebsrGrid)
     {
         int        combo = 0;
@@ -839,8 +840,12 @@ namespace
         }
 
         // Missing arrays while the row pointer announces entries.
-        const I       m = 37, n = 29, mb = (m + rbd - 1) / rbd;
-        const auto    csr = dense_to_csr(make_csr_dense<float>(m, n), m, n, 0);
+        const I            m = 37, n = 29, mb = (m + rbd - 1) / rbd, nb = (n + cbd - 1) / cbd;
+        const auto         dense = make_csr_dense<float>(m, n);
+        const auto         csr   = dense_to_csr(dense, m, n, 0);
+        std::vector<float> padded(size_t(mb * rbd) * (nb * cbd), 0.0f);
+        for(I i = 0; i < m; ++i)
+            std::copy_n(&dense[size_t(i) * n], n, &padded[size_t(i) * nb * cbd]);
         DevBuf<I>     ptr(csr.ptr), ind(csr.ind), bsr_ptr(mb + 1);
         DevBuf<float> val(csr.val);
         DevBuf<char>  temp(size_t(1) << 16);
@@ -857,7 +862,7 @@ namespace
             st_val,
             st_size);
         ASSERT_EQ(nnz_call(dir_r, m, n, ptr, ind, bsr_ptr, rbd, &nnz, temp), st_ok);
-        ASSERT_GT(nnz, 0);
+        ASSERT_EQ(nnz, count_blocks(padded, mb * rbd, nb * cbd, rbd, cbd));
 
         DevBuf<I>     bsr_ind(nnz);
         DevBuf<float> bsr_val(size_t(nnz) * rbd * cbd);
@@ -982,13 +987,24 @@ namespace
                 ++cptr[ind[e] - base + 1];
             for(I c = 0; c < nb; ++c)
                 cptr[c + 1] += cptr[c] - base;
-            std::vector<I> next(cptr.begin(), cptr.end() - 1);
+            std::vector<I> next(cptr.begin(), cptr.end() - 1), perm(nnzb);
             for(I r = 0; r < mb; ++r)
                 for(I e = ptr[r] - base; e < ptr[r + 1] - base; ++e)
-                    rind[next[ind[e] - base]++ - base] = r + base;
+                {
+                    const I pos = next[ind[e] - base]++ - base;
+                    rind[pos]   = r + base;
+                    perm[pos]   = e;
+                }
+            // Each block is copied unchanged to its transposed position.
+            const I            bs = rdim * cdim;
+            std::vector<float> val(nnzb * bs), cval(nnzb * bs);
+            for(I t = 0; t < nnzb * bs; ++t)
+                val[t] = 1.0f + t;
+            for(I k = 0; k < nnzb; ++k)
+                std::copy_n(&val[perm[k] * bs], bs, &cval[k * bs]);
 
             DevBuf<I>     d_ptr(ptr), d_ind(ind);
-            DevBuf<float> d_val(std::vector<float>(nnzb * rdim * cdim, 1.0f));
+            DevBuf<float> d_val(val);
             size_t        size = 0;
             ASSERT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
                           handle, mb, nb, nnzb, d_val, d_ptr, d_ind, rdim, cdim, &size),
@@ -1017,6 +1033,8 @@ namespace
                           st_ok);
                 EXPECT_EQ(d_cptr.read(nb + 1), cptr);
                 EXPECT_EQ(d_rind.read(nnzb), rind);
+                if(action == rocsparse_action_numeric)
+                    EXPECT_EQ(d_cval.read(nnzb * bs), cval);
             }
         }
     }
@@ -1189,17 +1207,20 @@ namespace
 
     TEST_F(ConvGebsr, Ell2CsrEmpty)
     {
-        MatDescr      ell_descr, csr_descr;
-        DevBuf<I>     d_eind(16), d_ptr(std::vector<I>(8, 0)), d_ind(8);
+        MatDescr      ell_descr;
+        DevBuf<I>     d_eind(16), d_ind(8);
         DevBuf<float> d_eval(16), d_val(8);
-        for(const auto& c : {std::array<I, 3>{0, 4, 2}, {4, 0, 2}, {4, 4, 0}})
+        for(const auto& c : {std::array<I, 4>{0, 4, 2, 0}, {4, 0, 2, 1}, {4, 4, 0, 0}})
         {
             SCOPED_TRACE("m " + std::to_string(c[0]) + " n " + std::to_string(c[1]) + " width "
-                         + std::to_string(c[2]));
-            I nnz = 0;
+                         + std::to_string(c[2]) + " base " + std::to_string(c[3]));
+            MatDescr  csr_descr(base_of(c[3]));
+            DevBuf<I> d_ptr(std::vector<I>(8, 77));
+            I         nnz = -1;
             EXPECT_EQ(rocsparse_ell2csr_nnz(
                           handle, c[0], c[1], ell_descr, c[2], d_eind, csr_descr, d_ptr, &nnz),
                       st_ok);
+            // Library bug: this quick return writes neither nnz (0) nor d_ptr (all the base).
             EXPECT_EQ(rocsparse_sell2csr(handle,
                                          c[0],
                                          c[1],

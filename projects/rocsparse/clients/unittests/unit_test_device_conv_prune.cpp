@@ -369,7 +369,10 @@ namespace
     {
         SCOPED_TRACE("per_row " + std::to_string(per_row) + " pct " + std::to_string(pct) + " "
                      + trace(c));
-        const auto a    = make_rows<T>(4, per_row, c.base_a);
+        auto a = make_rows<T>(4, per_row, c.base_a);
+        // Distinct magnitudes, so that every percentage selects its own threshold.
+        for(size_t k = 0; k < a.val.size(); ++k)
+            a.val[k] = static_cast<T>(1 + (k * 7) % 97);
         const T    thr  = threshold_of(a, pct);
         const auto want = keep_entries(a, c.base_a, [&](T v) { return std::abs(v) > thr; });
         const I    nnz  = a.nnz();

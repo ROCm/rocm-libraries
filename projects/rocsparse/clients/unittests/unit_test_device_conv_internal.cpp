@@ -110,6 +110,53 @@ namespace
         return dst.read();
     }
 
+    // The values 1..n stored as datatype dt, as bytes; they are exact in every datatype.
+    std::vector<char> iota_bytes(rocsparse_datatype dt, int n)
+    {
+        std::vector<char> b;
+        const auto        put = [&](auto x) {
+            const char* p = reinterpret_cast<const char*>(&x);
+            b.insert(b.end(), p, p + sizeof(x));
+        };
+        for(int v = 1; v <= n; ++v)
+        {
+            switch(dt)
+            {
+            case rocsparse_datatype_i8_r:
+                put(int8_t(v));
+                break;
+            case rocsparse_datatype_u8_r:
+                put(uint8_t(v));
+                break;
+            case rocsparse_datatype_i32_r:
+                put(int32_t(v));
+                break;
+            case rocsparse_datatype_u32_r:
+                put(uint32_t(v));
+                break;
+            case rocsparse_datatype_f16_r:
+                put(scalar<_Float16>(v));
+                break;
+            case rocsparse_datatype_bf16_r:
+                put(scalar<rocsparse_bfloat16>(v));
+                break;
+            case rocsparse_datatype_f32_r:
+                put(scalar<float>(v));
+                break;
+            case rocsparse_datatype_f64_r:
+                put(scalar<double>(v));
+                break;
+            case rocsparse_datatype_f32_c:
+                put(scalar<rocsparse_float_complex>(v));
+                break;
+            case rocsparse_datatype_f64_c:
+                put(scalar<rocsparse_double_complex>(v));
+                break;
+            }
+        }
+        return b;
+    }
+
     TEST_F(ConvInternal, ConvertArrayDatatypes)
     {
         constexpr size_t n   = 4;
@@ -117,23 +164,27 @@ namespace
         constexpr auto   c32 = rocsparse_datatype_f32_c, c64 = rocsparse_datatype_f64_c;
         using cf = rocsparse_float_complex;
         using cd = rocsparse_double_complex;
-        {
-            // Every (target, source) datatype pair, also for empty arrays (the widest
-            // type is double complex).
-            Silence      silence;
-            DevBuf<char> src(n * 16), dst(n * 16);
-            for(auto t : s_datatypes)
-                for(auto s : s_datatypes)
+        Silence                                                 silence;
+        const std::pair<rocsparse_datatype, rocsparse_datatype> converted[]
+            = {{f64, f32}, {f32, f64}, {c32, f32}, {c32, f64}, {c32, c64}, {c64, c32}};
+        for(auto t : s_datatypes)
+            for(auto s : s_datatypes)
+            {
+                SCOPED_TRACE(testing::Message() << "target " << t << " source " << s);
+                const std::vector<char> want = iota_bytes(t, n);
+                DevBuf<char> src(iota_bytes(s, n)), dst(std::vector<char>(want.size(), -1));
+                const rocsparse_status st
+                    = rocsparse::convert_array(handle, n, t, dst.get(), s, src.get());
+                EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st_ok);
+                // Library bug: the other pairs return success and write nothing.
+                if(t == s
+                   || std::find(std::begin(converted), std::end(converted), std::make_pair(t, s))
+                          != std::end(converted))
                 {
-                    EXPECT_EQ(rocsparse::convert_array(handle, n, t, dst.get(), s, src.get()),
-                              st_ok)
-                        << "target " << t << " source " << s;
-                    EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()),
-                              st_ok)
-                        << "empty, target " << t << " source " << s;
+                    EXPECT_EQ(st, st_ok);
+                    EXPECT_EQ(dst.read(), want);
                 }
-        }
-        Silence                  silence;
+            }
         const std::vector<float> hf{1.0f, -2.0f, 3.5f, 0.25f};
         EXPECT_EQ(convert_values<double>(handle, f64, f32, hf),
                   (std::vector<double>{1.0, -2.0, 3.5, 0.25}));
@@ -255,7 +306,8 @@ namespace
         // Real from real, complex from real, complex from complex.
         ASSERT_EQ(rocsparse::dnvec_transfer_from(handle, vf64, vf32), st_ok);
         EXPECT_EQ(d_f64.read(), (std::vector<double>{1.0, 2.0, 3.0, 4.0}));
-        EXPECT_EQ(rocsparse::dnvec_transfer_from(handle, vf32, vi32), st_ok);
+        // Library bug: f32 from i32 returns success and writes nothing (see convert_array).
+        (void)rocsparse::dnvec_transfer_from(handle, vf32, vi32);
         ASSERT_EQ(rocsparse::dnvec_transfer_from(handle, vc32, vf64), st_ok);
         ASSERT_EQ(rocsparse::dnvec_transfer_from(handle, vc64, vc32), st_ok);
         EXPECT_EQ(d_c64.read(),
@@ -330,10 +382,12 @@ namespace
                 c.handle, c.m, c.n, c.nnz_or_width, c.descr, val, ind, c.dense, c.ld, c.order);
         });
         // 64 bit indices.
+        ASSERT_EQ(hipMemset(dense, 0x7f, 16), hipSuccess);
         ASSERT_EQ((rocsparse::ell2dense_template<int64_t, float>(
                       handle, 2, 2, descr, 1, val, col64, dense, 2, rocsparse_order_column)),
                   st_ok);
         EXPECT_EQ(dense.read(), (std::vector<float>{0.0f, 4.0f, 3.0f, 0.0f}));
+        ASSERT_EQ(hipMemset(dense, 0x7f, 16), hipSuccess);
         ASSERT_EQ((rocsparse::coo2dense_aos_template<int64_t, float>(
                       handle, 2, 2, 2, descr, val, ind64, dense, 2, rocsparse_order_column)),
                   st_ok);
@@ -485,7 +539,7 @@ namespace
              {0},
              none,
              {0, 1, 1, 2},
-             fnone,
+             {4},
              {1, 2, 3, 5},
              fnone},
             // L unit, U non unit: L absorbs the diagonal, U stays strict.
@@ -590,12 +644,12 @@ namespace
              {unit, col, 1, {9, 9, 9, 9}, base0},
              {0, 1, 1, 1},
              none,
-             none,
+             {0},
              {0, 0, 1, 1},
              {0},
-             {},
+             {4},
              {2},
-             fnone},
+             {1, 3, 5}},
             {"change_lower",
              row,
              3,
@@ -609,10 +663,10 @@ namespace
              {0, 1, 1, 1},
              {2},
              none,
-             none,
+             {1},
              {4},
-             fnone,
-             fnone},
+             {2},
+             {1, 3, 5}},
         };
 
         for(const SlduCase& c : cases)
@@ -622,7 +676,7 @@ namespace
                 uptr(c.upper.ptr), uind(c.upper.nnz);
             DevBuf<I>     scratch(std::vector<I>(c.scratch), 64);
             DevBuf<float> dval_(c.val), lval(c.lower.nnz), uval(c.upper.nnz),
-                diag(std::max(c.m, c.n));
+                diag(std::vector<float>(std::max(c.m, c.n), -1));
             ASSERT_EQ((rocsparse::csxsldu_compute_template<float, I, I>(handle,
                                                                         c.dir,
                                                                         c.m,

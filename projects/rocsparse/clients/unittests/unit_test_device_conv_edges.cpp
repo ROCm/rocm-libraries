@@ -364,14 +364,13 @@ namespace
                                                  base_of(base),
                                                  d_buffer),
                               st_ok);
-                    if(m > 0)
-                        EXPECT_EQ(d_cptr.read(n + 1), std::vector<I>(n + 1, base));
+                    EXPECT_EQ(d_cptr.read(n + 1), std::vector<I>(n + 1, base));
                 }
     }
 
     // csr2bsr_nnz and scsr2bsr of matrices without entries: no block, all the block row
     // pointers are the index base. With entries, the column indices and values of the CSR
-    // matrix are required.
+    // matrix are required, and the result matches a host reference.
     TEST_F(ConvEdges, Csr2BsrEdges)
     {
         struct Shape
@@ -426,10 +425,34 @@ namespace
                               st_ok);
                 }
 
-            const I       m = 6, n = 6, block_dim = 2, mb = 3;
-            const auto    a = make_csr(m, n, base);
+            const I m = 6, n = 6, block_dim = 2, mb = 3;
+            auto    a = make_csr(m, n, base);
+            for(size_t k = 0; k < a.val.size(); ++k)
+                a.val[k] = 1.0f + k;
+            // Host BSR reference with row-major blocks (block_dim divides m and n).
+            std::vector<float> dense(m * n, 0.0f), bval;
+            for(I r = 0; r < m; ++r)
+                for(I k = a.ptr[r] - base; k < a.ptr[r + 1] - base; ++k)
+                    dense[r * n + a.ind[k] - base] = a.val[k];
+            std::vector<I> bptr{base}, bind;
+            for(I ib = 0; ib < mb; ++ib)
+            {
+                for(I jb = 0; jb < n / block_dim; ++jb)
+                {
+                    std::vector<float> blk;
+                    for(I ii = 0; ii < block_dim; ++ii)
+                        for(I jj = 0; jj < block_dim; ++jj)
+                            blk.push_back(dense[(ib * block_dim + ii) * n + jb * block_dim + jj]);
+                    if(std::any_of(blk.begin(), blk.end(), [](float v) { return v != 0.0f; }))
+                    {
+                        bind.push_back(jb + base);
+                        bval.insert(bval.end(), blk.begin(), blk.end());
+                    }
+                }
+                bptr.push_back(base + bind.size());
+            }
             DevCsr<float> d(a);
-            DevBuf<I>     d_bptr(mb + 1);
+            DevBuf<I>     d_bptr(std::vector<I>(mb + 1, 77));
             const auto    nnz = [&](const I* ind, I* bnnz) {
                 return rocsparse_csr2bsr_nnz(
                     handle, dir_r, m, n, csr_descr, d.ptr, ind, block_dim, bsr_descr, d_bptr, bnnz);
@@ -437,9 +460,10 @@ namespace
             I bnnz = 0;
             EXPECT_EQ(nnz(nullptr, &bnnz), st_ptr);
             ASSERT_EQ(nnz(d.ind, &bnnz), st_ok);
-            ASSERT_GT(bnnz, 0);
+            ASSERT_EQ(bnnz, I(bind.size()));
+            EXPECT_EQ(d_bptr.read(mb + 1), bptr);
             DevBuf<I>     d_bind(bnnz);
-            DevBuf<float> d_bval(size_t(bnnz) * block_dim * block_dim);
+            DevBuf<float> d_bval(std::vector<float>(bval.size(), -99.0f));
             const auto    compute = [&](const float* val, const I* ind) {
                 return rocsparse_scsr2bsr(handle,
                                           dir_r,
@@ -457,6 +481,9 @@ namespace
             };
             EXPECT_EQ(compute(nullptr, d.ind), st_ptr);
             EXPECT_EQ(compute(d.val, nullptr), st_ptr);
+            ASSERT_EQ(compute(d.val, d.ind), st_ok);
+            EXPECT_EQ(d_bind.read(), bind);
+            EXPECT_EQ(d_bval.read(), bval);
         }
     }
 } // namespace

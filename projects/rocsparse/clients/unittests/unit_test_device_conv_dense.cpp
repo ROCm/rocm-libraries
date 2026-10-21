@@ -107,9 +107,12 @@ namespace
                 const auto to_dense = [&](const T* v, const I* p, const I* i, T* a) {
                     return (csc ? csc2dense : csr2dense)(handle, s_m, s_n, descr, v, p, i, a, s_ld);
                 };
-                DevBuf<T> o_a(s_ld * s_n);
+                DevBuf<T> o_a(std::vector<T>(s_ld * s_n, make_val<T>(-99)));
                 ASSERT_EQ(to_dense(d_val, d_ptr, d_ind, o_a), st_ok);
-                EXPECT_EQ(o_a.read(), dense);
+                const auto got = o_a.read();
+                for(I j = 0; j < s_n; ++j)
+                    for(I i = 0; i < s_m; ++i)
+                        EXPECT_EQ(got[i + j * s_ld], dense[i + j * s_ld]) << i << ", " << j;
                 expect_null_args(to_dense, d_val.get(), d_ptr.get(), d_ind.get(), o_a.get());
 
                 // Dense to sparse.
@@ -221,7 +224,7 @@ namespace
                 for(I j = 0; j < s_sn; ++j)
                     for(I i = 0; i < s_sm; ++i)
                         expected[col_order ? i + j * ld : j + i * ld] = dense[i + j * s_sm];
-                DevBuf<float> d_dense(expected.size());
+                DevBuf<float> d_dense(std::vector<float>(expected.size(), -99.0f));
                 Dnmat         dn;
                 ASSERT_EQ(rocsparse_create_dnmat_descr(&dn, s_sm, s_sn, ld, d_dense, f32, order),
                           st_ok);

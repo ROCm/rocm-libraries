@@ -1098,13 +1098,12 @@ namespace
         rocsparse_datatype       type;
         std::vector<uint8_t>     raw;
         std::vector<std::string> printed;
-        bool                     check_text; // false for 8-bit types (printed as characters)
     };
 
     template <typename F>
-    Typed typed(rocsparse_datatype dt, F make, bool check_text = true)
+    Typed typed(rocsparse_datatype dt, F make)
     {
-        Typed tv{dt, {}, {}, check_text};
+        Typed tv{dt, {}, {}};
         for(int i = 1; i <= 4; ++i)
         {
             const auto         v = make(i);
@@ -1120,7 +1119,7 @@ namespace
     // 16-bit floating point values given by their bit patterns.
     Typed typed16(rocsparse_datatype dt, const uint16_t (&bits)[4])
     {
-        Typed tv{dt, {}, {}, true};
+        Typed tv{dt, {}, {}};
         for(int i = 0; i < 4; ++i)
         {
             const uint8_t* b = reinterpret_cast<const uint8_t*>(&bits[i]);
@@ -1134,23 +1133,19 @@ namespace
     {
         // The printed value of the small integers 1..4 is the integer itself for every
         // type; complex values print as the host stream does.
-        const std::vector<Typed> all = {
-            typed16(rocsparse_datatype_f16_r, {0x3C00, 0x4000, 0x4200, 0x4400}),
-            typed16(rocsparse_datatype_bf16_r, {0x3F80, 0x4000, 0x4040, 0x4080}),
-            typed(f32, [](int i) { return static_cast<float>(i); }),
-            typed(rocsparse_datatype_f64_r, [](int i) { return static_cast<double>(i); }),
-            typed(rocsparse_datatype_f32_c,
-                  [](int i) { return rocsparse_float_complex(i, -1.0f); }),
-            typed(rocsparse_datatype_f64_c,
-                  [](int i) { return rocsparse_double_complex(i, -1.0); }),
-            typed(rocsparse_datatype_i32_r, [](int i) { return static_cast<int32_t>(i); }),
-            typed(rocsparse_datatype_u32_r, [](int i) { return static_cast<uint32_t>(i); }),
-            typed(
-                rocsparse_datatype_i8_r, [](int i) { return static_cast<int8_t>(64 + i); }, false),
-            typed(
-                rocsparse_datatype_u8_r,
-                [](int i) { return static_cast<uint8_t>(64 + i); },
-                false)};
+        const std::vector<Typed> all
+            = {typed16(rocsparse_datatype_f16_r, {0x3C00, 0x4000, 0x4200, 0x4400}),
+               typed16(rocsparse_datatype_bf16_r, {0x3F80, 0x4000, 0x4040, 0x4080}),
+               typed(f32, [](int i) { return static_cast<float>(i); }),
+               typed(rocsparse_datatype_f64_r, [](int i) { return static_cast<double>(i); }),
+               typed(rocsparse_datatype_f32_c,
+                     [](int i) { return rocsparse_float_complex(i, -1.0f); }),
+               typed(rocsparse_datatype_f64_c,
+                     [](int i) { return rocsparse_double_complex(i, -1.0); }),
+               typed(rocsparse_datatype_i32_r, [](int i) { return static_cast<int32_t>(i); }),
+               typed(rocsparse_datatype_u32_r, [](int i) { return static_cast<uint32_t>(i); }),
+               typed(rocsparse_datatype_i8_r, [](int i) { return static_cast<int8_t>(64 + i); }),
+               typed(rocsparse_datatype_u8_r, [](int i) { return static_cast<uint8_t>(64 + i); })};
 
         // CSR: 1 x 4 row, the values are the four numbers. ELL: 2 x 2, width 2.
         DevBuf<int32_t> d_ptr(std::vector<int32_t>{0, 4}), d_ind(std::vector<int32_t>{0, 1, 2, 3});
@@ -1170,16 +1165,13 @@ namespace
             ASSERT_EQ(pe.status, st_ok);
             ASSERT_EQ(pc.body.size(), size_t(4));
             ASSERT_EQ(pe.body.size(), size_t(2));
-            if(tv.check_text)
-            {
-                std::vector<std::string> want;
-                for(size_t i = 0; i < 4; ++i)
-                    want.push_back("[" + std::to_string(i) + "] = " + tv.printed[i]);
-                EXPECT_EQ(pc.body, want);
-                // Entry (i, j) of the ELL matrix is value number j * 2 + i.
-                EXPECT_EQ(pe.body[0], " " + tv.printed[0] + " " + tv.printed[2]);
-                EXPECT_EQ(pe.body[1], " " + tv.printed[1] + " " + tv.printed[3]);
-            }
+            std::vector<std::string> want;
+            for(size_t i = 0; i < 4; ++i)
+                want.push_back("[" + std::to_string(i) + "] = " + tv.printed[i]);
+            EXPECT_EQ(pc.body, want);
+            // Entry (i, j) of the ELL matrix is value number j * 2 + i.
+            EXPECT_EQ(pe.body[0], " " + tv.printed[0] + " " + tv.printed[2]);
+            EXPECT_EQ(pe.body[1], " " + tv.printed[1] + " " + tv.printed[3]);
         }
     }
 
