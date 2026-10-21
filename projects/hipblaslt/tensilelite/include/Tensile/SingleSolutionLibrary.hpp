@@ -322,7 +322,7 @@ namespace TensileLite
                             useSolution = false;
                     }
                 }
-                else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                else if(isGemmTypeOnlySearch(searchType))
                 {
                     if(!isGemmTypeSame((*solution), problems[0]))
                         useSolution = false;

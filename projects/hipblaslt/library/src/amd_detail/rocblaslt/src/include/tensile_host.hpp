@@ -46,6 +46,7 @@
 #include "utility.hpp"
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <atomic>
 
 // Return the value category for a value, as a double precision value, such
@@ -153,21 +154,32 @@ inline bool& rocblaslt_suppress_tensile_error_messages()
     return t_suppress;
 }
 
+// searchType selects how the solution library filters rows. Callers that have
+// already collected the GridBased/Prediction candidates themselves pass
+// GEMM_TYPE_ONLY_NO_RANKING so those matching libraries are not searched again.
+// This is a per-call argument on purpose: it used to be a process-global set in
+// TensileLite::Debug, which raced between concurrent calls.
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
                                  rocblaslt_handle                                handle,
                                  rocblaslt::RocGemmType                          gemmType,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status
     getSolutionsFromIndex(rocblaslt_handle                                handle,

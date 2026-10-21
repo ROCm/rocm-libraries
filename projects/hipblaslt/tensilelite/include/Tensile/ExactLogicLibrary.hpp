@@ -164,22 +164,22 @@ namespace TensileLite
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
             SolutionSet<MySolution> rv;
-            const bool              debug       = Debug::Instance().printPropertyEvaluation();
-            const bool              streamK     = Debug::Instance().useExperimentalSelection() == 2;
-            const auto&             excludedLib = Debug::Instance().excludedLibFromGetAll();
+            const bool              debug   = Debug::Instance().printPropertyEvaluation();
+            const bool              streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const bool              skipRankingLibs = skipsRankingLibraries(searchType);
 
             auto amdGPU             = static_cast<AMDGPU const*>(&hardware);
             bool isStandardCUDevice = amdGPU->isStandardCU();
 
             for(auto const& row : rows)
             {
-                // we want to exclude this lib from getAll. If the Set is not empty,
-                // it means we want to skip searched GridBased, Prediction.
-                // But if this is a non-standard-CU GPU, we still need to search all for CU-Fallback solutions.
-                // In this case, we don't skip the excludedLib.
-                if(!excludedLib.empty() && isStandardCUDevice)
+                // The caller asked for a no-ranking search, so skip GridBased and
+                // Prediction: it has already collected those candidates itself.
+                // But if this is a non-standard-CU GPU, we still need to search all
+                // for CU-Fallback solutions, so the skip does not apply there.
+                if(skipRankingLibs && isStandardCUDevice)
                 {
-                    if(excludedLib.count(row.first.value->type()))
+                    if(isRankingMatchingLibrary(row.first.value->type()))
                         continue;
                 }
 
