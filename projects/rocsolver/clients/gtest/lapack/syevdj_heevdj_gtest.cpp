@@ -61,6 +61,9 @@ const vector<vector<int>> size_range = {
 // for daily_lapack tests
 const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}};
 
+// for weekly_lapack tests (large batch_count)
+const vector<vector<int>> large_batch_size_range = {{1, 1}};
+
 Arguments syevdj_heevdj_setup_arguments(syevdj_heevdj_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
@@ -81,7 +84,8 @@ Arguments syevdj_heevdj_setup_arguments(syevdj_heevdj_tuple tup)
     return arg;
 }
 
-class SYEVDJ_HEEVDJ : public ::TestWithParam<syevdj_heevdj_tuple>
+template <int BATCH_COUNT = 3>
+class SYEVDJ_HEEVDJ_BASE : public ::TestWithParam<syevdj_heevdj_tuple>
 {
 protected:
     void TearDown() override
@@ -92,15 +96,22 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = syevdj_heevdj_setup_arguments(GetParam());
+        Arguments arg = syevdj_heevdj_setup_arguments(this->GetParam());
 
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<char>("evect") == 'N'
            && arg.peek<char>("uplo") == 'L')
             testing_syevdj_heevdj_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_syevdj_heevdj<BATCHED, STRIDED, T>(arg);
     }
+};
+
+int constexpr SYEVDJ_HEEVDJ_BCOUNT = 64 * 1024 + 1;
+int constexpr SYEVDJ_HEEVDJ_BCOUNT_SMALL = 3;
+
+class SYEVDJ_HEEVDJ : public SYEVDJ_HEEVDJ_BASE<SYEVDJ_HEEVDJ_BCOUNT_SMALL>
+{
 };
 
 class SYEVDJ : public SYEVDJ_HEEVDJ
@@ -108,6 +119,18 @@ class SYEVDJ : public SYEVDJ_HEEVDJ
 };
 
 class HEEVDJ : public SYEVDJ_HEEVDJ
+{
+};
+
+class SYEVDJ_HEEVDJ_LARGE_BATCH : public SYEVDJ_HEEVDJ_BASE<SYEVDJ_HEEVDJ_BCOUNT>
+{
+};
+
+class SYEVDJ_LARGE_BATCH : public SYEVDJ_HEEVDJ_LARGE_BATCH
+{
+};
+
+class HEEVDJ_LARGE_BATCH : public SYEVDJ_HEEVDJ_LARGE_BATCH
 {
 };
 
@@ -177,6 +200,48 @@ TEST_P(HEEVDJ, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large batch_count tests
+
+TEST_P(SYEVDJ_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEVDJ_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(HEEVDJ_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVDJ_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(SYEVDJ_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEVDJ_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(HEEVDJ_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVDJ_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 // daily_lapack tests normal execution with medium to large sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYEVDJ,
@@ -191,3 +256,12 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEVDJ, Combine(ValuesIn(size_range), ValuesIn(op_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEVDJ, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+// weekly_lapack tests with batch_count > 64 * 1024
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYEVDJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         HEEVDJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(op_range)));

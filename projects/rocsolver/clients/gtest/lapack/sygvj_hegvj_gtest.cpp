@@ -66,6 +66,9 @@ const vector<vector<int>> large_matrix_size_range = {
     {300, 300, 310, 0},
 };
 
+// for weekly_lapack tests (large batch_count)
+const vector<vector<int>> large_batch_matrix_size_range = {{1, 1, 1, 0}};
+
 Arguments sygvj_setup_arguments(sygvj_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
@@ -92,7 +95,8 @@ Arguments sygvj_setup_arguments(sygvj_tuple tup)
     return arg;
 }
 
-class SYGVJ_HEGVJ : public ::TestWithParam<sygvj_tuple>
+template <int BATCH_COUNT = 3>
+class SYGVJ_HEGVJ_BASE : public ::TestWithParam<sygvj_tuple>
 {
 protected:
     void TearDown() override
@@ -103,13 +107,13 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = sygvj_setup_arguments(GetParam());
+        Arguments arg = sygvj_setup_arguments(this->GetParam());
 
         if(arg.peek<char>("itype") == '1' && arg.peek<char>("evect") == 'N'
            && arg.peek<char>("uplo") == 'U' && arg.peek<rocblas_int>("n") == 0)
             testing_sygvj_hegvj_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         if(arg.singular == 1)
             testing_sygvj_hegvj<BATCHED, STRIDED, T>(arg);
 
@@ -118,11 +122,30 @@ protected:
     }
 };
 
+int constexpr SYGVJ_HEGVJ_BCOUNT = 64 * 1024 + 1;
+int constexpr SYGVJ_HEGVJ_BCOUNT_SMALL = 3;
+
+class SYGVJ_HEGVJ : public SYGVJ_HEGVJ_BASE<SYGVJ_HEGVJ_BCOUNT_SMALL>
+{
+};
+
 class SYGVJ : public SYGVJ_HEGVJ
 {
 };
 
 class HEGVJ : public SYGVJ_HEGVJ
+{
+};
+
+class SYGVJ_HEGVJ_LARGE_BATCH : public SYGVJ_HEGVJ_BASE<SYGVJ_HEGVJ_BCOUNT>
+{
+};
+
+class SYGVJ_LARGE_BATCH : public SYGVJ_HEGVJ_LARGE_BATCH
+{
+};
+
+class HEGVJ_LARGE_BATCH : public SYGVJ_HEGVJ_LARGE_BATCH
 {
 };
 
@@ -192,6 +215,48 @@ TEST_P(HEGVJ, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large batch_count tests
+
+TEST_P(SYGVJ_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYGVJ_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(HEGVJ_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEGVJ_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(SYGVJ_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYGVJ_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(HEGVJ_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEGVJ_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYGVJ,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range)));
@@ -207,3 +272,12 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEGVJ,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(type_range)));
+
+// weekly_lapack tests with batch_count > 64 * 1024
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         SYGVJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_matrix_size_range), ValuesIn(type_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         HEGVJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_matrix_size_range), ValuesIn(type_range)));
