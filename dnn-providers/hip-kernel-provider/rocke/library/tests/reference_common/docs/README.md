@@ -14,7 +14,9 @@ reference harnesses:
 
 - [Quickstart: run, extend, and add references](quickstart.md)
 - [Qualification and publication workflow](gpu-reference-workflow.md)
+- [Variants, new kernel families, and concurrent pull requests](gpu-reference-workflow.md#variants-and-concurrent-changes)
 - [Triage a failing pinned test](gpu-reference-workflow.md#triage)
+- [Migrating from the per-architecture layout](#migrating-from-the-per-architecture-layout)
 - [SDPA contract, coverage, and replay](../../sdpa_reference/docs/sdpa-test-reference.md)
 - [Convolution contract, coverage, and replay](../../conv_reference/docs/conv-test-reference.md)
 - [Methodology and extension strategy](gpu-ci-pinned-rocke-test-reference-plan.md)
@@ -89,16 +91,61 @@ supported; removing it would be a separate policy and code change.
 | Term | Meaning |
 |---|---|
 | Operation | A `library/tests/<operation>_reference/` package, such as `conv` or `sdpa`, with its numerical contract, adapters, and `run_<operation>_reference.py` command line |
-| Adapter | `<operation>_reference/architectures/<arch>/__init__.py`. It declares the architecture's cases and prepares and launches the current kernel through the production dispatch and launch path |
-| Cohort, enrolled case | An architecture is enrolled when its operation's `architectures/registry.json` lists it. Its cohort is the adapter's `CASES`, and each is an enrolled case. Verification requires a bundle to record exactly the cohort, matching each case by its complete case contract |
+| Variant | One kernel family's pinned reference on one processor, such as SDPA's `dense` and `wmma` or convolution's `implicit_gemm_fwd`. It is the directory `<operation>_reference/architectures/<arch>/<variant>/`, named for the family module `<operation>_reference/implementations/<variant>.py`, and has its own cohort, baseline revision, lock, archive, and DVC pointer. A processor can enroll several. A name matches `^[a-z][a-z0-9_]*$`, does not start with `gfx`, and stays fixed once published. The `status` command lists every enrolled variant. On the command line, `--variant` selects one and defaults to an architecture's only variant; `--rocke-reference-variant` restricts pytest to one |
+| Adapter | `<operation>_reference/architectures/<arch>/<variant>/__init__.py`. It declares the variant's cases and prepares and launches the current kernel through the production dispatch and launch path. The processor package, `<arch>/__init__.py`, provides only `NAME`, which replay reads without importing an adapter |
+| Cohort, enrolled case | An architecture is enrolled, with each of its variants, when its operation's `architectures/registry.json` lists it. A variant's cohort is its adapter's `CASES`, and each is an enrolled case. Verification requires a bundle to record exactly the cohort, matching each case by its complete case contract |
+| Cohort digest | `cohort_sha256`, a SHA-256 over each case's contract, input digests, and tolerance, independent of case order. Qualification writes it to the lock, configuration checks it against the manifest that the lock pins, and host tests check it against the adapter's `CASES` without bundle data. `cases` and `status` name the variants with equal digests as sharing a cohort. Only variants whose adapters take `CASES` from one tuple, today the SDPA `wmma` adapters, change together, so an edit to that tuple needs each of them requalified; equal digests from separate tuples only show that the cases are currently identical |
 | Independent reference | The operation's offline oracle, `independent_reference` in `contract.py`; both operations use float64 NumPy. Only qualification computes it, optionally cross-checked with Torch |
 | Baseline revision | The committed revision whose production kernels a bundle freezes. Qualification snapshots its sources, and the lock records it as `baseline_revision` |
 | Qualification | The offline GPU run, `qualify`, that executes the baseline revision's kernels for every enrolled case, requires bit-identical repeated outputs, bounds their error against the independent reference, and writes a candidate bundle with its `qualification-lock.json`. It is valid only on the processor it ran on |
 | Manifest | A bundle's `manifest.json`. It records the baseline revision, payload file digests, and for each case the case contract, input and output digests, budget and comparison limit, kernel and launch metadata, and device target. Other guides call a processor's qualified manifest its certificate |
-| Baseline lock | `<operation>_reference/architectures/<arch>/baseline_lock.json`, the reviewed copy of a candidate's `qualification-lock.json`. It pins the schema, baseline revision, manifest digest, and `cohort_sha256`, a digest of each qualified case's contract, input digests, and tolerance; a bundle whose manifest differs is rejected, and host tests fail when the adapter's `CASES` no longer have that digest |
-| Bundle, archive, DVC pointer | A bundle is the extracted directory: the manifest and a payload of frozen code objects, runtime, and worker, without tensors. The archive `reference_bundles/<operation>/<arch>.tar.gz` packs it. Git tracks only its DVC pointer, `<arch>.tar.gz.dvc`; `dvc pull` fetches the archive and `artifact.py unpack` extracts and authenticates it |
-| Published pair | An operation and architecture with a committed lock and pointer, listed in [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake). Only published pairs are installed and get a `rocke_<operation>_gpu_<arch>_pytest` CTest |
+| Baseline lock | `<operation>_reference/architectures/<arch>/<variant>/baseline_lock.json`, the reviewed copy of a candidate's `qualification-lock.json`. It pins the schema, baseline revision, manifest digest, and cohort digest; a bundle whose manifest differs is rejected, and host tests fail when the adapter's `CASES` no longer have that digest |
+| Bundle, archive, DVC pointer | A bundle is the extracted directory: the manifest and a payload of frozen code objects, runtime, and worker, without tensors. The archive `reference_bundles/<operation>/<arch>/<variant>.tar.gz` packs it. Git tracks only its DVC pointer, `<variant>.tar.gz.dvc`; `dvc pull` fetches the archive and `artifact.py unpack` extracts and authenticates it, by default into `reference_bundles/<operation>/<arch>/<variant>/` |
+| Published variant | A variant with a committed lock and DVC pointer under an architecture listed in [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake). Reference installation installs every published variant, and `artifact.py published` lists them |
+| Published pair | An operation and architecture listed in `PublishedGpuReferences.cmake`, which reference installation requires to have at least one published variant. Each published pair gets one `rocke_<operation>_gpu_<arch>_pytest` CTest, which runs all of its published variants |
 | Replay | Running the bundle's frozen code object with its frozen runtime. Its output must match the qualified digest before the current kernel's output is compared with it |
 | Frozen and current ABI | The frozen ABI is the signature, launch geometry, and argument bindings that qualification recorded for the baseline code object; replay uses it unchanged. The current ABI is whatever the current kernel's launch path takes, which the adapter supplies. They may differ; see [kernel arguments](#kernel-arguments-and-compatibility) |
 | Tolerance, comparison limit | The tolerance `T` is a case's original error limit against the independent reference. Qualification bounds the baseline's error by `B`, and the comparison limit `C`, rounded strictly below `T-B`, limits the current output's distance from the replayed output. Within `C`, the current output is within `T` of the independent reference; see the [budget derivation](gpu-ci-pinned-rocke-test-reference-plan.md#1-preserve-the-original-accuracy-contract) |
 | Failure controls | The three GPU tests that show the comparison can fail: a perturbed current output must exceed the comparison limit, a perturbed replayed output must fail its qualified digest, and a suppressed launch must leave poisoned output that the worker rejects |
+
+## Migrating from the per-architecture layout
+
+References were once stored per operation and architecture; each now sits one
+level deeper, under its variant. Archives, manifests, and the archive member
+root `<operation>_reference_bundle/` are unchanged; only the paths moved:
+
+| Item | Path, relative to `library/tests/` unless shown |
+|---|---|
+| Baseline lock | `<operation>_reference/architectures/<arch>/<variant>/baseline_lock.json` |
+| DVC pointer and archive | `reference_bundles/<operation>/<arch>/<variant>.tar.gz.dvc` and `.tar.gz` |
+| Extracted source bundle | `reference_bundles/<operation>/<arch>/<variant>/` |
+| Installed bundle, relative to the installed test root | `engines/test_arch_content/rocke/<operation>/<arch>/<variant>/` |
+
+**Checkouts.** Archives fetched to `reference_bundles/<operation>/<arch>.tar.gz`,
+and the `manifest.json`, `qualification-lock.json`, and `payload/` of bundles
+extracted into `reference_bundles/<operation>/<arch>/`, are ignored leftovers
+that nothing reads. Delete them, then fetch and extract again as in the
+[quickstart](quickstart.md#i-changed-a-covered-kernel). Install into a fresh
+prefix, since an earlier installation keeps its bundles at the old paths.
+
+**Branches opened before the change.** A lock or DVC pointer that a merge
+restores at its old path fails configuration as a pre-variant file. If the
+branch changed it, move it into its variant, which `status` names, replacing
+the file there; otherwise delete it. A moved pointer's `path:` line names the
+archive beside it, `<variant>.tar.gz`. Adapters moved too: `<arch>/__init__.py`
+is now the processor package, which holds only `NAME`, so a branch's edit of
+the old adapter there, such as to `CASES`, shows up as a conflict in that file
+rather than following the move. Keep the processor package and port the edit
+into the variant's adapter, `<arch>/<variant>/__init__.py`.
+
+**External tools.** The `set(ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES ...)`
+lines in [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
+are unchanged and still list operation and architecture pairs, and the CTest
+names are unchanged. A tool that builds archive, lock, or install paths from
+those lists needs the variant level. Rather than building paths, list the
+published variants with the standard-library `artifact.py`, from the rocKE
+root; `--json` adds each variant's absolute lock, pointer, and archive paths:
+
+```bash
+python library/tests/reference_common/artifact.py published --operation sdpa --json
+```

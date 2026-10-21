@@ -6,8 +6,9 @@ SPDX-License-Identifier: MIT
 # Adding or updating a pinned GPU reference
 
 This is the authoritative authoring and publication workflow for rocKE pinned
-GPU references. Use it when adding coverage, replacing a baseline, or enrolling
-an operation on another architecture. The [SDPA](../../sdpa_reference/docs/sdpa-test-reference.md) and
+GPU references. Use it when adding coverage, replacing a baseline, adding a
+kernel family as a variant, or enrolling an operation on another architecture.
+The [SDPA](../../sdpa_reference/docs/sdpa-test-reference.md) and
 [convolution](../../conv_reference/docs/conv-test-reference.md) guides own their numerical contracts and
 coverage descriptions; they link here for the procedure.
 
@@ -28,7 +29,7 @@ A change that replaces a bundle, as described in the table below, needs:
   then snapshot the merged commit. Pull requests land as squash commits, so a
   feature-branch commit is not in `develop`'s history; once its branch is
   deleted, other checkouts cannot snapshot it again and the requalification
-  check below skips the pair.
+  check below skips the variant.
 - **Write access to the DVC `storage` remote, or a maintainer who has it.**
   Step 5 covers the upload and how to request publication.
 
@@ -37,60 +38,76 @@ A change that replaces a bundle, as described in the table below, needs:
 | Change | Required work |
 |---|---|
 | Change the current kernel or its launch arguments without changing the enrolled cases or numerical contract | Update its caller and any affected test adapter; verify against the existing baseline. Update export bindings before qualifying that revision as a future baseline |
-| Add or change cases on an existing operation/architecture | Update the cohort and coverage checks, qualify the complete resulting cohort, replace that pair's archive, lock, and DVC pointer |
+| Add or change cases on an existing variant | Update the cohort and coverage checks, qualify the complete resulting cohort, replace that variant's archive, lock, and DVC pointer |
 | Replace the frozen baseline implementation | Export the selected committed revision and independently qualify the complete cohort; replace the archive, lock, and pointer |
 | Change the baseline compiler target, such as gfx1201 to gfx12-generic | Recompile from a committed source revision supporting that target, independently qualify, and replace the archive, lock, and pointer |
-| Add an architecture | Implement its adapter, enroll qualification support, qualify on that target, then enroll publication and provider test selection |
-| Add an operation | Define its numerical contract, oracle, adapter, and replay support before following qualification and publication below |
+| Add a kernel family with the operation's contract | Add it as a [variant](#a-variant-or-a-new-operation): its family module and adapters, then qualify and publish its own archive, lock, and pointer on each processor. Existing variants are untouched |
+| Add an architecture | Implement its processor package and variant adapters, enroll qualification support, qualify on that target, then enroll publication and provider test selection |
+| Add an operation, including a kernel family with other math or another input and output model | Define its numerical contract, oracle, adapters, and replay support before following qualification and publication below |
 | Reorganize host tests, documentation, or installation without changing the qualified contract | Validate the affected code; no replacement bundle solely for that reorganization |
 
-Each operation/architecture has its own archive and trusted lock. A coverage
-change cannot be validated using the previous bundle: verification requires the
-manifest's case set and contracts to match the current cohort. Do not append a
-case or edit a budget in a qualified manifest to make verification pass.
-Requalify the complete cohort; the CLI does not incrementally extend bundles.
+Each variant of an operation on an architecture has its own cohort, baseline
+revision, archive, and trusted lock. A coverage change cannot be validated using
+the previous bundle: verification requires the manifest's case set and contracts
+to match the current cohort. Do not append a case or edit a budget in a
+qualified manifest to make verification pass. Requalify the complete cohort; the
+CLI does not incrementally extend bundles.
 
 Before qualifying on a GPU, check what a cohort edit changes. From the rocKE
 root, these commands run without a GPU or Torch:
 
 ```bash
 python library/tests/run_conv_reference.py cases --arch gfx942
-python library/tests/run_conv_reference.py diff --arch gfx942
+PYTHONPATH=platform/python python library/tests/run_conv_reference.py diff --arch gfx942
+PYTHONPATH=platform/python python library/tests/run_conv_reference.py status
 ```
 
-`cases` lists the enrolled case ids with their tolerances and case contracts;
-add `--json` for tools. `diff` authenticates the published bundle's manifest
-against the committed lock, matches cases by contract as verification does, and
-names enrolled cases the bundle does not record, recorded cases that are no
-longer enrolled, and changed tolerances or budgets. It exits with status 1 on
-any difference, and with status 2 and one message when it cannot read or
-authenticate the lock or bundle. It reads the DVC archive, or the extracted
-bundle when no archive is present; pass `--bundle` and `--lock` to check a
-candidate instead. `diff` reads recorded device targets with the rocKE platform
-package: install rocKE or set `PYTHONPATH=platform/python`.
+`cases` lists the enrolled case ids with their tolerances and case contracts,
+grouped by variant, and names the other variants whose cohort is the same; add
+`--json` for tools, which describes one variant's cohort and needs `--variant`
+when the architecture has several. `diff` authenticates the published bundle's
+manifest against the committed lock, matches cases by contract as verification
+does, and names enrolled cases the bundle does not record, recorded cases that
+are no longer enrolled, and changed tolerances or budgets. Without `--variant`,
+`--bundle`, or `--lock`, it compares every published variant of the
+architecture. It exits with status 1 on any difference, and with status 2 when
+it cannot read or authenticate a lock or bundle. It reads the DVC archive, or
+the extracted bundle when no archive is present; pass `--bundle` and `--lock`
+to check a candidate instead. `diff` reads recorded device targets with the
+rocKE platform package: install rocKE or set `PYTHONPATH=platform/python`.
+
+`status` prints one line per enrolled variant of every architecture: whether a
+committed lock publishes it and at which baseline revision, the other variants
+whose cohort is the same, and whether its published bundle matches the
+enrolled cases, differs, is missing, with the `dvc pull` command that fetches
+it, or is unusable. It exits with status 1 when a published variant differs
+and 2 when a lock or bundle is unusable; a missing bundle does not fail.
 
 `library/tests/test_reference_common.py`, which is also installed as
-`rocke_reference_common_pytest`, runs the same comparison for every pair with a
-committed lock. A cohort edit without a replacement bundle therefore fails host
-tests, not only the matching GPU suite. The check skips a pair only when no
-archive, extracted bundle, or installed bundle is present.
+`rocke_reference_common_pytest`, runs the same comparison for every variant
+with a committed lock. A cohort edit without a replacement bundle therefore
+fails host tests, not only the matching GPU suite. The check skips a variant
+only when no archive, extracted bundle, or installed bundle is present.
 
 Each lock also pins `cohort_sha256`, a digest of every qualified case's
 contract, input digests, and tolerance. Qualification writes it to
 `qualification-lock.json`, and configuration checks it against the manifest
 that the lock pins. The same file compares it with each adapter's `CASES`,
 which needs no bundle data, so a cohort edit fails host tests in every tree,
-including CI jobs that have no bundle for that architecture. Editing a cohort
-that several processors share fails for each of them until every one is
-requalified.
+including CI jobs that have no bundle for that architecture. `cases` and
+`status` name the variants whose cohort digests are equal. Editing a tuple of
+`CASES` that several adapters take, as the SDPA `wmma` adapters do, fails for
+each of them until every one is requalified; equal digests from separate
+tuples, as for the convolution adapters, only show that their cases are
+currently identical, and editing one tuple leaves the other locks valid.
 
-The same file also checks that each such pair can still be requalified at its
+The same file also checks that each such variant can still be requalified at its
 locked baseline. Because qualification runs the current adapter with the
 baseline's production sources, the check exports the lock's `baseline_revision`
 from the checkout's git history and prepares every enrolled case with the
 current adapter, without compiling or launching a kernel. If you port an adapter
-to a newer production API, keep the older API working or requalify the pair at
-a newer baseline. The check names each case it cannot prepare, with the error.
+to a newer production API, keep the older API working or requalify the variant
+at a newer baseline. The check names each case it cannot prepare, with the error.
 It skips in installed trees, without git, and when the revision is absent, as in
 a shallow clone.
 
@@ -100,7 +117,7 @@ request with an added key the runner predates. A host stand-in replaces the
 bundle's frozen rocKE runtime, so no GPU is needed. Published runners never
 change, so a harness change must keep sending every request key and case field
 that they read; the check names the case, the request keys, and the runner's
-error. Like the cohort check, it skips a pair only when no bundle data is
+error. Like the cohort check, it skips a variant only when no bundle data is
 present.
 
 ## 1. Choose coverage and implement the contract
@@ -115,29 +132,53 @@ For example, the convolution coverage request from
 motivates output-channel coverage: K=96 exercises a second N tile and its partial tail
 when tile_n=64; an odd K exercises the default epilogue. Check both FP16 and BF16.
 The [convolution guide](../../conv_reference/docs/conv-test-reference.md#coverage-and-execution) records
-the current cohort; its architecture adapter is the source of exact case geometry.
+the current cohort; its variant adapters are the source of exact case geometry.
 Assert the intended dispatch properties in host tests and verify the exported
 kernel metadata during qualification. Different runtime geometries can share a
 kernel binary while still exercising distinct address calculations.
 
-For existing operations, edit
-`library/tests/<operation>_reference/architectures/<arch>/__init__.py` and its
-`CASES`. The gfx1151, gfx1200, and gfx1201 SDPA adapters instead share `CASES`
-from `sdpa_reference/implementations/wmma.py`: editing that cohort changes it
-on every WMMA processor, so each published WMMA pair needs requalification and
-a replacement bundle. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`,
-`prepare`, `launch`, and `exported_kernel`. `CASE_BY_ID` indexes `CASES` with
+For existing variants, edit the adapter
+`library/tests/<operation>_reference/architectures/<arch>/<variant>/__init__.py`
+and its `CASES`. The gfx1151, gfx1200, and gfx1201 SDPA `wmma` adapters instead
+share `CASES` from `sdpa_reference/implementations/wmma.py`: editing that cohort
+changes it on every WMMA processor, so each published WMMA variant needs
+requalification and a replacement bundle, unless the
+[quickstart](quickstart.md#i-want-to-change-a-shared-cohort-on-one-processor)
+first gives the processors that keep their cases a tuple of their own. The
+adapter takes `NAME` from its processor package, `<arch>/__init__.py`, which
+holds nothing else and never imports a variant, because replay imports it to
+read the name. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`, `prepare`,
+`launch`, and `exported_kernel`. `CASE_BY_ID` indexes `CASES` with
 `reference_common.cases.index_cases`, so colliding case ids fail on import. An
 adapter that compiles a family code object also exports `COMPILER_TARGET`, and
 its exported kernel metadata records the same `compiler_target`. It must use the
 production dispatch/launch path and freeze the complete replay ABI. Keep the
 independent oracle independent of production indexing and geometry helpers.
 
+For a new variant, add the kernel family's module
+`<operation>_reference/implementations/<variant>.py` and an adapter directory
+`architectures/<arch>/<variant>/` for each processor that runs it. The registry
+finds a processor's variants as the subdirectories that hold an `__init__.py`;
+`test_enrolled_variants_follow_the_layout_rules` requires each to be named for
+an existing family module, with a name that matches `^[a-z][a-z0-9_]*$` and does
+not start with `gfx`, so it never looks like a processor directory. Treat a
+published name as permanent: new manifests record their variant, and staging and
+verification reject a manifest under another variant's name, so a rename needs
+requalification. If the family's exported kernels record a replay ABI that the
+operation's `worker.py` does not bind yet, extend its `replay_values`; published
+bundles keep their own frozen worker. Some shared tests in
+`test_reference_common.py`, some contract tests, and
+`test_sdpa_torch_reference.py` still assume one variant per architecture: they
+call `resolve_variant(arch)` or `get_adapter(arch)` without a variant. Giving
+an architecture a second variant makes them fail, most with
+`needs a selected reference variant`; in the same change, make them name a
+variant or loop over `variants(arch)`.
+
 For a new architecture, add it to the operation's `architectures/registry.json`
-so offline tools can load the adapter. This enables qualification only; it does
-not enroll installation. Confirm production support on the actual target before
-reusing another architecture's adapter. Never transfer error bounds or output
-digests across architectures.
+so offline tools can load its variant adapters. This enables qualification only;
+it does not enroll installation. Confirm production support on the actual target
+before reusing another architecture's adapter. Never transfer error bounds or
+output digests across architectures.
 
 For a new operation, implement its case model, deterministic quantized inputs,
 independent oracle, fixed comparison metric and budgets, and architecture
@@ -155,7 +196,7 @@ parts:
 | File | Declares |
 |---|---|
 | `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, `Metric`, and an optional `TorchReference` for offline Torch cross-checks; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
-| `worker.py` | `run(request, output)`, which passes a `WorkerOperation` with the adapter's launch call and the frozen replay-argument binding to `reference_common.worker.run_case` |
+| `worker.py` | `run(request, output)`, which passes a `WorkerOperation` with the adapter's launch call and the frozen replay-argument binding to `reference_common.worker.run_case`, with the requested variant's adapter in source mode and only the processor package in replay mode |
 | `test_<operation>_pinned_reference.py` | A `reference_bundle` fixture from `select_bundle` and the tests from `pinned_reference_tests`, with a negative-control perturbation that exceeds the comparison limit in the operation's metric |
 
 Qualification freezes the package's `contract.py`, `worker.py`, `architectures/`,
@@ -184,19 +225,31 @@ python -m pytest library/tests/test_reference_common.py \
   library/tests/test_<operation>_reference_contract.py -q
 ```
 
-After a `CASES` edit, `test_published_bundles_record_the_enrolled_cohorts` is
-expected to fail for the edited pair until step 5 replaces its bundle and lock.
+After a `CASES` edit, these are expected to fail until step 5 replaces each
+edited variant's bundle and lock:
+
+- `test_committed_locks_pin_the_enrolled_cohorts` for each edited variant, and
+  `test_published_bundles_record_the_enrolled_cohorts` for each one whose
+  bundle data is present, with `the enrolled cases differ from`;
+- `test_published_runners_replay_the_current_request` for each edited variant
+  whose bundle data is present, with
+  `does not cover the complete enrolled cohort`;
+- `test_status_reports_this_tree_without_a_gpu_or_torch` and
+  `test_status_says_how_to_provide_missing_bundle_data` for the operation,
+  because `status` exits with status 1 while a published variant differs.
+
 Fix every other failure before qualifying.
 
 ## 2. Prepare reproducible qualification inputs
 
 Commands below use Bash and run from the rocKE root unless stated otherwise.
-Choose one operation and architecture, and an unused working directory outside
-the checkout. Replace the placeholder paths before running:
+Choose one operation, architecture, and variant, and an unused working
+directory outside the checkout. Replace the placeholder paths before running:
 
 ```bash
 REFERENCE_OPERATION=conv                 # any registered operation, such as sdpa
 REFERENCE_ARCH=gfx942
+REFERENCE_VARIANT=implicit_gemm_fwd      # an enrolled variant that status lists
 REFERENCE_WORK='<outside-checkout-work-directory>'
 REFERENCE_REPOSITORY='<rocm-libraries-checkout>'
 REFERENCE_REVISION='<full-committed-baseline-sha>'
@@ -237,22 +290,30 @@ Use a committed source snapshot containing generic WMMA support; the original
 `c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed` baseline predates that support.
 
 Keep the archive, lock, installation directory, and CTest entry keyed by the
-qualified processor (`gfx1200` or `gfx1201`). The artifact splitter recognizes
-those directories. When both are published, a family job can download both but
-runs only the matching processor's suite. Until a processor is published, its
-pinned CTest entry is absent. See [family CI selection](../../sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
-for the skip and failure rules. Do not install the payload under `gfx12-generic`: that name
-does not identify a processor artifact in the existing splitter. Enrollment in
-the qualification registry alone does not publish a processor's suite; add it
-to the CMake publication list only after qualification and archive publication.
+qualified processor (`gfx1200` or `gfx1201`), with the `wmma` variant below it.
+The artifact splitter recognizes those processor directories. When both are
+published, a family job can download both but runs only the matching processor's
+suite. Until a processor is published, its pinned CTest entry is absent. See
+[family CI selection](../../sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
+for the skip and failure rules. Do not install the payload under
+`gfx12-generic`: that name does not identify a processor artifact in the
+existing splitter. Enrollment in the qualification registry alone does not
+publish a processor's suite; add it to the CMake publication list only after
+qualification and archive publication.
 
 ## 3. Qualify against independent references
 
 ```bash
 python "library/tests/run_${REFERENCE_OPERATION}_reference.py" qualify \
-  --arch "$REFERENCE_ARCH" --baseline "$REFERENCE_WORK/baseline" \
-  --output "$REFERENCE_WORK/bundle" --repetitions 3
+  --arch "$REFERENCE_ARCH" --variant "$REFERENCE_VARIANT" \
+  --baseline "$REFERENCE_WORK/baseline" --output "$REFERENCE_WORK/bundle" --repetitions 3
 ```
+
+`--variant` defaults to the architecture's only variant, and qualification
+prints the variant it qualifies. The manifest records it as `"variant"`;
+staging, `verify`, and `diff` reject a manifest that names another variant than
+the selected one. Manifests qualified before variants record none and are
+identified by the lock that authenticates them.
 
 Qualification executes the baseline repeatedly, checks deterministic output
 identities, and computes independent reference answers and conservative error
@@ -293,7 +354,7 @@ promoting the candidate:
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
 python "library/tests/run_${REFERENCE_OPERATION}_reference.py" verify \
-  --arch "$REFERENCE_ARCH" --bundle "$REFERENCE_WORK/bundle" \
+  --arch "$REFERENCE_ARCH" --variant "$REFERENCE_VARIANT" --bundle "$REFERENCE_WORK/bundle" \
   --lock "$REFERENCE_WORK/bundle/qualification-lock.json" --current-root .
 python -m pytest library/tests/test_reference_common.py \
   "library/tests/test_${REFERENCE_OPERATION}_reference_contract.py" -q
@@ -315,6 +376,7 @@ For the GPU pytest suite, pass the candidate bundle and lock explicitly:
 python -m pytest "library/tests/test_${REFERENCE_OPERATION}_pinned_reference.py" \
   --rocke-reference-operation "$REFERENCE_OPERATION" \
   --rocke-reference-arch "$REFERENCE_ARCH" \
+  --rocke-reference-variant "$REFERENCE_VARIANT" \
   --rocke-reference-bundle "$REFERENCE_WORK/bundle" \
   --rocke-reference-lock "$REFERENCE_WORK/bundle/qualification-lock.json" -v -rs
 ```
@@ -322,9 +384,12 @@ python -m pytest "library/tests/test_${REFERENCE_OPERATION}_pinned_reference.py"
 Explicit operation/architecture selection makes the matching processor's suite
 required, including failure on a missing bundle. A suite for another processor
 in the job's requested artifact list skips before loading its bundle. Bundle and
-lock overrides require that selection; a lock
-override also requires a bundle path. Without a lock override, verification uses
-the committed lock. Without either path override, tests use the standard bundle
+lock overrides require that selection; a lock override also requires a bundle
+path. An override replaces one variant's bundle, so `--rocke-reference-variant`
+is required when the architecture has several; it must name an enrolled variant
+and deselects the others. A variant without a committed lock runs only with a
+candidate bundle and lock. Without a lock override, verification uses the
+committed lock. Without either path override, tests use the standard bundle
 location and committed lock. The selected operation's GPU fixture alone consumes
 these paths. They do not change what CMake installs. Check that numerical cases
 and the changed-current-output, changed-baseline-output, and suppressed-launch
@@ -334,14 +399,15 @@ controls all execute.
 
 After reviewing the qualification evidence, copy the candidate
 `qualification-lock.json` to
-`library/tests/<operation>_reference/architectures/<arch>/baseline_lock.json`.
+`library/tests/<operation>_reference/architectures/<arch>/<variant>/baseline_lock.json`.
 Then pack against that reviewed lock:
 
 ```bash
 python library/tests/reference_common/artifact.py pack \
-  --operation "$REFERENCE_OPERATION" --bundle "$REFERENCE_WORK/bundle" \
-  --lock "library/tests/${REFERENCE_OPERATION}_reference/architectures/$REFERENCE_ARCH/baseline_lock.json" \
-  --archive "library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH.tar.gz"
+  --operation "$REFERENCE_OPERATION" --variant "$REFERENCE_VARIANT" \
+  --bundle "$REFERENCE_WORK/bundle" \
+  --lock "library/tests/${REFERENCE_OPERATION}_reference/architectures/$REFERENCE_ARCH/$REFERENCE_VARIANT/baseline_lock.json" \
+  --archive "library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH/$REFERENCE_VARIANT.tar.gz"
 ```
 
 Re-run `python -m pytest library/tests/test_reference_common.py -q`; it now
@@ -350,13 +416,16 @@ compares the enrolled cohort with the new archive and reviewed lock.
 From the rocm-libraries root, track that one archive:
 
 ```bash
-REFERENCE_DVC="dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH.tar.gz"
+REFERENCE_DVC="dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH/$REFERENCE_VARIANT.tar.gz"
 dvc add "$REFERENCE_DVC"
 ```
 
 `dvc add` may stage metadata automatically in this repository. Commit the
 pointer and lock, not the archive or extracted payload. Committing a replacement
-pointer does not upload its archive.
+pointer does not upload its archive. `reference_bundles/.gitignore` already
+ignores every archive and extracted bundle and is the only ignore file there:
+if `dvc add` writes another `.gitignore`, delete it, because configuration
+fails on one.
 
 Maintainers with write access to the DVC `storage` remote upload archives.
 Without that access, retain the candidate and request publication on the pull
@@ -400,20 +469,35 @@ For a newly published architecture, add it to the operation's
 `ROCKE_PUBLISHED_CONV_ARCHITECTURES`, in
 [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake).
 Every operation package needs a list; a new operation that publishes nothing yet
-sets its list to `""`. Updating coverage on an already published pair needs no
-enrollment change. CMake consumes only standard archive and baseline-lock paths.
+sets its list to `""`. A listed architecture installs every variant that has a
+committed lock, so updating coverage on a published variant or publishing
+another variant on a listed architecture needs no enrollment change.
+`python library/tests/reference_common/artifact.py published` lists the
+resulting published variants, and `--json` adds their lock, pointer, and
+archive paths. CMake consumes only standard archive and baseline-lock paths.
 Missing or corrupt published data, a list without an operation package, and a
 package without a list or `operation.json` fail configuration; they must not
 silently remove coverage.
+
+Every configuration that installs the Python tests, the default, also checks
+how each committed lock is wired, even with
+`ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF`. It fails on a lock without its
+variant's adapter, DVC pointer, or architecture in the publication list; a
+pointer without a lock; an invalid variant name; a lock or pointer at its path
+from before variants; and an ignore file under `reference_bundles/` other than
+the root one. A merge or a partial commit therefore cannot drop a
+qualification silently. The [triage](#triage) table lists these messages.
 
 ## 6. Validate installation and provider selection
 
 This validation can run before committing or merging the replacement, and before
 uploading it to DVC. CMake reads the files in the working checkout: place the
 reviewed candidate lock and packed archive at the standard paths from step 5,
-and update `PublishedGpuReferences.cmake` locally if adding a new published pair.
+and update `PublishedGpuReferences.cmake` locally if publishing a new architecture.
 Then use the normal configure/install path below. CMake does not require a Git
-commit, a DVC pointer, or remote availability to install a local archive.
+commit or remote availability to install a local archive, but each lock needs
+the DVC pointer that `dvc add` writes beside its archive: configuration fails on
+a lock without one.
 
 This exercises the actual installation path without candidate-install overrides.
 DVC publication and an empty-cache download check are still required before
@@ -449,10 +533,12 @@ verify the candidate manifest and lock match the reviewed files, then run the
 on matching hardware with source paths removed from the environment.
 
 The harness and committed locks belong in the generic test artifact. Each
-payload belongs under
-`bin/hip_kernel_provider/engines/test_arch_content/rocke/<operation>/<arch>/` in
-its architecture's test artifact, outside release library payloads. Test the
-assembled generic and matching architecture artifacts when validating packaging.
+variant's payload belongs under
+`bin/hip_kernel_provider/engines/test_arch_content/rocke/<operation>/<arch>/<variant>/`
+in its architecture's test artifact, outside release library payloads. TheRock
+splits these payloads by the first processor-named directory, which is still
+`<arch>`; variant names never start with `gfx`. Test the assembled generic and
+matching architecture artifacts when validating packaging.
 
 ### Processor selection in TheRock jobs
 
@@ -485,26 +571,63 @@ another processor or permit reuse of another processor's certificate.
 
 ### Enroll provider test selection
 
-New published pairs get separate `rocke_<operation>_gpu_<arch>_pytest` CTest
-entries, and a new operation also gets `rocke_<operation>_reference_unit_pytest`.
-The provider's
+Each newly published architecture gets a separate
+`rocke_<operation>_gpu_<arch>_pytest` CTest entry, and a new operation also
+gets `rocke_<operation>_reference_unit_pytest`. The provider's
 [`ROCKE_ENGINE_test_categories_external.yaml`](../../../../../ROCKE_ENGINE_test_categories_external.yaml)
 selects both by pattern for a lowercase operation name and a `gfx` processor, so
 it needs no edit; verify that the real provider selector includes the new
-entries. Adding cases to an existing pair uses its existing entry. Preserve
-explicit architecture selection and check that expected GPU cases did not skip;
-a passing empty selection proves nothing.
+entries. An architecture's entry runs every variant installed for it, with test
+ids `<arch>-<variant>-<case>` and a timeout of five minutes per installed
+variant, so adding cases or another variant to a published architecture uses
+its existing entry. Preserve explicit architecture selection and check that
+expected GPU cases did not skip; a passing empty selection proves nothing.
+When an architecture is selected but publishes no variant, the suite fails
+rather than passing empty.
 
 Update the operation's coverage description, and add a new operation's CTest
 entries to the
 [test inventory](../../../../platform/tests/README.md#installed-pinned-reference-suites).
-The inventory points to code for cases and published pairs, so a new case or
-architecture needs no edit there. Review case changes, pointer, lock, and
-qualification evidence together. Report host cases, GPU comparisons, negative
-controls, and skips separately. The bundle and matching source cohort must be
-available together when CI runs. Keep this guide as the single procedure;
-operation guides should explain their contracts and link here rather than
-reproduce these steps.
+The inventory points to code for cases, variants, and published pairs, so a new
+case, variant, or architecture needs no edit there. Review case changes,
+pointer, lock, and qualification evidence together. Report host cases, GPU
+comparisons, negative controls, and skips separately. The bundle and matching
+source cohort must be available together when CI runs. Keep this guide as the
+single procedure; operation guides should explain their contracts and link here
+rather than reproduce these steps.
+
+## Variants and concurrent changes
+
+A variant is one kernel family's reference on one processor, with its own
+cohort, baseline, lock, and archive; see the [glossary](README.md#glossary).
+
+### A variant or a new operation
+
+A new kernel family that computes the same math with the same inputs and
+outputs as an existing operation, using that operation's `Case`, independent
+reference, input generator, and manifest operation id, is a new **variant** of
+that operation. A family with different math or a different input and output
+model, such as convolution backward-data or backward-weight, or attention
+decode, paged KV, or backward, is a new **operation** package, such as
+`conv_bwd_reference`, with its own variants. This keeps each operation's
+contract single-purpose, and it keeps independent kernel pull requests in
+disjoint files. Tuning candidates, dtypes, and compiler targets within one
+family are cases or adapter attributes, such as `COMPILER_TARGET`, not
+variants.
+
+### What concurrent pull requests share
+
+Each variant's adapter, family module, lock, and DVC pointer are its own files,
+and the one ignore file already covers its archive, so most reference changes
+do not overlap. These still do:
+
+| Pull requests | What overlaps | Resolution |
+|---|---|---|
+| Two on different variants | Disjoint files, unless a host test or document lists the variants explicitly. Today a pull request that gives an architecture a second variant also edits `test_reference_common.py` and the operation's other host tests, such as its contract tests, until the tests that assume one variant per architecture are parametrized by variant | Merge in either order; where both edited those tests, keep both updates. Prefer tests parametrized over the enrolled variants and docs that point to `cases` and `status` |
+| Two on the same variant | Its lock and DVC pointer conflict, as intended | Rebase onto the one merged first, keep the union of both cohorts, and requalify. Configuration and host tests reject a lock, pointer, or `CASES` taken from different qualifications; review must check that neither pull request's cases were dropped |
+| One editing the shared WMMA cohort | Every published WMMA variant's lock, whose cohort digest no longer matches | Requalify each, or first [give a processor its own tuple](quickstart.md#i-want-to-change-a-shared-cohort-on-one-processor) to decouple it |
+| One adding an architecture | That operation's `architectures/registry.json` and its `set(ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES ...)` line | Rebase and keep both entries |
+| One changing an operation's `contract.py` or `reference_common` | Every variant of the operation, or of every operation, without a textual conflict | Run the host checks after merging; a change to case fields, inputs, or tolerances needs each affected variant requalified |
 
 ## Triage
 
@@ -521,12 +644,17 @@ rows for the kernel author implicate a kernel change.
 | `reference qualification failure` | The frozen baseline's output no longer matches its qualified digest: the GPU driver, ROCm runtime, or firmware differs from the qualified environment. The current kernel did not run | GPU environment owner, not the kernel author | Rerun to confirm, then compare the environment with the qualified one. Do not change the kernel or a tolerance; an environment that is meant to change the output needs a replacement baseline qualified in it |
 | `frozen baseline (replay) worker failed` | This environment cannot run the frozen runtime and code object, such as through its GPU driver, ROCm runtime, or device visibility | GPU environment owner | Read the worker log and compare the environment with the qualified one |
 | `differs from the qualified target`, `used different target features` | The GPU's target features, such as xnack or sramecc, differ from the qualified GPU's or between the two workers | GPU environment owner | Run on a GPU configured like the qualified one, or qualify a bundle for this target |
-| `reference bundle is missing`, `no extracted`, `does not match the pinned lock`, `has no manifest.json`, `missing, modified, or extra files`, `cannot be read`, `baseline identity mismatch`, `targets a different architecture`, `wrong reference operation` | The bundle was not fetched or extracted, is stale (extracted from an earlier archive, partly extracted, or modified), or belongs to another pair | Whoever runs the test | Run the `dvc pull` and `artifact.py unpack` commands the message prints, deleting a stale directory first, or pass the matching bundle and lock. Reinstall an installed tree from one build |
-| `reference archive missing`, `reference staging failed`, `No qualified ... baseline lock`, `has no publication list` during CMake configuration | A published archive was not fetched or does not match its lock, or the publication lists, locks, and operation packages disagree | Whoever configures the build, or the author of the publication change | Fetch every published archive before configuring ([step 6](#6-validate-installation-and-provider-selection)). Publish a pair only with its lock, and give each operation package a list and an `operation.json` |
+| `reference bundle is missing`, `no extracted`, `does not match the pinned lock`, `has no manifest.json`, `missing, modified, or extra files`, `cannot be read`, `baseline identity mismatch`, `targets a different architecture`, `wrong reference operation` | The bundle was not fetched or extracted, is stale (extracted from an earlier archive, partly extracted, or modified), or belongs to another architecture or variant | Whoever runs the test | Run the `dvc pull` and `artifact.py unpack` commands the message prints, deleting a stale directory first, or pass the matching bundle and lock. Reinstall an installed tree from one build |
+| `reference archive missing`, `reference staging failed`, `No qualified ... baseline lock`, `has no publication list` during CMake configuration | A published archive was not fetched or does not match its lock, or the publication lists, locks, and operation packages disagree | Whoever configures the build, or the author of the publication change | Fetch every published archive before configuring ([step 6](#6-validate-installation-and-provider-selection)). List an architecture only with a published variant, and give each operation package a list and an `operation.json` |
+| `is a pre-variant baseline lock`, `is a pre-variant DVC pointer` during CMake configuration | A lock or pointer sits at its path from before variants, such as after merging a branch opened earlier | Author of the merge | If the branch changed the file, move it into its variant as the message says, replacing the file there; otherwise delete it. See the [migration note](README.md#migrating-from-the-per-architecture-layout) |
+| `has no adapter`, `has no DVC pointer`, `tracks an archive that no lock publishes`, `does not list`, `publishes the invalid variant name`, `is the only ignore file` during CMake configuration | A variant's lock, adapter, pointer, and publication entry were not committed together, its name breaks the naming rule, or `dvc add` wrote a nested `.gitignore` | Author of the publication change | Commit the variant's lock, pointer, and adapter together and list its architecture, or remove the partial files; delete the nested ignore file |
+| `needs a selected reference variant`, `reference variant is not enrolled` | The architecture has several variants and none was selected, or the name is not one of them. In a host test, the test assumes one variant per architecture | Whoever runs the command, or the author who added the variant | Pass `--variant` to the command line or `--rocke-reference-variant` to pytest, with a variant the message lists. Make such a host test name a variant or loop over `variants(arch)` |
+| `wrong reference variant`, `bundle variant` | The bundle was qualified for another variant than its lock or selection | Whoever passed the bundle, or the author of the lock change | Pass the variant's own bundle with the lock from its qualification; never move a lock or archive between variants |
+| `reference is unpublished`, `reference variant is published` | An enrolled variant without a committed lock was selected, or the selected architecture publishes no variant | Whoever runs the test | Pass a qualified candidate bundle and its `qualification-lock.json`, or select a published variant |
 | `does not cover the complete enrolled cohort`, `the enrolled cases differ from`, `tolerance or budget changed`, `different compiler target` | The adapter's `CASES`, a shared cohort, the operation's `Case` fields, or the adapter's `COMPILER_TARGET` changed without a replacement bundle | Author of that change | Revert an unintended change. Otherwise [requalify the complete cohort](#decide-what-must-change) and publish its archive, lock, and DVC pointer. `diff` lists every difference |
 | `pins a cohort that its manifest does not record` | The lock's fields come from different qualifications, such as after a merge, or its `cohort_sha256` was edited to follow a cohort change that was not requalified | Author of the lock change | Restore the complete `qualification-lock.json` written with the published bundle. A cohort change needs a complete requalification |
-| `the current adapter cannot prepare`, `outside the sources of locked baseline` | An adapter update for a newer production API dropped the API of the pair's locked baseline revision, or a new case needs newer kernel support | Author of the adapter or case change | Keep the older API working in the adapter, or requalify the pair at a newer baseline revision |
-| `input digest mismatch` | The input generator or the NumPy implementation differs from qualification | Author of the contract change | Restore the generator; an intended change needs requalification of every pair of the operation |
+| `the current adapter cannot prepare`, `outside the sources of locked baseline` | An adapter update for a newer production API dropped the API of the variant's locked baseline revision, or a new case needs newer kernel support | Author of the adapter or case change | Keep the older API working in the adapter, or requalify the variant at a newer baseline revision |
+| `input digest mismatch` | The input generator or the NumPy implementation differs from qualification | Author of the contract change | Restore the generator; an intended change needs requalification of every variant of the operation |
 | `GPU unavailable`, `GPU is not available` | An explicitly selected suite found no GPU, or a GPU outside `AMDGPU_TARGETS` | CI job configuration | Run on the selected processor; see [processor selection](#processor-selection-in-therock-jobs) |
 | `baseline snapshot (qualification) worker failed`, `is not deterministic`, `leaves no comparison budget` | During qualification: the adapter does not support the snapshot's API, or the baseline kernel fails, is not deterministic, or exceeds the tolerance | Whoever qualifies | Select another committed baseline revision or extend the adapter. Never raise a tolerance to qualify |
 
