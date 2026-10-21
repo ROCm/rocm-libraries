@@ -20,6 +20,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -70,7 +71,9 @@
  * rather than read -- the loader has no comment-stripping parser. Every descriptor carries
  * a required `version`, gated per type (FILE_TYPES below) by RFC 0017 §4: accept iff the
  * major matches and the minor is no newer. An inline kernel gates against the UKD row; its
- * pack's own version gates the pack.
+ * pack's own version gates the pack. A UKD that carries `sources` -- the launches of a
+ * multi-launch kernel, RFC 0017 §15.1 -- must declare UKD 1.1. The descriptor only lists
+ * them: launch order belongs to the native handler.
  *
  * A KDP names its kernels either inline or by id: an entry of `kernelDescriptors` is an
  * object (the kernel itself) or a bare UUID string naming a `.ukd.json`. The two are
@@ -314,9 +317,12 @@ struct DescriptorVersion
 
 /// The UKD version this build reads. Named here as well as in the UKD row, which reads
 /// these, because an inline kernel gates against them from above where FILE_TYPES is
-/// assembled.
+/// assembled. 1.1 added `sources`: a 1.0 reader skips such a file at the version gate, and
+/// parseKernelDescriptor() refuses the key under a document that still declares 1.0.
 inline constexpr int UKD_VERSION_MAJOR = 1;
-inline constexpr int UKD_VERSION_MINOR = 0;
+inline constexpr int UKD_VERSION_MINOR = 1;
+/// The first UKD minor that may carry `sources`.
+inline constexpr int UKD_SOURCES_MINOR = 1;
 
 /// Parses `<major>.<minor>` as two separate integers, not a decimal fraction: RFC 0020
 /// §11.1 compares them as integers, so `1.10` is newer than `1.9` -- reading the field as
@@ -1208,29 +1214,117 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     return source;
 }
 
+/// A launch name is a lowercase identifier, `^[a-z][a-z0-9_]*$`: the rule
+/// `rocke.helpers.KernelModule` enforces on the producing side for a role. It names a
+/// launch in a diagnostic and in a native pack's lookup, never a path or a symbol.
+inline bool isLaunchName(std::string_view name)
+{
+    const auto isLower = [](unsigned char c) { return c >= 'a' && c <= 'z'; };
+    const auto isDigit = [](unsigned char c) { return c >= '0' && c <= '9'; };
+    return !name.empty() && isLower(static_cast<unsigned char>(name.front()))
+           && std::all_of(name.begin(), name.end(), [&](unsigned char c) {
+                  return isLower(c) || isDigit(c) || c == '_';
+              });
+}
+
+/// The `sources` map of a multi-launch UKD: at least two entries, each a launch name
+/// mapped to a complete `kpack` kernel source. One entry says what `kernel_source` says, so
+/// it is refused rather than accepted as a second spelling of one fact. Two entries naming
+/// the same (library, toc_key, symbol) are refused too: one kernel would answer for two
+/// launches. Entries that share a library and toc_key but differ in symbol are the normal
+/// case -- one module, several kernels.
+///
+/// A repeated key is not detected here: the DOM keeps the last value, as it does for every
+/// other descriptor object, and the packer never emits one.
+inline std::map<std::string, KernelSource> parseKernelSources(const nlohmann::json& root,
+                                                              const std::string& where)
+{
+    requireObject(root, where);
+    if(root.size() < 2)
+    {
+        fail("key 'sources' in " + where + " must hold at least two launches, not "
+             + std::to_string(root.size()) + "; a single launch is spelled 'kernel_source'");
+    }
+
+    std::map<std::string, KernelSource> sources;
+    std::map<std::tuple<std::string, std::string, std::string>, std::string> launchOf;
+    for(const auto& item : root.items())
+    {
+        const std::string& name = item.key();
+        if(!isLaunchName(name))
+        {
+            fail("launch name '" + name + "' in " + where
+                 + " must be a lowercase identifier matching ^[a-z][a-z0-9_]*$");
+        }
+        const std::string entryWhere = where + " launch '" + name + "'";
+        auto source = parseKernelSource(item.value(), entryWhere);
+        if(source.kind != KernelSourceKind::KPACK)
+        {
+            fail(entryWhere
+                 + " must be a 'kpack' kernel source: the launches of one kernel are "
+                   "exported by a packed code object");
+        }
+        const auto [existing, inserted]
+            = launchOf.emplace(std::make_tuple(source.library, source.tocKey, source.symbol), name);
+        if(!inserted)
+        {
+            fail(entryWhere + " names the same kernel (library '" + source.library + "', toc_key '"
+                 + source.tocKey + "', symbol '" + source.symbol + "') as launch '"
+                 + existing->second + "'");
+        }
+        sources.emplace(name, std::move(source));
+    }
+    return sources;
+}
+
 /// UKD: one launchable kernel, in either spelling -- alone in a `.ukd.json`, or inline in
 /// a KDP's `kernelDescriptors`. One function because there is one schema; @p entryLabel is
 /// the caller's locator. A file exists so a kernel can ship separately from the pack that
 /// binds it, or be shared by packs of different engines.
 ///
 /// Callers gate `version` before calling this: the FILE_TYPES walk for a file,
-/// parseInlineKernelDescriptor() for an entry. The key is accepted here but not checked,
-/// so a new caller must gate too or it reads a descriptor this build may not understand.
+/// parseInlineKernelDescriptor() for an entry. A new caller must gate too, or it reads a
+/// descriptor this build may not understand. The one rule checked here is the one that
+/// depends on the document's own version: `sources` needs UKD 1.1.
 /// `arch` is optional in both spellings: the devices this one kernel runs on, which must
 /// stay within what its pack claims. Absent, it inherits the pack.
 inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
                                               const std::string& entryLabel)
 {
-    requireKnownKeys(root,
-                     {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"},
-                     entryLabel);
+    requireKnownKeys(
+        root,
+        {"version", "id", "name", "kernel_source", "sources", "metadata", "priority", "arch"},
+        entryLabel);
 
     KernelDescriptor kernel;
     kernel.id = requireId(root, "id", entryLabel);
     kernel.name = requireString(root, "name", entryLabel);
     const std::string where = "kernel '" + kernel.name + "'";
-    kernel.source
-        = parseKernelSource(requireKey(root, "kernel_source", where), where + " kernel_source");
+    const bool hasSource = root.contains("kernel_source");
+    const bool hasSources = root.contains("sources");
+    if(hasSource == hasSources)
+    {
+        fail(where
+             + " must carry exactly one of 'kernel_source' (one launch) or 'sources' "
+               "(several launches), "
+             + std::string(hasSource ? "not both" : "and carries neither"));
+    }
+    if(hasSources)
+    {
+        const auto version
+            = parseDescriptorVersion(requireString(root, "version", entryLabel), entryLabel);
+        if(version.minor < UKD_SOURCES_MINOR)
+        {
+            fail(where + " carries 'sources', which needs UKD " + std::to_string(UKD_VERSION_MAJOR)
+                 + "." + std::to_string(UKD_SOURCES_MINOR) + "; its version says "
+                 + std::to_string(version.major) + "." + std::to_string(version.minor));
+        }
+        kernel.sources = parseKernelSources(root.at("sources"), where + " sources");
+    }
+    else
+    {
+        kernel.source = parseKernelSource(root.at("kernel_source"), where + " kernel_source");
+    }
 
     if(const auto it = root.find("metadata"); it != root.end())
     {

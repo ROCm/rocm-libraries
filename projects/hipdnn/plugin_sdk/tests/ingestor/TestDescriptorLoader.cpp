@@ -1856,6 +1856,29 @@ struct ViolationCase
     std::function<void(Documents&)> corrupt;
 };
 
+nlohmann::json launchSource(const std::string& symbol)
+{
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+            {"toc_key", "multi/module"},
+            {"symbol", symbol},
+            {"sha256", std::string(64, 'a')},
+            {"signature",
+             nlohmann::json::array({{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}}})}};
+}
+
+/// Rewrites the first inline kernel of the pack from `kernel_source` to a valid two-launch
+/// `sources` map under UKD 1.1, so a row below breaks exactly one thing about it.
+nlohmann::json& spellAsMultiLaunch(Documents& documents)
+{
+    auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors")[0];
+    kernel.erase("kernel_source");
+    kernel["version"] = "1.1";
+    kernel["sources"]
+        = {{"decode", launchSource("decode_kernel")}, {"merge", launchSource("merge_kernel")}};
+    return kernel;
+}
+
 class TestDescriptorLoaderViolation : public ::testing::TestWithParam<ViolationCase>
 {
 };
@@ -2005,6 +2028,57 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".kdp.json")
                               .at("kernelDescriptors")[0]["kernel_source"]["kind"]
                               = "hsaco_file";
+                      }},
+        // RFC 0017 §15.1: a kernel is one launch (`kernel_source`) or several (`sources`),
+        // never both and never neither, and `sources` is a UKD 1.1 key.
+        ViolationCase{"sources_beside_kernel_source",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents)["kernel_source"] = launchSource("single");
+                      }},
+        ViolationCase{"neither_kernel_source_nor_sources",
+                      [](Documents& documents) { spellAsMultiLaunch(documents).erase("sources"); }},
+        // One entry says what `kernel_source` says: two spellings of one fact drift.
+        ViolationCase{"sources_holds_a_single_launch",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources").erase("merge");
+                      }},
+        ViolationCase{"sources_is_not_an_object",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents)["sources"]
+                              = nlohmann::json::array({launchSource("a"), launchSource("b")});
+                      }},
+        ViolationCase{"launch_name_is_uppercase",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["Merge"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_starts_with_a_digit",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["2nd"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{
+            "sources_under_version_1_0",
+            [](Documents& documents) { spellAsMultiLaunch(documents)["version"] = "1.0"; }},
+        // One kernel answering for two launches is the same fact spelled twice.
+        ViolationCase{"two_launches_name_one_kernel",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["merge"]["symbol"] = sources.at("decode").at("symbol");
+                      }},
+        ViolationCase{"launch_is_an_embedded_source",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources")["merge"]
+                              = {{"kind", "embedded_source"},
+                                 {"source_file", "Kernel.cpp"},
+                                 {"entry_point", "Entry"}};
+                      }},
+        ViolationCase{"launch_signature_is_missing",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources").at("merge").erase(
+                              "signature");
                       }},
         ViolationCase{"arch_has_duplicate_entries",
                       [](Documents& documents) {
@@ -4233,7 +4307,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
     auto documents = makeSetDocuments('1', "test:valid");
-    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.1";
+    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.2";
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -4242,7 +4316,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     const auto& kernels = sets.front().packs.front().kernels;
     ASSERT_EQ(kernels.size(), 2u);
-    // Which two, not merely how many: the gate has to drop the entry that declared 1.1.
+    // Which two, not merely how many: the gate has to drop the entry that declared 1.2.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
@@ -4251,7 +4325,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
 }
 
 /// The gate runs before the body, so a skewed entry is not also judged for what its
-/// unreadable fields say. This one declares both 1.1 and an arch reaching past its pack:
+/// unreadable fields say. This one declares both 1.2 and an arch reaching past its pack:
 /// it is skipped for the version, and the arch violation -- which would otherwise fail
 /// the whole file -- is never reached. The file path orders it the same way, gating in
 /// the walk before any parser sees the document.
@@ -4264,7 +4338,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["arch"] = nlohmann::json::array({"gfx942"});
     auto& skewed = pack.at("kernelDescriptors").front();
-    skewed["version"] = "1.1";
+    skewed["version"] = "1.2";
     skewed["arch"] = nlohmann::json::array({"gfx90a"});
     writeDocuments(dir.path(), documents);
 
@@ -4275,7 +4349,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.1"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.2"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -4316,7 +4390,7 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
 
     auto broken = makeSetDocuments('2', "test:broken");
     referenceLastKernel(broken);
-    documentOfType(broken, ".ukd.json")["version"] = "1.1";
+    documentOfType(broken, ".ukd.json")["version"] = "1.2";
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -4369,7 +4443,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["x-pack-note"] = "header";
     auto& kernels = pack.at("kernelDescriptors");
-    kernels[0]["version"] = "1.1";
+    kernels[0]["version"] = "1.2";
     kernels[1]["x-kernel-note"] = "kernel";
     writeDocuments(dir.path(), documents);
     overwritePack(dir.path(), documents, GetParam().spell(pack));
@@ -4381,7 +4455,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
     const auto& param = GetParam();
     for(const std::string warning :
-        {"extension key 'x-pack-note'", "declares version 1.1", "extension key 'x-kernel-note'"})
+        {"extension key 'x-pack-note'", "declares version 1.2", "extension key 'x-kernel-note'"})
     {
         const auto count = countLogsContaining(recorder, warning);
         if(param.exactly)
@@ -4522,6 +4596,18 @@ void expectSameKernel(const KernelDescriptor& actual, const KernelDescriptor& ex
         EXPECT_EQ(actual.source.signature[i].size, expected.source.signature[i].size);
         EXPECT_EQ(actual.source.signature[i].offset, expected.source.signature[i].offset);
         EXPECT_EQ(actual.source.signature[i].name, expected.source.signature[i].name);
+    }
+    // Launches by name: a reading that dropped or re-bound one would otherwise load equal.
+    ASSERT_EQ(actual.sources.size(), expected.sources.size());
+    for(const auto& [launch, source] : expected.sources)
+    {
+        const auto found = actual.sources.find(launch);
+        ASSERT_NE(found, actual.sources.end()) << "launch '" << launch << "'";
+        EXPECT_EQ(found->second.library, source.library);
+        EXPECT_EQ(found->second.tocKey, source.tocKey);
+        EXPECT_EQ(found->second.symbol, source.symbol);
+        EXPECT_EQ(found->second.sha256, source.sha256);
+        EXPECT_EQ(found->second.signature.size(), source.signature.size());
     }
     EXPECT_TRUE(actual.metadata == expected.metadata);
     EXPECT_EQ(actual.priority, expected.priority);
@@ -4768,6 +4854,25 @@ std::vector<OracleCase> oracleCases()
              kernel["provenance"] = {{"tool", "hkp_pack"}, {"inputs", {1, 2.5, nullptr, true}}};
              return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
          }},
+        {"multi_launch_kernel",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel.erase("kernel_source");
+             kernel["version"] = "1.1";
+             kernel["sources"] = {{"decode", launchSource("oracle_decode")},
+                                  {"merge", launchSource("oracle_merge")}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
+        {"multi_launch_kernel_under_version_1_0",
+         rejected,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel.erase("kernel_source");
+             kernel["sources"] = {{"decode", launchSource("oracle_decode")},
+                                  {"merge", launchSource("oracle_merge")}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
         {"kernel_arch_within_pack",
          loads,
          [] {
@@ -4780,7 +4885,7 @@ std::vector<OracleCase> oracleCases()
          loads,
          [] {
              auto skewed = oracleKernel(2);
-             skewed["version"] = "1.1";
+             skewed["version"] = "1.2";
              return oraclePackText(oracleHeader(),
                                    nlohmann::json::array({oracleKernel(1), skewed}));
          }},
@@ -5260,6 +5365,80 @@ TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
     // Each kind fills only its own fields, so a consumer may read them under the tag alone.
     EXPECT_TRUE(source.sourceFile.empty());
     EXPECT_TRUE(source.entryPoint.empty());
+}
+
+/// The shape the packer emits for a multi-launch kernel: `sources` under UKD 1.1, one
+/// complete kpack source per launch. Both launches live in one module, so they share a
+/// library and a toc_key and differ in symbol -- and `source`, which a multi-launch kernel
+/// does not have, stays default.
+TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelAndCarriesEachLaunchByName)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_launch_kernel"));
+    auto documents = makeSetDocuments('1', "test:multi_launch");
+    spellAsMultiLaunch(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("decode").symbol, "decode_kernel");
+    EXPECT_EQ(kernel.sources.at("merge").symbol, "merge_kernel");
+    EXPECT_EQ(kernel.sources.at("decode").tocKey, kernel.sources.at("merge").tocKey);
+    EXPECT_EQ(kernel.sources.at("merge").sha256, std::string(64, 'a'));
+    EXPECT_EQ(kernel.sources.at("merge").signature.size(), 1u);
+    EXPECT_TRUE(kernel.source.sourceFile.empty());
+    EXPECT_TRUE(kernel.source.symbol.empty());
+}
+
+/// Same shape in a standalone `.ukd.json`, whose version the FILE_TYPES gate reads: UKD 1.1
+/// is within what this build reads, where a 1.0 runtime skips it as a newer minor.
+TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelInAStandaloneUkd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_launch_ukd"));
+    auto documents = makeSetDocuments('1', "test:multi_launch_ukd");
+    auto inlineKernel = spellAsMultiLaunch(documents);
+    documentOfType(documents, ".kdp.json")["kernelDescriptors"]
+        = nlohmann::json::array({inlineKernel["id"]});
+    documents.push_back(TestDocument{".ukd.json", inlineKernel});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.front().sources.size(), 2u);
+}
+
+/// Both spellings of the exactly-one rule are refused with the rule's own message. The
+/// violation rows above only see that the engine was dropped, which a missing `kernel_source`
+/// would also cause by another route, so the message is what tells the rule from its absence.
+TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSources)
+{
+    for(const bool both : {true, false})
+    {
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(both ? "both_source_spellings" : "no_source_spelling"));
+        auto documents = makeSetDocuments('1', "test:one_spelling");
+        auto& kernel = spellAsMultiLaunch(documents);
+        if(both)
+        {
+            kernel["kernel_source"] = launchSource("single");
+        }
+        else
+        {
+            kernel.erase("sources");
+        }
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                              "must carry exactly one of 'kernel_source'"))
+            << (both ? "both: " : "neither: ") << recorder.getRecordedLogsAsString();
+    }
 }
 
 namespace
