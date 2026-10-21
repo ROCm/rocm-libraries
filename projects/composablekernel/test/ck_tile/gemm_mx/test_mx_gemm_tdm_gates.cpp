@@ -9,6 +9,7 @@
  *          is skipped without one.
  */
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -143,6 +144,27 @@ struct TdmMxGemm
         return Kernel::MakeKernelArgs(args);
     }
 };
+
+// A 256-byte aligned address, as hipMalloc returns, standing in for a device pointer: the TDM
+// argument checks only look at its value.
+constexpr std::uintptr_t kDeviceAddress = 0x10000;
+constexpr char kAlignmentReason[] =
+    "requires A/B/E pointers aligned to TDMElementTraits<T>::alignment";
+
+// UniversalGemmKernel::IsTdmArgumentSupported with a valid k_batch and K and the given addresses,
+// with what it logged. It does not query the device, so acceptance is checked on any host.
+template <typename Gemm>
+std::pair<bool, std::string> tdm_pointers_ok(std::uintptr_t a, std::uintptr_t b, std::uintptr_t e)
+{
+    return logged([&] {
+        return Gemm::Kernel::IsTdmArgumentSupported("MX GEMM",
+                                                    1,
+                                                    128,
+                                                    reinterpret_cast<const void*>(a),
+                                                    reinterpret_cast<const void*>(b),
+                                                    reinterpret_cast<const void*>(e));
+    });
+}
 
 // K values of the TDM gtests (1..4 x K_Tile and 512^3), the grouped MX TDM gtests (512 + 128 i) and
 // the dispatcher bridge TDM tests with tile_k 128 (1, 2, 3, 4, 5, 8 x tile_k).
@@ -374,6 +396,27 @@ TEST(MxGemmTdmGates, KernelPassesItsLayouts)
     expect_shape_rejection<Gemm>(
         63, 64, 256, 64, 64, "requires M of a column-major packed A to be a multiple");
     skip_without_gfx125();
+}
+
+TEST(MxGemmTdmGates, KernelPointerAlignment)
+{
+    // 1-byte A and B (FP8, and FP4 packs) take any address; the fp16 E needs an even one.
+    using F8Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8>;
+    using F4Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F4, F4>;
+    for(std::uintptr_t offset : {0, 1, 2, 3})
+    {
+        const std::uintptr_t ab = kDeviceAddress + offset;
+        EXPECT_TRUE(tdm_pointers_ok<F8Gemm>(ab, ab, kDeviceAddress).first) << offset;
+        EXPECT_TRUE(tdm_pointers_ok<F4Gemm>(ab, ab, kDeviceAddress).first) << offset;
+    }
+    EXPECT_TRUE(tdm_pointers_ok<F8Gemm>(kDeviceAddress, kDeviceAddress, kDeviceAddress + 2).first);
+    for(std::uintptr_t offset : {1, 3})
+    {
+        const auto [ok, log] =
+            tdm_pointers_ok<F8Gemm>(kDeviceAddress, kDeviceAddress, kDeviceAddress + offset);
+        EXPECT_FALSE(ok) << offset;
+        EXPECT_NE(log.find(kAlignmentReason), std::string::npos) << log;
+    }
 }
 
 } // namespace
