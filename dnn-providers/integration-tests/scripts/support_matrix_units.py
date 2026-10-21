@@ -32,6 +32,7 @@ copies that share an identity but resolve to different graphs are an error.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -110,7 +111,6 @@ RANK_LAYOUTS = {
 }
 
 TOKEN_SPLIT_RE = re.compile(r"[_\-./]+")
-TEMPLATE_VAR_RE = re.compile(r"^\$\{case\.([A-Za-z0-9_.]+)\}$")
 SCENARIO_TAG_RE = re.compile(r"\[[^\[\]]+\]")
 
 
@@ -205,32 +205,23 @@ def load_sweep_cases(sweep_path: pathlib.Path, errors: list[str] | None):
 # --------------------------------------------------------------------------
 
 
-def lookup_case_value(values: dict, dotted: str):
-    """Resolve a dotted ``${case.a.b}`` path against a sweep case's values."""
-    node = values
-    for part in dotted.split("."):
-        if not isinstance(node, dict) or part not in node:
-            return None
-        node = node[part]
-    return node
+# The functions below transcribe the sweep-case expansion in
+# src/harness/bundle/IntegrationTestBundle.hpp, one function per C++ function,
+# so a case reads here as the graph the harness builds from it. Each raises
+# ``SweepCaseError`` where its C++ counterpart throws: loadIntegrationTestBundle()
+# turns every such throw into INVALID_SWEEP_CASE, and the case never runs.
+#
+# Not transcribed: warnUnusedSweepValues(). It only logs, so it cannot change
+# the graph or whether the case loads.
 
+CASE_PLACEHOLDER_PREFIX = "${case."
 
-def resolve_templates(node, values: dict):
-    """Recursively substitute ``${case.x}`` placeholders from case values.
+# Fields a tensor must take from its own values.tensors[] spec when a
+# placeholder for them sits inside it; a top-level value never stands in.
+PER_TENSOR_FIELDS = frozenset({"dims", "strides", "data_type"})
 
-    An unresolved placeholder collapses to None, matching the "attribute not
-    set" reading used everywhere else in the bundle format.
-    """
-    if isinstance(node, str):
-        match = TEMPLATE_VAR_RE.match(node)
-        if match:
-            return lookup_case_value(values, match.group(1))
-        return node
-    if isinstance(node, dict):
-        return {k: resolve_templates(v, values) for k, v in node.items()}
-    if isinstance(node, list):
-        return [resolve_templates(v, values) for v in node]
-    return node
+# lookup_json_path()'s "not found", distinct from a found JSON null.
+_MISSING = object()
 
 
 class SweepCaseError(ValueError):
@@ -238,26 +229,67 @@ class SweepCaseError(ValueError):
 
 
 def _is_uid(value) -> bool:
-    # JSON true / false are not integers to the harness's nlohmann::json.
+    # nlohmann::json's is_number_integer(): JSON true / false are not integers.
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def apply_case_tensors(graph: dict, values: dict) -> None:
-    """Overlay a sweep case's per-uid tensor specs onto the resolved graph.
+def first_path_token(path: str) -> str:
+    """Mirror firstPathToken(): ``a.b.c`` -> ``a``."""
+    return path.split(".", 1)[0]
 
-    Raises ``SweepCaseError`` where buildCaseTensorMap() throws: a spec
-    without an integer uid, a uid the template does not hold, or a uid given
-    twice. The harness skips such a case, so it never runs.
+
+def lookup_json_path(node, path: str):
+    """Mirror lookupJsonPath(): the value at dotted ``path``, or ``_MISSING``."""
+    current = node
+    start = 0
+    while start < len(path):
+        end = path.find(".", start)
+        key = path[start:] if end == -1 else path[start:end]
+        if not isinstance(current, dict) or key not in current:
+            return _MISSING
+        current = current[key]
+        if end == -1:
+            return current
+        start = end + 1
+    return current
+
+
+def placeholder_field(node) -> str | None:
+    """Mirror placeholderField(): ``path`` if ``node`` is exactly ``${case.path}``.
+
+    Only a whole string is a placeholder; ``"x${case.y}"`` stays a literal.
     """
-    specs = values.get("tensors", [])
+    if (
+        not isinstance(node, str)
+        or len(node) <= len(CASE_PLACEHOLDER_PREFIX) + 1
+        or not node.startswith(CASE_PLACEHOLDER_PREFIX)
+        or not node.endswith("}")
+    ):
+        return None
+    return node[len(CASE_PLACEHOLDER_PREFIX) : -1]
+
+
+def template_tensor_uids(template: dict) -> set[int]:
+    """Mirror collectTemplateTensorUids()."""
+    tensors = template.get("tensors")
+    if not isinstance(tensors, list):
+        return set()
+    uids = set()
+    for tensor in tensors:
+        if not isinstance(tensor, dict) or not _is_uid(tensor.get("uid")):
+            raise SweepCaseError("template tensor missing integer uid")
+        uids.add(tensor["uid"])
+    return uids
+
+
+def case_tensor_map(values: dict, template_uids: set[int]) -> dict[int, dict]:
+    """Mirror buildCaseTensorMap(): a case's values.tensors[] specs by uid."""
+    if "tensors" not in values:
+        return {}
+    specs = values["tensors"]
     if not isinstance(specs, list):
         raise SweepCaseError("values.tensors must be an array")
-    template_uids = {
-        tensor.get("uid")
-        for tensor in graph.get("tensors", []) or []
-        if isinstance(tensor, dict)
-    }
-    by_uid = {}
+    by_uid: dict[int, dict] = {}
     for spec in specs:
         if not isinstance(spec, dict) or not _is_uid(spec.get("uid")):
             raise SweepCaseError("case tensor missing integer uid")
@@ -267,16 +299,81 @@ def apply_case_tensors(graph: dict, values: dict) -> None:
         if uid in by_uid:
             raise SweepCaseError(f"duplicate case tensor uid {uid}")
         by_uid[uid] = spec
+    return by_uid
 
-    for tensor in graph.get("tensors", []) or []:
-        if not isinstance(tensor, dict):
-            continue
-        spec = by_uid.get(tensor.get("uid"))
-        if not spec:
-            continue
-        for key in ("dims", "strides", "data_type"):
-            if key in spec:
-                tensor[key] = spec[key]
+
+def resolve_placeholder(
+    path: str, tensor_uid: int | None, values: dict, case_tensors: dict[int, dict]
+):
+    """Mirror resolvePlaceholder().
+
+    Inside an object with integer uid N, the case's values.tensors[] spec for
+    N is searched first. A ``dims``, ``strides`` or ``data_type`` placeholder
+    must be found there; anything else falls back to the top-level values.
+    """
+    if tensor_uid is not None:
+        spec = case_tensors.get(tensor_uid)
+        if spec is not None:
+            value = lookup_json_path(spec, path)
+            if value is not _MISSING:
+                return copy.deepcopy(value)
+        if first_path_token(path) in PER_TENSOR_FIELDS:
+            raise SweepCaseError(
+                f"missing per-tensor placeholder value "
+                f"'{CASE_PLACEHOLDER_PREFIX}{path}}}' for tensor uid {tensor_uid}"
+            )
+    value = lookup_json_path(values, path)
+    if value is _MISSING:
+        raise SweepCaseError(
+            f"missing placeholder value '{CASE_PLACEHOLDER_PREFIX}{path}}}'"
+        )
+    return copy.deepcopy(value)
+
+
+def expand_template_node(
+    node, tensor_uid: int | None, values: dict, case_tensors: dict[int, dict]
+):
+    """Mirror expandTemplateNode().
+
+    Any object with an integer ``uid`` opens that uid's scope for everything
+    beneath it. A resolved value is used as is, never expanded again.
+    """
+    path = placeholder_field(node)
+    if path is not None:
+        return resolve_placeholder(path, tensor_uid, values, case_tensors)
+    if isinstance(node, list):
+        return [
+            expand_template_node(item, tensor_uid, values, case_tensors)
+            for item in node
+        ]
+    if isinstance(node, dict):
+        if _is_uid(node.get("uid")):
+            tensor_uid = node["uid"]
+        return {
+            key: expand_template_node(value, tensor_uid, values, case_tensors)
+            for key, value in node.items()
+        }
+    return node
+
+
+def expand_template_graph(template: dict, case: dict) -> dict:
+    """Mirror expandTemplateGraph(): the graph a sweep case runs, before patches."""
+    values = case.get("values") if isinstance(case.get("values"), dict) else {}
+    case_tensors = case_tensor_map(values, template_tensor_uids(template))
+    return expand_template_node(template, None, values, case_tensors)
+
+
+def check_sweep_golden(case: dict) -> None:
+    """Mirror resolveSweepGoldenDirectory()'s one throw.
+
+    The directory itself is not needed here, but a malformed ``golden`` costs
+    the case as surely as a malformed graph does.
+    """
+    golden = case.get("golden")
+    if golden is None:
+        return
+    if not isinstance(golden, dict) or not isinstance(golden.get("path"), str):
+        raise SweepCaseError("golden.path is required when golden is present")
 
 
 def apply_tensor_patches(graph: dict, case: dict) -> None:
@@ -721,11 +818,11 @@ def collect_sweep_units(
     units = []
     for case in cases:
         case_id = case["id"]
-        values = case.get("values") if isinstance(case.get("values"), dict) else {}
-
-        graph = resolve_templates(template, values)
+        # The order of loadIntegrationTestBundle(), so the first defect
+        # reported is the one the harness trips on.
         try:
-            apply_case_tensors(graph, values)
+            graph = expand_template_graph(template, case)
+            check_sweep_golden(case)
             apply_tensor_patches(graph, case)
         except SweepCaseError as error:
             report_error(

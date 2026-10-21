@@ -44,6 +44,7 @@ from support_matrix_units import (
     dtypes_of,
     layout_from_name,
     layout_from_strides,
+    placeholder_field,
     shape_tags_of,
     variant_of,
 )
@@ -573,19 +574,19 @@ class TestCollection:
         assert units[0].dtypes == "[io=fp16, compute=fp32]"
         assert units[1].dtypes == "[io=bf16, compute=fp32]"
 
-    def test_unresolved_placeholder_reads_as_unset(self, bundle_root: Path) -> None:
-        template = _graph(io_data_type="${case.missing}")
-        _sweep_bundle(
-            bundle_root,
-            "quick/Conv/Sweep",
-            cases=[{"id": "a_nchw", "values": {}}],
-            template=template,
-            claims={"E": [{"cases": ["a_nchw"], "support": {"gfx942": ["linux"]}}]},
+    def test_per_tensor_spec_fills_that_tensors_placeholders(
+        self, bundle_root: Path
+    ) -> None:
+        template = _graph(
+            tensors=[
+                {
+                    "uid": 1,
+                    "dims": "${case.dims}",
+                    "strides": "${case.strides}",
+                    "data_type": "half",
+                }
+            ]
         )
-        (unit,) = collect_units(bundle_root)
-        assert unit.dtypes == "[io=fp16, compute=fp32]"  # falls back to the tensor
-
-    def test_per_uid_tensor_override(self, bundle_root: Path) -> None:
         _sweep_bundle(
             bundle_root,
             "quick/Conv/Sweep",
@@ -593,20 +594,122 @@ class TestCollection:
                 {
                     "id": "case_a",
                     "values": {
+                        # Inside tensor 1, its own spec wins over these.
+                        "dims": [1, 1, 1, 1],
+                        "strides": [8192, 256, 16, 1],
                         "tensors": [
                             {
                                 "uid": 1,
                                 "dims": [8, 32, 16, 16],
                                 "strides": [8192, 1, 512, 32],
                             }
-                        ]
+                        ],
                     },
                 }
             ],
+            template=template,
             claims={"E": [{"cases": ["case_a"], "support": {"gfx942": ["linux"]}}]},
         )
         (unit,) = collect_units(bundle_root)
-        assert unit.layout == "NHWC"  # from the overridden strides, not the template
+        assert unit.graph["tensors"][0]["dims"] == [8, 32, 16, 16]
+        assert unit.layout == "NHWC"  # from the spec's strides, not the top level
+
+    def test_other_placeholders_in_a_tensor_fall_back_to_the_top_level(
+        self, bundle_root: Path
+    ) -> None:
+        template = _graph(
+            tensors=[{**_tensor(1, [1, 32, 16, 16]), "virtual": "${case.virtual}"}]
+        )
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "case_a", "values": {"virtual": True}}],
+            template=template,
+        )
+        (unit,) = collect_units(bundle_root)
+        assert unit.graph["tensors"][0]["virtual"] is True
+
+    def test_case_tensor_spec_does_not_overwrite_a_literal(
+        self, bundle_root: Path
+    ) -> None:
+        """A spec only feeds placeholders; the harness warns it is unused."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {
+                    "id": "case_a",
+                    "values": {"tensors": [{"uid": 1, "dims": [8, 32, 16, 16]}]},
+                }
+            ],
+        )
+        (unit,) = collect_units(bundle_root)
+        assert unit.graph["tensors"][0]["dims"] == [1, 32, 16, 16]
+
+    def test_placeholder_resolving_to_null_is_kept(self, bundle_root: Path) -> None:
+        template = _graph(
+            tensors=[{**_tensor(1, [1, 32, 16, 16]), "virtual": "${case.virtual}"}]
+        )
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "case_a", "values": {"virtual": None}}],
+            template=template,
+        )
+        errors: list[str] = []
+        (unit,) = collect_units(bundle_root, errors)
+        assert errors == []
+        assert unit.graph["tensors"][0]["virtual"] is None
+
+    def test_any_object_with_a_uid_scopes_its_placeholders(
+        self, bundle_root: Path
+    ) -> None:
+        template = _graph(
+            nodes=[{"type": "ConvAttributes", "x": {"uid": 1, "dims": "${case.dims}"}}]
+        )
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {
+                    "id": "case_a",
+                    "values": {"tensors": [{"uid": 1, "dims": [2, 2]}]},
+                }
+            ],
+            template=template,
+        )
+        (unit,) = collect_units(bundle_root)
+        assert unit.graph["nodes"][0]["x"] == {"uid": 1, "dims": [2, 2]}
+
+    def test_resolved_value_is_not_expanded_again(self, bundle_root: Path) -> None:
+        template = _graph(
+            tensors=[{**_tensor(1, [1, 32, 16, 16]), "name": "${case.name}"}]
+        )
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "case_a", "values": {"name": "${case.other}", "other": "x"}}],
+            template=template,
+        )
+        (unit,) = collect_units(bundle_root)
+        assert unit.graph["tensors"][0]["name"] == "${case.other}"
+
+    @pytest.mark.parametrize(
+        ("value", "field"),
+        [
+            ("${case.dims}", "dims"),
+            ("${case.a.b}", "a.b"),
+            ("${case.a-b c}", "a-b c"),
+            ("${case.x}", "x"),
+            ("${case.}", None),
+            ("${case.x", None),
+            ("x${case.y}", None),
+            ("${case.y} ", None),
+            (7, None),
+        ],
+    )
+    def test_placeholder_is_a_whole_string(self, value: object, field: str) -> None:
+        assert placeholder_field(value) == field
 
     def test_tensor_patch_sets_and_removes_keys(self, bundle_root: Path) -> None:
         """How a case makes a scalar runtime pass-by-value; see the README."""
@@ -637,6 +740,9 @@ class TestCollection:
         assert runtime.digest != fixed.digest
 
     def test_tensor_patch_applies_after_case_tensors(self, bundle_root: Path) -> None:
+        template = _graph(
+            tensors=[{**_tensor(1, [1, 32, 16, 16]), "data_type": "${case.data_type}"}]
+        )
         _sweep_bundle(
             bundle_root,
             "quick/Conv/Sweep",
@@ -647,6 +753,7 @@ class TestCollection:
                     "tensor_patches": [{"uid": 1, "set": {"data_type": "double"}}],
                 }
             ],
+            template=template,
         )
         (unit,) = collect_units(bundle_root)
         assert unit.graph["tensors"][0]["data_type"] == "double"
@@ -679,6 +786,14 @@ class TestCollection:
                 {"tensor_patches": [{"set": {"virtual": True}}]},
                 "tensor_patch entry is missing an integer uid",
             ),
+            (
+                {"golden": {"dir": "golden/bad"}},
+                "golden.path is required when golden is present",
+            ),
+            (
+                {"golden": "golden/bad"},
+                "golden.path is required when golden is present",
+            ),
         ],
     )
     def test_case_the_harness_cannot_load_is_an_error(
@@ -701,6 +816,70 @@ class TestCollection:
         assert [u.case_id for u in units] == ["good"]
         assert len(errors) == 1
         assert f"case 'bad': {message}" in errors[0]
+
+    @pytest.mark.parametrize(
+        ("values", "message"),
+        [
+            (
+                {"tensors": [{"uid": 1, "dims": [1, 32, 16, 16]}]},
+                "missing placeholder value '${case.dtype}'",
+            ),
+            (
+                # A top-level dims never stands in for a tensor's own.
+                {"dtype": "half", "dims": [1, 32, 16, 16]},
+                "missing per-tensor placeholder value '${case.dims}' "
+                "for tensor uid 1",
+            ),
+            (
+                {"dtype": "half", "tensors": [{"uid": 1, "strides": [1, 1, 1, 1]}]},
+                "missing per-tensor placeholder value '${case.dims}' "
+                "for tensor uid 1",
+            ),
+        ],
+    )
+    def test_case_missing_a_placeholder_value_is_an_error(
+        self, bundle_root: Path, values: dict, message: str
+    ) -> None:
+        """The harness throws rather than leave the field unset."""
+        template = _graph(
+            io_data_type="${case.dtype}",
+            tensors=[{**_tensor(1, [1, 32, 16, 16]), "dims": "${case.dims}"}],
+        )
+        good = {"dtype": "half", "tensors": [{"uid": 1, "dims": [1, 32, 16, 16]}]}
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {"id": "good", "values": good},
+                {"id": "bad", "values": values},
+            ],
+            template=template,
+        )
+        errors: list[str] = []
+        units = collect_units(bundle_root, errors)
+        assert [u.case_id for u in units] == ["good"]
+        assert len(errors) == 1
+        assert f"case 'bad': {message}" in errors[0]
+
+    @pytest.mark.parametrize("uid", [None, True, "1"])
+    def test_template_tensor_without_an_integer_uid_fails_every_case(
+        self, bundle_root: Path, uid: object
+    ) -> None:
+        tensor = _tensor(1, [1, 32, 16, 16])
+        if uid is None:
+            del tensor["uid"]
+        else:
+            tensor["uid"] = uid
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "a"}, {"id": "b"}],
+            template=_graph(tensors=[tensor]),
+        )
+        errors: list[str] = []
+        assert collect_units(bundle_root, errors) == []
+        assert len(errors) == 2
+        assert all("template tensor missing integer uid" in e for e in errors)
 
     def test_unknown_case_id_is_an_error(self, bundle_root: Path) -> None:
         _sweep_bundle(
