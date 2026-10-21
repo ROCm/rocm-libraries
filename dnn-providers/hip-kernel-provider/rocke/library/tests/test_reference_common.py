@@ -1539,6 +1539,173 @@ def test_registry_finds_variants_and_defaults_only_a_sole_one(tmp_path, monkeypa
             del sys.modules[name]
 
 
+# A variant is named for the module of the kernel family that it adapts.
+# TheRock splits installed bundles by their first gfx-named directory, which
+# must stay the processor's, so a variant name cannot start with gfx.
+_VARIANT_NAME = re.compile(r"(?!gfx)[a-z][a-z0-9_]*")
+# Replay imports only a processor's package. This child imports each one in a
+# fresh interpreter and reports its NAME and the modules that it loaded.
+_IMPORT_PROCESSORS = """
+import json
+import sys
+from importlib import import_module
+
+sys.path[:0] = sys.argv[2:]
+registry = import_module(sys.argv[1])
+loaded = {}
+for architecture in registry.ARCHITECTURES:
+    before = set(sys.modules)
+    package = registry.get_architecture(architecture)
+    loaded[architecture] = [package.NAME, sorted(set(sys.modules) - before)]
+print(json.dumps(loaded))
+"""
+
+
+def _check_variant_layout(registry):
+    """Fail unless the enrolled variants of ``registry`` follow the layout rules.
+
+    ``registry`` is an operation's architectures package. Each variant names a
+    module of the operation's ``implementations`` package, and its adapter's
+    ``NAME`` is its processor directory's. Each processor package names its
+    own directory and imports no variant, so replay never imports an adapter.
+    """
+    root = Path(registry.__file__).resolve().parent
+    implementations = root.parent / "implementations"
+    # The child imports the operation package and reference_common from these.
+    paths = (root.parents[1], Path(__file__).resolve().parent)
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", _IMPORT_PROCESSORS, registry.__name__, *paths],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if completed.returncode:
+        pytest.fail(
+            f"importing the processor packages of {registry.__name__} failed:\n"
+            f"{completed.stderr[-12000:]}",
+            pytrace=False,
+        )
+    processors = json.loads(completed.stdout)
+    adapters = {
+        f"{registry.__name__}.{architecture}.{variant}"
+        for architecture in registry.ARCHITECTURES
+        for variant in registry.variants(architecture)
+    }
+    problems = []
+    for architecture in registry.ARCHITECTURES:
+        package = root / architecture / "__init__.py"
+        name, loaded = processors[architecture]
+        if name != architecture:
+            problems.append(f"{package} sets NAME to {name!r}, not {architecture!r}")
+        imported = sorted(adapters.intersection(loaded))
+        if imported:
+            problems.append(
+                f"{package} imports {', '.join(imported)}, but replay imports "
+                "processor packages and must not import a variant adapter"
+            )
+        for variant in registry.variants(architecture):
+            adapter = root / architecture / variant / "__init__.py"
+            module = implementations / f"{variant}.py"
+            if not _VARIANT_NAME.fullmatch(variant):
+                problems.append(
+                    f"{adapter.parent} has an invalid variant name: a variant "
+                    "name matches ^[a-z][a-z0-9_]*$ and does not start with gfx"
+                )
+            if not module.is_file():
+                problems.append(
+                    f"{adapter.parent} names no kernel family module: {module} "
+                    "does not exist"
+                )
+            target = registry.get_adapter(architecture, variant).NAME
+            if target != architecture:
+                problems.append(
+                    f"{adapter} sets NAME to {target!r}, not {architecture!r}; "
+                    "import it from the processor package"
+                )
+    if problems:
+        pytest.fail(
+            f"{registry.__name__} breaks the reference variant layout:\n"
+            + "".join(f"  {problem}\n" for problem in problems),
+            pytrace=False,
+        )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_enrolled_variants_follow_the_layout_rules(operation):
+    """Tools address a variant by its name, and replay by its processor alone."""
+    from importlib import import_module
+
+    _check_variant_layout(import_module(f"{operation}_reference.architectures"))
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [None, "gfx-name", "pattern-name", "module", "processor", "adapter", "import"],
+)
+def test_variant_layout_check_names_each_violation(tmp_path, monkeypatch, problem):
+    """Each broken rule names the file to fix; a conforming tree passes."""
+    from importlib import import_module
+
+    package = tmp_path / "fictional_reference"
+    root = package / "architectures"
+    root.mkdir(parents=True)
+    (package / "implementations").mkdir()
+    for directory in (package, package / "implementations"):
+        (directory / "__init__.py").touch()
+    (root / "__init__.py").write_text(
+        "from pathlib import Path\n"
+        "from reference_common.registry import AdapterRegistry\n"
+        "_REGISTRY = AdapterRegistry(\n"
+        "    __name__, Path(__file__).resolve().parent, label='Fictional'\n"
+        ")\n"
+        "ARCHITECTURES = _REGISTRY.architectures\n"
+        "get_architecture = _REGISTRY.get_architecture\n"
+        "variants = _REGISTRY.variants\n"
+        "get_adapter = _REGISTRY.get_adapter\n"
+    )
+    (root / "registry.json").write_text('["gfx942"]\n')
+    variant, processor, adapter = "wide", 'NAME = "gfx942"\n', "from .. import NAME\n"
+    if problem == "gfx-name":
+        variant = "gfx942_wide"
+    elif problem == "pattern-name":
+        variant = "Wide"
+    elif problem == "processor":
+        processor = 'NAME = "gfx950"\n'
+    elif problem == "adapter":
+        adapter = 'NAME = "gfx950"\n'
+    elif problem == "import":
+        processor += "from . import wide\n"
+    (root / "gfx942" / variant).mkdir(parents=True)
+    (root / "gfx942/__init__.py").write_text(processor)
+    (root / "gfx942" / variant / "__init__.py").write_text(adapter)
+    if problem != "module":
+        (package / f"implementations/{variant}.py").touch()
+    expected = {
+        "gfx-name": f"{root / 'gfx942/gfx942_wide'} has an invalid variant name",
+        "pattern-name": f"{root / 'gfx942/Wide'} has an invalid variant name",
+        "module": f"{root / 'gfx942/wide'} names no kernel family module: "
+        f"{package / 'implementations/wide.py'} does not exist",
+        "processor": f"{root / 'gfx942/__init__.py'} sets NAME to 'gfx950', not "
+        "'gfx942'",
+        "adapter": f"{root / 'gfx942/wide/__init__.py'} sets NAME to 'gfx950', not "
+        "'gfx942'",
+        "import": f"{root / 'gfx942/__init__.py'} imports "
+        "fictional_reference.architectures.gfx942.wide, but replay",
+    }
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        registry = import_module("fictional_reference.architectures")
+        if problem is None:
+            _check_variant_layout(registry)
+            return
+        with pytest.raises(pytest.fail.Exception) as failure:
+            _check_variant_layout(registry)
+    finally:
+        for name in [name for name in sys.modules if name.startswith("fictional_")]:
+            del sys.modules[name]
+    assert expected[problem] in str(failure.value)
+
+
 def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
     values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
     encoded = encode(values.view(np.float32), "bf16")
