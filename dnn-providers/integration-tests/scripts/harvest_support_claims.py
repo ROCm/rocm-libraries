@@ -88,6 +88,7 @@ from typing import (
     Tuple,
 )
 
+from support_claim_schema import VALID_PLATFORMS
 from support_sidecar import (
     BUNDLE_DIR,
     Claim,
@@ -98,7 +99,6 @@ from support_sidecar import (
     sidecar_path,
 )
 
-VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
 MODES = ("enforcing", "warning_only")  # modeNames in SupportClaimReport.cpp
 

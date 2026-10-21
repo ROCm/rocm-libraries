@@ -54,7 +54,7 @@ from bundle_discovery import (  # noqa: E402
     read_sweep_cases,
     sidecar_for_graph,
 )
-from verify_support_claims import (  # noqa: E402
+from support_claim_schema import (  # noqa: E402
     validate_single_graph_schema,
     validate_sweep_schema,
 )

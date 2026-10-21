@@ -30,9 +30,9 @@ from bundle_discovery import (
     SWEEP_SUPPORT_NAME,
     sidecar_for_graph,
 )
+from support_claim_schema import SCHEMA_VERSION
 
 BUNDLE_DIR = BUNDLES_DIR_NAME
-SCHEMA_VERSION = 1
 
 
 class Claim(NamedTuple):

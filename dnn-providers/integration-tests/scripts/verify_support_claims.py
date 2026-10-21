@@ -9,6 +9,8 @@ Checks
 ------
 1. Schema: version == 1, claims is an object, arch -> array of tokens from
    {linux, windows}; sweep groups have non-empty cases + support.
+   The validators live in support_claim_schema.py, shared with the
+   support matrix collector.
 2. enforcement_level: a graph with a non-empty claim must not declare an
    unrecognised enforcement_level (single-graph: X.meta.json; sweep:
    cases[].metadata.enforcement_level in sweep.json).  Absent is legal and
@@ -42,137 +44,22 @@ from bundle_discovery import (  # noqa: E402
     graph_for_sidecar,
     is_single_graph_sidecar,
     is_sweep_root,
-    meta_for_graph,
     load_json,
+    meta_for_graph,
     read_sweep_cases,
     walk_bundle_tree,
 )
+from support_claim_schema import (  # noqa: E402
+    validate_single_graph_schema,
+    validate_sweep_schema,
+)
 
 BUNDLE_ROOT = DEFAULT_BUNDLES_DIR
-VALID_PLATFORMS = {"linux", "windows"}
 VALID_ENFORCEMENT_LEVELS = {"applicability", "buildable", "full"}
 
 
 def _error(path: Path, message: str, errors: List[str]) -> None:
     errors.append(f"{path}: {message}")
-
-
-def _validate_arch_platform_map(
-    data: dict, path: Path, context: str, errors: List[str]
-) -> None:
-    if not isinstance(data, dict):
-        _error(path, f"{context}: support must be an object", errors)
-        return
-    for arch, platforms in data.items():
-        if not arch:
-            _error(path, f"{context}: empty arch key", errors)
-            continue
-        if not isinstance(platforms, list):
-            _error(
-                path,
-                f"{context}: arch '{arch}' value must be an array",
-                errors,
-            )
-            continue
-        for platform in platforms:
-            if not isinstance(platform, str):
-                _error(
-                    path,
-                    f"{context}: platform entry must be a string,"
-                    f" got {type(platform).__name__}",
-                    errors,
-                )
-            elif platform not in VALID_PLATFORMS:
-                _error(
-                    path,
-                    f"{context}: invalid platform '{platform}'"
-                    f" (expected one of {sorted(VALID_PLATFORMS)})",
-                    errors,
-                )
-
-
-def validate_single_graph_schema(data: dict, path: Path, errors: List[str]) -> None:
-    if not isinstance(data, dict):
-        _error(path, "top-level value must be an object", errors)
-        return
-    if data.get("version") != 1:
-        _error(path, f"version must be 1, got {data.get('version')!r}", errors)
-    if "claims" not in data:
-        return
-    claims = data["claims"]
-    if claims is None:
-        _error(path, "'claims' must be an object (got null)", errors)
-        return
-    if not isinstance(claims, dict):
-        _error(path, "claims must be an object", errors)
-        return
-    for engine_name, arch_map in claims.items():
-        if not engine_name:
-            _error(path, "empty engine name in claims", errors)
-            continue
-        _validate_arch_platform_map(arch_map, path, f"claims.{engine_name}", errors)
-
-
-def validate_sweep_schema(data: dict, path: Path, errors: List[str]) -> None:
-    if not isinstance(data, dict):
-        _error(path, "top-level value must be an object", errors)
-        return
-    if data.get("version") != 1:
-        _error(path, f"version must be 1, got {data.get('version')!r}", errors)
-    if "claims" not in data:
-        return
-    claims = data["claims"]
-    if claims is None:
-        _error(path, "'claims' must be an object (got null)", errors)
-        return
-    if not isinstance(claims, dict):
-        _error(path, "claims must be an object", errors)
-        return
-    for engine_name, groups in claims.items():
-        if not engine_name:
-            _error(path, "empty engine name in claims", errors)
-            continue
-        if not isinstance(groups, list):
-            _error(
-                path,
-                f"claims.{engine_name} must be an array of groups",
-                errors,
-            )
-            continue
-        seen_case_ids = set()
-        for i, group in enumerate(groups):
-            ctx = f"claims.{engine_name}[{i}]"
-            if not isinstance(group, dict):
-                _error(path, f"{ctx}: group must be an object", errors)
-                continue
-            cases = group.get("cases")
-            if not isinstance(cases, list) or len(cases) == 0:
-                _error(path, f"{ctx}: must have a non-empty 'cases' array", errors)
-            else:
-                for case_id in cases:
-                    if not isinstance(case_id, str):
-                        _error(
-                            path,
-                            f"{ctx}: case id must be a string,"
-                            f" got {type(case_id).__name__}",
-                            errors,
-                        )
-                    elif not case_id:
-                        _error(path, f"{ctx}: empty case id", errors)
-                    elif case_id in seen_case_ids:
-                        _error(
-                            path,
-                            f"{ctx}: duplicate case id '{case_id}'"
-                            f" within engine '{engine_name}'",
-                            errors,
-                        )
-                    else:
-                        seen_case_ids.add(case_id)
-            support = group.get("support")
-            if support is None:
-                _error(path, f"{ctx}: missing 'support' object", errors)
-            else:
-                _validate_arch_platform_map(support, path, f"{ctx}.support", errors)
 
 
 def _has_non_empty_claims(data: object) -> bool:
