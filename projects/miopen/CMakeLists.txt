@@ -104,6 +104,7 @@ include(ROCMHeaderWrapper)
 
 include(cmake/ClangCheck.cmake)
 include(cmake/CheckPreCommit.cmake)
+include(cmake/ResourceCompiler.cmake)
 
 # Build library with Beta APIs
 add_definitions("-DMIOPEN_BETA_API=1")

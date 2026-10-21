@@ -36,7 +36,6 @@
 # Platform-specific compiler configuration
 if(WIN32)
     set(DEFAULT_ROCM_COMPILER_EXTENSION ".exe")
-    set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
     # No canonical ROCm install location exists on Windows, so leave the default
     # empty. Users must either supply -DROCM_CMAKE_PATH=... explicitly or have
     # hipconfig discoverable on PATH.
@@ -227,6 +226,20 @@ if(DEFINED ROCM_PATH AND NOT DEFINED ROCM_CMAKE_PATH)
         message(STATUS "Added ${ROCM_PATH} to CMAKE_PREFIX_PATH for finding HIP package")
     else()
         message(VERBOSE "ROCM_PATH already in CMAKE_PREFIX_PATH")
+    endif()
+endif()
+
+# MIOpen embeds a Windows VERSIONINFO resource (MIOpen.rc and friends) that needs a resource
+# compiler. Prefer llvm-rc from the ROCm LLVM toolchain (next to clang++), then any rc on PATH. If
+# none is found, mark RC as not-required so configuration still succeeds; cmake/ResourceCompiler.cmake
+# probes whatever ends up here and fails configuration with actionable guidance if it is unusable.
+if(WIN32 AND NOT CMAKE_RC_COMPILER)
+    get_filename_component(_miopen_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(_MIOPEN_RC_COMPILER NAMES llvm-rc rc HINTS "${_miopen_llvm_bin}")
+    if(_MIOPEN_RC_COMPILER)
+        set(CMAKE_RC_COMPILER "${_MIOPEN_RC_COMPILER}")
+    else()
+        set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
     endif()
 endif()
 

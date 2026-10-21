@@ -41,6 +41,28 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
+if(WIN32)
+    string(TIMESTAMP MIOPEN_COPYRIGHT_YEAR "%Y")
+endif()
+
+# Embed a Windows VERSIONINFO resource into a DLL target (ROCM-20937). No resource-compiler
+# availability guard is needed here: cmake/ResourceCompiler.cmake already fails configuration if no
+# usable resource compiler was found, so by the time this runs CMAKE_RC_COMPILER is guaranteed good.
+function(miopen_embed_version_resource target file_description internal_name)
+    if(NOT WIN32)
+        return()
+    endif()
+    set(MIOPEN_RC_FILE_DESCRIPTION "${file_description}")
+    set(MIOPEN_RC_INTERNAL_NAME "${internal_name}")
+    set(MIOPEN_RC_ORIGINAL_FILENAME "${internal_name}.dll")
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/src/MIOpen.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc"
+        @ONLY
+    )
+    target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc")
+endfunction()
+
 # Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
@@ -893,6 +915,8 @@ else()
         )
 endif()
 
+miopen_embed_version_resource(${_MIOPEN_IMPL_TARGET} "MIOpen Library" "${_MIOPEN_IMPL_TARGET}")
+
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # Rename the private library's public C entry points to their _impl form by
     # force-including the redefinition header into every private source. The
@@ -917,6 +941,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
+    miopen_embed_version_resource(MIOpen "MIOpen Public Wrapper" MIOpen)
 
     # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
     # frontend configured to dlopen the backend at first use, so libMIOpen.so
