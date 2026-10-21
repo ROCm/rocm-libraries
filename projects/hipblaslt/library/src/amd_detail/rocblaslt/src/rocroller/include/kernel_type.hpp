@@ -3,14 +3,18 @@
 
 #pragma once
 
-// Only the rocRoller call path is built against rocRoller's headers. The tile
-// ranker names two of its enumerations and nothing else, and gets them from a
-// hipBLASLt declaration so that it builds without a rocRoller checkout. The
-// choice is a compile definition rather than __has_include on purpose: ROCm
+// Only the rocRoller call path is built against rocRoller's headers, and it is
+// the only thing HIPBLASLT_USE_ROCROLLER is defined for here. The tile ranker
+// names two of rocRoller's enumerations and nothing else, and takes them from a
+// hipBLASLt declaration so that it builds without a rocRoller checkout. This is
+// an internal header: nothing outside library/src/amd_detail/rocblaslt/src
+// includes it, which is what keeps the two branches apart.
+//
+// The choice is a compile definition rather than __has_include on purpose: ROCm
 // installs rocRoller headers under /opt/rocm, so __has_include would pick up
 // whatever version happens to be installed, which is not the version the rest
 // of the library is built against.
-#ifdef HIPBLASLT_HAVE_ROCROLLER_HEADERS
+#ifdef HIPBLASLT_USE_ROCROLLER
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #else

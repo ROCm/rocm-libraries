@@ -10,8 +10,12 @@
 // only one that sees both, and it is compiled only when rocRoller is enabled --
 // which is also the only configuration in which disagreeing would matter.
 //
-// A failure here means rocRoller renumbered an enumeration. Read the new value
-// out of the header named in the message and update rocroller_enum_list.hpp.
+// A failure here means rocRoller renumbered an enumeration. Take the new value
+// from rocRoller/DataTypes/DataTypes.hpp or rocRoller/Operations/BlockScale_fwd.hpp
+// and update rocroller_enums.hpp.
+//
+// There is one assertion per enumerator declared in rocroller_enums.hpp. When
+// you add an enumerator there, add its assertion here.
 //
 // The file emits no code; the static assertions are the whole point.
 
@@ -20,26 +24,39 @@
 
 #include <type_traits>
 
-#include "rocroller_enum_list.hpp"
-
 static_assert(std::is_same_v<std::underlying_type_t<rocRoller::DataType>, int>,
-              "rocRoller::DataType changed its underlying type; update the hipBLASLt "
-              "declaration in rocroller_enums.hpp.");
+              "rocRoller::DataType changed its underlying type; update rocroller_enums.hpp.");
+static_assert(
+    std::is_same_v<std::underlying_type_t<rocRoller::Operations::ScaleMode>, int>,
+    "rocRoller::Operations::ScaleMode changed its underlying type; update rocroller_enums.hpp.");
 
-static_assert(std::is_same_v<std::underlying_type_t<rocRoller::Operations::ScaleMode>, int>,
-              "rocRoller::Operations::ScaleMode changed its underlying type; update the "
-              "hipBLASLt declaration in rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::Float) == 0,
+              "rocRoller::DataType::Float changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::Double) == 1,
+              "rocRoller::DataType::Double changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::Half) == 4,
+              "rocRoller::DataType::Half changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::BFloat16) == 6,
+              "rocRoller::DataType::BFloat16 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::FP8) == 8,
+              "rocRoller::DataType::FP8 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::BF8) == 10,
+              "rocRoller::DataType::BF8 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::FP4) == 12,
+              "rocRoller::DataType::FP4 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::FP6) == 14,
+              "rocRoller::DataType::FP6 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::BF6) == 16,
+              "rocRoller::DataType::BF6 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::Int32) == 21,
+              "rocRoller::DataType::Int32 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::E8M0) == 32,
+              "rocRoller::DataType::E8M0 changed value; update rocroller_enums.hpp.");
+static_assert(static_cast<int>(rocRoller::DataType::None) == 38,
+              "rocRoller::DataType::None changed value; update rocroller_enums.hpp.");
 
-#define HIPBLASLT_CHECK_DATA_TYPE(name, value)                            \
-    static_assert(static_cast<int>(rocRoller::DataType::name) == (value), \
-                  "rocRoller::DataType::" #name " changed value; update " \
-                  "HIPBLASLT_ROCROLLER_DATA_TYPES in rocroller_enum_list.hpp.");
-HIPBLASLT_ROCROLLER_DATA_TYPES(HIPBLASLT_CHECK_DATA_TYPE)
-#undef HIPBLASLT_CHECK_DATA_TYPE
-
-#define HIPBLASLT_CHECK_SCALE_MODE(name, value)                                        \
-    static_assert(static_cast<int>(rocRoller::Operations::ScaleMode::name) == (value), \
-                  "rocRoller::Operations::ScaleMode::" #name " changed value; update " \
-                  "HIPBLASLT_ROCROLLER_SCALE_MODES in rocroller_enum_list.hpp.");
-HIPBLASLT_ROCROLLER_SCALE_MODES(HIPBLASLT_CHECK_SCALE_MODE)
-#undef HIPBLASLT_CHECK_SCALE_MODE
+static_assert(static_cast<int>(rocRoller::Operations::ScaleMode::None) == 0,
+              "rocRoller::Operations::ScaleMode::None changed value; update rocroller_enums.hpp.");
+static_assert(
+    static_cast<int>(rocRoller::Operations::ScaleMode::Separate) == 2,
+    "rocRoller::Operations::ScaleMode::Separate changed value; update rocroller_enums.hpp.");
