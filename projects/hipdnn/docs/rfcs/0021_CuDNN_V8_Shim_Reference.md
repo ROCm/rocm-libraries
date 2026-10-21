@@ -2,8 +2,9 @@
 
 This document is the long-form companion to
 [RFC 0021: cuDNN v8 shim for hipDNN](./0021_CuDNN_V8_Shim.md). It collects the verified tables the
-main RFC summarises: the cuDNN backend C API identifiers the v0.x frontend uses and what hipDNN offers
-for each, the v0.x class inventory, per-operation setters, the consumer surfaces, NVIDIA's legacy
+main RFC summarises: the cuDNN backend C API identifiers upstream's v0.x frontend uses, what hipDNN
+offers for each and what the shim does with them, the C surface the shim declares, the v0.x class
+inventory with the members the shim rewrites, per-operation setters, the consumer surfaces, NVIDIA's legacy
 sample catalogue, and the `CUDNN_VERSION` gates.
 
 Citations are against the local copy of
@@ -13,7 +14,7 @@ Citations are against the local copy of
 Inside a table, a bare `:N` refers to the file named in that table's caption.
 
 No numeric value of any cuDNN enum appears here: cuDNN's C headers are proprietary, and the shim
-assigns its own values (RFC §4.8). Enums are compared by name only (§1.4). Consumer sources (§4) are
+assigns its own values (RFC §3.7). Enums are compared by name only (§1.4). Consumer sources (§4) are
 pinned to a commit per repository.
 
 ## Table of Contents
@@ -28,6 +29,12 @@ pinned to a commit per repository.
 ---
 
 ## 1. Identifier mapping: cuDNN backend C API to hipDNN
+
+Upstream's builders reach cuDNN through the backend descriptor C API. The shim declares only part of
+that API (§1.5): its builders hand the same values to the core (`detail/v8`, RFC §3.3), which lowers
+them to hipDNN. The tables below map upstream's identifiers to hipDNN and state what the shim does
+with each value. They name `CUDNN_ATTR_*` attributes, which the shim does not declare, because those
+identify the upstream code that a re-diff compares against (§2.6).
 
 Legend for the "hipDNN" columns:
 
@@ -49,45 +56,42 @@ functions are in `projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/cu
 
 | cuDNN entry point | hipDNN | Shim |
 |---|---|---|
-| `cudnnCreate` | `=` `hipdnnCreate` :88 | exists (v9 shim `cudnn.h:76`) |
-| `cudnnDestroy` | `=` :98 | exists (`cudnn.h:84`) |
-| `cudnnSetStream` | `=` :109 | exists (`cudnn.h:91`) |
-| `cudnnGetStream` | `=` :126 | exists (`cudnn.h:98`) |
-| `cudnnGetErrorString` | `=` :282 | exists (`cudnn.h:105`) |
-| `cudnnGetVersion`, `cudnnGetCudartVersion` | **MISSING** as integers (`hipdnnVersionString_ext` :995 returns a string) | exist; return the claimed `CUDNN_VERSION` 92200 and `CUDNN_CUDART_VERSION` (`cudnn.h:112,118`) |
-| `cudnnBackendCreateDescriptor` | `=` :141-142; unknown type → `NOT_SUPPORTED` (`projects/hipdnn/backend/src/descriptors/DescriptorFactory.cpp:160-161`) | new; creates a shim descriptor for **every** cuDNN type, including ones hipDNN lacks (§4.4) |
-| `cudnnBackendDestroyDescriptor` | `=` :160-161 | releases the caller's reference only; shim descriptors are reference-counted (§4.4) |
-| `cudnnBackendSetAttribute` | `=` :266-271, same parameter order | typed store with cuDNN attribute-type and count rules (§4.4) |
-| `cudnnBackendGetAttribute` | `=` :232-238, same parameter order | descriptor-valued gets fill **caller-created** descriptors in place (§4.4) |
-| `cudnnBackendFinalize` | `=` :200 | validates eagerly; hipDNN descriptors are created lazily at operation-graph finalize (§4.5) |
-| `cudnnBackendExecute` | `=` :182-184 | one `hipdnnBackendExecute` call; a handle other than the plan's stored context handle → `BAD_PARAM` (§4.7) |
-| `cudnnGetLastErrorString` | `=` `hipdnnGetLastErrorString` :297 | new; per-thread buffer merged with hipDNN's message (§4.4) |
-| `cudnnBackendInitialize` | **MISSING** (named only in a comment, :190) | not provided: deprecated in cuDNN 9.2 and called nowhere in upstream `include/` or `legacy_samples` (§4.8) |
-| `cudnnBackendPopulateCudaGraph`, `cudnnBackendUpdateCudaGraph` | **MISSING** | not provided; v9-only, dropped from the `cudnn_frontend_shim.h` port (§4.9) |
-| `cudnnReorderFilterAndBias` (legacy v7, behind `cudnnReorderFilterAndBiasInt8x32`) | **MISSING** | `cudnnReorderFilterAndBiasInt8x32` returns `NOT_SUPPORTED` (§4.9) |
+| `cudnnCreate` | `=` `hipdnnCreate` :88 | exists (v9 shim `cudnn.h:65`) |
+| `cudnnDestroy` | `=` :98 | exists (`cudnn.h:73`) |
+| `cudnnSetStream` | `=` :109 | exists (`cudnn.h:80`) |
+| `cudnnGetStream` | `=` :126 | exists (`cudnn.h:87`) |
+| `cudnnGetErrorString` | `=` :282 | exists (`cudnn.h:94`) |
+| `cudnnGetVersion`, `cudnnGetCudartVersion` | **MISSING** as integers (`hipdnnVersionString_ext` :995 returns a string) | exist; return the claimed `CUDNN_VERSION` 92200 and `CUDNN_CUDART_VERSION` (`cudnn.h:101,107`) |
+| `cudnnBackendCreateDescriptor`, `cudnnBackendDestroyDescriptor`, `cudnnBackendSetAttribute`, `cudnnBackendGetAttribute`, `cudnnBackendFinalize` | `=` :141-142, :160-161, :266-271, :232-238, :200 | not provided (RFC §9 R1); builders create, set and finalize hipDNN descriptors through the core |
+| `cudnnBackendExecute` | `=` :182-184 | `toCudnnStatus(hipdnnBackendExecute(...))`, no checks (`cudnn_graph.h:34`; RFC §3.6) |
+| `cudnnGetLastErrorString` | `=` `hipdnnGetLastErrorString` :297 | hipDNN's: copies and clears the calling thread's last hipDNN error (`cudnn_graph.h:48`; RFC §3.6) |
+| `cudnnBackendInitialize` | **MISSING** (named only in a comment, :190) | not provided: deprecated in cuDNN 9.2 and called nowhere in upstream `include/` or `legacy_samples` (§3.7) |
+| `cudnnBackendPopulateCudaGraph`, `cudnnBackendUpdateCudaGraph` | **MISSING** | not provided; v9-only, dropped from the `cudnn_frontend_shim.h` port (§3.8) |
+| `cudnnReorderFilterAndBias` (legacy v7, behind `cudnnReorderFilterAndBiasInt8x32`) | **MISSING** | `cudnnReorderFilterAndBiasInt8x32` returns `NOT_SUPPORTED` (§3.8) |
 
-hipDNN extension entry points the shim builds on: `hipdnnGetEngineCount_ext` :753,
-`hipdnnGetEngineInfo_ext` :786, `hipdnnGetEngineIdByName_ext` :817, `hipdnnGetEngineNameById_ext` :843,
-`hipdnnBackendGetSerializedExecutionPlan_ext` :432, `hipdnnBackendCreateAndDeserializeExecutionPlan_ext`
-:454. All shim calls go through `hipdnn_frontend::detail::hipdnnBackend()`, so they are mockable and
-work with the dynamically loaded frontend.
+hipDNN extensions the shim builds on: `hipdnnBackendGetSerializedExecutionPlan_ext` :432,
+`hipdnnBackendCreateAndDeserializeExecutionPlan_ext` :454 and the engine attribute
+`HIPDNN_ATTR_ENGINE_NAME_EXT`. All shim calls go through `hipdnn_frontend::detail::hipdnnBackend()`, so
+they are mockable and work with the dynamically loaded frontend.
 
 ### 1.2 Descriptor types
 
 hipDNN's source of truth for "implemented" is the `switch` in `DescriptorFactory::create`
 (`projects/hipdnn/backend/src/descriptors/DescriptorFactory.cpp:59-165`, caption file for `:N`); enum
-declarations are in `projects/hipdnn/backend/include/HipdnnBackendDescriptorType.h:27-352`.
+declarations are in `projects/hipdnn/backend/include/HipdnnBackendDescriptorType.h:27-352`. The shim
+keeps `cudnnBackendDescriptorType_t` whole (RFC §9 R6); "record" in the Shim column is the
+core's immutable value for the built object (RFC §3.3).
 
 | cuDNN descriptor type | hipDNN | hipDNN status | Shim |
 |---|---|---|---|
-| `CUDNN_BACKEND_TENSOR_DESCRIPTOR` | `=` | implemented (:79-80) | lowered at graph finalize, one hipDNN tensor per UID (§4.5) |
-| `CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR` | **MISSING** | — | shim parameter descriptor; folded onto the convolution op at graph finalize |
+| `CUDNN_BACKEND_TENSOR_DESCRIPTOR` | `=` | implemented (:79-80) | record at `TensorBuilder::build()`; lowered at graph build, one hipDNN tensor per UID (§3.4) |
+| `CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR` | **MISSING** | — | record; folded onto the convolution op at graph build |
 | `CUDNN_BACKEND_POINTWISE_DESCRIPTOR` | **MISSING** | — | folded onto `OPERATION_POINTWISE` |
 | `CUDNN_BACKEND_MATMUL_DESCRIPTOR` | **MISSING** | — | folded onto `OPERATION_MATMUL` |
 | `CUDNN_BACKEND_REDUCTION_DESCRIPTOR` | **MISSING** | — | folded onto `OPERATION_REDUCTION` |
 | `CUDNN_BACKEND_RESAMPLE_DESCRIPTOR` | **MISSING** | — | folded onto the resample ops |
-| `CUDNN_BACKEND_RNG_DESCRIPTOR` | **MISSING** | — | creatable and validated; any op using it is `NOT_SUPPORTED` |
-| `CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR` | `=` | implemented (:82-83) | lowered, params folded (§4.5) |
+| `CUDNN_BACKEND_RNG_DESCRIPTOR` | **MISSING** | — | record, validated; any op using it is `NOT_SUPPORTED` |
+| `CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR` | `=` | implemented (:82-83) | lowered, params folded (§3.4) |
 | `CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR` | `=` | implemented (:100-101) | lowered, params folded |
 | `CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR` | `=` | implemented (:85-86) | lowered, params folded |
 | `CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR` | `=` | implemented (:97-98) | lowered with slot mapping and default elision |
@@ -97,23 +101,23 @@ declarations are in `projects/hipdnn/backend/include/HipdnnBackendDescriptorType
 | `CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR` | `=` | implemented (:151-152) | lowered |
 | `CUDNN_BACKEND_OPERATION_NORM_FORWARD_DESCRIPTOR` | **MISSING**; `≈` per-norm `BATCHNORM_DESCRIPTOR_EXT` (:133-134), `BATCHNORM_INFERENCE_DESCRIPTOR_EXT` (:88-89), `LAYERNORM_DESCRIPTOR_EXT` (:127-128), `RMSNORM_DESCRIPTOR_EXT` (:121-122) | implemented (ext) | dispatched on `NORM_FWD_MODE` and phase |
 | `CUDNN_BACKEND_OPERATION_NORM_BACKWARD_DESCRIPTOR` | **MISSING**; `≈` `BATCHNORM_BACKWARD_DESCRIPTOR_EXT` (:103-104), `LAYERNORM_BACKWARD_DESCRIPTOR_EXT` (:130-131), `RMSNORM_BACKWARD_DESCRIPTOR_EXT` (:154-155) | implemented (ext) | dispatched on `NORM_BWD_MODE` |
-| `CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR` | `=` | declared only | `NOT_SUPPORTED` at finalize, naming the op |
-| `CUDNN_BACKEND_OPERATION_BN_FINALIZE_STATISTICS_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at finalize |
-| `CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at finalize |
-| `CUDNN_BACKEND_OPERATION_RNG_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at finalize |
-| `CUDNN_BACKEND_OPERATION_RESHAPE_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at finalize |
-| `CUDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR` | `=` | declared only | `NOT_SUPPORTED` at finalize |
-| `CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR` | `=` | implemented (:70-71) | `HANDLE` required; canonicalize, stable topological sort, lower through `hipdnn_frontend` nodes and packers (§4.5) |
-| `CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR` | `=` | implemented (:76-77) | every mode → FALLBACK (§4.6) |
-| `CUDNN_BACKEND_ENGINE_DESCRIPTOR` | `=` | implemented (:64-65) | dense per-graph index over the enumerated engines, sorted by signed engine ID (§4.6) |
-| `CUDNN_BACKEND_ENGINECFG_DESCRIPTOR` | `=` | implemented (:61-62) | shim-finalized at once; reuses the engine's cached default hipDNN config, or builds its own lazily when knob choices are set (§4.6) |
-| `CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR` | `=` | implemented (:94-95) | projected onto `cudnnBackendKnobType_t` (§4.6) |
-| `CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR` | `=` | implemented (:91-92) | reverse-mapped to hipDNN string knob IDs (§4.6) |
-| `CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR` | `=` | implemented (:67-68) | §4.7 |
-| `CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR` | `=` | implemented (:73-74) | §4.7 |
+| `CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR` | `=` | declared only | `NOT_SUPPORTED` at `OperationBuilder::build()`, naming the op |
+| `CUDNN_BACKEND_OPERATION_BN_FINALIZE_STATISTICS_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_BACKEND_OPERATION_RNG_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_BACKEND_OPERATION_RESHAPE_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR` | `=` | declared only | `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR` | `=` | implemented (:70-71) | built by `OperationGraphBuilder::build()`: handle required; canonicalize, stable topological sort, lower through `hipdnn_frontend` nodes and packers (§3.4) |
+| `CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR` | `=` | implemented (:76-77) | every mode → FALLBACK; run once per graph at enumeration, never per `EngineHeuristicsBuilder::build()` (§3.5) |
+| `CUDNN_BACKEND_ENGINE_DESCRIPTOR` | `=` | implemented (:64-65) | dense per-graph index over the enumerated engines, sorted by signed engine ID; `Engine_v8`'s raw descriptor is the graph's cached `ENGINE` (§3.5) |
+| `CUDNN_BACKEND_ENGINECFG_DESCRIPTOR` | `=` | implemented (:61-62) | heuristic results and knob-free configs share the engine's cached default hipDNN config; a config with knob choices builds and finalizes its own at `EngineConfigBuilder::build()` (§3.5) |
+| `CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR` | `=` | implemented (:94-95) | read at `EngineBuilder::build()` and projected onto `cudnnBackendKnobType_t`; no shim object of this type (§3.5) |
+| `CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR` | `=` | implemented (:91-92) | `EngineConfig_v8` keeps `(type, value)` pairs; reverse-mapped to hipDNN string knob IDs at config build (§3.5) |
+| `CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR` | `=` | implemented (:67-68) | built or deserialized by `ExecutionPlanBuilder` (§3.6) |
+| `CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR` | `=` | implemented (:73-74) | built by `VariantPackBuilder::build()` (§3.6) |
 | `CUDNN_BACKEND_KERNEL_CACHE_DESCRIPTOR` | `=` | declared only | `setKernelCache` with a non-null cache → `NOT_SUPPORTED` |
 | `CUDNN_BACKEND_DEVICEPROP_DESCRIPTOR` | **MISSING** | — | `setDeviceProperties` with non-null properties → `NOT_SUPPORTED` |
-| `CUDNN_BACKEND_INTERMEDIATE_INFO_DESCRIPTOR`, `CUDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR` | `=` | declared only | creatable; no v0.x class uses them; every attribute that references them is `NOT_SUPPORTED` |
+| `CUDNN_BACKEND_INTERMEDIATE_INFO_DESCRIPTOR`, `CUDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR` | `=` | declared only | enumerators only; no v0.x class uses them |
 
 hipDNN-only operation types (SDPA, block-scale (de)quantize, MoE grouped matmul, custom op, profiling
 control) are unreachable from the v0.x surface; the upstream `OperationBuilder_v8` rejects those modes
@@ -125,7 +129,7 @@ In the "Shim" columns, *forwarded*, *folded* and *set on the op* mean the value 
 matching `hipdnn_frontend` attribute object (`TensorAttributes`, `ConvFpropAttributes`,
 `PointwiseAttributes`, ...) of a standalone `hipdnn_frontend` node, whose validation, inference and
 packer (`projects/hipdnn/frontend/include/hipdnn_frontend/detail/*Packer.hpp`) emit the hipDNN
-attributes (RFC §4.5). The shim issues no hand-written `hipdnnBackendSetAttribute` sequences for
+attributes (RFC §3.4). The shim issues no hand-written `hipdnnBackendSetAttribute` sequences for
 operations or tensors.
 
 **Tensor.** Caption: `upstream:include/cudnn_frontend_Tensor.h`.
@@ -136,7 +140,7 @@ operations or tensors.
 | `CUDNN_ATTR_TENSOR_DIMENSIONS` :382, `STRIDES` :392, `UNIQUE_ID` :402, `IS_VIRTUAL` :422 | `=` | forwarded; one hipDNN tensor per UID, conflicting definitions → `BAD_PARAM` |
 | `CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT` :409 | `=` | ≥ 16 not set; < 16 forwarded (the graph then needs plugin API ≥ 1.3.0, which no current provider reports — divergence); never forwards > 16 |
 | `CUDNN_ATTR_TENSOR_IS_BY_VALUE` :436 (set) | NS on set (read-only) | `≈` `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT`; variant-pack entries are host pointers |
-| `CUDNN_ATTR_TENSOR_CONSTANT_VALUE` :527-557 | `≈` `HIPDNN_ATTR_TENSOR_VALUE_EXT` | forwarded; bytes copied at tensor finalize (upstream passes a pointer into builder-owned storage); takes precedence over `IS_BY_VALUE` |
+| `CUDNN_ATTR_TENSOR_CONSTANT_VALUE` :527-557 | `≈` `HIPDNN_ATTR_TENSOR_VALUE_EXT` | forwarded; bytes copied at `TensorBuilder::build()` (upstream passes a pointer into builder-owned storage); takes precedence over `IS_BY_VALUE` |
 | `CUDNN_ATTR_TENSOR_VECTOR_COUNT` :451, `VECTORIZED_DIMENSION` :465 | **MISSING** | `VECTOR_COUNT` ≠ 1 → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_TENSOR_REORDERING_MODE` :514 | **MISSING** (the attribute type exists) | ≠ NONE → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC` :488 | `=` | forwarded; the graph then needs plugin API ≥ 1.3.0 (`K_RAGGED_TENSOR_MIN_API_VERSION`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp:32`), which no current provider reports — divergence |
@@ -153,14 +157,14 @@ floors are 1.3.0 (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVe
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR` | **MISSING** | parameter descriptor held by the shim |
-| `CUDNN_ATTR_CONVOLUTION_COMP_TYPE` / `CONV_MODE` / `DILATIONS` / `FILTER_STRIDES` / `PRE_PADDINGS` / `POST_PADDINGS` (ConvDesc.h:307-390) | `=`, but set on the **operation** descriptor | folded onto the hipDNN conv op at graph finalize |
+| `CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR` | **MISSING** | parameter record held by the builder object |
+| `CUDNN_ATTR_CONVOLUTION_COMP_TYPE` / `CONV_MODE` / `DILATIONS` / `FILTER_STRIDES` / `PRE_PADDINGS` / `POST_PADDINGS` (ConvDesc.h:307-390) | `=`, but set on the **operation** descriptor | folded onto the hipDNN conv op at graph build |
 | `CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS` (ConvDesc.h:335) | **MISSING** (implied by array lengths) | checked against the array lengths |
 | `CUDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X` / `W` / `Y` (:1970-1997) | `=` | forwarded |
 | `CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX` / `W` / `DY` (:596-626) | `=` | forwarded |
 | `CUDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X` / `DW` / `DY` (:976-1007) | `=` | forwarded |
 | `CUDNN_ATTR_OPERATION_CONVOLUTION_{FORWARD,BWD_DATA,BWD_FILTER}_CONV_DESC` (:2006, :636, :1017) | **MISSING** | consumed by the shim; parameters folded |
-| `CUDNN_ATTR_OPERATION_CONVOLUTION_{FORWARD,BWD_DATA,BWD_FILTER}_ALPHA` / `BETA` (:2022-2037, :653-668, :1033-1048) | **MISSING** | alpha ≠ 1 or beta ≠ 0 → `NOT_SUPPORTED` at op finalize, naming the attribute |
+| `CUDNN_ATTR_OPERATION_CONVOLUTION_{FORWARD,BWD_DATA,BWD_FILTER}_ALPHA` / `BETA` (:2022-2037, :653-668, :1033-1048) | **MISSING** | alpha ≠ 1 or beta ≠ 0 → `NOT_SUPPORTED` at `OperationBuilder::build()`, naming the scale |
 
 Evidence: conv ops route the parameter attributes to `setConvolutionAttribute`
 (`projects/hipdnn/backend/src/descriptors/DescriptorAttributeUtils.hpp:519-575`).
@@ -170,7 +174,7 @@ Evidence: conv ops route the parameter attributes to `setConvolutionAttribute`
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_BACKEND_POINTWISE_DESCRIPTOR` | **MISSING** | parameter descriptor held by the shim |
+| `CUDNN_BACKEND_POINTWISE_DESCRIPTOR` | **MISSING** | parameter record held by the builder object |
 | `CUDNN_ATTR_POINTWISE_MODE` (PW.h:231) | `=`, on the op | translated by name; `COS`, `MOD`, `POW` have no hipDNN mode and fail closed |
 | `CUDNN_ATTR_POINTWISE_MATH_PREC` (PW.h:253) | `=`, on the op | forwarded |
 | `CUDNN_ATTR_POINTWISE_NAN_PROPAGATION` (PW.h:267) | **MISSING** | stored and ignored (divergence) |
@@ -179,7 +183,7 @@ Evidence: conv ops route the parameter attributes to `setConvolutionAttribute`
 | `CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR` (:455) | **MISSING** | consumed by the shim |
 | `CUDNN_ATTR_OPERATION_POINTWISE_XDESC` / `BDESC` / `TDESC` / `YDESC` (:468, :552, :567, :482) | `≈` `HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT` / `IN_1_EXT` / `IN_2_EXT` / `OUT_0_EXT` | X→IN_0, B→IN_1, T→IN_2, Y→OUT_0 |
 | `CUDNN_ATTR_OPERATION_POINTWISE_DXDESC` / `DYDESC` (:508, :495) | **MISSING** | backward activations: DY→IN_0, X→IN_1, DX→OUT_0 |
-| `CUDNN_ATTR_OPERATION_POINTWISE_ALPHA1` / `ALPHA2` (:526, :538) | **MISSING** | ≠ 1 → `NOT_SUPPORTED` at op finalize |
+| `CUDNN_ATTR_OPERATION_POINTWISE_ALPHA1` / `ALPHA2` (:526, :538) | **MISSING** | ≠ 1 → `NOT_SUPPORTED` at `OperationBuilder::build()` |
 
 Evidence: float-typed parameter setters at
 `projects/hipdnn/backend/src/descriptors/PointwiseOperationDescriptor.cpp:94-141`.
@@ -189,7 +193,7 @@ Evidence: float-typed parameter setters at
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_BACKEND_MATMUL_DESCRIPTOR` | **MISSING** | parameter descriptor held by the shim |
+| `CUDNN_BACKEND_MATMUL_DESCRIPTOR` | **MISSING** | parameter record held by the builder object |
 | `CUDNN_ATTR_MATMUL_COMP_TYPE` (MM.h:140) | `=`, on the op | folded onto the op |
 | `CUDNN_ATTR_MATMUL_PADDING_VALUE` (MM.h:160) | **MISSING** | `NOT_SUPPORTED` when set |
 | `CUDNN_ATTR_OPERATION_MATMUL_ADESC` / `BDESC` / `CDESC` (:350-373) | `=` | forwarded |
@@ -201,7 +205,7 @@ Evidence: float-typed parameter setters at
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_BACKEND_REDUCTION_DESCRIPTOR` | **MISSING** | parameter descriptor held by the shim |
+| `CUDNN_BACKEND_REDUCTION_DESCRIPTOR` | **MISSING** | parameter record held by the builder object |
 | `CUDNN_ATTR_REDUCTION_OPERATOR` / `COMP_TYPE` / `IS_DETERMINISTIC` (RD.h:177, :155, :205) | `=`, on the op | folded; operator translated by name |
 | `CUDNN_ATTR_OPERATION_REDUCTION_XDESC` / `YDESC` (:314, :326) | `=` | forwarded |
 | `CUDNN_ATTR_OPERATION_REDUCTION_DESC` (:301) | **MISSING** | consumed by the shim |
@@ -211,7 +215,7 @@ Evidence: float-typed parameter setters at
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_BACKEND_RESAMPLE_DESCRIPTOR` | **MISSING** | parameter descriptor held by the shim |
+| `CUDNN_BACKEND_RESAMPLE_DESCRIPTOR` | **MISSING** | parameter record held by the builder object |
 | `CUDNN_ATTR_RESAMPLE_MODE` / `COMP_TYPE` / `PADDING_MODE` (RS.h:339, :361, :396) | `=`, on the op | folded; NEAREST and BILINEAR → `NOT_SUPPORTED`; `EDGE_VAL_PAD` has no hipDNN mode and fails closed |
 | `CUDNN_ATTR_RESAMPLE_WINDOW_DIMS` / `PRE_PADDINGS` / `POST_PADDINGS` / `STRIDES` (RS.h:422-464, `cudnnFraction_t`) | `=`, T! (hipDNN stores `int64` vectors) | integer fractions converted; non-integer → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_RESAMPLE_NAN_PROPAGATION` (RS.h:374) | **MISSING** | stored and ignored (divergence) |
@@ -229,21 +233,21 @@ unless prefixed `Rng.h` (= `upstream:include/cudnn_frontend_Rng.h`).
 |---|---|---|
 | `CUDNN_ATTR_OPERATION_NORM_FWD_*` (`MODE`, `PHASE`, `XDESC`, `MEAN_DESC`, `INV_VARIANCE_DESC`, `SCALE_DESC`, `BIAS_DESC`, `EPSILON_DESC`, `EXP_AVG_FACTOR_DESC`, `INPUT/OUTPUT_RUNNING_MEAN/VAR_DESC`, `YDESC`, `PEER_STAT_DESCS`; :1094-1238) | **MISSING** as one op; `≈` split per norm (`BATCHNORM*_EXT`, `LAYERNORM_EXT`, `RMSNORM_EXT`); no `NORM_MODE` type | BATCH → `BatchnormAttributes` (training) or `BatchnormInferenceAttributes` (mean + inverse variance); LAYER → `LayernormAttributes` (normalized-dimension count inferred by the hipDNN node); RMS → `RMSNormAttributes` (inverse variance → inverse RMS); `EXP_AVG_FACTOR_DESC` → hipDNN `MOMENTUM`; epsilon / momentum become runtime pass-by-value scalars when the caller marks them by-value; compute type synthesized as FLOAT (cuDNN norm ops carry none, hipDNN requires one — divergence); INSTANCE, GROUP, ADA_LAYER, `PEER_STAT_DESCS` → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_OPERATION_NORM_BWD_*` (:1273-1365) | **MISSING**; `≈` `BATCHNORM_BACKWARD_DESCRIPTOR_EXT`, `LAYERNORM_BACKWARD_DESCRIPTOR_EXT`, `RMSNORM_BACKWARD_DESCRIPTOR_EXT` | BATCH / LAYER / RMS → `BatchnormBackwardAttributes` / `LayernormBackwardAttributes` / `RMSNormBackwardAttributes`; compute type FLOAT as forward; peer stats and other modes → `NOT_SUPPORTED` |
-| `CUDNN_ATTR_OPERATION_BN_FINALIZE_*` (:705-876) | **MISSING** | settable; op `NOT_SUPPORTED` at finalize |
-| `CUDNN_ATTR_OPERATION_BN_BWD_WEIGHTS_*` (:1836-1951) | **MISSING** | settable; op `NOT_SUPPORTED` at finalize |
-| `CUDNN_ATTR_OPERATION_GENSTATS_*` (:896-951) | descriptor type declared, no class or attributes | settable; op `NOT_SUPPORTED` at finalize |
-| `CUDNN_ATTR_RNG_*` (Rng.h:236-302) | **MISSING** | stored and validated |
-| `CUDNN_ATTR_OPERATION_RNG_YDESC` / `SEED` / `DESC` / `OFFSET_DESC` (:1612-1675) | **MISSING** | settable; op `NOT_SUPPORTED` at finalize |
-| `CUDNN_ATTR_OPERATION_RESHAPE_XDESC` / `YDESC` / `MODE` (:1771-1805) | **MISSING** | settable; op `NOT_SUPPORTED` at finalize |
-| `CUDNN_ATTR_OPERATION_PAGED_CACHE_LOAD_*` (:1731-1752) | descriptor type declared only | settable; op `NOT_SUPPORTED` at finalize |
+| `CUDNN_ATTR_OPERATION_BN_FINALIZE_*` (:705-876) | **MISSING** | upstream's slot checks, then `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_ATTR_OPERATION_BN_BWD_WEIGHTS_*` (:1836-1951) | **MISSING** | upstream's slot checks, then `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_ATTR_OPERATION_GENSTATS_*` (:896-951) | descriptor type declared, no class or attributes | upstream's slot checks, then `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_ATTR_RNG_*` (Rng.h:236-302) | **MISSING** | validated at `RngDescBuilder::build()`; never lowered |
+| `CUDNN_ATTR_OPERATION_RNG_YDESC` / `SEED` / `DESC` / `OFFSET_DESC` (:1612-1675) | **MISSING** | upstream's slot checks, then `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_ATTR_OPERATION_RESHAPE_XDESC` / `YDESC` / `MODE` (:1771-1805) | **MISSING** | upstream's slot checks, then `NOT_SUPPORTED` at `OperationBuilder::build()` |
+| `CUDNN_ATTR_OPERATION_PAGED_CACHE_LOAD_*` (:1731-1752) | descriptor type declared only | upstream's slot checks, then `NOT_SUPPORTED` at `OperationBuilder::build()` |
 
 **Operation graph.** Caption: `upstream:include/cudnn_frontend_OperationGraph.h`.
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_ATTR_OPERATIONGRAPH_OPS` :265 | `=`; hipDNN **appends** on repeated sets and requires finalized ops | replace semantics in the shim; hipDNN `OPS` set once, after a stable topological sort |
-| `CUDNN_ATTR_OPERATIONGRAPH_HANDLE` :279 | `=`, set-only; hipDNN graph finalize rejects a null handle (`projects/hipdnn/backend/src/descriptors/GraphDescriptor.cpp:34`) | **required**: missing → `BAD_PARAM` at finalize, as the v9 shim's handle-less build; cuDNN ≥ 9.8 accepts a handle-less graph (divergence, §6) |
-| `CUDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT` :77 (get) | NS | synthesized: N = number of enumerated engines; the first engine query runs the enumeration and needs a HIP device (§4.6) |
+| `CUDNN_ATTR_OPERATIONGRAPH_OPS` :265 | `=`; hipDNN **appends** on repeated sets and requires finalized ops | the core sets hipDNN `OPS` once, after a stable topological sort |
+| `CUDNN_ATTR_OPERATIONGRAPH_HANDLE` :279 | `=`, set-only; hipDNN graph finalize rejects a null handle (`projects/hipdnn/backend/src/descriptors/GraphDescriptor.cpp:34`) | **required**: missing → `BAD_PARAM` at `OperationGraphBuilder::build()`, as the v9 shim's handle-less build; cuDNN ≥ 9.8 accepts a handle-less graph (divergence, §6) |
+| `CUDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT` :77 (get) | NS | `getEngineCount()`: number of enumerated engines; the first engine query runs the enumeration and needs a HIP device (§3.5) |
 | `CUDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED` :299 | NS | `true` → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED` :320 | `≈` `HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT` | `true` → `NOT_SUPPORTED` (the v8 variant pack has no override attributes) |
 
@@ -257,7 +261,7 @@ getter switch `:248-287` has no `HANDLE` or `ENGINE_GLOBAL_COUNT` case.
 |---|---|---|
 | `CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH` :210 | `=` | forwarded |
 | `CUDNN_ATTR_ENGINEHEUR_MODE` :223; `CUDNN_HEUR_MODE_INSTANT` / `A` / `B` / `FALLBACK` | `=`, but only `HIPDNN_HEUR_MODE_FALLBACK` is accepted | every mode → FALLBACK; first use of each other mode warns once per process |
-| `CUDNN_ATTR_ENGINEHEUR_RESULTS` :92, :112 (get) | `=`; fills caller ENGINECFGs in place but leaves them **unfinalized** | count query honored; fills caller-created shim configs in rank order, shim-finalized at once, each reusing the engine's cached default hipDNN config |
+| `CUDNN_ATTR_ENGINEHEUR_RESULTS` :92, :112 (get) | `=`; fills caller ENGINECFGs in place but leaves them **unfinalized** | not read: results are the graph's rank snapshot, each viewing the engine's cached, finalized default hipDNN config; `getEngineConfig(n)` returns the first `n` |
 | `CUDNN_ATTR_ENGINEHEUR_DEVICEPROP` :238, `SM_COUNT_TARGET` :260 | NS | `NOT_SUPPORTED` when set |
 
 Evidence: FALLBACK-only check at
@@ -270,18 +274,18 @@ Evidence: FALLBACK-only check at
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
 | `CUDNN_ATTR_ENGINE_OPERATION_GRAPH` :266 | `=` | forwarded |
-| `CUDNN_ATTR_ENGINE_GLOBAL_INDEX` :279 | `=`, but the value is a 64-bit hash of the engine name | dense `0..N-1` index ↔ hipDNN ID. The engines are those returned by hipDNN's FALLBACK heuristic whose default config finalizes, sorted by **signed** engine ID; enumerated lazily on the first engine query of a graph (needs a HIP device) and cached per graph (§4.6) |
-| `CUDNN_ATTR_ENGINE_KNOB_INFO` :315 (get) | `=`; get allocates new descriptors | in-place fill, capped at `CUDNN_KNOB_TYPE_COUNTS` |
-| `CUDNN_ATTR_ENGINE_NUMERICAL_NOTE` (EP.h:167, F.h:56) | NS | synthesized: `NONDETERMINISTIC` unless the engine claims determinism; nothing else (§4.6) |
-| `CUDNN_ATTR_ENGINE_BEHAVIOR_NOTE` (EP.h:193, F.h:84) | `=`; enumerators differ | mapped by name; only `RUNTIME_COMPILATION` exists on both sides |
-| `CUDNN_ATTR_ENGINE_LAYOUT_INFO`, `SM_COUNT_TARGET`, `DEVICEPROP` | NS (`SM_COUNT_TARGET` `≈` `CU_COUNT_TARGET_EXT`) | `NOT_SUPPORTED` |
+| `CUDNN_ATTR_ENGINE_GLOBAL_INDEX` :279 | `=`, but the value is a 64-bit hash of the engine name | dense `0..N-1` index ↔ hipDNN ID. The engines are those returned by hipDNN's FALLBACK heuristic whose default config finalizes, sorted by **signed** engine ID; enumerated lazily on the first engine query of a graph (needs a HIP device) and cached per graph (§3.5) |
+| `CUDNN_ATTR_ENGINE_KNOB_INFO` :315 (get) | `=`; get allocates new descriptors | read at `EngineBuilder::build()`; `getSupportedKnobs()` lists the projected knobs |
+| `CUDNN_ATTR_ENGINE_NUMERICAL_NOTE` (EP.h:167, F.h:56) | NS | never queried; synthesized: `NONDETERMINISTIC` unless the engine claims determinism; nothing else (§3.5) |
+| `CUDNN_ATTR_ENGINE_BEHAVIOR_NOTE` (EP.h:193, F.h:84) | `=`; enumerators differ | read from hipDNN, mapped by name; only `RUNTIME_COMPILATION` exists on both sides |
+| `CUDNN_ATTR_ENGINE_LAYOUT_INFO`, `SM_COUNT_TARGET`, `DEVICEPROP` | NS (`SM_COUNT_TARGET` `≈` `CU_COUNT_TARGET_EXT`) | not read by the builders |
 | `CUDNN_ATTR_KNOB_INFO_TYPE` / `MAXIMUM_VALUE` / `MINIMUM_VALUE` / `STRIDE` :126-150 | `=`; `TYPE` is a string, T! | projected through the v9 shim's `detail/knob_wrapper.h`; a knob with no cuDNN type, or whose valid values cannot be expressed as min / max / stride, is hidden |
-| `CUDNN_ATTR_KNOB_CHOICE_KNOB_TYPE` / `KNOB_VALUE` (EC.h:122, :134) | `=`; `KNOB_TYPE` is a string, T! | reverse-mapped; a hidden type → `NOT_SUPPORTED`; a duplicate type → `BAD_PARAM`; values checked with hipDNN's knob validation. A value of `-1` (upstream's "unset", sent for every knob not chosen once one is) is ignored at `ENGINECFG` finalize unless the knob is visible and accepts `-1`; `KNOB_CHOICES` get still returns it |
+| `CUDNN_ATTR_KNOB_CHOICE_KNOB_TYPE` / `KNOB_VALUE` (EC.h:122, :134) | `=`; `KNOB_TYPE` is a string, T! | reverse-mapped; a hidden type → `NOT_SUPPORTED`; a duplicate type → `BAD_PARAM`; values checked with hipDNN's knob validation, all at `EngineConfigBuilder::build()`. A value of `-1` (upstream's "unset", sent for every knob not chosen once one is) is ignored unless the knob is visible and accepts `-1`; the plan tag keeps it |
 | `cudnnBackendKnobType_t`, `CUDNN_KNOB_TYPE_*`, `CUDNN_KNOB_TYPE_COUNTS` | **MISSING** (knobs are plugin-defined string IDs) | shim-defined enum, values shim-assigned |
-| `CUDNN_ATTR_ENGINECFG_ENGINE` (EC.h:184; get EP.h:447, F.h:50) | `=`; get allocates | in-place fill |
-| `CUDNN_ATTR_ENGINECFG_KNOB_CHOICES` (EC.h:202 set; EP.h:253 get) | `=`; set supported, get NS | answered from shim state |
-| `CUDNN_ATTR_ENGINECFG_WORKSPACE_SIZE` | `=`, get-only | forwarded from the cached default hipDNN config; a config with knob choices creates and finalizes its own on the first query or at plan finalize |
-| `CUDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO` | NS | `NOT_SUPPORTED` |
+| `CUDNN_ATTR_ENGINECFG_ENGINE` (EC.h:184; get EP.h:447, F.h:50) | `=`; get allocates | `hasNumericalNote` / `hasBehaviorNote` get it from the hipDNN config and destroy it after use |
+| `CUDNN_ATTR_ENGINECFG_KNOB_CHOICES` (EC.h:202 set; EP.h:253 get) | `=`; set supported, get NS | kept in the config record; set on the config's own hipDNN `ENGINECFG` |
+| `CUDNN_ATTR_ENGINECFG_WORKSPACE_SIZE` | `=`, get-only | not read by the builders (the plan's workspace size is) |
+| `CUDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO` | NS | not read by the builders |
 
 Evidence: `projects/hipdnn/backend/src/descriptors/EngineDescriptor.cpp:146-155` (numerical note,
 layout info, CU count, device properties → `NOT_SUPPORTED`);
@@ -292,12 +296,12 @@ layout info, CU count, device properties → `NOT_SUPPORTED`);
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_ATTR_EXECUTION_PLAN_HANDLE` :505 | `=`; accepted and ignored | built path (`ENGINE_CONFIG` set): optional; unset or null → the operation graph's handle, set → must equal it (`BAD_PARAM` otherwise). Load path (`JSON_REPRESENTATION` set): required (`BAD_PARAM` otherwise), as upstream's `loadFromJson` sets it. Stored as the context handle that `cudnnBackendExecute` compares against |
-| `CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG` :399 (get :537) | `=`; set requires a finalized config; get allocates | must be finalized; get fills in place |
+| `CUDNN_ATTR_EXECUTION_PLAN_HANDLE` :505 | `=`; accepted and ignored | `build()`: not sent, as upstream; the plan is created on the graph's handle. `loadFromJson`: required (`BAD_PARAM` otherwise), as upstream; the plan is deserialized on it. `cudnnBackendExecute` checks no handle |
+| `CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG` :399 (get :537) | `=`; set requires a finalized config; get allocates | must be a built `EngineConfig` (a config record); its hipDNN `ENGINECFG` is set on the plan |
 | `CUDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE` :298 | `=` | forwarded |
-| `CUDNN_ATTR_EXECUTION_PLAN_JSON_REPRESENTATION` :128, :492 | NS both ways | get: shim-generated JSON object; `"engine"` is always an object with `globalIndex`, `id` (a decimal string, since hashed IDs exceed JSON's exact integer range), optional `name` and `behaviorNotes`; `payload` (base64) only when `hipdnnBackendGetSerializedExecutionPlan_ext` succeeds (§4.7). Set (`loadFromJson`): parsed at plan finalize by a fixed-format reader; any other format → `BAD_PARAM`; no `payload` → `NOT_SUPPORTED`; otherwise deserialized via `hipdnnBackendCreateAndDeserializeExecutionPlan_ext` |
-| `CUDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE` :414 | NS | `NOT_SUPPORTED` |
-| `CUDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS` / `RUN_ONLY_INTERMEDIATE_UIDS` / `DEVICEPROP` | NS | `NOT_SUPPORTED` |
+| `CUDNN_ATTR_EXECUTION_PLAN_JSON_REPRESENTATION` :128, :492 | NS both ways | get: shim-generated JSON object; `"engine"` is always an object with `globalIndex`, `id` (a decimal string, since hashed IDs exceed JSON's exact integer range), optional `name` and `behaviorNotes`; `payload` (base64) only when `hipdnnBackendGetSerializedExecutionPlan_ext` succeeds (§3.6). `loadFromJson`: parsed by a fixed-format reader; any other format → `BAD_PARAM`; no `payload` → `NOT_SUPPORTED`; otherwise deserialized via `hipdnnBackendCreateAndDeserializeExecutionPlan_ext` |
+| `CUDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE` :414 | NS | `setKernelCache` with a non-null cache → `NOT_SUPPORTED` |
+| `CUDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS` / `RUN_ONLY_INTERMEDIATE_UIDS` / `DEVICEPROP` | NS | not set by the builders |
 
 Evidence: `projects/hipdnn/backend/src/descriptors/ExecutionPlanDescriptor.cpp:152-160` (get NS),
 `:210-222` (set NS), `:248` (handle ignored), `:270-273` (unfinalized config rejected).
@@ -306,25 +310,25 @@ Evidence: `projects/hipdnn/backend/src/descriptors/ExecutionPlanDescriptor.cpp:1
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_ATTR_VARIANT_PACK_DATA_POINTERS` :139, `UNIQUE_IDS` :152, `WORKSPACE` :165 | `=` | forwarded; the hipDNN variant pack is built at shim variant-pack finalize |
-| `CUDNN_ATTR_VARIANT_PACK_INTERMEDIATES` | NS | `NOT_SUPPORTED` |
+| `CUDNN_ATTR_VARIANT_PACK_DATA_POINTERS` :139, `UNIQUE_IDS` :152, `WORKSPACE` :165 | `=` | forwarded; the hipDNN variant pack is built at `VariantPackBuilder::build()` |
+| `CUDNN_ATTR_VARIANT_PACK_INTERMEDIATES` | NS | not set by the builders |
 
-**Attribute types.** Every `CUDNN_TYPE_*` the v0.x headers use exists by name in hipDNN except
-`CUDNN_TYPE_NORM_MODE` and `CUDNN_TYPE_RESHAPE_MODE` (**MISSING**); the shim declares both and checks
-attribute types against cuDNN's rules, not hipDNN's.
+**Attribute types.** Every `CUDNN_TYPE_*` upstream's v0.x headers use exists by name in hipDNN except
+`CUDNN_TYPE_NORM_MODE` and `CUDNN_TYPE_RESHAPE_MODE` (**MISSING**). The shim declares no attribute
+types: the core passes typed values, and sets hipDNN attributes through `hipdnn_frontend`'s packers.
 
 ### 1.4 Enum name comparison
 
 Only names are compared. The design never relies on NVIDIA's numeric values: the shim assigns its own
-(RFC §4.8), every translation between cuDNN and hipDNN enums is a switch on names, never a cast, and
+(RFC §3.7), every translation between cuDNN and hipDNN enums is a switch on names, never a cast, and
 unknown values fail closed. Status codes are translated by the v9 shim's existing switch
 (`projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/detail/status_translation.h`).
 
 | Enum family | Name differences (cuDNN v0.x usage vs hipDNN) |
 |---|---|
-| Attribute names | prefix rename for the shared core; many hipDNN `_EXT` additions; see §1.3 for missing names |
+| Attribute names | prefix rename for the shared core; many hipDNN `_EXT` additions; see §1.3 for missing names. Not declared by the shim (§1.5) |
 | Descriptor types | prefix rename; see §1.2 for missing types |
-| Attribute types | all v0.x types exist except `NORM_MODE`, `RESHAPE_MODE` |
+| Attribute types | all v0.x types exist except `NORM_MODE`, `RESHAPE_MODE`. Not declared by the shim (§1.5) |
 | Data types | hipDNN lacks `INT8x4`, `UINT8x4`, `INT8x32`, `FAST_FLOAT_FOR_FP8`, `COMPLEX_FP32`, `COMPLEX_FP64`; hipDNN adds `FP6_*_EXT`, `FP8_*_FNUZ` |
 | Pointwise modes | hipDNN lacks `COS`, `MOD`, `POW` |
 | Convolution mode | same names |
@@ -337,6 +341,25 @@ unknown values fail closed. Status codes are translated by the v9 shim's existin
 | Norm forward phase | same names |
 | Status codes | the shim keeps the v9 shim's single `cudnnStatus_t` (`cudnn_status.h`) |
 
+### 1.5 Declared C surface
+
+The shim declares the C identifiers that upstream's v0.x headers, NVIDIA's legacy samples and the
+PyTorch consumers name (RFC §3.7), as extracted by
+`projects/hipdnn/frontend/tests/data/cudnn_v8/extract_cudnn_v8_identifiers.py` into
+`cudnn_v8_identifiers.inc` and pinned by `TestCudnnShimV8Identifiers.cpp`. Types and enums are in
+`detail/c_types.h`; functions in `cudnn.h`, `cudnn_graph.h` and `cudnn_frontend_Reorder_Tensor.h`.
+
+| Kind | Declared | Not declared (RFC §9 R4) |
+|---|---|---|
+| Functions | `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `cudnnGetStream`, `cudnnGetErrorString`, `cudnnGetVersion`, `cudnnGetCudartVersion`, `cudnnBackendExecute`, `cudnnGetLastErrorString`, `cudnnReorderFilterAndBiasInt8x32` | `cudnnBackendCreateDescriptor`, `cudnnBackendDestroyDescriptor`, `cudnnBackendSetAttribute`, `cudnnBackendGetAttribute`, `cudnnBackendFinalize` |
+| Handle and descriptor types | `cudnnHandle_t` = `hipdnnHandle_t`, `cudnnBackendDescriptor_t` = `hipdnnBackendDescriptor_t`, `cudnnFraction_t` | — |
+| Enums | `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`, `cudnnBackendHeurMode_t`, `cudnnBackendKnobType_t`, `cudnnBackendNormFwdPhase_t`, `cudnnBackendNormMode_t`, `cudnnBackendNumericalNote_t`, `cudnnBackendReshapeMode_t`, `cudnnBackendTensorReordering_t`, `cudnnBnFinalizeStatsMode_t`, `cudnnConvolutionMode_t`, `cudnnDataType_t`, `cudnnGenStatsMode_t`, `cudnnNanPropagation_t`, `cudnnPaddingMode_t`, `cudnnPointwiseMode_t`, `cudnnReduceTensorOp_t`, `cudnnResampleMode_t`, `cudnnRngDistribution_t`, `cudnnTensorFormat_t`; `cudnnStatus_t` from the v9 shim | `cudnnBackendAttributeName_t` (`CUDNN_ATTR_*`), `cudnnBackendAttributeType_t` (`CUDNN_TYPE_*`), `cudnnMoeGroupedMatmulMode_t` (named only by enum converters, removed with it) |
+
+The legacy-corpus harness declares the five `CUDNN_ATTR_TENSOR_*` names, `CUDNN_TYPE_DATA_TYPE`,
+`CUDNN_TYPE_INT64` and `NOT_SUPPORTED` stubs of the four functions "Tensor creation comparison" calls
+in its own `tests/cudnn_samples/legacy/overlay/cudnn.h`, which is never installed under `include/`
+(RFC §9 R3; §5.2).
+
 ---
 
 ## 2. v0.x class and builder inventory
@@ -344,7 +367,7 @@ unknown values fail closed. Status codes are translated by the v9 shim's existin
 ### 2.1 Header inventory
 
 Line counts are `wc -l`. Caption directory: `upstream:include/`. "Shim" is the RFC 0021 disposition
-(RFC §4.1).
+(RFC §3.1).
 
 | Header | Lines | Main public contents | Shim |
 |---|---:|---|---|
@@ -415,9 +438,9 @@ The umbrella includes the v0.x headers at :106-127 but **not** `EngineConfigGene
 | `set_error_and_throw_exception` | `cudnn_frontend_utils.h:237` | appends `cudnnGetLastErrorString`; throws unless `NV_CUDNN_DISABLE_EXCEPTION` |
 | `AllowAll` | `cudnn_frontend_utils.h:223` | always `false` (keep everything) |
 | `get_pointwise_mode_port_count` | `cudnn_frontend_utils.h:796` | decides which pointwise slots are set |
-| `detail::create_descriptor` / `destroy_descriptor` / `set_attribute` / `get_attribute` / `finalize` / `execute` | `cudnn_frontend_shim.h:531-581` | the only path from builders to the C API |
+| `detail::create_descriptor` / `destroy_descriptor` / `set_attribute` / `get_attribute` / `finalize` / `execute` | `cudnn_frontend_shim.h:531-581` | the only path from builders to the C API; the shim keeps only `execute` (§2.6) |
 | Macros | `CUDNN_FRONTEND_UNUSED` (`utils.h:199`), `NV_CUDNN_DISABLE_EXCEPTION`, `CUDNN_FRONTEND_SKIP_JSON_LIB`, `NV_FE_CALL_TO_BACKEND` (`shim.h:171-180`), `NV_FE_CALL_TO_CUDA` / `NV_FE_CALL_TO_CU` (`shim.h:182-194`), `CUDNN_FE_LOG*` (`Logging.h:125-164`), `NV_CUDNN_FRONTEND_DISABLE_LOGGING` | `CUDNN_FE_LOG*` already exist, `#ifndef`-guarded, in the v9 shim |
-| FE enums | `cudnn_frontend_utils.h:334-794` | `DescriptorType_t`, `NormMode_t`, `RngDistribution_t` become shim-owned (RFC §4.8) |
+| FE enums | `cudnn_frontend_utils.h:334-794` | `DescriptorType_t`, `NormMode_t`, `RngDistribution_t` become shim-owned (RFC §3.7) |
 
 ### 2.4 Classes and public methods
 
@@ -450,30 +473,60 @@ move-only. Exceptions: `PointWiseDescBuilder_v8::build()` returns by value
 | `EngineConfigGenerator` (`EngineConfigGenerator.h`) | — | `generate_engine_config`, `cudnnGetPlan` ×2, `cudnnFindPlan<Sampling>` ×2, `cudnnFindPlanAndCache<Sampling>`; `CudnnFindSamplingTechnique` |
 | `time_sorted_plan<Sampling>` (`find_plan.h`) | — | one warm-up, then 1, 3 or 100 timed runs; timed in the shim with hipDNN's profiling-control descriptor |
 
-### 2.5 Class → backend descriptor → attributes
+### 2.5 Class → record → raw descriptor
 
-Every `build()` does Create(type), one SetAttribute per attribute, Finalize. "Get" marks
-`cudnnBackendGetAttribute`.
+Upstream's `build()` does Create(type), one SetAttribute per attribute, Finalize; "Get" marks
+`cudnnBackendGetAttribute`. The shim's `build()` passes the same values to a `detail/v8` factory, which
+returns an immutable record (RFC §3.3). `get_raw_desc()` is the hipDNN descriptor the record owns, or
+null; `TestCudnnShimV8BuilderContracts.RawDescriptorFollowsClassTable` pins the last column.
 
-| Class | Backend descriptor | Attributes (attribute type) |
-|---|---|---|
-| `Tensor_v8` | `TENSOR` | `DATA_TYPE` (DATA_TYPE), `DIMENSIONS`, `STRIDES` (INT64×n), `UNIQUE_ID`, `BYTE_ALIGNMENT` (INT64), `IS_VIRTUAL`, `IS_BY_VALUE` (BOOLEAN), `VECTOR_COUNT`, `VECTORIZED_DIMENSION` (INT64), `RAGGED_OFFSET_DESC` (BACKEND_DESCRIPTOR), `REORDERING_MODE` (TENSOR_REORDERING_MODE), `CONSTANT_VALUE` (VOID_PTR) |
-| `ConvDesc_v8` | `CONVOLUTION` | `COMP_TYPE` (DATA_TYPE), `CONV_MODE` (CONVOLUTION_MODE), `SPATIAL_DIMS` (INT64), `PRE_PADDINGS`, `POST_PADDINGS`, `DILATIONS`, `FILTER_STRIDES` (INT64×n) |
-| `PointWiseDesc_v8` | `POINTWISE` | `MODE` (POINTWISE_MODE), `MATH_PREC` (DATA_TYPE), `NAN_PROPAGATION` (NAN_PROPOGATION), ReLU/ELU/softplus/swish parameters (DOUBLE), `AXIS` (INT64); mode-dependent |
-| `MatMulDesc_v8` | `MATMUL` | `COMP_TYPE` (DATA_TYPE), `PADDING_VALUE` (DOUBLE) |
-| `ReductionDesc_v8` | `REDUCTION` | `COMP_TYPE` (DATA_TYPE), `OPERATOR` (REDUCTION_OPERATOR_TYPE), `IS_DETERMINISTIC` (BOOLEAN) |
-| `ResampleDesc_v8` | `RESAMPLE` | `MODE` (RESAMPLE_MODE), `COMP_TYPE` (DATA_TYPE), `NAN_PROPAGATION`, `PADDING_MODE` (PADDING_MODE), `SPATIAL_DIMS` (INT64), `WINDOW_DIMS`, `PRE_PADDINGS`, `POST_PADDINGS`, `STRIDES` (FRACTION×n) |
-| `RngDesc_v8` | `RNG` | `DISTRIBUTION` (RNG_DISTRIBUTION), normal / uniform / Bernoulli parameters (DOUBLE) |
-| `Operation_v8` | `OPERATION_*`, chosen by mode | §3 |
-| `OperationGraph_v8` | `OPERATIONGRAPH` | `OPS` (BACKEND_DESCRIPTOR×n), `HANDLE` (HANDLE), `IS_DYNAMIC_SHAPE_ENABLED`, `IS_OVERRIDE_SHAPE_ENABLED` (BOOLEAN); Get `ENGINE_GLOBAL_COUNT` (INT64) |
-| `EngineHeuristics_v8` | `ENGINEHEUR`; results are pre-created `ENGINECFG`s | `OPERATION_GRAPH` (BACKEND_DESCRIPTOR), `MODE` (HEUR_MODE), `DEVICEPROP` (BACKEND_DESCRIPTOR), `SM_COUNT_TARGET` (INT32); Get `RESULTS` (BACKEND_DESCRIPTOR×n; n = 0 queries the count) |
-| `Engine_v8` | `ENGINE`, `KNOB_INFO` ×`CUDNN_KNOB_TYPE_COUNTS` | `OPERATION_GRAPH`, `GLOBAL_INDEX` (INT64); Get `KNOB_INFO`; Get `KNOB_INFO_TYPE` (KNOB_TYPE), `MAXIMUM_VALUE`, `MINIMUM_VALUE`, `STRIDE` (INT64) |
-| `EngineConfig_v8` | `ENGINECFG`, `KNOB_CHOICE` ×COUNTS | `KNOB_CHOICE_KNOB_TYPE` (KNOB_TYPE), `KNOB_CHOICE_KNOB_VALUE` (INT64), `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES` (BACKEND_DESCRIPTOR) |
-| `ExecutionPlan_v8` | `EXECUTION_PLAN`; temporaries `ENGINE`, `KNOB_CHOICE` | `ENGINE_CONFIG` (set and get), `KERNEL_CACHE`, `HANDLE` (`loadFromJson` only), `JSON_REPRESENTATION` (CHAR, set and get), Get `WORKSPACE_SIZE`; Get on config `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES`; Get on engine `GLOBAL_INDEX`, `NUMERICAL_NOTE`, `BEHAVIOR_NOTE`; Get on knob `KNOB_TYPE`, `KNOB_VALUE` |
-| `VariantPack_v8` | `VARIANT_PACK` | `DATA_POINTERS` (VOID_PTR×n), `UNIQUE_IDS` (INT64×n), `WORKSPACE` (VOID_PTR) |
-| Filters | temporary `ENGINE` | Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) |
-| Errata | temporary `TENSOR` | Get the conv op's X/W, X/DW or DX/W tensors, then `TENSOR_DIMENSIONS` |
-| find/get plan, cache | — | `cudnnBackendExecute`, `cudnnGetStream`, CUDA events (shim: hipDNN profiling-control descriptor; no `cudnnGetStream`) |
+| Class | Upstream: backend descriptor and attributes (attribute type) | Shim record | Shim `get_raw_desc()` |
+|---|---|---|---|
+| `Tensor_v8` | `TENSOR`: `DATA_TYPE` (DATA_TYPE), `DIMENSIONS`, `STRIDES` (INT64×n), `UNIQUE_ID`, `BYTE_ALIGNMENT` (INT64), `IS_VIRTUAL`, `IS_BY_VALUE` (BOOLEAN), `VECTOR_COUNT`, `VECTORIZED_DIMENSION` (INT64), `RAGGED_OFFSET_DESC` (BACKEND_DESCRIPTOR), `REORDERING_MODE` (TENSOR_REORDERING_MODE), `CONSTANT_VALUE` (VOID_PTR) | `TensorRecord` | null |
+| `ConvDesc_v8` | `CONVOLUTION`: `COMP_TYPE` (DATA_TYPE), `CONV_MODE` (CONVOLUTION_MODE), `SPATIAL_DIMS` (INT64), `PRE_PADDINGS`, `POST_PADDINGS`, `DILATIONS`, `FILTER_STRIDES` (INT64×n) | `ConvolutionRecord` | null |
+| `PointWiseDesc_v8` | `POINTWISE`: `MODE` (POINTWISE_MODE), `MATH_PREC` (DATA_TYPE), `NAN_PROPAGATION` (NAN_PROPOGATION), ReLU/ELU/softplus/swish parameters (DOUBLE), `AXIS` (INT64); mode-dependent | `PointwiseRecord` | null |
+| `MatMulDesc_v8` | `MATMUL`: `COMP_TYPE` (DATA_TYPE), `PADDING_VALUE` (DOUBLE) | `MatmulRecord` | null |
+| `ReductionDesc_v8` | `REDUCTION`: `COMP_TYPE` (DATA_TYPE), `OPERATOR` (REDUCTION_OPERATOR_TYPE), `IS_DETERMINISTIC` (BOOLEAN) | `ReductionRecord` | null |
+| `ResampleDesc_v8` | `RESAMPLE`: `MODE` (RESAMPLE_MODE), `COMP_TYPE` (DATA_TYPE), `NAN_PROPAGATION`, `PADDING_MODE` (PADDING_MODE), `SPATIAL_DIMS` (INT64), `WINDOW_DIMS`, `PRE_PADDINGS`, `POST_PADDINGS`, `STRIDES` (FRACTION×n) | `ResampleRecord` | null |
+| `RngDesc_v8` | `RNG`: `DISTRIBUTION` (RNG_DISTRIBUTION), normal / uniform / Bernoulli parameters (DOUBLE) | `RngRecord` | null |
+| `Operation_v8` | `OPERATION_*`, chosen by mode: §3 | one `*OperationRecord` per lowered kind (convolution forward / backward data / backward filter, pointwise, matmul, reduction, resample forward / backward, norm forward / backward); unsupported kinds build none (§3.3) | null |
+| `OperationGraph_v8` | `OPERATIONGRAPH`: `OPS` (BACKEND_DESCRIPTOR×n), `HANDLE` (HANDLE), `IS_DYNAMIC_SHAPE_ENABLED`, `IS_OVERRIDE_SHAPE_ENABLED` (BOOLEAN); Get `ENGINE_GLOBAL_COUNT` (INT64) | `GraphCore`: the finalized hipDNN graph, its handle, tag and engine space | the hipDNN `OPERATIONGRAPH` |
+| `EngineHeuristics_v8` | `ENGINEHEUR`, results are pre-created `ENGINECFG`s: `OPERATION_GRAPH` (BACKEND_DESCRIPTOR), `MODE` (HEUR_MODE), `DEVICEPROP` (BACKEND_DESCRIPTOR), `SM_COUNT_TARGET` (INT32); Get `RESULTS` (BACKEND_DESCRIPTOR×n; n = 0 queries the count) | none; results are `ConfigRecord`s | null; each result: the engine's default `ENGINECFG` |
+| `EngineFallbackList_v8` | as heuristics, FALLBACK mode | none; results are `ConfigRecord`s | null; each result as heuristics |
+| `Engine_v8` | `ENGINE`, `KNOB_INFO` ×`CUDNN_KNOB_TYPE_COUNTS`: `OPERATION_GRAPH`, `GLOBAL_INDEX` (INT64); Get `KNOB_INFO`; Get `KNOB_INFO_TYPE` (KNOB_TYPE), `MAXIMUM_VALUE`, `MINIMUM_VALUE`, `STRIDE` (INT64) | `EngineRecord`: graph, dense index, engine ID | the graph's `ENGINE` for that ID |
+| `EngineConfig_v8` | `ENGINECFG`, `KNOB_CHOICE` ×COUNTS: `KNOB_CHOICE_KNOB_TYPE` (KNOB_TYPE), `KNOB_CHOICE_KNOB_VALUE` (INT64), `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES` (BACKEND_DESCRIPTOR) | `ConfigRecord`: engine, knob choices | knob-free: the engine's default `ENGINECFG`; with knob choices: its own `ENGINECFG`, built and finalized at `EngineConfigBuilder::build()` |
+| `ExecutionPlan_v8` | `EXECUTION_PLAN`, temporaries `ENGINE`, `KNOB_CHOICE`: `ENGINE_CONFIG` (set and get), `KERNEL_CACHE`, `HANDLE` (`loadFromJson` only), `JSON_REPRESENTATION` (CHAR, set and get), Get `WORKSPACE_SIZE`; Get on config `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES`; Get on engine `GLOBAL_INDEX`, `NUMERICAL_NOTE`, `BEHAVIOR_NOTE`; Get on knob `KNOB_TYPE`, `KNOB_VALUE` | `PlanRecord`: config record, plan, workspace size, tag, notes; a loaded plan's config record holds the JSON's engine index, ID, name, notes and knobs | the finalized `EXECUTION_PLAN`, built or deserialized |
+| `VariantPack_v8` | `VARIANT_PACK`: `DATA_POINTERS` (VOID_PTR×n), `UNIQUE_IDS` (INT64×n), `WORKSPACE` (VOID_PTR) | `VariantPackRecord` | the finalized `VARIANT_PACK` |
+| Filters | temporary `ENGINE`: Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) | — | `hasNumericalNote` reads the engine's ID only; `hasBehaviorNote` reads `ENGINE_BEHAVIOR_NOTE` |
+| Errata | temporary `TENSOR`: Get the conv op's X/W, X/DW or DX/W tensors, then `TENSOR_DIMENSIONS` | — | reads the operation record's tensor records |
+| find/get plan, cache | `cudnnBackendExecute`, `cudnnGetStream`, CUDA events | — | `cudnnBackendExecute` passthrough; hipDNN profiling-control descriptor for timing; no `cudnnGetStream` |
+
+### 2.6 Ported headers: rewritten and verbatim members
+
+For re-diffing a ported header against a new upstream tag. "Verbatim" means upstream's logic with only
+the mechanical edits of RFC §3.8 (namespace, includes, formatting, `-Werror` fixes, message text).
+"Rewritten" members called the backend C API upstream and call the core (`detail/v8`) here, keeping
+upstream's check order and statuses. Headers are under
+`projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/`; upstream's are under `include/`.
+
+| Header | Rewritten | Removed | Verbatim |
+|---|---|---|---|
+| `cudnn_backend_base.h` | `OpaqueBackendPointer`: holds a record and a non-owning view of its hipDNN descriptor; creates and destroys nothing; adds `get_type`, `get_record` | — | `BackendDescriptor`, `ManagedOpaqueDescriptor`, `make_shared_backend_pointer` (now an empty pointer). Shim-own: `detail::v8::makeManaged`, `recordOf` |
+| `cudnn_frontend_shim.h` (subset) | — | `detail::create_descriptor`, `destroy_descriptor`, `set_attribute`, `get_attribute`, `finalize` | `create_handle`, `destroy_handle`, `get_compiled_version`, `convert_version_to_str`, `get_backend_version_string`, `execute` (calls `cudnnBackendExecute`), `get_error_string`, `get_last_error_string`, `get_last_error_string_`, `set_stream`, `get_stream`. Shim-own: `PlanTimer`, `deviceSynchronize` |
+| `cudnn_frontend_Tensor.h` | `TensorBuilder_v8::build` (prechecks before the record, in upstream order; private `failPrecheck`) | the `CUDNN_VERSION >= 8900` / `92200` gates | `Tensor_v8`, every setter, `cloneFrom`, special members, aliases |
+| `cudnn_frontend_ConvDesc.h`, `_PointWiseDesc.h`, `_MatMulDesc.h`, `_ReductionDesc.h`, `_Resample.h`, `_Rng.h` | `<X>Builder_v8::build` (also resets status and error on success) | version gates around plumbing only (`MatMulDesc` ≥ 8900, `ReductionDesc` ≥ 91100 branch, `Rng` ≥ 8700) | the `<X>_v8` class, every setter, special members, aliases |
+| `cudnn_frontend_Operation.h` | `build()` dispatch; `build_conv_forward`, `build_conv_backward_data`, `build_conv_backward_filter`, `build_pointwise_op`, `build_matmul_op`, `build_reduction_op`, `build_resample_fwd_operation`, `build_resample_bwd_operation`, `build_norm_forward`, `build_norm_backward`; `build_genstats_op`, `build_bn_finalize_op`, `build_bn_bwd_weight_op`, `build_rng_operation`, `build_reshape_operation`, `build_paged_cache_load_op` (slot checks, then `NOT_SUPPORTED`); `validate_norm_op`'s `== 8500` branch. New private helpers: `slot_record`, `tensor_record`, `required_record`, `peer_stats_present`, `scale_value`, `commit_record`, `reject_unsupported`, `convolution_labels`, `commit_convolution`. `Operation_v8::alphabetaType` retyped to `cudnnDataType_t`; `norm_fwd_phase`, `norm_mode` initialized to `NOT_SET` | every `detail::set_attribute` / `finalize` call; `NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR` and `CUDNN_VERSION` gates that wrapped only plumbing | `Operation_v8` (`describe`, `getOutputTensor`, `getTag`, `getFeatureVector`), every setter including `setpwDesc`'s mode classification, `extract_feature_vector`, `copy_dims_and_strides`, the other `validate_*`, constructors, aliases |
+| `cudnn_frontend_OperationGraph.h` | `OperationGraph_v8::getEngineCount`, `OperationGraphBuilder_v8::build` | — | `OperationGraph_v8` (`describe`, `getOpCount`, `getTag`, feature vectors, `getOps`), every setter, special members, aliases |
+| `cudnn_frontend_Heuristics.h` | `EngineHeuristicsBuilder_v8::build`, `EngineHeuristics_v8::getEngineConfig`, `getEngineConfigCount` | `get_heur_b_mutex` | `get_heuristics_list` (all overloads), `get_heuristics_list_impl`, the `NV_CUDNN_FE_TRY` / `NV_CUDNN_FE_CATCH` macros, builder setters, aliases |
+| `cudnn_frontend_Engine.h` | `EngineBuilder_v8::build` | `Engine_v8::bKnobs`, `Engine_v8::buildKnobs` | `Engine_v8::Knob`, `describe`, `getTag`, `getSupportedKnobs`, `getFinalizedKnobs`, `knobs_set`, builder setters |
+| `cudnn_frontend_EngineConfig.h` | `EngineConfigBuilder_v8::setEngine` (keeps knob choices as values), `EngineConfigBuilder_v8::build` (builds the knob `ENGINECFG`) | the `EngineConfig_v8()` constructor that created `KNOB_CHOICE` descriptors, `bChoices` | `describe`, `getTag`, `EngineConfigList` |
+| `cudnn_frontend_EngineFallbackList.h` | `EngineFallbackListBuilder_v8::build` | — | `get_fallback_engine_list`, `EngineFallbackList_v8`, setters |
+| `cudnn_frontend_Filters.h` | `hasNumericalNote`, `hasBehaviorNote` | — | `filter` |
+| `cudnn_frontend_ExecutionPlan.h` | `ExecutionPlan_v8::getJsonRepresentation`, `fetchNotes`, `buildTag`, `computeWorkSpaceSize`, new private `adopt`; `ExecutionPlanBuilder_v8::build`, `loadFromJson` | — | class layout and members, `getWorkspaceSize`, `describe`, `getTag`, `setExecutionTime` / `getExecutionTime`, `getAllNumericNotes`, `getNumericNotes`, `getBehaviorNotes`, `getAllBehaviorNotes`, copy and move members, every builder setter, aliases |
+| `cudnn_frontend_VariantPack.h` | `VariantPackBuilder_v8::build` | — | `VariantPack_v8`, every setter, special members, aliases |
+| `cudnn_frontend_Errata.h` | `check_shape` (takes the operation's `ManagedOpaqueDescriptor` and `detail::ErrataTensorSlot`; reads the tensor record's dimensions), `check_rule`'s graph overload (passes `getOps()[0]` and the slot). New: `detail::ErrataTensorSlot`, `detail::errataTensor` | the raw `ops_` descriptor array | `load_from_config`, `check_errata`, the tag, version, knob and shape matching |
+| `cudnn_frontend_utils.h` | — | `detail::convert_to_cudnn_type` / `convert_from_cudnn_type` for `MoeGroupedMatmulMode_t` (RFC §9 R4) | everything else as ported |
+| `cudnn_frontend_find_plan.h`, `_get_plan.h`, `_ExecutionPlanCache.h`, `_EngineConfigGenerator.h`, `_Logging.h`, `_Reorder_Tensor.h` | — | — | no backend calls besides `detail::execute`; unchanged by the move to the core |
 
 ---
 
@@ -512,7 +565,7 @@ forward, norm backward and BN-backward-weights).
 
 ### 3.3 Per-op build table
 
-| Op (tag) | `build_*` | Setters used | Backend attributes | hipDNN lowering (RFC §4.5): `hipdnn_frontend` attribute object + node + packer |
+| Op (tag) | `build_*` | Setters used | Backend attributes | hipDNN lowering (RFC §3.4): `hipdnn_frontend` attribute object + node + packer |
 |---|---|---|---|---|
 | Conv forward (`ConvFwd`) | :1964 | `setxDesc`, `setwDesc`, `setyDesc`, `setcDesc`, `setAlpha`, `setBeta` | `CONVOLUTION_FORWARD_X`, `_W`, `_Y`, `_CONV_DESC`, `_ALPHA`, `_BETA` (float, or double for a double conv compute type) (:1970-2037) | `ConvFpropAttributes` + conv-fprop node and `ConvolutionFpropPacker`; conv parameters folded into the attributes; alpha ≠ 1 / beta ≠ 0 → `NOT_SUPPORTED` |
 | Conv backward-data (`ConvBwdData`) | :589 | `setwDesc`, one of `setdyDesc`/`setyDesc`, one of `setdxDesc`/`setxDesc`, `setcDesc`, alpha, beta | `CONVOLUTION_BWD_DATA_DX`, `_W`, `_DY`, `_CONV_DESC`, `_ALPHA`, `_BETA` (:596-668) | `ConvDgradAttributes` + `ConvolutionDgradPacker`; as above |
@@ -520,16 +573,16 @@ forward, norm backward and BN-backward-weights).
 | Pointwise (JSON name of the mode, :449) | :444 | `setpwDesc`, `setxDesc`; forward: `setyDesc`; backward activation: `setdyDesc` + `setdxDesc`; `setbDesc` (≥ 3 ports), `settDesc` (4 ports); `setAlpha`, `setAlpha2` | `PW_DESCRIPTOR`, `XDESC`, `YDESC` or `DYDESC` + `DXDESC`, `ALPHA1`, `ALPHA2`, `BDESC`, `TDESC` (:455-567) | `PointwiseAttributes` + `PointwisePacker`; slots X/B/T/Y → IN_0/IN_1/IN_2/OUT_0, backward DY/X/DX → IN_0/IN_1/OUT_0; default-valued parameters left unset (the packer elides unset optionals); alpha1/alpha2 ≠ 1 → `NOT_SUPPORTED` |
 | Matmul (`Matmul`) | :346 | `setaMatDesc`, `setbMatDesc`, `setcMatDesc`, `setmatmulDesc`, optional `setm/n/kOverrideDesc` | `MATMUL_ADESC`, `BDESC`, `CDESC`, `GEMM_M/N/K_OVERRIDE_DESC`, `MATMUL_DESC` (:350-426) | `MatmulAttributes` + `MatmulPacker` with the comp type; padding value and M/N/K overrides → `NOT_SUPPORTED` |
 | Reduction (`Reduction`) | :298 | `setreductionDesc`, `setxDesc`, `setyDesc` | `REDUCTION_DESC`, `XDESC`, `YDESC` (:301-326) | `ReductionAttributes` + `ReductionPacker` (operator, comp type, determinism) |
-| GenStats (`GenStats`) | :891 | `setxDesc`, `setSumDesc`, `setSqSumDesc`, `setGenStatsMode`, `setComputeType` | `GENSTATS_XDESC`, `SUMDESC`, `SQSUMDESC`, `MODE`, `MATH_PREC` (:896-951) | `NOT_SUPPORTED` at finalize |
-| BN finalize (`BNFinalize`) | :688 | `setBNFinalizeMode`, `setComputeType`, `setSumDesc`, `setSqSumDesc`, `setScaleAndBias`, `setEqScaleAndBias`, `setPrev/NextRunningMeanAndVar`, `setSavedMeanAndInvVar`, `setEpsilonTensor`, `setExpDecayFactorTensor`, `setAccumCountTensor` | `BN_FINALIZE_*` (:705-876); optional attributes set only when non-null | `NOT_SUPPORTED` at finalize |
-| BN backward weights (`Dgrad_Drelu_BN_Bwd`) | :1831 | `setComputeType`, `setxDesc`, `setSavedMeanAndInvVar`, `setScale`, `setdyDesc`, `setDScaleAndDBias`, `setEqScalesAndBias` | `BN_BWD_WEIGHTS_*` (:1836-1951) | `NOT_SUPPORTED` at finalize |
+| GenStats (`GenStats`) | :891 | `setxDesc`, `setSumDesc`, `setSqSumDesc`, `setGenStatsMode`, `setComputeType` | `GENSTATS_XDESC`, `SUMDESC`, `SQSUMDESC`, `MODE`, `MATH_PREC` (:896-951) | upstream's slot checks, then `NOT_SUPPORTED` at `build()` |
+| BN finalize (`BNFinalize`) | :688 | `setBNFinalizeMode`, `setComputeType`, `setSumDesc`, `setSqSumDesc`, `setScaleAndBias`, `setEqScaleAndBias`, `setPrev/NextRunningMeanAndVar`, `setSavedMeanAndInvVar`, `setEpsilonTensor`, `setExpDecayFactorTensor`, `setAccumCountTensor` | `BN_FINALIZE_*` (:705-876); optional attributes set only when non-null | upstream's slot checks, then `NOT_SUPPORTED` at `build()` |
+| BN backward weights (`Dgrad_Drelu_BN_Bwd`) | :1831 | `setComputeType`, `setxDesc`, `setSavedMeanAndInvVar`, `setScale`, `setdyDesc`, `setDScaleAndDBias`, `setEqScalesAndBias` | `BN_BWD_WEIGHTS_*` (:1836-1951) | upstream's slot checks, then `NOT_SUPPORTED` at `build()` |
 | Norm forward (`Norm_Fwd`) | :1068 | `setNormalizationMode`, `setNormFwdPhase`, `setxDesc`, `setScaleAndBias`, `setSavedMeanAndInvVar`, `setEpsilonTensor`, `setExpDecayFactorTensor`, `setPrev/NextRunningMeanAndVar`, `setyDesc`, `addPeerStatTensor` / `setPeerStatTensor` | `NORM_FWD_*` incl. `PEER_STAT_DESCS` (:1094-1238) | BATCH → `BatchnormAttributes` (training) / `BatchnormInferenceAttributes` (mean + inverse variance); LAYER → `LayernormAttributes` (the hipDNN node infers the normalized-dimension count); RMS → `RMSNormAttributes`; `EXP_AVG_FACTOR_DESC` → `MOMENTUM`; compute type synthesized as FLOAT; other modes and peer stats → `NOT_SUPPORTED` |
 | Norm backward (`Norm_Bwd`) | :1255 | `setNormalizationMode`, `setxDesc`, `setSavedMeanAndInvVar`, `setdyDesc`, `setScale`, `setdxDesc`, `setDScaleAndDBias`, `addPeerStatTensor`, `setEpsilonTensor` | `NORM_BWD_*` (:1273-1365) | BATCH / LAYER / RMS → `BatchnormBackwardAttributes` / `LayernormBackwardAttributes` / `RMSNormBackwardAttributes`; compute type FLOAT; other modes and peer stats → `NOT_SUPPORTED` |
 | Resample forward (`Resample_fwd`) | :1381 | `setxDesc`, `setyDesc`, `setResampleDesc`, `setAlpha`/`setBeta` (sent as double), `setidxDesc` | `RESAMPLE_FWD_XDESC`, `YDESC`, `ALPHA`, `BETA`, `DESC`, `IDXDESC` (:1385-1451) | `ResampleFwdAttributes` + `ResampleFwdPacker`; fractions → integers; NEAREST/BILINEAR → `NOT_SUPPORTED`; alpha ≠ 1 / beta ≠ 0 → `NOT_SUPPORTED` |
 | Resample backward (`Resample_bwd`) | :1470 | `setdxDesc`, `setdyDesc`, `setResampleDesc`, alpha, beta, `setidxDesc`, optional `setxDesc`/`setyDesc` | `RESAMPLE_BWD_DXDESC`, `XDESC`, `YDESC`, `DYDESC`, `ALPHA`, `BETA`, `DESC`, `IDXDESC` (:1477-1578) | `ResampleBwdAttributes` + `ResampleBwdPacker`; as forward; `XDESC` / `YDESC` set → `NOT_SUPPORTED` |
-| RNG (`Rng`) | :1605 | `setyDesc`, `setRngDesc`, `setSeed` or `setSeedDesc`, `setOffsetDesc` | `RNG_YDESC`, `RNG_SEED`, `RNG_DESC`, `RNG_OFFSET_DESC` (:1612-1675) | `NOT_SUPPORTED` at finalize |
-| Reshape (`Reshape`) | :1764 | `setxDesc`, `setyDesc`, `setReshapeMode` | `RESHAPE_XDESC`, `YDESC`, `RESHAPE_MODE` (:1771-1805) | `NOT_SUPPORTED` at finalize |
-| Paged cache load (no tag set) | :1700 | `setcontainerDesc`, `setpageTableDesc`, `setsequenceDesc`, `setyDesc` | `PAGED_CACHE_LOAD_CONTAINER_DESC`, `PAGE_TABLE_DESC`, `SEQUENCE_DESC`, `YDESC` (:1731-1752) | `NOT_SUPPORTED` at finalize |
+| RNG (`Rng`) | :1605 | `setyDesc`, `setRngDesc`, `setSeed` or `setSeedDesc`, `setOffsetDesc` | `RNG_YDESC`, `RNG_SEED`, `RNG_DESC`, `RNG_OFFSET_DESC` (:1612-1675) | upstream's slot checks, then `NOT_SUPPORTED` at `build()` |
+| Reshape (`Reshape`) | :1764 | `setxDesc`, `setyDesc`, `setReshapeMode` | `RESHAPE_XDESC`, `YDESC`, `RESHAPE_MODE` (:1771-1805) | upstream's slot checks, then `NOT_SUPPORTED` at `build()` |
+| Paged cache load (no tag set) | :1700 | `setcontainerDesc`, `setpageTableDesc`, `setsequenceDesc`, `setyDesc` | `PAGED_CACHE_LOAD_CONTAINER_DESC`, `PAGE_TABLE_DESC`, `SEQUENCE_DESC`, `YDESC` (:1731-1752) | upstream's slot checks, then `NOT_SUPPORTED` at `build()` |
 
 ### 3.4 Feature vector
 
@@ -625,23 +678,23 @@ name **cuDNN** engine numbers:
 | `rule_id` `ConvBwdData` (3-D) | ConvBwdData eng23 | [8000, ∞) | no `CUDNN_ERRATA_JSON_FILE` and `x.dim() > 4` | **yes** |
 
 Only the 3-D `ConvBwdData eng23` rule is live. Shim indices are dense per graph over the enumerated
-engines, sorted by signed hipDNN engine ID (RFC §4.6), so `eng23` names a hipDNN engine only when a
+engines, sorted by signed hipDNN engine ID (RFC §3.5), so `eng23` names a hipDNN engine only when a
 graph has ≥ 24 enumerated engines (none does today), and then an arbitrary one — a documented
 divergence. The sm_120 lambda reads `plan_json["engine"]` as an object (L742), which is why the shim's
-plan JSON always carries an `"engine"` object (RFC §4.7).
+plan JSON always carries an `"engine"` object (RFC §3.6).
 
 ### 4.6 Other consumers
 
 | Consumer | API generation | v0.x surface beyond PyTorch (line numbers at the pinned commit) |
 |---|---|---|
-| OpenXLA / TensorFlow (`cuda_dnn.cc`; TF vendors it under `third_party/xla/`) | Mixed: conv, fused conv, matmul fusion, norm on v0.x; attention, block-scaled matmul, serialized graphs on v9 (`graph.deserialize`, L6876) | `TensorBuilder.cloneFrom` (L2870); `ConvDescBuilder.setComputeType` / `setSpatialDimCount` (L2946-2949, L3293-3296, L3615-3618); pointwise MIN / MAX / ELU / RELU / DIV (L3021-3031), RELU6 via `setReluUpperClip` (L3700), leaky ReLU via `setReluLowerClipSlope` (L3715), GELU / TANH / SIGMOID (L3860-3866); reduction (L3435); `NORM_FORWARD` / `NORM_BACKWARD` with `setNormalizationMode` / `setNormFwdPhase` (L5832-5858); `get_heuristics_list<N>` with string modes (L3917-3921, L5396-5410); `EngineBuilder.setGlobalEngineIdx` (L3965); `Engine::getSupportedKnobs` / `setChoice` keyed by the raw knob-type value (L3981-3984); `EngineConfigBuilder` (L3989); raw `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` on `EXECUTION_PLAN_ENGINE_CONFIG`, `ENGINECFG_ENGINE`, `ENGINE_GLOBAL_INDEX`, `ENGINECFG_KNOB_CHOICES`, `KNOB_CHOICE_KNOB_TYPE/VALUE` to persist autotune results (L5081-5199) |
+| OpenXLA / TensorFlow (`cuda_dnn.cc`; TF vendors it under `third_party/xla/`) | Mixed: conv, fused conv, matmul fusion, norm on v0.x; attention, block-scaled matmul, serialized graphs on v9 (`graph.deserialize`, L6876) | `TensorBuilder.cloneFrom` (L2870); `ConvDescBuilder.setComputeType` / `setSpatialDimCount` (L2946-2949, L3293-3296, L3615-3618); pointwise MIN / MAX / ELU / RELU / DIV (L3021-3031), RELU6 via `setReluUpperClip` (L3700), leaky ReLU via `setReluLowerClipSlope` (L3715), GELU / TANH / SIGMOID (L3860-3866); reduction (L3435); `NORM_FORWARD` / `NORM_BACKWARD` with `setNormalizationMode` / `setNormFwdPhase` (L5832-5858); `get_heuristics_list<N>` with string modes (L3917-3921, L5396-5410); `EngineBuilder.setGlobalEngineIdx` (L3965); `Engine::getSupportedKnobs` / `setChoice` keyed by the raw knob-type value (L3981-3984); `EngineConfigBuilder` (L3989); raw `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` on `EXECUTION_PLAN_ENGINE_CONFIG`, `ENGINECFG_ENGINE`, `ENGINE_GLOBAL_INDEX`, `ENGINECFG_KNOB_CHOICES`, `KNOB_CHOICE_KNOB_TYPE/VALUE` to persist autotune results (L5081-5199), which the shim does not provide (RFC §9 R1) |
 | PaddlePaddle (`conv_cudnn_frontend.h`) | v0.x | conv + pointwise via `TensorBuilder` / `OperationBuilder` / `OperationGraphBuilder` (L101, L172, L182, L492-496); `hasNumericalNote` (L40, L199-211); `get_heuristics_list<2>` (L222); `EngineConfigGenerator` (L235); `cudnnFindPlan<CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>` (L262-263); `cudnnGetPlan` (L272); `getTag` / `getExecutionTime` (L277-278); own plan cache keyed by the feature vector, with stability tracked per plan tag (L384-403) |
 | ONNX Runtime CUDA EP (`nn/conv.cc`) | v9 graph API only (L117-245, L416-430) | none (RFC 0012 scope) |
 | TransformerEngine (fused attention) | v9 graph API only (L9, L26-29, L93, L593) | none (RFC 0012 scope) |
 
 XLA persists `(GLOBAL_INDEX, knob choices)` keyed by the raw knob-type value (L5199) and replays it
 (L3982); Paddle tracks plan stability by tag. This is why the shim's engine index is stable across
-hipDNN re-rankings and its enum values are append-only (RFC §4.6, §4.8). The index is not stable across
+hipDNN re-rankings and its enum values are append-only (RFC §3.5, §3.7). The index is not stable across
 changes to the set of enumerated engines (provider added, removed or upgraded, different GPU).
 
 ---
@@ -691,7 +744,7 @@ stops before `cudnnBackendExecute` or crashes in the sample.
 
 | # | Test case (line) | Gate | Pattern | Data type | Driver and key APIs | Tier and expected outcome |
 |---:|---|---|---|---|---|---|
-| 1 | "Tensor creation comparison" :33 | — | raw backend tensor vs `TensorBuilder` | FLOAT | raw `cudnnBackendCreateDescriptor` / `SetAttribute` / `Finalize` / `DestroyDescriptor` (:68-86), `TensorBuilder` | RUN_CLEAN, `ran-clean`: no engine involved |
+| 1 | "Tensor creation comparison" :33 | — | raw backend tensor vs `TensorBuilder` | FLOAT | raw `cudnnBackendCreateDescriptor` / `SetAttribute` / `Finalize` / `DestroyDescriptor` (:68-86), `TensorBuilder` | XFAIL_RUN, `ran-with-assertion-failures`: the builder half runs clean; the shim has no raw descriptor C API, so the raw half compiles against the harness stub `legacy/overlay/cudnn.h` (§1.5), whose calls return `NOT_SUPPORTED`, and its first `REQUIRE` fails |
 | 2 | "Use global(index) for execution" :92 | — | conv backward-filter | FLOAT + CPU ref | C `run_from_global_index`: `EngineBuilder.setGlobalEngineIdx(0)`, knobs, `EngineConfigBuilder`, plan, variant pack | XFAIL_RUN, `ran-with-assertion-failures`: alignment 4 (`conv_sample.cpp:179-227`) leaves zero engines, so engine index 0 is out of range |
 | 3 | "Use heuristics for execution" :165 | — | conv forward | FLOAT + CPU ref | C `run_from_heuristics`: static `ExecutionPlanCache`, `EngineConfigGenerator`, `cudnnFindPlanAndCache<MEDIAN_OF_THREE>` | XFAIL_RUN, `ran-with-assertion-failures`: zero engines, so `cudnnFindPlanAndCache` throws because no plan ran |
 | 4 | "Use DNN based heuristics for execution" :241 | — | conv forward | FLOAT | C `run_from_heuristics` (mode argument ignored) | XFAIL_RUN, `ran-with-assertion-failures`: as #3 |
@@ -714,8 +767,8 @@ stops before `cudnnBackendExecute` or crashes in the sample.
 | 21 | "DgradDrelu sample" :1285 | — | conv backward-data → RELU_BWD | HALF | F `run_dgrad_drelu` | XFAIL_RUN, `crashed`: alignment 4 (`fusion_sample.cpp:2062-2095`) leaves zero engines |
 | 22 | "ConvColReduction sample" :1352 | — | conv → reduction ADD | HALF | F `run_conv_reduction` | XFAIL_RUN, `crashed`: no conv + reduction engine |
 | 23 | "Use errata to block global(index) for execution" :1405 | — | conv backward-filter, engine index 20 | FLOAT | C `block_using_errata`: `setGlobalEngineIdx(20)`, `check_errata` ×3 (tag, tag + shape, wildcard) | XFAIL_RUN, `ran-with-assertion-failures`: engine index 20 is out of range (see note) |
-| 24 | "DP4A execution with cudnnFindPlan" :1456 | — | conv forward, INT8x4 vectorized | INT8, INT32 compute | C `run_dp4a`: `setVectorCountAndDimension` | XFAIL_RUN, `ran-with-assertion-failures`: `CUDNN_DATA_INT8` with `VECTOR_COUNT` 4 (`conv_sample.cpp:1192-1193`) → `NOT_SUPPORTED` at tensor finalize |
-| 25 | "IMMA execution with manual autotuning" :1514 | — | conv forward, INT8x32 | INT8, INT32 compute | C `run_imma`: `setReorderType(INT8x32)`, `filter` ×2, `cudnnReorderFilterAndBiasInt8x32`, `check_errata` | XFAIL_RUN, `ran-with-assertion-failures`: `CUDNN_DATA_INT8` with `VECTOR_COUNT` 32 (`conv_sample.cpp:1308-1309`) → `NOT_SUPPORTED` at tensor finalize; the reorder helper is `NOT_SUPPORTED` too |
+| 24 | "DP4A execution with cudnnFindPlan" :1456 | — | conv forward, INT8x4 vectorized | INT8, INT32 compute | C `run_dp4a`: `setVectorCountAndDimension` | XFAIL_RUN, `ran-with-assertion-failures`: `CUDNN_DATA_INT8` with `VECTOR_COUNT` 4 (`conv_sample.cpp:1192-1193`) → `NOT_SUPPORTED` at `TensorBuilder::build()` |
+| 25 | "IMMA execution with manual autotuning" :1514 | — | conv forward, INT8x32 | INT8, INT32 compute | C `run_imma`: `setReorderType(INT8x32)`, `filter` ×2, `cudnnReorderFilterAndBiasInt8x32`, `check_errata` | XFAIL_RUN, `ran-with-assertion-failures`: `CUDNN_DATA_INT8` with `VECTOR_COUNT` 32 (`conv_sample.cpp:1308-1309`) → `NOT_SUPPORTED` at `TensorBuilder::build()`; the reorder helper is `NOT_SUPPORTED` too |
 | 26 | "Use Plan cache for rerunning the same convolution" :1572 | — | conv forward, twice | FLOAT | C `run_from_heuristics` ×2; second run hits `ExecutionPlanCache` | XFAIL_RUN, `ran-with-assertion-failures`: zero engines, so the first run throws and the cache check fails (see note) |
 | 27 | "Scale Bias Conv BNGenstats" :1669 | — | mul → add → leaky ReLU → conv → GEN_STATS | HALF, FLOAT stats | F `run_bn_conv_gen_stat` | XFAIL_RUN, `ran-with-assertion-failures`: GEN_STATS → `NOT_SUPPORTED` |
 | 28 | "Dual Scale Bias Act Relu" :1714 | — | (mul → add) ×2 → add → ReLU | HALF | F `run_dsbar` | XFAIL_RUN, `crashed`: no engine for the 6-op pointwise chain |
@@ -733,15 +786,14 @@ stops before `cudnnBackendExecute` or crashes in the sample.
 | 40 | "BN BWD Weights sample" :2669 | ≥ 90800 | pointwise + RELU_BWD → conv backward-data → BN_BWD_WEIGHTS | HALF, FLOAT stats | F `run_bn_bwd_weight`: `setEqScalesAndBias` | XFAIL_RUN, `ran-with-assertion-failures`: BN backward weights → `NOT_SUPPORTED` |
 | 41 | "Batch normalization" :2744 | ≥ 8800 | NORM_FORWARD / NORM_BACKWARD batch norm with 2 peer-stat tensors (2 sections) | HALF, FLOAT stats | N `run_batch_norm_forward`, `execute_batch_norm_forward`, `run_batch_norm_backward`; caches copyable plans by feature vector | XFAIL_RUN, `ran-with-assertion-failures`: peer statistics → `NOT_SUPPORTED` |
 
-Tally: 2 RUN_CLEAN, 4 RUN, 35 XFAIL_RUN (16 `ran-with-assertion-failures`, 19 `crashed`).
+Tally: 1 RUN_CLEAN, 4 RUN, 36 XFAIL_RUN (17 `ran-with-assertion-failures`, 19 `crashed`).
 
 Note on #23 and #26: plan-cache and errata cases would be natural RUN_CLEAN candidates, but both build
 their graph with `create_common_descriptors` (alignment 4), which has no engine, and #23 also needs
-NVIDIA engine 20. #26 would fail even with engines: its second run executes the cached plan on a new
-handle, which the shim rejects with `BAD_PARAM` (the `cudnnBackendExecute` handle row of
+NVIDIA engine 20. With engines, #26's second run would execute the cached plan on a new handle, which the shim
+passes to hipDNN unchecked (the `cudnnBackendExecute` handle row of
 [Known divergences](../KNOWN_DIVERGENCES.md#engines-plans-and-execution)). A RUN_CLEAN errata or
-plan-cache check would need a 16-byte-aligned variant that reuses one handle, which the upstream
-corpus does not have.
+plan-cache check would need a 16-byte-aligned variant, which the upstream corpus does not have.
 
 Filter predicates the samples use: `isNonDeterministic`, `isReducedPrecisionReduction`,
 `isDownConvertingInputs` (`hasNumericalNote<>`, `conv_sample.cpp:30-47`); `allowAll`
@@ -780,13 +832,13 @@ Caption directory: `upstream:include/`.
 | ≥ 8900 | tensor ragged offset | `cudnn_frontend_Tensor.h:479` | in |
 | ≥ 8900 | matmul padding value | `cudnn_frontend_MatMulDesc.h:152` | in |
 | ≥ 8905 | heuristics SM count | `cudnn_frontend_Heuristics.h:252` | in |
-| ≥ 90400 | operation-graph dynamic shape | `cudnn_frontend_OperationGraph.h:292` | in; `true` → `NOT_SUPPORTED` at shim finalize |
+| ≥ 90400 | operation-graph dynamic shape | `cudnn_frontend_OperationGraph.h:292` | in; `true` → `NOT_SUPPORTED` at `OperationGraphBuilder::build()` |
 | ≥ 90400 | plan kernel cache | `cudnn_frontend_ExecutionPlan.h:411` | in |
-| < 90500 | paged-cache-load → `NOT_SUPPORTED` in the builder | `cudnn_frontend_Operation.h:1701` | compiled out: the builder builds the op; the shim rejects it at finalize |
-| < 90800 | operation graph requires a handle | `cudnn_frontend_OperationGraph.h:241` | compiled out: the builder accepts a missing handle, but the shim's graph finalize returns `BAD_PARAM` (§1.3) |
+| < 90500 | paged-cache-load → `NOT_SUPPORTED` in the builder | `cudnn_frontend_Operation.h:1701` | compiled out: `OperationBuilder::build()` runs upstream's slot checks, then returns `NOT_SUPPORTED` |
+| < 90800 | operation graph requires a handle | `cudnn_frontend_OperationGraph.h:241` | compiled out, but `OperationGraphBuilder::build()` still returns `BAD_PARAM` without a handle (§1.3) |
 | ≥ 90800 | heuristics device properties | `cudnn_frontend_Heuristics.h:236` | in |
 | ≥ 91100 | reduction determinism | `cudnn_frontend_ReductionDesc.h:189` | in |
-| ≥ 92100 | operation-graph override shape | `cudnn_frontend_OperationGraph.h:313` | in; `true` → `NOT_SUPPORTED` at shim finalize |
+| ≥ 92100 | operation-graph override shape | `cudnn_frontend_OperationGraph.h:313` | in; `true` → `NOT_SUPPORTED` at `OperationGraphBuilder::build()` |
 | ≥ 92200 | tensor constant value | `cudnn_frontend_Tensor.h:528` | in |
 | ≥ 92200 | reshape-mode setter and attribute | `cudnn_frontend_Operation.h:1795,2594` | in |
 
