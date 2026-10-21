@@ -155,6 +155,9 @@ python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch 
 
 Each list names the rocm-libraries commit it was generated from, and ends with the unbuildable MIs and why
 the setting closest to fitting failed. `--report-dir` also writes every MI's verdict and witness setting as CSV.
+`--depthu` also searches every buildable MI at each DepthU of the space and lists, in its comment, the DepthUs
+it builds at (e.g. `# MT256x128  DepthU 64,128`); MI Designer ignores the comment. It takes about 2.5x as long,
+because each list must show where an MI stops building.
 
 ---
 

@@ -32,6 +32,10 @@ global-read widths move the same bytes whatever the element size:
      kernels closest to fitting (the closest per over-used resource first). A single start can
      sit where no one change helps while a slightly worse kernel is two changes from building.
 An MI none of these build is reported unbuildable, with how far the closest kernel overflows.
+
+Optionally (classify_candidates(depthu=True), generate_buildable_mis.py --depthu) every buildable MI
+is also searched at each DepthU of the space, climbing from the DepthU its witness used
+(buildable_depthus), and its list line records the DepthUs at which it builds.
 """
 
 from __future__ import annotations
@@ -46,7 +50,7 @@ import multiprocessing as mp
 import re
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -414,6 +418,20 @@ class SettingSearch:
         self.space = space
         self.gemm_type = config["GemmProblems"][0].gemm_type
         self.elem_bytes = dataSize[self.gemm_type.data_type]
+        self.depthu: Optional[int] = None  # set by pinned(): the one DepthU every kernel uses
+
+    def pinned(self, depthu: int) -> "SettingSearch":
+        """This search with every kernel at ``depthu``: the space's only DepthU, and only the MI
+        entries for which it is legal."""
+        s = copy.copy(self)
+        s.space = replace(self.space, fork={**self.space.fork, "DepthU": [depthu]})
+        s.depthu = depthu
+        return s
+
+    @staticmethod
+    def _min_depthu(entry: Dict[str, Any]) -> int:
+        """Smallest DepthU with at least one loop iteration: MFMA K x local split U."""
+        return entry["MatrixInstruction"][2] * entry.get("WorkGroup", [0, 0, 1])[2]
 
     def read_width(self, bf16_elements: int) -> int:
         """Global-read vector width moving the same bytes as ``bf16_elements`` 2-byte elements."""
@@ -438,12 +456,13 @@ class SettingSearch:
             if lsu > 1:
                 entry["WorkGroup"] = [p.WG0, p.WG1, lsu]
             entries.append(entry)
+        if self.depthu is not None:
+            entries = [e for e in entries if self.depthu >= self._min_depthu(e)]
         return entries
 
     def _legal_depthu(self, entry: Dict[str, Any]) -> List[int]:
-        """DepthU values the space allows with at least one loop iteration: DepthU >= MFMA K x local split U."""
-        lsu = entry.get("WorkGroup", [0, 0, 1])[2]
-        k = entry["MatrixInstruction"][2] * lsu
+        """DepthU values the space allows with at least one loop iteration."""
+        k = self._min_depthu(entry)
         return sorted(d for d in self.space.fork.get("DepthU", []) if isinstance(d, int) and d >= k)
 
     def _base(self, entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -545,6 +564,7 @@ class Verdict:
     witness: Dict[str, Any] = field(default_factory=dict)
     overflow: float = math.inf  # closest kernel's Measurement.overflow() (unbuildable MIs)
     reason: str = ""
+    depthu: List[int] = field(default_factory=list)  # DepthUs it builds at (buildable_depthus)
 
 
 def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
@@ -619,13 +639,44 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
     )
 
 
+def buildable_depthus(
+    checker: CodegenChecker, search: SettingSearch, mi: MI, witness: Dict[str, Any]
+) -> List[int]:
+    """Every DepthU of the space at which ``mi`` builds, for an MI whose ``witness`` setting built.
+
+    Searches from the witness's DepthU upward, then downward, stopping in each direction at the first
+    DepthU where classify finds no kernel. That assumes an MI's buildable DepthUs are contiguous, which
+    held for all 900 gfx950 MIs checked at every DepthU (300 each of BBS NN, F8BS NT, SSS NN): a larger
+    DepthU stages more of A and B in LDS and registers. Each stop is a full search that fails, so
+    recording DepthUs takes about 2.5x a list's generation time.
+    """
+    dus = sorted(d for d in search.space.fork.get("DepthU", []) if isinstance(d, int))
+    w = witness.get("DepthU")
+    if w not in dus:
+        return []
+    i = dus.index(w)
+    found = [w]
+    for d in dus[i + 1 :]:
+        if not classify(checker, search.pinned(d), mi).buildable:
+            break
+        found.append(d)
+    for d in reversed(dus[:i]):
+        if not classify(checker, search.pinned(d), mi).buildable:
+            break
+        found.insert(0, d)
+    return found
+
+
 # ---------------------------------------------------------------------------- driver
-_WORKER: Tuple[Optional[CodegenChecker], Optional[SettingSearch]] = (None, None)
+_WORKER: Tuple[Optional[CodegenChecker], Optional[SettingSearch], bool] = (None, None, False)
 
 
 def _classify_in_worker(mi: MI) -> Verdict:
-    checker, search = _WORKER
-    return classify(checker, search, mi)
+    checker, search, depthu = _WORKER
+    v = classify(checker, search, mi)
+    if depthu and v.buildable:
+        v.depthu = buildable_depthus(checker, search, mi, v.witness)
+    return v
 
 
 def classify_candidates(
@@ -633,9 +684,11 @@ def classify_candidates(
     hipblaslt_path: Path,
     workers: int,
     progress: Callable[[int, int, int], None] = lambda done, total, buildable: None,
+    depthu: bool = False,
 ) -> Tuple[List[Verdict], TuningSpace, str]:
     """Verdict for every candidate MI of one GEMM type, in enumeration order.
 
+    With ``depthu``, every buildable MI's verdict also lists the DepthUs it builds at (buildable_depthus).
     Returns (verdicts, tuning space, GEMM name).
     """
     global _WORKER
@@ -646,13 +699,13 @@ def classify_candidates(
     search = SettingSearch(checker.space, cfg)
     mis = enumerate_candidate_mis(cfg["ARCH"], gemm.gemm_type.data_type, LIST_SEARCH_SPACE)
 
-    _WORKER = (checker, search)  # inherited by forked workers
+    _WORKER = (checker, search, depthu)  # inherited by forked workers
     verdicts: Dict[MI, Verdict] = {}
     with mp.get_context("fork").Pool(workers) as pool:
         for v in pool.imap_unordered(_classify_in_worker, mis, chunksize=1):
             verdicts[v.mi] = v
             progress(len(verdicts), len(mis), sum(x.buildable for x in verdicts.values()))
-    _WORKER = (None, None)
+    _WORKER = (None, None, False)
     return [verdicts[mi] for mi in mis], checker.space, gemm.name
 
 
@@ -683,6 +736,12 @@ def write_buildable_list(
         "# geko/config_generator/buildability.py), generated with StreamK off: it also holds the few\n",
         "# tiles that build only as non-StreamK kernels. MI Designer reads this list instead of\n",
         "# enumerating MIs.\n",
+    ]
+    if any(v.depthu for v in buildable):
+        lines.append(
+            "# Each MI's comment gives its macro tile and every DepthU of the search space at which it builds.\n"
+        )
+    lines += [
         f"# {len(buildable)} of {len(verdicts)} candidate MIs are buildable; the others are listed at the end.\n",
         "\n",
         f"Architecture: {library_logic_architecture(arch)}\n",
@@ -692,7 +751,11 @@ def write_buildable_list(
         f"Source: {source}\n",
         "MatrixInstructions:\n",
     ]
-    lines += [f"  - [{', '.join(map(str, v.mi))}]  # {mt(v.mi)}\n" for v in buildable]
+
+    def note(v: Verdict) -> str:
+        return mt(v.mi) + (f"  DepthU {','.join(map(str, v.depthu))}" if v.depthu else "")
+
+    lines += [f"  - [{', '.join(map(str, v.mi))}]  # {note(v)}\n" for v in buildable]
     lines.append(
         "\n# Not buildable within the search space (closest kernel: how far its most over-used resource\n"
         "# exceeds the cap, and TensileLite's reason):\n"
@@ -707,14 +770,17 @@ def write_buildable_list(
 
 
 def write_report(path: Path, verdicts: Sequence[Verdict]) -> None:
-    """Every MI's verdict, the stage that decided it, code generations used, and the witness setting
-    (the setting that built, or for unbuildable MIs the one closest to fitting)."""
+    """Every MI's verdict, the stage that decided it, code generations used, the witness setting
+    (the setting that built, or for unbuildable MIs the one closest to fitting) and, when recorded,
+    the DepthUs it builds at."""
     import csv
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["mi", "buildable", "stage", "checks", "overflow", "reason", "witness"])
+        w.writerow(
+            ["mi", "buildable", "stage", "checks", "overflow", "reason", "witness", "depthu"]
+        )
         for v in verdicts:
             w.writerow(
                 [
@@ -725,5 +791,6 @@ def write_report(path: Path, verdicts: Sequence[Verdict]) -> None:
                     "" if v.buildable else v.overflow,
                     v.reason,
                     json.dumps(v.witness, sort_keys=True, default=str),
+                    ",".join(map(str, v.depthu)),
                 ]
             )
