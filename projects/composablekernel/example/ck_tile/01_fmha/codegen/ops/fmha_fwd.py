@@ -1698,18 +1698,32 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
             if (hdim, hdim_v) in ((128, 128), (64, 64)):
+                # The simplified mask keeps both window bounds live in the mainloop, so plain
+                # causal gets the one-bound kernel. t:l,r and b:l,r also arrive as
+                # top-left/bottom-right; the constraint sends those windows to s_mask.
+                has_causal = mask_impl == "simplified"
+                causal_only = CppConstraint(
+                    "a.window_size_left < 0 && a.window_size_right == 0"
+                )
+                tdm_masks = (["causal"] if has_causal else []) + list(
+                    get_mask_map(mask_impl)
+                )
                 for logits, qscale, mask, bias, lse, sink in itertools.product(
                     ["f"],
                     ["no", "pertensor", "perhead", "blockscale"],
-                    get_mask_map(mask_impl).keys(),
+                    tdm_masks,
                     ["no", "bias"],
                     ["f", "t"],
                     ["f", "t"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    is_causal = has_causal and mask == "causal"
+                    if is_causal and bias != "no":
+                        continue
+                    constraint = causal_only if is_causal else CppConstraint()
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
 
             for logits, qscale, mask, bias in itertools.product(
                 ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
