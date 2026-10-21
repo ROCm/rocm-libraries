@@ -52,11 +52,10 @@ static const char ROCKE_DATALAYOUT_LLVM23[]
 /* ================================ registry ============================== */
 
 /* gfx -> backend descriptor. Adding a CDNA gfx is one row here (Python
- * BACKEND_REGISTRY). vmcnt_bits records arch.vmcnt_bits; it is a hardware fact
- * the lowerer keys future divergence on. The wired CDNA targets all share the
- * gfx9/10 split waitcnt layout and 6-bit VMCNT today (gfx942's potential
- * 4-bit compv4 partial-waitcnt is recorded as vmcnt_bits but does not change
- * the encoder selection). */
+ * BACKEND_REGISTRY). vmcnt_bits records arch.vmcnt_bits, the hardware width of
+ * the s_waitcnt VMCNT field; the lowerer keys future divergence on it. The
+ * wired CDNA targets all share the gfx9/10 split waitcnt layout and its 6-bit
+ * VMCNT field. */
 typedef struct registry_row
 {
     const char* gfx;
