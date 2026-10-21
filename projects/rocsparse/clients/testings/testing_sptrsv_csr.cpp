@@ -804,4 +804,22 @@ INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 
-void testing_sptrsv_csr_extra(const Arguments& arg) {}
+void testing_sptrsv_csr_extra(const Arguments& arg)
+{
+    // A null handle passes the descriptor create and fails the first set_input.
+    rocsparse_status status = rocsparse_status_success;
+    try
+    {
+        rocsparse_local_sptrsv descr(nullptr,
+                                     rocsparse_operation_none,
+                                     rocsparse_sptrsv_alg_default,
+                                     rocsparse_datatype_f32_r,
+                                     rocsparse_datatype_f32_r,
+                                     rocsparse_analysis_policy_reuse);
+    }
+    catch(const rocsparse_status& s)
+    {
+        status = s;
+    }
+    EXPECT_ROCSPARSE_STATUS(status, rocsparse_status_invalid_handle);
+}

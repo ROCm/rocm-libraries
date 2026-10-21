@@ -1612,8 +1612,30 @@ static void testing_sptrsm_csr_extra1(const Arguments& arg)
     spsm_csr_B_conjugate(arg, rocsparse_order_column, rocsparse_order_column);
 }
 
+static void testing_sptrsm_csr_extra2(const Arguments& arg)
+{
+    // A null handle passes the descriptor create and fails the first set_input.
+    rocsparse_status status = rocsparse_status_success;
+    try
+    {
+        rocsparse_local_sptrsm descr(nullptr,
+                                     rocsparse_operation_none,
+                                     rocsparse_operation_none,
+                                     rocsparse_sptrsm_alg_default,
+                                     rocsparse_datatype_f32_r,
+                                     rocsparse_datatype_f32_r,
+                                     rocsparse_analysis_policy_reuse);
+    }
+    catch(const rocsparse_status& s)
+    {
+        status = s;
+    }
+    EXPECT_ROCSPARSE_STATUS(status, rocsparse_status_invalid_handle);
+}
+
 void testing_sptrsm_csr_extra(const Arguments& arg)
 {
     testing_sptrsm_csr_extra0(arg);
     testing_sptrsm_csr_extra1(arg);
+    testing_sptrsm_csr_extra2(arg);
 }
