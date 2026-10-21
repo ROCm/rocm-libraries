@@ -75,6 +75,15 @@ committed lock. A cohort edit without a replacement bundle therefore fails host
 tests, not only the matching GPU suite. The check skips a pair only when no
 archive, extracted bundle, or installed bundle is present.
 
+Each lock also pins `cohort_sha256`, a digest of every qualified case's
+contract, input digests, and tolerance. Qualification writes it to
+`qualification-lock.json`, and configuration checks it against the manifest
+that the lock pins. The same file compares it with each adapter's `CASES`,
+which needs no bundle data, so a cohort edit fails host tests in every tree,
+including CI jobs that have no bundle for that architecture. Editing a cohort
+that several processors share fails for each of them until every one is
+requalified.
+
 The same file also checks that each such pair can still be requalified at its
 locked baseline. Because qualification runs the current adapter with the
 baseline's production sources, the check exports the lock's `baseline_revision`
@@ -515,6 +524,7 @@ rows for the kernel author implicate a kernel change.
 | `reference bundle is missing`, `no extracted`, `does not match the pinned lock`, `has no manifest.json`, `missing, modified, or extra files`, `cannot be read`, `baseline identity mismatch`, `targets a different architecture`, `wrong reference operation` | The bundle was not fetched or extracted, is stale (extracted from an earlier archive, partly extracted, or modified), or belongs to another pair | Whoever runs the test | Run the `dvc pull` and `artifact.py unpack` commands the message prints, deleting a stale directory first, or pass the matching bundle and lock. Reinstall an installed tree from one build |
 | `reference archive missing`, `reference staging failed`, `No qualified ... baseline lock`, `has no publication list` during CMake configuration | A published archive was not fetched or does not match its lock, or the publication lists, locks, and operation packages disagree | Whoever configures the build, or the author of the publication change | Fetch every published archive before configuring ([step 6](#6-validate-installation-and-provider-selection)). Publish a pair only with its lock, and give each operation package a list and an `operation.json` |
 | `does not cover the complete enrolled cohort`, `the enrolled cases differ from`, `tolerance or budget changed`, `different compiler target` | The adapter's `CASES`, a shared cohort, the operation's `Case` fields, or the adapter's `COMPILER_TARGET` changed without a replacement bundle | Author of that change | Revert an unintended change. Otherwise [requalify the complete cohort](#decide-what-must-change) and publish its archive, lock, and DVC pointer. `diff` lists every difference |
+| `pins a cohort that its manifest does not record` | The lock's fields come from different qualifications, such as after a merge, or its `cohort_sha256` was edited to follow a cohort change that was not requalified | Author of the lock change | Restore the complete `qualification-lock.json` written with the published bundle. A cohort change needs a complete requalification |
 | `the current adapter cannot prepare`, `outside the sources of locked baseline` | An adapter update for a newer production API dropped the API of the pair's locked baseline revision, or a new case needs newer kernel support | Author of the adapter or case change | Keep the older API working in the adapter, or requalify the pair at a newer baseline revision |
 | `input digest mismatch` | The input generator or the NumPy implementation differs from qualification | Author of the contract change | Restore the generator; an intended change needs requalification of every pair of the operation |
 | `GPU unavailable`, `GPU is not available` | An explicitly selected suite found no GPU, or a GPU outside `AMDGPU_TARGETS` | CI job configuration | Run on the selected processor; see [processor selection](#processor-selection-in-therock-jobs) |

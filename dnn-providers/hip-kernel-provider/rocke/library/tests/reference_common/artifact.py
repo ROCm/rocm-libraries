@@ -12,7 +12,7 @@ import json
 import shutil
 import tarfile
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 
@@ -69,6 +69,38 @@ def _digest(path: Path) -> str:
         return digest.hexdigest()
 
 
+def cohort_digest(rows: Iterable[Mapping[str, object]]) -> str:
+    """Digest a cohort from one ``case``/``input_digests``/``tolerance`` row per case.
+
+    Rows are hashed as sorted compact JSON, so neither case order nor manifest
+    keys, which may use an earlier id format, change the digest. Outputs and
+    kernels are left out, so processors that enroll the same cases share it. A
+    lock records it as ``cohort_sha256``; configuration compares it with the
+    pinned manifest, and host tests compare it with the adapter's cases, which
+    needs no bundle data.
+    """
+    lines = sorted(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) for row in rows
+    )
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def manifest_cohort_digest(manifest: Mapping) -> str:
+    """Digest the cohort that a schema-2 manifest's cases record."""
+    return cohort_digest(
+        {
+            "case": entry["case"],
+            "input_digests": entry["input_digests"],
+            "tolerance": entry["budget"]["tolerance"],
+        }
+        for entry in manifest["cases"].values()
+    )
+
+
+class InconsistentLockError(ValueError):
+    """A lock whose fields disagree with each other, so no archive satisfies it."""
+
+
 def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
     """Authenticate the manifest and every payload file before installation."""
     _check_operation(operation)
@@ -96,6 +128,19 @@ def validate_bundle(bundle: Path, lock: Path, *, operation: str) -> None:
         raise ValueError(f"bundle operation {declared!r} does not match {operation!r}")
     if manifest["schema"] != 2:
         raise ValueError("only tensor-free schema-2 reference bundles are supported")
+    # A candidate lock from an earlier qualification may lack the digest; host
+    # tests require it in every committed lock.
+    if "cohort_sha256" in expected:
+        cohort = manifest_cohort_digest(manifest)
+        if cohort != expected["cohort_sha256"]:
+            raise InconsistentLockError(
+                "GPU reference lock pins a cohort that its manifest does not "
+                "record\n"
+                f"  manifest.json cases digest {cohort[:12]}, {lock.name} pins "
+                f"cohort_sha256 {expected['cohort_sha256'][:12]}\n"
+                "  every lock field must come from the qualification-lock.json "
+                "written with this bundle; a cohort change needs requalification"
+            )
     if any(p.is_file() and p.suffix in (".npz", ".npy") for p in bundle.rglob("*")):
         raise ValueError(
             "generated-input GPU reference bundles must not contain tensor files"
@@ -193,6 +238,9 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
         bundle = staged / f"{operation}_reference_bundle"
         try:
             validate_bundle(bundle, lock, operation=operation)
+        except InconsistentLockError:
+            # The archive has the manifest that the lock pins; no fetch can help.
+            raise
         except ValueError as error:
             mismatch = f"{archive} is not the archive that {lock} pins"
             if _is_published_pair(archive, lock, operation=operation):

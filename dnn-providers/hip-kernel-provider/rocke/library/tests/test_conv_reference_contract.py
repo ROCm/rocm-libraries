@@ -24,6 +24,7 @@ from conv_reference.contract import (
     reference_scale,
 )
 from reference_common import cli as common_cli
+from reference_common.artifact import validate_bundle
 from reference_common.numeric import (
     ErrorBudget,
     array_digest,
@@ -576,6 +577,11 @@ def test_qualification_freezes_self_contained_replay_support(
         baseline, bundle, repetitions=3, torch_reference="cpu" if with_torch else None
     )
     manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
+    # Configuration checks the lock's cohort digest against the manifest, and
+    # host tests check it against the enrolled cases.
+    validate_bundle(bundle, bundle / "qualification-lock.json", operation="conv")
+    lock = json.loads((bundle / "qualification-lock.json").read_text())
+    assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest("gfx942")
     assert manifest["cases"][case.id]["budget"]["baseline_error_bound"] == (
         0.001 if with_torch else 0
     )

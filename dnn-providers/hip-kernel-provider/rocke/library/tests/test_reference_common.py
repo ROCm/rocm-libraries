@@ -22,7 +22,9 @@ import pytest
 
 from reference_common.artifact import (
     OPERATIONS,
+    cohort_digest,
     display_command,
+    manifest_cohort_digest,
     manifest_operation,
     pack,
     unpack,
@@ -401,6 +403,100 @@ def test_unpacked_payload_is_checked_against_the_lock(tmp_path, operation):
     with pytest.raises(ValueError, match="payload"):
         unpack(archive, tmp_path / "output", lock, operation=operation)
     assert not (tmp_path / "output").exists()
+
+
+def test_cohort_digest_binds_contracts_inputs_and_tolerances():
+    """Only what a lock certifies changes the digest; ids, order and outputs do not."""
+    entries = {
+        "a": {
+            "case": {"name": "a", "shape": [1, 2]},
+            "input_digests": {"q": "1" * 64},
+            "budget": {"tolerance": 0.01, "baseline_error_bound": 0.001},
+            "output_digest": "2" * 64,
+        },
+        "b": {
+            "case": {"name": "b", "shape": [3, 4]},
+            "input_digests": {"q": "3" * 64},
+            "budget": {"tolerance": 0.02, "baseline_error_bound": 0.002},
+            "output_digest": "4" * 64,
+        },
+    }
+    digest = manifest_cohort_digest({"cases": entries})
+    # The enrolled side digests the same rows built from each case.
+    assert digest == cohort_digest(
+        {
+            "case": entry["case"],
+            "input_digests": entry["input_digests"],
+            "tolerance": entry["budget"]["tolerance"],
+        }
+        for entry in entries.values()
+    )
+    # Earlier id formats, case order, and another qualification's outputs and
+    # bounds keep the cohort, so processors sharing cases share its digest.
+    renamed = {f"old-{key}": entry for key, entry in reversed(entries.items())}
+    assert manifest_cohort_digest({"cases": renamed}) == digest
+    requalified = json.loads(json.dumps(entries))
+    requalified["a"]["output_digest"] = "5" * 64
+    requalified["a"]["budget"]["baseline_error_bound"] = 0.003
+    assert manifest_cohort_digest({"cases": requalified}) == digest
+    for (field, key), value in (
+        (("case", "shape"), [1, 3]),
+        (("input_digests", "q"), "6" * 64),
+        (("budget", "tolerance"), 0.03),
+    ):
+        changed = json.loads(json.dumps(entries))
+        changed["a"][field][key] = value
+        assert manifest_cohort_digest({"cases": changed}) != digest, field
+    del renamed["old-b"]
+    assert manifest_cohort_digest({"cases": renamed}) != digest
+
+
+def test_lock_pins_the_cohort_that_its_manifest_records(tmp_path, operation):
+    bundle, lock = _fixture(tmp_path, operation)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["cases"] = {
+        "a": {
+            "case": {"name": "a"},
+            "input_digests": {"q": "1" * 64},
+            "budget": {"tolerance": 0.01},
+        }
+    }
+    encoded = json.dumps(manifest).encode()
+    (bundle / "manifest.json").write_bytes(encoded)
+    pinned = {
+        "schema": 2,
+        "baseline_revision": manifest["baseline_revision"],
+        "cohort_sha256": manifest_cohort_digest(manifest),
+        "manifest_sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+    lock.write_text(json.dumps(pinned))
+    validate_bundle(bundle, lock, operation=operation)
+    archive = tmp_path / "bundle.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    # A candidate lock from before the digest still authenticates its bundle.
+    lock.write_text(
+        json.dumps({k: v for k, v in pinned.items() if k != "cohort_sha256"})
+    )
+    validate_bundle(bundle, lock, operation=operation)
+    # A lock mixed from two qualifications, or a digest edited to follow an
+    # unqualified cohort change, matches no archive.
+    lock.write_text(json.dumps(dict(pinned, cohort_sha256="0" * 64)))
+    with pytest.raises(
+        ValueError, match="pins a cohort that its manifest does not record"
+    ):
+        validate_bundle(bundle, lock, operation=operation)
+    output = tmp_path / "extracted"
+    with pytest.raises(ValueError) as error:
+        unpack(archive, output, lock, operation=operation)
+    message = str(error.value)
+    assert (
+        f"cases digest {pinned['cohort_sha256'][:12]}, lock.json pins "
+        f"cohort_sha256 {'0' * 12}"
+    ) in message
+    assert "a cohort change needs requalification" in message
+    # The archive holds the pinned manifest, so no fetch is suggested.
+    assert "is not the archive" not in message
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("suffix", [".npz", ".npy"])
@@ -1833,6 +1929,90 @@ def _check_published_cohort(operation, architecture):
 def test_published_bundles_record_the_enrolled_cohorts(operation, architecture):
     """A cohort edit cannot pass host tests while its published bundle lags."""
     _check_published_cohort(operation, architecture)
+
+
+def _check_locked_cohort(operation, architecture):
+    """Fail when the committed lock does not pin the enrolled cohort's digest.
+
+    Configuration checks the lock's ``cohort_sha256`` against the manifest
+    that the lock pins, so the digest stands for the published bundle's
+    cohort. Comparing it with the adapter's cases needs no bundle data, so a
+    cohort edit without requalification fails on every host, including CI jobs
+    for other processors. A cohort that several processors share therefore
+    fails for each processor that was not requalified.
+    """
+    from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    name = f"{spec.label} {architecture}"
+    path = spec.architectures.baseline_lock(architecture)
+    locked = json.loads(path.read_text()).get("cohort_sha256")
+    if locked is None:
+        pytest.fail(
+            f"{name}: {path} records no cohort_sha256, which every committed "
+            "lock needs. Qualification writes it to qualification-lock.json; a "
+            "lock qualified before then needs the manifest_cohort_digest, from "
+            "reference_common/artifact.py, of the manifest that it pins",
+            pytrace=False,
+        )
+    enrolled = spec.enrolled_cohort_digest(architecture)
+    if enrolled != locked:
+        script = Path(__file__).with_name(f"run_{operation}_reference.py")
+        pytest.fail(
+            f"{name}: the enrolled cases differ from the cohort that {path} pins "
+            f"(enrolled cohort_sha256 {enrolled[:12]}, locked {locked[:12]}), so "
+            f"the published bundle no longer certifies them on a {architecture} "
+            "GPU. A change to the cases, their tolerances, or their generated "
+            "inputs needs a complete requalification and a new published "
+            f"archive, lock, and DVC pointer; see {_WORKFLOW_DOC}. List the "
+            "differences with: "
+            + display_command(["python", str(script), "diff", "--arch", architecture]),
+            pytrace=False,
+        )
+
+
+@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
+def test_committed_locks_pin_the_enrolled_cohorts(operation, architecture):
+    """A cohort edit fails without bundle data, so every host and CI job sees it."""
+    _check_locked_cohort(operation, architecture)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_locked_cohort_check_names_the_lock_and_the_requalification(
+    tmp_path, monkeypatch, operation
+):
+    from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    architecture = spec.architectures.ARCHITECTURES[0]
+    target = spec.architectures.get_architecture(architecture)
+    lock = tmp_path / "baseline_lock.json"
+    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
+    pinned = {"schema": 2, "baseline_revision": "a" * 40, "manifest_sha256": "0" * 64}
+    lock.write_text(json.dumps(pinned))
+
+    def check():
+        return _outcome(lambda: _check_locked_cohort(operation, architecture))
+
+    outcome, message = check()
+    assert outcome == "fail"
+    assert _mentions(message, lock) and "records no cohort_sha256" in message
+    locked = spec.enrolled_cohort_digest(architecture)
+    lock.write_text(json.dumps(dict(pinned, cohort_sha256=locked)))
+    assert check() == ("pass", "")
+
+    # The author enrolled one more case, or edited a cohort that this processor
+    # shares, without requalifying.
+    monkeypatch.setattr(target, "CASES", target.CASES[:-1])
+    outcome, message = check()
+    assert outcome == "fail"
+    assert _mentions(message, lock) and f"locked {locked[:12]}" in message
+    assert "needs a complete requalification and a new published archive" in message
+    assert _WORKFLOW_DOC in message
+    (diff,) = _commands(message)
+    assert _same(diff[0], Path(__file__).with_name(f"run_{operation}_reference.py"))
+    args = spec._parser().parse_args(diff[1:])
+    assert (args.command, args.arch) == ("diff", architecture)
 
 
 def test_published_pairs_are_listed_without_importing_adapters(monkeypatch):

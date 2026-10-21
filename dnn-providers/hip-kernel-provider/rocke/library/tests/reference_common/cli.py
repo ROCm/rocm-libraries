@@ -35,7 +35,13 @@ from typing import Any
 
 import numpy as np
 
-from .artifact import display_command, manifest_operation, unpack
+from .artifact import (
+    cohort_digest,
+    display_command,
+    manifest_cohort_digest,
+    manifest_operation,
+    unpack,
+)
 from .cases import compare_manifest_cases, describe_case, match_manifest_cases
 from .numeric import (
     ErrorBudget,
@@ -246,6 +252,27 @@ class ReferenceOperation:
             ),
         )
 
+    def enrolled_cohort_digest(self, architecture: str) -> str:
+        """Digest an architecture's enrolled cohort as its lock's ``cohort_sha256``.
+
+        Each case contributes its contract, generated input digests, and
+        tolerance, as qualification records them in the manifest. Generating
+        inputs needs NumPy but no GPU or bundle data, so a host can tell that
+        the adapter's cases are no longer the cohort that the lock pins.
+        """
+        target = self.architectures.get_architecture(architecture)
+        return cohort_digest(
+            {
+                "case": asdict(case),
+                "input_digests": {
+                    name: array_digest(array)
+                    for name, array in self.contract.make_inputs(case).items()
+                },
+                "tolerance": case.tolerance,
+            }
+            for case in target.CASES
+        )
+
     def checked_inputs(
         self, case: Any, digests: dict[str, str]
     ) -> dict[str, np.ndarray]:
@@ -397,6 +424,7 @@ class ReferenceOperation:
             {
                 "schema": self.contract.SCHEMA_VERSION,
                 "baseline_revision": metadata["revision"],
+                "cohort_sha256": manifest_cohort_digest(manifest),
                 "manifest_sha256": file_digest(output / "manifest.json"),
             },
         )

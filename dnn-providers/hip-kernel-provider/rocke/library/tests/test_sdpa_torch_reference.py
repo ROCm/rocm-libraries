@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ import numpy as np
 import pytest
 
 from reference_common import cli as common_cli
+from reference_common.artifact import validate_bundle
 from reference_common.numeric import (
     encode,
     file_digest,
@@ -85,6 +87,11 @@ def test_qualification_bounds_all_enabled_references(
         return
     cli.qualify(baseline, bundle, 3, torch_reference="cpu" if with_torch else None)
     manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
+    # Configuration checks the lock's cohort digest against the manifest, and
+    # host tests check it against the enrolled cases.
+    validate_bundle(bundle, bundle / "qualification-lock.json", operation="sdpa")
+    lock = json.loads((bundle / "qualification-lock.json").read_text())
+    assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest("gfx942")
     entry = manifest["cases"][case.id]
     assert entry["budget"]["baseline_error_bound"] == (
         max(measured["bound"], torch_bound) if with_torch else measured["bound"]

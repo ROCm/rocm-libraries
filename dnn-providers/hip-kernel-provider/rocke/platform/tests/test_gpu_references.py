@@ -56,6 +56,7 @@ def project(tmp_path):
             "schema": 2,
             "baseline_revision": "a" * 40,
             "operation": declared["manifest_operation"],
+            "cases": {},
             "files": {"kernel.hsaco": hashlib.sha256(payload).hexdigest()},
         }
         encoded = json.dumps(manifest).encode()
@@ -252,7 +253,9 @@ def test_shared_code_payloads_install_under_separate_processor_directories(proje
         assert (root / architecture / "payload/kernel.hsaco").read_bytes() == b"sdpa"
 
 
-@pytest.mark.parametrize("problem", ["archive", "lock", "integrity", "python"])
+@pytest.mark.parametrize(
+    "problem", ["archive", "lock", "integrity", "cohort", "python"]
+)
 def test_required_reference_prerequisites_fail_configuration(project, problem):
     library = project / "library/tests"
     lock = library / "conv_reference/architectures/gfx942/baseline_lock.json"
@@ -260,9 +263,12 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         (library / "reference_bundles/conv/gfx942.tar.gz").unlink()
     elif problem == "lock":
         lock.unlink()
-    elif problem == "integrity":
+    elif problem in ("integrity", "cohort"):
+        # A stale lock pins another manifest; a lock mixed from two
+        # qualifications pins the archive's manifest but another cohort.
+        field = "manifest_sha256" if problem == "integrity" else "cohort_sha256"
         data = json.loads(lock.read_text())
-        data["manifest_sha256"] = "0" * 64
+        data[field] = "0" * 64
         lock.write_text(json.dumps(data))
     result = configure(project, python=problem != "python")
     assert result.returncode != 0
@@ -270,10 +276,12 @@ def test_required_reference_prerequisites_fail_configuration(project, problem):
         "archive": "reference archive missing",
         "lock": "No qualified conv baseline lock for gfx942",
         "integrity": "does not match the pinned lock",
+        "cohort": "pins a cohort that its manifest does not record",
         "python": "requires a Python3 interpreter",
     }
     output = result.stdout + result.stderr
-    assert expected[problem] in output
+    # CMake wraps long messages.
+    assert expected[problem] in " ".join(output.split())
     if problem == "archive":
         # CMake wraps message text at spaces, so a path with a space spans lines.
         pointer = str(library / "reference_bundles/conv/gfx942.tar.gz.dvc")
@@ -406,6 +414,7 @@ def test_published_bundles_have_supported_cohorts_and_committed_locks(tmp_path):
             lock = json.loads((root / architecture / "baseline_lock.json").read_text())
             assert lock["schema"] == 2
             assert len(bytes.fromhex(lock["baseline_revision"])) == 20
+            assert len(bytes.fromhex(lock["cohort_sha256"])) == 32
             assert len(bytes.fromhex(lock["manifest_sha256"])) == 32
 
 
