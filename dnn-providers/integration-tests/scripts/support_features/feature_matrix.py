@@ -48,6 +48,7 @@ from support_matrix_markdown import FULL, PARTIAL  # noqa: E402
 from support_matrix_units import (  # noqa: E402
     ClaimUnit,
     collect_units,
+    node_type_label,
     report_error,
     write_stdout,
 )
@@ -65,7 +66,7 @@ Target = tuple[str, str]  # (arch, platform)
 # Op groups and GPU families
 # --------------------------------------------------------------------------
 
-# First match wins, over the display name (node type without "Attributes").
+# First match wins, over the op name node_type_label() gives.
 GROUP_RULES = (
     ("Attention", lambda op: op.startswith("Sdpa")),
     ("Linear attention", lambda op: op in ("Gdn", "Kda")),
@@ -114,13 +115,8 @@ GPUS = {
 }
 
 
-def display_name(node_type: str) -> str:
-    """``SdpaAttributes`` -> ``Sdpa``; the suffix is on every node type."""
-    return node_type.replace("Attributes", "", 1)
-
-
 def group_of(node_type: str) -> str:
-    name = display_name(node_type)
+    name = node_type_label(node_type)
     for group, matches in GROUP_RULES:
         if matches(name):
             return group
@@ -149,7 +145,7 @@ def group_anchor(group: str) -> str:
 
 
 def op_anchor(node_type: str) -> str:
-    return "op-" + display_name(node_type).lower()
+    return "op-" + node_type_label(node_type).lower()
 
 
 def heading_anchor(heading: str) -> str:
@@ -212,7 +208,7 @@ class FeatureClaims:
 
     @property
     def node_types(self) -> list[str]:
-        return sorted(self.features, key=lambda t: display_name(t).lower())
+        return sorted(self.features, key=lambda t: node_type_label(t).lower())
 
     @property
     def groups(self) -> list[str]:
@@ -378,7 +374,7 @@ def render_by_engine(claims: FeatureClaims) -> list[str]:
             total = len(claims.features[node_type])
             rows.append(
                 [
-                    f"**{link(display_name(node_type), op_anchor(node_type))}** "
+                    f"**{link(node_type_label(node_type), op_anchor(node_type))}** "
                     f"({total})",
                     *(percent_cell(c, total) for c in counts),
                 ]
@@ -393,7 +389,7 @@ def render_op_groups(claims: FeatureClaims) -> list[str]:
     for group in claims.groups:
         members = claims.group_members(group)
         listed = ", ".join(
-            f"{link(display_name(t), op_anchor(t))} ({len(claims.features[t])}"
+            f"{link(node_type_label(t), op_anchor(t))} ({len(claims.features[t])}"
             + ("" if claims.op_graphs.get(t) else ", **no test graph**")
             + ")"
             for t in members
@@ -428,7 +424,7 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
         missing = [f for f in features if f not in used]
         rows.append(
             [
-                f'<a id="{op_anchor(node_type)}"></a>**{display_name(node_type)}** '
+                f'<a id="{op_anchor(node_type)}"></a>**{node_type_label(node_type)}** '
                 f"({len(features)})",
                 ", ".join(f"`{f}`" for f in exercised) or "—",
                 ", ".join(f"`{f}`" for f in missing) or "—",

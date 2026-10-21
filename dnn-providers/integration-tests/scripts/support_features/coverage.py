@@ -49,6 +49,7 @@ from support_features import registry  # noqa: E402
 from support_matrix_units import (  # noqa: E402
     ClaimUnit,
     collect_units,
+    node_type_label,
     report_error,
     write_stdout,
 )
@@ -161,7 +162,7 @@ def compute_coverage(
 def resolve_node_type(op: str) -> str:
     """``Sdpa`` or ``SdpaAttributes`` -> ``SdpaAttributes``, or raise."""
     for node_type in registry.OPS:
-        if op in (node_type, node_type.replace("Attributes", "", 1)):
+        if op in (node_type, node_type_label(node_type)):
             return node_type
     raise ValueError(f"unknown op {op!r}; catalogued: {sorted(registry.OPS)}")
 

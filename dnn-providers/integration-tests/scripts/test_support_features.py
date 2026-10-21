@@ -64,6 +64,7 @@ from support_features.coverage import (
     compute_coverage,
     main,
     render_markdown,
+    resolve_node_type,
     share,
 )
 from support_features.feature_matrix import (
@@ -71,14 +72,13 @@ from support_features.feature_matrix import (
     FAMILIES,
     GPUS,
     compute_feature_claims,
-    display_name,
     group_of,
     heading_anchor,
     percent_cell,
 )
 from support_features.feature_matrix import main as feature_matrix_main
 from support_features.feature_matrix import render as render_feature_matrix
-from support_matrix_units import ClaimUnit, collect_units
+from support_matrix_units import ClaimUnit, collect_units, node_label, node_type_label
 
 # --------------------------------------------------------------------------
 # Schema reading
@@ -696,12 +696,19 @@ class TestFeatureMatrixNames:
     def test_gfx1250_is_data_center_despite_its_gfx1_name(self) -> None:
         assert GPUS["gfx1250"].family == DATA_CENTER
 
-    def test_display_name_drops_only_the_first_suffix(self) -> None:
-        assert display_name("SdpaAttributes") == "Sdpa"
+    def test_node_type_label_drops_the_attributes_token(self) -> None:
+        assert node_type_label("SdpaAttributes") == "Sdpa"
         assert (
-            display_name("BatchnormInferenceAttributesVarianceExt")
+            node_type_label("BatchnormInferenceAttributesVarianceExt")
             == "BatchnormInferenceVarianceExt"
         )
+
+    @pytest.mark.parametrize("node_type", sorted(registry.OPS))
+    def test_every_view_names_an_op_alike(self, node_type: str) -> None:
+        """The name the matrix and feature matrix show is one --graphs takes."""
+        label = node_type_label(node_type)
+        assert node_label({"type": node_type}) == label
+        assert resolve_node_type(label) == node_type
 
     @pytest.mark.parametrize(
         ("count", "total", "cell"),

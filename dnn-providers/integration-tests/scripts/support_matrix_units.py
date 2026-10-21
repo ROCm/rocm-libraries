@@ -477,12 +477,6 @@ def layout_from_strides(graph: dict) -> str | None:
     return labels[1] if channels_last else labels[0]
 
 
-def short_node_type(node_type: str) -> str:
-    if node_type.endswith("Attributes"):
-        return node_type[: -len("Attributes")]
-    return node_type
-
-
 def pointwise_label(node: dict) -> str:
     """``Pointwise:RELU_FWD[lower_clip,upper_clip]`` for one pointwise node."""
     inputs = node.get("inputs") or {}
@@ -508,7 +502,7 @@ def node_label(node: dict) -> str:
     node_type = node.get("type") or "Unknown"
     if node_type == "PointwiseAttributes":
         return pointwise_label(node)
-    return short_node_type(node_type)
+    return node_type_label(node_type)
 
 
 def _off_neutral(parameters: dict, key: str, neutral: int) -> bool:
@@ -674,9 +668,10 @@ def node_type_label(node_type: str) -> str:
 
     ``Attributes`` is a schema wart, not part of the op's name, and it is not
     always the trailing token -- so strip it wherever it appears rather than
-    only off the end.
+    only off the end. Every view names an op through this, so one op reads
+    the same in the matrix, the feature matrix and the coverage report.
     """
-    return node_type.replace("Attributes", "") or node_type
+    return node_type.replace("Attributes", "", 1) or node_type
 
 
 def primary_of(graph: dict) -> str:
