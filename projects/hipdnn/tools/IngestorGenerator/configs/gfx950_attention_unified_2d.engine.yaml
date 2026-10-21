@@ -51,7 +51,8 @@ kmd_fields:
 # TOP_LEFT_CAUSAL, 2 BOTTOM_RIGHT_CAUSAL. The kernel's own band is two spec fields
 # (causal_top_left, right_bound), which map NO_MASK -> (false, -1), TOP_LEFT_CAUSAL ->
 # (true, 0), BOTTOM_RIGHT_CAUSAL -> (false, 0); this field carries them as one value
-# because a descriptor may not ship the -1 sentinel in metadata.
+# because a descriptor may not ship the -1 sentinel in metadata. hkp_pack observes it from
+# the compiled spec through the bound accessor UnifiedAttention2DTiledSpec.mask_type().
 - name: mask_type
   type: int
   default_value: 0
@@ -112,7 +113,7 @@ specialization:
     block_size:
       field: block_size
     mask_type:
-      field: mask_type
+      method: mask_type
     sliding_window:
       field: sliding_window
     num_seqs:

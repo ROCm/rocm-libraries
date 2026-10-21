@@ -109,7 +109,7 @@ specialization:
     block_size:
       field: block_size
     mask_type:
-      field: mask_type
+      method: mask_type
     sliding_window:
       field: sliding_window
     num_seqs:
