@@ -15,6 +15,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -24,10 +27,11 @@ def sample_gemm(iteration, rng):
     The eventual distribution will use rng; this sequence is independent of it.
     """
     dtype = ("f32_r", "bf16_r")[(iteration - 1) % 2]
+    size = 10 + iteration
     return {
-        "M": iteration,
-        "N": iteration,
-        "K": iteration,
+        "M": size,
+        "N": size,
+        "K": size,
         "a_type": dtype,
         "b_type": dtype,
         "c_type": dtype,
@@ -83,6 +87,12 @@ def run_command(command, directory, timeout, log_name):
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env={
+                **os.environ,
+                "OMP_NUM_THREADS": "1",
+                "OPENBLAS_NUM_THREADS": "1",
+                "MKL_NUM_THREADS": "1",
+            },
         ) as process:
             try:
                 return process.wait(timeout=timeout)
@@ -158,6 +168,13 @@ def run_case(args, directory, problem, config):
         shlex.join(convert) + "\n" + shlex.join(command) + "\n", encoding="utf-8"
     )
     case_config = {**config, "plugins": {"race": {}, "logging": {}}}
+    # Parallelism comes from independent GEMMs, each with one emulator worker.
+    case_config.update(
+        num_threads=1,
+        cpu_dispatch_threads=1,
+        async_helper_threads=0,
+        cpu_thread_budget=1,
+    )
     case_config["sinks"] = {"types": ["stderr", "file"], "dir": str(directory)}
     write_json(directory / "rocjitsu.json", case_config)
     status = run_command(convert, directory, args.timeout, "conversion.log")
@@ -197,6 +214,14 @@ def main(argv=None):
     parser.add_argument("--count", type=positive_int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--threads", type=positive_int, default=1, help="number of concurrent GEMMs"
+    )
+    parser.add_argument(
+        "--stop-on-failure",
+        action="store_true",
+        help="stop starting new cases after a failure",
+    )
+    parser.add_argument(
         "--case", type=positive_int, help="run just this 1-based iteration"
     )
     parser.add_argument("--bench", default="hipblaslt-bench")
@@ -228,37 +253,64 @@ def main(argv=None):
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     summary = {
-        "sampler": "iteration-square-v1",
+        "sampler": "iteration-square-v2",
         "seed": args.seed,
         "requested": 1 if args.case else args.count,
         "sampled": 0,
         "passed": 0,
         "failed": 0,
-        "blacklisted": 0,
+        "known_failures": 0,
+        "threads": args.threads,
         "dry_run": args.dry_run,
         "complete": False,
     }
     rng = random.Random(args.seed)
-    try:
-        for iteration in range(1, args.count + 1):
-            problem = sample_gemm(iteration, rng)
-            if args.case and iteration != args.case:
-                continue
+    lock = threading.Lock()
+    stop = threading.Event()
+    iterations = iter(range(1, args.count + 1))
+    started = time.perf_counter()
+
+    def worker():
+        while True:
+            # Sample in iteration order so scheduling cannot change the inputs.
+            with lock:
+                if stop.is_set():
+                    return
+                for iteration in iterations:
+                    problem = sample_gemm(iteration, rng)
+                    if not args.case or iteration == args.case:
+                        break
+                else:
+                    return
+                summary["sampled"] += 1
             directory = args.output / f"case-{iteration:04d}"
             directory.mkdir()
             write_input(directory / "input.yaml", problem)
-            summary["sampled"] += 1
-            print(f"{iteration}: M=N=K={iteration} {problem['a_type']}", flush=True)
+            print(f"{iteration}: M=N=K={problem['M']} {problem['a_type']}", flush=True)
             if not args.dry_run:
                 result = run_case(args, directory, problem, config)
                 write_json(directory / "result.json", result)
-                summary[result["outcome"]] += 1
+                with lock:
+                    summary[result["outcome"]] += 1
+                    if args.stop_on_failure and result["outcome"] == "failed":
+                        stop.set()
                 print(
-                    f"  {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
+                    f"{iteration}: {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
                     flush=True,
                 )
-        summary["complete"] = True
+
+    try:
+        with ThreadPoolExecutor(max_workers=args.threads) as pool:
+            futures = [pool.submit(worker) for _ in range(args.threads)]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except BaseException:
+                    stop.set()
+                    raise
+        summary["complete"] = summary["sampled"] == summary["requested"]
     finally:
+        summary["elapsed_seconds"] = time.perf_counter() - started
         write_json(args.output / "summary.json", summary)
         print(json.dumps(summary, sort_keys=True), flush=True)
     return int(summary["failed"] != 0)
