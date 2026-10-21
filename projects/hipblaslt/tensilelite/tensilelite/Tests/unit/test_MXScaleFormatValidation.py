@@ -49,7 +49,7 @@ import pytest
 
 from rocisa.enum import DataTypeEnum
 from tensilelite.Common.DataType import DataType
-from tensilelite.SolutionStructs.Solution import _validateMXLocalReadWidth
+from tensilelite.SolutionStructs.Solution import _validateMX2DFreeTile, _validateMXLocalReadWidth
 from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -499,3 +499,74 @@ class TestFieldShapeCompatibility:
         }}
         assert _call(st) is False
         assert st["Valid"] is False
+
+
+def _free_tile_state(
+    *,
+    mt0=256,
+    mt1=128,
+    mxBlockFreeA=128,
+    mxBlockFreeB=128,
+    depthU=256,
+    numWaves=4,
+    tdmInst=3,
+):
+    return {
+        "ProblemType": {
+            "MXBlockA": 128,
+            "MXBlockB": 128,
+            "MXBlockFreeA": mxBlockFreeA,
+            "MXBlockFreeB": mxBlockFreeB,
+        },
+        "MacroTile0": mt0,
+        "MacroTile1": mt1,
+        "MatrixInstK": 128,
+        "DepthU": depthU,
+        "NumWaves": numWaves,
+        "TDMInst": tdmInst,
+        "enableTDMA": bool(tdmInst & 1),
+        "enableTDMB": bool(tdmInst & 2),
+        "TDMFuse": 0,
+        "UseSubtileImpl": False,
+    }
+
+
+class TestMX2DFreeTile:
+    def test_rejects_unaligned_macro_tile(self, capsys):
+        # Reviewer case: MT1=224 over MXBlockFreeB=128. WG1 starts at N=224
+        # and spans scale rows 1-3; codegen loads two and switches at local 128.
+        state = _free_tile_state(mt1=224)
+
+        assert _validateMX2DFreeTile(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: 2D MX scale for B requires MacroTile1 (224) to be a multiple "
+            "or divisor of MXBlockFreeB (128); an unaligned WG phase reads the wrong scale rows"
+        )
+
+    def test_rejects_m_split_remainder_rows(self, capsys):
+        # DepthU=128: one K-group for two components -> M-split. MT=384 is
+        # three scale rows; each component takes one and row 2 is never loaded.
+        state = _free_tile_state(mt0=384, depthU=128)
+
+        assert _validateMX2DFreeTile(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: 2D MX TDM M-split for A requires scale rows (3) to be a multiple "
+            "of TDM components (2); the remainder rows are never loaded"
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(),                                         # aligned, K-split
+            dict(mt1=64),                                   # MT divides MXBlockFree
+            dict(mt0=384, depthU=256),                      # 3 rows but K-split
+            dict(mt0=128, depthU=128),                      # 1 row < 2 comps: comps share the tile
+        ],
+        ids=["aligned", "mt-divides-free", "k-split-3-rows", "rows-lt-comps"],
+    )
+    def test_accepts_supported_shapes(self, kwargs):
+        state = _free_tile_state(**kwargs)
+        assert _validateMX2DFreeTile(state, False) is True
+        assert "Valid" not in state

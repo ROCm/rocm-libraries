@@ -19,7 +19,11 @@
 # at MXBlock 32 needs 1073. Two tiles that do fit, kept as a pair so one
 # rejection can never empty the solution set: MT256x128 is aligned to the
 # 128x128 scaling tile, MT256x224 deliberately is not, which exercises scale
-# indexing across a tile boundary that misses the MacroTile.
+# indexing across a tile boundary that misses the MacroTile. In group 2 (2D)
+# derivation currently rejects MT256x224: the scale codegen ignores the WG
+# phase (wg*MT) % MXBlockFree (MT224's WG1 starts at n=224 and spans scale rows
+# 1-3), so only MT256x128 runs there. MT256x224 stays listed so it is tested
+# again once that is fixed and the reject is lifted.
 #
 # All K sizes are multiples of 128 because derivation raises
 # AssertSummationElementMultiple to max(MXBlockA, MXBlockB); it is also set
