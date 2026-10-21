@@ -7,10 +7,10 @@ can use different GPU functions, so checking a range of inputs exercises more
 of the library.
 
 This test samples GEMMs and runs them through rocJITsu, which executes GPU
-instructions on CPUs. Its race detector checks whether threads can access the
-same memory without the ordering needed to avoid a conflict. The benchmark also
-compares the computed output with a separate CPU calculation. No physical GPU
-is required.
+instructions on CPUs. Its race detector looks for cases where one GPU thread
+writes to a memory location that another thread reads or writes, without
+coordination between them. The benchmark also compares the computed output with
+a separate CPU calculation. No physical GPU is required.
 
 ## Design
 
