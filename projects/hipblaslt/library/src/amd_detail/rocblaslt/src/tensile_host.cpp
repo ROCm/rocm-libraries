@@ -2260,14 +2260,16 @@ namespace
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         // Tripwire, in the spirit of the -Wswitch one in clients/tests/unit: drop the
-        // MX scale setup below and padMXScaleTensorFreeDim goes unused, so this file
+        // MX scale setup below and mxScalePadding goes unused, so this file
         // stops compiling rather than silently losing the packed-buffer declaration
         // that setHostMXScaleA/B carry along with the descriptor.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
 #endif
-        const bool padMXScaleTensorFreeDim = mxScaleTensorNeedsPaddingFreeDim();
+        const TensileLite::MXScalePadding mxScalePadding
+            = mxScaleTensorNeedsPaddingFreeDim() ? TensileLite::MXScalePadding::Gfx950
+                                                 : TensileLite::MXScalePadding::Gfx1250;
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -2295,27 +2297,27 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
             break;
         }
 
@@ -2342,27 +2344,27 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
             break;
         }
 
@@ -2420,11 +2422,11 @@ namespace
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
             prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
           rocblaslt::setHostMXScaleA(
-              tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+              tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
             prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
           rocblaslt::setHostMXScaleB(
-              tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+              tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
 
         return tensileProblem;
     }
@@ -2585,14 +2587,16 @@ namespace
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         // Tripwire, in the spirit of the -Wswitch one in clients/tests/unit: drop the
-        // MX scale setup below and padMXScaleTensorFreeDim goes unused, so this file
+        // MX scale setup below and mxScalePadding goes unused, so this file
         // stops compiling rather than silently losing the packed-buffer declaration
         // that setHostMXScaleA/B carry along with the descriptor.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
 #endif
-        const bool padMXScaleTensorFreeDim = mxScaleTensorNeedsPaddingFreeDim();
+        const TensileLite::MXScalePadding mxScalePadding
+            = mxScaleTensorNeedsPaddingFreeDim() ? TensileLite::MXScalePadding::Gfx950
+                                                 : TensileLite::MXScalePadding::Gfx1250;
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -2619,27 +2623,27 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
             break;
         }
 
@@ -2665,27 +2669,27 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
             break;
         }
 
@@ -2755,11 +2759,11 @@ namespace
 	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
 	    rocblaslt::setHostMXScaleA(
-	        tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+	        tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
 	    rocblaslt::setHostMXScaleB(
-	        tensileProblem, rocisa::DataType::E8, 32, padMXScaleTensorFreeDim);
+	        tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)

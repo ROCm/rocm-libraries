@@ -227,6 +227,7 @@ namespace TensileLite
                 ("mx-b-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix B")
                 ("mx-a-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix A")
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
+                ("mx-scales-packed",         po::value<bool>()->default_value(false), "Allocate MX scale tensors with no padding: ceil(K/mxBlock) bytes per row, the layout the hipBLASLt public API specifies and that externally captured custom kernels index.")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")

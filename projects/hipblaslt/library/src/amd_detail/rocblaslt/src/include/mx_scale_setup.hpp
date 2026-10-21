@@ -29,9 +29,9 @@ namespace rocblaslt
     inline void setHostMXScaleA(TensileLite::ContractionProblemGemm& problem,
                                 rocisa::DataType                     mxType,
                                 int                                  mxBlock,
-                                bool                                 padScaleTensorFreeDim)
+                                TensileLite::MXScalePadding          padding)
     {
-        problem.setMXScaleA(mxType, mxBlock, {}, padScaleTensorFreeDim);
+        problem.setMXScaleA(mxType, mxBlock, {}, padding);
         problem.setCustomKernelMXScalesArePacked(true);
     }
 
@@ -39,9 +39,9 @@ namespace rocblaslt
     inline void setHostMXScaleB(TensileLite::ContractionProblemGemm& problem,
                                 rocisa::DataType                     mxType,
                                 int                                  mxBlock,
-                                bool                                 padScaleTensorFreeDim)
+                                TensileLite::MXScalePadding          padding)
     {
-        problem.setMXScaleB(mxType, mxBlock, {}, padScaleTensorFreeDim);
+        problem.setMXScaleB(mxType, mxBlock, {}, padding);
         problem.setCustomKernelMXScalesArePacked(true);
     }
 }

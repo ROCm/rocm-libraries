@@ -364,6 +364,28 @@ namespace TensileLite
     };
 
     /**
+     * How setMXScaleA/B shape the MX scale tensor descriptor.
+     *
+     * A micro-scaled (MX) GEMM carries one E8M0 scale byte per mxBlock elements
+     * along the summation dimension, so one row of scales needs ceil(K/mxBlock)
+     * bytes. The modes differ only in how much unused slack they add past that.
+     */
+    enum class MXScalePadding : int
+    {
+        /// No slack: exactly ceil(K/mxBlock) bytes per row. This is the layout
+        /// the hipBLASLt public API specifies, so it is what a real caller
+        /// allocates and what externally captured custom kernels index.
+        Packed = 0,
+
+        /// K-block count rounded up to a multiple of 128/mxBlock.
+        Gfx1250 = 1,
+
+        /// K-block count rounded up to a multiple of 8 and the free dimension to
+        /// a multiple of 32, as the generated gfx950 subtile kernels require.
+        Gfx950 = 2,
+    };
+
+    /**
      * Describes a tensor contraction in by using TensorDescriptor objects for
      * each input or output tensor as well as indices describing transposes,
      * summations, etc. This is decoupled from any particular pointers, which
@@ -1293,14 +1315,20 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleA(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> saStride = {},
+                         MXScalePadding      padding  = MXScalePadding::Gfx950);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleB(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> sbStride = {},
+                         MXScalePadding      padding  = MXScalePadding::Gfx950);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1372,10 +1400,11 @@ namespace TensileLite
         /// even though mxsa()/mxsb() carry the gfx950 padding setMXScaleA/B applies
         /// for the Tensile-generated HostPreSwizzle kernels.
         ///
-        /// hipBLASLt sets it: the user's plain Block_32_UE8M0 scale pointer is
-        /// packed. The TensileLite benchmark client leaves it false: it allocates
-        /// the scale buffer from the padded descriptor and hands that same buffer
-        /// to the custom kernel.
+        /// hipBLASLt always sets it: the user's plain Block_32_UE8M0 scale pointer
+        /// is packed. The TensileLite benchmark client sets it when it allocated
+        /// the scale buffer with MXScalePadding::Packed, and leaves it false when
+        /// it allocated a padded buffer, so the stride always describes the bytes
+        /// the caller really handed over.
         void setCustomKernelMXScalesArePacked(bool packed)
         {
             m_customKernelMXScalesArePacked = packed;

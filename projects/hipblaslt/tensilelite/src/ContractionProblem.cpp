@@ -695,7 +695,10 @@ namespace TensileLite
         calcArithmeticIntensity();
     }
 	
-    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride, bool padScaleTensorFreeDim)
+    void ContractionProblemGemm::setMXScaleA(rocisa::DataType    mxTypeA,
+                                             int                 mxBlockA,
+                                             std::vector<size_t> saStride,
+                                             MXScalePadding      padding)
     {
         m_mxBlockA = mxBlockA;
         m_mxTypeA = mxTypeA;
@@ -704,26 +707,28 @@ namespace TensileLite
         {
             std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
             auto boundIdx = m_boundIndices[0].a;
-            if (padScaleTensorFreeDim)
+            saSizes[boundIdx] = CeilDivide(saSizes[boundIdx], (size_t)mxBlockA);
+            if (padding == MXScalePadding::Gfx950)
             {
-                saSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), (size_t)8);
+                saSizes[boundIdx] = RoundUpToMultiple(saSizes[boundIdx], (size_t)8);
                 auto freeIdx = m_freeIndicesA[0].i;
                 saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
             }
-            else
+            else if (padding == MXScalePadding::Gfx1250)
             {
-                // gfx1250 padding
                 size_t dimk = 128 / mxBlockA;
-                saSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), dimk);
+                saSizes[boundIdx] = RoundUpToMultiple(saSizes[boundIdx], dimk);
             }
+            // MXScalePadding::Packed keeps the bare ceil(K/mxBlock) K-block count.
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
     }
 
-    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride, bool padScaleTensorFreeDim)
+    void ContractionProblemGemm::setMXScaleB(rocisa::DataType    mxTypeB,
+                                             int                 mxBlockB,
+                                             std::vector<size_t> sbStride,
+                                             MXScalePadding      padding)
     {
         m_mxBlockB = mxBlockB;
         m_mxTypeB = mxTypeB;
@@ -732,20 +737,19 @@ namespace TensileLite
         {
             std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
             auto boundIdx = m_boundIndices[0].b;
-            if (padScaleTensorFreeDim)
+            sbSizes[boundIdx] = CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB);
+            if (padding == MXScalePadding::Gfx950)
             {
-                sbSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), (size_t)8);
+                sbSizes[boundIdx] = RoundUpToMultiple(sbSizes[boundIdx], (size_t)8);
                 auto freeIdx = m_freeIndicesB[0].i;
                 sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
             }
-            else
+            else if (padding == MXScalePadding::Gfx1250)
             {
-                // gfx1250 padding
                 size_t dimk = 128 / mxBlockB;
-                sbSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), dimk);
+                sbSizes[boundIdx] = RoundUpToMultiple(sbSizes[boundIdx], dimk);
             }
+            // MXScalePadding::Packed keeps the bare ceil(K/mxBlock) K-block count.
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }
