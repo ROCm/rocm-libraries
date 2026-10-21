@@ -1152,7 +1152,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                                   clear_workspace,
                                                                   kernel,
                                                                   dim3(gdx, gdy, gdz),
-                                                                  dim3(BlockSize),
+                                                                  dim3(BlockSize + LoadBlockSize),
                                                                   0,
                                                                   gemm_arg,
                                                                   gemm_kernel_args,
@@ -1318,7 +1318,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         // check device
         if constexpr(DirectLoad)
         {
-            if(get_device_name() != "gfx950")
+            if(!(is_gfx125_supported() || ck::get_device_name() == "gfx950"))
             {
                 return false;
             }
