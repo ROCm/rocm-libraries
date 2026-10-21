@@ -20,34 +20,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-
-def sample_gemm(iteration, rng):
-    """Provisional sampling: positive square sizes, alternating FP32 and BF16.
-
-    The eventual distribution will use rng; this sequence is independent of it.
-    """
-    dtype = ("f32_r", "bf16_r")[(iteration - 1) % 2]
-    size = 10 + iteration
-    return {
-        "M": size,
-        "N": size,
-        "K": size,
-        "a_type": dtype,
-        "b_type": dtype,
-        "c_type": dtype,
-        "d_type": dtype,
-        "compute_type": "c_f32_r",
-        "transA": "N",
-        "transB": "N",
-        "batch_count": 1,
-        "alpha": 1,
-        "beta": 0,
-    }
+from sample_hipblaslt_gemms import SAMPLER_VERSION, sample_gemm
 
 
 def bench_input(problem):
     return {
-        **problem,
+        **{key: value for key, value in problem.items() if key != "family"},
         "function": "matmul",
         "algo_method": 0,
         "requested_solution_num": 1,
@@ -108,6 +86,8 @@ def check_result(problem, text, race_log):
         return "race reported"
     if "[rj warn]" in text or "[rj error]" in text:
         return "rocJITsu diagnostic; inspect bench.log"
+    if "error: NO solution found!" in text:
+        return "no solution in the loaded library"
     rows, header = [], None
     for line in text.splitlines():
         if re.match(r"^\[\d+\]:", line):
@@ -127,6 +107,15 @@ def check_result(problem, text, race_log):
         for key in ("a_type", "b_type", "c_type", "d_type", "transA", "transB"):
             if row[key] != problem[key]:
                 return "bench result types or transposes differ from input"
+        if row["compute_type"] != problem["compute_type"][2:]:
+            return "bench result compute type differs from input"
+        for key in ("alpha", "beta", "scaleA", "scaleB", "bias_vector"):
+            if float(row[key]) != problem[key]:
+                return "bench result scalars, scaling or epilogue differ from input"
+        if row["activation_type"] != problem["activation_type"] or (
+            problem["bias_vector"] and row["bias_type"] != problem["bias_type"]
+        ):
+            return "bench result epilogue differs from input"
         for key in ("norm_error", "atol", "rtol"):
             value = float(row[key])
             if not math.isfinite(value) or value < 0:
@@ -196,7 +185,11 @@ def run_case(args, directory, problem, config):
         f"bench exited {status}" if status else check_result(problem, text, race_log)
     )
     return {
-        "outcome": "failed" if reason else "passed",
+        "outcome": (
+            "unsupported"
+            if reason == "no solution in the loaded library"
+            else "failed" if reason else "passed"
+        ),
         "reason": reason,
         "exit_code": status,
     }
@@ -244,6 +237,14 @@ def main(argv=None):
         config = json.loads(args.config.read_text(encoding="utf-8"))
         if not isinstance(config, dict):
             parser.error("--config must contain a JSON object")
+        if (
+            config.get("vm", {})
+            .get("gpu", {})
+            .get("device", {})
+            .get("gfx_target_version")
+            != 90500
+        ):
+            parser.error("--config must emulate gfx950")
         for name in ("bench", "rocjitsu"):
             executable = shutil.which(getattr(args, name))
             if not executable:
@@ -253,13 +254,16 @@ def main(argv=None):
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     summary = {
-        "sampler": "iteration-square-v2",
+        "sampler": SAMPLER_VERSION,
+        "architecture": "gfx950",
         "seed": args.seed,
         "requested": 1 if args.case else args.count,
         "sampled": 0,
         "passed": 0,
         "failed": 0,
+        "unsupported": 0,
         "known_failures": 0,
+        "coverage": {key: {} for key in ("family", "transpose", "epilogue")},
         "threads": args.threads,
         "dry_run": args.dry_run,
         "complete": False,
@@ -277,22 +281,35 @@ def main(argv=None):
                 if stop.is_set():
                     return
                 for iteration in iterations:
-                    problem = sample_gemm(iteration, rng)
+                    problem = sample_gemm(rng)
                     if not args.case or iteration == args.case:
                         break
                 else:
                     return
                 summary["sampled"] += 1
+                categories = {
+                    "family": problem["family"],
+                    "transpose": problem["transA"] + problem["transB"],
+                    "epilogue": ("bias+" if problem["bias_vector"] else "")
+                    + problem["activation_type"],
+                }
+                for key, category in categories.items():
+                    counts = summary["coverage"][key]
+                    counts[category] = counts.get(category, 0) + 1
             directory = args.output / f"case-{iteration:04d}"
             directory.mkdir()
             write_input(directory / "input.yaml", problem)
-            print(f"{iteration}: M=N=K={problem['M']} {problem['a_type']}", flush=True)
+            write_json(directory / "problem.json", problem)
+            print(
+                f"{iteration}: {problem['M']}x{problem['N']}x{problem['K']} {problem['family']}",
+                flush=True,
+            )
             if not args.dry_run:
                 result = run_case(args, directory, problem, config)
                 write_json(directory / "result.json", result)
                 with lock:
                     summary[result["outcome"]] += 1
-                    if args.stop_on_failure and result["outcome"] == "failed":
+                    if args.stop_on_failure and result["outcome"] != "passed":
                         stop.set()
                 print(
                     f"{iteration}: {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
@@ -313,7 +330,7 @@ def main(argv=None):
         summary["elapsed_seconds"] = time.perf_counter() - started
         write_json(args.output / "summary.json", summary)
         print(json.dumps(summary, sort_keys=True), flush=True)
-    return int(summary["failed"] != 0)
+    return int(summary["failed"] + summary["unsupported"] != 0)
 
 
 if __name__ == "__main__":
