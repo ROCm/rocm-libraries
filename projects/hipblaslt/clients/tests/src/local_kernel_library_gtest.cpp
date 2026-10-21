@@ -478,6 +478,27 @@ TEST(LocalKernelLibrary, smoke_FindAllHonoursSearchType)
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::HARDWARE_ONLY).size(), 3u);
 }
 
+// The DEFAULT search applies the software predicate the shipped libraries do,
+// which drops StreamK dynamic-queue kernels where the XCD count is not known
+// to be a power of two. makeGpu() carries no XCD count.
+TEST(LocalKernelLibrary, smoke_FindAllAppliesSoftwarePredicate)
+{
+    auto         problem = makeProblem();
+    auto         gpu     = makeGpu();
+    LocalLibrary library;
+
+    auto plain                                       = makeSolution(problem);
+    auto dynamicQueue                                = makeSolution(problem);
+    dynamicQueue->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+    dynamicQueue->sizeMapping.workAssignment         = WorkAssignment::DynamicWorkQueue;
+    library.addSolutions({plain, dynamicQueue});
+
+    EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::DEFAULT),
+              SolutionSet<ContractionSolution>({plain}));
+    EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY),
+              SolutionSet<ContractionSolution>({plain, dynamicQueue}));
+}
+
 // Readers run while kernels are registered and mapped.
 TEST(LocalKernelLibrary, smoke_ConcurrentReadersAndWriter)
 {

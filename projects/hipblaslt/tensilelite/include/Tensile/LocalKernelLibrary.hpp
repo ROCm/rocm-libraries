@@ -206,8 +206,9 @@ namespace TensileLite
 
         /**
          * Registered kernels, mapped or not, that match the problem as far as
-         * `searchType` asks: every check for DEFAULT, the GEMM type for
-         * GEMM_TYPE_ONLY, the hardware alone for HARDWARE_ONLY.
+         * `searchType` asks, with the filters the shipped libraries apply: the
+         * problem type, hardware and software predicates for DEFAULT, the GEMM
+         * type for GEMM_TYPE_ONLY, the hardware alone for HARDWARE_ONLY.
          */
         SolutionSet<MySolution> findAll(MyProblem const&          problem,
                                         Hardware const&           hardware,
@@ -226,7 +227,12 @@ namespace TensileLite
                 switch(searchType)
                 {
                 case SolutionLibrarySearchType::DEFAULT:
-                    match = canServe(solution, problem, hardware);
+                    if(matchesProblemType(solution, problem))
+                    {
+                        Task task(hardware, problem, solution);
+                        match = (*solution.hardwarePredicate)(hardware)
+                                && softwarePredicate(searchType, task, hardware, solution, problem);
+                    }
                     break;
                 case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
                     match = (*solution.hardwarePredicate)(hardware)
@@ -363,15 +369,13 @@ namespace TensileLite
         }
 
         /**
-         * Whether a registered kernel can serve this problem, by the same test
-         * the shipped exact-match rows apply. The shipped library reaches a
-         * solution only through rows that already matched the problem type;
-         * nothing does that here, so the solution's problem predicate, which
-         * includes its problem type, is what rejects a kernel of the wrong
-         * type. The explicit checks reject the common mismatches first.
+         * The common problem type mismatches, rejected before any predicate
+         * runs. The shipped library reaches a solution only through rows that
+         * already matched the problem type; nothing does that here, so the
+         * solution's problem predicate, which includes its problem type, is
+         * what rejects the rest.
          */
-        static bool
-            canServe(MySolution const& solution, MyProblem const& problem, Hardware const& hardware)
+        static bool matchesProblemType(MySolution const& solution, MyProblem const& problem)
         {
             auto const& pt = solution.problemType;
 
@@ -385,7 +389,15 @@ namespace TensileLite
             if(pt.computeType != problem.computeType())
                 return false;
 
-            if(pt.highPrecisionAccumulate != problem.highPrecisionAccumulate())
+            return pt.highPrecisionAccumulate == problem.highPrecisionAccumulate();
+        }
+
+        /// Whether a registered kernel can serve this problem, by the same
+        /// test the shipped exact-match rows apply.
+        static bool
+            canServe(MySolution const& solution, MyProblem const& problem, Hardware const& hardware)
+        {
+            if(!matchesProblemType(solution, problem))
                 return false;
 
             Task task(hardware, problem, solution);
