@@ -41,6 +41,7 @@
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
+#include "tuning_scratch.hpp"
 
 #include <hipblaslt/hipblaslt-opt-in-features.h>
 
@@ -4055,13 +4056,15 @@ namespace
 
         if(is_e_enabled(prob.epilogue))
         {
-            layout.bytesE = tensorSpanBytes(elementSizeOf(prob.aux_type),
+            bool expandedE = false;
+            layout.bytesE  = tensorSpanBytes(elementSizeOf(prob.aux_type),
                                             prob.m,
                                             prob.n,
                                             prob.col_stride_e,
                                             prob.batch_count,
-                                            prob.batch_stride_e);
-            if(layout.bytesE == 0)
+                                            prob.batch_stride_e,
+                                            &expandedE);
+            if(layout.bytesE == 0 || (is_grad_enabled(prob.epilogue) && expandedE))
                 return layout;
         }
 
@@ -4423,15 +4426,7 @@ namespace
                    == hipSuccess;
         };
 
-        // Zero the whole buffer before anything reads it.
-        //
-        // Scratch comes from a raw hipMalloc, and not every span in it gets
-        // seeded: an in-place problem reads C through D, a backward epilogue
-        // reads the aux tensor it would otherwise only write, and a solution can
-        // read its own workspace. Those reads would land on whatever the
-        // allocator handed back, where a denormal pattern changes the timing of
-        // the very thing being measured and a NaN or Inf can change it a great
-        // deal. Zero is uniform, cheap and cannot denormal.
+        // Initialize writable scratch; read-only gradient E is seeded below.
         if(tuningFailureInjected(TuningFailureStage::Setup)
            || hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
         {
@@ -4455,6 +4450,15 @@ namespace
                 static_cast<void>(hipGetLastError());
             }
         } streamDrain{prob.stream};
+
+        if(is_grad_enabled(prob.epilogue) && layout.bytesE
+           && !rocblaslt::seedGradientAuxiliary(bytes + layout.offsetE,
+                                                prob.E,
+                                                layout.bytesE,
+                                                layout.strideE,
+                                                layout.blockCount,
+                                                prob.stream))
+            return TuningAttempt::FallbackSetup;
 
         // Seed the rotation inputs over the zeros. Block 0 takes the caller's A
         // and B so the data is representative of what the kernel will really

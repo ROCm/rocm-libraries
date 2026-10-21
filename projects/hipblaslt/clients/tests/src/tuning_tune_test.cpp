@@ -1833,6 +1833,8 @@ namespace
         bool                inPlace    = false;
         hipblasLtEpilogue_t epilogue   = HIPBLASLT_EPILOGUE_DEFAULT;
         int32_t             biasStride = 0;
+        int64_t             auxStride  = -1;
+        int64_t             auxLD      = 0;
 
         size_t  workspaceBytes = 0;
         size_t  rotatingBytes  = 0;
@@ -1879,12 +1881,13 @@ namespace
         };
 
         // Only compared, never dereferenced, so any distinct addresses do.
-        static char    buffers[5];
+        static char    buffers[6];
         const void*    A    = &buffers[0];
         const void*    B    = &buffers[1];
         const void*    C    = &buffers[2];
         void*          D    = c.inPlace ? &buffers[2] : &buffers[3];
         void*          bias = &buffers[4];
+        void*          aux  = &buffers[5];
         const bool     nA   = c.opA == HIPBLAS_OP_N;
         const bool     nB   = c.opB == HIPBLAS_OP_N;
         const int32_t  opA = c.opA, opB = c.opB;
@@ -1918,6 +1921,24 @@ namespace
                                                     &c.biasStride,
                                                     sizeof(c.biasStride))
                         == HIPBLAS_STATUS_SUCCESS;
+
+        if(ok
+           && (c.epilogue == HIPBLASLT_EPILOGUE_DGELU || c.epilogue == HIPBLASLT_EPILOGUE_GELU_AUX))
+        {
+            const int64_t ld     = c.auxLD ? c.auxLD : c.m;
+            const int64_t stride = c.auxStride >= 0 ? c.auxStride : ld * c.n;
+            ok                   = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &aux, sizeof(aux))
+                     == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &ld, sizeof(ld))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(desc,
+                                                    HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE,
+                                                    &stride,
+                                                    sizeof(stride))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
 
         uint64_t v[10] = {};
         ok             = ok
@@ -2022,6 +2043,25 @@ namespace
             ASSERT_TRUE(plan.usable);
             EXPECT_EQ(plan.blocks, 1u);
         }
+    }
+
+    TEST_F(TuningScratchPlan_pre_checkin, GradientAuxiliaryOverlapDoesNotCopyAnExpandedSpan)
+    {
+        PlanCase c;
+        c.batch     = 2;
+        c.auxLD     = c.m + 8;
+        c.auxStride = c.m * c.n;
+        c.epilogue  = HIPBLASLT_EPILOGUE_DGELU;
+        Plan plan;
+        ASSERT_TRUE(planFor(c, &plan));
+        EXPECT_FALSE(plan.usable);
+        c.auxStride = c.auxLD * c.n;
+        ASSERT_TRUE(planFor(c, &plan));
+        EXPECT_TRUE(plan.usable);
+        c.auxStride = c.m * c.n;
+        c.epilogue  = HIPBLASLT_EPILOGUE_GELU_AUX;
+        ASSERT_TRUE(planFor(c, &plan));
+        EXPECT_TRUE(plan.usable) << "Writable forward auxiliary scratch can be expanded";
     }
 
     // A gradient epilogue writes the bias, as long as the longer side of D,
