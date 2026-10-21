@@ -12,6 +12,7 @@ Documentation for rocSPARSE is available at
 * Added the batch support for `rocsparse_sptrsm`.
 * Added the `rocsparse_dnmat_transpose` generic routine for dense matrix transposing.
 * Added the `rocsparse_dnmat_copy_data` generic routine for dense matrix data copying.
+* Added support for the `amdgcnspirv` architecture.
 
 ### Optimized
 * Improved `rocsparse_Xgemvi` performance, especially when `n` is greater than `m`.

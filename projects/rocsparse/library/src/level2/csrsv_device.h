@@ -37,7 +37,7 @@ namespace rocsparse
     __device__ __forceinline__ void
         csrsv_analysis_max_nnz(I* max_nnz, I* block_max_nnz, int* block_rows_left, I row_nnz)
     {
-        if constexpr(rocsparse::has_noncoherent_xcd_l2)
+        if (has_noncoherent_xcd_l2)
         {
             __scoped_atomic_fetch_max(
                 block_max_nnz, row_nnz, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP);
@@ -93,7 +93,7 @@ namespace rocsparse
         // Initialize local done array
         local_done_array[wid] = 0;
 
-        if constexpr(rocsparse::has_noncoherent_xcd_l2)
+        if (has_noncoherent_xcd_l2)
         {
             if(hipThreadIdx_x == 0)
             {
@@ -234,7 +234,7 @@ namespace rocsparse
         // Initialize local done array
         local_done_array[wid] = 0;
 
-        if constexpr(rocsparse::has_noncoherent_xcd_l2)
+        if (has_noncoherent_xcd_l2)
         {
             if(hipThreadIdx_x == 0)
             {

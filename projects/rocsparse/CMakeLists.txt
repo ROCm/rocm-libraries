@@ -182,10 +182,10 @@ endif()
 if(COMMAND rocm_check_target_ids)
     if(BUILD_ADDRESS_SANITIZER)
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
+        TARGETS "amdgcnspirv;gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+          TARGETS "amdgcnspirv;gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                   "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
                   "gfx1030;gfx1100;gfx1101;gfx1102"
                   "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
@@ -194,10 +194,11 @@ if(COMMAND rocm_check_target_ids)
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
-                                "gfx1030;gfx1100;gfx1101;gfx1102"
-                                "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
-                                "gfx1200;gfx1201;gfx1250;gfx1250-strict")
+        set(DEFAULT_GPU_TARGETS "amdgcnspirv;gfx803;gfx900:xnack-;"
+                                "gfx906:xnack-;gfx908:xnack-gfx1030;gfx1100;"
+                                "gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;"
+                                "gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;"
+                                "gfx1250;gfx1250-strict")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
