@@ -7,34 +7,34 @@
 
 #pragma once
 
-#include "kernel_data_types.hpp"
+#include <hipblaslt/hipblaslt.h>
 
 #include "origami/types.hpp"
 
 /**
- * @brief Convert hipblaslt::DataType to analytical::DataType
+ * @brief Convert hipDataType to analytical::DataType
  */
-inline origami::data_type_t kernel_data_type_to_analytical_type(hipblaslt::DataType type)
+inline origami::data_type_t hipDataType_to_analytical_type(hipDataType type)
 {
     switch(type)
     {
-        case hipblaslt::DataType::Half:
-            return origami::data_type_t::Half;
-        case hipblaslt::DataType::Float:
-            return origami::data_type_t::Float;
-        case hipblaslt::DataType::BFloat16:
-            return origami::data_type_t::BFloat16;
-        case hipblaslt::DataType::FP8:
-            return origami::data_type_t::Float8;
-        case hipblaslt::DataType::BF8:
-            return origami::data_type_t::BFloat8;
-        case hipblaslt::DataType::FP6:
-            return origami::data_type_t::Float6;
-        case hipblaslt::DataType::BF6:
-            return origami::data_type_t::BFloat6;
-        case hipblaslt::DataType::FP4:
-            return origami::data_type_t::Float4;
-        default:
-            return origami::data_type_t::None;
+    case HIP_R_16F:
+        return origami::data_type_t::Half;
+    case HIP_R_32F:
+        return origami::data_type_t::Float;
+    case HIP_R_16BF:
+        return origami::data_type_t::BFloat16;
+    case HIP_R_8F_E4M3:
+        return origami::data_type_t::Float8;
+    case HIP_R_8F_E5M2:
+        return origami::data_type_t::BFloat8;
+    case HIP_R_6F_E2M3:
+        return origami::data_type_t::Float6;
+    case HIP_R_6F_E3M2:
+        return origami::data_type_t::BFloat6;
+    case HIP_R_4F_E2M1:
+        return origami::data_type_t::Float4;
+    default:
+        return origami::data_type_t::None;
     }
 }
