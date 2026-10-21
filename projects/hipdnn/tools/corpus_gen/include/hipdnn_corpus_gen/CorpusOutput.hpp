@@ -5,6 +5,7 @@
 
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 
+#include <filesystem>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -119,6 +120,32 @@ inline std::string shellWord(const std::string& text)
         word += character == '\'' ? std::string("'\\''") : std::string(1, character);
     }
     return word + "'";
+}
+
+/// @brief @p path in a form the OS opens whatever its length.
+///
+/// Windows refuses a path of MAX_PATH (260) characters or more unless it is in extended-length
+/// form (`\\?\`), which must be absolute with backslash separators. A graph file name alone
+/// may be 200 characters, so a corpus under an ordinary build directory crosses that limit.
+/// Elsewhere, and for a shorter path, @p path is returned unchanged.
+inline std::filesystem::path openablePath(const std::filesystem::path& path)
+{
+#ifdef _WIN32
+    constexpr size_t MAX_PLAIN_PATH = 260;
+    const auto absolute = std::filesystem::absolute(path).lexically_normal();
+    const auto& native = absolute.native();
+    if(native.size() < MAX_PLAIN_PATH || native.rfind(LR"(\\?\)", 0) == 0)
+    {
+        return path;
+    }
+    if(native.rfind(LR"(\\)", 0) == 0)
+    {
+        return std::filesystem::path(LR"(\\?\UNC\)" + native.substr(2));
+    }
+    return std::filesystem::path(LR"(\\?\)" + native);
+#else
+    return path;
+#endif
 }
 
 /// @brief One line of `commands.txt`: hipdnn_bench sweeping @p graph, its CSV (with its own

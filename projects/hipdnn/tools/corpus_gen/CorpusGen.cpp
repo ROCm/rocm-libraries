@@ -1564,7 +1564,7 @@ int runGenerator(const std::vector<std::string>& args)
             // Stem must equal manifest `name`: scoring joins bench output by stem.
             const auto name = graph.name + ".fb";
             const auto graphPath = root / "graphs" / name;
-            std::ofstream problem(graphPath, std::ios::binary);
+            std::ofstream problem(hipdnn_corpus_gen::openablePath(graphPath), std::ios::binary);
             problem.write(reinterpret_cast<const char*>(graph.bytes.data()),
                           static_cast<std::streamsize>(graph.bytes.size()));
             problem.close();

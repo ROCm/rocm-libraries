@@ -12,8 +12,13 @@
 
 #include <hipdnn_corpus_gen/CorpusOutput.hpp>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
+#include <system_error>
 
 namespace hipdnn_corpus_gen
 {
@@ -127,6 +132,35 @@ TEST(TestCorpusOutput, EachBenchCommandWritesItsOwnCsvWithAHeader)
               "--engine-name 'hipkernel:ConvFwd' --sweep --problem-id 'g' --query '"
                   + asQueryArgument(point) + "' > '/corpus/results/g.csv'");
     EXPECT_EQ(line.find("--no-header"), std::string::npos);
+}
+
+TEST(TestCorpusOutput, AGraphFileOverMaxPathIsWrittenAndReadBack)
+{
+    // A 240-character file name under the temp directory is past Windows' 260-character
+    // MAX_PATH, as a long graph name under a build directory is.
+    const auto dir
+        = std::filesystem::temp_directory_path()
+          / ("hipdnn_corpus_gen_long_path_"
+             + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    const auto path = dir / (std::string(236, 'g') + ".fb");
+    ASSERT_GE(std::filesystem::absolute(path).native().size(), size_t{260});
+
+    const std::string bytes = "graph bytes";
+    {
+        std::ofstream out(openablePath(path), std::ios::binary);
+        out << bytes;
+        out.close();
+        EXPECT_TRUE(out.good());
+    }
+    std::ifstream in(openablePath(path), std::ios::binary);
+    const std::string read{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    EXPECT_EQ(read, bytes);
+    in.close();
+
+    std::error_code ignored;
+    std::filesystem::remove(openablePath(path), ignored);
+    std::filesystem::remove(dir, ignored);
 }
 
 } // namespace hipdnn_corpus_gen

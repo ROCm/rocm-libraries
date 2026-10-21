@@ -1452,7 +1452,11 @@ class TestTheOutputIsWhatTheRequestClassAccepts:
         mined shape becomes."""
         monkeypatch.setattr(sys, "path", list(sys.path))
         monkeypatch.syspath_prepend(str(_MINE.parent))
-        import registry_enumerator
+        try:
+            # registry_enumerator needs PyYAML, which a lane without rocKE's tooling lacks.
+            import registry_enumerator
+        except ImportError as exc:
+            pytest.skip(f"the rocKE library cannot be imported here ({exc})")
 
         # Absolute, from this file: a copied source tree has no .git for the
         # repository-relative form to anchor on.
