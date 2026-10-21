@@ -100,6 +100,10 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
 
+## SDPA paged attention
+
+hipDNN requires both `set_paged_attention_k_table` and `set_paged_attention_v_table` (or neither), requires `set_paged_attention_max_seq_len_kv` with exactly `ceil(max_seq_len_kv / block_size)` page-table columns, requires K and V to share a block size, and rejects packed (ragged) page tables. `seq_len_q` is optional for dense queries and `use_padding_mask` is not required. Full contract and differences: [SdpaPagedAttention.md](./SdpaPagedAttention.md).
+
 ## hipDNN extensions
 
 - `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.

@@ -43,6 +43,10 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Supports a subset of the CPU operations (e.g. Convolution forward, Batchnorm forward, Layernorm, RMSNorm, Reduction, SDPA forward, Matmul, Pointwise)
   - Not intended for performance or production use
 
+## Operation Contracts
+
+- **[SDPA forward with a paged K/V cache](./SdpaPagedAttention.md)** - Graph rules and runtime semantics for paged K/V, alone or with ragged queries (cuDNN-compatible, with listed differences)
+
 ## Roadmap
 
 For information about planned features, upcoming operations, and the development roadmap, please see:
