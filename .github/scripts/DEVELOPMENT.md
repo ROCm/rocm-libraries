@@ -269,9 +269,27 @@ are stored as repository secrets and are not accessible in dry-run/local
 testing. The routing logic (PR title tag matching, component-name fallback) is
 pure Python and is independently testable without a live webhook.
 
-> **Note:** no workflow currently invokes this script. Its callers were the
-> single-arch TheRock CI lanes, which were removed; it is kept for the next
-> workflow that needs failure routing.
+In `therock-multi-arch-ci.yml`, build and test jobs run inside TheRock's
+reusable workflows, so the `notify_teams_on_failure` job calls this script once
+with `--failed-jobs-from-run`. The script lists the failed `Linux::`/`Windows::`
+jobs of the run attempt (skipping `(xfail)` jobs), downloads each job log with
+`gh api`, routes test jobs by job name and build jobs by `--component-name`,
+sends one notification per job, and exits 1 if any notification failed. The
+job is `continue-on-error`, so a notifier failure never blocks a PR.
+
+To debug this mode locally against a real run, point it at that run and use
+`--dry-run` (requires an authenticated `gh` or `GH_TOKEN`):
+
+```bash
+GITHUB_REPOSITORY=ROCm/rocm-libraries GITHUB_RUN_ID=<run-id> GITHUB_RUN_ATTEMPT=1 \
+python .github/scripts/notify_teams.py \
+  --failed-jobs-from-run \
+  --webhook-urls '{"miopen": "https://placeholder"}' \
+  --pr-number 123 \
+  --pr-title "[miopen] Fix something" \
+  --component-name projects/miopen \
+  --dry-run
+```
 
 Use `--dry-run` to exercise the routing logic locally without sending a
 notification:
