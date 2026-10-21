@@ -135,15 +135,16 @@ TEST(DsSpreadPacer, TheDrainEndsAStageEarlier) {
 }
 
 TEST(DsSpreadPacer, TheRegionEndNeedsNoDrain) {
-    // 12 loads to the region end (the loop returns to its start): the 8 drain WMMAs are not kept
-    // free, so the 32 WMMAs are 8 batches of 2 loads (ceil(12 / 8)) and all are placed by WMMA 24.
+    // 16 loads to the region end (the loop returns to its start), 32 WMMAs, 8 of them the drain.
+    // Without a drain at the region end the stage has all 8 batches: 2 loads in each, the last
+    // one in the batch at WMMA 28. With the drain kept it would have 6 batches (3 loads each) and
+    // be done by WMMA 20.
     Loads v;
-    add(v, 12, 0);
+    add(v, 16, 0);
     DsSpreadPacer p;
     p.plan(v, 32, 4, 0, /*drain=*/8);
     auto pending = ids(v);
-    for (int w = 0; w < 32 && !pending.empty(); w += 4)
-        EXPECT_LE(issueBatch(p, w, pending), 2) << "w=" << w;
+    for (int w = 0; w < 32; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 2) << "w=" << w;
     EXPECT_TRUE(pending.empty());
 }
 
