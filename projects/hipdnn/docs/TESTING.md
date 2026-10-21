@@ -103,8 +103,6 @@ Labels on a PR change what CI runs. Required GitHub checks are configured outsid
 | `ci:cpu-test-only` | Disables the GPU test runner for all families |
 | `test_filter:<tier>` | No effect on the PR workflow: its tier is `standard` (or `quick` on a fallback) |
 
-`ci:single-arch` opts a PR into the legacy `therock-ci.yml`, where a `test_type:<tier>` label picks the tier.
-
 ## Emulating CI
 
 Climb only as far as you need.
