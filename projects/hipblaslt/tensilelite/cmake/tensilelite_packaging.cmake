@@ -12,6 +12,13 @@ endif()
 if(TENSILELITE_STANDALONE)
     rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "origami-static-dev")
     rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "origami-static-devel")
+    # tensilelite-jit links amd_comgr.
+    if(TENSILELITE_ENABLE_JIT)
+        rocm_package_add_dependencies(COMPONENT devel DEPENDS "comgr")
+        if(TENSILELITE_BUILD_SHARED_LIBS)
+            rocm_package_add_dependencies(COMPONENT runtime DEPENDS "comgr")
+        endif()
+    endif()
 
     if(TENSILELITE_BUILD_SHARED_LIBS)
         set(CPACK_DEBIAN_RUNTIME_PACKAGE_REPLACES "hipblaslt (<< ${_tensilelite_moved_from})")
@@ -51,17 +58,26 @@ elseif(TENSILELITE_ENABLE_HOST AND (ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUB
             if(ROCM_DEP_ROCMCORE)
                 rocm_package_add_dependencies(DEPENDS "rocm-core-asan")
             endif()
+            if(TENSILELITE_ENABLE_JIT)
+                rocm_package_add_dependencies(COMPONENT tensilelite DEPENDS "comgr-asan")
+            endif()
             install(FILES "${CPACK_RESOURCE_FILE_LICENSE}"
                 DESTINATION "share/doc/tensilelite-host-asan"
                 COMPONENT tensilelite)
             set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tensilelite-license)
         else()
             rocm_package_setup_component(tensilelite-devel)
+            if(TENSILELITE_ENABLE_JIT)
+                rocm_package_add_dependencies(COMPONENT tensilelite-devel DEPENDS "comgr")
+            endif()
             if(TENSILELITE_BUILD_SHARED_LIBS)
                 rocm_package_setup_component(tensilelite
                     LIBRARY_NAME tensilelite
                     PACKAGE_NAME host
                     PARENT tensilelite-devel)
+                if(TENSILELITE_ENABLE_JIT)
+                    rocm_package_add_dependencies(COMPONENT tensilelite DEPENDS "comgr")
+                endif()
                 set(_tensilelite_devel_package tensilelite-host)
                 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tensilelite)
                 set(CPACK_DEBIAN_TENSILELITE_PACKAGE_RECOMMENDS

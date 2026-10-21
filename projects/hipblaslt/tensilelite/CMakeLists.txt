@@ -44,6 +44,9 @@ option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shar
 option(TENSILELITE_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
 cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
     "Use mxDataGenerator for pre-swizzled MX scale strides." ON "NOT WIN32" OFF)
+option(TENSILELITE_ENABLE_JIT "Build the COMGR-based TensileLite JIT library." ON)
+cmake_dependent_option(TENSILELITE_ENABLE_JIT_PYTHON
+    "Build the nanobind Python module for the TensileLite JIT library." OFF "TENSILELITE_ENABLE_JIT" OFF)
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
 if(TENSILELITE_STANDALONE)
@@ -90,6 +93,11 @@ if(TENSILELITE_ENABLE_HOST_ASAN AND TENSILELITE_ENABLE_HOST_TSAN)
 endif()
 
 add_subdirectory(rocisa)
+
+if(TENSILELITE_ENABLE_JIT)
+    find_package(amd_comgr CONFIG REQUIRED)
+    add_subdirectory(src/tensilelite)
+endif()
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -224,6 +232,21 @@ if(TENSILELITE_ENABLE_HOST)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
     )
 
+    if(TENSILELITE_BUILD_SHARED_LIBS AND NOT WIN32)
+        set_property(TARGET tensilelite-host PROPERTY
+            INSTALL_RPATH "$ORIGIN;$ORIGIN/../llvm/lib")
+    endif()
+
+    if(TENSILELITE_ENABLE_CLIENT)
+        add_subdirectory(client)
+    endif()
+
+    if(NOT TENSILELITE_STANDALONE AND (TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
+        add_subdirectory(tests)
+    endif()
+endif()
+
+if(TENSILELITE_ENABLE_HOST OR TENSILELITE_ENABLE_JIT)
     set(_tensilelite_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/tensilelite")
     install(EXPORT tensilelite-targets
         NAMESPACE roc::
@@ -242,28 +265,19 @@ if(TENSILELITE_ENABLE_HOST)
         VERSION "${PROJECT_VERSION}"
         COMPATIBILITY SameMajorVersion
     )
+    set(_tensilelite_config_files
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config-version.cmake")
+    if(TENSILELITE_ENABLE_HOST)
+        list(APPEND _tensilelite_config_files "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake")
+    endif()
     install(
-        FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config-version.cmake"
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake"
+        FILES ${_tensilelite_config_files}
         DESTINATION "${_tensilelite_config_dir}"
         COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
     )
+    unset(_tensilelite_config_files)
     unset(_tensilelite_config_dir)
-
-    if(TENSILELITE_BUILD_SHARED_LIBS AND NOT WIN32)
-        set_property(TARGET tensilelite-host PROPERTY
-            INSTALL_RPATH "$ORIGIN;$ORIGIN/../llvm/lib")
-    endif()
-
-    if(TENSILELITE_ENABLE_CLIENT)
-        add_subdirectory(client)
-    endif()
-
-    if(NOT TENSILELITE_STANDALONE AND (TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
-        add_subdirectory(tests)
-    endif()
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_packaging.cmake")
