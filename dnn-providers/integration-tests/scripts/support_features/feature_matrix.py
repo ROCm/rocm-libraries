@@ -41,6 +41,7 @@ from typing import NamedTuple
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+from bundle_discovery import DEFAULT_BUNDLES_DIR  # noqa: E402
 from support_features import registry  # noqa: E402
 from support_features.coverage import unit_features, unit_location  # noqa: E402
 from support_matrix_markdown import FULL, PARTIAL  # noqa: E402
@@ -53,7 +54,6 @@ from support_matrix_units import (  # noqa: E402
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[4]
-DEFAULT_BUNDLES_DIR = SCRIPTS_DIR.parent / "integration-test-bundles"
 REGEN_COMMAND = f"python3 {SCRIPT_PATH.relative_to(REPO_ROOT).as_posix()}"
 
 NOT_CLAIMED = "❌"

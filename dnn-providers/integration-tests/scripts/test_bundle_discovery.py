@@ -13,21 +13,28 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
 from bundle_discovery import (
+    BUNDLES_DIR_NAME,
     COMPANION_KINDS,
+    DEFAULT_BUNDLES_DIR,
     SWEEP_MANIFEST_NAME,
+    SWEEP_SUPPORT_NAME,
     SWEEP_TEMPLATE_NAME,
     find_graph_files,
     find_sweep_roots,
+    graph_for_sidecar,
     is_descendant_of,
     is_graph_file,
+    is_single_graph_sidecar,
     is_sweep_root,
     load_json,
+    meta_for_graph,
     read_sweep_cases,
+    sidecar_for_graph,
 )
 
 HEADER = (
@@ -207,6 +214,51 @@ class TestIsDescendantOf:
 
     def test_sibling_does_not(self, tmp_path: Path) -> None:
         assert not is_descendant_of(tmp_path / "a", tmp_path / "b")
+
+
+class TestDefaultBundlesDir:
+    def test_is_the_checkouts_bundle_tree(self) -> None:
+        assert DEFAULT_BUNDLES_DIR.name == BUNDLES_DIR_NAME
+        assert DEFAULT_BUNDLES_DIR.is_dir()
+        assert DEFAULT_BUNDLES_DIR.parent == HEADER.parents[3]
+
+
+class TestSingleGraphCompanionNames:
+    def test_sidecar_and_meta_sit_beside_the_graph(self) -> None:
+        graph = Path("a") / "b" / "Small.json"
+        assert sidecar_for_graph(graph) == Path("a") / "b" / "Small.support.json"
+        assert meta_for_graph(graph) == Path("a") / "b" / "Small.meta.json"
+
+    def test_keeps_the_path_flavour(self) -> None:
+        sidecar = sidecar_for_graph(PurePosixPath("a/Small.json"))
+        assert type(sidecar) is PurePosixPath
+
+    def test_dotted_graph_name_keeps_its_dots(self) -> None:
+        graph = Path("model.fp16.json")
+        assert sidecar_for_graph(graph) == Path("model.fp16.support.json")
+        assert graph_for_sidecar(sidecar_for_graph(graph)) == graph
+
+    def test_round_trip(self) -> None:
+        sidecar = Path("a") / "Small.support.json"
+        assert sidecar_for_graph(graph_for_sidecar(sidecar)) == sidecar
+
+    def test_companions_are_not_graphs(self, tmp_path: Path) -> None:
+        graph = tmp_path / "Small.json"
+        assert is_graph_file(graph)
+        assert not is_graph_file(sidecar_for_graph(graph))
+        assert not is_graph_file(meta_for_graph(graph))
+
+    def test_bare_sweep_sidecar_is_not_a_single_graph_sidecar(self) -> None:
+        bare = Path("sweep") / SWEEP_SUPPORT_NAME
+        assert is_single_graph_sidecar(Path("Small.support.json"))
+        assert not is_single_graph_sidecar(bare)
+        with pytest.raises(ValueError):
+            graph_for_sidecar(bare)
+
+    def test_other_names_are_not_sidecars(self) -> None:
+        assert not is_single_graph_sidecar(Path("Small.json"))
+        with pytest.raises(ValueError):
+            graph_for_sidecar(Path("Small.meta.json"))
 
 
 class TestLoadJson:

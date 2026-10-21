@@ -48,8 +48,11 @@ from bundle_discovery import (  # noqa: E402
     SWEEP_SUPPORT_NAME,
     SWEEP_TEMPLATE_NAME,
     discover_bundle_tree,
+    graph_for_sidecar,
+    is_single_graph_sidecar,
     load_json,
     read_sweep_cases,
+    sidecar_for_graph,
 )
 from verify_support_claims import (  # noqa: E402
     validate_single_graph_schema,
@@ -762,7 +765,7 @@ def collect_single_graph_unit(
     Claimless when the bundle has no sidecar; see ``collect_sweep_units`` for
     why that is a unit rather than nothing.
     """
-    support_path = graph_path.with_name(f"{graph_path.stem}.support.json")
+    support_path = sidecar_for_graph(graph_path)
     claims = load_sidecar(support_path, validate_single_graph_schema, errors)
 
     graph = read_json_object(graph_path, errors)
@@ -828,10 +831,10 @@ def check_orphaned_sidecars(
                     f"{path}: orphaned {SWEEP_SUPPORT_NAME} -- its directory is "
                     "not a sweep root, so no bundle reads these claims",
                 )
-        elif path.name.endswith(".support.json"):
+        elif is_single_graph_sidecar(path):
             if any(parent in sweep_set for parent in path.parents):
                 continue
-            graph = path.with_name(path.name[: -len(".support.json")] + ".json")
+            graph = graph_for_sidecar(path)
             if graph not in graph_set:
                 report_error(
                     errors,

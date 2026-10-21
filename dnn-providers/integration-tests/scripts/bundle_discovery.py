@@ -21,7 +21,13 @@ from __future__ import annotations
 import json
 import os
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
+from typing import TypeVar
+
+# The bundle tree, relative to the integration-tests directory, and its place
+# in this checkout: the default every claim tool scans.
+BUNDLES_DIR_NAME = "integration-test-bundles"
+DEFAULT_BUNDLES_DIR = Path(__file__).resolve().parent.parent / BUNDLES_DIR_NAME
 
 # Mirrors isSweepTemplateFile() / isSweepManifestFile().
 SWEEP_TEMPLATE_NAME = "graph.template.json"
@@ -35,6 +41,39 @@ SWEEP_SUPPORT_NAME = "support.json"
 # Mirrors companionKinds(): suffixes that mark a .json as metadata *for* a
 # graph rather than a graph test in its own right.
 COMPANION_KINDS = frozenset({"meta", "support"})
+
+# A single-graph bundle X.json keeps its companions beside it as X.<kind>.json.
+SINGLE_GRAPH_SUPPORT_SUFFIX = ".support.json"
+SINGLE_GRAPH_META_SUFFIX = ".meta.json"
+
+PathT = TypeVar("PathT", bound=PurePath)
+
+
+def sidecar_for_graph(graph_path: PathT) -> PathT:
+    """``X.json`` -> ``X.support.json``, the sidecar of a single-graph bundle."""
+    return graph_path.with_name(f"{graph_path.stem}{SINGLE_GRAPH_SUPPORT_SUFFIX}")
+
+
+def meta_for_graph(graph_path: PathT) -> PathT:
+    """``X.json`` -> ``X.meta.json``, the metadata of a single-graph bundle."""
+    return graph_path.with_name(f"{graph_path.stem}{SINGLE_GRAPH_META_SUFFIX}")
+
+
+def is_single_graph_sidecar(path: PurePath) -> bool:
+    # The bare sweep "support.json" has no leading dot, so it never matches.
+    return path.name.endswith(SINGLE_GRAPH_SUPPORT_SUFFIX)
+
+
+def graph_for_sidecar(support_path: PathT) -> PathT:
+    """``X.support.json`` -> ``X.json``, the graph a single-graph sidecar claims.
+
+    The inverse of ``sidecar_for_graph``. Raises ``ValueError`` for any other
+    name, the bare sweep ``support.json`` included.
+    """
+    name = support_path.name
+    if not is_single_graph_sidecar(support_path):
+        raise ValueError(f"{support_path}: not a single-graph sidecar")
+    return support_path.with_name(name[: -len(SINGLE_GRAPH_SUPPORT_SUFFIX)] + ".json")
 
 
 def is_graph_file(json_path: Path) -> bool:

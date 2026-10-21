@@ -42,6 +42,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+from bundle_discovery import DEFAULT_BUNDLES_DIR  # noqa: E402
 from support_matrix_markdown import (  # noqa: E402
     REGEN_COMMAND,
     REGEN_OVERVIEW_COMMAND,
@@ -55,7 +56,6 @@ from support_matrix_units import collect_units, warn, write_stdout  # noqa: E402
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 INTEGRATION_TESTS_DIR = SCRIPT_PATH.parent.parent
-DEFAULT_BUNDLES_DIR = INTEGRATION_TESTS_DIR / "integration-test-bundles"
 DEFAULT_MATRIX_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX.md"
 DEFAULT_OVERVIEW_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX_OVERVIEW.md"
 

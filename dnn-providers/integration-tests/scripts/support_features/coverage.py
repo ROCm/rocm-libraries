@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+from bundle_discovery import DEFAULT_BUNDLES_DIR  # noqa: E402
 from support_features import FeatureError  # noqa: E402
 from support_features import registry  # noqa: E402
 from support_matrix_units import (  # noqa: E402
@@ -51,8 +52,6 @@ from support_matrix_units import (  # noqa: E402
     report_error,
     write_stdout,
 )
-
-DEFAULT_BUNDLES_DIR = SCRIPTS_DIR.parent / "integration-test-bundles"
 
 
 @dataclass

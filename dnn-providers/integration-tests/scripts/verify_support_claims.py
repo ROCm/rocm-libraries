@@ -35,16 +35,20 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bundle_discovery import (  # noqa: E402
+    DEFAULT_BUNDLES_DIR,
     SWEEP_MANIFEST_NAME,
     SWEEP_SUPPORT_NAME,
     SWEEP_TEMPLATE_NAME,
+    graph_for_sidecar,
+    is_single_graph_sidecar,
     is_sweep_root,
+    meta_for_graph,
     load_json,
     read_sweep_cases,
     walk_bundle_tree,
 )
 
-BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "integration-test-bundles"
+BUNDLE_ROOT = DEFAULT_BUNDLES_DIR
 VALID_PLATFORMS = {"linux", "windows"}
 VALID_ENFORCEMENT_LEVELS = {"applicability", "buildable", "full"}
 
@@ -191,9 +195,7 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
     rejects the whole metadata object for it, so the bundle would silently lose
     every other field it declares.  That is what this catches.
     """
-    # support_path is X.support.json => bundle is X.json => meta is X.meta.json
-    bundle_stem = Path(support_path.stem).stem  # "X.support.json" -> "X"
-    meta_path = support_path.parent / f"{bundle_stem}.meta.json"
+    meta_path = meta_for_graph(graph_for_sidecar(support_path))
     if not meta_path.exists():
         return
     meta, error = load_json(meta_path)
@@ -255,8 +257,7 @@ def check_sweep_case_ids(
 
 
 def check_orphaned_single_graph(support_path: Path, errors: List[str]) -> None:
-    bundle_stem = Path(support_path.stem).stem  # "X.support" -> "X"
-    bundle_path = support_path.parent / f"{bundle_stem}.json"
+    bundle_path = graph_for_sidecar(support_path)
     if not bundle_path.exists():
         _error(
             support_path,
@@ -321,7 +322,7 @@ def verify_all(bundle_root: Path) -> List[str]:
     # directory symlink is checked rather than silently skipped.
     _, files = walk_bundle_tree(bundle_root)
 
-    for support_path in (f for f in files if f.name.endswith(".support.json")):
+    for support_path in (f for f in files if is_single_graph_sidecar(f)):
         data, loaded = _load_sidecar(support_path, errors)
         if not loaded:
             continue
