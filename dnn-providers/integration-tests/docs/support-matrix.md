@@ -38,7 +38,8 @@ They read bundle JSON through the same `bundle_discovery.py` loader as
 `SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the compact
 overview-only variant produced by `--overview-only`, small enough to render on
 GitHub. CI fails if it is stale; regenerate it with `--overview-only` in the
-same commit as the sidecar change.
+same commit as the sidecar change. `harvest_support_claims.py --write`
+regenerates it for you.
 
 Bundle data is checked in CI, not at commit time. The top-level exclude in
 `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook,
