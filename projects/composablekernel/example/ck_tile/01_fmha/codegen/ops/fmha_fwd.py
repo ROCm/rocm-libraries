@@ -1890,7 +1890,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # when both match (dispatch order = list order in generated code).
             # NOTE: dropout is not yet implemented in qr_tdm - only emit
             # dropout="f" so dropout workloads fall through to qr.
-            # Logits soft cap is not implemented either, so pin logits="f".
+            # Logits soft cap (qr_tdm and qr_tdm_pingpong, not qr_tdm_sched) comes
+            # without a bias, as everywhere.
             if (hdim, hdim_v) in {
                 (32, 32),
                 (64, 64),
@@ -1913,13 +1914,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     # Avoid carrying general-window mask state through the
                     # causal main loop. Keep the simplified fallback for windows.
                     tdm_masks.insert(0, "causal")
+                # logits soft cap: without a bias (check_feature)
                 for logits, mask, bias, lse, sink in itertools.product(
-                    ["f"],
+                    ["f", "t"],
                     tdm_masks,
                     BIAS_MAP.keys(),
                     ["t", "f"],
                     ["t", "f"],
                 ):
+                    if logits == "t" and bias != "no":
+                        continue
                     mask_constraint = CppConstraint()
                     if mask_impl == "simplified" and mask == "causal":
                         if bias != "no" or lse != "f" or sink != "f":

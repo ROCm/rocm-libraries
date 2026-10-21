@@ -978,6 +978,102 @@ TEST(TestCkTileFmhaFwd, SkipMinSeqlenQ)
     EXPECT_NE(selected_kernel.find("_skip_"), std::string::npos) << selected_kernel;
 }
 
+// A logits soft cap on the gfx1250 TDM pipelines (qr_tdm, qr_tdm_pingpong; not qr_tdm_sched) of
+// each API. A cap of 0.5 bends every score, so the reference catches a missing transform.
+// api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask
+using TdmSoftCapCase = std::tuple<const char*, const char*, mode_enum, int, int, int, const char*>;
+
+class TdmLogitsSoftCap : public TestWithParam<TdmSoftCapCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b"},
+           TdmSoftCapCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, 8, 532, 0, "0"},
+           TdmSoftCapCase{"fwd", "qr_tdm_pingpong", mode_enum::group, 100, 500, 0, "t:64,32"}));
+
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+INSTANTIATE_TEST_SUITE_P(
+    SplitKV,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"splitkv", "qr_tdm", mode_enum::batch, 300, 2049, 0, "b"},
+           TdmSoftCapCase{"splitkv", "qr_tdm_pingpong", mode_enum::batch, 1, 2000, 128, "0"}));
+#endif
+
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+INSTANTIATE_TEST_SUITE_P(
+    PagedKV,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"pagedkv", "qr_tdm", mode_enum::batch, 100, 500, 7, "0"},
+           TdmSoftCapCase{"pagedkv", "qr_tdm_pingpong", mode_enum::group, 300, 500, 64, "b"}));
+#endif
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+INSTANTIATE_TEST_SUITE_P(
+    BatchPrefill,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"batch_prefill", "qr_tdm", mode_enum::group, 100, 500, 16, "0"},
+           TdmSoftCapCase{"batch_prefill", "qr_tdm_pingpong", mode_enum::group, 100, 500, 1, "b"}));
+#endif
+
+TEST_P(TdmLogitsSoftCap, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
+
+        const auto [api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask_str] =
+            GetParam();
+        const bool splitkv = std::string(api) == "splitkv";
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   3,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(3, seqlen_q),
+                                                   std::vector<int>(3, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0.5f, // logits_soft_cap
+                                                   true,
+                                                   splitkv, // lse
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   splitkv ? 3 : 1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "linear",
+                                                   "vllm",
+                                                   api,
+                                                   pipeline);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_logits_"), std::string::npos) << selected_kernel;
+    }
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts

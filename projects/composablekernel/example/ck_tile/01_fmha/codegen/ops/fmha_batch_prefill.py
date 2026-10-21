@@ -1013,6 +1013,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
                 if sink == "t" and mask in ("no", "s_no"):
                     continue
                 pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "f", "f", qscale, mask, sink, "linear", kv_lookup_table))  # fmt: skip
+        # logits soft cap on qr_tdm and qr_tdm_pingpong (not qr_tdm_sched), without a bias
+        pipelines += [
+            replace(p, F_logits="t")
+            for p in pipelines
+            if p.tag in ("qr_tdm", "qr_tdm_pingpong") and p.F_bias == "no" and p.F_qscale == "no"
+        ]
         return pipelines + KernelComponentFactory.get_pipelines(
             dtype, hdim, receipt, mask_impl
         )

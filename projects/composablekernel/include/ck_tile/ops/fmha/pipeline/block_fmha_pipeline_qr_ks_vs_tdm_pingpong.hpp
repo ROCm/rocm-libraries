@@ -267,6 +267,15 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 });
             });
         }
+        else if constexpr(kHasLogitsSoftCap)
+        {
+            // a LogitsSoftCapTransform (see the base pipeline)
+            ignore = bias_dram_window;
+            ignore = q_origin;
+            ignore = k_start;
+            ignore = scale_s;
+            tile_elementwise_inout([&](auto& x) { x = position_encoding(x); }, s_acc);
+        }
         else
         {
             ignore = bias_dram_window;

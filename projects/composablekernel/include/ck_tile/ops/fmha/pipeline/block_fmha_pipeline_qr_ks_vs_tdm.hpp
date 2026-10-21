@@ -315,9 +315,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                   "qr_tdm pipeline: FAST_EXP2=0 has no code path here - log2(e) is never folded "
                   "into scale_s, so the kernel would return 2^logit instead of e^logit");
 
-    static_assert(!kHasLogitsSoftCap,
-                  "qr_tdm pipeline does not implement logits soft cap - LogitsTransform is never "
-                  "applied, so scores would reach softmax uncapped and unscaled");
+    // A logits soft cap comes without a bias, and through the position-encoding argument: a
+    // LogitsSoftCapTransform, applied to the scores after gemm0 (STAGE 2).
+    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
+                  "qr_tdm pipeline: a logits soft cap comes without a bias");
 
     // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
     // Dropout requires kernel dispatch interface expansion (dropout object +
@@ -1156,6 +1157,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                         position_encoding.update(s_acc(i_j_idx), row, col);
                     });
                 });
+            }
+            else if constexpr(kHasLogitsSoftCap)
+            {
+                tile_elementwise_inout([&](auto& x) { x = position_encoding(x); }, s_acc);
             }
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
@@ -2093,6 +2098,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                         position_encoding.update(s_acc(i_j_idx), row, col);
                     });
                 });
+            }
+            else if constexpr(kHasLogitsSoftCap)
+            {
+                tile_elementwise_inout([&](auto& x) { x = position_encoding(x); }, s_acc);
             }
 
             s_wait_tensorcnt_barrier<kVTdmInsts>();

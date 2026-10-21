@@ -2083,8 +2083,8 @@ class TestGfx125PagedKVCodegen(unittest.TestCase):
 
 
 class TestGfx125SplitKVCodegen(unittest.TestCase):
-    """fwd_splitkv on gfx1250: the TDM pipelines of fmha_fwd (no sink, no soft cap) before qr,
-    which keeps sink and soft cap, and other archs unchanged."""
+    """fwd_splitkv on gfx1250: the TDM pipelines of fmha_fwd (no sink) before qr, which keeps
+    sink, and other archs unchanged."""
 
     def test_tdm_instances_and_dispatch(self):
         from codegen.ops.fmha_fwd_splitkv import (
@@ -2105,7 +2105,10 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
                 )
                 if tdm:
                     self.assertEqual(kernel.F_pipeline.F_sink, "f")
-                    self.assertEqual(kernel.F_pipeline.F_logits, "f")
+                    # a logits soft cap without a bias, and not on qr_tdm_sched
+                    if kernel.F_pipeline.F_logits == "t":
+                        self.assertEqual(kernel.F_pipeline.F_bias, "no")
+                        self.assertNotEqual(kernel.F_pipeline.tag, "qr_tdm_sched")
         self.assertTrue(
             any(k.F_pipeline.F_sink == "t" for k in kernels if k.F_pipeline.tag == "qr")
         )

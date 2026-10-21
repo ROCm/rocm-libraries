@@ -69,8 +69,8 @@ struct FmhaFwdPagedKVKernel
         detail::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
     static constexpr bool kIsTdmPipeline =
         detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> || kIsSegmentedTdmPipeline;
-    static_assert(!kIsTdmPipeline || (kIsPagedKV && !kDoFp8StaticQuant && !kHasLogitsSoftCap),
-                  "TDM pagedkv_prefill reads paged K/V, without fp8 static quant or soft cap");
+    static_assert(!kIsTdmPipeline || (kIsPagedKV && !kDoFp8StaticQuant),
+                  "TDM pagedkv_prefill reads paged K/V, without fp8 static quant");
 
     static constexpr bool kKVGather = [] {
         if constexpr(kIsTdmPipeline)
@@ -1186,6 +1186,16 @@ struct FmhaFwdPagedKVKernel
         auto o_acc_tile = [&]() {
             if constexpr(kIsTdmPipeline)
             {
+                // A logits soft cap reaches the TDM pipelines in place of their position
+                // encoding (it comes without a bias; see LogitsSoftCapTransform).
+                const auto score_transform = [&]() {
+                    if constexpr(kHasLogitsSoftCap)
+                        return LogitsSoftCapTransform<AttentionVariant,
+                                                      remove_cvref_t<decltype(variant_params)>>{
+                            variant, variant_params};
+                    else
+                        return position_encoding;
+                }();
                 // TDM needs affine views and clamps each box to the real lengths: each K/V
                 // tile is read through a view of its page that ends at seqlen_k (or with TDM
                 // gathers whose row indices come from the page table).
@@ -1268,7 +1278,7 @@ struct FmhaFwdPagedKVKernel
                                           bias_dram_window,
                                           lse_dram_window,
                                           mask,
-                                          position_encoding,
+                                          score_transform,
                                           kargs.scale_s,
                                           sink_value,
                                           smem_ptr + Policy::GetLdsOffsetK0(),
@@ -1285,7 +1295,7 @@ struct FmhaFwdPagedKVKernel
                                           bias_dram_window,
                                           lse_dram_window,
                                           mask,
-                                          position_encoding,
+                                          score_transform,
                                           kargs.scale_s,
                                           static_cast<void*>(smem_ptr),
                                           sink_value,

@@ -3562,6 +3562,21 @@ struct FmhaFwdKernel
                     ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
                     : -numeric<float>::infinity();
 
+            // A logits soft cap reaches the TDM pipelines in place of their position encoding
+            // (a soft cap comes without a bias; see LogitsSoftCapTransform).
+            const auto score_transform = [&]() {
+                if constexpr(kHasLogitsSoftCap)
+                {
+                    using Params =
+                        ck_tile::LogitsSoftCapParams<FmhaMask, CK_TILE_FMHA_FWD_FAST_EXP2>;
+                    return LogitsSoftCapTransform<AttentionVariant, Params>{
+                        AttentionVariant{},
+                        Params{mask, scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp}};
+                }
+                else
+                    return position_encoding;
+            }();
+
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPipelineName == "qr_tdm" && kBlockQScale)
                 {
@@ -3609,7 +3624,7 @@ struct FmhaFwdKernel
                                                     bias_dram_window,
                                                     lse_dram_window,
                                                     mask,
-                                                    position_encoding,
+                                                    score_transform,
                                                     scale_s,
                                                     sink_value,
                                                     smem_arena + Policy::GetLdsOffsetK0(),
@@ -3625,7 +3640,7 @@ struct FmhaFwdKernel
                                                     bias_dram_window,
                                                     lse_dram_window,
                                                     mask,
-                                                    position_encoding,
+                                                    score_transform,
                                                     scale_s,
                                                     sink_value,
                                                     smem_ptr);
@@ -3651,7 +3666,7 @@ struct FmhaFwdKernel
                                                     bias_dram_window,
                                                     lse_dram_window,
                                                     mask,
-                                                    position_encoding,
+                                                    score_transform,
                                                     scale_s,
                                                     sink_value,
                                                     smem_ptrk0,
@@ -3670,7 +3685,7 @@ struct FmhaFwdKernel
                                                 bias_dram_window,
                                                 lse_dram_window,
                                                 mask,
-                                                position_encoding,
+                                                score_transform,
                                                 scale_s,
                                                 smem_ptr,
                                                 sink_value);

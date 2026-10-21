@@ -898,6 +898,16 @@ struct FmhaFwdSplitKVKernel
         auto o_acc_tile = [&, i_split_ = i_split]() {
             if constexpr(kIsTdmPipeline)
             {
+                // A logits soft cap reaches the TDM pipelines in place of their position
+                // encoding (it comes without a bias; see LogitsSoftCapTransform).
+                const auto score_transform = [&]() {
+                    if constexpr(kHasLogitsSoftCap)
+                        return LogitsSoftCapTransform<AttentionVariant,
+                                                      remove_cvref_t<decltype(variant_params)>>{
+                            variant, variant_params};
+                    else
+                        return position_encoding;
+                }();
                 // TDM needs affine views and clamps each box to the real lengths.
                 // kMergeNumHeadGroupsSeqLenQ runs one query row (max_seqlen_q == 1), so the
                 // merged rows are the heads of one K/V head, nhead_stride_q apart.
@@ -937,7 +947,7 @@ struct FmhaFwdSplitKVKernel
                                                   bias_dram_window,
                                                   lse_acc_dram_window,
                                                   mask,
-                                                  position_encoding,
+                                                  score_transform,
                                                   kargs.scale_s,
                                                   sink_value,
                                                   smem_ptr + Policy::GetLdsOffsetK0(),
@@ -954,7 +964,7 @@ struct FmhaFwdSplitKVKernel
                                                   bias_dram_window,
                                                   lse_acc_dram_window,
                                                   mask,
-                                                  position_encoding,
+                                                  score_transform,
                                                   kargs.scale_s,
                                                   sink_value,
                                                   static_cast<void*>(smem_ptr));
@@ -967,7 +977,7 @@ struct FmhaFwdSplitKVKernel
                                                   bias_dram_window,
                                                   lse_acc_dram_window,
                                                   mask,
-                                                  position_encoding,
+                                                  score_transform,
                                                   kargs.scale_s,
                                                   static_cast<void*>(smem_ptr),
                                                   sink_value,
