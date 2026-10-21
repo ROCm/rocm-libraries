@@ -211,9 +211,11 @@ rocsparseio_status rocsparseio_open(rocsparseio_handle* p_handle,
                                     ...);
 
 //! @brief Close the rocsparseio file.
+//! @details The handle is released even if closing the file fails.
 //! @param[in] handle pointer to the rocsparseio handle.
 //! @retval rocsparseio_status_success the operation completed successfully.
 //! @retval rocsparseio_status_invalid_handle \p handle is a null pointer.
+//! @retval rocsparseio_status_invalid_file_operation closing the file failed, for example because buffered data could not be written.
 
 rocsparseio_status rocsparseio_close(rocsparseio_handle handle);
 

@@ -1050,6 +1050,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(ptr);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -1359,6 +1367,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(ptr);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -1711,6 +1727,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(ptr);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -1998,6 +2022,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(row);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -2258,6 +2290,13 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(offset);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -2516,6 +2555,13 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -2977,6 +3023,16 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(coo_row);
+            free_host(coo_col);
+            free_host(coo_val);
+            free_host(ell_col);
+            free_host(ell_val);
+            return false;
+        }
         return true;
     }
 
@@ -3149,6 +3205,12 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -3346,7 +3408,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_csr_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3399,7 +3466,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_mcsr_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3452,7 +3524,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_bcsr_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3489,7 +3566,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_coo_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3524,7 +3606,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_dia_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3559,7 +3646,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_ell_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3617,7 +3709,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_hyb_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3647,7 +3744,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_dense_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 

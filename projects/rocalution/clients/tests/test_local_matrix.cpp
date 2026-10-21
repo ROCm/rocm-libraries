@@ -384,6 +384,11 @@ GENERATE_TEST_CASES(local_matrix_test, testing_write_file_MTX, write_file_mtx_to
 // Test case for LocalMatrix::WriteFileRSIO
 GENERATE_TEST_CASES(local_matrix_test, testing_write_file_RSIO, write_file_RSIO)
 
+// Test case for LocalMatrix::WriteFileRSIO when closing the file fails
+GENERATE_TEST_CASES(local_matrix_test,
+                    testing_write_file_RSIO_close_failure,
+                    write_file_RSIO_close_failure)
+
 // Test case for LocalMatrix::CopyFromAsync
 GENERATE_TEST_CASES_DEVICE(local_matrix_test, testing_local_copy_from_async, local_copy_from_async)
 
