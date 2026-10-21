@@ -638,6 +638,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
+| Random GEMMs under CPU rocJITsu (gfx950) | No, advisory | Component team | The Multi-Arch per-PR sidecar checks 100 fixed-seed GEMMs for numerics and races using the run's BLAS artifacts; reports upload on failure. Runner unit tests run when the scripts or workflows change. See [random GEMM testing](docs/nightly-random-gemm.md) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -824,6 +825,12 @@ enforced numbers cannot see the characterization-to-unit migration at all, is in
 
 Beyond PR validation, the following run on a nightly or postsubmit cadence rather than per PR:
 
+- **Random GEMMs under CPU rocJITsu.** The Multi-Arch nightly sidecar checks 1,000
+  fixed-seed gfx950 GEMMs, including MXFP8 and MXFP4, using the nightly run's BLAS
+  artifacts. It uses the same seed and sampler as the 100-case per-PR sidecar.
+  Both are advisory, require no GPU, and retain every case's input and logs.
+  Manual artifact replay and local validation are documented in
+  [random GEMM testing](docs/nightly-random-gemm.md).
 - **Additional hardware.** This repository's own nightly runs the same Linux families as a pull
   request (gfx94X and gfx950) plus Windows gfx1151. TheRock's nightly, which tests rocm-libraries at
   the commit TheRock pins, adds more families (gfx90a, gfx103X, gfx110X, gfx115X, gfx120X).

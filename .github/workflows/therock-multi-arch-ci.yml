@@ -83,6 +83,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  random_gemm_runner_tests:
+    name: Random GEMM runner tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Test sampling and failure handling
+        run: |
+          if ! git diff --quiet HEAD^ HEAD -- .github/scripts/run_random_hipblaslt_gemms.py .github/scripts/sample_hipblaslt_gemms.py .github/scripts/tests/test_random_hipblaslt_gemms.py '.github/workflows/therock*'; then
+            python3 -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
+          fi
+
   ci-env:
     name: Load CI Environment
     runs-on: ubuntu-24.04
@@ -327,6 +343,38 @@ jobs:
       amdgpu_families: ${{ matrix.amdgpu_families }}
       amdgpu_targets: ${{ matrix.amdgpu_targets }}
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
+
+  rocjitsu_random_gemms_gfx950:
+    name: rocjitsu random GEMMs (gfx950, 100 cases)
+    needs: [ci-env, configure, setup, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.event_name == 'pull_request' &&
+        (
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblas-common,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/origami,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/stinkytofu,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/mxdatagenerator,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',shared/rocroller,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt') ||
+          needs.configure.outputs.run_all_tests == 'true'
+        ) &&
+        contains(needs.setup.outputs.linux_build_config, 'gfx950-dcgpu') &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
+      build_runs_on: ${{ fromJSON(needs.setup.outputs.linux_build_config).build_runs_on_medium }}
+      amdgpu_families: gfx950-dcgpu
+      amdgpu_targets: gfx950
+      random_gemm_count: 100
+      random_gemm_seed: 0
+      random_gemm_threads: 8
+      rocjitsu_ref: 29656a8dcc052615e1ca49cafde98d684b6b81f2
 
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure

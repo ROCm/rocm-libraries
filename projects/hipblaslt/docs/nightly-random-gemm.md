@@ -3,7 +3,7 @@
 This prototype [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py)
 tests GEMMs through rocJITsu on CPUs, checking numerics and detecting races.
 No physical GPU is required. In this initial prototype, bench chooses its
-kernel through the ordinary heuristic. Nightly workflow integration is pending.
+kernel through the ordinary heuristic.
 
 The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) has separate
 functions for numerics, shapes, layouts, scalars and epilogues. M, N and K are
@@ -67,3 +67,37 @@ records elapsed time and sampled families, transposes and epilogues.
 A pass requires successful numerics and race detection. Known-failure exclusions
 start empty, and every race report fails. Inputs and results are saved under the
 output directory. Use `--help` for all options.
+
+## CI and pre-merge validation
+
+The existing Multi-Arch workflows call the CPU
+[race-check workflow](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
+after the Linux build publishes its artifacts. The per-PR run samples 100 GEMMs;
+nightly samples 1,000. Both use gfx950, seed 0 and eight concurrent GEMMs, so
+the per-PR inputs are the first 100 nightly inputs. The job fetches the matching
+BLAS runtime, device library and bench test payload from that workflow run.
+The emulator is pinned independently to a revision validated with these types.
+
+These GEMM jobs are advisory: a failed test step and its reports remain visible,
+but they do not change the required Multi-Arch summary. No known-failure entries
+are enabled. Every sample executes, and unsupported configurations, race reports
+and numerical failures make the test step fail. Runner unit tests execute on a
+small GitHub-hosted runner when the runner or its workflows change.
+
+The race-check workflow also supports manual dispatch with `artifact_run_id`,
+`random_gemm_count`, `random_gemm_seed`, `random_gemm_threads` and `rocjitsu_ref`.
+Choose a completed rocm-libraries Multi-Arch run that published gfx950 artifacts.
+Manual replay tests the scripts from the selected workflow ref against that
+artifact run; it does not rebuild hipBLASLt. For a pre-merge end-to-end check,
+push the draft branch so its per-PR caller builds and tests the merged tree.
+GitHub requires a workflow to exist on the default branch before its manual
+dispatch is available.
+
+For local validation of the same driver, fetch the artifact payload with
+TheRock's `install_rocm_from_artifacts.py --blas --tests`, and check out the
+workflow's pinned rocm-systems revision. Set `ROCM_PATH`, `ROCJITSU_SOURCE_DIR`,
+`ROCJITSU_BUILD_DIR`, `RACE_REPORT_DIR`, `AMDGPU_FAMILIES=gfx950-dcgpu`,
+`RANDOM_GEMM_COUNT`, `RANDOM_GEMM_SEED` and `RANDOM_GEMM_THREADS`, then run
+`.github/scripts/run_rocjitsu_hipblaslt_race_check.sh`. Build and report paths
+must be outside the source checkout. The driver builds the CLI and race/logging
+plugins, then invokes the same Python runner used by CI.
