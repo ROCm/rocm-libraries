@@ -756,6 +756,14 @@ class AlgorithmDeviceFindFirstOf(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceFindIf(Algorithm):
+    algorithm_name = "device_find_if"
+    cpp_configuration_template_name = "find_if_config_template"
+    config_selection_params = [
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceRunLengthEncode(Algorithm):
     algorithm_name = 'device_run_length_encode'
     cpp_configuration_template_name = 'run_length_encode_config_template'
@@ -850,6 +858,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceReduceByKey(fallback_entries)
     elif algorithm_name == 'device_find_first_of':
         return AlgorithmDeviceFindFirstOf(fallback_entries)
+    elif algorithm_name == 'device_find_if':
+        return AlgorithmDeviceFindIf(fallback_entries)
     elif algorithm_name == 'device_run_length_encode':
         return AlgorithmDeviceRunLengthEncode(fallback_entries)
     elif algorithm_name == 'device_run_length_encode_non_trivial':

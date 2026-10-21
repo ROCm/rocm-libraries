@@ -1313,6 +1313,11 @@ struct find_first_of_config_params
     kernel_config_params kernel_config{};
 };
 
+struct find_if_config_params
+{
+    kernel_config_params kernel_config{};
+};
+
 struct adjacent_find_config_params
 {
     kernel_config_params kernel_config{};
@@ -1330,6 +1335,22 @@ struct find_first_of_config : public detail::find_first_of_config_params
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     constexpr find_first_of_config()
         : detail::find_first_of_config_params{
+            {BlockSize, ItemsPerThread, 0}
+    }
+    {}
+#endif
+};
+
+/// \brief Configuration of device-level find_if
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct find_if_config : public detail::find_if_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    constexpr find_if_config()
+        : detail::find_if_config_params{
             {BlockSize, ItemsPerThread, 0}
     }
     {}
@@ -1362,6 +1383,17 @@ constexpr find_first_of_config_params find_first_of_config_params_base()
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     return find_first_of_config_params{
+        {256, ::rocprim::max(1u, 16u / item_scale)}
+    };
+};
+
+template<class Value>
+constexpr find_if_config_params find_if_config_params_base()
+{
+    constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    return find_if_config_params{
         {256, ::rocprim::max(1u, 16u / item_scale)}
     };
 };

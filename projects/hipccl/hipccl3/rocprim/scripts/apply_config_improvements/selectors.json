@@ -21,6 +21,9 @@
     "find_first_of": [
         "value_type"
     ],
+    "find_if": [
+        "value_type"
+    ],
     "histogram": [
         "value_type",
         "channels",
