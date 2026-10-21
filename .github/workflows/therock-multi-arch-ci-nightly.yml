@@ -70,7 +70,11 @@ jobs:
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
     needs: [setup]
-    if: false
+    if: >-
+      ${{
+        needs.setup.outputs.linux_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
     secrets: inherit
     with:
@@ -91,11 +95,14 @@ jobs:
 
   linux_code_coverage_build_and_test:
     name: Linux::CodeCoverage::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [setup]
+    needs: [linux_build_and_test]
+    # Run once linux_build_and_test finishes regardless of pass/fail (tests can
+    # fail), but skip if that job was skipped or the run was cancelled.
+    if: ${{ !cancelled() && needs.linux_build_and_test.result != 'skipped' }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
     secrets: inherit
     with:
-      baseline_run_id: "37736020964"
+      baseline_run_id: ${{ github.run_id }}
       baseline_repository: "ROCm/rocm-libraries"
       baseline_release_type: "ci"
       amdgpu_families: "gfx94X-dcgpu"
@@ -116,7 +123,11 @@ jobs:
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
     needs: [setup]
-    if: false
+    if: >-
+      ${{
+        needs.setup.outputs.windows_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
     secrets: inherit
     with:
