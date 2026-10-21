@@ -1685,13 +1685,13 @@ migration has a target.
 - **Type checking on TensileLite** (AIHPBLAS-5038). No type checking exists today despite type hints
   being a documented style rule. A large dynamically typed code generator with no type verification
   is a standing risk.
-- **Record every result as evidence.** Give each test scenario a stable identity, and record with
-  each run the source and build versions, the GPU, the flags, why the scenario was selected, whether
-  it ran or was skipped, its runtime, any defect links, and its result artifacts, in a shared results
-  record. That is what lets a pruning or retirement decision cite evidence, and lets a defect be
-  traced back to what was supposed to catch it. Measure feedback time, from a change to its first
-  test signal, alongside escaped regressions, so a faster suite that catches less shows up as a
-  trade rather than a win. A ticket will be filed under AIHPBLAS-5028.
+- **Record every result as evidence** (AIHPBLAS-5245). Give each test scenario a stable identity,
+  and record with each run the source and build versions, the GPU, the flags, why the scenario was
+  selected, whether it ran or was skipped, its runtime, any defect links, and its result artifacts,
+  in a shared results record. That is what lets a pruning or retirement decision cite evidence, and
+  lets a defect be traced back to what was supposed to catch it. Measure feedback time, from a
+  change to its first test signal, alongside escaped regressions, so a faster suite that catches
+  less shows up as a trade rather than a win.
 
 ### How this plan develops
 
