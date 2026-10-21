@@ -449,7 +449,10 @@ def main(argv=None):
                 try:
                     result = run_case(args, directory, problem, config)
                 except OSError as error:
-                    result = {"outcome": "failed", "reason": f"execution error: {error}"}
+                    result = {
+                        "outcome": "failed",
+                        "reason": f"execution error: {error}",
+                    }
                 write_json(directory / "result.json", result)
                 with lock:
                     summary[result["outcome"]] += 1

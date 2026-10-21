@@ -21,34 +21,24 @@ block scales. Outputs are chosen from each family's supported types.
 | MXFP8 | E4M3 FP8 | FP32, FP16 or BF16 | E8M0 per 32 elements |
 | MXFP4 | E2M1 FP4 | FP32, FP16 or BF16 | E8M0 per 32 elements |
 
-These are initial profiles, not an enumeration of every supported combination.
-The MX client mode is `1001`, corresponding to
-`HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT`. Its scales use the gfx950
-preswizzled layout; the documented K-multiple-of-128 restriction for legacy
-`VEC32_UE8M0` mode does not describe this extension. Local CPU probes passed
-MXFP8 and MXFP4 at K=32, 64, 96 and 128 with M=32 and N=64.
+The MX mode is `1001` (`HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT`),
+using gfx950's preswizzled scale layout. All dimensions are aligned to 32.
+These profiles follow the project's [type tables](reference/api-reference.rst)
+and gfx950 MX tests; they cover a useful subset of supported combinations.
 
 Alpha is sampled from `{-2, -1, 0.5, 1, 2}` and beta from
 `{-2, -1, 0, 0.5, 1, 2}`. Epilogues sample none, bias, ReLU, bias+ReLU, GELU
 and bias+GELU, with FP32 bias. The fixed seed reproduces the sequence across
 thread counts. Alpha stays nonzero so every case exercises multiplication.
 
-The numerical configurations follow the project's
-[type documentation](reference/data-type-support.rst),
-[combination tables](reference/api-reference.rst) and gfx950 MX tests.
-Bench's normal heuristic checks the complete configuration against the loaded
-library. A reported lack of a heuristic solution is counted as `unsupported`
-and retains its input and logs; cases are never resampled. The distribution
-aims to produce executable GEMMs. Its minimum dimension is 32, so random
-samples cannot have M, N or K equal to 1. Missing solutions remain failures
-to investigate when assessing or extending a sampling profile.
-The public `hipblasLtMatmulAlgoGetHeuristic` query checks one set of descriptors;
-there is no public query that enumerates all legal numerical combinations.
-Alignment and a documented type pairing do not guarantee that the loaded
-library contains a kernel for every sampled configuration.
-The [individual observation table](random-gemm-observations.md) records the
-inputs and failures from local exploration, with complete machine-readable
-benchmark inputs alongside it.
+The fixed distribution passed 5,000 local samples with no missing solutions.
+That evidence applies to the tested library build: normal heuristic selection
+can still return `error: NO solution found!` for another configuration or build.
+The runner records that outcome as `unsupported`, retains its input and logs,
+and fails the run. The missing-solution rate measures how many samples could
+execute; it has no percentage cutoff. Cases are never replaced.
+[Exploratory observations](random-gemm-observations.md) document individual
+inputs and failures outside the default distribution.
 
 ## Running
 
@@ -59,7 +49,7 @@ input conversion, and the bench build must enable MX data generation.
 ```sh
 HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python .github/scripts/run_random_hipblaslt_gemms.py \
     --bench /path/to/hipblaslt-bench --rocjitsu /path/to/rocjitsu \
-    --config /path/to/gfx950_cdna4_kmd.json --count 100 --threads 8 \
+    --config /path/to/gfx950_mi355x_kmd.json --count 100 --threads 8 \
     --output /path/to/results
 ```
 
@@ -69,34 +59,33 @@ has a separate reproduction. `--stop-on-failure` stops workers from taking new
 cases after a failure, including a missing solution; cases already running
 finish. The CI callers attempt the full loop without early stopping.
 
-The summary counts passes, failures, unsupported cases and known failures, and
-records elapsed time and sampled families, transposes and epilogues.
-It also records the random missing-solution rate as a coverage metric, using
-completed random attempts as the denominator. A list-only run has no random
-rate. Explicit regression inputs can deliberately include size-1 dimensions.
-A pass requires successful numerics and race detection. Known-failure exclusions
-start empty, and every race report fails. Inputs and results are saved under the
-output directory. Use `--help` for all options.
+A pass requires successful benchmark numerical validation and evidence that
+the selected GEMM ran with race detection. Races, numerical failures, missing
+solutions and emulator diagnostics fail the run. There are no exclusions or
+expected-failure exemptions; `known_failures` is reserved and stays zero.
 
-`--explicit-cases` loads a JSON list of required inputs in addition to the random
-samples. Each entry has a stable `id`, a description and a complete `problem`.
-Required cases never consume random draws. The summary
-reports `random` and `explicit` counts separately; `sampled` counts only random
-inputs, while `requested` includes both. Each run writes `cases.md` and
-`cases.json`, listing every input and observed result. Explicit tests retain the
-same numerical assertions and race checks as random tests; there are no expected
-failure exemptions.
+`--explicit-cases` adds a JSON list with `id`, `description` and `problem` fields.
+These cases do not consume random draws and use the same checks. Reports contain
+separate random and explicit totals, plus sampled types, transposes, epilogues
+and elapsed time. Each case retains its input, commands, logs and result;
+`cases.md` and `cases.json` collect the inputs and outcomes for the whole run.
 
 The checked-in [required cases](../../../.github/scripts/hipblaslt_explicit_gemms.json)
-include five numerical-validation reproducers and one BF16 TN input,
-256×160×192 with one batch, matching the reduced shape from
+contain one BF16 TN input, 256×160×192 with one batch, matching the reduced shape from
 [the reported prefetch race](https://github.com/ROCm/rocm-libraries/pull/14147).
-The heuristic may select a different kernel, so these check the shapes rather
-than guaranteeing coverage of that particular custom schedule. Results record
+The heuristic may select a different kernel, so this checks the shape without
+guaranteeing coverage of that particular custom schedule. Results record
 the selected kernel names. Use `--count 0 --explicit-cases ...` to run the list
 alone, or `--explicit-case ID --explicit-cases ...` to replay one named input.
 `--case N` continues to replay only the Nth random sample. Early stopping also
 applies to explicit tests; omit `--stop-on-failure` to attempt the full list.
+
+The separate [diagnostic cases](../../../.github/scripts/hipblaslt_diagnostic_gemms.json)
+retain five observed numerical-validation failures near zero or FP16 overflow.
+They are available through `--count 0 --explicit-cases` using that file, with
+the same strict checks and no exemptions. They are outside the initial CI
+workload because they exercise validation edge cases documented in the
+[observation table](random-gemm-observations.md).
 
 ## CI and pre-merge validation
 
@@ -107,9 +96,8 @@ nightly samples 1,000. Both use gfx950, seed 0 and eight concurrent GEMMs, so
 the per-PR inputs are the first 100 nightly inputs. The job fetches the matching
 BLAS runtime, device library and bench test payload from that workflow run.
 The emulator is pinned independently to a revision validated with these types.
-Both callers also run the same six required cases, giving 106 per-PR inputs and
-1,006 nightly inputs. The known numerical reproducers currently fail strict
-validation and remain visible in the advisory job; no blacklist hides them.
+Both callers also run the same required BF16 case, giving 101 per-PR inputs
+and 1,001 nightly inputs.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
 but they do not change the required Multi-Arch summary. No known-failure entries
@@ -117,20 +105,17 @@ are enabled. Every sample is attempted. Missing solutions, race reports and
 numerical failures make the test step fail. Runner unit tests execute on a
 small GitHub-hosted runner when the runner or its workflows change.
 
-The race-check workflow also supports manual dispatch with `artifact_run_id`,
-`random_gemm_count`, `random_gemm_seed`, `random_gemm_threads` and `rocjitsu_ref`.
-Choose a completed rocm-libraries Multi-Arch run that published gfx950 artifacts.
-Manual replay tests the scripts from the selected workflow ref against that
-artifact run; it does not rebuild hipBLASLt. For a pre-merge end-to-end check,
-push the draft branch so its per-PR caller builds and tests the merged tree.
-GitHub requires a workflow to exist on the default branch before its manual
-dispatch is available.
-
-For local validation of the same driver, fetch the artifact payload with
-TheRock's `install_rocm_from_artifacts.py --blas --tests`, and check out the
-workflow's pinned rocm-systems revision. Set `ROCM_PATH`, `ROCJITSU_SOURCE_DIR`,
+For local validation of the CI driver, fetch the BLAS and test artifacts with
+TheRock's `install_rocm_from_artifacts.py --blas --tests`. Use the workflow's
+pinned rocm-systems revision and set `ROCM_PATH`, `ROCJITSU_SOURCE_DIR`,
 `ROCJITSU_BUILD_DIR`, `RACE_REPORT_DIR`, `AMDGPU_FAMILIES=gfx950-dcgpu`,
-`RANDOM_GEMM_COUNT`, `RANDOM_GEMM_SEED` and `RANDOM_GEMM_THREADS`, then run
-`.github/scripts/run_rocjitsu_hipblaslt_race_check.sh`. Build and report paths
-must be outside the source checkout. The driver builds the CLI and race/logging
-plugins, then invokes the same Python runner used by CI.
+`RANDOM_GEMM_COUNT`, `RANDOM_GEMM_SEED` and `RANDOM_GEMM_THREADS`. Run
+`.github/scripts/run_rocjitsu_hipblaslt_race_check.sh`; it builds the emulator and
+plugins, then invokes the same Python runner. Build and report paths belong
+outside the source checkout.
+
+The reusable workflow also accepts manual dispatch with `artifact_run_id` and
+the sampling settings. It tests the selected scripts against an existing
+gfx950 artifact run without rebuilding hipBLASLt. GitHub exposes manual
+dispatch only after a workflow exists on the default branch; the per-PR caller
+provides the hosted check before merge.
