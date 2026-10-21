@@ -161,6 +161,13 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
                     /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
+                    # Also report the unit tests and rocsparse-test as separate flags. Upload only if
+                    # coverage_split succeeded, so a stale or partial file is never sent; a failure here
+                    # must not fail the job.
+                    if make coverage_split; then
+                        /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-unit.info --name rocm-libraries-unit --flags rocSPARSE-unit --sha ${commitSha} || true
+                        /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-integration.info --name rocm-libraries-integration --flags rocSPARSE-integration --sha ${commitSha} || true
+                    fi
                 """
 
         platform.runCommand(this, command)
