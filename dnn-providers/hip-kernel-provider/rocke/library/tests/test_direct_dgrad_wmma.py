@@ -153,6 +153,36 @@ class TestDgradWmmaSpec(unittest.TestCase):
                 if why is None:
                     self.assertEqual(tuple(grid), spec.grid())
 
+    def test_binding_rejects_bad_input(self):
+        """A rejected spec returns the rejection (no grid is computed from its
+        zero tile extents); a missing, mistyped or partial problem raises."""
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+
+        for knobs in (dict(waves_c=0), dict(tiles_c=0), dict(waves_p=0)):
+            sd = conv_direct_dgrad_wmma_spec_to_dict(
+                DirectDgradWmmaSpec(problem=_problem(), **knobs)
+            )
+            ok, why, _, grid, _ = eng.conv_direct_dgrad_wmma_describe(sd, "gfx1250")
+            self.assertFalse(ok, knobs)
+            self.assertIn("waves and tiles", why)
+            self.assertEqual(tuple(grid), (0, 0, 0))
+        good = conv_direct_dgrad_wmma_spec_to_dict(
+            DirectDgradWmmaSpec(problem=_problem())
+        )
+        partial = dict(good["problem"])
+        del partial["kpg"]
+        for problem in (None, "N2H13", partial):
+            sd = dict(good)
+            if problem is None:
+                del sd["problem"]
+            else:
+                sd["problem"] = problem
+            with self.subTest(problem=problem), self.assertRaises(ValueError):
+                eng.conv_direct_dgrad_wmma_describe(sd, "gfx1250")
+            with self.subTest(problem=problem), self.assertRaises(ValueError):
+                eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch="gfx1250")
+
     def test_ir_is_shape_independent(self):
         """One binary serves every extent, group count and channel count."""
         from rocke.core.ir_serialize import serialize

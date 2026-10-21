@@ -1832,9 +1832,18 @@ rocke_direct_dgrad_wmma_spec_t ddgw_build_spec(const py::dict& d, std::deque<std
         return store.back().c_str();
     };
     rocke_direct_dgrad_wmma_spec_t s = rocke_direct_dgrad_wmma_spec_default();
-    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("DirectDgradWmmaSpec requires a problem dictionary");
     {
         py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("DirectDgradWmmaSpec.problem requires ") + key);
+        }
         std::string v;
         fill_direct_conv_problem(&s.problem, pd);
         if(dict_str(pd, "dtype", v))
@@ -1904,7 +1913,7 @@ py::tuple conv_direct_dgrad_wmma_describe(const py::dict& d, const std::string& 
     bool ok = rocke_direct_dgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
     if(rocke_direct_dgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
         name[0] = '\0';
-    if(s.tile_w > 0 && s.tile_n > 0 && rocke_direct_dgrad_wmma_tile_h(&s) > 0)
+    if(ok) /* a rejected spec may have zero tile extents */
         rocke_direct_dgrad_wmma_grid(&s, grid);
     return py::make_tuple(ok,
                           std::string(reason),
