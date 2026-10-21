@@ -16,7 +16,13 @@ import unittest
 import numpy as np
 
 from rocke.numeric.references import sdpa_reference as exported_sdpa_reference
-from rocke.numeric.sdpa_reference import keep, resolve_diagonal_band, sdpa_reference
+from rocke.numeric.sdpa_reference import (
+    _band_mask,
+    keep,
+    resolve_diagonal_band,
+    resolve_hipdnn_band,
+    sdpa_reference,
+)
 
 INF = math.inf
 
@@ -149,6 +155,34 @@ class TestKeep(unittest.TestCase):
                                         keep(q, k, sq, skv, tl, left, right), not masked
                                     )
 
+    def test_band_mask_agrees_with_keep(self):
+        for sq in range(1, 9):
+            for skv in range(1, 9):
+                for left in (-1, 0, 1, 3):
+                    for right in (-1, 0, 1, 3):
+                        for tl in (True, False):
+                            want = [
+                                [
+                                    keep(q, k, sq, skv, tl, left, right)
+                                    for k in range(skv)
+                                ]
+                                for q in range(sq)
+                            ]
+                            np.testing.assert_array_equal(
+                                _band_mask(sq, skv, tl, left, right),
+                                want,
+                                err_msg=str((sq, skv, tl, left, right)),
+                            )
+
+    def test_band_mask_known_shapes(self):
+        np.testing.assert_array_equal(
+            _band_mask(3, 3, True, -1, 0), np.tril(np.ones((3, 3), dtype=bool))
+        )
+        # Bottom-right on 2x4 shifts the diagonal right by s_kv - s_q = 2.
+        np.testing.assert_array_equal(
+            _band_mask(2, 4, False, -1, 0), [[1, 1, 1, 0], [1, 1, 1, 1]]
+        )
+
 
 class TestResolve(unittest.TestCase):
     def test_defaults(self):
@@ -177,6 +211,113 @@ class TestResolve(unittest.TestCase):
             resolve_diagonal_band(left_bound=-2)
         with self.assertRaises(ValueError):
             resolve_diagonal_band(right_bound=-5)
+
+
+def _hipdnn_extract_diagonal_band(left, right, top_left, causal, causal_br):
+    """Transliteration of hipDNN's ``extractDiagonalBandParams`` (CPU reference
+    PlanUtils.hpp) and ``resolveDiagonalBand`` (asm SDPA engine): returns
+    ``(left, right, top_left)`` or raises ``ValueError`` where they throw."""
+    left = -1 if left is None else left
+    right = -1 if right is None else right
+    if left < -1 or right < -1:
+        raise ValueError("bounds")
+    if causal and causal_br:
+        raise ValueError("both flags")
+    if causal or causal_br:
+        return left, right if right >= 0 else 0, causal and top_left
+    return left, right, top_left
+
+
+class TestResolveHipdnnBand(unittest.TestCase):
+    ALIGNMENTS = {"TOP_LEFT": True, "BOTTOM_RIGHT": False}
+
+    def _grid(self):
+        for left in (None, -1, 0, 3, -2):
+            for right in (None, -1, 0, 2, -5):
+                for alignment, top_left in self.ALIGNMENTS.items():
+                    for flags in (
+                        (False, False),
+                        (True, False),
+                        (False, True),
+                        (True, True),
+                    ):
+                        yield left, right, alignment, top_left, flags
+
+    def test_matches_the_hipdnn_resolvers_exhaustively(self):
+        for left, right, alignment, top_left, (causal, causal_br) in self._grid():
+            kw = dict(
+                left_bound=left,
+                right_bound=right,
+                diagonal_alignment=alignment,
+                causal_mask=causal,
+                causal_mask_bottom_right=causal_br,
+            )
+            try:
+                want = _hipdnn_extract_diagonal_band(
+                    left, right, top_left, causal, causal_br
+                )
+            except ValueError:
+                with self.assertRaises(ValueError, msg=str(kw)):
+                    resolve_hipdnn_band(**kw)
+                continue
+            diagonal, got_left, got_right = resolve_hipdnn_band(**kw)
+            self.assertEqual(
+                (got_left, got_right, diagonal == "top_left"), want, msg=str(kw)
+            )
+
+    def test_agrees_with_resolve_diagonal_band_without_flags(self):
+        for left, right, alignment, top_left, flags in self._grid():
+            if any(flags):
+                continue
+            try:
+                want = resolve_diagonal_band(
+                    left_bound=left, right_bound=right, top_left=top_left
+                )
+            except ValueError:
+                with self.assertRaises(ValueError):
+                    resolve_hipdnn_band(
+                        left_bound=left,
+                        right_bound=right,
+                        diagonal_alignment=alignment,
+                    )
+                continue
+            diagonal, got_left, got_right = resolve_hipdnn_band(
+                left_bound=left, right_bound=right, diagonal_alignment=alignment
+            )
+            self.assertEqual((got_left, got_right, diagonal == "top_left"), want)
+
+    def test_flag_and_stored_bounds_merge(self):
+        # The bottom-right flag with a stored left bound is a sliding window.
+        self.assertEqual(
+            resolve_hipdnn_band(causal_mask_bottom_right=True, left_bound=3),
+            ("bottom_right", 3, 0),
+        )
+        # causal_mask keeps a stored alignment; the other flag forces it.
+        self.assertEqual(
+            resolve_hipdnn_band(causal_mask=True, diagonal_alignment="BOTTOM_RIGHT"),
+            ("bottom_right", -1, 0),
+        )
+        self.assertEqual(
+            resolve_hipdnn_band(
+                causal_mask_bottom_right=True, diagonal_alignment="TOP_LEFT"
+            ),
+            ("bottom_right", -1, 0),
+        )
+
+    def test_defaults_are_unmasked_top_left(self):
+        self.assertEqual(resolve_hipdnn_band(), ("top_left", -1, -1))
+        self.assertEqual(
+            resolve_hipdnn_band(diagonal_alignment=None), ("top_left", -1, -1)
+        )
+
+    def test_unknown_alignment_rejected(self):
+        with self.assertRaisesRegex(ValueError, "unknown diagonal_alignment"):
+            resolve_hipdnn_band(diagonal_alignment="CENTER")
+
+    def test_result_feeds_keep(self):
+        diagonal, left, right = resolve_hipdnn_band(causal_mask_bottom_right=True)
+        self.assertTrue(keep(1, 4, 2, 5, diagonal, left, right))
+        self.assertFalse(keep(0, 4, 2, 5, diagonal, left, right))
 
 
 class TestSdpaReference(unittest.TestCase):
