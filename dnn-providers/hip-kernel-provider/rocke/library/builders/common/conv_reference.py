@@ -160,7 +160,6 @@ def conv_reference(
             [conv_reference(A[n0 : n0 + n], B, p, out_dtype) for n0, n in slices]
         )
     if not p.is_3d:
-        A_t = A.float().cuda().permute(0, 3, 1, 2)  # NHWC -> NCHW
         # B layout is KYXC with C = C_total. PyTorch F.conv2d expects weights
         # shaped [K, C/groups, Y, X]. Each filter stores cpg channels contiguously
         # at the start of its C dimension; slice to cpg then permute.
@@ -168,18 +167,37 @@ def conv_reference(
         B_t = (
             B.float().cuda()[:, :, :, :Cg].permute(0, 3, 1, 2)
         )  # [K,Y,X,Cg]->[K,Cg,Y,X]
-        result = (
-            F.conv2d(
-                A_t,
-                B_t,
-                stride=(p.sH, p.sW),
-                padding=(p.pH, p.pW),
-                dilation=(p.dH, p.dW),
-                groups=p.groups,
+        # The backend's conv produces garbage once an fp32 operand passes
+        # 2**31 bytes (seen on an 8x768x768x256 batch: the last image is
+        # wrong), so a large batch is convolved a few images at a time.
+        n_img, h_img, w_img, c_img = A.shape
+        # The padded input extent bounds the output's (stride >= 1).
+        out_bound = (h_img + 2 * p.pH) * (w_img + 2 * p.pW) * B.shape[0]
+        img_bytes = 4 * max(h_img * w_img * c_img, out_bound)
+        per_chunk = ((1 << 31) - 1) // img_bytes
+        if per_chunk < 1:
+            raise ValueError(
+                f"conv_reference: one {h_img}x{w_img}x{c_img} image needs "
+                f"{img_bytes} fp32 bytes, past the backend's 2**31 limit; "
+                "the batch split cannot make it fit"
             )
-            .permute(0, 2, 3, 1)  # NCHW -> NHWC
-            .contiguous()
-        )
+        parts = []
+        for n0 in range(0, n_img, per_chunk):
+            A_t = A[n0 : n0 + per_chunk].float().cuda().permute(0, 3, 1, 2)
+            parts.append(
+                F.conv2d(
+                    A_t,
+                    B_t,
+                    stride=(p.sH, p.sW),
+                    padding=(p.pH, p.pW),
+                    dilation=(p.dH, p.dW),
+                    groups=p.groups,
+                )
+                .permute(0, 2, 3, 1)  # NCHW -> NHWC
+                .contiguous()
+            )
+            del A_t
+        result = parts[0] if len(parts) == 1 else torch.cat(parts)
     else:
         A_t = A.float().cuda().permute(0, 4, 1, 2, 3)  # NDHWC -> NCDHW
         Cg = p.C // p.groups

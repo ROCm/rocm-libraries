@@ -1822,8 +1822,9 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
 
 /* ======================== conv_direct_nongrouped ========================== */
 
-/* Non-grouped (groups == 1) direct conv. The dict mirrors DirectNongroupedConvSpec
- * with the problem nested; `iglp` / `waves_per_eu` may be None (absent knob). */
+/* Non-grouped (groups == 1, or grouped=True) direct conv. The dict mirrors
+ * DirectNongroupedConvSpec with the problem nested; `iglp` / `waves_per_eu` may
+ * be None (absent knob). */
 rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
                                                            std::deque<std::string>& store)
 {
@@ -1860,6 +1861,9 @@ rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
     s.chiplet_chunk = dict_int(d, "chiplet_chunk", s.chiplet_chunk);
     s.num_xcds = dict_int(d, "num_xcds", s.num_xcds);
     s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
+    s.split_c = dict_int(d, "split_c", s.split_c);
+    s.grouped = dict_bool(d, "grouped", s.grouped);
+    s.group_merge = dict_int(d, "group_merge", s.group_merge);
     /* The C spec encodes None as a sentinel (-1 / 0). An explicit value in the
      * sentinel range would silently read as None here, so reject it with the
      * message Python's validate() raises for the same spec. */
@@ -4106,17 +4110,17 @@ PYBIND11_MODULE(rocke_engine, m)
     m.doc() = "pybind11 binding for the C++ rocke engine (universal GEMM "
               "family). Foundation of the ROCKE_BACKEND=cpp dual-backend path.";
 
-    /* ---- engine freshness / provenance stamp ----
-     * build_id() is a content hash of the engine sources this .so was built
-     * from; engine_version() is the human-readable version. Harnesses and the
-     * provider compare this against the build-id recorded with a set of
-     * prebuilt artifacts (emitters, manifests) to fail loud on a stale/mixed
-     * build instead of producing spurious mismatches. These are artifact
-     * stamps only; they never touch the emitted IR. */
+    /* ---- portable-IR bundle freshness / provenance stamp ----
+     * build_id() is a content hash of the native bundle inputs this .so was
+     * built from; engine_version() is the human-readable version. Harnesses and
+     * the provider compare this against the build-id recorded with a set of
+     * prebuilt artifacts (replay CLI, emitters, manifests) to fail loud on a
+     * stale/mixed build instead of producing spurious mismatches. These are
+     * artifact stamps only; they never touch the emitted IR. */
     m.def(
         "build_id",
         []() { return std::string(rocke_build_id()); },
-        "Content hash of the engine sources this module was built from. "
+        "Content hash of the portable-IR native bundle inputs. "
         "Compare against the build-id recorded with prebuilt artifacts to "
         "detect a stale/mixed build.");
     m.def(
