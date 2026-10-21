@@ -19,6 +19,7 @@ from pathlib import Path
 
 import yaml
 
+from codegen import provenance
 from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH, ConfigError, load_config
 from codegen.generator import IngestorGenerator
 from codegen.models import EVERY_ARCH
@@ -59,6 +60,13 @@ def main() -> None:
         required=True,
         type=Path,
         help="Path to YAML config file (e.g., configs/conv_fwd.yaml)",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="The engine manifest the config was built from "
+        "(configs/<engine>.engine.yaml). Recorded in provenance.generated_from on "
+        "each KDP; omitted from the record when not given.",
     )
     parser.add_argument(
         "--output-dir",
@@ -230,7 +238,11 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        written = generator.render(config, args.output_dir)
+        written = generator.render(
+            config,
+            args.output_dir,
+            generated_from=provenance.generated_from(args.manifest, args.config),
+        )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(EXIT_BAD_INPUT)
