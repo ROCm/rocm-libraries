@@ -261,17 +261,25 @@ def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
     customConfigOnly parses just the custom.config entry, a few KB inside a
     block that can be 1 MB (rocRoller's serialized kernel graph). The rest of
     the block is not parsed, so errors in it go unnoticed. The whole block is
-    parsed when custom.config is not found in its usual form or appears more
-    than once.
+    parsed when custom.config is not found in its usual form, appears more than
+    once, or the slice does not parse.
     """
     contents = getCustomKernelContents(name, directory)
-    text = _customConfigYaml(contents) if customConfigOnly else None
-    if text is None:
+    if customConfigOnly:
+        text = _customConfigYaml(contents)
+        if text is not None:
+            try:
+                return yaml.load(text, Loader=SafeLoader)
+            except yaml.YAMLError:
+                # The slice can cut valid YAML: a flow collection closed in
+                # column 0, or an alias to an anchor defined outside the entry.
+                # The whole block parses those, and reports a real error in
+                # custom.config.
+                pass
+    try:
         # The final newline keeps the last block scalar's own newline, which
         # the slice above keeps as well.
-        text = "\n".join(_embeddedYamlLines(contents)) + "\n"
-    try:
-        return yaml.load(text, Loader=SafeLoader)
+        return yaml.load("\n".join(_embeddedYamlLines(contents)) + "\n", Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 

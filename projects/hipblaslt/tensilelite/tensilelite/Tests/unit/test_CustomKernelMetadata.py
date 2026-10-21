@@ -1189,6 +1189,26 @@ def test_read_custom_kernel_config_error_inside_the_entry_is_reported(tmp_path):
     with pytest.raises(RuntimeError, match="Failed to parse YAML"):
         readCustomKernelConfig("k", str(tmp_path))
 
+def test_read_custom_kernel_config_flow_mapping_closed_in_column_zero(tmp_path):
+    # Valid YAML, but the closing brace in column 0 ends the slice before the
+    # mapping is closed, so the slice alone does not parse.
+    _write_metadata(tmp_path / "k.s", """\
+        custom.config: {
+          A: 1
+        }
+        amdhsa.kernels: []
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
+
+def test_read_custom_kernel_config_alias_to_an_anchor_outside_the_entry(tmp_path):
+    # The anchor is defined before custom.config, outside the slice.
+    _write_metadata(tmp_path / "k.s", """\
+        shared: &p {A: 1}
+        custom.config:
+          X: *p
+        """)
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"X": {"A": 1}}
+
 def test_read_custom_kernel_config_matches_a_full_parse_of_shipped_kernels():
     # Kernels under 600 KB (101: tensile, aiter, rocblas, triton, wave) keep
     # the whole-block comparison cheap. The 1 MB rocRoller kernels are read
