@@ -153,11 +153,12 @@ python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch 
   --types B:B:S H:H:S F8:B:S --layouts TN NN NT TT --workers 64
 ```
 
-Each list names the rocm-libraries commit it was generated from, and ends with the unbuildable MIs and why
-the setting closest to fitting failed. `--report-dir` also writes every MI's verdict and witness setting as CSV.
-`--depthu` also searches every buildable MI at each DepthU of the space and lists, in its comment, the DepthUs
-it builds at (e.g. `# MT256x128  DepthU 64,128`); MI Designer ignores the comment. It takes about 2.5x as long,
-because each list must show where an MI stops building.
+Each list names the rocm-libraries commit it was generated from, gives every buildable MI's DepthUs in its
+comment (e.g. `# MT256x128  DepthU 64,128`; MI Designer ignores comments), and ends with the unbuildable MIs
+and why the setting closest to fitting failed. Finding where each MI stops building roughly doubles the time:
+about 70 min for all 24 gfx950 lists on 352 workers without DepthUs, 2.5 h with them. `--report-dir` also
+writes every MI's verdict and witness setting as CSV, which lets a later TensileLite change be rechecked by
+replaying the witnesses instead of regenerating.
 
 ---
 
