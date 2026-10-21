@@ -2,8 +2,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Run the local kernel tests in hipblaslt-test. Fails if the binary has none,
-# which means HIPBLASLT_ENABLE_LOCAL_KERNELS did not reach the build.
+# Run the local kernel tests in hipblaslt-test, and the code object loader
+# tests that build only with them. Fails if the binary has no local kernel
+# tests, which means HIPBLASLT_ENABLE_LOCAL_KERNELS did not reach the build.
 # Locally: bash projects/hipblaslt/scripts/local-kernels/run-tests.sh
 
 set -euo pipefail
@@ -16,4 +17,5 @@ if ! grep -q '^  ' <<< "${listed}"; then
     echo "hipblaslt-test has no LocalKernel* tests; HIPBLASLT_ENABLE_LOCAL_KERNELS is off" >&2
     exit 1
 fi
-"${test_binary}" --gtest_filter='LocalKernel*' 2>&1 | tee "${LOCAL_KERNELS_LOG_DIR}/hipblaslt-test.log"
+"${test_binary}" --gtest_filter='LocalKernel*:HipSolutionAdapter*' 2>&1 \
+    | tee "${LOCAL_KERNELS_LOG_DIR}/hipblaslt-test.log"
