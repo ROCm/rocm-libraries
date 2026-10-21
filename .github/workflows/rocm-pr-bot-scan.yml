@@ -1,21 +1,15 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 #
-# Pre-commit security gate: fast, PR-side security scanners that run on
-# every pull request. The security counterpart to `pre-commit.yml`. The
-# set of scanners lives in `security-baseline.yml`, so scanners coming
-# online are picked up here without touching this file.
-#
-# Requests human-readable reports only: findings are uploaded as a build
-# artifact and printed to the job summary, never to the Security tab, so
-# fork PRs (which never receive elevated tokens) behave identically to
-# same-repo PRs. See the scheduled counterpart (weekly-security-scan.yml)
-# for the SARIF / code-scanning upload.
+# Caller workflow: triggers the centralized ROCm PR Bot hosted in
+# ROCm/TheRock-PR-Bot. Drop this file into any repo that needs PR bot
+# coverage; no other changes are required.
 name: ROCm PR Bot Scan
 
 on:
-  # SECURITY: base-repo context so secrets work for fork PRs. The called
-  # workflow never checks out/executes PR head code.
+  # SECURITY: pull_request_target runs in the base-repo context so secrets
+  # are available even for fork PRs. The called workflow never checks out
+  # or executes PR head code directly.
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   check_run:
@@ -34,15 +28,12 @@ concurrency:
 
 jobs:
   rocm-pr-bot:
-    # Skip the bot's own completed check_run to avoid loops. endsWith() matches
-    # the reusable job name ("rocm-pr-bot / therock-pr-bot"). The legacy local
-    # workflow was removed in this PR, so no other bot reacts to this check.
+    # Skip the bot's own completed check_run to avoid trigger loops.
+    # endsWith() matches the reusable job name ("rocm-pr-bot / rocm-pr-bot").
     if: >-
       github.event_name != 'check_run' ||
-      !endsWith(github.event.check_run.name, 'therock-pr-bot')
-    uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@c421bd284b7e8d82692d36420aef0ccda3f62985
-    with:
-      repo_name: rocm-libraries
+      !endsWith(github.event.check_run.name, 'rocm-pr-bot')
+    uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@49fb88fb1d113f4507a6449008ffa3a80b36454a
     secrets:
-      THEROCK_PR_BOT_APPID: ${{ secrets.THEROCK_PR_BOT_APPID }}
-      THEROCK_PRBOT_KEY: ${{ secrets.THEROCK_PRBOT_KEY }}
+      ROCM_PR_BOT_APPID: ${{ secrets.ROCM_PR_BOT_APPID }}
+      ROCM_PRBOT_KEY: ${{ secrets.ROCM_PRBOT_KEY }}
