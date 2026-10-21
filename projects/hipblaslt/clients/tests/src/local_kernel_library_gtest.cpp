@@ -165,11 +165,19 @@ namespace
 
 TEST(LocalKernelIndexSpace, smoke_PartitionBoundary)
 {
+    EXPECT_EQ(JitKernelIndexBase, 1 << 30);
     EXPECT_EQ(LocalKernelIndexBase, 3 << 29);
 
+    EXPECT_FALSE(isJitKernelIndex(0));
+    EXPECT_FALSE(isJitKernelIndex(JitKernelIndexBase - 1)) << "the last shipped index";
+    EXPECT_TRUE(isJitKernelIndex(JitKernelIndexBase));
+    EXPECT_TRUE(isJitKernelIndex(LocalKernelIndexBase - 1));
+    EXPECT_FALSE(isJitKernelIndex(LocalKernelIndexBase)) << "the first local index";
+    EXPECT_FALSE(isJitKernelIndex(INT32_MAX));
+
     EXPECT_FALSE(isLocalKernelIndex(0));
-    EXPECT_FALSE(isLocalKernelIndex((1 << 30) - 1)) << "the last shipped index";
-    EXPECT_FALSE(isLocalKernelIndex(1 << 30)) << "the first JIT index";
+    EXPECT_FALSE(isLocalKernelIndex(JitKernelIndexBase - 1)) << "the last shipped index";
+    EXPECT_FALSE(isLocalKernelIndex(JitKernelIndexBase)) << "the first JIT index";
     EXPECT_FALSE(isLocalKernelIndex(LocalKernelIndexBase - 1)) << "the last JIT index";
 
     EXPECT_TRUE(isLocalKernelIndex(LocalKernelIndexBase));
