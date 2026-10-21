@@ -12,7 +12,7 @@ These APIs operate at different levels:
 |---|---|---|
 | `target.mma.op_for_shape(...)` | Match one instruction's shape, A/B/C dtypes, family and scale contract in the target catalog | An `MmaOp`; no match returns `None`, ambiguity raises `ValueError`; no IR is emitted |
 | `builder.mma(atom, a, b, c, *extra)` | Record the selected operation and its operands | One `tile.mma` IR operation; lowering later emits the LLVM intrinsic selected by `op_id` |
-| `MfmaAtom.emit_scaled(...)` | Call the existing named 16x16x128 scaled-MFMA wrapper | Delegates to `builder.mma` with a fixed operation ID, regardless of the helper atom's shape or dtype |
+| `MfmaAtom.emit_scaled(...)` | Call the existing named 16x16x128 scaled-MFMA wrapper | Delegates to `builder.mma` with a fixed operation ID, regardless of the helper atom's shape or dtype. It passes the optional `a_format` and `b_format` (default `fp8e4m3`) to the builder. A and B must use the same format in this version |
 | Operator dispatcher | Select a kernel implementation and specialization for a workload | A kernel builder and spec; that builder selects and emits instructions |
 
 `mma` also accepts a raw operation-ID string, as the existing named wrappers
@@ -29,7 +29,8 @@ authoring entrypoints:
 
 | Path | Authoring entrypoint | Per-lane FP32 accumulator | Current consumer |
 |---|---|---|---|
-| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; A/B format selectors are fixed to zero in lowering |
+| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; `a_format` and `b_format` set the `cbsz` and `blgp` format selectors (default `fp8e4m3`). A and B must use the same format in this version. Every operand has 256 bits per lane |
+| Unscaled 16x16x128 op for every format | `IRBuilder.mfma_f32_16x16x128_fp4fp6fp8(...)` | 4 values | Direct operation authoring; both scale operands are literal 0, and `a_format` and `b_format` select the data type. A and B must use the same format in this version |
 | Existing 16x16x128 FP8 atom | `MfmaAtom.fp8_16x16x128().emit(...)` | 4 values | gfx950 FP8 fused-MoE dispatcher; the same scaled intrinsic is used with constant in-instruction scales |
 | Native 32x32x64 scaled family | `op_for_shape(family="mfma_scaled", ...)`, then `IRBuilder.mma(atom, a, b, c, a_scale, b_scale)` | 16 values | Direct packed GEMM builder and untuned examples, with independent A/B formats and K32 E8M0 scales |
 
