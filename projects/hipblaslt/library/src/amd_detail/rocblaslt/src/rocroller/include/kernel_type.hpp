@@ -3,8 +3,19 @@
 
 #pragma once
 
+// Only the rocRoller call path is built against rocRoller's headers. The tile
+// ranker names two of its enumerations and nothing else, and gets them from a
+// hipBLASLt declaration so that it builds without a rocRoller checkout. The
+// choice is a compile definition rather than __has_include on purpose: ROCm
+// installs rocRoller headers under /opt/rocm, so __has_include would pick up
+// whatever version happens to be installed, which is not the version the rest
+// of the library is built against.
+#ifdef HIPBLASLT_HAVE_ROCROLLER_HEADERS
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#else
+#include "rocroller_enums.hpp"
+#endif
 
 /**
  * @brief ScaleType
