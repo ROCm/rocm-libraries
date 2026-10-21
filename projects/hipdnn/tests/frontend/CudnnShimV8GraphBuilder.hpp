@@ -7,6 +7,8 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_graph.h>
 
+#include "CudnnShimV8BuilderGraph.hpp"
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
@@ -19,74 +21,6 @@
 
 namespace hipdnn_shim_v8_test
 {
-
-inline std::string lastError()
-{
-    std::array<char, 1024> message{};
-    cudnnGetLastErrorString(message.data(), message.size());
-    return message.data();
-}
-
-inline std::vector<std::int64_t> packedStrides(const std::vector<std::int64_t>& dims)
-{
-    std::vector<std::int64_t> strides(dims.size(), 1);
-    for(std::size_t i = dims.size() - 1; i > 0; --i)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
-
-// The decimal engine id a plan's JSON representation carries in "engine":{"id":"..."}.
-inline std::string jsonEngineId(const std::string& json)
-{
-    const std::string key = "\"id\"";
-    const auto keyPos = json.find(key);
-    if(keyPos == std::string::npos)
-    {
-        return {};
-    }
-    const auto open = json.find('"', json.find(':', keyPos + key.size()));
-    if(open == std::string::npos)
-    {
-        return {};
-    }
-    const auto close = json.find('"', open + 1);
-    if(close == std::string::npos)
-    {
-        return {};
-    }
-    return json.substr(open + 1, close - open - 1);
-}
-
-class DeviceBuffer
-{
-public:
-    explicit DeviceBuffer(std::size_t bytes)
-    {
-        EXPECT_EQ(hipMalloc(&_ptr, std::max<std::size_t>(bytes, 1)), hipSuccess);
-    }
-    DeviceBuffer(const DeviceBuffer&) = delete;
-    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-    DeviceBuffer(DeviceBuffer&&) = delete;
-    DeviceBuffer& operator=(DeviceBuffer&&) = delete;
-
-    ~DeviceBuffer()
-    {
-        if(_ptr != nullptr)
-        {
-            static_cast<void>(hipFree(_ptr));
-        }
-    }
-
-    void* get() const
-    {
-        return _ptr;
-    }
-
-private:
-    void* _ptr = nullptr;
-};
 
 struct TensorOptions
 {

@@ -24,7 +24,7 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
-#include "CudnnShimV8GraphBuilder.hpp"
+#include "CudnnShimV8BuilderGraph.hpp"
 
 namespace
 {
