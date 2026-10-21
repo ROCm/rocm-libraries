@@ -80,11 +80,13 @@ class WgradSplitPolicy:
     * ``min_slice_k`` -- the shallowest K-slice worth a CTA; shallower slices pay
       the fixed per-CTA cost and one more atomic pass for little work.
     * ``max_degree`` / ``max_degree_by_dtype`` -- the cap, overridable per dW
-      dtype. A packed 16-bit atomic rounds every partial into dW, so accuracy
-      decreases as the degree grows (most when partials share a sign); like the
-      CK formula on gfx950, the general cap accepts that. A per-dtype cap is for
-      a dtype whose packed atomic loses throughput under contention, where a
-      higher degree is slower as well as less accurate.
+      dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
+      so with same-sign partials the relative error grows with the degree, up
+      to about ``degree * 2**-(mantissa bits + 1)``. A 16-bit dtype's cap keeps
+      that bound under the 5e-2 tolerance the wgrad suite verifies against;
+      fp16's is lower still because its packed atomic loses throughput under
+      contention. The general cap is for fp32 dW, whose atomic rounding is
+      negligible at any degree here.
     """
 
     target_ctas: int
@@ -100,13 +102,19 @@ class WgradSplitPolicy:
 # Arches whose wgrad split-K degree comes from a fitted policy rather than the
 # CK formulas, whose fill targets leave these devices mostly idle. Fitted on
 # gfx1250 bf16/fp16 wgrad.
+#
+# The bf16 cap is an accuracy bound, not a throughput fit: bf16 keeps 8
+# significant bits, so 16 same-sign partials stay within 16 * 2**-9 of the
+# exact sum, under the 5e-2 tolerance. Higher degrees are faster on
+# small-channel shapes with a deep reduction, but all-positive inputs then
+# exceed that tolerance.
 _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
     "gfx1250": WgradSplitPolicy(
         target_ctas=2048,
         grouped_target_ctas=4096,
         min_slice_k=2048,
         max_degree=128,
-        max_degree_by_dtype=(("fp16", 8),),
+        max_degree_by_dtype=(("bf16", 16), ("fp16", 8)),
     ),
 }
 

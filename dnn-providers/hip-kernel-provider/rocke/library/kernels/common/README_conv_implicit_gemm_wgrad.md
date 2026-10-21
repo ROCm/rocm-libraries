@@ -62,11 +62,12 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset (`mem` pipeline, `default` epilogue, 16x16x16 or
   16x16x32 atom).
 - Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
-  CTA-fill term and a slice-depth term, under a general cap. As with the CK
-  formula on gfx950, the bf16 degree is not capped for accuracy: each slice
-  rounds its partial into a 16-bit dW, so accuracy decreases as the degree grows,
-  most when partials share a sign. fp16 has a lower cap because its packed atomic
-  loses throughput under contention.
+  CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
+  16-bit atomic rounds the running sum in dW, so with same-sign partials the
+  error grows with the degree, up to about `degree * 2**-9` for bf16. bf16 is
+  capped at 16, which keeps that bound under the suite's 5e-2 tolerance; higher
+  degrees miss it on all-positive inputs. fp16 is capped at 8 because its packed
+  atomic loses throughput under contention. fp32 takes the general cap of 128.
 - Reachability: as on gfx950, wgrad has no dispatcher instance list; it is
   served from the AOT cache. The cache grid (`kernels/conv/aot_jobs.py`) builds
   one split-K binary per geometry, and the degree is resolved at launch by

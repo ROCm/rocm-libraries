@@ -233,12 +233,21 @@ class TestGfx1250Policy(unittest.TestCase):
 
     def test_dtype_caps(self):
         # A 4-tile grid on a long reduction asks for far more than any cap:
-        # bf16 takes the general cap, as the CK formula does on gfx950, and
-        # fp16 its own lower one.
+        # each 16-bit dtype takes its own cap, and fp32 the general one.
         args = (24, 9 * 24, 42 * 240 * 320)
-        self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 128)
+        self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 16)
         self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 8)
         self.assertEqual(self._pick(*args, dtype_d="fp32").split_k, 128)
+
+    def test_bf16_degree_stays_within_tolerance(self):
+        # N=64, 64x64, C=K=16, 3x3: wg_M=16, wg_N=144, wg_K=262144. Fill and
+        # slice depth both ask for 128, where all-positive bf16 partials exceed
+        # the 5e-2 tolerance. Each packed bf16 add rounds the running sum by at
+        # most 2**-9, so the degree must keep degree * 2**-9 under 5e-2.
+        for tile in (32, 64):
+            d = self._pick(16, 9 * 16, 64 * 64 * 64, tile=tile, dtype_d="bf16")
+            self.assertEqual(d.split_k, 16, d.reason)
+            self.assertLess(d.split_k * 2.0**-9, 5e-2)
 
     def test_fill_boundary(self):
         # 2048 // 127 = 2048 // 128 = 16; one tile more drops the fill to 15.

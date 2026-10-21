@@ -831,10 +831,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
         at that degree rather than at the cache's ``split_k=2`` marker; the
         degree is a kernarg, so the IR is the same.
 
-        These are the 2x2-warp tiles, and the problems are sized so the bf16
-        degree lands on the slice-depth bound and fp16 on its cap. The inputs
-        are all-positive -- same-sign partials do not cancel their 16-bit
-        rounding -- so this also bounds the accuracy at that degree.
+        These are the 2x2-warp tiles, and the problems are sized so each
+        dtype's degree lands on its cap. The last bf16 problem (small channels,
+        deep reduction) asks for 128 before the cap; all-positive partials miss
+        the tolerance there. The inputs are all-positive -- same-sign partials
+        do not cancel their 16-bit rounding -- so this also bounds the accuracy
+        at the cap.
         """
         from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
@@ -853,18 +855,19 @@ class TestConvWgradCorrectness(unittest.TestCase):
         target = ArchTarget.from_gfx(GPU_ARCH)
         if target.wave_size != 32 or not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"WMMA split-K not enabled on {GPU_ARCH}")
-        # (C, K, G, dtype, (tile_m, tile_n, tile_k), expected degree)
+        # (N, H=W, C, K, G, dtype, (tile_m, tile_n, tile_k), expected degree)
         cases = [
-            (64, 96, 1, "bf16", (32, 64, 64), 16),
-            (64, 128, 1, "fp16", (64, 64, 64), 8),
-            (64, 64, 4, "bf16", (32, 32, 32), 16),
-            (64, 64, 4, "fp16", (32, 32, 32), 8),
+            (32, 32, 64, 96, 1, "bf16", (32, 64, 64), 16),
+            (32, 32, 64, 128, 1, "fp16", (64, 64, 64), 8),
+            (32, 32, 64, 64, 4, "bf16", (32, 32, 32), 16),
+            (32, 32, 64, 64, 4, "fp16", (32, 32, 32), 8),
+            (64, 64, 16, 16, 1, "bf16", (32, 64, 64), 16),
         ]
         ran = 0
-        for C, K, G, dtype, tile, degree in cases:
-            with self.subTest(C=C, K=K, G=G, dtype=dtype):
+        for N, HW, C, K, G, dtype, tile, degree in cases:
+            with self.subTest(N=N, HW=HW, C=C, K=K, G=G, dtype=dtype):
                 problem = ConvProblem(
-                    N=32, Hi=32, Wi=32, C=C, K=K, Y=3, X=3, pH=1, pW=1, groups=G
+                    N=N, Hi=HW, Wi=HW, C=C, K=K, Y=3, X=3, pH=1, pW=1, groups=G
                 )
                 geometries = [
                     g
@@ -902,10 +905,10 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     **dict(job.spec_kwargs, split_k=resolved),
                 )
                 shape = _Shape(
-                    f"wide_N32H32W32C{C}K{K}G{G}",
-                    N=32,
-                    Hi=32,
-                    Wi=32,
+                    f"wide_N{N}H{HW}W{HW}C{C}K{K}G{G}",
+                    N=N,
+                    Hi=HW,
+                    Wi=HW,
                     C=C,
                     K=K,
                     Y=3,
