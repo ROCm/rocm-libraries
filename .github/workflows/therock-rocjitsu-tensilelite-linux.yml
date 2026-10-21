@@ -181,8 +181,9 @@ jobs:
           source, destination, budget = sys.argv[1:]
           config = json.load(open(source))
           config["cpu_thread_budget"] = int(budget)
-          # Multiple engine threads give wrong StreamK sgemm results, so pin one
-          # even when a larger runner's budget would allocate two.
+          # With more than one engine thread, a StreamK ready flag is sometimes
+          # left set after the kernel (caught by the Synchronizer check), so pin
+          # one even when a larger runner's budget would allocate two.
           config["num_threads"] = 1
           json.dump(config, open(destination, "w"), indent=2)
           PY
