@@ -30,6 +30,15 @@ from analyze_timing import (
     tree_to_timings,
     print_summary,
     TimingSeries,
+    build_purpose_hierarchy,
+    TIMING_HIERARCHY,
+    PURPOSE_OF,
+    G_REFERENCE,
+    G_INPUT,
+    G_VALIDATION,
+    G_KERNEL,
+    G_LAUNCH,
+    G_UNATTRIBUTED,
     TimingRecord,
     ProblemTiming,
     ALL_KNOWN_CATEGORIES,
@@ -449,9 +458,111 @@ class TestColumnAlignment:
         log = tmp_path / "run.log"
         log.write_text(SAMPLE_TIMING_LOG)
         timings, problems = analyze_timing_file(str(log))
-        print_summary(timings, problems)
+        print_summary(timings, problems, legacy=True)
         out = capsys.readouterr().out
 
         assert self._table_numeric_edges(out) > 0
         header = next(l for l in out.split("\n") if l.strip().startswith("Category"))
         assert header.index("Count") + len("Count") == 44 + 1 + 8  # category column + gap + count column
+
+
+class TestPurposeHierarchy:
+    """The default tree is grouped by what the time is spent on, not by where the timer is called."""
+
+    TIMINGS = {
+        "python_benchmark_problems": [1000.0],
+        "python_client_execution": [900.0],
+        "hip_initialization": [50.0],
+        "pre_problem": [300.0],
+        "cpu_data_init": [100.0],
+        "cpu_reference_gemm": [150.0],
+        "solve_cpu_fast": [140.0],
+        "pre_solution": [200.0],
+        "pre_solution_listener.ReferenceValidator": [120.0],
+        "cpu_reference_gemm_per_solution_inputs_changed": [110.0],
+        "solve_cpu_fast_per_solution_inputs_changed": [105.0],
+        "pre_solution_listener.DataInitialization": [60.0],
+        "validate_warmups": [180.0],
+        "validate_warmups_listener.SynchronizerValidator": [100.0],
+        "validate_warmups_listener.BenchmarkTimer": [20.0],
+        "validate_gpu_sync": [15.0],
+    }
+
+    def _groups(self):
+        return {g.name: g for g in build_purpose_hierarchy(dict(self.TIMINGS))}
+
+    @staticmethod
+    def _names(node):
+        out = set()
+        for child in node.children:
+            out.add(child.name)
+            out |= TestPurposeHierarchy._names(child)
+        return out
+
+    def test_categories_move_to_their_purpose_group(self):
+        groups = self._groups()
+
+        # The reference GEMM is one group even though it is called from two different places.
+        assert {"cpu_reference_gemm", "solve_cpu_fast", "pre_solution_listener.ReferenceValidator",
+                "cpu_reference_gemm_per_solution_inputs_changed"} <= self._names(groups[G_REFERENCE])
+        assert "cpu_data_init" in self._names(groups[G_INPUT])
+        assert "pre_solution_listener.DataInitialization" in self._names(groups[G_INPUT])
+        assert "validate_warmups_listener.SynchronizerValidator" in self._names(groups[G_VALIDATION])
+        # The warmup sync wait belongs to kernel execution, although it is called from validation.
+        assert "validate_warmups_listener.BenchmarkTimer" in self._names(groups[G_KERNEL])
+        assert "hip_initialization" in self._names(groups[G_LAUNCH])
+
+    def test_containers_get_no_row_and_every_category_is_shown_once(self):
+        groups = self._groups()
+        shown = [n for g in groups.values() for n in self._names(g) if not n.startswith("(")]
+        assert len(shown) == len(set(shown))
+        for container in ("python_benchmark_problems", "python_client_execution", "pre_problem",
+                          "pre_solution", "validate_warmups"):
+            assert container not in shown
+
+    def test_groups_add_up_to_the_legacy_tree(self):
+        legacy_total = sum(n.total_ms for n in build_hierarchy(dict(self.TIMINGS)))
+        purpose_total = sum(g.total_ms for g in self._groups().values())
+        assert purpose_total == pytest.approx(legacy_total, abs=0.05)
+
+    def test_containers_report_what_is_left_over_as_unattributed(self):
+        timings = {
+            "python_benchmark_problems": [100.0], "python_client_execution": [100.0],
+            "validate_warmups": [100.0],
+            "validate_warmups_listener.BenchmarkTimer": [30.0], "validate_gpu_sync": [30.0],
+            "validate_warmups_listener.SynchronizerValidator": [60.0],
+        }
+        groups = {g.name: g for g in build_purpose_hierarchy(timings)}
+        assert groups[G_VALIDATION].total_ms == pytest.approx(60.0)
+        assert groups[G_KERNEL].total_ms == pytest.approx(30.0)
+        # validate_warmups itself accounted for 10 ms that no sub-timer covers: reported, not lost.
+        assert groups[G_UNATTRIBUTED].total_ms == pytest.approx(10.0)
+
+    def test_a_row_loses_the_time_of_children_that_moved_elsewhere(self, monkeypatch):
+        # benchmark_runs is a row of the kernel group; move one of its timers to another group.
+        monkeypatch.setitem(PURPOSE_OF, "benchmark_pre_syncs", G_LAUNCH)
+        timings = {
+            "python_benchmark_problems": [100.0], "python_client_execution": [100.0],
+            "benchmark_runs": [100.0], "benchmark_pre_syncs": [25.0], "benchmark_post_syncs": [5.0],
+        }
+        groups = {g.name: g for g in build_purpose_hierarchy(timings)}
+        runs = next(c for c in groups[G_KERNEL].children if c.name == "benchmark_runs")
+        assert runs.total_ms == pytest.approx(75.0)                   # 100 - the 25 that moved
+        assert groups[G_LAUNCH].total_ms == pytest.approx(25.0)
+        assert sum(g.total_ms for g in groups.values()) == pytest.approx(100.0)
+
+    def test_every_direct_child_of_a_phase_has_an_explicit_purpose(self):
+        # A new timer under these must be given a purpose on purpose, not by inheriting.
+        top = TIMING_HIERARCHY["python_benchmark_problems"]["python_client_execution"]
+        for name in list(TIMING_HIERARCHY) + list(top):
+            assert name in PURPOSE_OF, f"{name} has no purpose group"
+
+    def test_default_report_is_purpose_and_legacy_flag_keeps_the_old_one(self, capsys):
+        print_summary(dict(self.TIMINGS), [])
+        default = capsys.readouterr().out
+        print_summary(dict(self.TIMINGS), [], legacy=True)
+        legacy = capsys.readouterr().out
+
+        assert G_REFERENCE in default and "Data Preparation" not in default
+        assert "Data Preparation" in legacy and G_REFERENCE not in legacy
+        assert "Reference computation (CPU GEMM)" in legacy

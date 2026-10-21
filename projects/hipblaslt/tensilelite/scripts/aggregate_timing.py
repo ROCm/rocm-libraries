@@ -10,7 +10,7 @@ is then printed with the same report as a single run, so the output has exactly 
 ``analyze_timing.py <log>``.
 
 Usage:
-    python scripts/aggregate_timing.py LOG [LOG ...]
+    python scripts/aggregate_timing.py [--legacy] LOG [LOG ...]
 
 Logs may be plain text or ``.gz``. Which runs are included is decided entirely by the files passed
 in; there are no defaults.
@@ -63,6 +63,9 @@ def main():
     )
     parser.add_argument('logfiles', nargs='+',
                         help='Log files (plain or .gz) containing timing output, one per run')
+    parser.add_argument('--legacy', action='store_true',
+                        help='Print the tree as the timers are nested in the code, with the original '
+                             'display groups, instead of grouping by purpose')
     args = parser.parse_args()
 
     total = empty_tree()
@@ -75,7 +78,7 @@ def main():
         add_trees(total, timings_to_tree(timings))
         problem_timings.extend(problems)
 
-    print_summary(tree_to_timings(total), problem_timings)
+    print_summary(tree_to_timings(total), problem_timings, legacy=args.legacy)
 
 
 if __name__ == '__main__':
