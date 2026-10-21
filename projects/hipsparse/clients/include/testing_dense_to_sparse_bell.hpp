@@ -338,8 +338,9 @@ void testing_dense_to_sparse_bell(Arguments argus)
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Analysis populates the ellCols field of the descriptor.
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_analysis(handle, matA, matB, alg, buffer));
@@ -405,7 +406,6 @@ void testing_dense_to_sparse_bell(Arguments argus)
         unit_check_general(1, bell_val_size, 1, hbell_val_cpu.data(), hbell_val.data());
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif

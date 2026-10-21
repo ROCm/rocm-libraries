@@ -329,8 +329,9 @@ void testing_spmv_sell(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
         handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Preprocess (optional)
     if(argus.call_preprocess)
@@ -428,7 +429,6 @@ void testing_spmv_sell(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));

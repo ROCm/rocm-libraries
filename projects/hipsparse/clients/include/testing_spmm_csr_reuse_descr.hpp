@@ -158,8 +158,9 @@ static void call_spmm(hipsparseHandle_t&     handle,
     // is required, so the buffer remains valid for every backend.
     bufferSize = std::max(bufferSize, size_t(4));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -207,7 +208,6 @@ static void call_spmm(hipsparseHandle_t&     handle,
     unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_1.data());
     unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_2.data());
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
@@ -288,6 +288,7 @@ static void call_spmm_shared_buffer(hipsparseHandle_t&                       han
 
     void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Step 2: repeatedly loop over every configuration and call hipsparseSpMM
     // with the shared buffer, never calling bufferSize again. Verify each
@@ -370,8 +371,6 @@ static void call_spmm_shared_buffer(hipsparseHandle_t&                       han
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>

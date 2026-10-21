@@ -135,8 +135,9 @@ static void call_spsm(hipsparseHandle_t&     handle,
                                                    descr,
                                                    &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -223,7 +224,6 @@ static void call_spsm(hipsparseHandle_t&     handle,
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_2.data());
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
@@ -328,6 +328,7 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
 
     void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Step 2: repeatedly loop over every configuration and run SpSM analysis /
     // solve with the shared buffer, never calling bufferSize again. Verify each
@@ -427,8 +428,6 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>

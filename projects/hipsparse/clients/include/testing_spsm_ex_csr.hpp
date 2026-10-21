@@ -320,8 +320,9 @@ void testing_spsm_ex_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, C1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -429,8 +430,6 @@ void testing_spsm_ex_csr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));

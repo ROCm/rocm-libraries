@@ -156,8 +156,9 @@ void testing_gtsv2(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         hipsparseXgtsv2_bufferSizeExt(handle, m, n, ddl, dd, ddu, dB, ldb, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     if(argus.unit_check)
     {
@@ -218,8 +219,6 @@ void testing_gtsv2(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 #endif // TESTING_GTSV2_HPP

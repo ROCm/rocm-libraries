@@ -119,8 +119,9 @@ static void call_spmv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
         handle, transA, &alpha, matA, x, &beta, y1, computeType, alg, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -163,7 +164,6 @@ static void call_spmv(hipsparseHandle_t&     handle,
     unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
     unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
@@ -239,6 +239,7 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
 
     void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Step 2: repeatedly loop over every (operation, algorithm) configuration
     // and call hipsparseSpMV with the shared buffer, never calling
@@ -300,8 +301,6 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
             CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 static std::vector<hipsparseOperation_t> get_supported_operations(hipDataType datatype)

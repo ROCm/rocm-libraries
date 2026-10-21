@@ -500,8 +500,9 @@ void testing_spgemm_csr(Arguments argus)
                                                          &bufferSize1,
                                                          nullptr));
 
-    void* externalBuffer1;
+    void* externalBuffer1 = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&externalBuffer1, bufferSize1));
+    auto externalBuffer1_managed = hipsparse_unique_ptr{externalBuffer1, device_free};
 
     // SpGEMM work estimation
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -564,8 +565,9 @@ void testing_spgemm_csr(Arguments argus)
                                                   &bufferSize2,
                                                   nullptr));
 
-    void* externalBuffer2;
+    void* externalBuffer2 = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&externalBuffer2, bufferSize2));
+    auto externalBuffer2_managed = hipsparse_unique_ptr{externalBuffer2, device_free};
 
     // SpGEMM compute
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -792,10 +794,6 @@ void testing_spgemm_csr(Arguments argus)
         unit_check_general(
             1, nnz_C_gold, 1, hcsr_val_C_reuse_gold.data(), hcsr_val_C_1_reuse.data());
     }
-
-    // Free buffers
-    CHECK_HIP_ERROR(hipFree(externalBuffer1));
-    CHECK_HIP_ERROR(hipFree(externalBuffer2));
 
     // Clean up
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));

@@ -164,8 +164,9 @@ void testing_gtsv_interleaved_batch(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseXgtsvInterleavedBatch_bufferSizeExt(
         handle, algo, m, ddl, dd, ddu, dx, batch_count, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     if(argus.unit_check)
     {
@@ -235,8 +236,6 @@ void testing_gtsv_interleaved_batch(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 #endif // TESTING_GTSV_INTERLEAVED_BATCH_HPP

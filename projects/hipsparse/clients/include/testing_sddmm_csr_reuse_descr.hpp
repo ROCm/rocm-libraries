@@ -151,8 +151,9 @@ static void call_sddmm(hipsparseHandle_t&     handle,
     // required.
     bufferSize = std::max(bufferSize, size_t(4));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Compute the host reference once: it is identical for both pointer modes.
     std::vector<T> hval_gold(hcsr_val);
@@ -206,7 +207,6 @@ static void call_sddmm(hipsparseHandle_t&     handle,
     unit_check_near(1, nnz, 1, hval_gold.data(), hval_1.data());
     unit_check_near(1, nnz, 1, hval_gold.data(), hval_2.data());
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 }
@@ -313,6 +313,7 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
 
     void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Step 2: repeatedly loop over every configuration and call hipsparseSDDMM
     // with the shared buffer, never calling bufferSize again. Verify each
@@ -423,8 +424,6 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>

@@ -854,8 +854,11 @@ void testing_spmat_descr(void)
     int*   dcsr_col_indC = NULL;
     float* dcsr_valC     = NULL;
     CHECK_HIP_ERROR(hipMalloc((void**)&dcsr_row_ptrC, (m + 1) * sizeof(int)));
+    auto dcsr_row_ptrC_managed = hipsparse_unique_ptr{dcsr_row_ptrC, device_free};
     CHECK_HIP_ERROR(hipMalloc((void**)&dcsr_col_indC, nnzC * sizeof(int)));
+    auto dcsr_col_indC_managed = hipsparse_unique_ptr{dcsr_col_indC, device_free};
     CHECK_HIP_ERROR(hipMalloc((void**)&dcsr_valC, nnzC * sizeof(float)));
+    auto dcsr_valC_managed = hipsparse_unique_ptr{dcsr_valC, device_free};
 
     CHECK_HIP_ERROR(hipMemcpy(
         dcsr_row_ptrC, hcsr_row_ptrC.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice));
@@ -1068,9 +1071,6 @@ void testing_spmat_descr(void)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matO));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroy(handle));
 
-    CHECK_HIP_ERROR(hipFree(dcsr_row_ptrC));
-    CHECK_HIP_ERROR(hipFree(dcsr_col_indC));
-    CHECK_HIP_ERROR(hipFree(dcsr_valC));
 #endif
 }
 

@@ -68,8 +68,9 @@ void testing_gemvi_bad_arg(const Arguments& argus)
     T*   y    = (T*)y_managed.get();
 
     // gemvi
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, 100));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     verify_hipsparse_status_invalid_handle(hipsparseXgemvi(
         nullptr, opType, m, n, &alpha, A, lda, nnz, x, xInd, &beta, y, idxBase, buffer));
@@ -152,7 +153,6 @@ void testing_gemvi_bad_arg(const Arguments& argus)
             handle, opType, m, n, &alpha, A, lda, n + 1, x, xInd, &beta, y, idxBase, buffer),
         "Error: nnz is invalid");
 
-    CHECK_HIP_ERROR(hipFree(buffer));
 #endif
 }
 
@@ -212,11 +212,12 @@ void testing_gemvi(Arguments argus)
 
     // gemvi bufferSize
     int   bufferSize;
-    void* externalBuffer;
+    void* externalBuffer = nullptr;
 
     CHECK_HIPSPARSE_ERROR(
         testing::hipsparseXgemvi_bufferSize<T>(handle, trans, m, n, nnz, &bufferSize));
     CHECK_HIP_ERROR(hipMalloc(&externalBuffer, bufferSize));
+    auto externalBuffer_managed = hipsparse_unique_ptr{externalBuffer, device_free};
 
     if(argus.unit_check)
     {
@@ -331,7 +332,6 @@ void testing_gemvi(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(externalBuffer));
 #endif
 }
 

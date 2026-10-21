@@ -132,8 +132,9 @@ static void call_spsv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_bufferSize(
         handle, transA, &alpha, matA, x, y1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
+    void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -179,7 +180,6 @@ static void call_spsv(hipsparseHandle_t&     handle,
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data(), -1.0, atol);
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
@@ -263,6 +263,7 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
 
     void* buffer = nullptr;
     CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto buffer_managed = hipsparse_unique_ptr{buffer, device_free};
 
     // Step 2: repeatedly loop over every configuration and run SpSV analysis /
     // solve with the shared buffer, never calling bufferSize again. Verify each
@@ -341,8 +342,6 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>
