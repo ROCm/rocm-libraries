@@ -96,8 +96,6 @@ set_target_properties( hipfft-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJE
 
 if( HIPFFT_BUILD_SCOPE )
   set( BENCH_OUT_DIR "/clients/staging" )
-elseif( HIPFFT_CLIENTS_BUILD_SCOPE )
-  set( BENCH_OUT_DIR "/bin" )
 else()
   set( BENCH_OUT_DIR "/bin")
 endif()

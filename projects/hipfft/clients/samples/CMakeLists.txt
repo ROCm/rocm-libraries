@@ -91,8 +91,6 @@ foreach( sample ${sample_list} )
   
   if( HIPFFT_BUILD_SCOPE )
     set( SAMPLES_OUT_DIR "/clients/staging" )
-  elseif( HIPFFT_CLIENTS_BUILD_SCOPE )
-    set( SAMPLES_OUT_DIR "/bin" )
   else()
     set( SAMPLES_OUT_DIR "/bin" )
   endif()
