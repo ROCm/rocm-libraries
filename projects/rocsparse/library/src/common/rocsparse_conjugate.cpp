@@ -39,9 +39,9 @@ namespace rocsparse
     {
         if constexpr(GRID_STRIDE)
         {
-            const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            int64_t       idx    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
             const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
-            for(int64_t idx = gid; idx < length; idx += stride)
+            for(; idx < length; idx += stride)
             {
                 array[idx * array_inc] = rocsparse::conj(array[idx * array_inc]);
             }
@@ -82,36 +82,24 @@ namespace rocsparse
                                                                     int64_t          array_inc,
                                                                     int64_t          array_stride)
     {
-        const int64_t  blocks_x = (length - 1) / 256 + 1;
-        const uint32_t grid_x   = rocsparse::get_grid_size_x(handle, blocks_x, 256);
-        const dim3     blocks(grid_x, rocsparse::get_grid_size_y(handle, batch_count));
-
-        if(grid_x < blocks_x)
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::conjugate_kernel<256, true, T>),
-                                               blocks,
-                                               dim3(256),
-                                               0,
-                                               handle->stream,
-                                               batch_count,
-                                               length,
-                                               reinterpret_cast<T*>(array),
-                                               array_inc,
-                                               array_stride);
-        }
-        else
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::conjugate_kernel<256, false, T>),
-                                               blocks,
-                                               dim3(256),
-                                               0,
-                                               handle->stream,
-                                               batch_count,
-                                               length,
-                                               reinterpret_cast<T*>(array),
-                                               array_inc,
-                                               array_stride);
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            (length - 1) / 256 + 1,
+            256,
+            [&](auto grid_stride, uint32_t grid_x) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::conjugate_kernel<256, decltype(grid_stride)::value, T>),
+                    dim3(grid_x, rocsparse::get_grid_size_y(handle, batch_count)),
+                    dim3(256),
+                    0,
+                    handle->stream,
+                    batch_count,
+                    length,
+                    reinterpret_cast<T*>(array),
+                    array_inc,
+                    array_stride);
+                return rocsparse_status_success;
+            }));
         return rocsparse_status_success;
     }
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,9 +39,9 @@ namespace rocsparse
         {
             // Index in int64_t so neither the block offset nor the final
             // grid-stride increment wraps for 32-bit nnz.
-            const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            int64_t       idx    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
             const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
-            for(int64_t idx = gid; idx < nnz; idx += stride)
+            for(; idx < nnz; idx += stride)
             {
                 x_val[idx] = y[x_ind[idx] - idx_base];
             }
