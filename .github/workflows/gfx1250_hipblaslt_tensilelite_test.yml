@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# hipBLASLt + TensileLite on a gfx1250 runner in strict mode (gfx1250-strict).
+# TEMPORARY: hipBLASLt + TensileLite on a gfx1250 runner in strict mode (gfx1250-strict).
 #
 # Builds hipBLASLt + TensileLite for gfx1250-strict from the PR's source against a
 # pinned ROCm SDK nightly (pip wheels), inside a container on the gfx1250 runner, then
@@ -9,6 +9,9 @@
 # Building here, rather than fetching a TheRock artifact, means a PR gets strict
 # coverage without waiting for a multi-arch build, whose PR builds don't include
 # gfx1250-strict.
+#
+# Planned for removal once TheRock's multi-arch builds produce gfx1250-strict artifacts
+# (ROCm/TheRock#8350) and gfx1250-strict runners are available in TheRock CI.
 #
 # Per-PR: on pull_request, for non-draft PRs by ROCm org members (forks included)
 # that touch hipBLASLt/TensileLite or this workflow. The org label comes from
