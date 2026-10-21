@@ -100,7 +100,7 @@ constexpr auto config_name()
 }
 
 // These two functors exist for build time optimization of predicate-based benchmarks.
-// These benchmarks require a predicate function. Defining that prodice function via
+// These benchmarks require a predicate function. Defining that predicate function via
 // a lambda function (within the benchmark's run() implementation) creates this problem:
 // - The benchmark struct takes template args. So if we define a predicate function within run() using a lambda,
 //   then for each unique instantiation of the benchmark, the lambda predicate function will be given a unique type.
@@ -108,7 +108,7 @@ constexpr auto config_name()
 // - This means that each unique instantiation of the benchmark will ultimately cause a unique kernel to be generated.
 // - Since the predicate-based benchmarks are instantiated with different probabilities, there is a unique kernel
 //   generated for each unique probability value, even though the actual kernel code is identical.
-// Defining the predicates as functors here (that take the theshold/flag type as a template parameter) means that the same
+// Defining the predicates as functors here (that take the threshold/flag type as a template parameter) means that the same
 // type is passed into each benchmark instance's call to rocprim::select. This can significantly reduce the number
 // of kernels that need to be generated.
 template<typename T>
