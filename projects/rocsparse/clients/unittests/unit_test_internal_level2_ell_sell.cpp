@@ -48,19 +48,6 @@
 //    directions, including a transpose case whose matrix size is not a
 //    multiple of the slice size (a partial last slice).
 //
-//    NOTE: on current develop, sellmvt_device reads x[row] before checking
-//    row < m (the bounds check only guards the start/end offsets used by the
-//    accumulation loop, which is why padding threads never touch
-//    sell_col_ind / sell_val). That stray read of x is harmless here -- the
-//    loaded value is never used because the padding thread's own start/end
-//    range is empty -- but it means the transpose/partial-last-slice test
-//    below must size x so that the read stays in-bounds for every slice
-//    (see build_bidiagonal_sell). This fix is already implemented in open PR
-//    https://github.com/ROCm/rocm-libraries/pull/13339 (not merged at the
-//    time of writing); this test does not attempt to change
-//    sellmv_device.h, it only asserts the numeric result, which is correct
-//    either way.
-//
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
@@ -878,12 +865,10 @@ TEST_F(SellMv, none_small_slice)
                      expected);
 }
 
-// Transpose, slice size 32 (small-slice kernel sellmvt_device), m = 40 is not
-// a multiple of 32 so the second (and last) slice is only 8 rows out of 32 --
-// a partial last slice. This is exactly the configuration where
-// sellmvt_device's padding threads (local rows 8..31 of slice 1, global rows
-// 40..63) read past the end of x; see the file comment at the top. The
-// padding threads' loop range is empty, so the numeric result is unaffected.
+// Transpose, slice size 32 (small-slice kernel sellmvt_device). m = 40 is not a
+// multiple of 32, so the last slice holds 8 rows and its local rows 8..31 are
+// padding threads past row m. Those threads must not read x or the slice data.
+// This test checks only y, so it does not detect an out-of-bounds read by them.
 TEST_F(SellMv, transpose_small_slice_partial_last_slice)
 {
     const int64_t        m = 40, n = 40, slice = 32;
