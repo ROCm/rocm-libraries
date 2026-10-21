@@ -46,9 +46,12 @@ python library/tests/run_conv_reference.py diff --arch gfx942
 add `--json` for tools. `diff` authenticates the published bundle's manifest
 against the committed lock, matches cases by contract as verification does, and
 names enrolled cases the bundle does not record, recorded cases that are no
-longer enrolled, and changed tolerances or budgets. It exits non-zero on any
-difference. It reads the DVC archive, or the extracted bundle when no archive
-is present; pass `--bundle` and `--lock` to check a candidate instead.
+longer enrolled, and changed tolerances or budgets. It exits with status 1 on
+any difference, and with status 2 and one message when it cannot read or
+authenticate the lock or bundle. It reads the DVC archive, or the extracted
+bundle when no archive is present; pass `--bundle` and `--lock` to check a
+candidate instead. `diff` reads recorded device targets with the rocKE platform
+package: install rocKE or set `PYTHONPATH=platform/python`.
 
 `library/tests/test_reference_common.py`, which is also installed as
 `rocke_reference_common_pytest`, runs the same comparison for every pair with a

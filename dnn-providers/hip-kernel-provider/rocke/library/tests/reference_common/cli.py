@@ -18,13 +18,17 @@ without a GPU.
 from __future__ import annotations
 
 import argparse
+import gzip
 import importlib.util
 import json
 import shlex
 import shutil
 import sys
+import tarfile
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+import zlib
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import ModuleType
@@ -54,6 +58,9 @@ _WORKFLOW = "library/tests/reference_common/docs/gpu-reference-workflow.md"
 _BASELINE = "frozen baseline (replay)"
 _CURRENT = "current kernel (source)"
 _SNAPSHOT = "baseline snapshot (qualification)"
+# Reading a truncated, corrupt, or non-gzip archive raises these; tarfile wraps
+# only some of them in ReadError.
+_ARCHIVE_ERRORS = (EOFError, gzip.BadGzipFile, tarfile.TarError, zlib.error)
 
 
 def _triage(problem: str, cause: str, step: str) -> str:
@@ -643,7 +650,9 @@ class ReferenceOperation:
 
         An archive is unpacked into a temporary directory by ``artifact.unpack``,
         which rejects unsafe members and authenticates the manifest and payload
-        against the lock before the manifest is read.
+        against the lock before the manifest is read. An archive that cannot be
+        decompressed or read as tar, such as a truncated fetch or a DVC pointer,
+        raises ``ValueError`` with the step that replaces it.
         """
         lock = lock_path or self.architectures.baseline_lock(architecture)
         if bundle.is_dir():
@@ -653,9 +662,44 @@ class ReferenceOperation:
                 prefix=f"rocke-{self.name}-diff-"
             ) as temporary:
                 staged = Path(temporary) / "bundle"
-                unpack(bundle, staged, lock, operation=self.name)
+                try:
+                    unpack(bundle, staged, lock, operation=self.name)
+                except _ARCHIVE_ERRORS as error:
+                    raise ValueError(
+                        self._unreadable_archive(bundle, architecture, error)
+                    ) from None
                 manifest = self._authenticated_manifest(staged, lock, architecture)
         return self.cohort_differences(manifest, architecture)
+
+    def _unreadable_archive(
+        self, archive: Path, architecture: str, error: Exception
+    ) -> str:
+        """Explain an archive that cannot be read and how to replace it."""
+        directory = default_bundle_path(
+            self._package.parent, architecture, operation=self.name
+        )
+        published = directory.with_name(f"{directory.name}.tar.gz")
+        pointer = published.with_name(f"{published.name}.dvc")
+        if archive.resolve() == published.resolve() and pointer.is_file():
+            fetch = shlex.join(["dvc", "pull", _shown(pointer)])
+            step = f"delete {_shown(archive)}, then fetch it again with: {fetch}"
+        elif archive.suffix == ".dvc":
+            fetch = shlex.join(["dvc", "pull", _shown(archive)])
+            step = (
+                "pass the archive that this DVC pointer tracks, "
+                f"{_shown(archive.with_suffix(''))}, after fetching it with: {fetch}"
+            )
+        else:
+            step = (
+                "pass an extracted bundle directory or a .tar.gz archive written "
+                "by artifact.py pack"
+            )
+        return _triage(
+            f"{self.label} bundle archive {_shown(archive)} cannot be read: {error}",
+            "the file is truncated or corrupt, such as after an interrupted fetch, "
+            "or is not a bundle archive, such as a DVC pointer",
+            step,
+        )
 
     def published_bundle(self, architecture: str) -> Path:
         """Locate the published bundle data that this tree provides by default.
@@ -923,11 +967,13 @@ class ReferenceOperation:
             )
         verification = commands.add_parser(
             "verify",
-            help="run every required GPU comparison",
+            help="compare frozen and current kernels on this GPU",
             description=(
-                "Authenticate a bundle against its lock, then run each enrolled "
-                "case's frozen and current kernels on this GPU and check every "
-                "current output against the case's qualified budget."
+                "Authenticate a bundle against its lock, then run the frozen and "
+                "current kernels of each enrolled case, or of each case selected "
+                "with --case, on this GPU and check every current output against "
+                "the case's qualified budget. Exits with status 1 when a "
+                "comparison fails and 2 when the lock or bundle cannot be used."
             ),
         )
         verification.add_argument(
@@ -989,7 +1035,11 @@ class ReferenceOperation:
                 "Authenticate a bundle's manifest against its lock, then report "
                 "enrolled cases it does not record, recorded cases that are not "
                 "enrolled, and changed tolerances or budgets, matching cases as "
-                "verification does. Exits with status 1 on any difference."
+                "verification does. Exits with status 1 on any difference and 2 "
+                "when the lock or bundle cannot be read or authenticated. Reading "
+                "the recorded device targets needs the rocKE platform package: "
+                "install rocKE or set PYTHONPATH=platform/python from the rocKE "
+                "root."
             ),
         )
         comparison.add_argument(
@@ -1049,7 +1099,10 @@ class ReferenceOperation:
             print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
         print(f"{self.label} {architecture}: {len(cases)} enrolled cases")
 
-    def _diff(self, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    def _selected_lock(
+        self, parser: argparse.ArgumentParser, args: argparse.Namespace
+    ) -> Path:
+        """Return ``--lock`` or the committed lock, or exit when it does not exist."""
         lock = args.lock or self.architectures.baseline_lock(args.arch)
         if args.lock is None and not lock.is_file():
             parser.error(
@@ -1058,6 +1111,36 @@ class ReferenceOperation:
             )
         if not lock.is_file():
             parser.error(f"lock not found: {_shown(lock)}")
+        return lock
+
+    @contextmanager
+    def _bundle_errors(
+        self, parser: argparse.ArgumentParser, command: str
+    ) -> Iterator[None]:
+        """Report an unusable lock or bundle as one message and exit status 2.
+
+        The message already names the lock or bundle problem, so a traceback
+        would only repeat it, and status 2 keeps these errors apart from a
+        reported difference or a failed comparison. Matching recorded device
+        targets needs the rocKE platform package, so its absence is reported
+        the same way.
+        """
+        try:
+            yield
+        except (ValueError, OSError) as error:
+            parser.error(str(error))
+        except ModuleNotFoundError as error:
+            # Any other missing module is a defect; keep its traceback.
+            if error.name is None or error.name.partition(".")[0] != "rocke":
+                raise
+            parser.error(
+                f"{command} reads recorded device target ids with the rocKE "
+                f"platform package, which cannot be imported ({error}); install "
+                "rocKE or set PYTHONPATH=platform/python from the rocKE root"
+            )
+
+    def _diff(self, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+        lock = self._selected_lock(parser, args)
         if args.bundle is not None:
             bundle = args.bundle.resolve()
             if not bundle.exists():
@@ -1070,7 +1153,8 @@ class ReferenceOperation:
                     f"no {args.arch} {self.label} bundle at {_shown(archive)} or "
                     f"{_shown(bundle)}; fetch the archive with DVC or pass --bundle"
                 )
-        differences = self.diff_bundle(bundle, lock, architecture=args.arch)
+        with self._bundle_errors(parser, args.command):
+            differences = self.diff_bundle(bundle, lock, architecture=args.arch)
         cases = self.architectures.get_architecture(args.arch).CASES
         if not differences:
             print(
@@ -1093,9 +1177,9 @@ class ReferenceOperation:
     def _verify(
         self, parser: argparse.ArgumentParser, args: argparse.Namespace
     ) -> None:
+        lock = self._selected_lock(parser, args)
         bundle = args.bundle.resolve()
         if bundle.is_file():
-            lock = args.lock or self.architectures.baseline_lock(args.arch)
             parser.error(self._unpack_hint(bundle, lock))
         if not bundle.is_dir():
             parser.error(f"bundle directory not found: {_shown(bundle)}")
@@ -1110,7 +1194,8 @@ class ReferenceOperation:
                 )
             cases = tuple(case for case in cases if case.id in args.cases)
         skipped = len(target.CASES) - len(cases)
-        manifest = self.load_bundle(bundle, args.lock, architecture=args.arch)
+        with self._bundle_errors(parser, args.command):
+            manifest = self.load_bundle(bundle, args.lock, architecture=args.arch)
         if skipped:
             print(
                 f"{self.label}: running {len(cases)} of {len(target.CASES)} "

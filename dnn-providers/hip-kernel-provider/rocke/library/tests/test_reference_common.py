@@ -1432,6 +1432,90 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
     assert f"{architecture} has no published" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(
+    "problem", ["another-lock", "another-operation", "pointer", "truncated", "stale"]
+)
+def test_diff_reports_an_unusable_bundle_once_with_status_2(
+    tmp_path, capsys, operation, problem
+):
+    """A bundle that diff cannot read or authenticate is an error, not a difference."""
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    archive = tmp_path / f"{architecture}.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    source, hint = archive, None
+    if problem == "another-lock":
+        # Such as another architecture's archive checked against this lock.
+        lock.write_text(
+            json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
+        )
+        expected = "GPU reference manifest does not match the pinned lock"
+        hint = f"{archive} is not the archive that {lock} pins"
+    elif problem == "another-operation":
+        other = _another_operation(operation)
+        other_bundle, other_lock = _fixture(tmp_path / other, other)
+        source = tmp_path / f"{other}.tar.gz"
+        pack(other_bundle, source, other_lock, operation=other)
+        expected = (
+            f"invalid {operation.upper()} archive member: {other}_reference_bundle/"
+        )
+    elif problem == "pointer":
+        source = archive.with_name(f"{archive.name}.dvc")
+        source.write_text("outs:\n- md5: 0\n")
+        expected = f"archive {source.resolve()} cannot be read: not a gzip file"
+        hint = f"pass the archive that this DVC pointer tracks, {archive.resolve()}"
+    elif problem == "truncated":
+        source = tmp_path / "truncated.tar.gz"
+        source.write_bytes(archive.read_bytes()[: archive.stat().st_size // 2])
+        expected = f"archive {source.resolve()} cannot be read: "
+        hint = "pass an extracted bundle directory or a .tar.gz archive"
+    else:
+        (bundle / "payload/kernel.hsaco").write_bytes(b"modified")
+        source = bundle
+        expected = "payload has missing, modified, or extra files"
+    command = ["diff", "--arch", architecture, "--bundle", str(source)]
+    with pytest.raises(SystemExit) as exit:
+        spec.main([*command, "--lock", str(lock)])
+    assert exit.value.code == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "Traceback" not in output.err
+    assert output.err.count(expected) == 1
+    assert hint is None or output.err.count(hint) == 1
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("command", ["diff", "verify"])
+def test_bundle_commands_say_how_to_provide_the_rocke_platform(
+    tmp_path, operation, command
+):
+    """Matching recorded device targets needs rocKE; its absence is not a crash."""
+    import os
+
+    _, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    stub = tmp_path / "without-rocke"
+    stub.mkdir()
+    (stub / "rocke.py").write_text(
+        "raise ModuleNotFoundError(\"No module named 'rocke'\", name='rocke')\n"
+    )
+    env = dict(os.environ, PYTHONPATH=str(stub), PYTHONNOUSERSITE="1")
+    script = Path(__file__).with_name(f"run_{operation}_reference.py")
+    result = subprocess.run(
+        [sys.executable, str(script), command, "--arch", architecture]
+        + ["--bundle", str(bundle), "--lock", str(lock)],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2, result.stderr
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
+    assert result.stderr.count(f"{command} reads recorded device target ids") == 1
+    assert "install rocKE or set PYTHONPATH=platform/python" in result.stderr
+
+
 _WORKFLOW_DOC = "library/tests/reference_common/docs/gpu-reference-workflow.md"
 
 
@@ -1482,12 +1566,16 @@ def _check_published_cohort(operation, architecture):
             "only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
             "assembled with its architecture's test artifact"
         )
+    unusable = None
     try:
         differences = spec.diff_bundle(bundle, architecture=architecture)
-    except ValueError as error:
+    except (ValueError, OSError) as error:
+        # Fail outside the handler so pytest reports the message only once.
+        unusable = str(error)
+    if unusable is not None:
         pytest.fail(
-            f"{name} bundle data at {bundle} is not the bundle that its committed "
-            f"lock pins:\n{error}",
+            f"{name} bundle data at {bundle} is unreadable or is not the bundle "
+            f"that its committed lock pins:\n{unusable}",
             pytrace=False,
         )
     if differences:
@@ -1570,8 +1658,23 @@ def test_published_cohort_check_names_unqualified_cases(
     lock.write_text(
         json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
     )
-    with pytest.raises(pytest.fail.Exception, match="not the bundle that its"):
+    with pytest.raises(pytest.fail.Exception) as failure:
         _check_published_cohort(operation, architecture)
+    assert "not the bundle that its committed lock pins" in str(failure.value)
+    # Raised outside the handler, so pytest shows the message once.
+    assert failure.value.__context__ is None
+    if layout == "archive":
+        # A truncated fetch fails with the step that replaces it.
+        archive.write_bytes(archive.read_bytes()[: archive.stat().st_size // 2])
+        with pytest.raises(pytest.fail.Exception) as failure:
+            _check_published_cohort(operation, architecture)
+        assert failure.value.__context__ is None
+        message = str(failure.value)
+        assert f"archive {archive.resolve()} cannot be read: " in message
+        assert (
+            f"delete {archive.resolve()}, then fetch it again with: dvc pull "
+            f"{pointer.resolve()}"
+        ) in message
 
     if layout == "archive":
         archive.unlink()
@@ -1612,6 +1715,48 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
         spec.main([*command, str(tmp_path / "missing")])
     assert exit.value.code == 2
     assert "bundle directory not found" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_verify_reports_an_unusable_lock_or_bundle_once(
+    tmp_path, capsys, monkeypatch, operation
+):
+    """Verification refuses a missing lock or rejected bundle with one message."""
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    archive = tmp_path / f"{architecture}.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+
+    def refused(*args):
+        with pytest.raises(SystemExit) as exit:
+            spec.main(["verify", "--arch", architecture, "--bundle", *map(str, args)])
+        assert exit.value.code == 2
+        output = capsys.readouterr()
+        assert "Traceback" not in output.err
+        return output.err
+
+    # An architecture with no published bundle has no committed lock.
+    unpublished = (tmp_path / "unpublished/baseline_lock.json").resolve()
+    monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: unpublished)
+    for selected in (bundle, archive):
+        error = refused(selected)
+        assert (
+            f"{architecture} has no published {spec.label} bundle: {unpublished} "
+            "does not exist; pass a candidate's --bundle and --lock"
+        ) in error
+        # No unpack command names the lock that does not exist.
+        assert "artifact.py" not in error
+    assert f"lock not found: {unpublished}" in refused(bundle, "--lock", unpublished)
+    # load_bundle rejects a cohort the bundle does not record and stale data.
+    target = spec.architectures.get_architecture(architecture)
+    cases = target.CASES
+    monkeypatch.setattr(target, "CASES", cases[1:])
+    error = refused(bundle, "--lock", lock)
+    assert error.count("does not cover the complete enrolled cohort") == 1
+    monkeypatch.setattr(target, "CASES", cases)
+    (bundle / "payload/kernel.hsaco").write_bytes(b"modified")
+    error = refused(bundle, "--lock", lock)
+    assert error.count("payload has missing, modified, or extra files") == 1
+    assert error.count("likely cause:") == 1
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1668,6 +1813,12 @@ def test_every_reference_command_and_option_has_help(operation):
         assert summaries[name] and command.description, name
         for action in command._actions:
             assert action.help, f"{name} {action.option_strings} has no help"
+    # Scripts can tell a difference or failed comparison from unusable data.
+    for name in ("diff", "verify"):
+        description = commands.choices[name].description
+        assert "status 1" in description and " 2 when the lock or bundle" in description
+    assert "PYTHONPATH=platform/python" in commands.choices["diff"].description
+    assert "--case" in commands.choices["verify"].description
 
 
 def _verifiable_case(monkeypatch, operation):
