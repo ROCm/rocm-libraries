@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,11 @@ rocsparse_status rocsparse::check_matrix_csc_core(rocsparse_handle       handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // The CSC arrays are the CSR arrays of the transpose, which stores the other triangle.
+    const rocsparse_fill_mode csr_uplo = (uplo == rocsparse_fill_mode_lower)
+                                             ? rocsparse_fill_mode_upper
+                                             : rocsparse_fill_mode_lower;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::check_matrix_csr_core(handle,
                                                                n, // switch
                                                                m, // m and n
@@ -53,7 +58,7 @@ rocsparse_status rocsparse::check_matrix_csc_core(rocsparse_handle       handle,
                                                                csc_row_ind,
                                                                idx_base,
                                                                matrix_type,
-                                                               uplo,
+                                                               csr_uplo,
                                                                storage,
                                                                data_status,
                                                                temp_buffer));
@@ -105,7 +110,7 @@ rocsparse_status rocsparse::check_matrix_csc_checkarg(rocsparse_handle       han
     ROCSPARSE_CHECKARG_SIZE(2, n);
     ROCSPARSE_CHECKARG_SIZE(3, nnz);
     ROCSPARSE_CHECKARG_ARRAY(4, nnz, csc_val);
-    ROCSPARSE_CHECKARG_ARRAY(5, m, csc_col_ptr);
+    ROCSPARSE_CHECKARG_ARRAY(5, n, csc_col_ptr);
     ROCSPARSE_CHECKARG_ARRAY(6, nnz, csc_row_ind);
     ROCSPARSE_CHECKARG_ENUM(7, idx_base);
     ROCSPARSE_CHECKARG_ENUM(8, matrix_type);
