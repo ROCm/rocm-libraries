@@ -14,7 +14,8 @@
  *   - ROCKE_ARCH_DOMAIN is parsed by Python's rules, with Python's message;
  *   - `error` refuses with ROCKE_ERR_ARCH_DOMAIN and Python's message;
  *   - `warn` and `off` lower;
- *   - the message is cut where Python's MESSAGE_CAP cuts it.
+ *   - the message is cut where Python's MESSAGE_CAP cuts it;
+ *   - the message text equals a sentence that the Python test also pins.
  *
  * The demand used is `mov.dpp8.i32` on gfx950: an RDNA intrinsic the committed
  * columns measure arch_absent on CDNA, which is a fact about the hardware. If no
@@ -189,6 +190,28 @@ void test_message_cap()
     EXPECT(std::string(out).rfind(head, 0) == 0, std::string("message text: ") + out);
 }
 
+/* The same sentence is pinned in test_arch_domain_lane.py
+ * (test_the_message_text_is_the_one_the_cpp_engine_pins), where Python's
+ * message() must produce it. The two tests run without the rocke_engine
+ * extension, so a drift in either engine fails a CI test. */
+void test_message_text()
+{
+    const rocke_arch_domain_cell_t cell
+        = {kKey, kArch, "arch_absent", "no such intrinsic on gfx950", 0};
+    char out[ROCKE_ERR_MSG_CAP];
+    rocke_arch_domain_message(&cell, "llvm22", out, sizeof out);
+    EXPECT(std::string(out)
+               == "arch-domain: intrinsic 'mov.dpp8.i32' is not available on gfx950 at llvm22 "
+                  "(arch_absent): no such intrinsic on gfx950",
+           std::string("message text: ") + out);
+    const rocke_arch_domain_cell_t bare = {kKey, kArch, "arch_absent", "", 0};
+    rocke_arch_domain_message(&bare, "llvm22", out, sizeof out);
+    EXPECT(std::string(out)
+               == "arch-domain: intrinsic 'mov.dpp8.i32' is not available on gfx950 at llvm22 "
+                  "(arch_absent)",
+           std::string("message text without evidence: ") + out);
+}
+
 void test_lowering(const char* flavor, const rocke_arch_domain_cell_t* cell)
 {
     char want[ROCKE_ERR_MSG_CAP];
@@ -235,6 +258,7 @@ int main()
 {
     test_mode_parsing();
     test_message_cap();
+    test_message_text();
 
     const rocke_arch_domain_cell_t* cell = nullptr;
     const char* flavor = refusing_flavor(&cell);

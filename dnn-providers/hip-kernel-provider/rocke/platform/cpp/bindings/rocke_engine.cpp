@@ -3803,10 +3803,12 @@ std::string gfx1151_wmma_fmha_fwd_v2_lower_llvm(const py::dict& d, const std::st
         = w1151fmha_v2_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    const char* a = arch.c_str();
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
 }
 
 std::string gfx1151_wmma_fmha_fwd_v2_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3922,10 +3924,12 @@ std::string gfx1151_wmma_fmha_decode_lower_llvm(const py::dict& d, const std::st
         = w1151dec_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    const char* a = arch.c_str();
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
 }
 
 std::string gfx1151_wmma_fmha_decode_serialize_ir(const py::dict& d, const std::string& arch)

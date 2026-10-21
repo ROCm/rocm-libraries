@@ -1198,6 +1198,24 @@ def test_both_mode_flags_refusals_over_different_intrinsics(
 # --------------------------------------------------------------------------
 
 
+def test_the_message_text_is_the_one_the_cpp_engine_pins() -> None:
+    """``test_arch_domain_refusal.cpp`` pins these two sentences for the C++
+    engine. This test needs no extension, so CI compares the engines' bytes
+    through the two literals."""
+    assert arch_domain.message(
+        "mov.dpp8.i32", "gfx950", "llvm22", "arch_absent", "no such intrinsic on gfx950"
+    ) == (
+        "arch-domain: intrinsic 'mov.dpp8.i32' is not available on gfx950 at llvm22 "
+        "(arch_absent): no such intrinsic on gfx950"
+    )
+    assert arch_domain.message(
+        "mov.dpp8.i32", "gfx950", "llvm22", "arch_absent", ""
+    ) == (
+        "arch-domain: intrinsic 'mov.dpp8.i32' is not available on gfx950 at llvm22 "
+        "(arch_absent)"
+    )
+
+
 @pytest.mark.parametrize("flavor", _committed_flavors())
 def test_the_cpp_engine_refuses_with_the_python_message(
     monkeypatch: pytest.MonkeyPatch, flavor: str
