@@ -82,8 +82,8 @@ python dnn-providers/hip-kernel-provider/rocke/tools/run_checks.py
 It **auto-discovers** every `test_*.py` and every `<family>_emit.{py,c}` parity
 pair — so adding a new test needs **no** edit to any script or checklist. It runs,
 in order: relative-path guard → byte-identity gate (both `llvm20` and `llvm22`) →
-platform + library parity → pytest (both suites) → on-GPU numeric (auto-skips
-when no device). Scope while iterating with:
+platform + library parity → pytest (both suites, then the pinned GPU reference
+suites) → on-GPU numeric (auto-skips when no device). Scope while iterating with:
 
 - `--steps <subset>` — pick stages, e.g. `--steps numeric` (just the on-GPU
   correctness lane) or `--steps gate,parity`.
@@ -105,6 +105,15 @@ This replaces hand-maintaining a list of tests to run.
       picks all of this up automatically.
 - [ ] **[`run_checks.py`](#run-the-checks) green** on the platforms in the
       [testing matrix](#local-testing-matrix-platforms).
+- [ ] **Pinned GPU references.** A change to a kernel that an enrolled pinned
+      reference case reaches keeps that operation's pinned suites green on its
+      published processors; new cases, architectures, or operations are
+      requalified and published. The
+      [pinned reference quickstart](library/tests/reference_common/docs/quickstart.md)
+      covers both. [`run_checks.py`](#run-the-checks) runs the comparisons only
+      when this machine's GPU has an extracted bundle, and otherwise its summary
+      says they did NOT run; a green run without them is not pinned coverage. See
+      [TESTING.md](TESTING.md#pinned-reference-documentation).
 - [ ] **Correctness before speed.** The numeric harness passes within tolerance
       *before* any perf number is quoted. Never report a speedup on a
       numerically-wrong kernel.
@@ -155,6 +164,11 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       one). A new *variant* of an existing family just extends that family's doc.
 - [ ] A benchmark scenario for the family (the on-GPU numeric test is already
       required by the Core DoD).
+- [ ] **Pinned GPU references:** an enrolled pinned case that dispatch now
+      routes to the family makes it a covered kernel (Core DoD). To pin the
+      family's own paths, [add cases](library/tests/reference_common/docs/quickstart.md#i-want-to-add-a-case)
+      or [an operation](library/tests/reference_common/docs/quickstart.md#i-want-to-add-an-operation);
+      either is requalified and published.
 
 ### B. New knob / optimization
 
@@ -179,6 +193,10 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] **Dashboards & shapes** — the feature is tracked by the internal perf
       dashboard, and representative shapes are handed to benchmarking. Publish
       relative evidence only through a policy-qualified PR or result document.
+- [ ] **Pinned GPU references** — a feature that changes a covered kernel or an
+      enrolled case's dispatch keeps the pinned suites green; pinning the feature
+      with new cases or architectures follows the
+      [quickstart](library/tests/reference_common/docs/quickstart.md).
 
 ### D. Perf optimization (no new feature)
 
@@ -188,6 +206,12 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       record.
 - [ ] Replayable case study + runbook + qualifying benchmark/result-doc update.
 - [ ] Honest losses recorded, not just wins.
+- [ ] **Pinned GPU references** — an optimized covered kernel stays within each
+      enrolled case's comparison limit
+      ([quickstart](library/tests/reference_common/docs/quickstart.md#i-changed-a-covered-kernel));
+      on a failure, follow
+      [triage](library/tests/reference_common/docs/gpu-reference-workflow.md#triage)
+      and never widen a tolerance to pass.
 
 ## Local testing matrix (platforms)
 
@@ -392,6 +416,9 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
    [numeric_attention.py](library/tests/differential/numeric_attention.py)
    and/or the extended parity harness spawned by
    [test_extended_parity_attention.py](library/tests/test_extended_parity_attention.py).
+   To also compare the shape against a frozen GPU baseline, enroll it as a
+   pinned SDPA case ([add a case](library/tests/reference_common/docs/quickstart.md#i-want-to-add-a-case)),
+   which requalifies each edited pair.
 4. **Build/smoke coverage.** If the shape exercises a new build path, add it to
    [test_attention_builds.py](library/tests/test_attention_builds.py) or the arch
    smoke test ([test_gfx950_smoke_attention.py](library/tests/test_gfx950_smoke_attention.py)).
