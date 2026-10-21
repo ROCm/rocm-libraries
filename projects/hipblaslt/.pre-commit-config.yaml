@@ -32,3 +32,41 @@ repos:
         args: ["-t", "B506"]
         types: [python]
         stages: [pre-commit]
+
+  # Hooks below mirror the aster pre-commit config and only apply to the new
+  # tensilelite tree, so existing TensileLite code is left untouched.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v2.3.0
+    hooks:
+      - id: check-yaml
+        files: &newTensileliteTree ^projects/hipblaslt/tensilelite/(include|src|tests)/tensilelite/
+      - id: end-of-file-fixer
+        files: *newTensileliteTree
+      - id: trailing-whitespace
+        files: *newTensileliteTree
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.10.0
+    hooks:
+      - id: yamlfmt
+        files: *newTensileliteTree
+  # Make docstrings PEP 257 compliant.
+  - repo: https://github.com/PyCQA/docformatter
+    rev: eb1df347edd128b30cd3368dddc3aa65edcfac38
+    hooks:
+      - id: docformatter
+        # Disable wrap-summaries to avoid rewording many docstrings.
+        args: ["--in-place", "--wrap-summaries=0"]
+        files: *newTensileliteTree
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v20.1.6
+    hooks:
+      - id: clang-format
+        files: *newTensileliteTree
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: *newTensileliteTree
+      - id: ruff-format
+        files: *newTensileliteTree

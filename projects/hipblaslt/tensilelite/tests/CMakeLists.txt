@@ -206,6 +206,11 @@ endif()
 
 enable_testing()
 
+# After enable_testing() so the JIT Python test gets a CTestTestfile.
+if(TENSILELITE_ENABLE_JIT)
+    add_subdirectory(tensilelite)
+endif()
+
 #################################################
 #        Tests for cpu-gemm-driver              #
 #################################################
