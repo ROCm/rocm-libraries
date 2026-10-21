@@ -33,6 +33,11 @@ with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF wit
 Ninja, including installation and an external C++ consumer for both. It also
 checks the embedded defaults.
 
+CI also builds and tests native C++ on Windows with MSVC and Ninja, installs
+HostNumerics, and builds and tests an external consumer of the installed package.
+Python bindings are disabled in this Windows job; Linux covers binding builds
+and installed imports, with Windows Python coverage left for a follow-up.
+
 Install into a local prefix with:
 
 ```shell
