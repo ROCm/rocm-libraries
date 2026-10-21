@@ -3,7 +3,8 @@
 Status: initial design. The sampling distribution and executable runner are pending.
 
 The nightly test samples GEMM inputs from a fixed distribution and runs them with
-`hipblaslt-bench`. A fixed seed gives the same ordered inputs on each night.
+`hipblaslt-bench` under rocJITsu entirely on CPUs. It requires no physical GPU.
+A fixed seed gives the same ordered inputs on each night.
 The bench client chooses a kernel through its ordinary heuristic. The script
 does not read solution metadata or select solution indices.
 
@@ -12,8 +13,9 @@ does not read solution metadata or select solution indices.
 Proposed location: `.github/scripts/run_random_hipblaslt_gemms.py`.
 
 The script accepts the bench executable, seed, case count, per-case timeout and
-output directory. Proposed defaults are seed 0 and 100 cases; the timeout will
-be chosen once the workload sizes are known. A dry-run option writes inputs
+output directory. The case count is configurable, with a default of 100; seed 0
+is proposed. The timeout will be chosen once the workload sizes are known.
+A dry-run option writes inputs
 without executing them. A case option reproduces one position in the sequence.
 
 The caller supplies the ROCm environment, matching device library and
@@ -33,11 +35,14 @@ def sample_gemm(rng):
 
 def main():
     rng = random.Random(args.seed)
+    counts = Counter()
     for case_number in range(args.count):
         problem = sample_gemm(rng)
         save_input(case_number, problem)
         if not args.dry_run:
-            run_and_check(case_number, problem)
+            outcome = process_case(case_number, problem)
+            counts[outcome] += 1
+    write_summary(counts)
 ```
 
 The distribution will define dimensions, storage and compute types,
@@ -49,8 +54,7 @@ saved inputs remain the authoritative reproduction of an earlier run.
 
 Run cases sequentially, with one bench process per case. Each input is a YAML
 list containing one record with ordinary heuristic selection and one requested
-algorithm.
-Enable numerical checks and `norm_check_assert` in that record: the direct
+algorithm. Enable numerical checks and `norm_check_assert` in that record: the direct
 command-line `--verify` path computes diagnostics but disables that assertion.
 Use the matching bench client's `--yaml` conversion environment.
 
@@ -58,6 +62,44 @@ Use zero warmup iterations, fixed timing and one timed iteration initially.
 Numerical validation also executes the GEMM. This avoids depending on a client
 change to make zero timed iterations suppress execution. This test measures
 correctness rather than performance, and does not require exactly one dispatch.
+
+## Known failures and counts
+
+Maintain separate lists for confirmed rocJITsu problems and genuine kernel
+races awaiting fixes. Each entry identifies a complete GEMM input, the observed
+failure and its tracker. rocJITsu entries distinguish core-emulator bugs from
+race-detector-plugin bugs. A race report alone does not establish which list
+it belongs to; investigation determines whether the report is a detector bug
+or a genuine race.
+
+Identify entries by their GEMM parameters rather than a solution index or just
+a seed and case number. Changing the distribution must not make an old entry
+match an unrelated input. Keep the lists empty until a failure is confirmed;
+do not import unrelated historical exclusions automatically.
+
+Process all requested samples and print these totals:
+
+| Outcome | Meaning |
+| --- | --- |
+| Known rocJITsu problem | Input listed for a confirmed emulator or detector bug |
+| Known genuine race | Input listed for a confirmed kernel race awaiting a fix |
+| Passed | Executed and passed both numerical checking and race detection |
+| Unexpected failure | Unlisted failure, timeout, no solution or missing result |
+
+Every sample contributes to exactly one total. Known failures consume a sample
+slot; they are not replaced with another random input. The summary includes the
+number sampled so the outcome counts can be checked against the requested
+count. Being listed or skipped never establishes a pass; a pass requires execution
+and successful numerical and race checks.
+
+Continue after individual case failures to collect totals for the whole loop.
+An unexpected failure makes the final script exit unsuccessful. Failure to
+start the runner, load its configuration or write results aborts the run and
+reports how many samples were processed.
+
+Whether listed GEMMs are skipped before execution or run to detect fixes is
+still to be decided. If listed cases run, a changed failure must remain visible
+and a passing case must be reported as a pass so its entry can be removed.
 
 ## Results and reproduction
 
@@ -68,11 +110,12 @@ Record the seed, sampling-code version, Python version and bench version once
 for the run. The selected kernel may change when the library changes, even
 when the sampled input stays fixed.
 
-A pass requires a completed numerical result for the requested input as well
-as a successful process exit. No-solution responses, missing results, numerical
-failures and timeouts fail the run. Race reports also fail the run, even when
-bench exits successfully. Do not silently resample rejected inputs or retry
-failures. Stop at the first failure and preserve its files for reproduction.
+A pass requires a completed numerical result for the requested input, a
+successful process exit and no race reports. An unlisted no-solution response,
+missing result, numerical failure, timeout or race report fails the run. A
+race report remains a failure even when bench exits successfully. Do not
+silently resample rejected inputs or retry failures. Preserve failed cases'
+files for reproduction and continue the loop.
 
 ## Next steps
 
