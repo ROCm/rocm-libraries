@@ -428,9 +428,10 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    `rocke_sdpa_gpu_<arch>_pytest` entries run the same pytest file used locally:
    one numerical comparison for each case the architecture enrolls, plus three
    negative checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
-   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks
-   and compares each installed bundle's cases with the enrolled cohort. Neither
-   host entry requires a GPU bundle.
+   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks,
+   compares each installed bundle's cases with the enrolled cohort, and replays
+   its frozen runner with the current request on a host stand-in runtime.
+   Neither host entry requires a GPU bundle.
 
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.

@@ -1764,17 +1764,12 @@ def _published_pairs():
     return pairs
 
 
-def _check_published_cohort(operation, architecture):
-    """Fail when the published bundle does not record the enrolled cohort.
+def _published_bundle_data(spec, architecture):
+    """Return the bundle data that ``diff`` reads by default, or skip without it.
 
-    Verification rejects every case of such a bundle, so otherwise only a
-    matching GPU would notice an enrolled case that was never qualified. This
-    reads the bundle data that ``diff`` reads by default and compares it the
-    same way; it skips only when the tree has no bundle data for the pair.
+    The skip says what the tree lacks: a fetched archive or extracted bundle in
+    a source checkout, or a staged bundle in an installed tree.
     """
-    from importlib import import_module
-
-    spec = import_module(f"{operation}_reference.cli").OPERATION
     name = f"{spec.label} {architecture}"
     bundle = spec.published_bundle(architecture)
     if not bundle.exists():
@@ -1791,6 +1786,22 @@ def _check_published_cohort(operation, architecture):
             "only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
             "assembled with its architecture's test artifact"
         )
+    return bundle
+
+
+def _check_published_cohort(operation, architecture):
+    """Fail when the published bundle does not record the enrolled cohort.
+
+    Verification rejects every case of such a bundle, so otherwise only a
+    matching GPU would notice an enrolled case that was never qualified. This
+    reads the bundle data that ``diff`` reads by default and compares it the
+    same way; it skips only when the tree has no bundle data for the pair.
+    """
+    from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    name = f"{spec.label} {architecture}"
+    bundle = _published_bundle_data(spec, architecture)
     unusable = None
     try:
         differences = spec.diff_bundle(bundle, architecture=architecture)
@@ -1939,6 +1950,196 @@ def test_published_cohort_check_names_unqualified_cases(
         assert _mentions(reason, archive)
         (pull,) = _commands(reason)
         assert pull[:2] == ["dvc", "pull"] and _same(pull[2], pointer)
+
+
+# A host stand-in for the frozen rocKE runtime that a bundle's runner replays
+# with, so replay needs no HIP. Device buffers are host memory, and the device
+# reports the target id written beside hip_module. A launch requires every
+# argument of the frozen kernel's signature, as the runtime's argument packer
+# does, then zeroes each bound buffer that the worker poisoned with 0xff bytes,
+# so an output that the replay leaves unbound still reads back as unwritten.
+_STUB_RUNTIME = {
+    "rocke/__init__.py": "",
+    "rocke/core/__init__.py": "",
+    # Recorded device targets carry no profile suffix such as -strict, which is
+    # all that the runtime's conversion removes before features are split off.
+    "rocke/core/arch.py": """
+def compiler_target_from_target_id(target_id):
+    return target_id
+""",
+    "rocke/runtime/hip_module.py": """
+from pathlib import Path
+
+
+def get_device_target_id(device=0):
+    return Path(__file__).with_name("device_target").read_text()
+
+
+def get_device_arch(device=0):
+    return get_device_target_id(device).split(":", 1)[0]
+""",
+    "rocke/runtime/__init__.py": """
+import ctypes
+from dataclasses import dataclass
+
+_MEMORY = {}
+
+
+class Runtime:
+    def memcpy_h2d(self, destination, source, nbytes):
+        ctypes.memmove(destination, source, nbytes)
+
+    def memcpy_d2h(self, destination, source, nbytes):
+        ctypes.memmove(destination, source, nbytes)
+
+    def memset(self, pointer, value, nbytes):
+        ctypes.memset(pointer, value, nbytes)
+
+    def sync(self):
+        pass
+
+
+class DeviceMem:
+    def __init__(self, nbytes):
+        self._pointer = 0
+        self.realloc(nbytes)
+
+    def ptr(self):
+        return self._pointer
+
+    def realloc(self, nbytes):
+        _MEMORY.pop(self._pointer, None)
+        self._pointer = 0
+        if nbytes > 0:
+            memory = ctypes.create_string_buffer(nbytes)
+            self._pointer = ctypes.addressof(memory)
+            _MEMORY[self._pointer] = memory
+
+
+@dataclass
+class LaunchConfig:
+    grid: tuple = (1, 1, 1)
+    block: tuple = (64, 1, 1)
+
+
+@dataclass(frozen=True)
+class LaunchSummary:
+    launches: int
+
+
+class KernelLauncher:
+    def __init__(self, *, hsaco, kernel_name, signature, **options):
+        self.kernel_name = kernel_name
+        self.signature = list(signature)
+
+    def __call__(self, values, *, config):
+        poisoned = []
+        for argument in self.signature:
+            name, kind = argument["name"], argument["type"]
+            if name not in values:
+                raise KeyError(f"missing kernel arg {name!r}")
+            value = values[name]
+            if kind.startswith("ptr<"):
+                pointer = value.ptr() if hasattr(value, "ptr") else value
+                if pointer and pointer not in _MEMORY:
+                    raise ValueError(f"kernel arg {name!r} is not a device buffer")
+                memory = _MEMORY.get(pointer)
+                if memory is not None and memory.raw.count(0xFF) == len(memory):
+                    poisoned.append(memory)
+            elif kind == "f32":
+                float(value)
+            elif kind in ("i32", "i64"):
+                int(value)
+            else:
+                raise ValueError(f"unsupported kernel arg type {kind!r} for {name}")
+        for memory in poisoned:
+            ctypes.memset(memory, 0, len(memory))
+        return LaunchSummary(launches=1)
+""",
+}
+
+
+# A request can gain keys that published runners predate, such as the selected
+# variant. An unenrolled name fails any runner that resolves the key, so the
+# key passes only when the runner ignores it.
+@pytest.mark.parametrize(
+    "added", [{}, {"variant": "unenrolled"}], ids=["current-request", "variant-key"]
+)
+@pytest.mark.parametrize(("operation", "architecture"), _published_pairs())
+def test_published_runners_replay_the_current_request(
+    tmp_path, monkeypatch, operation, architecture, added
+):
+    """Every published frozen runner accepts the request that verification sends.
+
+    A published bundle's runner is frozen, but verification builds its request
+    with the current harness, so a request change must keep every published
+    runner replaying without requalification. This verifies each enrolled case
+    of the published bundle with a host stand-in for the frozen runtime, so it
+    needs no GPU, and ends each verification after its replay, since the
+    stand-in computes no output to compare.
+    """
+    from importlib import import_module
+
+    from reference_common import cli as common_cli
+    from reference_common.runner import run_worker
+    from reference_common.session import reuse_workers
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    bundle = _published_bundle_data(spec, architecture)
+    if bundle.is_file():
+        lock = spec.architectures.baseline_lock(architecture)
+        unpack(bundle, tmp_path / "bundle", lock, operation=operation)
+        bundle = tmp_path / "bundle"
+    manifest = spec.load_bundle(bundle, architecture=architecture)
+    runtime = tmp_path / "runtime"
+    for name, source in _STUB_RUNTIME.items():
+        (runtime / name).parent.mkdir(parents=True, exist_ok=True)
+        (runtime / name).write_text(source)
+
+    class Replayed(Exception):
+        """Ends verification once the frozen worker has replayed its case."""
+
+    def replay(request, *, platform, **paths):
+        # Verification replays the frozen baseline before the current kernel.
+        assert request["mode"] == "replay"
+        request = dict(request, **added)
+        try:
+            result = run_worker(request, platform=runtime, **paths)
+        except (RuntimeError, TimeoutError) as error:
+            result = error
+        raise Replayed(request, result)
+
+    def check_replay(case):
+        key = spec.manifest_key(manifest, case, architecture=architecture)
+        (runtime / "rocke/runtime/device_target").write_text(
+            manifest["cases"][key]["device_target"]
+        )
+        with pytest.raises(Replayed) as replayed:
+            spec.verify_case(
+                case, bundle=bundle, manifest=manifest, architecture=architecture
+            )
+        request, result = replayed.value.args
+        if isinstance(result, Exception):
+            pytest.fail(
+                f"{spec.label} {architecture} case {case.id}: the published frozen "
+                "runner rejected the request that verification sends, with keys "
+                f"{sorted(request)}, so verification fails on a {architecture} "
+                "GPU. A published runner cannot change: keep sending the request "
+                "keys and case fields that it reads, or requalify the bundle:\n"
+                f"{result}",
+                pytrace=False,
+            )
+        # Every repetition read back what the stand-in's launch wrote.
+        assert not any(output.any() for output in result[0])
+
+    monkeypatch.setattr(common_cli, "run_worker", replay)
+    cases = spec.architectures.get_architecture(architecture).CASES
+    # Without a worker session, run_worker runs the worker module as a script.
+    check_replay(cases[0])
+    # Verification reuses one worker per bundle, which calls the module's run().
+    with reuse_workers(spec.worker_module):
+        for case in cases:
+            check_replay(case)
 
 
 # Qualification runs this tree's adapter with the baseline snapshot's rocKE and

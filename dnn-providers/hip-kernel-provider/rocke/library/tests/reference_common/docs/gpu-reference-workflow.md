@@ -85,6 +85,15 @@ a newer baseline. The check names each case it cannot prepare, with the error.
 It skips in installed trees, without git, and when the revision is absent, as in
 a shallow clone.
 
+The same file also replays every enrolled case with each published bundle's
+frozen runner, using the request that verification currently sends and that
+request with an added key the runner predates. A host stand-in replaces the
+bundle's frozen rocKE runtime, so no GPU is needed. Published runners never
+change, so a harness change must keep sending every request key and case field
+that they read; the check names the case, the request keys, and the runner's
+error. Like the cohort check, it skips a pair only when no bundle data is
+present.
+
 ## 1. Choose coverage and implement the contract
 
 Use cases that exercise distinct production paths, rather than counting shapes

@@ -169,7 +169,7 @@ environment without Torch; they do not invoke the offline CPU oracles.
 
 | CTest entry | Scope | Registration |
 |---|---|---|
-| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, and that each installed bundle records the enrolled cohort | Host suite; skips the cohort check for a bundle that is not installed |
+| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, and that each installed bundle records the enrolled cohort and its frozen runner accepts the current request | Host suite; skips the bundle checks for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_sdpa_gpu_<arch>_pytest` | The SDPA cases enrolled for `<arch>` and three failure checks | For each published SDPA architecture, when its bundle is installed |
