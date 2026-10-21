@@ -2530,7 +2530,9 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
     std::string shapes[2];
     for (int v = 0; v < 2; ++v) {
         SetUp();
-        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        // Destination registers outside what the WMMAs write (100 .. 476), so no WMMA has to wait
+        // for a load and the WMMAs stay in program order whatever the loads do.
+        for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
         for (int i = 0; i < 48; i++) createWmmaF32_16x16x16_bf16(8 * (i % 8), 100 + 8 * i);
         PassContext ctx;
         ctx.setGemmTileConfig(config);
@@ -2558,6 +2560,35 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
     EXPECT_LE(longestRun(shapes[1]), 2u) << shapes[1];
     EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8);
     EXPECT_GE(shapes[1].find_last_of('d') + 10, shapes[1].size()) << shapes[1];
+}
+
+// The plan counts WMMA positions in program order, so the scheduler must issue the WMMAs in that
+// order: a WMMA waiting for a load does not let a later, independent WMMA pass it (the ready queue
+// is first come first serve, so without the DAG edge it could).
+TEST_F(DAGSchedulerPassTest, DsSpread_KeepsTheWmmasInProgramOrder) {
+    // A reads what the load writes (it waits for the load); B and C are independent of it.
+    createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/600);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/140, /*src0Start=*/8);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.dsSpread = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    std::vector<int> wmmaDests;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* in = cast<StinkyInstruction>(&ir);
+        if (isMatrixInstruction(*in))
+            wmmaDests.push_back(static_cast<int>(in->getDestRegs()[0].reg.idx));
+    }
+    EXPECT_EQ(wmmaDests, (std::vector<int>{100, 120, 140}));
 }
 
 // Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.

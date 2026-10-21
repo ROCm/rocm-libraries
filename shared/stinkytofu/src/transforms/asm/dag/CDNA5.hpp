@@ -3398,6 +3398,19 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
                 if (isMatrixInstruction(*deps.dag.nodes[n].inst)) wmmaPos[n] = pos++;
         }
+        // Keep the WMMAs in program order. The plan above counts positions in that order, and the
+        // ready queue is first come first serve, so in a rare case it could issue them in
+        // another one. A DAG-only edge between consecutive WMMAs, the way the ds read order is
+        // locked, makes what is scheduled equal what was planned.
+        {
+            StinkyInstruction* prevWmma = nullptr;
+            for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
+                if (wmmaPos[n] < 0) continue;
+                auto* wmma = const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst);
+                if (prevWmma != nullptr) deps.requestedConstraints.emplace_back(prevWmma, wmma);
+                prevWmma = wmma;
+            }
+        }
         const int queueDelay = wmmaQueueDepth() > 1 ? wmmaQueueDepth() : 0;
         std::vector<int> earliestAt(deps.dag.nodes.size(), 0);
         for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
