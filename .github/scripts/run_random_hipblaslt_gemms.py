@@ -102,7 +102,7 @@ def run_command(command, directory, timeout, log_name):
 
 
 def check_result(problem, text, race_log):
-    """Require the requested numerical row and GEMM dispatch in the race sink."""
+    """Return a failure reason, or None when numerical and race checks pass."""
     if re.search(r"^RACE\s", text + "\n" + race_log, re.MULTILINE):
         return "race reported"
     if "[rj warn]" in text or "[rj error]" in text:
@@ -254,7 +254,11 @@ def main(argv=None):
         "--timeout", type=positive_int, default=180, help="seconds per command"
     )
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="write sampled inputs and reports without running bench or rocJITsu",
+    )
     args = parser.parse_args(argv)
     if args.case and args.case > args.count:
         parser.error("--case must be within --count")
