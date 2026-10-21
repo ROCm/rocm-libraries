@@ -427,9 +427,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
         page_block_size = 0;
     }
 #endif
-    // batch_prefill, and pagedkv_prefill on the gfx125 TDM pipelines, take any page size
+    // batch_prefill, and pagedkv_prefill on the gfx125 TDM pipelines, take any page size;
+    // -api=auto runs batch_prefill for group mode with one split when it is built.
+    const bool auto_runs_batch_prefill = CK_TILE_FMHA_FWD_BATCH_PREFILL_API && api == "auto" &&
+                                         mode == mode_enum::group && num_splits == 1;
     const bool need_128_aligned_page =
-        api != "batch_prefill" && api != "pagedkv" &&
+        api != "batch_prefill" && api != "pagedkv" && !auto_runs_batch_prefill &&
         (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
          CK_TILE_FMHA_FWD_PAGEDKV_API);
     if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
@@ -2014,7 +2017,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             init_args(bp_args);
 
             const float ave_time = fmha_batch_prefill(bp_traits, bp_args, sc);
-            if(ave_time >= 0.0f || !api_auto)
+            // the other APIs read neither the vectorized layout nor the SGLang page table
+            if(ave_time >= 0.0f || !api_auto || kv_vectorized || kv_sglang)
                 return ave_time;
         }
 #endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API
@@ -2038,7 +2042,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
 #endif // CK_TILE_FMHA_FWD_PAGEDKV_API
 #if CK_TILE_FMHA_FWD_SPLITKV_API
-        if(api_auto ? (1 < num_splits || use_kvcache) : api == "splitkv")
+        // splitkv takes pages of a multiple of 128 only
+        if(api_auto ? ((1 < num_splits || use_kvcache) && page_block_size % 128 == 0)
+                    : api == "splitkv")
         {
             fmha_fwd_splitkv_traits fmha_splitkv_traits;
             init_traits(fmha_splitkv_traits);
@@ -2051,6 +2057,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
         if(!(api_auto || api == "fwd"))
             return -1.0f; // the named API is not built in
+        if(0 < page_block_size && page_block_size % 128 != 0)
+            return -1.0f; // pages only batch_prefill or pagedkv_prefill read
         fmha_fwd_traits fmha_traits;
         init_traits(fmha_traits);
 
