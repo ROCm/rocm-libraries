@@ -10,15 +10,46 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import run_random_hipblaslt_gemms as runner
+import sample_hipblaslt_gemms as sampler
 
 
 def bench_result(problem, *, norm="0", atol="1e-6"):
+    keys = (
+        "M",
+        "N",
+        "K",
+        "batch_count",
+        "a_type",
+        "b_type",
+        "c_type",
+        "d_type",
+        "compute_type",
+        "transA",
+        "transB",
+        "alpha",
+        "beta",
+        "scaleA",
+        "scaleB",
+        "bias_vector",
+        "activation_type",
+        "bias_type",
+    )
+    header = [k.lower() if k in ("M", "N", "K") else k for k in keys]
+    values = []
+    for key in keys:
+        value = problem[key]
+        if key == "bias_vector":
+            value = int(value)
+        elif key == "compute_type":
+            value = value[2:]
+        values.append(str(value))
     return (
-        "[0]:m,n,k,batch_count,a_type,b_type,c_type,d_type,transA,transB,norm_error,atol,rtol\n"
-        f"{problem['M']},{problem['N']},{problem['K']},1,"
-        f"{problem['a_type']},{problem['b_type']},{problem['c_type']},{problem['d_type']},"
-        f"N,N,{norm},{atol},1e-6\n"
-        "    --kernel name: gemm_kernel\n"
+        "[0]:"
+        + ",".join(header)
+        + ",norm_error,atol,rtol\n"
+        + ",".join(values)
+        + f",{norm},{atol},1e-6\n"
+        + "    --kernel name: gemm_kernel\n"
     )
 
 
@@ -46,28 +77,90 @@ class RandomGemmTests(unittest.TestCase):
             self.assertEqual(summary["sampled"], 100)
             self.assertEqual(summary["passed"], 0)
             self.assertTrue(summary["complete"])
+            self.assertEqual(summary["architecture"], "gfx950")
+            for counts in summary["coverage"].values():
+                self.assertEqual(sum(counts.values()), 100)
 
-    def test_sampler_prefix_and_type_cycle(self):
+    def test_sampler_is_seeded_aligned_and_preserves_legal_profiles(self):
         def inputs(count, seed):
             rng = random.Random(seed)
-            return [runner.sample_gemm(i, rng) for i in range(1, count + 1)]
+            return [sampler.sample_gemm(rng) for _ in range(count)]
 
         self.assertEqual(inputs(3, 0), inputs(7, 0)[:3])
-        self.assertEqual(inputs(3, 0), inputs(3, 42))
+        self.assertNotEqual(inputs(3, 0), inputs(3, 42))
+        problems = inputs(1000, 0)
         self.assertEqual(
-            [(p["M"], p["N"], p["K"], p["a_type"]) for p in inputs(3, 0)],
-            [(11, 11, 11, "f32_r"), (12, 12, 12, "bf16_r"), (13, 13, 13, "f32_r")],
+            {p["family"] for p in problems}, set(sampler.NUMERICAL_FAMILIES)
         )
+        self.assertEqual(
+            {p["transA"] + p["transB"] for p in problems}, {"NN", "NT", "TN", "TT"}
+        )
+        self.assertEqual(
+            {(p["bias_vector"], p["activation_type"]) for p in problems},
+            set(sampler.EPILOGUES),
+        )
+        self.assertTrue(any(p["M"] != p["N"] != p["K"] for p in problems))
+        for problem in problems:
+            for key in ("M", "N", "K"):
+                self.assertIn(problem[key], range(32, 500, 32))
+            self.assertEqual(problem["a_type"], problem["b_type"])
+            self.assertEqual(problem["c_type"], problem["d_type"])
+            self.assertEqual(problem["compute_type"], "c_f32_r")
+            self.assertNotEqual(problem["alpha"], 0)
+            if problem["family"].startswith("mx"):
+                self.assertEqual((problem["transA"], problem["transB"]), ("T", "N"))
+                self.assertEqual((problem["scaleA"], problem["scaleB"]), (1001, 1001))
+            else:
+                self.assertEqual((problem["scaleA"], problem["scaleB"]), (0, 0))
+            self.assertNotIn("family", runner.bench_input(problem))
 
     def test_missing_wrong_failed_or_nonfinite_results_cannot_pass(self):
-        problem = runner.sample_gemm(1, random.Random(0))
+        problem = sampler.sample_gemm(random.Random(0))
         text = bench_result(problem)
         race = '[rocjitsu] Kernel dispatch: "gemm_kernel" symbol="gemm_kernel"\n'
         self.assertIsNone(runner.check_result(problem, text, race))
+        for key, value in (
+            ("a_type", "f16_r"),
+            ("compute_type", "c_f16_r"),
+            ("transA", "T" if problem["transA"] == "N" else "N"),
+            ("alpha", 3),
+            ("beta", 3),
+            ("scaleA", 1001),
+            ("scaleB", 1001),
+            ("bias_vector", not problem["bias_vector"]),
+            (
+                "activation_type",
+                "none" if problem["activation_type"] != "none" else "relu",
+            ),
+        ):
+            with self.subTest(key=key):
+                self.assertIsNotNone(
+                    runner.check_result(
+                        problem, bench_result({**problem, key: value}), race
+                    )
+                )
+        biased = {**problem, "bias_vector": True}
+        self.assertIsNotNone(
+            runner.check_result(
+                biased, bench_result({**biased, "bias_type": "bf16_r"}), race
+            )
+        )
+        self.assertEqual(
+            runner.check_result(
+                problem, "error: NO solution found!", race + "RACE detected\n"
+            ),
+            "race reported",
+        )
         for bad_text, bad_race in (
             ("", race),
             (text + text, race),
-            (text.replace("11,11,11,1", "12,11,11,1"), race),
+            (
+                text.replace(
+                    f"{problem['M']},{problem['N']},{problem['K']},1", "1,1,1,1"
+                ),
+                race,
+            ),
+            (text.replace(",norm_error", ",missing_norm_error"), race),
             (bench_result(problem, norm="nan"), race),
             (bench_result(problem, atol="failed"), race),
             (text, ""),
@@ -98,10 +191,10 @@ class RandomGemmTests(unittest.TestCase):
                 "started = time.monotonic()\ntime.sleep(0.1)\n"
                 "(d / 'interval.json').write_text(json.dumps([started, time.monotonic()]))\n"
                 "(d / 'race.log').write_text('[rocjitsu] Kernel dispatch: symbol=\"gemm_kernel\"\\n' "
-                "+ ('RACE found\\n' if p['M'] == 12 and config.get('failure', 'race') == 'race' else ''))\n"
+                "+ ('RACE found\\n' if d.name == 'case-0002' and config.get('failure', 'race') == 'race' else ''))\n"
                 f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
                 "from test_random_hipblaslt_gemms import bench_result\n"
-                "if p['M'] == 12:\n"
+                "if d.name == 'case-0002':\n"
                 "    mode = config.get('failure', 'race')\n"
                 "    if mode == 'numerical-exit': sys.exit(1)\n"
                 "    if mode == 'emulator-exit': sys.exit(7)\n"
@@ -114,7 +207,9 @@ class RandomGemmTests(unittest.TestCase):
             )
             emulator.chmod(0o755)
             config = root / "config.json"
-            config.write_text("{}")
+            config.write_text(
+                json.dumps({"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}})
+            )
             output = root / "results"
             status = runner.main(
                 [
@@ -192,12 +287,21 @@ class RandomGemmTests(unittest.TestCase):
                 ("numerical-exit", "bench exited 1", 1),
                 ("allclose", "missing or failed numerical checks", 0),
                 ("emulator-exit", "bench exited 7", 7),
-                ("no-solution", "expected one completed bench result", 0),
+                ("no-solution", "no solution in the loaded library", 0),
                 ("timeout", "bench exited 124", 124),
             ):
                 for early_stop in (False, True):
                     with self.subTest(mode=mode, early_stop=early_stop):
-                        config.write_text(json.dumps({"failure": mode}))
+                        config.write_text(
+                            json.dumps(
+                                {
+                                    "failure": mode,
+                                    "vm": {
+                                        "gpu": {"device": {"gfx_target_version": 90500}}
+                                    },
+                                }
+                            )
+                        )
                         output = root / f"{mode}-{early_stop}"
                         command = [
                             "--count",
@@ -217,7 +321,9 @@ class RandomGemmTests(unittest.TestCase):
                             command.append("--stop-on-failure")
                         self.assertEqual(runner.main(command), 1)
                         summary = json.loads((output / "summary.json").read_text())
-                        self.assertEqual(summary["failed"], 1)
+                        unsupported = int(mode == "no-solution")
+                        self.assertEqual(summary["failed"], 1 - unsupported)
+                        self.assertEqual(summary["unsupported"], unsupported)
                         self.assertEqual(summary["passed"], 1 if early_stop else 2)
                         self.assertEqual(summary["sampled"], 2 if early_stop else 3)
                         self.assertEqual(summary["complete"], not early_stop)
@@ -227,7 +333,10 @@ class RandomGemmTests(unittest.TestCase):
                         )
                         self.assertEqual(result["reason"], reason)
                         self.assertEqual(result["exit_code"], exit_code)
-                        self.assertEqual(result["outcome"], "failed")
+                        self.assertEqual(
+                            result["outcome"],
+                            "unsupported" if unsupported else "failed",
+                        )
                         if early_stop:
                             self.assertFalse((output / "case-0003").exists())
                         else:
@@ -268,6 +377,20 @@ class RandomGemmTests(unittest.TestCase):
                 ),
                 124,
             )
+
+    def test_execution_requires_gfx950(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "config.json"
+            config.write_text(
+                json.dumps({"vm": {"gpu": {"device": {"gfx_target_version": 90402}}}})
+            )
+            with self.assertRaises(SystemExit) as error:
+                runner.main(
+                    ["--config", str(config), "--output", str(root / "results")]
+                )
+            self.assertEqual(error.exception.code, 2)
+            self.assertFalse((root / "results").exists())
 
 
 if __name__ == "__main__":
