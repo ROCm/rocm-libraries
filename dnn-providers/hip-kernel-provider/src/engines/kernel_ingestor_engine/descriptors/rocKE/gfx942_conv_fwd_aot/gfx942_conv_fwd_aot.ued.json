@@ -8,7 +8,10 @@
   },
   "metadata": "b4ffadc0-a9e3-471e-878f-6a6d183469fb",
   "sort_kernel_catalog": {
-    "default": "43c06e3e-003b-4726-be57-4c898f3ee9d4"
+    "default": [
+      "43c06e3e-003b-4726-be57-4c898f3ee9d4",
+      "cf0524ca-b4bd-4db8-a6d5-3e0fc80d3d3d"
+    ]
   },
   "knobs": [
     "kernel_family",
