@@ -61,7 +61,7 @@ public:
         }
     }
 
-    hipsparseLocalDnMat(const hipsparseLocalDnMat&)            = delete;
+    hipsparseLocalDnMat(const hipsparseLocalDnMat&) = delete;
     hipsparseLocalDnMat& operator=(const hipsparseLocalDnMat&) = delete;
 
     operator hipsparseDnMatDescr_t() const
