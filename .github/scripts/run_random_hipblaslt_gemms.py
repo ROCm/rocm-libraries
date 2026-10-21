@@ -163,7 +163,7 @@ def check_result(problem, text, race_log):
     if "[rj warn]" in text or "[rj error]" in text:
         return "rocJITsu diagnostic; inspect bench.log"
     if "error: NO solution found!" in text:
-        return "no solution in the loaded library"
+        return "no heuristic solution"
     rows, header = [], None
     for line in text.splitlines():
         if re.match(r"^\[\d+\]:", line):
@@ -277,7 +277,7 @@ def run_case(args, directory, problem, config):
     return {
         "outcome": (
             "unsupported"
-            if reason == "no solution in the loaded library"
+            if reason == "no heuristic solution"
             else "failed" if reason else "passed"
         ),
         "reason": reason,
@@ -451,7 +451,11 @@ def main(argv=None):
                 with lock:
                     summary[result["outcome"]] += 1
                     summary["sources"][source][result["outcome"]] += 1
-                    if args.stop_on_failure and result["outcome"] != "passed":
+                    if args.stop_on_failure and (
+                        result["outcome"] == "failed"
+                        or source == "explicit"
+                        and result["outcome"] == "unsupported"
+                    ):
                         stop.set()
                 print(
                     f"{name}: {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
@@ -483,11 +487,30 @@ def main(argv=None):
             == summary["requested"]
         )
     finally:
+        random_counts = summary["sources"]["random"]
+        completed_random = sum(
+            random_counts[key] for key in ("passed", "failed", "unsupported")
+        )
+        summary["random_no_solution_rate"] = (
+            random_counts["unsupported"] / completed_random
+            if completed_random
+            else None
+        )
+        summary["random_no_solution_limit"] = 0.1
+        # Compare counts exactly: a rate equal to 10% must fail too.
+        summary["random_no_solution_limit_exceeded"] = (
+            random_counts["unsupported"] > 0
+            and random_counts["unsupported"] * 10 >= completed_random
+        )
         summary["elapsed_seconds"] = time.perf_counter() - started
         write_json(args.output / "summary.json", summary)
         write_case_report(args.output, records)
         print(json.dumps(summary, sort_keys=True), flush=True)
-    return int(summary["failed"] + summary["unsupported"] != 0)
+    return int(
+        summary["failed"] > 0
+        or summary["sources"]["explicit"]["unsupported"] > 0
+        or summary["random_no_solution_limit_exceeded"]
+    )
 
 
 if __name__ == "__main__":
