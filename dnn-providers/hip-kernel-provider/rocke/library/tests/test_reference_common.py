@@ -677,6 +677,51 @@ def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
         worker.run({}, tmp_path)
 
 
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize(
+    "architecture,device_target,accepted",
+    [
+        ("gfx1200", "gfx1200", True),
+        ("gfx1100", "gfx1100", True),
+        ("gfx942", "gfx942:sramecc+:xnack-", True),
+        ("gfx1200", "gfx1201", False),
+        ("gfx1100", "gfx1101", False),
+        ("gfx942", None, False),
+    ],
+)
+def test_reference_worker_requires_the_physical_processor(
+    operation, architecture, device_target, accepted, tmp_path, monkeypatch
+):
+    """A generic catalog row (gfx1200 -> gfx12-generic) must not hide the device."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    import rocke
+    from rocke.runtime import hip_module
+
+    worker = import_module(f"{operation}_reference.worker")
+    # Only the enrolled name is read before the device check, so the processor
+    # need not have an adapter for this operation.
+    monkeypatch.setattr(
+        worker, "get_architecture", lambda name: SimpleNamespace(NAME=name)
+    )
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: device_target
+    )
+    request = {
+        "architecture": architecture,
+        "platform_root": str(Path(rocke.__file__).resolve().parent),
+        "mode": "source",
+        "repetitions": 1,
+    }
+    # An accepted device proceeds to decode the case this request omits.
+    with pytest.raises(
+        KeyError if accepted else RuntimeError,
+        match="case" if accepted else f"HIP-visible {architecture} device",
+    ):
+        worker.run(request, tmp_path)
+
+
 def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
     values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
     encoded = encode(values.view(np.float32), "bf16")

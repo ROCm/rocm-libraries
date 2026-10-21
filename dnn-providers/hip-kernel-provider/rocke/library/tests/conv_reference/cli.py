@@ -23,6 +23,7 @@ import numpy as np
 
 from reference_common.source import snapshot
 from reference_common.runner import run_worker
+from reference_common.targets import processor_from_target_id
 
 from reference_common.session import reuse_workers
 from .architectures import ARCHITECTURES, baseline_lock, get_architecture
@@ -242,7 +243,7 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
         )
     for case in target.CASES:
         entry = manifest["cases"][case.id]
-        if entry["device_target"].split(":", 1)[0] != architecture:
+        if processor_from_target_id(entry["device_target"]) != architecture:
             raise ValueError(
                 f"convolution bundle targets a different architecture: {case.id}"
             )

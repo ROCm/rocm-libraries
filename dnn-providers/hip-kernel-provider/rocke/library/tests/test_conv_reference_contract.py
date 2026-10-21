@@ -211,6 +211,25 @@ def test_locked_bundle_rejects_invalid_contracts(tmp_path, change):
         cli.load_bundle(tmp_path, lock)
 
 
+@pytest.mark.parametrize(
+    "device_target,accepted",
+    [
+        ("gfx942-strict:sramecc+:xnack-", True),
+        ("gfx950:sramecc+:xnack-", False),
+    ],
+)
+def test_bundle_target_is_the_physical_processor(device_target, accepted):
+    """Profiles and features do not change the processor that was qualified."""
+    manifest = _manifest()
+    for entry in manifest["cases"].values():
+        entry["device_target"] = device_target
+    if accepted:
+        cli._validate_cases(manifest, "gfx942")
+    else:
+        with pytest.raises(ValueError, match="different architecture"):
+            cli._validate_cases(manifest, "gfx942")
+
+
 @pytest.mark.parametrize("failure", [None, "old", "current", "target"])
 def test_verification_uses_gpu_outputs_and_frozen_scale_only(
     tmp_path, monkeypatch, failure

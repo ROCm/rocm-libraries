@@ -21,6 +21,7 @@ import numpy as np
 from .architectures import get_architecture
 from .contract import Case
 from reference_common.numeric import array_digest, decode, file_digest, write_json
+from reference_common.targets import get_device_processor
 
 
 def run(request: dict, output: Path) -> None:
@@ -29,12 +30,12 @@ def run(request: dict, output: Path) -> None:
 
     import rocke
     from rocke.runtime import DeviceMem, KernelLauncher, LaunchConfig, Runtime
-    from rocke.runtime.hip_module import get_device_arch, get_device_target_id
+    from rocke.runtime.hip_module import get_device_target_id
 
     root = Path(request["platform_root"]).resolve()
     if not Path(rocke.__file__).resolve().is_relative_to(root):
         raise RuntimeError("worker imported rocKE outside its selected source/runtime")
-    if get_device_arch() != target.NAME:
+    if get_device_processor() != target.NAME:
         raise RuntimeError(
             f"convolution correctness requires a HIP-visible {target.NAME} device"
         )
