@@ -5,6 +5,9 @@ This document is the **hipDNN milestone / release verification** plan: the proce
 > [!IMPORTANT]
 > ⚠️ **All prerequisites and tests in this document must pass for a successful release.**
 
+> [!NOTE]
+> Commands are given for Linux (bash). Windows differences are noted where they apply.
+
 ---
 
 ## Objective
@@ -173,4 +176,4 @@ Ahead of release branching, also run the larger `Workloads/microbench/` and `Wor
 
 - `dnn-benchmark` exits 0.
 - Every regression that `compare` flags is explained or has a tracked issue.
-- The results file is kept with the run record, as the baseline for the next release.
+- The team compares benchmark results release by release with dnn-benchmarking; the results file is the baseline for the next release.

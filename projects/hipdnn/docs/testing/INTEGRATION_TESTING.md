@@ -1,6 +1,6 @@
 # Integration Testing
 
-Owner: @ROCm/hipdnn-core | Last Updated: 2026-10-15
+Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-21
 
 One shared test project builds a graph, runs it on a provider's engine, and checks the result against a reference. Every provider runs the same project, so a case added for one provider tests all of them. This page is the overview. The [integration test documentation](../../../../dnn-providers/integration-tests/docs/README.md) is the reference for flags, formats and authoring.
 

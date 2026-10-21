@@ -189,9 +189,9 @@ ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
 
 > Records [Feature Release Test Plan → Performance Testing](./TestPlan.md#performance-testing).
 
-For each GPU family, attach the results file and paste the comparison against the previous release.
+For each GPU family, record the results file name and paste the comparison against the previous release.
 
-- **Results file**: `<headline-<version>-<arch>.json, attached or linked>`
+- **Results file**: `<headline-<version>-<arch>.json>`
 - **Baseline**: `<previous release's results file for the same GPU family>`
 
 ```bash
@@ -220,7 +220,7 @@ Sign-off gate. Every box must be checked with real evidence before marking the m
 - [ ] Ran the focused gtest/ctest filters **and** the `full` tier in every installed test directory, on every supported GPU family.
 - [ ] Pasted the passing snippets into section 5 (elapsed times updated if rerun on final artifacts).
 - [ ] Confirmed all [Feature Release Test Plan](./TestPlan.md) prerequisites (CI green, documentation/changelog current) are satisfied.
-- [ ] Attached the headline benchmark results for each GPU family, and explained or tracked every regression `compare` flagged (section 7).
+- [ ] Recorded the headline benchmark results for each GPU family, and explained or tracked every regression `compare` flagged (section 7).
 
 **Tips for a defensible record:**
 

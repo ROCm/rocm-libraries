@@ -1,6 +1,6 @@
 # hipDNN Testing Strategy
 
-Owner: @ROCm/hipdnn-core | Last Updated: 2026-10-15
+Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-21
 
 hipDNN is tested in four layers: cheap unit tests everywhere, mock-based API tests for the core, the same quality bar for every provider, and one shared integration project that runs against every provider. This page covers why and what each layer owns. For commands, tiers and CI placement, see [Testing](../TESTING.md). For current limits, see [Known Testing Gaps](./KNOWN_TESTING_GAPS.md).
 

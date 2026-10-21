@@ -1,6 +1,6 @@
 # Release Testing
 
-Owner: @ROCm/hipdnn-core | Last Updated: 2026-10-15
+Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-21
 
 The hipDNN team owns release testing: it runs the `full` tier, runs the benchmark corpus, and decides what to prioritize. Each item below is tagged **today** (automated), **manual** (the team runs it by hand) or **planned**.
 

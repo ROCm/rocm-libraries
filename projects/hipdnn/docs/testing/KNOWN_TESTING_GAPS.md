@@ -1,6 +1,6 @@
 # Known Testing Gaps
 
-Owner: @ROCm/hipdnn-core | Last Updated: 2026-10-16
+Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-21
 
 Gaps in hipDNN testing that the hipDNN team owns. Planned work is in the Roadmap: [Q3 2026](../Roadmap.md#testing), [Q4 2026](../Roadmap.md#testing-1) and [Q1 2027](../Roadmap.md#testing-2).
 

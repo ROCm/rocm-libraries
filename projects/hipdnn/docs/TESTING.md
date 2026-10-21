@@ -1,6 +1,6 @@
 # hipDNN Testing
 
-Owner: @ROCm/hipdnn-core | Last Updated: 2026-10-15
+Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-21
 
 This page shows how to build and run hipDNN tests, what each CI tier runs, and what to run before you push.
 
