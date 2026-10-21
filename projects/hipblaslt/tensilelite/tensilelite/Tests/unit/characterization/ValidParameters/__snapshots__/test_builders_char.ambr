@@ -2643,6 +2643,7 @@
     'StinkyTofuParameters': dict({
       'type': 'int',
       'value': -1,
+    }),
     'StinkyTofuRegisterAllocation': dict({
       'head': list([
         0,
