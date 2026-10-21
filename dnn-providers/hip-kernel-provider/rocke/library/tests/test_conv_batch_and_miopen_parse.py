@@ -83,12 +83,23 @@ def test_direct_parse_keeps_flags_before_mode():
 
 
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
-def test_direct_parse_rejects_fp32_by_its_own_keyword(kw):
+def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
-    # The error names the keyword the command gave, not the "-m conv" value.
-    with pytest.raises(ValueError, match=f"fp32 \\('{kw}'\\)"):
-        parse_miopen_cmd_direct(f"MIOpenDriver {kw} " + _FLAGS.format(g=64, f=1))
+    # The fp32 driver keywords give fp32 problems, and TF32 under -M 0 (the
+    # direct kernels take fp32 storage).
+    cmd = f"MIOpenDriver {kw} " + _FLAGS.format(g=64, f=1)
+    assert parse_miopen_cmd_direct(cmd)[1] == "fp32"
+    assert parse_miopen_cmd_direct(cmd + " -M 0")[1] == "tf32"
+
+
+def test_direct_parse_takes_dtype_from_keyword_not_mode_value():
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # "-m conv" is a flag value, not the fp32 driver keyword.
+    cmd = "MIOpenDriver convfp16 " + _FLAGS.format(g=64, f=1)
+    assert parse_miopen_cmd_direct(cmd)[1] == "fp16"
+    assert parse_miopen_cmd_direct(cmd + " -M 0")[1] == "fp16"
 
 
 def test_direct_parse_rejects_mode_value_as_keyword():

@@ -748,7 +748,12 @@ def direct_spec_for_problem(
             f"one padding for both axes (only {', '.join(PER_AXIS_PAD_VARIANTS)} "
             "take a column padding of their own)"
         )
-    spec = make_direct_spec(variant, problem, knobs, wave_size)
+    try:
+        # Some specs validate on construction: a variant with no kernel for
+        # the problem's dtype (fp32 / tf32) raises there.
+        spec = make_direct_spec(variant, problem, knobs, wave_size)
+    except ValueError as e:
+        return None, str(e)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why
