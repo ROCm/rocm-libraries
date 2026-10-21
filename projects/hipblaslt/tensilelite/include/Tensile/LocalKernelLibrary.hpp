@@ -266,12 +266,17 @@ namespace TensileLite
          * gets a new index in the local range, written back to
          * `solution->index`. Indices are valid only in this process.
          *
+         * The library keeps and modifies the objects passed in, so it takes
+         * only solutions with no index yet (a negative one). A solution the
+         * shipped library, a JIT library or this one has already indexed is
+         * shared with that library and is rejected, not renumbered.
+         *
          * Each is also tagged Equal here, before it is published, because a
          * local kernel is selected only through an exact mapping; selection then
          * never writes to a solution that concurrent lookups share.
          *
          * Registers all of them, or none and returns an empty vector if any is
-         * null, repeated, or already registered, or if the local range cannot
+         * null, repeated, or already has an index, or if the local range cannot
          * hold them all.
          */
         std::vector<int> addSolutions(std::vector<std::shared_ptr<MySolution>> const& incoming)
@@ -285,8 +290,7 @@ namespace TensileLite
             std::unordered_set<MySolution const*> seen;
             for(auto const& solution : incoming)
             {
-                if(!solution || !seen.insert(solution.get()).second
-                   || isRegisteredLocked(*solution))
+                if(!solution || solution->index >= 0 || !seen.insert(solution.get()).second)
                     return {};
             }
 
@@ -348,13 +352,6 @@ namespace TensileLite
         {
             std::shared_lock<std::shared_mutex> lock(m_snapshotMutex);
             return m_snapshot;
-        }
-
-        /// Caller must hold m_snapshotMutex.
-        bool isRegisteredLocked(MySolution const& solution) const
-        {
-            auto it = m_snapshot->solutions.find(solution.index);
-            return it != m_snapshot->solutions.end() && it->second.get() == &solution;
         }
 
         /// Caller must hold m_snapshotMutex exclusively.

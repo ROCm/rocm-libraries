@@ -43,10 +43,12 @@ namespace
         return ContractionProblemGemm::GEMM(transA, false, m, n, k, lda, k, m, 1.0, false, 1);
     }
 
-    // Matches the problem type of `problem`; every predicate is True.
+    // Matches the problem type of `problem`; every predicate is True. It has no
+    // index yet, as addSolutions requires.
     SolutionPtr makeSolution(ContractionProblemGemm const& problem)
     {
-        auto  solution             = std::make_shared<ContractionSolution>();
+        auto solution              = std::make_shared<ContractionSolution>();
+        solution->index            = -1;
         auto& pt                   = solution->problemType;
         pt.transA                  = problem.transA();
         pt.transB                  = problem.transB();
@@ -191,8 +193,6 @@ TEST(LocalKernelLibrary, smoke_AddSolutionsAssignsLocalIndices)
 
     auto a        = makeSolution(problem);
     auto b        = makeSolution(problem);
-    a->index      = 7;
-    b->index      = 8;
     auto assigned = library.addSolutions({a, b});
 
     ASSERT_EQ(assigned.size(), 2u);
@@ -217,21 +217,23 @@ TEST(LocalKernelLibrary, smoke_AddSolutionsRejectsRepeats)
     auto         problem = makeProblem();
     LocalLibrary library;
 
-    auto a   = makeSolution(problem);
-    auto b   = makeSolution(problem);
-    a->index = 7;
-    b->index = 8;
+    auto a = makeSolution(problem);
+    auto b = makeSolution(problem);
     EXPECT_TRUE(library.addSolutions({a, b, a}).empty());
     EXPECT_TRUE(library.addSolutions({a, nullptr}).empty());
     EXPECT_EQ(library.registeredCount(), 0u);
-    EXPECT_EQ(a->index, 7);
+    EXPECT_EQ(a->index, -1);
     EXPECT_EQ(a->tag, ContractionSolution::MatchingTag::Others);
 
     int index = library.addSolutions({a}).at(0);
     EXPECT_TRUE(library.addSolutions({b, a}).empty());
     EXPECT_EQ(library.registeredCount(), 1u);
     EXPECT_EQ(a->index, index);
-    EXPECT_EQ(b->index, 8);
+    EXPECT_EQ(b->index, -1);
+
+    LocalLibrary other;
+    EXPECT_TRUE(other.addSolutions({a}).empty()) << "registered with another library";
+    EXPECT_EQ(a->index, index);
     EXPECT_EQ(library.addSolutions({b}).at(0), index + 1)
         << "a rejected call should not consume indices";
 }
@@ -549,6 +551,23 @@ TEST(LocalKernelMaster, smoke_TopSolutionsPrependMappedKernelOnce)
     EXPECT_EQ(f.stub->lastTopRequest, 3);
     for(int i = 1; i < 4; i++)
         EXPECT_EQ(top[i], f.stub->shipped[i - 1]) << "shipped order should be kept";
+}
+
+// Registering a solution the shipped library holds is rejected, so it keeps
+// its shipped index and tag.
+TEST(LocalKernelMaster, smoke_ShippedSolutionsAreNotRegistered)
+{
+    auto          problem = makeProblem();
+    MasterFixture f(problem);
+
+    for(auto const& shipped : f.stub->shipped)
+    {
+        const int index = shipped->index;
+        EXPECT_TRUE(f.local->addSolutions({makeSolution(problem), shipped}).empty());
+        EXPECT_EQ(shipped->index, index);
+        EXPECT_EQ(shipped->tag, ContractionSolution::MatchingTag::Others);
+    }
+    EXPECT_EQ(f.local->registeredCount(), 0u);
 }
 
 TEST(LocalKernelMaster, smoke_TopOneSkipsShippedLibrary)
