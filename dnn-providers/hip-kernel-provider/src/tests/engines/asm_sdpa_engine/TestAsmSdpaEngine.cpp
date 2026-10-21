@@ -13,6 +13,8 @@
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
+#include "mocks/MockPlanBuilder.hpp"
+#include "mocks/StampedGraph.hpp"
 
 namespace asm_sdpa_engine
 {
@@ -70,6 +72,28 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
+}
+
+// The plugin advertises a newer engine API than this engine is written against, so the
+// engine itself declines ragged, custom-alignment and token-unit ragged graphs before any
+// plan builder sees them.
+TEST(TestAsmSdpaEngineApiFloor, DeclinesGraphsNeedingANewerEngineApi)
+{
+    auto planBuilder
+        = std::make_unique<::testing::NiceMock<hip_kernel_provider::MockPlanBuilder>>();
+    ON_CALL(*planBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+    AsmSdpaEngine engine;
+    engine.addPlanBuilder(std::move(planBuilder));
+
+    Handle handle;
+    using hip_kernel_provider::StampedGraph;
+    EXPECT_TRUE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION)));
+    EXPECT_FALSE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION)));
+    EXPECT_FALSE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION)));
 }
 
 } // namespace

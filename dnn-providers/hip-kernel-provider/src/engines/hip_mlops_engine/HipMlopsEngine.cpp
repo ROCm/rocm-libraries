@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipMlopsEngine.hpp"
+#include "core/EngineApiFloor.hpp"
 #include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -31,6 +32,10 @@ static void initializeHipKernelSettings(
 bool HipMlopsEngine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    if(core::needsNewerThanCompiledInEngineApi(opGraph))
+    {
+        return false;
+    }
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
     for(const auto& planBuilder : _planBuilders)

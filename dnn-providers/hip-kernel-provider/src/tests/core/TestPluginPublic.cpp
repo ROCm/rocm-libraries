@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <string_view>
 
 #include "version.h"
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
 TEST(TestPluginPublic, HipdnnPluginSetLogLevelSuccess)
 {
@@ -44,7 +46,7 @@ TEST(TestPluginPublic, HipdnnPluginGetApiVersionSuccess)
     auto status = hipdnnPluginGetApiVersion(&version);
 
     ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(version, "1.2.0");
+    EXPECT_EQ(std::string_view{version}, hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION);
 }
 
 TEST(TestPluginPublic, HipdnnPluginGetApiVersionNullPtr)

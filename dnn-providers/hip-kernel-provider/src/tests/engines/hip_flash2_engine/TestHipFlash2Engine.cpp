@@ -15,6 +15,8 @@
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
+#include "mocks/MockPlanBuilder.hpp"
+#include "mocks/StampedGraph.hpp"
 
 namespace hip_flash2_engine
 {
@@ -181,6 +183,28 @@ TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
     // We need a valid engine config to call getMaxWorkspaceSize
     // Use a stub since we just want to verify the zero-workspace property
     EXPECT_EQ(_engine->id(), HipFlash2Engine::staticId()); // engine is valid
+}
+
+// The plugin advertises a newer engine API than this engine is written against, so the
+// engine itself declines ragged, custom-alignment and token-unit ragged graphs before any
+// plan builder sees them.
+TEST(TestHipFlash2EngineApiFloor, DeclinesGraphsNeedingANewerEngineApi)
+{
+    auto planBuilder
+        = std::make_unique<::testing::NiceMock<hip_kernel_provider::MockPlanBuilder>>();
+    ON_CALL(*planBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+    HipFlash2Engine engine;
+    engine.addPlanBuilder(std::move(planBuilder));
+
+    Handle handle;
+    using hip_kernel_provider::StampedGraph;
+    EXPECT_TRUE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION)));
+    EXPECT_FALSE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION)));
+    EXPECT_FALSE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION)));
 }
 
 } // namespace
