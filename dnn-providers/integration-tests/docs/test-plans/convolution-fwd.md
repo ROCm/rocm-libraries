@@ -87,7 +87,7 @@ larger than the padded input. The generator never writes an illegal graph.
 | F9 | Dilation | 1, 2, 3, 4; different per dimension; dilated filter equal to padded input (output 1) | ready | Q |
 | F10 | Symmetric padding | 0, 1, 2, 3; "same" (f // 2); "full" (f − 1); padding ≥ filter (border outputs read only padding); different per dimension | ready | Q |
 | F11 | Asymmetric padding | pre ≠ post: TF-style "same" with an even filter or stride 2 (pre 0, post 1), pre only, post only, different per dimension | GPU ref ready; CPU ref has no asymmetric test (I6) | Q (probe) |
-| F12 | Output size edge cases | output spatial 1; output larger than input (heavy padding); y dims and strides set explicitly vs inferred (dims and strides removed from the y tensor) | ready | PR |
+| F12 | Output size edge cases | output spatial 1; output larger than input (heavy padding); y dims and strides set explicitly vs inferred. **Inferred outputs are not a bundle case:** the graph JSON loader requires `dims` on every tensor (`TensorAttributes.hpp`), and a sweep case that removes them is dropped at registration with no failure. They stay a C++ graph test. | explicit: ready; inferred: C++ test | Q (explicit) |
 | F13 | `conv_mode` | `CROSS_CORRELATION`, `CONVOLUTION` (filter flipped) | **both refs** (I6) | Q (probe) |
 
 ### 2.2 Memory layout and tensor kind
@@ -348,7 +348,7 @@ that holds its graph; the levels cascade.
 | F15–F16 layout, strides | — | 1 case each | rank × dtype, 2 mixes and 3 stride kinds | paired with every S shape |
 | F19–F20 types | fp8 e4m3, double | each extra type and mixed pair once | × rank × layout | paired with every S shape |
 | F21 values | uniform | + zero, const, large | + tiny, × rank × dtype; A1, A2 (long accumulation) | × core; paired with every S shape; X4 |
-| F12, F35 | — | 1 case each | × rank × dtype | paired with every S shape |
+| F35 | — | 1 case | × rank × dtype | paired with every S shape |
 | H hazards | — | each H once (2D) | each H × every pair (2D); 1D, 3D × 2 pairs | — |
 | Model | — | M2, M9, M11 | M1–M12 × every pair of its rank | — |
 | Stress | — | — | — | X1–X4 (X3 fp16 and bf16) |
@@ -362,17 +362,16 @@ Cases generated (own level / cumulative):
 | Level | Plain conv | Fused | Own | Cumulative | Claim | Probe |
 |---|---|---|---|---|---|---|
 | quick | 30 | 109 | **139** | 139 | 62 | 77 |
-| PR | 102 | 164 | **266** | 405 | 91 | 175 |
-| nightly | 831 | 1,077 | **1,908** | 2,313 | 871 | 1,037 |
-| full | 949 | 2,281 | **3,230** | 5,543 | 1,027 | 2,203 |
+| PR | 101 | 164 | **265** | 404 | 91 | 174 |
+| nightly | 823 | 1,077 | **1,900** | 2,304 | 871 | 1,029 |
+| full | 884 | 2,281 | **3,165** | 5,469 | 1,027 | 2,138 |
 
-By size class: quick S 139. PR S 249, H 14, M 3. Nightly S 1,379, L 268, M 123,
-H 126, A 12. Full S 2,081, L 1,129, X 20. 268 distinct conv geometries in all.
+By size class: quick S 139. PR S 248, H 14, M 3. Nightly S 1,371, L 268, M 123,
+H 126, A 12. Full S 2,016, L 1,129, X 20. 268 distinct conv geometries in all.
 The cumulative count is higher than the first estimate (~3,800) because the
 core-cover rule now applies to all seven topologies, and because probe classes
-are crossed with rank and layout.
-
-Final per-level counts are fixed by a cold-cache timing run (I9); see §4.4.
+are crossed with rank and layout. Counts are those of the generator;
+`generate_conv_fwd_bundles.py --report` prints them again.
 
 ### 4.2 Probes and regressions
 
@@ -390,7 +389,7 @@ writes the reasons into `metadata.notes`:
 | Probe class | Items |
 |---|---|
 | Unsupported feature | F13 `CONVOLUTION`; F11 asymmetric padding; F19 fp8, int8, double; F1 4D spatial; F26 non-ReLU activation; F27–F29 scale, residual and chains beyond conv → bias → activation |
-| Awkward combination | F15 mixed layouts; F16 non-packed strides; F20 mixed precision and compute type; F25 bias variants; F30 materialised conv output; F31 io-type intermediate; F12 inferred output; F35 override shape |
+| Awkward combination | F15 mixed layouts; F16 non-packed strides; F20 mixed precision and compute type; F25 bias variants; F30 materialised conv output; F31 io-type intermediate; F35 override shape |
 | Value domain | F21 zero, const, large, tiny |
 | Hazard | every H shape; X3 (F18) |
 
@@ -436,8 +435,25 @@ Rejection probes are never in this register and are never trimmed.
 
 ### 4.5 Measured run
 
-See the measured run recorded in the pull request. It is repeated whenever the
-generator changes the level contents.
+One cold run of every level on gfx942 (MI300X, 64 CPUs, one GPU) with the MIOpen
+plugin, in 60-test chunks across 10 processes:
+
+| Level | Cases | Wall time |
+|---|---|---|
+| quick | 139 | 38 s |
+| PR | 265 | 31 s |
+| nightly | 1,900 | 42 s |
+| full | 3,165 | 42 s |
+
+The whole tree runs in under three minutes, against budgets of 5, 30, 60 min and
+none. Two facts drive the numbers. A case that no engine accepts skips in about
+1 ms, and most cases are of that kind. A case that executes costs 0.3–2 s of
+compile and solver search; GPU execution is milliseconds even for X2. The
+budgets therefore leave room to grow nightly by an order of magnitude, and the
+estimate in §4.4 holds: compile and solver search, not execution, set the cost.
+Run in chunks like this: one GPU fault (`hipErrorIllegalAddress`) makes every
+later test in the same process fail with error 700, so a single faulting case
+can hide thousands of results.
 
 ---
 
@@ -503,7 +519,7 @@ live sweep case, so no level that runs without `dvc pull` loses coverage.
 | Item | Rule |
 |---|---|
 | Verification | `auto`: golden → GPU reference → CPU reference. See [Verification modes](../running-tests.md#verification-modes). |
-| Tolerance | `TestTolerances.hpp` `conv::getToleranceFwd`. The maximum across graph nodes is used as atol and as rtol. Overrides go in the engine TOML. |
+| Tolerance | `TestTolerances.hpp` `conv::getToleranceFwd`. The maximum across graph nodes is used as atol and as rtol. Overrides go in the engine TOML. The fp32 default (1e-5, 1e-5) is below the numerical floor of a long reduction: the absolute error between two correct fp32 implementations grows with the accumulation length A = C/G × filter volume (observed on gfx942: 5e-5 at A ≤ 1,152; 1.9e-4 at A ≈ 4,600; 8e-3 at A ≈ 440,000). Every engine that runs L, M, H, A and X shapes in fp32 needs a tolerance class per A. Calibrate it from observed error; never loosen it to make a case pass. |
 | Support claims | Enforced. See [support-claim-enforcement.md](../support-claim-enforcement.md). Only `claim` cases are recorded (§4.2). |
 
 These features need reference or harness work before their cases can be judged
