@@ -55,7 +55,7 @@ public:
         }
     }
 
-    hipsparseLocalDnVec(const hipsparseLocalDnVec&)            = delete;
+    hipsparseLocalDnVec(const hipsparseLocalDnVec&) = delete;
     hipsparseLocalDnVec& operator=(const hipsparseLocalDnVec&) = delete;
 
     operator hipsparseDnVecDescr_t() const
