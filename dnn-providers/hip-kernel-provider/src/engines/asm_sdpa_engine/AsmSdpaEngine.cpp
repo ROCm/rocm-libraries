@@ -3,6 +3,8 @@
 
 #include "AsmSdpaEngine.hpp"
 
+#include "core/EngineApiFloor.hpp"
+
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
@@ -29,6 +31,10 @@ int64_t AsmSdpaEngine::staticId()
 bool AsmSdpaEngine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    if(hip_kernel_provider::core::needsNewerThanCompiledInEngineApi(opGraph))
+    {
+        return false;
+    }
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))

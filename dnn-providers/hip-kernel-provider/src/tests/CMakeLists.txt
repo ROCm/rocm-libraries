@@ -20,6 +20,7 @@ add_executable(
     core/TestContainer.cpp
     core/TestHandle.cpp
     core/TestContext.cpp
+    core/TestEngineApiFloor.cpp
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
     compilation/TestProgramAndKernel.cpp

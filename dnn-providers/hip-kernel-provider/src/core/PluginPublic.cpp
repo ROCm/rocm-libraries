@@ -13,7 +13,11 @@ using namespace hip_kernel_provider::core;
 #define HIPDNN_PLUGIN_HANDLE_TYPE Handle
 #define HIPDNN_PLUGIN_CONTEXT_TYPE Context
 
-#define HIPDNN_PLUGIN_API_VERSION "1.2.0"
+// The newest engine plugin API (hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION): ragged
+// tensors, custom tensor alignment and token-unit ragged offsets. Each engine still
+// declines what it cannot serve: an ingestor engine through its descriptor sdk_version,
+// the compiled-in engines through core/EngineApiFloor.hpp.
+#define HIPDNN_PLUGIN_API_VERSION "1.4.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

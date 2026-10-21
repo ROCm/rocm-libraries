@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
+#include "core/EngineApiFloor.hpp"
 
 namespace hip_flash2_engine
 {
@@ -22,6 +23,10 @@ void HipFlash2Engine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 bool HipFlash2Engine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    if(hip_kernel_provider::core::needsNewerThanCompiledInEngineApi(opGraph))
+    {
+        return false;
+    }
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))

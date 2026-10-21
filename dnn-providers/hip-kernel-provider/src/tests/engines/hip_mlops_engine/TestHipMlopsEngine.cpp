@@ -12,6 +12,7 @@
 
 #include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "mocks/StampedGraph.hpp"
 
 using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
@@ -336,4 +337,24 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppli
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+}
+
+// The plugin advertises a newer engine API than this engine is written against, so the
+// engine itself declines ragged, custom-alignment and token-unit ragged graphs before any
+// plan builder sees them.
+TEST(TestHipMlopsEngine, DeclinesGraphsNeedingANewerEngineApi)
+{
+    auto mockPlanBuilder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+    ON_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+    HipMlopsEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    Handle handle;
+    EXPECT_TRUE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION)));
+    EXPECT_FALSE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION)));
+    EXPECT_FALSE(engine.isApplicable(
+        handle, StampedGraph(hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION)));
 }
