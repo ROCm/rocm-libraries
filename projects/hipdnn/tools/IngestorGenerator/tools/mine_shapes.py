@@ -159,7 +159,9 @@ def _mask_from_attributes(
 
     The anchor is carried by the mask kind, not folded onto top-left: the two differ
     when Sq != Sk, and the UHD corpus deliberately includes that case. A window kind
-    has no anchor, so a bottom-right window across unequal lengths is refused.
+    has no anchor, so a bottom-right window across unequal lengths is refused. The
+    deprecated booleans merge into the stored bounds and alignment the way the ASM
+    SDPA engine's `plan_utils::resolveDiagonalBand` does.
     """
     alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
@@ -173,12 +175,18 @@ def _mask_from_attributes(
             raise SystemExit(
                 f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
-    if attrs.get("causal_mask"):
-        left, right, alignment = -1, 0, "TOP_LEFT"
-    elif attrs.get("causal_mask_bottom_right"):
-        left, right, alignment = -1, 0, "BOTTOM_RIGHT"
+    causal = attrs.get("causal_mask")
+    causal_bottom_right = attrs.get("causal_mask_bottom_right")
+    if causal and causal_bottom_right:
+        raise SystemExit(
+            f"FAIL: {path}: causal_mask and causal_mask_bottom_right are mutually exclusive"
+        )
     left = -1 if left is None else left
     right = -1 if right is None else right
+    if causal or causal_bottom_right:
+        right = max(right, 0)
+    if causal_bottom_right:
+        alignment = "BOTTOM_RIGHT"
     if left == -1 and right == -1:
         return {"mask_type": NO_MASK, "sliding_window": 0}
     bottom_right = alignment == "BOTTOM_RIGHT"

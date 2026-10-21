@@ -361,6 +361,36 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->split_k = 2;
         *arch = "gfx950";
         return 0;
+    case 34:
+        /* patch: a patch embedding (stride == filter, no padding) as one GEMM
+         * over the filter's (y, x, c) -- the tilde cshuffle store splits each
+         * column into a filter row and its run of X*C. */
+        spec->problem = rocke_conv_problem_make(4, 32, 32, 3, 64, 4, 4, 4, 4, 0, 0, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 64;
+        spec->tile_k = 64;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->epilogue = "cshuffle";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 4;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 4;
+        spec->lds_k_outer = true;
+        spec->uniform_k_decode = true;
+        spec->patch = true;
+        *arch = "gfx950";
+        return 0;
+    case 35:
+        /* patch with the scalar (default) tilde store and stride > filter. */
+        spec->problem = rocke_conv_problem_make(2, 30, 30, 4, 32, 2, 2, 3, 3, 0, 0, 1, 1);
+        spec->tile_k = 32;
+        spec->patch = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

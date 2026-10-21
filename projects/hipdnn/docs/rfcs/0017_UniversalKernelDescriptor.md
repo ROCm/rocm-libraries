@@ -1921,8 +1921,8 @@ and are worth stating here:
   mask-mode state machine inverts into a boolean disjunction over `$kernel.mask_mode`, because the
   kernel's own metadata supplies the value the C++ would have computed and compared. That
   inversion is the general recipe for porting a classifier into criteria data. It carries one
-  obligation the recipe must state: the machine is first-match-wins, so each arm has to negate the
-  arms above it. Transcribing the arms in source order encodes a different function, and in this
+  obligation the recipe must state: a first-match-wins machine obliges each arm to negate the arms
+  above it (the mask machine was one until it became resolve-then-classify). Transcribing the arms in source order encodes a different function, and in this
   family it reproduces a defect that shipped — a windowed causal graph served as plain causal,
   with the window silently discarded.
 - **Per-instance geometry rides on `$kernel.*`.** Measured cohorts that a formula over graph
