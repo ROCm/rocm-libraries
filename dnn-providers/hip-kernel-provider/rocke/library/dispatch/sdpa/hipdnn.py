@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from rocke.numeric.sdpa_reference import resolve_hipdnn_band
+
 from .common import SdpaBias, SdpaDropout, SdpaFp8, SdpaPaged, SdpaRequest, SdpaTensor
 
 __all__ = ["HIPDNN_DTYPES", "from_hipdnn", "from_hipdnn_graph"]
@@ -163,38 +165,14 @@ def _sdpa_tensor(entry: Mapping) -> SdpaTensor:
 
 
 def _resolve_band(attrs: Mapping) -> tuple[str, int, int]:
-    """``(diagonal, left_bound, right_bound)``, merging the deprecated flags.
-
-    Follows hipDNN's resolvers (``extractDiagonalBandParams`` in the CPU
-    reference, ``resolveDiagonalBand`` in the asm SDPA engine): a deprecated
-    flag acts as if its setter ran first (right bound 0, plus bottom-right
-    alignment for ``causal_mask_bottom_right``), and the stored bounds and
-    alignment are applied on top. ``causal_mask`` keeps the stored alignment.
-    """
-    causal = bool(attrs.get("causal_mask") or False)
-    causal_br = bool(attrs.get("causal_mask_bottom_right") or False)
-    if causal and causal_br:
-        raise ValueError(
-            "causal_mask and causal_mask_bottom_right are mutually exclusive "
-            "but both are set"
-        )
-    alignment = str(attrs.get("diagonal_alignment") or "TOP_LEFT").upper()
-    if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
-        raise ValueError(f"unknown diagonal_alignment {alignment!r}")
-    left = attrs.get("left_bound")
-    right = attrs.get("right_bound")
-    left = -1 if left is None else int(left)
-    right = -1 if right is None else int(right)
-    if left < -1 or right < -1:
-        raise ValueError(
-            "left_bound and right_bound must be >= -1 "
-            f"(got left_bound={left}, right_bound={right})"
-        )
-    if causal or causal_br:
-        right = right if right >= 0 else 0
-        if causal_br:
-            alignment = "BOTTOM_RIGHT"
-    return alignment.lower(), left, right
+    """``(diagonal, left_bound, right_bound)`` from the node's mask attributes."""
+    return resolve_hipdnn_band(
+        left_bound=attrs.get("left_bound"),
+        right_bound=attrs.get("right_bound"),
+        diagonal_alignment=attrs.get("diagonal_alignment"),
+        causal_mask=bool(attrs.get("causal_mask")),
+        causal_mask_bottom_right=bool(attrs.get("causal_mask_bottom_right")),
+    )
 
 
 def from_hipdnn(
