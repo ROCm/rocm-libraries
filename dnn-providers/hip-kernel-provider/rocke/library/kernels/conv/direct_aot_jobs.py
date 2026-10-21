@@ -333,6 +333,13 @@ DGRAD_WMMA_STRIDED_KNOBS = (
     (2, 4, 2, 4, 8, 2, 64, 2, True),
     (2, 4, 2, 4, 16, 1, 64, 2, True),
     (2, 4, 2, 4, 16, 2, 64, 2, True),
+    (1, 8, 3, 4, 16, 1, 64, 2, False),
+    (2, 2, 2, 6, 8, 2, 64, 2, False),
+    (2, 2, 2, 6, 16, 1, 32, 2, False),
+    (2, 2, 2, 6, 16, 2, 32, 2, False),
+    (2, 2, 2, 6, 16, 2, 64, 2, False),
+    (2, 4, 2, 6, 16, 2, 64, 2, False),
+    (4, 2, 2, 6, 16, 1, 32, 2, False),
 )
 # 2x2 stride 2 (patch merge): every phase is a 1x1, all four share one B
 # fragment, so wider channel blocks pay off.
