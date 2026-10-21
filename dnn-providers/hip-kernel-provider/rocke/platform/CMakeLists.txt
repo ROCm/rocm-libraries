@@ -967,7 +967,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
-        "tests/library/tests/test_gfx942_4wgqa_q_tail_numeric.py"
+        "tests/library/tests/test_gfx942_4wgqa_tail_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"

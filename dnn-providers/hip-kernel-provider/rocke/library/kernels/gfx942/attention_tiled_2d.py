@@ -6354,13 +6354,40 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
-    def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
-        pb = b.global_load_i32(BT, lblk)
-        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+    kv_desc = TensorDescriptor.naive(
+        "kv_cache",
+        lengths=[1 << 24, BS, HKV, HD],
+        coord_names=("physical_block", "token", "kv_head", "dim"),
+    ).transform(
+        indirect(
+            "logical_block",
+            into="physical_block",
+            table=BT,
+            base=b.mul(sid, bt_stride_p),
+        ),
+    )
+    kv_pos_desc = kv_desc.transform(
+        unmerge("kv_pos", into=("logical_block", "token"), dims=(1 << 24, BS))
+    )
+    kv_tile_desc = kv_desc.transform(
+        unmerge("tile_key", into=("block_in_tile", "token"), dims=(BPT, BS)),
+        embed(("tile", "block_in_tile"), into="logical_block", strides=(BPT, 1)),
+    )
+    # Keys past klen in the last tile are masked (P = 0), but 0 * NaN is NaN: clamp them to the
+    # sequence's last key so their block-table entry and cache slot are the sequence's own. Only
+    # tiles of the masked loops can reach past klen; the interior loop keeps the (tile, key in
+    # tile) address, whose key split is loop-invariant, which this VALU-bound kernel needs.
+    last_key = b.sub(klen, b.const_i32(1))
+
+    def kv_elem(kv, keytile, dim, clamp):
+        if clamp:
+            pos = b.smin(b.add(b.mul(kv, b.const_i32(BN)), keytile), last_key)
+            off, _ = kv_pos_desc.offset(b, kv_pos=pos, kv_head=kvh, dim=dim)
+        else:
+            off, _ = kv_tile_desc.offset(
+                b, tile=kv, tile_key=keytile, kv_head=kvh, dim=dim
+            )
+        return off
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)
@@ -6457,15 +6484,12 @@ def build_gfx942_4warp_gqa(
                     _rnb = b.add(b.const_i32(_kk * K), b.add(_kbapl, b.const_i32(_j)))
                     SWZ_V[(_kk, _nt, _j)] = swz(_rnb, _colv)
 
-    def fill_tile(tkv, buf_off):
+    def fill_tile(tkv, buf_off, clamp):
         for c in range(v_fill_nloads):
             lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
             key = b.div(lin, b.const_i32(HD))
             hd = b.mod(lin, b.const_i32(HD))
-            pk = phys_key(tkv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
+            velem = kv_elem(tkv, key, hd, clamp)
             row = b.add(buf_off, key)
             b.smem_store_vN(
                 V_lds,
@@ -6482,17 +6506,14 @@ def build_gfx942_4warp_gqa(
                 )
 
     def fill_load(
-        tkv,
+        tkv, clamp
     ):  # PREFETCH phase 1: issue global loads early -> latency hides under compute
         pf = []
         for c in range(v_fill_nloads):
             lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
             key = b.div(lin, b.const_i32(HD))
             hd = b.mod(lin, b.const_i32(HD))
-            pk = phys_key(tkv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
+            velem = kv_elem(tkv, key, hd, clamp)
             vr = b.global_load_vN(Vp, velem, dtype, 8, align=16)
             kr = b.global_load_vN(Kp, velem, dtype, 8, align=16)
             pf.append((vr, kr, key, hd))
@@ -6515,7 +6536,7 @@ def build_gfx942_4warp_gqa(
             buf_off = b.mul(
                 b.mod(kv, b.const_i32(2)), b.const_i32(32)
             )  # prefilled buffer (pipeline)
-            pk_kt = None
+            k_row = None
             knext = b.select(
                 b.cmp_lt(b.add(kv, b.const_i32(1)), kvend),
                 b.add(kv, b.const_i32(1)),
@@ -6525,15 +6546,20 @@ def build_gfx942_4warp_gqa(
                 b.mod(b.add(kv, b.const_i32(1)), b.const_i32(2)), b.const_i32(32)
             )
             pf = fill_load(
-                knext
+                knext, masked
             )  # issue next-tile loads NOW (hide under this tile's QK/softmax/PV)
         else:
             buf_off = b.const_i32(0)  # D256: single buffer, fill current tile in-body
             b.sync()  # D256 WAR: guard prev-iter PV V_lds reads before overwrite
-            fill_tile(kv, buf_off)
+            fill_tile(kv, buf_off, masked)
             b.sync()  # D256 RAW: V_lds ready
-            pk_kt = [
-                phys_key(kv, b.add(b.const_i32(kt * 32), ld.m_in_atom))
+            k_row = [
+                kv_elem(
+                    kv,
+                    b.add(b.const_i32(kt * 32), ld.m_in_atom),
+                    b.const_i32(0),
+                    masked,
+                )
                 for kt in range(NKEYT)
             ]
         S_T = [at.zero_acc(b) for _ in range(NKEYT)]
@@ -6549,13 +6575,7 @@ def build_gfx942_4warp_gqa(
                     _kcol = SWZ_K[(h, kt)] if _SWZH else swz(row_k, koff)
                     kf = b.smem_load_vN(K_lds, row_k, _kcol, dtype=dtype, n=APL)
                 else:
-                    kelem = b.add(
-                        b.mul(
-                            b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh),
-                            b.const_i32(HD),
-                        ),
-                        koff,
-                    )
+                    kelem = b.add(k_row[kt], koff)
                     kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
                 S_T[kt] = at.emit(b, kf, q, S_T[kt])
         Sm = [[None] * CPL for _ in range(NKEYT)]
@@ -6679,17 +6699,26 @@ def build_gfx942_4warp_gqa(
 
     if HD128_PIPE:  # pipeline prologue: prefill first tile (D256/bs64 fills in-body)
         with b.scf_if(b.cmp_lt(kvstart, kvend)):
-            fill_tile(kvstart, b.mul(b.mod(kvstart, b.const_i32(2)), b.const_i32(32)))
+            fill_tile(
+                kvstart, b.mul(b.mod(kvstart, b.const_i32(2)), b.const_i32(32)), True
+            )
         b.sync()
     l1 = run_loop(kvstart, _a, iters, True, "kva")
     it1 = [("m2", l1.results[0]), ("l2", l1.results[1])] + [
         (f"b{nt}", l1.results[2 + nt]) for nt in range(NDdim)
     ]
-    l2 = run_loop(_a, _bnd, it1, False, "kvb")
+    # The D128 pipe prefetches tile kv+1 unclamped in the interior loop, so that loop stops one
+    # tile early: its last prefetch would be the first masked tile.
+    _bnd2 = (
+        b.select(b.cmp_lt(_a, _bnd), b.sub(_bnd, b.const_i32(1)), _bnd)
+        if HD128_PIPE
+        else _bnd
+    )
+    l2 = run_loop(_a, _bnd2, it1, False, "kvb")
     it2 = [("m3", l2.results[0]), ("l3", l2.results[1])] + [
         (f"c{nt}", l2.results[2 + nt]) for nt in range(NDdim)
     ]
-    l3 = run_loop(_bnd, kvend, it2, True, "kvc")
+    l3 = run_loop(_bnd2, kvend, it2, True, "kvc")
     m_f = l3.results[0]
     l_f = l3.results[1]
     accs_f = l3.results[2:]

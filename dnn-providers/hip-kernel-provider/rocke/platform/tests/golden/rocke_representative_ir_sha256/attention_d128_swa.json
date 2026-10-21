@@ -5,10 +5,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 397634,
+          "bytes": 398131,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "db8fc3cdabc858f487ad448bd98e49a7014d898c977b3c9e968072ba55124bff",
+          "sha256": "e38f87c6dac61f02aa3d2da4f1cda4a0f208054aaba87c11ad5b3f2a91869805",
           "status": "ok"
         }
       },
@@ -18,10 +18,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 397641,
+          "bytes": 398138,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "fd854b28026d6853e4dd038dfd7b4f9868b664d3c3270c2adfa6c9c1338046ee",
+          "sha256": "78d21bbf9f7c86a90dae4cf1c82cd439bbb68979565a5a845c9f1099c6bf6fa4",
           "status": "ok"
         }
       },
@@ -31,10 +31,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 397705,
+          "bytes": 398202,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "d20dead7ae7170c50ef906fcbdd38d7f5e72f5762820a0d3fc8ff40841d0b167",
+          "sha256": "b6b46c50f6f9ab7100b30ee17b0cd14f80feb9fe723c3ab454f7a7c964a5a366",
           "status": "ok"
         }
       },
@@ -44,10 +44,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 397705,
+          "bytes": 398202,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
-          "sha256": "d20dead7ae7170c50ef906fcbdd38d7f5e72f5762820a0d3fc8ff40841d0b167",
+          "sha256": "b6b46c50f6f9ab7100b30ee17b0cd14f80feb9fe723c3ab454f7a7c964a5a366",
           "status": "ok"
         }
       },
