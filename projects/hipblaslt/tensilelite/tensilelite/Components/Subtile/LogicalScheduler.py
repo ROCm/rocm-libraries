@@ -4625,6 +4625,13 @@ class LogicalScheduler:
             if self.config.numSubIterK >= 2 and has_ab_holes:
                 return {}, self._operandLendVgprs(dead_ids)
             return None, self._operandLendVgprs(None)
+        # Small tile (MT<=256x256): normally no lend (the loop has headroom).  But the
+        # DPP store-fold needs a >=4-entry fused-store batch (two M-pairs) to coalesce,
+        # and availableBlockMaxVgpr only reaches that once the dead operand tiles are
+        # freed.  Small tiles have no woven tail (every MFMA already retired), so lending
+        # all operand tiles is safe; the batch sizer then grows to a fold-capable size.
+        if kernel.get("DPPStoreFold"):
+            return None, self._operandLendVgprs(None)
         return {}, []
 
     def _plsinStagedStoreCount(self, weaveGroups, lendTiles, storeCfg=None):

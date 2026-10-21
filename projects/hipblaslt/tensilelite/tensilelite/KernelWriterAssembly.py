@@ -17613,6 +17613,11 @@ class KernelWriterAssembly(KernelWriter):
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
     vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
     numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
+    # DPP store-fold (SubtileStoreCachelineFill) extras. Allocated only when
+    # isSubtileFold; batchB/store data reuse the +0..+3 pack quad (vgprStoreData==base).
+    vgprStoreData: int = -1       # blended store-data quad (reuses the pack quad)
+    vgprVoff: int = -1            # per-store blended voffset (base vs base+64B by odd-lane mask)
+    vgprBlendTmp: int = -1        # scratch for the quad_perm data/addr blend
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -18305,6 +18310,23 @@ class KernelWriterAssembly(KernelWriter):
         # active feature appends its own disjoint sub-window, so no two offsets collide.
         base = 7 if kernel.get("UseSubtileImpl") else 4
         nxt  = base
+        # DPP store-fold (SubtileStoreCachelineFill): append 2 cvt VGPRs for the per-store
+        # voffset blend (vVoff) and the quad_perm blend temp (vBlend).  The blended store
+        # data reuses the +0..+3 pack quad (vgprStoreData==cvtVgpr).  The +9-register cvt
+        # footprint is absorbed by the DPPStoreFold-driven operand lend (see
+        # _selectPlsinFusedStorePolicy), so the high-water does not grow.  MIWaveTile[0]==8
+        # is the proven config; other tiles take the fold only if the 9 VGPRs fit.
+        miwt = kernel.get("MIWaveTile", [0, 0])
+        maxVgpr = self.states.regCaps["MaxVgpr"]
+        foldFits = (self.vgprPool.size() + 9) <= maxVgpr
+        isSubtileFold = (kernel.get("DPPStoreFold")
+                         and kernel.get("UseSubtileImpl")
+                         and len(miwt) >= 2 and miwt[0] >= 4
+                         and (miwt[0] == 8 or foldFits))
+        foldVoff = foldBlend = -1
+        if isSubtileFold:
+          foldVoff, foldBlend = nxt, nxt + 1
+          nxt += 2
         numCvtVgprs = nxt if kernel.get("UseSubtileImpl") else 4
         # Paired-store pack ring is blk-sched's permlane16 paired-store mechanism, held in
         # its own allocation rather than appended to the cvt block (growing that block
@@ -18332,7 +18354,10 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprPairPackRing=pairRing, \
-                                               numPairPackQuads=pairQuads)
+                                               numPairPackQuads=pairQuads, \
+                                               vgprStoreData=(cvtVgpr) if isSubtileFold else -1, \
+                                               vgprVoff=(cvtVgpr+foldVoff) if isSubtileFold else -1, \
+                                               vgprBlendTmp=(cvtVgpr+foldBlend) if isSubtileFold else -1)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")

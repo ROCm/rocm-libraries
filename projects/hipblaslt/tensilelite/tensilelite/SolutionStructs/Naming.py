@@ -258,6 +258,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # DPPStoreFold=0 is what every shipped kernel already has, so naming it only
+    # when set keeps the DPPSF token off the existing (unfolded) kernel names.
+    if state.get("DPPStoreFold", 0):
+      requiredParametersTemp.add("DPPStoreFold")
+    else:
+      requiredParametersTemp.discard("DPPStoreFold")
+
     # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
     if state.get("LDSSegmentBRotate", 0):
       requiredParametersTemp.add("LDSSegmentBRotate")

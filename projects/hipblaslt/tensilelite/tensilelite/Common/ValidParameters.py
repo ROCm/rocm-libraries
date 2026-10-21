@@ -585,6 +585,12 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # DPP store-fold (SubtileStoreCachelineFill): on UseSubtileImpl bf16 stores,
+    # coalesce two M-adjacent paired dwordx4 stores into all-lanes DPP-blended
+    # stores (quad_perm [0,0,2,2]/[1,1,3,3] + odd-lane cndmask), removing the
+    # 50%-cacheline write-amplification. gfx950 only; also drives a small-tile
+    # operand lend so the fused-store batch is large enough to fold.
+    "DPPStoreFold": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
