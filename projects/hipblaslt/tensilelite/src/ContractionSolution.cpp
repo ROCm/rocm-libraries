@@ -6839,6 +6839,10 @@ namespace TensileLite
         if(problem.getParams().uniformSummationOrder() == 0)
             return;
 
+        // Dynamic work queue currently processes full tiles only
+        if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
+            return;
+
         const std::string reason = uniformSummationOrderLaunchObstacle(
             problem, hardware, launch, resolvedGlobalAccumulation, gsu, synchronizer, true);
         if(!reason.empty())
