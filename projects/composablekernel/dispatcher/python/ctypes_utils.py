@@ -319,7 +319,13 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             errors.append(f"Preshuffle requires tile_k >= 32, got {config.tile_k}")
             suggested_fixes["tile_k"] = 32
 
-    elif variant == "multi_d":
+    else:
+        from codegen_common import packed_b_pipeline_reject_reason
+        reason = packed_b_pipeline_reject_reason(pipeline, preshuffle=False)
+        if reason:
+            errors.append(reason)
+
+    if variant == "multi_d":
         # Multi-D has standard GEMM constraints
         # Could add specific constraints here if needed
         pass

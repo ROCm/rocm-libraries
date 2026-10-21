@@ -42,6 +42,7 @@ from enum import Enum
 import logging
 from codegen_common import (
     PACKED_B_PIPELINES,
+    packed_b_pipeline_reject_reason,
     preshuffle_pipeline_reject_reason,
     preshuffle_tile_reject_reason,
 )
@@ -812,6 +813,16 @@ class ArchFilter:
                 config.warp_tile_n,
                 config.warp_tile_k,
             )
+            if reason:
+                result.add_error(reason)
+
+        if config.operator in (
+            OperatorType.GEMM,
+            OperatorType.GEMM_MULTI_D,
+            OperatorType.GEMM_GROUPED,
+            OperatorType.GEMM_STREAMK,
+        ):
+            reason = packed_b_pipeline_reject_reason(config.pipeline, preshuffle=False)
             if reason:
                 result.add_error(reason)
 

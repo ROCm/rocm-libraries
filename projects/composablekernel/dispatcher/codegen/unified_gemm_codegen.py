@@ -42,6 +42,8 @@ from codegen_common import (
     PACKED_B_PIPELINES,
     PRESHUFFLE_GFX1250_PIPELINES,
     preshuffle_pipeline_reject_reason,
+    packed_b_pipeline_reject_reason,
+    is_true,
     gemm_lockstep_vector_bytes,
     gemm_default_epilogue_vector_size,
     gemm_vector_size_suffix,
@@ -1834,7 +1836,9 @@ class UnifiedGemmCodegen:
         for tile, trait in itertools.product(tile_configs, trait_configs):
             # gfx1250 pipelines (non-MX comp_async / comp_tdm*) and the TDM
             # epilogue: exact-arch, variant and trait gate.
-            reason = self._gfx1250_pipeline_reject_reason(
+            reason = packed_b_pipeline_reject_reason(
+                trait.pipeline, variant == GemmVariant.PRESHUFFLE
+            ) or self._gfx1250_pipeline_reject_reason(
                 tile, trait, variant
             ) or gfx1250_fp32_tile_reject_reason(
                 self.gpu_target,
@@ -2054,13 +2058,19 @@ class UnifiedGemmCodegen:
             # ANY configured pipeline/scheduler; the precise per-trait check
             # happens later in _get_configs_for_variant. Filtering here with a
             # single hard-coded pipeline (compv4) wrongly dropped tiles that are
-            # legal under mem/compv3.
+            # legal under mem/compv3. Packed-B pipelines exist only in the
+            # preshuffle variant, so they are checked under its rules.
             if self.arch_filter and HAS_ARCH_FILTER:
                 trait_cfg = self.config.get("trait_config", {})
                 pipelines = trait_cfg.get("pipeline") or ["compv4"]
                 schedulers = trait_cfg.get("scheduler") or ["intrawave"]
                 if not any(
-                    self._is_tile_arch_valid(tile, pipeline=pl, scheduler=sc)
+                    self._is_tile_arch_valid(
+                        tile,
+                        variant=GemmVariant.PRESHUFFLE if pl in PACKED_B_PIPELINES else None,
+                        pipeline=pl,
+                        scheduler=sc,
+                    )
                     for pl in pipelines
                     for sc in schedulers
                 ):
@@ -2214,7 +2224,9 @@ class UnifiedGemmCodegen:
             tc.get("vector_size_b", [0]),
             tc.get("vector_size_c", [0]),
         ):
-            trait = TraitConfig(*params)
+            # JSON configs may spell the boolean traits as strings ("false").
+            pads_persistent = tuple(is_true(v) for v in params[3:7])
+            trait = TraitConfig(*params[:3], *pads_persistent, *params[7:])
 
             # Basic trait validation (unsupported combinations)
             if not trait.is_valid():

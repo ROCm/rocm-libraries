@@ -2684,10 +2684,12 @@ def expand_sweep(
     pipelines = _expand_values(tr.get("pipeline"), ["compv3"])
     schedulers = _expand_values(tr.get("scheduler"), ["intrawave"])
     epilogues = _expand_values(tr.get("epilogue"), ["cshuffle"])
-    pad_ms = _expand_values(tr.get("pad_m"), [False])
-    pad_ns = _expand_values(tr.get("pad_n"), [False])
-    pad_ks = _expand_values(tr.get("pad_k"), [False])
-    persistents = _expand_values(tr.get("persistent"), [False])
+    # JSON configs may spell the boolean traits as strings ("false").
+    is_true = _codegen_common().is_true
+    pad_ms = [is_true(v) for v in _expand_values(tr.get("pad_m"), [False])]
+    pad_ns = [is_true(v) for v in _expand_values(tr.get("pad_n"), [False])]
+    pad_ks = [is_true(v) for v in _expand_values(tr.get("pad_k"), [False])]
+    persistents = [is_true(v) for v in _expand_values(tr.get("persistent"), [False])]
     if vector_sizes is None:
         vector_sizes = list(
             itertools.product(

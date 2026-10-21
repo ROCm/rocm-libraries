@@ -29,6 +29,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 import codegen_common as cc  # noqa: E402
 from arch_filter import ArchFilter, KernelConfig, OperatorType  # noqa: E402
+from gemm_utils import expand_sweep  # noqa: E402
 from unified_gemm_codegen import GemmVariant, UnifiedGemmCodegen  # noqa: E402
 
 
@@ -73,7 +74,7 @@ def _single_config_json(pipeline, pad=False, warp_tile_k=32, **tile):
 
 
 def _generate(pipeline, gpu_target, layout="rcr", pad=None, datatype="fp16", warp_tile_k=32,
-              **tile):
+              variant=GemmVariant.PRESHUFFLE, **tile):
     pad = _full_pads(pipeline) if pad is None else pad
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -81,7 +82,7 @@ def _generate(pipeline, gpu_target, layout="rcr", pad=None, datatype="fp16", war
         cfg.write_text(json.dumps(_single_config_json(pipeline, pad, warp_tile_k, **tile)))
         gen = UnifiedGemmCodegen(
             root / "out", datatype=datatype, layout=layout, gpu_target=gpu_target,
-            config_file=cfg, variants=[GemmVariant.PRESHUFFLE],
+            config_file=cfg, variants=[variant],
         )
         result = gen.generate_all(parallel=False)
         return [Path(k).read_text() for k in result["kernels"]]
@@ -283,6 +284,49 @@ class TestCodegen(unittest.TestCase):
                 # The dispatcher must reject the partial N/K tiles the TDM launcher throws on.
                 full_nk = str(pipeline in cc.TDM_PIPELINES).lower()
                 self.assertIn(f"static constexpr bool RequiresFullNKTiles = {full_nk};", kernels[0])
+
+
+    def test_packed_b_pipelines_rejected_outside_preshuffle(self):
+        # Only the preshuffle variant packs B on the host.
+        for pipeline in cc.PACKED_B_PIPELINES:
+            for arch in ("gfx942", "gfx1250"):
+                with self.subTest(pipeline=pipeline, arch=arch):
+                    self.assertEqual(_generate(pipeline, arch, variant=GemmVariant.STANDARD), [])
+                    config = KernelConfig(
+                        datatype_a="fp16", datatype_b="fp16", datatype_c="fp32", **TILE,
+                        pipeline=pipeline, scheduler="default", operator=OperatorType.GEMM,
+                    )
+                    self.assertFalse(ArchFilter(arch).validate_kernel(config).valid)
+        self.assertEqual(len(_generate("preshuffle_tdm", "gfx1250")), 1)
+
+    def test_string_pad_flags_emit_like_booleans(self):
+        # JSON configs may spell the pads as strings; "false" must not mean padded.
+        for pipeline in cc.PRESHUFFLE_GFX1250_PIPELINES:
+            pad = _full_pads(pipeline)
+            with self.subTest(pipeline=pipeline):
+                kernels = _generate(pipeline, "gfx1250", pad=str(pad).lower())
+                self.assertEqual(kernels, _generate(pipeline, "gfx1250", pad=pad))
+                self.assertEqual(len(kernels), 1)
+
+
+class TestExpandSweep(unittest.TestCase):
+    def test_string_pad_flags_sweep_like_booleans(self):
+        config = json.loads((DISPATCHER_DIR.parent / "tile_engine/ops/gemm/gemm_preshuffle/"
+                             "configs/default_config_gfx1250.json").read_text())
+
+        def names(pads):
+            for pad in ("pad_m", "pad_n", "pad_k"):
+                config["trait_config"][pad]["values"] = pads
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+                json.dump(config, f)
+                f.flush()
+                return sorted(c.name for c in expand_sweep(
+                    f.name, arch="gfx1250", dtype="fp16", variant="preshuffle"))
+
+        expected = names([False, True])
+        for pipeline in cc.PRESHUFFLE_GFX1250_PIPELINES:
+            self.assertTrue(any(f"_rcr_{pipeline}_" in n for n in expected), pipeline)
+        self.assertEqual(names(["false", "true"]), expected)
 
 
 if __name__ == "__main__":

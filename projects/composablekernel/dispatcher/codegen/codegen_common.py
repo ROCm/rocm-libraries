@@ -1476,9 +1476,20 @@ PRESHUFFLE_PAD_NK_REJECT_REASON = (
 PRESHUFFLE_WARP_K1_PIPELINES = PACKED_B_PIPELINES + ("comp_async",)
 
 
-def _is_true(value) -> bool:
+def is_true(value) -> bool:
     """Accept both JSON booleans and their string spellings."""
     return value is True or str(value).lower() == "true"
+
+
+def packed_b_pipeline_reject_reason(pipeline: str, preshuffle: bool) -> str:
+    """Reason string if a packed-B pipeline is used outside the preshuffle op, else "".
+
+    These pipelines read B packed by the host shuffle_b_v0, which only the
+    preshuffle variant performs; any other GEMM would compute from unpacked B.
+    """
+    if pipeline in PACKED_B_PIPELINES and not preshuffle:
+        return f"{pipeline} reads preshuffled B, so only the preshuffle variant can use it"
+    return ""
 
 
 def preshuffle_pipeline_reject_reason(
@@ -1516,7 +1527,7 @@ def preshuffle_pipeline_reject_reason(
     arch = normalize_gfx_arch(gpu_target)
     pads = (pad_m, pad_n, pad_k)
     if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
-        pad_nk = _is_true(pad_n) or _is_true(pad_k)
+        pad_nk = is_true(pad_n) or is_true(pad_k)
         return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
     if arch and arch != GFX1250_ARCH:
         return f"pipeline {pipeline!r} requires {GFX1250_ARCH}, got {arch!r}"
@@ -1528,9 +1539,9 @@ def preshuffle_pipeline_reject_reason(
     want_epilogue = "tdm" if pipeline in TDM_PIPELINES else "cshuffle"
     if epilogue and epilogue != want_epilogue:
         return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
-    if pipeline != "comp_async" and any(_is_true(p) for p in pads):
+    if pipeline != "comp_async" and any(is_true(p) for p in pads):
         return TDM_PAD_REJECT_REASON
-    if pipeline == "comp_async" and None not in pads and not all(_is_true(p) for p in pads):
+    if pipeline == "comp_async" and None not in pads and not all(is_true(p) for p in pads):
         return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
