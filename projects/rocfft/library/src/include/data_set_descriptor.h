@@ -24,9 +24,11 @@
 #include "rocfft/rocfft.h"
 
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // Label distinguishing between input and output data layouts where or
@@ -198,6 +200,19 @@ struct data_descriptor_t
      * @return The total number of axes (length and batch axes).
      */
     size_t get_full_rank() const;
+    /**
+     * @return The array type of the data set (`rocfft_array_type_unset` if not provided).
+     */
+    rocfft_array_type get_array_type() const;
+    /**
+     * @return Whether a precision was provided for the data set.
+     */
+    bool has_precision() const;
+    /**
+     * @return The precision of the data set.
+     * @throw std::logic_error if no precision was provided (see `has_precision`).
+     */
+    rocfft_precision get_precision() const;
     /**
      * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
@@ -491,8 +506,17 @@ private:
     std::vector<axis_t> len_axes;
     std::vector<axis_t> batch_axes;
 
-    // Default array type that stores information about the FFT. Can be set in the constructor.
+    // Array type of the data set's elements; unset until provided.
     rocfft_array_type array_type = rocfft_array_type_unset;
+
+    // Marker for "no precision provided". Stored as the enum's underlying integer
+    // type because rocfft_precision has no unset value and out-of-range enum
+    // values are undefined behavior. Never exposed outside this struct.
+    static constexpr std::underlying_type_t<rocfft_precision> precision_unset
+        = std::numeric_limits<std::underlying_type_t<rocfft_precision>>::max();
+
+    // Precision of the data set's elements; precision_unset until provided.
+    std::underlying_type_t<rocfft_precision> precision = precision_unset;
 
     // If the current object captures the data layout for a sub-dimensional data set
     // embedded within another, an embedding map is required to keep track of which of
