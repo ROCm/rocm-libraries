@@ -131,10 +131,17 @@ def test_coverage_row_is_represented(case, feature):
 # --- normalization --------------------------------------------------------------
 
 
-def test_negative_bounds_read_as_unbounded():
-    req = replace(BASE, left_bound=-7, right_bound=-2)
+def test_minus_one_is_unbounded_and_is_kept():
+    req = replace(BASE, left_bound=-1, right_bound=-1)
     assert (req.left_bound, req.right_bound) == (-1, -1)
-    assert req == replace(BASE, left_bound=-1, right_bound=-1)
+    assert req.features() == BASE.features()
+
+
+@pytest.mark.parametrize("left, right", [(-2, -1), (-1, -2), (-7, -2), (-4, 0)])
+def test_bounds_below_minus_one_are_rejected(left, right):
+    """hipDNN's resolvers throw for a bound < -1; it must not read as unbounded."""
+    with pytest.raises(ValueError, match=r"must be >= -1"):
+        replace(BASE, left_bound=left, right_bound=right)
 
 
 @pytest.mark.parametrize("arch", ["GFX950", " gfx950 ", "gfx950:sramecc+:xnack-"])

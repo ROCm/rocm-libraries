@@ -13,7 +13,8 @@ plus what a direct Python caller could break (ranks, strides, literals).
 The request is normalized on construction, so one meaning has one spelling and
 :meth:`SdpaRequest.normalized` is a stable cache key:
 
-- negative band bounds read as ``-1`` (unbounded), as hipDNN's mask resolver does;
+- a band bound is ``-1`` (unbounded) or ``>= 0``; hipDNN's resolvers reject
+  anything below ``-1``, so this does too;
 - the scale has exactly one source, and ``scale`` is ``1.0`` unless that source is
   ``"value"``;
 - a bias is right-aligned to rank 4, and every size-1 bias dim has stride 0.
@@ -393,9 +394,8 @@ class SdpaRequest(OperatorRequest):
         object.__setattr__(
             self, "arch", base_arch_from_target_id(self.arch.strip().lower())
         )
-        left, right = int(self.left_bound), int(self.right_bound)
-        object.__setattr__(self, "left_bound", -1 if left < 0 else left)
-        object.__setattr__(self, "right_bound", -1 if right < 0 else right)
+        object.__setattr__(self, "left_bound", int(self.left_bound))
+        object.__setattr__(self, "right_bound", int(self.right_bound))
         if self.scale_source != "value":
             object.__setattr__(self, "scale", 1.0)
         object.__setattr__(self, "scale", float(self.scale))
@@ -410,6 +410,11 @@ class SdpaRequest(OperatorRequest):
         _check_choice(self.diagonal, _DIAGONALS, "diagonal")
         _check_choice(self.scale_source, _SCALE_SOURCES, "scale_source")
         _check_choice(self.implementation, _IMPLEMENTATIONS, "implementation")
+        if self.left_bound < -1 or self.right_bound < -1:
+            raise ValueError(
+                "left_bound and right_bound must be >= -1 (-1 is unbounded), got "
+                f"left_bound={self.left_bound}, right_bound={self.right_bound}"
+            )
 
         for name in ("q", "k", "v", "o"):
             rank = len(getattr(self, name).dims)

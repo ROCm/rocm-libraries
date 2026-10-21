@@ -162,12 +162,27 @@ def test_from_hipdnn_accepts_a_uid_mapping():
         ),
         # An unset right bound (-1) does not override the flag's right bound of 0.
         ({"causal_mask": True, "right_bound": -1}, ("top_left", -1, 0)),
-        ({"left_bound": -4, "right_bound": -9}, ("top_left", -1, -1)),
     ],
 )
 def test_mask_merges_deprecated_flags_like_hipdnn(attributes, band):
     req = _request(attributes=attributes)
     assert (req.diagonal, req.left_bound, req.right_bound) == band
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {"left_bound": -4, "right_bound": -9},
+        {"left_bound": -2},
+        {"right_bound": -2},
+        # The flag's right bound of 0 must not mask an invalid stored bound.
+        {"causal_mask": True, "right_bound": -5},
+        {"causal_mask_bottom_right": True, "left_bound": -3},
+    ],
+)
+def test_bounds_below_minus_one_are_rejected_like_hipdnn(attributes):
+    with pytest.raises(ValueError, match=r"must be >= -1"):
+        _request(attributes=attributes)
 
 
 def test_flag_with_a_stored_left_bound_is_a_window_not_causal():

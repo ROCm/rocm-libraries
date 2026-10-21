@@ -185,6 +185,11 @@ def _resolve_band(attrs: Mapping) -> tuple[str, int, int]:
     right = attrs.get("right_bound")
     left = -1 if left is None else int(left)
     right = -1 if right is None else int(right)
+    if left < -1 or right < -1:
+        raise ValueError(
+            "left_bound and right_bound must be >= -1 "
+            f"(got left_bound={left}, right_bound={right})"
+        )
     if causal or causal_br:
         right = right if right >= 0 else 0
         if causal_br:
