@@ -36,7 +36,7 @@
 /// @brief hipDNN placeholder so signatures naming it compile; graph capture is unsupported.
 using cudaGraph_t = void*;
 
-// cudnnHandle_t and the backend C types live in detail/backend/c_types.h;
+// cudnnHandle_t and the backend C types live in detail/c_types.h;
 // cudnnBackendExecute and cudnnGetLastErrorString live in cudnn_graph.h.
 
 // Needs cudnnStatus_t; used by the entry points below.

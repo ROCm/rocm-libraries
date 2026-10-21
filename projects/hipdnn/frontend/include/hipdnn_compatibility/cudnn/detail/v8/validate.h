@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>

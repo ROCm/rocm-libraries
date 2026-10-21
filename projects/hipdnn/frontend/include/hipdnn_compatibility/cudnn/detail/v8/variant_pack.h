@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-#include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>

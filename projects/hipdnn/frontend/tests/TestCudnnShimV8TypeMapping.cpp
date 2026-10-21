@@ -231,12 +231,6 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
     X(UNIFORM)                             \
     X(NORMAL)
 
-#define HIPDNN_TEST_FE_MOE_GROUPED_MATMUL_MODE(X) \
-    X(NOT_SET)                                    \
-    X(NONE)                                       \
-    X(GATHER)                                     \
-    X(SCATTER)
-
 #define HIPDNN_TEST_FE_DESCRIPTOR_TYPE(X)               \
     X(NOT_SET)                                          \
     X(POINTWISE_DESCRIPTOR)                             \
@@ -336,7 +330,6 @@ HIPDNN_TEST_FE_ENUM(ReshapeMode_t, HIPDNN_TEST_FE_RESHAPE_MODE)
 HIPDNN_TEST_FE_ENUM(KnobType_t, HIPDNN_TEST_FE_KNOB_TYPE)
 HIPDNN_TEST_FE_ENUM(HeurMode_t, HIPDNN_TEST_FE_HEUR_MODE)
 HIPDNN_TEST_FE_ENUM(RngDistribution_t, HIPDNN_TEST_FE_RNG_DISTRIBUTION)
-HIPDNN_TEST_FE_ENUM(MoeGroupedMatmulMode_t, HIPDNN_TEST_FE_MOE_GROUPED_MATMUL_MODE)
 HIPDNN_TEST_FE_ENUM(DescriptorType_t, HIPDNN_TEST_FE_DESCRIPTOR_TYPE)
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
@@ -374,9 +367,6 @@ HIPDNN_TEST_MAPPING(cudnnBackendReshapeMode_t, ReshapeMode_t, "CUDNN_RESHAPE_")
 HIPDNN_TEST_MAPPING(cudnnBackendKnobType_t, KnobType_t, "CUDNN_KNOB_TYPE_")
 HIPDNN_TEST_MAPPING(cudnnBackendHeurMode_t, HeurMode_t, "CUDNN_HEUR_MODE_")
 HIPDNN_TEST_MAPPING(cudnnRngDistribution_t, RngDistribution_t, "CUDNN_RNG_DISTRIBUTION_")
-HIPDNN_TEST_MAPPING(cudnnMoeGroupedMatmulMode_t,
-                    MoeGroupedMatmulMode_t,
-                    "CUDNN_MOE_GROUPED_MATMUL_MODE_")
 HIPDNN_TEST_MAPPING(cudnnBackendDescriptorType_t, DescriptorType_t, "CUDNN_BACKEND_")
 
 using MappedTypes = std::tuple<cudnnDataType_t,
@@ -394,7 +384,6 @@ using MappedTypes = std::tuple<cudnnDataType_t,
                                cudnnBackendKnobType_t,
                                cudnnBackendHeurMode_t,
                                cudnnRngDistribution_t,
-                               cudnnMoeGroupedMatmulMode_t,
                                cudnnBackendDescriptorType_t>;
 
 template <typename T, typename List>
@@ -405,9 +394,7 @@ struct Contains<T, std::tuple<Ts...>> : std::disjunction<std::is_same<T, Ts>...>
 {
 };
 
-constexpr std::array<std::string_view, 6> UNMAPPED_C_TYPES = {"cudnnBackendAttributeName_t",
-                                                              "cudnnBackendAttributeType_t",
-                                                              "cudnnBnFinalizeStatsMode_t",
+constexpr std::array<std::string_view, 4> UNMAPPED_C_TYPES = {"cudnnBnFinalizeStatsMode_t",
                                                               "cudnnGenStatsMode_t",
                                                               "cudnnNanPropagation_t",
                                                               "cudnnTensorFormat_t"};

@@ -6,7 +6,6 @@
 Writes the committed fixtures next to this script (or to --output):
 
 - cudnn_v8_identifiers.inc: every C identifier the shim must declare, classified.
-- cudnn_v8_attribute_usage.inc: every (attribute, attribute type) pair at a call site.
 - cudnn_v8_enum_values.inc: the shim-assigned enumerator values. Values are
   alphabetical within each enum on first assignment and append-only afterwards:
   an existing value never changes, a new enumerator takes the next free value.
@@ -28,7 +27,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PINS_FILE = HERE / "pins.json"
 IDENTIFIERS_FILE = "cudnn_v8_identifiers.inc"
-ATTRIBUTE_USAGE_FILE = "cudnn_v8_attribute_usage.inc"
 ENUM_VALUES_FILE = "cudnn_v8_enum_values.inc"
 
 # v0.x code only names CUDNN_KNOB_TYPE_COUNTS; the enumerators themselves come
@@ -75,6 +73,15 @@ EXCLUDED = {
     "cudnnBackendSetAttribute": "raw descriptor C API removed; only cudnnBackendExecute stays",
     "cudnnBackendGetAttribute": "raw descriptor C API removed; only cudnnBackendExecute stays",
     "cudnnBackendFinalize": "raw descriptor C API removed; only cudnnBackendExecute stays",
+}
+
+# Whole enums the scan finds that the shim no longer declares: no shim code names
+# them (the raw descriptor C API is gone) or only type converters did. Their
+# enumerators are dropped with them; their pinned values are retired.
+EXCLUDED_ENUMS = {
+    "cudnnBackendAttributeName_t": "raw descriptor C API removed",
+    "cudnnBackendAttributeType_t": "raw descriptor C API removed",
+    "cudnnMoeGroupedMatmulMode_t": "named only by type converters",
 }
 
 # The v9 shim surface: emitted under ALREADY_DECLARED so the test still checks
@@ -168,37 +175,6 @@ COUNT_SENTINELS = {
 TOKEN_PATTERN = re.compile(r"\b(CUDNN_[A-Za-z0-9_]+|cudnn[A-Z][A-Za-z0-9_]*)\b")
 DEFINE_PATTERN = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)", re.MULTILINE)
 RAW_STRING_PATTERN = re.compile(r'(?:u8|u|U|L)?R"([^()\\\s]{0,16})\(')
-ATTRIBUTE_PATTERN = re.compile(r"CUDNN_ATTR_\w+")
-ATTRIBUTE_TYPE_PATTERN = re.compile(r"CUDNN_TYPE_\w+")
-IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_]\w*")
-
-# (attribute argument index, attribute type argument index or a fixed type).
-# The Operation.h lambdas take (operation, attr, message, ptr[, type, count])
-# and default the type to BACKEND_DESCRIPTOR; they are told apart from
-# detail::set_attribute by the string literal in the third argument.
-CALL_SHAPES = {
-    "set_attribute": (1, 2),
-    "get_attribute": (1, 2),
-    "cudnnBackendSetAttribute": (1, 2),
-    "cudnnBackendGetAttribute": (1, 2),
-    "set_tensor_descriptor": (0, "CUDNN_TYPE_BACKEND_DESCRIPTOR"),
-    "check_shape": (2, "CUDNN_TYPE_BACKEND_DESCRIPTOR"),
-}
-CALL_PATTERN = re.compile(
-    r"(?<![\w.>])(?:detail::)?(" + "|".join(CALL_SHAPES) + r")\s*\("
-)
-
-# Parameter names through which forwarding helpers pass an attribute; their
-# call sites are scanned instead.
-FORWARDED_ATTRIBUTE_PARAMETERS = {"attr", "tensor_attr", "attributeName"}
-
-# Non-literal attribute types: (attribute pattern, type expression) -> types.
-TYPE_OVERRIDES = {
-    (
-        r"CUDNN_ATTR_OPERATION_(?:CONVOLUTION_\w+_(?:ALPHA|BETA)|POINTWISE_ALPHA[12])",
-        "m_operation.alphabetaType",
-    ): ("CUDNN_TYPE_FLOAT", "CUDNN_TYPE_DOUBLE"),
-}
 
 
 class ExtractionError(Exception):
@@ -271,27 +247,6 @@ def _is_digit_separator(text: str, i: int) -> bool:
     return k + 1 < i and text[k + 1].isdigit()
 
 
-def split_arguments(text: str, start: int) -> list[str]:
-    """Split the call arguments that begin at text[start] (just past the '(')."""
-    depth = 0
-    args = []
-    current = []
-    for c in text[start:]:
-        if c in "([{":
-            depth += 1
-        elif c in ")]}":
-            if depth == 0:
-                args.append("".join(current).strip())
-                return args
-            depth -= 1
-        elif c == "," and depth == 0:
-            args.append("".join(current).strip())
-            current = []
-            continue
-        current.append(c)
-    raise ExtractionError("unterminated call")
-
-
 def load_pins() -> dict:
     return json.loads(PINS_FILE.read_text(encoding="utf-8"))
 
@@ -334,33 +289,34 @@ def input_files(frontend: Path, pytorch: Path, pins: dict) -> list[Path]:
 class Scan:
     tokens: set[str]
     defines: set[str]
-    calls: list[tuple[str, int, str, list[str]]]
 
 
 def scan(files: list[Path]) -> Scan:
-    result = Scan(set(), set(), [])
+    result = Scan(set(), set())
     for path in files:
         text = strip_comments_and_literals(
             path.read_text(encoding="utf-8", errors="replace")
         )
         result.defines.update(DEFINE_PATTERN.findall(text))
         result.tokens.update(TOKEN_PATTERN.findall(text))
-        for match in CALL_PATTERN.finditer(text):
-            line = text.count("\n", 0, match.start()) + 1
-            args = split_arguments(text, match.end())
-            result.calls.append((f"{path.name}:{line}", line, match.group(1), args))
     return result
 
 
 def classify(scanned: Scan) -> list[Identifier]:
     names = scanned.tokens - scanned.defines
     stale = sorted(
-        (set(EXCLUDED) | set(ALREADY_DECLARED_NAMES) | COUNT_SENTINELS) - names
+        (
+            set(EXCLUDED)
+            | set(EXCLUDED_ENUMS)
+            | set(ALREADY_DECLARED_NAMES)
+            | COUNT_SENTINELS
+        )
+        - names
     )
     if stale:
         raise ExtractionError(
-            "EXCLUDED/ALREADY_DECLARED/COUNT_SENTINELS entries no longer found: "
-            + ", ".join(stale)
+            "EXCLUDED/EXCLUDED_ENUMS/ALREADY_DECLARED/COUNT_SENTINELS entries"
+            " no longer found: " + ", ".join(stale)
         )
     identifiers = []
     unclassified = []
@@ -382,6 +338,11 @@ def classify(scanned: Scan) -> list[Identifier]:
             unclassified.append(name)
     if unclassified:
         raise ExtractionError("unclassified names: " + ", ".join(unclassified))
+    identifiers = [
+        i
+        for i in identifiers
+        if i.enum not in EXCLUDED_ENUMS and i.name not in EXCLUDED_ENUMS
+    ]
 
     types = {i.name for i in identifiers if i.kind == TYPE}
     enums = {i.enum for i in identifiers if i.kind == ENUMERATOR}
@@ -398,62 +359,6 @@ def classify(scanned: Scan) -> list[Identifier]:
     if problems:
         raise ExtractionError("\n".join(problems))
     return identifiers
-
-
-def attribute_usage(scanned: Scan, identifiers: list[Identifier]) -> list[tuple]:
-    attributes = {
-        i.name for i in identifiers if i.enum == "cudnnBackendAttributeName_t"
-    }
-    attribute_types = {
-        i.name for i in identifiers if i.enum == "cudnnBackendAttributeType_t"
-    }
-    pairs = set()
-    used_overrides = set()
-    errors = []
-    for where, _, function, args in scanned.calls:
-        attribute_index, type_source = CALL_SHAPES[function]
-        if len(args) <= attribute_index:
-            continue
-        attribute = args[attribute_index]
-        if not ATTRIBUTE_PATTERN.fullmatch(attribute):
-            # A forwarding helper's own body or declaration.
-            parameter = IDENTIFIER_PATTERN.findall(attribute)
-            if not parameter or parameter[-1] not in FORWARDED_ATTRIBUTE_PARAMETERS:
-                errors.append(f"{where}: non-literal attribute '{attribute}'")
-            continue
-        if isinstance(type_source, str):
-            type_expression = type_source
-        elif len(args) > 2 and args[2].startswith('"'):
-            type_expression = (
-                args[4] if len(args) > 4 else "CUDNN_TYPE_BACKEND_DESCRIPTOR"
-            )
-        else:
-            type_expression = args[type_source]
-        if ATTRIBUTE_TYPE_PATTERN.fullmatch(type_expression):
-            resolved = (type_expression,)
-        else:
-            resolved = None
-            for key, types in TYPE_OVERRIDES.items():
-                pattern, expression = key
-                if expression == type_expression and re.fullmatch(pattern, attribute):
-                    resolved = types
-                    used_overrides.add(key)
-                    break
-            if resolved is None:
-                errors.append(
-                    f"{where}: unresolved type '{type_expression}' for {attribute}"
-                )
-                continue
-        for attribute_type in resolved:
-            if attribute not in attributes or attribute_type not in attribute_types:
-                errors.append(f"{where}: {attribute}/{attribute_type} not in fixture")
-            pairs.add((attribute, attribute_type))
-    unused = set(TYPE_OVERRIDES) - used_overrides
-    if unused:
-        errors.append(f"unused TYPE_OVERRIDES: {sorted(unused)}")
-    if errors:
-        raise ExtractionError("\n".join(errors))
-    return sorted(pairs)
 
 
 ENUM_VALUE_LINE = re.compile(
@@ -546,11 +451,6 @@ def render_identifiers(pins: dict, identifiers: list[Identifier]) -> str:
             )
         else:
             body.append(f"HIPDNN_CUDNN_SHIM_{identifier.kind}({identifier.name})")
-    return header(pins) + "\n".join(body) + "\n"
-
-
-def render_attribute_usage(pins: dict, pairs: list[tuple]) -> str:
-    body = [f"HIPDNN_CUDNN_SHIM_ATTR_USAGE({a}, {t})" for a, t in pairs]
     return header(pins) + "\n".join(body) + "\n"
 
 
@@ -649,7 +549,6 @@ def run(arguments: argparse.Namespace) -> int:
     check_frontend_version(frontend, pins)
     scanned = scan(input_files(frontend, Path(arguments.pytorch), pins))
     identifiers = classify(scanned)
-    pairs = attribute_usage(scanned, identifiers)
 
     output = Path(arguments.output)
     values_path = output / ENUM_VALUES_FILE
@@ -658,6 +557,9 @@ def run(arguments: argparse.Namespace) -> int:
         if values_path.is_file()
         else {}
     )
+    pinned = {
+        enum: members for enum, members in pinned.items() if enum not in EXCLUDED_ENUMS
+    }
     table = assign_enum_values(identifiers, pinned)
     for enum, members in pinned.items():
         for name, value in members.items():
@@ -666,7 +568,6 @@ def run(arguments: argparse.Namespace) -> int:
 
     outputs = {
         IDENTIFIERS_FILE: render_identifiers(pins, identifiers),
-        ATTRIBUTE_USAGE_FILE: render_attribute_usage(pins, pairs),
         ENUM_VALUES_FILE: render_enum_values(pins, table),
     }
     if arguments.check:
@@ -691,7 +592,7 @@ def run(arguments: argparse.Namespace) -> int:
     for identifier in identifiers:
         counts[identifier.kind] += 1
     summary = ", ".join(f"{kind}={count}" for kind, count in counts.items())
-    print(f"{summary}, ATTR_USAGE={len(pairs)}, EXCLUDED={len(EXCLUDED)}")
+    print(f"{summary}, EXCLUDED={len(EXCLUDED)}, EXCLUDED_ENUMS={len(EXCLUDED_ENUMS)}")
     return 0
 
 

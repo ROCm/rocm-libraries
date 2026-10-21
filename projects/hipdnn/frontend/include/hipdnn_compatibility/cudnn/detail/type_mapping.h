@@ -13,7 +13,7 @@
 
 #include <optional>
 
-#include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 // cuDNN C enum <-> shim FE enum, matched by enumerator name as upstream's
@@ -931,37 +931,6 @@ constexpr std::optional<cudnnRngDistribution_t> toCudnn(RngDistribution_t value)
     case RngDistribution_t::NORMAL:
         return CUDNN_RNG_DISTRIBUTION_NORMAL;
     case RngDistribution_t::NOT_SET:
-    default:
-        return std::nullopt;
-    }
-}
-
-constexpr std::optional<MoeGroupedMatmulMode_t> toFe(cudnnMoeGroupedMatmulMode_t value) noexcept
-{
-    switch(value)
-    {
-    case CUDNN_MOE_GROUPED_MATMUL_MODE_GATHER:
-        return MoeGroupedMatmulMode_t::GATHER;
-    case CUDNN_MOE_GROUPED_MATMUL_MODE_NONE:
-        return MoeGroupedMatmulMode_t::NONE;
-    case CUDNN_MOE_GROUPED_MATMUL_MODE_SCATTER:
-        return MoeGroupedMatmulMode_t::SCATTER;
-    default:
-        return std::nullopt;
-    }
-}
-
-constexpr std::optional<cudnnMoeGroupedMatmulMode_t> toCudnn(MoeGroupedMatmulMode_t value) noexcept
-{
-    switch(value)
-    {
-    case MoeGroupedMatmulMode_t::NONE:
-        return CUDNN_MOE_GROUPED_MATMUL_MODE_NONE;
-    case MoeGroupedMatmulMode_t::GATHER:
-        return CUDNN_MOE_GROUPED_MATMUL_MODE_GATHER;
-    case MoeGroupedMatmulMode_t::SCATTER:
-        return CUDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
-    case MoeGroupedMatmulMode_t::NOT_SET:
     default:
         return std::nullopt;
     }

@@ -579,17 +579,6 @@ inline RngDistribution_t convert_from_cudnn_type(const cudnnRngDistribution_t cu
     return toFe(cudnn_mode).value_or(RngDistribution_t::NOT_SET);
 }
 
-inline cudnnStatus_t convert_to_cudnn_type(const MoeGroupedMatmulMode_t mode,
-                                           cudnnMoeGroupedMatmulMode_t& cudnn_mode)
-{
-    return convertToCudnnOrInvalid(mode, cudnn_mode);
-}
-
-inline MoeGroupedMatmulMode_t convert_from_cudnn_type(const cudnnMoeGroupedMatmulMode_t cudnn_mode)
-{
-    return toFe(cudnn_mode).value_or(MoeGroupedMatmulMode_t::NOT_SET);
-}
-
 // NOLINTEND(readability-identifier-naming)
 
 // Upstream serializes these enums with NLOHMANN_JSON_SERIALIZE_ENUM. Most are aliases of
