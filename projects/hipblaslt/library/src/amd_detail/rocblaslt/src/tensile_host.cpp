@@ -8296,6 +8296,9 @@ try
             log_error(__func__, "library has an unrecognized hardware predicate", libraryPath);
             return rocblaslt_status_invalid_value;
         }
+        // The file's own index; addSolutions takes only unindexed solutions.
+        // This shard was parsed for this call, so nothing else shares them.
+        entry.second->index = -1;
         solutions.push_back(entry.second);
     }
 
