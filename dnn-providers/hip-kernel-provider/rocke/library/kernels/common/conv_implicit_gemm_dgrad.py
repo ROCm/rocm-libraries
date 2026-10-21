@@ -69,6 +69,10 @@ from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
+from rocke.helpers.magic_division import (
+    calculate_magic_numbers,
+    do_magic_division_dynamic,
+)
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import ceil_div, kernel_name_join
@@ -76,8 +80,6 @@ from rocke.helpers.tensor_view import make_buffer_resource
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
-    calculate_magic_numbers,
-    do_magic_division_dynamic,
     embed,
     pad,
     unmerge_magic,
@@ -1192,12 +1194,6 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"(max_sub_gemms); raise max_sub_gemms to build a kernel that "
             f"can serve it"
         )
-    if p.groups > 1 and p.cpg == 1:
-        return False, (
-            "depthwise dgrad (channels-per-group == 1) is not supported by the "
-            "implicit-GEMM grouped path"
-        )
-
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
     if spec.tile_n % (spec.warp_n * spec.warp_tile_n):

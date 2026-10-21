@@ -603,6 +603,74 @@ class TestConvDgradCorrectness(unittest.TestCase):
             label="fp16 grouped g4 split_k=auto",
         )
 
+    def test_bf16_depthwise_large_filter(self):
+        """Depthwise (cpg=kpg=1) dgrad: a one-column GEMM per group, every
+        operand scalar. A tall, asymmetric filter with per-axis "same"
+        padding pins the separate Y/X and pH/pW decode."""
+        self._verify(
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "14",
+            "--Wi",
+            "14",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "11",
+            "--X",
+            "3",
+            "--pH",
+            "5",
+            "--pW",
+            "1",
+            "--groups",
+            "32",
+            "--split-k",
+            "1",
+            label="bf16 depthwise g32 11x3",
+        )
+
+    def test_fp16_depthwise_stride2(self):
+        """Depthwise dgrad on the stride-2 tilde decomposition path."""
+        if ARCH not in _MFMA_ARCHES:
+            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "15",
+            "--Wi",
+            "13",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "5",
+            "--X",
+            "3",
+            "--pH",
+            "2",
+            "--pW",
+            "0",
+            "--sH",
+            "2",
+            "--sW",
+            "2",
+            "--groups",
+            "64",
+            "--split-k",
+            "1",
+            label="fp16 depthwise g64 stride=2",
+        )
+
 
 def _count_vector_buffer_loads(ll: str) -> int:
     """Number of vector-typed raw buffer loads in the lowered IR (dY free axis)."""

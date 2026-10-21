@@ -753,8 +753,9 @@ def _spec(idx: int):
         )
 
     if idx == 32:
-        # Rejected by both validators: depthwise (channels-per-group == 1) is
-        # not an implicit-GEMM grouped problem.
+        # Grouped depthwise (channels-per-group == 1): a one-column GEMM per
+        # group, every operand scalar. cshuffle so the config is accepted (the
+        # default epilogue rejects a 16-bit dX).
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64)
         return (
             DgradConvSpec(
@@ -768,7 +769,7 @@ def _spec(idx: int):
                 warp_tile_n=32,
                 warp_tile_k=16,
                 pipeline="mem",
-                epilogue="default",
+                epilogue="cshuffle",
             ),
             "gfx950",
         )

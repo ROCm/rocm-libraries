@@ -327,15 +327,6 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             return false;
         }
     }
-    if(p->groups > 1 && rocke_conv_problem_cpg(p) == 1)
-    {
-        snprintf(reason,
-                 reason_cap,
-                 "depthwise dgrad (channels-per-group == 1) is not supported by the "
-                 "implicit-GEMM grouped path");
-        return false;
-    }
-
     if(s->tile_m % (s->warp_m * s->warp_tile_m))
     {
         snprintf(reason, reason_cap, "tile_m not divisible by warp_m * warp_tile_m");
@@ -1398,7 +1389,7 @@ static void _magic_divmod(rocke_ir_builder_t* b,
                           rocke_value_t** r_out)
 {
     rocke_value_t* tmp = rocke_b_umul_hi_i32(b, n, d->mult);
-    rocke_value_t* summed = rocke_b_add(b, tmp, n);
+    rocke_value_t* summed = rocke_b_add_nuw(b, tmp, n);
     rocke_value_t* q = rocke_b_lshr(b, summed, d->shift);
     rocke_value_t* qd = rocke_b_mul(b, q, d->value);
     *q_out = q;
