@@ -642,8 +642,10 @@ struct FmhaFwdSplitKVKernel
         long_index_t batch_offset_o_acc   = 0;
         index_t kv_l2p_offset =
             0; // logical-to-physical offset of seqlen_k coordinate. only used for paged-kvcache
+        // The TDM pipelines take the sink logit on every block they get it: only split 0's
+        // (an empty split 0 still publishes it through its lse_acc).
         const float sink_value =
-            kargs.sink_ptr != nullptr
+            kargs.sink_ptr != nullptr && (!kIsTdmPipeline || i_split == 0)
                 ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
                 : -numeric<float>::infinity();
 

@@ -394,8 +394,10 @@ class FmhaFwdSplitKVApiTrait:
 
     @property
     def page_check(self) -> str:
-        if self.pipeline_tag not in TDM_PIPELINES or self.pagedkv != "t":
+        if self.pagedkv != "t":
             return ""
+        if self.pipeline_tag not in TDM_PIPELINES:
+            return " && (a.page_block_size % 128 == 0)"
         # each warp's K/V rows lie in one page
         return f" && (a.page_block_size % {self.kv_warp_rows} == 0) && !a.is_gappy"
 
@@ -1003,10 +1005,9 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
-    # fp16/bf16 without sink or logits soft cap run the TDM pipelines of fmha_fwd on its
-    # tiles and rules: qr_tdm_pingpong on its grids (its 16-row tile up to 16 query rows:
-    # decode, the merged heads of a K/V head), qr_tdm_sched from 128 rows, then qr_tdm. qr
-    # keeps sink and logits soft cap.
+    # fp16/bf16 run the TDM pipelines of fmha_fwd on its tiles and rules: qr_tdm_pingpong
+    # on its grids (its 16-row tile up to 16 query rows: decode, the merged heads of a K/V
+    # head), qr_tdm_sched from 128 rows, then qr_tdm.
     #                            bm0, bn0, bk0, bn1, bk1, bk0max
     _QR_TDM_TILES = {
         32  : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
@@ -1059,11 +1060,14 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                     head_pad = "f" if hdim == 64 else "t"
                     pipelines.append(Pipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", bias, "t", "f", pagedkv, "f", mask))  # fmt: skip
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", bias, "t", "f", pagedkv, "f", mask))  # fmt: skip
-        # logits soft cap on qr_tdm and qr_tdm_pingpong (not qr_tdm_sched), without a bias
+        # sink (tokens and logit) on the TDM pipelines
+        pipelines += [replace(p, F_sink="t") for p in pipelines]
+        # logits soft cap on the TDM pipelines, without a bias
         pipelines += [
             replace(p, F_logits="t")
             for p in pipelines
-            if p.tag in ("qr_tdm", "qr_tdm_pingpong") and p.F_bias == "no"
+            if p.tag in ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong")
+            and p.F_bias == "no"
         ]
         return pipelines + KernelComponentFactoryBase.get_pipelines(
             dtype, hdim, mask_impl

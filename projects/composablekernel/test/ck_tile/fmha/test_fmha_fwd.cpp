@@ -1180,6 +1180,87 @@ TEST_P(TdmDropout, DataTypeConfig)
     }
 }
 
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+// fwd_splitkv on the TDM pipelines with a sink logit (counted once over the splits) and sink
+// tokens (on the split holding the window's first tile).
+// pipeline, seqlen_q, seqlen_k, page_block_size, mask, init_sink
+using TdmSplitKVSinkCase = std::tuple<const char*, int, int, int, const char*, int>;
+
+class TdmSplitKVSink : public TestWithParam<TdmSplitKVSinkCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         TdmSplitKVSink,
+                         Values(TdmSplitKVSinkCase{"qr_tdm", 300, 2049, 0, "b", 1},
+                                TdmSplitKVSinkCase{"qr_tdm", 300, 2049, 0, "b:300,0,70", 1},
+                                TdmSplitKVSinkCase{"qr_tdm_sched", 300, 2049, 0, "b:256,0,4", 0},
+                                TdmSplitKVSinkCase{"qr_tdm_pingpong", 1, 3000, 128, "0", 1},
+                                TdmSplitKVSinkCase{
+                                    "qr_tdm_pingpong", 40, 2049, 0, "b:256,0,4", 1}));
+
+TEST_P(TdmSplitKVSink, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
+
+        const auto [pipeline, seqlen_q, seqlen_k, page_block_size, mask_str, init_sink] =
+            GetParam();
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(
+            mode_enum::batch,
+            4,
+            16,
+            seqlen_q == 1 ? 4 : 8,
+            std::vector<int>(4, seqlen_q),
+            std::vector<int>(4, seqlen_k),
+            128,
+            128,
+            0,
+            {-1},
+            {-1},
+            {},
+            {},
+            0,
+            false,
+            false,
+            0,
+            0.0f,
+            true,
+            true, // lse
+            page_block_size,
+            false,
+            "n",
+            0.0f,
+            0,
+            0,
+            false,
+            mask_str,
+            qscale_str,
+            true,
+            3, // num_splits
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1,
+            init_sink,
+            1,
+            stream_config,
+            std::nullopt,
+            &selected_kernel,
+            "linear",
+            "vllm",
+            "splitkv",
+            pipeline);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_sink"), std::string::npos) << selected_kernel;
+    }
+}
+#endif
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts

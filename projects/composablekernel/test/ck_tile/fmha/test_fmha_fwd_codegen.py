@@ -2110,8 +2110,8 @@ class TestGfx125PagedKVCodegen(unittest.TestCase):
 
 
 class TestGfx125SplitKVCodegen(unittest.TestCase):
-    """fwd_splitkv on gfx1250: the TDM pipelines of fmha_fwd (no sink) before qr, which keeps
-    sink, and other archs unchanged."""
+    """fwd_splitkv on gfx1250: the TDM pipelines of fmha_fwd before qr, also with sink and
+    a logits soft cap, and other archs unchanged."""
 
     def test_tdm_instances_and_dispatch(self):
         from codegen.ops.fmha_fwd_splitkv import (
@@ -2130,15 +2130,15 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
                 self.assertEqual(
                     "BlockFmhaFwdSplitKVTdmPipelineProblem" in kernel.template, tdm
                 )
-                if tdm:
-                    self.assertEqual(kernel.F_pipeline.F_sink, "f")
-                    # a logits soft cap without a bias, and not on qr_tdm_sched
-                    if kernel.F_pipeline.F_logits == "t":
-                        self.assertEqual(kernel.F_pipeline.F_bias, "no")
-                        self.assertNotEqual(kernel.F_pipeline.tag, "qr_tdm_sched")
-        self.assertTrue(
-            any(k.F_pipeline.F_sink == "t" for k in kernels if k.F_pipeline.tag == "qr")
-        )
+                # a logits soft cap without a bias
+                if tdm and kernel.F_pipeline.F_logits == "t":
+                    self.assertEqual(kernel.F_pipeline.F_bias, "no")
+        for tag in tags:
+            with self.subTest(tag=tag):
+                self.assertEqual(
+                    {k.F_pipeline.F_sink for k in kernels if k.F_pipeline.tag == tag},
+                    {"f", "t"},
+                )
 
         with tempfile.TemporaryDirectory() as output_dir:
             from codegen.ops.fmha_fwd_splitkv import write_blobs
@@ -2147,6 +2147,9 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
                 ["gfx1250"], Path(output_dir), "@*d128_bf16*", 0, [128], "simplified"
             )
             api = (Path(output_dir) / "fmha_fwd_splitkv_api.cpp").read_text()
+        # qr takes pages of 128, the TDM pipelines pages of a warp's K/V rows
+        self.assertIn("&& (a.page_block_size % 128 == 0)", api)
+        self.assertIn("&& (a.page_block_size % 16 == 0)", api)
         merged_rows = "(a.max_seqlen_q == 1 && a.nhead_k < a.nhead_q ? a.nhead_q / a.nhead_k : a.max_seqlen_q)"
         # the 16-row tile up to 16 query rows (decode merges the heads of a K/V head)
         self.assertIn(f"({merged_rows} <= 16)", api)
@@ -2176,9 +2179,8 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
 
 
 class TestGfx125TdmDropoutCodegen(unittest.TestCase):
-    """Dropout on gfx1250 runs on fp16/bf16 qr_tdm (fmha_fwd, and batch_prefill below
-    d256), also with sink or a logits soft cap, and never on qr_tdm_sched/qr_tdm_pingpong.
-    """
+    """Dropout on gfx1250 runs on the fp16/bf16 TDM pipelines of fmha_fwd and batch_prefill,
+    also with sink or a logits soft cap."""
 
     def _check(self, kernels, hdims):
         tdm_dropout = [

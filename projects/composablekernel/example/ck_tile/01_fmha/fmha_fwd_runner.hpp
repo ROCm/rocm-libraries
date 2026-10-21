@@ -427,15 +427,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
         page_block_size = 0;
     }
 #endif
-    // batch_prefill, and pagedkv_prefill on the gfx125 TDM pipelines, take any page size;
+    // The paged APIs check the page size of each instance (the gfx125 TDM pipelines take
+    // pages of a few rows or any size); appending to the KV cache takes pages of 128.
     // -api=auto runs batch_prefill for group mode with one split when it is built.
     const bool auto_runs_batch_prefill = CK_TILE_FMHA_FWD_BATCH_PREFILL_API && api == "auto" &&
                                          mode == mode_enum::group && num_splits == 1;
-    const bool need_128_aligned_page =
-        api != "batch_prefill" && api != "pagedkv" && !auto_runs_batch_prefill &&
-        (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
-         CK_TILE_FMHA_FWD_PAGEDKV_API);
-    if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
+    if(need_append_kvcache && 0 < page_block_size && !(page_block_size % 128 == 0))
     {
         std::cerr << "only paged-kvcache block size divisible by 128 are currently supported"
                   << std::endl;
@@ -2046,9 +2043,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
 #endif // CK_TILE_FMHA_FWD_PAGEDKV_API
 #if CK_TILE_FMHA_FWD_SPLITKV_API
-        // splitkv takes pages of a multiple of 128 only
-        if(api_auto ? ((1 < num_splits || use_kvcache) && page_block_size % 128 == 0)
-                    : api == "splitkv")
+        if(api_auto ? (1 < num_splits || use_kvcache) : api == "splitkv")
         {
             fmha_fwd_splitkv_traits fmha_splitkv_traits;
             init_traits(fmha_splitkv_traits);

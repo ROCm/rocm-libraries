@@ -882,6 +882,24 @@ struct SplitKVTileMask : public Mask
         const index_t split_end   = min(x_total, split_start + per_split);
         return ck_tile::make_tuple(max(start, split_start), min(end, split_end));
     }
+
+    // Sink tokens: (sink_seq_end, start, end) as Mask's, with the window cut to this split
+    // and the sink tiles on the split that holds the window's first tile.
+    template <index_t TileHeight, index_t TileWidth>
+    CK_TILE_HOST_DEVICE constexpr auto
+    GetSinkTileRangeAlongX(index_t i_y, number<TileHeight> height, number<TileWidth> width) const
+    {
+        static_assert(TileWidth == kTileX);
+        const auto [sink_seq_end, start, end] = Mask::GetSinkTileRangeAlongX(i_y, height, width);
+        const index_t x_total                 = Mask::GetXTotal();
+        const index_t tiles                   = integer_divide_ceil(x_total, kTileX);
+        const index_t per_split               = integer_divide_ceil(tiles, num_splits) * kTileX;
+        const index_t split_start             = per_split * i_split;
+        const index_t split_end               = min(x_total, split_start + per_split);
+        const index_t sink_split              = min(max(start, 0) / per_split, num_splits - 1);
+        return ck_tile::make_tuple(
+            sink_split == i_split ? sink_seq_end : 0, max(start, split_start), min(end, split_end));
+    }
 };
 
 } // namespace ck_tile

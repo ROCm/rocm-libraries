@@ -415,8 +415,7 @@ struct BlockFmhaFwdSplitKVTdmPipelineProblem
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits_::kMergeNumHeadGroupsSeqLenQ;
     static constexpr bool kKVGather                  = false;
 
-    static_assert(!kDoFp8StaticQuant && !Traits_::kHasSink,
-                  "split-KV on TDM: no fp8 static quant, no sink");
+    static_assert(!kDoFp8StaticQuant, "split-KV on TDM: no fp8 static quant");
     static_assert(BlockFmhaShape_::IsVLayoutRowMajor, "split-KV on TDM needs row-major V");
 };
 
