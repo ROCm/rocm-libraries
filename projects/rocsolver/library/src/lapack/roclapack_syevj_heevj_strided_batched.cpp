@@ -66,9 +66,9 @@ try
             return rocblas_status_invalid_handle;
 
         // argument checking
-        rocblas_status st = rocsolver_syevj_heevj_argCheck(handle, esort, evect, uplo, n, A, lda,
-                                                            residual, max_sweeps, n_sweeps, W, info,
-                                                            batch_count);
+        rocblas_status st
+            = rocsolver_syevj_heevj_argCheck(handle, esort, evect, uplo, n, A, lda, residual,
+                                             max_sweeps, n_sweeps, W, info, batch_count);
         if(st != rocblas_status_continue)
             return st;
     }

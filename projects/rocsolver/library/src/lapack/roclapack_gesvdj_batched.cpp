@@ -102,10 +102,10 @@ try
 
     {
         rocblas_int const batch_count = bid_inc;
-        rocsolver_gesvdj_getMemorySize<true, T, SS>(
-            left_svect, right_svect, m, n, batch_count, &size_scalars, &size_VUtmp,
-            &size_work1_UVtmp, &size_work2, &size_work3, &size_work4, &size_work5_ipiv,
-            &size_work6_workArr);
+        rocsolver_gesvdj_getMemorySize<true, T, SS>(left_svect, right_svect, m, n, batch_count,
+                                                    &size_scalars, &size_VUtmp, &size_work1_UVtmp,
+                                                    &size_work2, &size_work3, &size_work4,
+                                                    &size_work5_ipiv, &size_work6_workArr);
     }
 
     if(rocblas_is_device_memory_size_query(handle))

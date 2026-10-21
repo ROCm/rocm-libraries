@@ -69,8 +69,8 @@ try
 
         // argument checking
         rocblas_status st
-            = rocsolver_sygvj_hegvj_argCheck(handle, itype, evect, uplo, n, A, lda, B, ldb, residual,
-                                             max_sweeps, n_sweeps, W, info, batch_count);
+            = rocsolver_sygvj_hegvj_argCheck(handle, itype, evect, uplo, n, A, lda, B, ldb,
+                                             residual, max_sweeps, n_sweeps, W, info, batch_count);
         if(st != rocblas_status_continue)
             return st;
     }
@@ -100,8 +100,8 @@ try
     {
         rocblas_int const batch_count = bid_inc;
         rocsolver_sygvj_hegvj_getMemorySize<true, false, T, S>(
-            itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-            &size_work4, &size_work5, &size_work6, &size_iinfo, &optim_mem);
+            itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
+            &size_work3, &size_work4, &size_work5, &size_work6, &size_iinfo, &optim_mem);
     }
 
     if(rocblas_is_device_memory_size_query(handle))
@@ -144,8 +144,8 @@ try
         // execution
         rocblas_status const istat = rocsolver_sygvj_hegvj_template<true, false, T>(
             handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, abstol,
-            residual, max_sweeps, n_sweeps, W, strideW, info, batch_count, (T*)scalars, work1, work2,
-            work3, work4, work5, work6, (rocblas_int*)iinfo, optim_mem);
+            residual, max_sweeps, n_sweeps, W, strideW, info, batch_count, (T*)scalars, work1,
+            work2, work3, work4, work5, work6, (rocblas_int*)iinfo, optim_mem);
         if(istat != rocblas_status_success)
         {
             return (istat);

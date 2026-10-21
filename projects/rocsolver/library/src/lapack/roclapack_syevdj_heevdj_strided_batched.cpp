@@ -132,8 +132,8 @@ try
 
         rocblas_status const istat = rocsolver_syevdj_heevdj_template<false, true, T>(
             handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, info, batch_count,
-            (T*)scalars, (S*)workE, (T*)workTau, (T*)workVec, (rocblas_int*)workSplits, work1, work2,
-            work3, work4, workArr);
+            (T*)scalars, (S*)workE, (T*)workTau, (T*)workVec, (rocblas_int*)workSplits, work1,
+            work2, work3, work4, workArr);
         if(istat != rocblas_status_success)
         {
             return (istat);

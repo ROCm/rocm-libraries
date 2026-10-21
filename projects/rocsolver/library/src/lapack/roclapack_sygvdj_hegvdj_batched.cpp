@@ -61,8 +61,8 @@ try
             return rocblas_status_invalid_handle;
 
         // argument checking
-        rocblas_status st = rocsolver_sygvdj_hegvdj_argCheck(handle, itype, evect, uplo, n, lda, ldb,
-                                                             A, B, D, info, batch_count);
+        rocblas_status st = rocsolver_sygvdj_hegvdj_argCheck(handle, itype, evect, uplo, n, lda,
+                                                             ldb, A, B, D, info, batch_count);
         if(st != rocblas_status_continue)
             return st;
     }
@@ -99,9 +99,9 @@ try
     {
         rocblas_int const batch_count = bid_inc;
         rocsolver_sygvdj_hegvdj_getMemorySize<true, false, T, S>(
-            itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-            &size_work4, &size_workE, &size_workTau, &size_workVec, &size_workSplits, &size_iinfo,
-            &size_workArr, &optim_mem);
+            itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
+            &size_work3, &size_work4, &size_workE, &size_workTau, &size_workVec, &size_workSplits,
+            &size_iinfo, &size_workArr, &optim_mem);
     }
 
     if(rocblas_is_device_memory_size_query(handle))
