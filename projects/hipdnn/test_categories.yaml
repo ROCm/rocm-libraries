@@ -38,13 +38,15 @@ test_categories:
     description: "Current hipDNN unit-check coverage"
     test_patterns:
       - "hipdnn_test_name_validation"
-      - "hipdnn_cache_key_codegen_tests"
+      - "hipdnn_schema_codegen_tests"
       - "hipdnn_data_sdk_tests"
       - "hipdnn_flatbuffers_sdk_tests"
       - "hipdnn_backend_tests"
       - "hipdnn_frontend_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
+      # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
+      - "hipdnn_gpu_generic_targets_.*"
 
   integration:
     description: "Current hipDNN integration-check coverage"
@@ -53,8 +55,12 @@ test_categories:
       - "hipdnn_public_backend_tests"
       - "hipdnn_backend_logging_shutdown_tests"
       - "hipdnn_public_frontend_tests"
-      # Build tree only: these two smoke tests run CMake driver scripts rather than
+      # Build tree only: these smoke tests run CMake driver scripts rather than
       # installed gtest binaries, so they are absent from the installed
       # CTestTestfile.cmake. See tools/CMakeLists.txt.
       - "hipdnn_list_engines_smoke"
       - "hipdnn_validate_descriptors_smoke"
+      - "hipdnn_validate_descriptors_l2_static_order"
+      - "hipdnn_validate_descriptors_l2_dynamic_features"
+      - "hipdnn_validate_descriptors_l1_static_order"
+      - "hipdnn_validate_descriptors_l1_native"

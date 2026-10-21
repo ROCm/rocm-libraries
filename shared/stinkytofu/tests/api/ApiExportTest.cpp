@@ -85,7 +85,6 @@
 #include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
-#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
@@ -99,6 +98,14 @@ constexpr std::array<int, 3> kArch{12, 5, 0};
 std::unique_ptr<StinkyAsmModule> makeModule() {
     StinkyAsmModule::ModuleOptions opts{};
     opts.OptLevel = 0;
+    // Backend's entry gate rejects a zeroed tile config, so a test that cares
+    // about something else still has to look like a configured kernel. The
+    // values are arbitrary -- only "not 0" is load-bearing.
+    opts.TileA0 = 128;
+    opts.TileB0 = 128;
+    opts.TileM0 = 64;
+    opts.WaveGroup0 = 2;
+    opts.WaveGroup1 = 2;
     return std::make_unique<StinkyAsmModule>("api_test", kArch, opts);
 }
 }  // namespace
@@ -255,7 +262,6 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createStinkyRemoveNopPass(), nullptr);
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
     EXPECT_NE(createGfx1250HazardPass(), nullptr);
-    EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
     EXPECT_NE(createStinkyUnreachableBlockElimPass(), nullptr);

@@ -239,7 +239,6 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spsm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -365,7 +364,6 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spsm_ex_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F

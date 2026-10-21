@@ -1,0 +1,51 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Minimal CPU-only code-generation input for the CMS pre-loop local-read drain
+# when ForceUnrollSubIter is disabled. This is the configuration implicated by
+# ROCM-31578.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  Device: 0
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - MaxOccupancy: [40]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - StreamK: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 256, 1, 128]

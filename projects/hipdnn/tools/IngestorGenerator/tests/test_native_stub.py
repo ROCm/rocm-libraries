@@ -4,8 +4,10 @@
 """A real compiler's verdict on the emitted C++. ``packs/<Name>Native.cpp`` is what an
 agent or a human fills in to make an engine serve real graphs (see RUNBOOK.md)."""
 
-import subprocess
+import json
+import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -78,6 +80,45 @@ def compile_env():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text)
 
+    # GpuGenericTargetsTable.hpp is rendered from the JSON table, as plugin_sdk/CMakeLists.txt does.
+    table_in = (plugin_sdk / ".." / "cmake" / "GpuGenericTargetsTable.hpp.in").resolve()
+    table_json = (plugin_sdk / ".." / "data" / "gpu_generic_targets.json").resolve()
+    if not (table_in.is_file() and table_json.is_file()):
+        pytest.skip(f"missing generic target table inputs {table_in} / {table_json}")
+    generics = json.loads(table_json.read_text())["generics"]
+    arrays, rows = "", ""
+    for generic in sorted(generics):
+        array = generic.upper().replace("-", "_") + "_MEMBERS"
+        literals = "".join(f'    "{m}",\n' for m in generics[generic])
+        arrays += f"inline constexpr std::string_view {array}[] = {{\n{literals}}};\n\n"
+        rows += f'    {{"{generic}", {array}, {len(generics[generic])}}},\n'
+    table_text = table_in.read_text()
+    for key, value in (
+        ("HIPDNN_GENERIC_TARGET_MEMBER_ARRAYS", arrays),
+        ("HIPDNN_GENERIC_TARGET_ROWS", rows),
+        ("HIPDNN_GENERIC_TARGET_ROW_COUNT", str(len(generics))),
+    ):
+        table_text = table_text.replace(f"@{key}@", value)
+    table_out = gen_dir / "hipdnn_plugin_sdk" / "GpuGenericTargetsTable.hpp"
+    table_out.parent.mkdir(parents=True, exist_ok=True)
+    table_out.write_text(table_text)
+
+    # version.h includes version_number.h; both come from the same CMake templates
+    # hipdnn_generate_version_header (cmake/VersionUtils.cmake) configures.
+    number_in = (data_sdk / ".." / ".." / "cmake" / "version_number.h.in").resolve()
+    if not number_in.is_file():
+        pytest.skip(f"missing version template {number_in}")
+    number_template = number_in.read_text()
+
+    def configure(text: str, subs: dict, out: Path) -> None:
+        for key, value in subs.items():
+            text = text.replace(f"@{key}@", str(value))
+        # A placeholder left behind means a template grew a variable this stand-in
+        # does not know; fail here rather than with a confusing compile error.
+        assert not re.search(r"@\w+@", text), f"unfilled placeholder in {out}"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text)
+
     for name, root, version_vals in (
         (
             "hipdnn_data_sdk",
@@ -98,13 +139,22 @@ def compile_env():
         in_path = (root / ".." / "version.h.in").resolve()
         if not in_path.is_file():
             pytest.skip(f"missing version template {in_path}")
-        text = in_path.read_text()
         prefix = name.upper()
-        for key, value in version_vals.items():
-            text = text.replace(f"@{prefix}_VERSION_{key}@", str(value))
-        out = gen_dir / name / "version.h"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text)
+        configure(
+            in_path.read_text(),
+            {f"{prefix}_VERSION_{k}": v for k, v in version_vals.items()},
+            gen_dir / name / "version.h",
+        )
+        configure(
+            number_template,
+            {
+                "_VERSION_PREFIX": prefix,
+                "_VERSION_MAJOR": version_vals["MAJOR"],
+                "_VERSION_MINOR": version_vals["MINOR"],
+                "_VERSION_PATCH": version_vals["PATCH"],
+            },
+            gen_dir / name / "version_number.h",
+        )
 
     return {
         "gxx": gxx,

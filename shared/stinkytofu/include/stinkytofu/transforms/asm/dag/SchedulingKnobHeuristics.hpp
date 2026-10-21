@@ -34,9 +34,6 @@ namespace stinkytofu {
 /// Named region used as the "main loop" feature source.
 inline constexpr std::string_view kMainLoopGroupName = "loopWithPrefetch";
 
-/// CDNA5 scheduling-policy default / heuristic cap for dsReadPerWmma.
-/// Keep aligned with kGfx1250Config.dsReadPerWmma in CDNA5.hpp (not HWModel).
-inline constexpr int kStaticDefaultDsReadPerWmma = 3;
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
 
@@ -51,8 +48,6 @@ struct SchedulingIRStats {
     int dsLoadCount = 0;
     /// Sum of `latencyCycles` over main-loop matrix instructions.
     int sumWmmaLatencyCycles = 0;
-    /// `latencyCycles` of the first main-loop matrix instruction (0 if none).
-    int firstWmmaLatencyCycles = 0;
 
     bool degenerate() const {
         return wmmaCount <= 0 || dsLoadCount <= 0;
@@ -62,7 +57,7 @@ struct SchedulingIRStats {
 /// Stable feature schema for heuristic / future NN policies (bump version when
 /// the layout of fields that models train on changes).
 struct SchedulingFeatures {
-    int featureVersion = 3;
+    int featureVersion = 7;
     std::array<int, 3> arch{};
     SchedulingIRStats stats{};
     /// Optional tile/wave shape from ModuleOptions (0 = unknown / unset).
@@ -75,20 +70,13 @@ struct SchedulingFeatures {
 };
 
 struct ResolvedSchedulingKnobs {
-    int dsReadThrottleLatency = 0;
-    int dsReadPerWmma = kStaticDefaultDsReadPerWmma;
     int clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
-
-    SchedulingKnobSource dsReadThrottleLatencySource = SchedulingKnobSource::StaticDefault;
-    SchedulingKnobSource dsReadPerWmmaSource = SchedulingKnobSource::StaticDefault;
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
 };
 
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).
 struct SchedulingKnobOverrides {
-    std::optional<int> dsReadThrottleLatency;
-    std::optional<int> dsReadPerWmma;
     std::optional<int> clusterBarrierRule3SignalLeadCycles;
 };
 
@@ -115,8 +103,6 @@ staticSchedulingKnobDefaults(const std::array<int, 3>& arch);
 STINKYTOFU_EXPORT SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module);
 
 /// Build overrides from ModuleOptions sentinels:
-///   DsReadThrottleLatency <= 0                    → unset
-///   DsReadPerWmma < 0                             → unset
 ///   ClusterBarrierRule3SignalLeadCycles < 0       → unset
 STINKYTOFU_EXPORT SchedulingKnobOverrides
 schedulingKnobOverridesFromModuleOptions(const StinkyAsmModule::ModuleOptions& opts);
@@ -134,10 +120,6 @@ resolveSchedulingKnobsForModule(const StinkyAsmModule& module, const SchedulingK
 
 STINKYTOFU_EXPORT ResolvedSchedulingKnobs
 resolveSchedulingKnobsForModule(const StinkyAsmModule& module);
-
-/// Write resolved DAG knobs into PassFeatureConfig (always concrete values).
-STINKYTOFU_EXPORT void applyResolvedSchedulingKnobs(PassFeatureConfig& config,
-                                                    const ResolvedSchedulingKnobs& resolved);
 
 STINKYTOFU_EXPORT const char* schedulingKnobSourceName(SchedulingKnobSource source);
 

@@ -39,6 +39,7 @@
 #include <string_view>
 #include <typeinfo>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "AllHwMappings.hpp"
@@ -73,6 +74,20 @@ namespace nb = nanobind;
 namespace {
 using namespace rocisa;
 using namespace stinkytofu;
+
+// Module options of the removed cap / throttle ds_load pacing. Still accepted, no longer read.
+bool isRemovedDsPacingOption(const std::string& key) {
+    static const std::unordered_set<std::string> removed = {"DsReadPerCap",
+                                                            "DsReadPerWmma",
+                                                            "DsIssueCapSpanCycles",
+                                                            "DsIssueCapMode",
+                                                            "DsReadThrottleLatency",
+                                                            "DsReadThrottleTransitionFactor",
+                                                            "DsReadThrottleTransitionEntries",
+                                                            "DsSlotFirst",
+                                                            "BarrierHalfSlack"};
+    return removed.count(key) > 0;
+}
 
 StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb, GfxArchID arch);
 StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, GfxArchID arch);
@@ -1597,8 +1612,8 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinels: DsReadPerWmma / DsReadOrder / throttle / Rule3 lead default to -1
-            // (= unset) via ModuleOptions; Gfx1250Backend resolves unset knobs through
+            // Sentinels: DsReadOrder / Rule3 lead default to -1 (= unset) via ModuleOptions;
+            // Gfx1250Backend resolves an unset Rule3 lead through
             // SchedulingKnobHeuristics. DsReadOrder keeps an explicit -1 here because 0 is
             // a valid enumerator (ProgramOrder) and must not mean "not provided".
             moduleOptions.DsReadOrder = -1;
@@ -1606,11 +1621,20 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
                 bool hasSetOptions = false;
+                std::unordered_set<std::string> knownOptions;
 
             // Set stinky module options from valid options in the options dict
-#define SET_MODULE_OPTION(name, type) \
-    hasSetOptions |=                  \
-        (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name));
+// A key that is unknown or has the wrong type is reported instead of silently ignored: a
+// stale build or a typo would otherwise run an experiment without the requested option.
+#define SET_MODULE_OPTION(name, type)                                  \
+    knownOptions.insert(#name);                                        \
+    if (options.contains(#name)) {                                     \
+        if (nb::try_cast<type>(options[#name], moduleOptions.name))    \
+            hasSetOptions = true;                                      \
+        else                                                           \
+            std::cerr << "[StinkyTofu] WARNING: module option '" #name \
+                         "' has the wrong type and is ignored\n";      \
+    }
 
 #define DEBUG_SET_MODULE_OPTION(name, type)                                                  \
     if (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name)) { \
@@ -1624,6 +1648,16 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 #undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
+                for (auto kv : options) {
+                    const std::string key = nb::cast<std::string>(kv.first);
+                    if (isRemovedDsPacingOption(key))
+                        std::cerr
+                            << "[StinkyTofu] WARNING: module option '" << key
+                            << "' was removed with the legacy ds_load pacing and is ignored\n";
+                    else if (!knownOptions.count(key))
+                        std::cerr << "[StinkyTofu] WARNING: unknown module option '" << key
+                                  << "' is ignored (stale build or typo?)\n";
+                }
             }
 
             auto stinkyModule =

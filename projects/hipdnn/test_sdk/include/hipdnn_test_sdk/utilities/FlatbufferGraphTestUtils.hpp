@@ -2249,6 +2249,109 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder
+    createValidRMSNormActivationGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+                                      const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                                      = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+                                      = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                      bool overrideShapeEnabled = false)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    std::vector<int64_t> derivedDims(dims);
+    derivedDims[0] = 1; // Normalize bias/scale on first axis
+
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", inputDataType, &strides, &dims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", inputDataType, &strides, &dims, true));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "scale",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    // Epsilon (pass-by-value)
+    const std::vector<int64_t> passByValueDims = {1};
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "epsilon",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &passByValueDims,
+        &passByValueDims,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+        builder.CreateStruct(epsilonVal).Union()));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 5, "yActiv", inputDataType, &strides, &dims));
+
+    auto rmsnormAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
+                                                                        1, // x uid
+                                                                        3, // scale uid
+                                                                        4, // epsilon uid
+                                                                        2 // y uid
+        );
+
+    auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.1f,
+        0.5f,
+        std::nullopt,
+        std::nullopt,
+        2, // y uid
+        std::nullopt,
+        std::nullopt,
+        5, // yActiv uid
+        std::nullopt,
+        std::nullopt,
+        std::nullopt);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "rmsnorm",
+        computeDataType,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes,
+        rmsnormAttributes.Union());
+    nodes.push_back(node);
+    auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "pointwise",
+        computeDataType,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        pointwiseAttributes.Union());
+    nodes.push_back(nodePointwise);
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder
     createValidRMSNormBwdGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
                                const std::vector<int64_t>& dims = {2, 3, 224, 224},
                                bool hasOptionalAttributes = true,
@@ -2346,6 +2449,147 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes,
         rmsnormBwdAttributes.Union());
     nodes.push_back(node);
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder createValidRMSNormBwdActivationGraph(
+    const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+    const std::vector<int64_t>& dims = {2, 3, 224, 224},
+    bool hasOptionalAttributes = true,
+    hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    bool overrideShapeEnabled = false)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    std::vector<int64_t> derivedDims(dims);
+    derivedDims[0] = 1; // Normalize bias/scale on first axis
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    // inv_rms stat shape is [N, 1, 1, 1, ...] when scale is [1, C, H, W ..]
+    std::vector<int64_t> statDims(dims.size(), 1);
+    statDims[0] = dims[0];
+    const std::vector<int64_t> statStrides = hipdnn_data_sdk::utilities::generateStrides(
+        statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    // dy (gradient of output)
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "dy", inputDataType, &strides, &dims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", inputDataType, &strides, &dims));
+
+    // x (original input)
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 3, "x", inputDataType, &strides, &dims));
+
+    // scale
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        4,
+        "scale",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    // dx (gradient of input)
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 5, "dx", inputDataType, &strides, &dims));
+
+    // dscale (gradient of scale)
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "dscale",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    // inv_rms (inverse RMS from forward pass)
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        7,
+        "inv_rms",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &statStrides,
+        &statDims));
+
+    if(hasOptionalAttributes)
+    {
+        // dbias (gradient of bias)
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                8,
+                "dbias",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &derivedStrides,
+                &derivedDims));
+    }
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 9, "dyActiv", inputDataType, &strides, &dims, true));
+
+    auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+        0.1f,
+        0.5f,
+        std::nullopt,
+        std::nullopt,
+        1, // dy uid
+        2, // y uid
+        std::nullopt,
+        9, // dyActiv uid
+        std::nullopt,
+        std::nullopt,
+        std::nullopt);
+
+    auto rmsnormBwdAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
+            builder,
+            9, // dy uid
+            3, // x uid
+            4, // scale uid
+            7, // inv_rms uid
+            5, // dx uid
+            6, // dscale uid
+            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(8)
+                                  : flatbuffers::nullopt // dbias uid
+        );
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "pointwise",
+        computeDataType,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        pointwiseAttributes.Union());
+    nodes.push_back(nodePointwise);
+    auto nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "rmsnorm_bwd",
+        computeDataType,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes,
+        rmsnormBwdAttributes.Union());
+    nodes.push_back(nodeBwd);
 
     auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
@@ -2689,9 +2933,16 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
-    const std::vector<int64_t>& strides = {65536, 1024, 32, 1},
-    const std::vector<int64_t>& dims = {2, 64, 32, 32},
+    const std::vector<int64_t>& ioDims = {2, 64, 32, 32},
+    const std::vector<int64_t>& ioStrides = {65536, 1024, 32, 1},
+    const std::vector<int64_t>& scaleDims = {2, 2, 32, 32},
+    const std::vector<int64_t>& scaleStrides = {2048, 1024, 32, 1},
+    const int32_t blockSize = 32,
     hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -2701,17 +2952,14 @@ inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> scaleDims = {2, 2, 32, 32};
-    const std::vector<int64_t> scaleStrides = {2048, 1024, 32, 1};
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", inputDataType, &ioStrides, &ioDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", inputDataType, &strides, &dims));
+        builder, 2, "y", outputDataType, &ioStrides, &ioDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", inputDataType, &strides, &dims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 3, "scale", inputDataType, &scaleStrides, &scaleDims));
+        builder, 3, "scale", scaleDataType, &scaleStrides, &scaleDims));
 
     auto blockScaleQuantizeAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
@@ -2719,7 +2967,7 @@ inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
             1, // x uid
             2, // y uid
             3, // scale uid
-            32, // block_size
+            blockSize, // block_size
             axis,
             false // transpose
         );
@@ -3430,6 +3678,365 @@ inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulBwdGraph()
         &nodes);
     builder.Finish(graphOffset);
     return builder;
+}
+
+inline void addLinearAttentionTensor(
+    flatbuffers::FlatBufferBuilder& builder,
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>&
+        tensorAttributes,
+    int64_t uid,
+    const char* name,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    const std::vector<int64_t>& dims,
+    const std::vector<int64_t>& strides)
+{
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, uid, name, dataType, &strides, &dims));
+}
+
+inline flatbuffers::FlatBufferBuilder finishLinearAttentionGraph(
+    flatbuffers::FlatBufferBuilder builder,
+    const std::vector<
+        ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>&
+        tensorAttributes,
+    const char* nodeName,
+    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType,
+    ::flatbuffers::Offset<void> attributes)
+{
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        nodeName,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        nodeType,
+        attributes));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// Linear-attention test graphs share one problem: N=2 sequences of 4 tokens
+// (T=8 total, cu_seqlens = [0, 4, 8]), H=2 heads, K=V=8. Every UID is
+// distinct, so a converter that passes one optional UID in another's slot
+// fails the JSON round trip.
+//
+// The JSON converters pass the 7 bools positionally. A swap of two bools is
+// visible only when the swapped values differ, so each converter gets two
+// graphs whose flags differ, between them, on every pair of neighbouring bool
+// arguments (output_final_state, use_qk_l2norm, use_beta_sigmoid,
+// allow_neg_eigval, safe_gate, batch_invariant, overwrite_initial_state).
+// Each converter also sees scale both set and unset. Both graphs of a pair
+// obey the cuDNN cross-field rules in gdn_attributes.fbs:
+//   - state pool: gate_domain LINEAR, no safe_gate, state_indices into an
+//     initial-state pool, no checkpoints.
+//   - safe gate: gate_domain LOG, safe_gate with a_log and dt_bias,
+//     checkpoints every 4 tokens (max(8 // 4 + 2, 1) = 4 rows), in-place
+//     state update.
+namespace linear_attention_test_detail
+{
+
+inline constexpr int64_t Q_UID = 1;
+inline constexpr int64_t K_UID = 2;
+inline constexpr int64_t V_UID = 3;
+inline constexpr int64_t G_UID = 4;
+inline constexpr int64_t BETA_UID = 5;
+inline constexpr int64_t CU_SEQLENS_UID = 6;
+inline constexpr int64_t INITIAL_STATE_UID = 7;
+inline constexpr int64_t A_LOG_UID = 8;
+inline constexpr int64_t DT_BIAS_UID = 9;
+inline constexpr int64_t STATE_INDICES_UID = 10;
+inline constexpr int64_t O_UID = 11;
+inline constexpr int64_t FINAL_STATE_UID = 12;
+inline constexpr int64_t STATE_CHECKPOINTS_UID = 13;
+
+using TensorList
+    = std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>;
+
+// q, k, v, g, beta, cu_seqlens and o. g is [T, H] for GDN and per key channel,
+// [T, H, K], for KDA.
+inline void addRequiredTensors(flatbuffers::FlatBufferBuilder& builder,
+                               TensorList& tensors,
+                               bool perKeyChannelGate)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const std::vector<int64_t> seqDims = {8, 2, 8};
+    const std::vector<int64_t> seqStrides = {16, 8, 1};
+    const std::vector<int64_t> perHeadDims = {8, 2};
+    const std::vector<int64_t> perHeadStrides = {2, 1};
+    const std::vector<int64_t> cuSeqlensDims = {3};
+    const std::vector<int64_t> unitStrides = {1};
+
+    addLinearAttentionTensor(builder, tensors, Q_UID, "q", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder, tensors, K_UID, "k", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder, tensors, V_UID, "v", DataType::FLOAT, seqDims, seqStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             G_UID,
+                             "g",
+                             DataType::FLOAT,
+                             perKeyChannelGate ? seqDims : perHeadDims,
+                             perKeyChannelGate ? seqStrides : perHeadStrides);
+    addLinearAttentionTensor(
+        builder, tensors, BETA_UID, "beta", DataType::FLOAT, perHeadDims, perHeadStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             CU_SEQLENS_UID,
+                             "cu_seqlens",
+                             DataType::INT32,
+                             cuSeqlensDims,
+                             unitStrides);
+    addLinearAttentionTensor(builder, tensors, O_UID, "o", DataType::FLOAT, seqDims, seqStrides);
+}
+
+// initial_state and final_state as a 3-row pool [3, H, V, K], addressed by
+// state_indices [N].
+inline void addStatePoolTensors(flatbuffers::FlatBufferBuilder& builder, TensorList& tensors)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const std::vector<int64_t> poolDims = {3, 2, 8, 8};
+    const std::vector<int64_t> stateStrides = {128, 64, 8, 1};
+    const std::vector<int64_t> sequenceDims = {2};
+    const std::vector<int64_t> unitStrides = {1};
+
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             INITIAL_STATE_UID,
+                             "initial_state",
+                             DataType::FLOAT,
+                             poolDims,
+                             stateStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             STATE_INDICES_UID,
+                             "state_indices",
+                             DataType::INT32,
+                             sequenceDims,
+                             unitStrides);
+    addLinearAttentionTensor(
+        builder, tensors, FINAL_STATE_UID, "final_state", DataType::FLOAT, poolDims, stateStrides);
+}
+
+// initial_state and final_state [N, H, V, K], state_checkpoints [4, H, V, K],
+// a_log [H], and dt_bias: [H] for GDN, [H, K] for KDA.
+inline void addSafeGateTensors(flatbuffers::FlatBufferBuilder& builder,
+                               TensorList& tensors,
+                               bool perKeyChannelDtBias)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const std::vector<int64_t> stateDims = {2, 2, 8, 8};
+    const std::vector<int64_t> checkpointDims = {4, 2, 8, 8};
+    const std::vector<int64_t> stateStrides = {128, 64, 8, 1};
+    const std::vector<int64_t> headDims = {2};
+    const std::vector<int64_t> unitStrides = {1};
+    const std::vector<int64_t> headKeyDims = {2, 8};
+    const std::vector<int64_t> headKeyStrides = {8, 1};
+
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             INITIAL_STATE_UID,
+                             "initial_state",
+                             DataType::FLOAT,
+                             stateDims,
+                             stateStrides);
+    addLinearAttentionTensor(
+        builder, tensors, A_LOG_UID, "a_log", DataType::FLOAT, headDims, unitStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             DT_BIAS_UID,
+                             "dt_bias",
+                             DataType::FLOAT,
+                             perKeyChannelDtBias ? headKeyDims : headDims,
+                             perKeyChannelDtBias ? headKeyStrides : unitStrides);
+    addLinearAttentionTensor(
+        builder, tensors, FINAL_STATE_UID, "final_state", DataType::FLOAT, stateDims, stateStrides);
+    addLinearAttentionTensor(builder,
+                             tensors,
+                             STATE_CHECKPOINTS_UID,
+                             "state_checkpoints",
+                             DataType::FLOAT,
+                             checkpointDims,
+                             stateStrides);
+}
+
+} // namespace linear_attention_test_detail
+
+// GDN state-pool graph (see the linear-attention notes above).
+// True flags: output_final_state, use_beta_sigmoid, allow_neg_eigval, batch_invariant.
+inline flatbuffers::FlatBufferBuilder createValidGdnGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/false);
+    detail::addStatePoolTensors(builder, tensorAttributes);
+
+    hipdnn_flatbuffers_sdk::data_objects::GdnAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_state_indices_tensor_uid(detail::STATE_INDICES_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_scale(0.35355339f);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(false);
+    attrs.add_checkpoint_every_n_tokens(0);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(true);
+    attrs.add_safe_gate(false);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LINEAR);
+    attrs.add_batch_invariant(true);
+    attrs.add_overwrite_initial_state(false);
+    auto gdnAttributes = attrs.Finish();
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "gdn",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes,
+        gdnAttributes.Union());
+}
+
+// GDN safe-gate graph (see the linear-attention notes above); scale is left at
+// its default. True flags: output_final_state, use_qk_l2norm, use_beta_sigmoid,
+// safe_gate, overwrite_initial_state.
+inline flatbuffers::FlatBufferBuilder createValidGdnSafeGateGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/false);
+    detail::addSafeGateTensors(builder, tensorAttributes, /*perKeyChannelDtBias=*/false);
+
+    hipdnn_flatbuffers_sdk::data_objects::GdnAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_a_log_tensor_uid(detail::A_LOG_UID);
+    attrs.add_dt_bias_tensor_uid(detail::DT_BIAS_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_state_checkpoints_tensor_uid(detail::STATE_CHECKPOINTS_UID);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(true);
+    attrs.add_checkpoint_every_n_tokens(4);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(false);
+    attrs.add_safe_gate(true);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LOG);
+    attrs.add_batch_invariant(false);
+    attrs.add_overwrite_initial_state(true);
+    auto gdnAttributes = attrs.Finish();
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "gdn",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes,
+        gdnAttributes.Union());
+}
+
+// KDA safe-gate graph (see the linear-attention notes above), with an
+// explicit scale and gate_lower_bound. True flags, which alternate with the
+// false ones: output_final_state, use_beta_sigmoid, safe_gate,
+// overwrite_initial_state.
+inline flatbuffers::FlatBufferBuilder createValidKdaGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/true);
+    detail::addSafeGateTensors(builder, tensorAttributes, /*perKeyChannelDtBias=*/true);
+
+    hipdnn_flatbuffers_sdk::data_objects::KdaAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_a_log_tensor_uid(detail::A_LOG_UID);
+    attrs.add_dt_bias_tensor_uid(detail::DT_BIAS_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_state_checkpoints_tensor_uid(detail::STATE_CHECKPOINTS_UID);
+    attrs.add_scale(0.35355339f);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(false);
+    attrs.add_checkpoint_every_n_tokens(4);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(false);
+    attrs.add_safe_gate(true);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LOG);
+    attrs.add_gate_lower_bound(-5.0f);
+    attrs.add_batch_invariant(false);
+    attrs.add_overwrite_initial_state(true);
+    auto kdaAttributes = attrs.Finish();
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "kda",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes,
+        kdaAttributes.Union());
+}
+
+// KDA state-pool graph (see the linear-attention notes above); scale and
+// gate_lower_bound are left at their defaults. True flags: output_final_state,
+// use_beta_sigmoid, allow_neg_eigval, batch_invariant.
+inline flatbuffers::FlatBufferBuilder createValidKdaStatePoolGraph()
+{
+    namespace detail = linear_attention_test_detail;
+    flatbuffers::FlatBufferBuilder builder;
+    detail::TensorList tensorAttributes;
+    detail::addRequiredTensors(builder, tensorAttributes, /*perKeyChannelGate=*/true);
+    detail::addStatePoolTensors(builder, tensorAttributes);
+
+    hipdnn_flatbuffers_sdk::data_objects::KdaAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(detail::Q_UID);
+    attrs.add_k_tensor_uid(detail::K_UID);
+    attrs.add_v_tensor_uid(detail::V_UID);
+    attrs.add_g_tensor_uid(detail::G_UID);
+    attrs.add_beta_tensor_uid(detail::BETA_UID);
+    attrs.add_cu_seqlens_tensor_uid(detail::CU_SEQLENS_UID);
+    attrs.add_initial_state_tensor_uid(detail::INITIAL_STATE_UID);
+    attrs.add_state_indices_tensor_uid(detail::STATE_INDICES_UID);
+    attrs.add_o_tensor_uid(detail::O_UID);
+    attrs.add_final_state_tensor_uid(detail::FINAL_STATE_UID);
+    attrs.add_output_final_state(true);
+    attrs.add_use_qk_l2norm(false);
+    attrs.add_checkpoint_every_n_tokens(0);
+    attrs.add_use_beta_sigmoid(true);
+    attrs.add_allow_neg_eigval(true);
+    attrs.add_safe_gate(false);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LINEAR);
+    attrs.add_batch_invariant(true);
+    attrs.add_overwrite_initial_state(false);
+    auto kdaAttributes = attrs.Finish();
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "kda",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes,
+        kdaAttributes.Union());
 }
 
 inline flatbuffers::FlatBufferBuilder createValidEngineConfig(int64_t configId)

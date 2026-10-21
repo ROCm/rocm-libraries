@@ -124,6 +124,8 @@ option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar 
 option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
 option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
 option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
+option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
+option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -186,16 +188,16 @@ if(COMMAND rocm_check_target_ids)
           TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                   "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
                   "gfx1030;gfx1100;gfx1101;gfx1102"
-                  "gfx1150;gfx1151;gfx1152;gfx1153"
-                  "gfx1200;gfx1201;gfx1250")
+                  "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
+                  "gfx1200;gfx1201;gfx1250;gfx1250-strict")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                                 "gfx1030;gfx1100;gfx1101;gfx1102"
-                                "gfx1150;gfx1151;gfx1152;gfx1153"
-                                "gfx1200;gfx1201;gfx1250")
+                                "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
+                                "gfx1200;gfx1201;gfx1250;gfx1250-strict")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -227,7 +229,7 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "5.1.0")
+set(VERSION_STRING "5.2.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
@@ -419,9 +421,12 @@ if(BUILD_CODE_COVERAGE)
     # Also fold in the standalone unit-test binaries so their host-side coverage
     # of librocsparse is counted. The %m module hash keeps profraw names distinct
     # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
-    # Wrapped in || true so a unit-test failure cannot abort the coverage upload.
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test || true"
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device || true"
+    # make exports GTEST_FILTER into the recipe environment and gtest honors it,
+    # which previously selected 0 host tests and 6 device tests. These binaries
+    # are not categorized that way, so run each suite in full. || true keeps a
+    # unit-test failure from aborting the coverage upload.
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test --gtest_filter='*' || true"
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device --gtest_filter='*' || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 

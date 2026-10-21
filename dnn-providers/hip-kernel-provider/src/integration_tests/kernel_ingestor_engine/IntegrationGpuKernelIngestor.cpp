@@ -29,6 +29,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -174,74 +175,19 @@ struct ExecuteCase
     int iterations;
 };
 
-/// How many times the composite plan has resolved a winner, counted from the plugin's
-/// selection log. BenchmarkPlan emits exactly one of these per sampling sweep.
-size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& recorder)
+/// How many sampling sweeps the composite plan has resolved, counted from the plugin's
+/// logs. BenchmarkPlan ends every sweep with exactly one of these two lines: the winner,
+/// or -- when no candidate yielded a usable time -- the fallback to the first candidate.
+/// Both count: on Windows, where HIP reports negative event readings
+/// (ROCm/rocm-systems#12925), bad readings can leave every candidate unusable.
+size_t countSweepResolutions(const hipdnn_test_sdk::utilities::LogRecorderBase& recorder)
 {
     const auto logs = recorder.getRecordedLogs();
     return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [](const auto& log) {
-        return log.message.find("benchmarking selected kernel") != std::string::npos;
+        return log.message.find("benchmarking selected kernel") != std::string::npos
+               || log.message.find("benchmarking found no usable candidate") != std::string::npos;
     }));
 }
-
-/// Captures plugin logs for one test and restores every piece of process-global state it
-/// touched. Both the global log level and the user callback registration outlive the
-/// test otherwise: a raised level changes what later tests emit, and a callback keyed on
-/// a destroyed fixture would stay registered. Manual teardown at the end of the body is
-/// not enough, because an early ASSERT return skips it.
-class ScopedPluginLogCapture
-{
-public:
-    explicit ScopedPluginLogCapture(void* userHandle)
-        : _userHandle(userHandle)
-    {
-        const auto levelRead = hipdnn_frontend::getGlobalLogLevel(_previousLevel);
-        EXPECT_EQ(levelRead.code, ErrorCode::OK) << levelRead.err_msg;
-
-        const auto registered = setCallback(HIPDNN_SEV_INFO);
-        EXPECT_EQ(registered.code, ErrorCode::OK) << registered.err_msg;
-        _registered = registered.code == ErrorCode::OK;
-
-        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO);
-        EXPECT_EQ(levelSet.code, ErrorCode::OK) << levelSet.err_msg;
-    }
-
-    ~ScopedPluginLogCapture()
-    {
-        if(_registered)
-        {
-            static_cast<void>(setCallback(HIPDNN_SEV_OFF));
-        }
-        static_cast<void>(hipdnn_frontend::setGlobalLogLevel(_previousLevel));
-    }
-
-    ScopedPluginLogCapture(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture& operator=(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture(ScopedPluginLogCapture&&) = delete;
-    ScopedPluginLogCapture& operator=(ScopedPluginLogCapture&&) = delete;
-
-    hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder() const
-    {
-        return _recorder;
-    }
-
-private:
-    hipdnn_frontend::Error setCallback(hipdnnSeverity_t minLevel) const
-    {
-        return hipdnn_frontend::setUserLogCallback(
-            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-            minLevel,
-            hipdnn_frontend::LogCallbackMode::SYNC,
-            _userHandle);
-    }
-
-    // Declared before the recorder so the recorder's own saved-level restore runs first.
-    hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
-    void* _userHandle;
-    bool _registered = false;
-    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder
-        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-};
 
 } // namespace
 
@@ -481,14 +427,15 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 
 /// Drives global.benchmarking=1 through the frontend against the shipped pointwise
 /// pack, verifying the numerical result against the CPU reference and confirming from
-/// the plugin's own logs that the composite plan actually ran a sampling sweep and
-/// resolved a winner once.
+/// the plugin's own logs that the composite plan actually ran a sampling sweep, exactly
+/// once.
 ///
-/// Which candidate wins is deliberately not asserted: the two block-size-64/256 FLOAT
-/// candidates surviving knob filtering for this graph may be indistinguishable within
-/// noise, and either winner is correct so long as it produces the right answer. What
-/// must hold is that benchmarking happened at all -- otherwise the case would pass
-/// identically with the feature removed.
+/// Which candidate wins is not asserted: the two block-size-64/256 FLOAT candidates
+/// surviving knob filtering for this graph may be indistinguishable within noise, and
+/// either is correct so long as it produces the right answer. A winner is required except
+/// on Windows, where bad HIP event readings can leave both unusable and the plan then
+/// serves the first. What must hold everywhere is that benchmarking happened at all --
+/// otherwise the case would pass identically with the feature removed.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
     const ScopedPluginLogCapture capture(this);
@@ -514,20 +461,23 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(context, /*seed=*/0);
 
+#ifndef _WIN32
+    // HIP event timing is reliable here, so a sweep without a usable candidate is a bug.
     EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
         << "the sampling sweep did not resolve a winner. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
+#endif
 
-    const size_t selectionsAfterFirstExecute = countSelectionLogs(recorder);
-    ASSERT_EQ(selectionsAfterFirstExecute, 1U)
-        << "expected exactly one selection sweep. Captured logs:\n"
+    const size_t sweepsAfterFirstExecute = countSweepResolutions(recorder);
+    ASSERT_EQ(sweepsAfterFirstExecute, 1U)
+        << "expected exactly one sampling sweep. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
     verifyBuiltGraph(context, /*seed=*/1);
 
-    // The winner is resolved once for the plan's life: a second execute() must reuse it
-    // rather than re-sample.
-    EXPECT_EQ(countSelectionLogs(recorder), selectionsAfterFirstExecute)
+    // The sweep resolves once for the plan's life: a second execute() must reuse its
+    // choice rather than re-sample.
+    EXPECT_EQ(countSweepResolutions(recorder), sweepsAfterFirstExecute)
         << "the second execute() re-sampled instead of reusing the winner. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 

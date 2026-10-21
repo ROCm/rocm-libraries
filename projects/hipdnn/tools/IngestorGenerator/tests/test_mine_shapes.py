@@ -261,14 +261,16 @@ class TestCausalityComesFromTheGraphNotTheFilename:
     """`causal` decides which dispatcher branch resolves, so mining it wrong sizes a
     variant set that cannot serve the shapes it claims.
 
-    hipDNN has no `causal` boolean: the deprecated pair takes precedence when set,
-    otherwise causality is (left_bound, right_bound, diagonal_alignment), and every
-    shipped causal bundle leaves both booleans false with `left_bound=-1,
-    right_bound=0`. A filename heuristic is wrong for every causal graph here -- they
-    carry `causal` in a PARENT DIRECTORY, never in the leaf name.
+    hipDNN has no `causal` boolean: causality is (left_bound, right_bound,
+    diagonal_alignment), and a set deprecated boolean only defaults an unbounded right
+    bound to 0 (forcing BOTTOM_RIGHT for `causal_mask_bottom_right`), with the stored
+    bounds and alignment applied on top. Every shipped causal bundle leaves both
+    booleans false with `left_bound=-1, right_bound=0`. A filename heuristic is wrong
+    for every causal graph here -- they carry `causal` in a PARENT DIRECTORY, never in
+    the leaf name.
     """
 
-    def _graph(self, path: Path, attrs: dict) -> None:
+    def _graph(self, path: Path, attrs: dict, seqlen_q: int = 4096) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -276,7 +278,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
                     "tensors": [
                         {
                             "name": "query",
-                            "dims": [1, 32, 4096, 128],
+                            "dims": [1, 32, seqlen_q, 128],
                             "data_type": "bf16",
                         },
                         {"name": "key", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
@@ -291,7 +293,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             )
         )
 
-    def _mine(self, tmp_path: Path) -> list:
+    def _run(self, tmp_path: Path) -> tuple[subprocess.CompletedProcess, Path]:
         out = tmp_path / "shapes.json"
         result = subprocess.run(
             [
@@ -306,8 +308,17 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             capture_output=True,
             text=True,
         )
+        return result, out
+
+    def _mine(self, tmp_path: Path) -> list:
+        result, out = self._run(tmp_path)
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(out.read_text())
+
+    def _assert_refused(self, tmp_path: Path) -> None:
+        result, out = self._run(tmp_path)
+        assert result.returncode != 0
+        assert not out.exists(), "a refused graph must not yield a mined corpus"
 
     def test_the_bound_form_is_read_as_causal_despite_a_neutral_filename(
         self, tmp_path
@@ -347,12 +358,48 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         )
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [2]
 
-    def test_the_deprecated_boolean_still_takes_precedence_when_set(self, tmp_path):
+    def test_the_deprecated_boolean_supplies_the_causal_right_bound(self, tmp_path):
         self._graph(
             tmp_path / "graphs" / "g.json",
             {"causal_mask": True, "left_bound": None, "right_bound": None},
         )
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [1]
+
+    def test_the_deprecated_boolean_keeps_a_stored_bottom_right_alignment(
+        self, tmp_path
+    ):
+        """Chunked prefill (Sq != Skv) asks for a bottom-right diagonal; reading it as
+        top-left causal mines a different request than the caller made."""
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "diagonal_alignment": "BOTTOM_RIGHT"},
+            seqlen_q=1024,
+        )
+        self._assert_refused(tmp_path)
+
+    def test_the_deprecated_boolean_with_bottom_right_and_square_shape_is_causal(
+        self, tmp_path
+    ):
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "diagonal_alignment": "BOTTOM_RIGHT"},
+        )
+        assert [s["mask_type"] for s in self._mine(tmp_path)] == [1]
+
+    def test_the_deprecated_boolean_keeps_a_stored_left_bound(self, tmp_path):
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "left_bound": 127, "right_bound": None},
+        )
+        shapes = self._mine(tmp_path)
+        assert [(s["mask_type"], s["sliding_window"]) for s in shapes] == [(2, 128)]
+
+    def test_both_deprecated_booleans_set_is_refused(self, tmp_path):
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "causal_mask_bottom_right": True},
+        )
+        self._assert_refused(tmp_path)
 
     def test_causal_and_noncausal_shapes_do_not_collapse_onto_one_key(self, tmp_path):
         """Two graphs identical but for causality are TWO variants; merging them halves
@@ -374,22 +421,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             tmp_path / "graphs" / "g.json",
             {"causal_mask": False, "left_bound": "unbounded", "right_bound": 0},
         )
-        out = tmp_path / "shapes.json"
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(_MINE),
-                "--graphs",
-                str(tmp_path / "graphs"),
-                "--include-windowed",
-                "--out",
-                str(out),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
-        assert not out.exists(), "a refused bound must not yield a mined corpus"
+        self._assert_refused(tmp_path)
 
 
 class TestRocKeBenchTree:
@@ -429,6 +461,30 @@ class TestRocKeBenchTree:
         )
         shapes = json.loads(out.read_text()) if out.exists() else []
         return result, shapes
+
+    def test_an_explicit_noncausal_record_is_mined_unmasked(self, tmp_path):
+        """`[-1, -1]` alone reads as causal; an explicit `causal: false` (the
+        emitted benchmark lists carry one) is a full request, not its causal twin."""
+        result, shapes = self._mine_bench(
+            tmp_path, self._record(causal=False), self._record(causal=True)
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sorted(s["mask_type"] for s in shapes) == [0, 1]
+
+    def test_a_noncausal_record_with_a_window_is_refused(self, tmp_path):
+        result, _ = self._mine_bench(
+            tmp_path, self._record(causal=False, window_size=[127, 0])
+        )
+        assert result.returncode != 0
+        assert "non-causal record cannot carry window" in result.stdout + result.stderr
+
+    def test_a_varlen_record_is_skipped_and_counted(self, tmp_path):
+        result, shapes = self._mine_bench(
+            tmp_path, self._record(varlen=True, num_seqs=4), self._record()
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(shapes) == 1 and shapes[0]["batch"] == 1
+        assert "1 rocKE varlen record(s) skipped" in result.stdout
 
     def test_a_jsonl_trace_is_read_at_all(self, tmp_path):
         """A json.load reader gets 'Extra data' and silently mines nothing."""
@@ -725,3 +781,222 @@ class TestEveryRequestSemanticSurvivesMining:
         assert "1 duplicate shape(s) merged" in output
         suites = {p["suite"] for p in shapes[0]["_provenance_occurrences"]}
         assert suites == {"suite_a", "suite_b"}, "a merged duplicate lost its vote"
+
+
+def _hipdnn_graph(
+    path: Path,
+    *,
+    dtype: str = "bfloat16",
+    inputs: dict | None = None,
+    attrs: dict | None = None,
+) -> None:
+    """A graph in the shape dnn-benchmarking ships: operand UIDs under the node's
+    `inputs`/`outputs`, every tensor with strides, and the full attribute set."""
+    b, s = 1, 512
+
+    def tensor(uid, name, heads):
+        dims = [b, heads, s, 128]
+        strides = [s * heads * 128, 128, heads * 128, 1]
+        return {
+            "uid": uid,
+            "name": name,
+            "dims": dims,
+            "strides": strides,
+            "data_type": dtype,
+        }
+
+    tensors = [
+        tensor(1, "Q", 8),
+        tensor(2, "K", 2),
+        tensor(3, "V", 2),
+        tensor(4, "O", 8),
+    ]
+    node_inputs = {
+        "q_tensor_uid": 1,
+        "k_tensor_uid": 2,
+        "v_tensor_uid": 3,
+        "sink_token_tensor_uid": None,
+        "seq_len_q_tensor_uid": None,
+        "seq_len_kv_tensor_uid": None,
+    }
+    for key, uid in (inputs or {}).items():
+        node_inputs[key] = uid
+        tensors.append({"uid": uid, "name": key, "dims": [1], "strides": [1]})
+    node_attrs = {
+        "causal_mask": False,
+        "left_bound": -1,
+        "right_bound": 0,
+        "diagonal_alignment": "TOP_LEFT",
+        "dropout_probability": None,
+        "max_seq_len_kv": None,
+        "generate_stats": None,
+        "attn_scale_value": 0.088,
+        **(attrs or {}),
+    }
+    for key, uid in (attrs or {}).items():
+        if key.endswith("_tensor_uid") and uid is not None:
+            tensors.append({"uid": uid, "name": key, "dims": [1], "strides": [1]})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "name": path.stem,
+                "tensors": tensors,
+                "nodes": [
+                    {
+                        "type": "SdpaAttributes",
+                        "inputs": node_inputs,
+                        "outputs": {"o_tensor_uid": 4},
+                        "attributes": node_attrs,
+                    }
+                ],
+            }
+        )
+    )
+
+
+def _mine_graphs(tmp_path: Path) -> tuple[int, str, list, list]:
+    out = tmp_path / "shapes.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_MINE),
+            "--graphs",
+            str(tmp_path / "graphs"),
+            "--out",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    shapes = json.loads(out.read_text()) if out.exists() else []
+    excluded_path = tmp_path / "shapes.excluded.json"
+    excluded = json.loads(excluded_path.read_text()) if excluded_path.exists() else []
+    return result.returncode, result.stdout + result.stderr, shapes, excluded
+
+
+class TestOutOfFamilyDtypesAreExcludedNotFatal:
+    """dnn-benchmarking corpora routinely carry fp32 SDPA graphs. One of them must
+    not abort the whole source; it is recorded as excluded with its reason."""
+
+    def test_an_fp32_graph_is_excluded_and_the_rest_is_mined(self, tmp_path):
+        _hipdnn_graph(tmp_path / "graphs" / "bf16.json")
+        _hipdnn_graph(tmp_path / "graphs" / "fp32.json", dtype="float")
+        rc, output, shapes, excluded = _mine_graphs(tmp_path)
+        assert rc == 0, output
+        assert len(shapes) == 1 and shapes[0]["dtype"] == "bf16"
+        assert len(excluded) == 1, excluded
+        assert excluded[0]["path"].endswith("fp32.json")
+        assert "fp32" in excluded[0]["reason"]
+        assert "excluded      :     1" in output
+
+    def test_a_source_of_only_excluded_graphs_is_an_empty_corpus_not_a_failure(
+        self, tmp_path
+    ):
+        _hipdnn_graph(tmp_path / "graphs" / "fp32.json", dtype="float32")
+        rc, output, shapes, excluded = _mine_graphs(tmp_path)
+        assert rc == 0, output
+        assert shapes == [] and len(excluded) == 1
+
+    def test_an_unrecognised_dtype_is_still_refused(self, tmp_path):
+        """Exclusion is for recognised dtypes only; a spelling nobody mapped is
+        still malformed input."""
+        _hipdnn_graph(tmp_path / "graphs" / "g.json", dtype="cheesecake")
+        rc, output, _, _ = _mine_graphs(tmp_path)
+        assert rc != 0
+        assert "unknown dtype spelling" in output
+
+
+class TestOperandsBoundInNodeInputs:
+    """hipDNN graphs bind operand UIDs under the SDPA node's `inputs`. A sink bound
+    there must be mined as a sink request, not as the easier sinkless problem."""
+
+    def test_a_sink_bound_in_node_inputs_is_mined_as_use_sinks(self, tmp_path):
+        _hipdnn_graph(
+            tmp_path / "graphs" / "sink.json", inputs={"sink_token_tensor_uid": 9}
+        )
+        rc, output, shapes, _ = _mine_graphs(tmp_path)
+        assert rc == 0, output
+        assert shapes[0]["use_sinks"] is True
+
+    def test_a_null_input_slot_does_not_hide_an_attribute_bound_sink(self, tmp_path):
+        """The helper's `inputs` carries `sink_token_tensor_uid: null`, as real graphs
+        do for an unbound slot. The legacy attribute binding must still count."""
+        _hipdnn_graph(
+            tmp_path / "graphs" / "sink.json", attrs={"sink_token_tensor_uid": 9}
+        )
+        rc, output, shapes, _ = _mine_graphs(tmp_path)
+        assert rc == 0, output
+        assert shapes[0]["use_sinks"] is True
+
+
+def _emitted(variant: str, seqlens: list[int], hq: int, hkv: int, **over) -> dict:
+    """One record as the dense prefill benchmarks' `--emit-shapes` writes it: the
+    rocKE trace schema plus an explicit `causal`, and `varlen`/`seqlens` for a packed
+    ragged batch. Synthetic, so the tests do not follow the benchmarks' shape lists."""
+    record = {
+        "model": "benchmark_dense_prefill_live",
+        "variant": variant,
+        "label": variant,
+        "num_seqs": len(seqlens),
+        "max_seqlen_q": max(seqlens),
+        "max_seqlen_k": max(seqlens),
+        "num_query_heads": hq,
+        "num_kv_heads": hkv,
+        "head_size": 128,
+        "q_dtype": "bf16",
+        "causal": True,
+        "window_size": [-1, 0],
+        "has_sinks": False,
+    }
+    record.update(over)
+    return record
+
+
+class TestAnEmittedBenchmarkShapeListIsMinable:
+    """The dense prefill benchmarks write their shape lists with `--emit-shapes` in
+    the trace schema this miner reads. A whole emitted list, mined through the CLI,
+    keeps the full, windowed and packed rows apart from the causal ones."""
+
+    def _mine(self, tmp_path: Path, *records: dict):
+        tree = tmp_path / "bench"
+        tree.mkdir()
+        (tree / "dense_prefill_live_shapes.json").write_text(
+            "".join(json.dumps(r) + "\n" for r in records)
+        )
+        out = tmp_path / "shapes.json"
+        mined = subprocess.run(
+            [sys.executable, str(_MINE), "--rocke-bench", str(tree), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert mined.returncode == 0, mined.stdout + mined.stderr
+        return mined.stdout, json.loads(out.read_text())
+
+    def test_full_and_windowed_rows_stay_distinct_and_repeats_merge(self, tmp_path):
+        output, shapes = self._mine(
+            tmp_path,
+            _emitted("causal/mha", [1024], 8, 8),
+            _emitted("causal/gqa", [1024], 8, 2),
+            _emitted("full/mha", [1024], 8, 8, causal=False, window_size=[-1, -1]),
+            _emitted("swa/w512", [1024], 8, 8, window_size=[511, 0]),
+            # The persistent mode re-measures a causal shape on another grid.
+            _emitted("persistent/mha", [1024], 8, 8),
+        )
+        assert len(shapes) == 4, output
+        assert "1 duplicate shape(s) merged" in output
+        by_mask = sorted((s["mask_type"], s["sliding_window"]) for s in shapes)
+        assert by_mask == [(0, 0), (1, 0), (1, 0), (2, 512)], by_mask
+        full = next(s for s in shapes if s["mask_type"] == 0)
+        assert (full["nhead_q"], full["nhead_k"]) == (8, 8)
+
+    def test_packed_varlen_rows_are_skipped_and_counted(self, tmp_path):
+        output, shapes = self._mine(
+            tmp_path,
+            _emitted("dense/s512", [512], 8, 8),
+            _emitted("dense/s2048", [2048], 8, 8),
+            _emitted("varlen/4seq", [512, 1024, 300, 2048], 8, 8, varlen=True),
+        )
+        assert sorted(s["seqlen_q"] for s in shapes) == [512, 2048], output
+        assert all(s["batch"] == 1 for s in shapes)
+        assert "1 rocKE varlen record(s) skipped" in output

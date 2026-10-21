@@ -16,7 +16,9 @@ file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/default_flatc_version.txt"
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
-set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+set(HIPDNN_GTEST_VERSION "1.17.0" CACHE STRING
+    "GoogleTest version fetched when no GTest package is available"
+)
 
 option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
@@ -163,6 +165,23 @@ set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/test_pl
 set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Install directory for test plugins"
 )
+# Test data files (not libraries) live under lib/ on every platform: TheRock's hipDNN test
+# artifact claims lib/test_plugins/**, while Windows puts the test plugins themselves in bin/.
+set(HIPDNN_TEST_DATA_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/test_plugins"
+    CACHE INTERNAL "Build directory for test data"
+)
+set(HIPDNN_TEST_DATA_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins"
+    CACHE INTERNAL "Install directory for test data"
+)
+# Both directories seen from a test binary. Build and install trees share these offsets, so
+# a test that resolves them from its own binary reads the copy beside whichever tree it runs
+# from, as TheRock's artifact-only runners require.
+file(RELATIVE_PATH HIPDNN_TEST_PLUGIN_RELDIR "/${CMAKE_INSTALL_BINDIR}"
+     "/${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+)
+file(RELATIVE_PATH HIPDNN_TEST_DATA_RELDIR "/${CMAKE_INSTALL_BINDIR}"
+     "/${HIPDNN_TEST_DATA_INSTALL_DIR}"
+)
 
 # Migrate HIP_DNN_BUILD_BACKEND -> HIPDNN_BUILD_BACKEND
 if(DEFINED HIP_DNN_BUILD_BACKEND)
@@ -224,6 +243,7 @@ include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
+include(cmake/WindowsDllStaging.cmake)
 include(cmake/Tests.cmake)
 include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
