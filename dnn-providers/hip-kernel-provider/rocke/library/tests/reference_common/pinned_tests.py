@@ -39,8 +39,13 @@ def select_bundle(
     """Yield the lookup of a slot's adapter, bundle, and authenticated manifest.
 
     The lookup takes an architecture and variant and skips a slot of another
-    processor. An explicitly selected operation or bundle is required: a
-    missing enrolled GPU or bundle fails instead of skipping. Each skip says
+    processor or, with ``--rocke-reference-variant``, of another variant. A
+    published variant, one with a committed lock, runs its default bundle. An
+    explicitly selected operation or bundle is required: a missing enrolled
+    GPU or bundle fails instead of skipping. An unpublished variant runs only a
+    candidate bundle and lock; without them it skips, but fails when selected
+    by name or when its selected architecture publishes no variant, since that
+    selection would otherwise pass without running anything. Each skip says
     which of these it was, or that options selected another operation, and how
     to run the tests. A slot's bundle and reused workers stay open until a test
     opens another slot, so at most one slot's workers are alive at a time. The
@@ -48,6 +53,7 @@ def select_bundle(
     them there.
     """
     selected = config.getoption("--rocke-reference-operation")
+    chosen = config.getoption("--rocke-reference-variant")
     name = operation.name.upper()
     if selected and selected != operation.name:
         pytest.skip(
@@ -70,10 +76,47 @@ def select_bundle(
             else "no GPU detected: HIP reports no device"
         )
         pytest.skip(f"{reason}; run on an enrolled {name} processor ({enrolled})")
+    registry = operation.architectures
     lock = config.getoption("--rocke-reference-lock")
     lock = Path(lock) if lock else None
     opened: dict[tuple[str, str], tuple[ModuleType, Path, dict]] = {}
     workers = ExitStack()
+
+    def check_published(variant: str) -> None:
+        """Skip or fail an unpublished variant that has no candidate bundle and lock."""
+        committed = registry.baseline_lock(arch, variant)
+        if committed.is_file() or (configured and lock):
+            return
+        candidate = (
+            "pass a qualified candidate bundle and its qualification-lock.json with "
+            "--rocke-reference-bundle and --rocke-reference-lock"
+        )
+        unpublished = f"the {arch} {variant} {name} reference is unpublished"
+        if configured:
+            pytest.fail(
+                f"{unpublished}, so no committed lock authenticates the candidate "
+                f"bundle {Path(configured).resolve()}; {candidate}"
+            )
+        if variant == chosen:
+            pytest.fail(
+                f"--rocke-reference-variant selects {variant}, but {unpublished}: "
+                f"{committed} does not exist; {candidate}"
+            )
+        published = [
+            other
+            for other in registry.variants(arch)
+            if registry.baseline_lock(arch, other).is_file()
+        ]
+        if selected and not published:
+            pytest.fail(
+                f"no {arch} {name} reference variant is published, so the selected "
+                f"{arch} suite would run nothing; {candidate}"
+            )
+        pytest.skip(
+            f"not published: {unpublished}, since {committed} does not exist; to "
+            f"verify a candidate, select it with --rocke-reference-variant {variant} "
+            f"and {candidate}"
+        )
 
     def open_slot(architecture: str, variant: str) -> tuple[ModuleType, Path, dict]:
         if architecture != arch:
@@ -81,11 +124,17 @@ def select_bundle(
                 f"not selected: this {architecture} {variant} reference runs only "
                 f"on a {architecture} GPU, and this GPU is {arch}"
             )
+        if chosen and variant != chosen:
+            pytest.skip(
+                f"not selected: --rocke-reference-variant {chosen} selects another "
+                f"{arch} variant"
+            )
         if (architecture, variant) in opened:
             return opened[architecture, variant]
+        check_published(variant)
         workers.close()
         opened.clear()
-        target = operation.architectures.get_adapter(arch, variant)
+        target = registry.get_adapter(arch, variant)
         bundle = (
             Path(configured).resolve()
             if configured

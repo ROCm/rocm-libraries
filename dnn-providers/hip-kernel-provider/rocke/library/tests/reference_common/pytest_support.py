@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Architecture selection for installed, operation-specific reference CTests."""
+"""Architecture and variant selection for installed per-operation reference CTests."""
 
 from __future__ import annotations
 
@@ -45,11 +45,16 @@ def architecture_available(
 def start_reference_session(config) -> None:
     architecture = config.getoption("--rocke-reference-arch")
     operation = config.getoption("--rocke-reference-operation")
+    variant = config.getoption("--rocke-reference-variant")
     bundle = config.getoption("--rocke-reference-bundle")
     lock = config.getoption("--rocke-reference-lock")
     if (bundle or lock) and not (architecture and operation):
         raise pytest.UsageError(
             "reference bundle/lock overrides require explicit operation and architecture"
+        )
+    if variant and not (architecture and operation):
+        raise pytest.UsageError(
+            "reference variant selection requires explicit operation and architecture"
         )
     if lock and not bundle:
         raise pytest.UsageError("reference lock override requires a reference bundle")
@@ -62,12 +67,16 @@ def start_reference_session(config) -> None:
     registry = importlib.import_module(f"{operation}_reference.architectures")
     try:
         registry.get_architecture(architecture)
-        if bundle or lock:
-            # An override replaces one variant's bundle, so the architecture
-            # must have exactly one variant.
-            registry.resolve_variant(architecture)
     except ValueError as error:
         raise pytest.UsageError(str(error)) from error
+    if variant or bundle:
+        # A selected variant must be enrolled. An override replaces one
+        # variant's bundle, so without a selection the architecture must have
+        # only one variant.
+        try:
+            registry.resolve_variant(architecture, variant)
+        except ValueError as error:
+            raise pytest.UsageError(f"--rocke-reference-variant: {error}") from error
     from .targets import get_device_processor
 
     # Match the processor against artifact targets. get_device_arch() returns
@@ -91,10 +100,16 @@ def select_reference_items(config, items) -> None:
     architecture = config.getoption("--rocke-reference-arch")
     if not architecture:
         return
+    variant = config.getoption("--rocke-reference-variant")
     selected, deselected = [], []
     for item in items:
         callspec = getattr(item, "callspec", None)
-        case_arch = callspec.params.get("architecture") if callspec else None
-        (selected if case_arch in (None, architecture) else deselected).append(item)
+        params = callspec.params if callspec else {}
+        case_arch = params.get("architecture")
+        keep = case_arch in (None, architecture)
+        # Only a reference slot, parametrized by both, names its variant.
+        if keep and variant and case_arch:
+            keep = params.get("variant") in (None, variant)
+        (selected if keep else deselected).append(item)
     items[:] = selected
     config.hook.pytest_deselected(items=deselected)

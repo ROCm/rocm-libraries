@@ -319,6 +319,12 @@ class ReferenceOperation:
         source = baseline / "source"
         if payload_digests(source) != metadata["files"]:
             raise ValueError("baseline sources no longer match the committed snapshot")
+        # The variant may be the architecture's default, so name the one qualified.
+        print(
+            f"{self.label} {architecture} {variant}: qualifying "
+            f"{len(target.CASES)} enrolled cases",
+            flush=True,
+        )
         output.mkdir(parents=True, exist_ok=False)
         payload = output / "payload"
         payload.mkdir()
@@ -588,10 +594,11 @@ class ReferenceOperation:
         the committed lock and the default bundle, and defaults to the
         architecture's only variant.
         """
+        variant = self.architectures.resolve_variant(architecture, variant)
         committed = self.architectures.baseline_lock(architecture, variant)
         lock = lock or committed
         if bundle.is_file():
-            return self._unpack_hint(bundle, lock, option=option)
+            return self._unpack_hint(bundle, lock, variant, option=option)
         if lock.resolve() != committed.resolve():
             return (
                 "pass a candidate bundle directory together with the "
@@ -635,7 +642,7 @@ class ReferenceOperation:
         return (
             f"{lead} dvc pull and artifact.py unpack:\n"
             f"    {display_command(['dvc', 'pull', _shown(pointer)])}\n"
-            f"    {self._unpack_command(archive, bundle, lock)}"
+            f"    {self._unpack_command(archive, bundle, lock, variant)}"
         )
 
     def validate_cases(
@@ -997,6 +1004,10 @@ class ReferenceOperation:
 
     def _parser(self) -> argparse.ArgumentParser:
         architectures = self.architectures.ARCHITECTURES
+        variant_help = (
+            "enrolled variant of the architecture (default: its only variant; "
+            "required when it has several)"
+        )
         parser = argparse.ArgumentParser(
             description=self.description,
             epilog=(
@@ -1040,6 +1051,9 @@ class ReferenceOperation:
             choices=architectures,
             default="gfx942",
             help="enrolled architecture of this GPU (default: %(default)s)",
+        )
+        qualification.add_argument(
+            "--variant", help=f"{variant_help}; qualification prints the one it runs"
         )
         qualification.add_argument(
             "--baseline",
@@ -1090,6 +1104,7 @@ class ReferenceOperation:
             default="gfx942",
             help="enrolled architecture of this GPU (default: %(default)s)",
         )
+        verification.add_argument("--variant", help=variant_help)
         verification.add_argument(
             "--bundle",
             required=True,
@@ -1127,14 +1142,22 @@ class ReferenceOperation:
             "cases",
             help="list an architecture's enrolled cases",
             description=(
-                "Print each enrolled case id with its tolerance and case contract."
+                "Print each enrolled case id with its tolerance and case contract, "
+                "grouped by variant. Each variant's count names the other enrolled "
+                "variants that share its cohort, so a change to that cohort needs "
+                "their requalification too."
             ),
         )
         listing.add_argument(
             "--arch", choices=architectures, required=True, help="enrolled architecture"
         )
         listing.add_argument(
-            "--json", action="store_true", help="print the cohort as JSON"
+            "--variant",
+            help="list only this enrolled variant (default: every variant; --json "
+            "needs one when the architecture has several)",
+        )
+        listing.add_argument(
+            "--json", action="store_true", help="print one variant's cohort as JSON"
         )
         comparison = commands.add_parser(
             "diff",
@@ -1143,21 +1166,27 @@ class ReferenceOperation:
                 "Authenticate a bundle's manifest against its lock, then report "
                 "enrolled cases it does not record, recorded cases that are not "
                 "enrolled, and changed tolerances or budgets, matching cases as "
-                "verification does. Exits with status 1 on any difference and 2 "
-                "when the lock or bundle cannot be read or authenticated. Reading "
-                "the recorded device targets needs the rocKE platform package: "
-                "install rocKE or set PYTHONPATH=platform/python from the rocKE "
-                "root."
+                "verification does. Without --variant, --bundle, or --lock, it "
+                "compares every published variant of the architecture. Exits "
+                "with status 1 on any difference and 2 when the lock or bundle "
+                "cannot be read or authenticated. Reading the recorded device "
+                "targets needs the rocKE platform package: install rocKE or set "
+                "PYTHONPATH=platform/python from the rocKE root."
             ),
         )
         comparison.add_argument(
             "--arch", choices=architectures, required=True, help="enrolled architecture"
         )
         comparison.add_argument(
+            "--variant",
+            help="compare only this enrolled variant (default: every published "
+            "variant; with --bundle or --lock, the architecture's only variant)",
+        )
+        comparison.add_argument(
             "--bundle",
             type=Path,
-            help="bundle directory or .tar.gz archive (default: the "
-            "architecture's DVC archive, else its extracted bundle)",
+            help="bundle directory or .tar.gz archive (default: the variant's "
+            "DVC archive, else its extracted bundle)",
         )
         comparison.add_argument(
             "--lock",
@@ -1179,21 +1208,52 @@ class ReferenceOperation:
                 args.output.resolve(),
                 args.repetitions,
                 args.arch,
+                variant=self._variant(parser, args),
                 torch_reference=args.torch_reference,
             )
         elif args.command == "cases":
-            self._list_cases(args.arch, as_json=args.json)
+            # The text listing groups every variant; JSON describes one cohort.
+            variants = (
+                self.architectures.variants(args.arch)
+                if args.variant is None and not args.json
+                else (self._variant(parser, args),)
+            )
+            self._list_cases(args.arch, variants, as_json=args.json)
         elif args.command == "diff":
             self._diff(parser, args)
         else:
             self._verify(parser, args)
 
-    def _list_cases(self, architecture: str, *, as_json: bool) -> None:
-        cases = self.architectures.get_adapter(architecture).CASES
+    def _variant(
+        self, parser: argparse.ArgumentParser, args: argparse.Namespace
+    ) -> str:
+        """Return ``--variant`` or the architecture's only variant, or exit.
+
+        The error lists the enrolled variants when ``--variant`` is not one of
+        them or is missing for an architecture with several.
+        """
+        try:
+            return self.architectures.resolve_variant(args.arch, args.variant)
+        except ValueError as error:
+            parser.error(f"argument --variant: {error}")
+
+    def _list_cases(
+        self, architecture: str, variants: Sequence[str], *, as_json: bool
+    ) -> None:
+        """Print each variant's enrolled cases, or one variant's cohort as JSON.
+
+        A variant's count names the other enrolled (architecture, variant)
+        slots whose cases have the same cohort digest, which their locks pin as
+        ``cohort_sha256``: a change to a shared cohort needs each of those
+        slots requalified.
+        """
         if as_json:
+            (variant,) = variants
+            cases = self.architectures.get_adapter(architecture, variant).CASES
             listing = {
                 "operation": self.name,
                 "architecture": architecture,
+                "variant": variant,
                 "cases": [
                     {"id": case.id, "tolerance": case.tolerance, "case": asdict(case)}
                     for case in cases
@@ -1201,21 +1261,43 @@ class ReferenceOperation:
             }
             print(json.dumps(listing, indent=2))
             return
-        width = max((len(case.id) for case in cases), default=0)
-        for case in cases:
-            fields = " ".join(f"{name}={value}" for name, value in asdict(case).items())
-            print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
-        print(f"{self.label} {architecture}: {len(cases)} enrolled cases")
+        cohorts = {
+            (name, variant): self.enrolled_cohort_digest(name, variant)
+            for name in self.architectures.ARCHITECTURES
+            for variant in self.architectures.variants(name)
+        }
+        for index, variant in enumerate(variants):
+            if index:
+                print()
+            cases = self.architectures.get_adapter(architecture, variant).CASES
+            width = max((len(case.id) for case in cases), default=0)
+            for case in cases:
+                fields = " ".join(
+                    f"{name}={value}" for name, value in asdict(case).items()
+                )
+                print(f"{case.id:<{width}}  tolerance={case.tolerance:g} {fields}")
+            shared = [
+                f"{name} {other}"
+                for (name, other), digest in cohorts.items()
+                if digest == cohorts[architecture, variant]
+                and (name, other) != (architecture, variant)
+            ]
+            note = f"; cohort shared with {', '.join(shared)}" if shared else ""
+            print(
+                f"{self.label} {architecture} {variant}: {len(cases)} enrolled "
+                f"cases{note}"
+            )
 
     def _selected_lock(
-        self, parser: argparse.ArgumentParser, args: argparse.Namespace
+        self, parser: argparse.ArgumentParser, args: argparse.Namespace, variant: str
     ) -> Path:
-        """Return ``--lock`` or the committed lock, or exit when it does not exist."""
-        lock = args.lock or self.architectures.baseline_lock(args.arch)
+        """Return ``--lock`` or the variant's committed lock, or exit when missing."""
+        lock = args.lock or self.architectures.baseline_lock(args.arch, variant)
         if args.lock is None and not lock.is_file():
             parser.error(
-                f"{args.arch} has no published {self.label} bundle: {_shown(lock)} "
-                "does not exist; pass a candidate's --bundle and --lock"
+                f"{args.arch} {variant} has no published {self.label} bundle: "
+                f"{_shown(lock)} does not exist; pass a candidate's --bundle and "
+                "--lock"
             )
         if not lock.is_file():
             parser.error(f"lock not found: {_shown(lock)}")
@@ -1223,92 +1305,122 @@ class ReferenceOperation:
 
     @contextmanager
     def _bundle_errors(
-        self, parser: argparse.ArgumentParser, command: str
+        self, report: Callable[[str], object], command: str
     ) -> Iterator[None]:
-        """Report an unusable lock or bundle as one message and exit status 2.
+        """Report an unusable lock or bundle as one message.
 
         The message already names the lock or bundle problem, so a traceback
-        would only repeat it, and status 2 keeps these errors apart from a
-        reported difference or a failed comparison. Matching recorded device
-        targets needs the rocKE platform package, so its absence is reported
-        the same way.
+        would only repeat it. ``report`` is ``parser.error``, whose status 2
+        keeps these errors apart from a reported difference or a failed
+        comparison, or collects the message so that other variants are still
+        compared. Matching recorded device targets needs the rocKE platform
+        package, so its absence is reported the same way.
         """
         try:
             yield
         except (ValueError, OSError) as error:
-            parser.error(str(error))
+            report(str(error))
         except ModuleNotFoundError as error:
             # Any other missing module is a defect; keep its traceback.
             if error.name is None or error.name.partition(".")[0] != "rocke":
                 raise
-            parser.error(
+            report(
                 f"{command} reads recorded device target ids with the rocKE "
                 f"platform package, which cannot be imported ({error}); install "
                 "rocKE or set PYTHONPATH=platform/python from the rocKE root"
             )
 
     def _diff(self, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-        lock = self._selected_lock(parser, args)
-        if args.bundle is not None:
-            bundle = args.bundle.resolve()
-            if not bundle.exists():
-                parser.error(f"bundle not found: {_shown(bundle)}")
+        published = [
+            variant
+            for variant in self.architectures.variants(args.arch)
+            if self.architectures.baseline_lock(args.arch, variant).is_file()
+        ]
+        selection = (args.variant, args.bundle, args.lock)
+        if published and all(option is None for option in selection):
+            # Without a selected variant, bundle, or lock, compare every
+            # published variant with its published bundle.
+            variants = published
         else:
-            bundle = self.published_bundle(args.arch)
-            if not bundle.exists():
-                archive = bundle.with_name(f"{bundle.name}.tar.gz")
-                parser.error(
-                    f"no {args.arch} {self.label} bundle at {_shown(archive)} or "
-                    f"{_shown(bundle)}; fetch the archive with DVC or pass --bundle"
+            variants = [self._variant(parser, args)]
+        unusable, differed = [], False
+        for variant in variants:
+            lock = self._selected_lock(parser, args, variant)
+            if args.bundle is not None:
+                bundle = args.bundle.resolve()
+                if not bundle.exists():
+                    parser.error(f"bundle not found: {_shown(bundle)}")
+            else:
+                bundle = self.published_bundle(args.arch, variant)
+                if not bundle.exists():
+                    archive = bundle.with_name(f"{bundle.name}.tar.gz")
+                    unusable.append(
+                        f"no {args.arch} {variant} {self.label} bundle at "
+                        f"{_shown(archive)} or {_shown(bundle)}; fetch the archive "
+                        "with DVC or pass --bundle"
+                    )
+                    continue
+            differences = None
+            with self._bundle_errors(unusable.append, args.command):
+                differences = self.diff_bundle(
+                    bundle, lock, architecture=args.arch, variant=variant
                 )
-        with self._bundle_errors(parser, args.command):
-            differences = self.diff_bundle(bundle, lock, architecture=args.arch)
-        cases = self.architectures.get_adapter(args.arch).CASES
-        if not differences:
+            if differences is None:
+                continue
+            subject = f"{self.label} {args.arch} {variant}"
+            if not differences:
+                cases = self.architectures.get_adapter(args.arch, variant).CASES
+                print(
+                    f"{subject}: all {len(cases)} enrolled cases match "
+                    f"{_shown(bundle)}"
+                )
+                continue
+            differed = True
+            print(f"{subject}: the enrolled cases differ from {_shown(bundle)}")
+            for difference in differences:
+                print(f"  {difference}")
+        if differed:
             print(
-                f"{self.label} {args.arch}: all {len(cases)} enrolled cases match "
-                f"{_shown(bundle)}"
+                "A cohort or budget change needs a complete requalification; see "
+                f"{_WORKFLOW}."
             )
-            return
-        print(
-            f"{self.label} {args.arch}: the enrolled cases differ from "
-            f"{_shown(bundle)}"
-        )
-        for difference in differences:
-            print(f"  {difference}")
-        print(
-            "A cohort or budget change needs a complete requalification; see "
-            f"{_WORKFLOW}."
-        )
-        raise SystemExit(1)
+        if unusable:
+            # A missing rocKE platform package fails every variant alike.
+            parser.error("\n".join(dict.fromkeys(unusable)))
+        if differed:
+            raise SystemExit(1)
 
     def _verify(
         self, parser: argparse.ArgumentParser, args: argparse.Namespace
     ) -> None:
-        lock = self._selected_lock(parser, args)
+        variant = self._variant(parser, args)
+        lock = self._selected_lock(parser, args, variant)
         bundle = args.bundle.resolve()
         if bundle.is_file():
-            parser.error(self._unpack_hint(bundle, lock))
+            parser.error(self._unpack_hint(bundle, lock, variant))
         if not bundle.is_dir():
             parser.error(f"bundle directory not found: {_shown(bundle)}")
-        target = self.architectures.get_adapter(args.arch)
+        target = self.architectures.get_adapter(args.arch, variant)
         cases = target.CASES
         if args.cases:
             unknown = sorted(set(args.cases) - {case.id for case in cases})
             if unknown:
                 parser.error(
-                    f"not enrolled for {args.arch}: {', '.join(unknown)}; list the "
-                    f"enrolled ids with: {parser.prog} cases --arch {args.arch}"
+                    f"not enrolled for {args.arch} {variant}: {', '.join(unknown)}; "
+                    f"list the enrolled ids with: {parser.prog} cases --arch "
+                    f"{args.arch} --variant {variant}"
                 )
             cases = tuple(case for case in cases if case.id in args.cases)
         skipped = len(target.CASES) - len(cases)
-        with self._bundle_errors(parser, args.command):
-            manifest = self.load_bundle(bundle, args.lock, architecture=args.arch)
+        with self._bundle_errors(parser.error, args.command):
+            manifest = self.load_bundle(
+                bundle, args.lock, architecture=args.arch, variant=variant
+            )
         if skipped:
             print(
                 f"{self.label}: running {len(cases)} of {len(target.CASES)} "
-                f"enrolled {args.arch} cases selected with --case; a subset run "
-                "is not a full verification",
+                f"enrolled {args.arch} {variant} cases selected with --case; a "
+                "subset run is not a full verification",
                 flush=True,
             )
         current = args.current_root.resolve() if args.current_root else None
@@ -1322,6 +1434,7 @@ class ReferenceOperation:
                     current_root=current,
                     repetitions=args.repetitions,
                     architecture=args.arch,
+                    variant=variant,
                 )
                 print(json.dumps(report, sort_keys=True), flush=True)
         if skipped:
@@ -1349,10 +1462,11 @@ class ReferenceOperation:
     ) -> str:
         """Show the verify command that repeats one case's comparison.
 
-        The command checks the same bundle against the same lock, so a failing
-        candidate is not rerun against the committed lock. The script is
-        installed beside the operation package, so its path is valid in source
-        and installed trees.
+        The command checks the same variant's bundle against the same lock, so
+        a failing candidate is not rerun against the committed lock. It names
+        the variant even when it is the default, so it stays valid once the
+        architecture enrolls another. The script is installed beside the
+        operation package, so its path is valid in source and installed trees.
         """
         committed = self.architectures.baseline_lock(architecture, variant)
         candidate = (
@@ -1370,6 +1484,8 @@ class ReferenceOperation:
                 "verify",
                 "--arch",
                 architecture,
+                "--variant",
+                variant,
                 "--bundle",
                 _shown(bundle),
                 *candidate,
@@ -1379,8 +1495,13 @@ class ReferenceOperation:
             ]
         )
 
-    def _unpack_command(self, archive: Path, bundle: Path, lock: Path) -> str:
-        """Show the artifact.py command that extracts and authenticates an archive."""
+    def _unpack_command(
+        self, archive: Path, bundle: Path, lock: Path, variant: str
+    ) -> str:
+        """Show the artifact.py command that extracts and authenticates an archive.
+
+        ``variant`` names the variant that ``lock`` belongs to.
+        """
         return display_command(
             [
                 "python",
@@ -1388,6 +1509,8 @@ class ReferenceOperation:
                 "unpack",
                 "--operation",
                 self.name,
+                "--variant",
+                variant,
                 "--archive",
                 _shown(archive),
                 "--bundle",
@@ -1398,7 +1521,7 @@ class ReferenceOperation:
         )
 
     def _unpack_hint(
-        self, archive: Path, lock: Path, *, option: str = "--bundle"
+        self, archive: Path, lock: Path, variant: str, *, option: str = "--bundle"
     ) -> str:
         """Explain how to extract an archive passed where a bundle directory belongs."""
         stem = archive.name.removesuffix(".tar.gz")
@@ -1408,6 +1531,6 @@ class ReferenceOperation:
         return (
             f"{_shown(archive)} is a file, but {option} needs an extracted bundle "
             "directory. Unpack and authenticate the archive with:\n  "
-            f"{self._unpack_command(archive, directory, lock)}\n"
+            f"{self._unpack_command(archive, directory, lock, variant)}\n"
             f"then pass {display_command([option, _shown(directory)])}"
         )

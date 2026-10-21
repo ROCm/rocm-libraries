@@ -661,6 +661,7 @@ def pytest_addoption(parser):
     parser.addoption("--rocke-reference-operation")
     parser.addoption("--rocke-reference-bundle")
     parser.addoption("--rocke-reference-lock")
+    parser.addoption("--rocke-reference-variant")
 def pytest_sessionstart(session):
     start_reference_session(session.config)
 def pytest_collection_modifyitems(config, items):
@@ -704,6 +705,138 @@ def test_negative_control():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "2 passed, 1 deselected" in result.stdout
+
+
+_VARIANT_SESSION_CONFTEST = """
+from reference_common.pytest_support import (
+    select_reference_items,
+    start_reference_session,
+)
+from rocke.runtime import hip_module
+
+hip_module.get_device_target_id = lambda device=0: {architecture!r}
+
+
+def pytest_addoption(parser):
+    for option in ("arch", "bundle", "lock", "operation", "variant"):
+        parser.addoption(f"--rocke-reference-{{option}}")
+
+
+def pytest_sessionstart(session):
+    start_reference_session(session.config)
+
+
+def pytest_collection_modifyitems(config, items):
+    select_reference_items(config, items)
+"""
+# The shared pinned tests of a synthetic operation, whose bundles are missing.
+_VARIANT_SESSION_TESTS = """
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from fictional_reference import architectures
+from reference_common.pinned_tests import pinned_reference_tests, select_bundle
+from {operation}_reference.cli import OPERATION, load_bundle
+
+OPERATION = replace(OPERATION, name="fictional", architectures=architectures)
+
+
+@pytest.fixture(scope="module")
+def reference_bundle(pytestconfig):
+    missing = Path(__file__).with_name("missing")
+    yield from select_bundle(
+        pytestconfig, OPERATION, lambda *args, **kwargs: missing, load_bundle
+    )
+
+
+(
+    test_correctness_against_qualified_rocke,
+    test_rejects_perturbed_gpu_results,
+    test_rejects_missing_gpu_launch,
+) = pinned_reference_tests(OPERATION, perturbation=1.0)
+"""
+
+
+@pytest.mark.parametrize("operation", OPERATIONS[:1])
+@pytest.mark.parametrize("variant", [None, "narrow"])
+def test_reference_pytest_selects_variants_by_id(
+    second_variant, tmp_path, operation, variant
+):
+    """A session of the shared pinned tests over a synthetic second variant.
+
+    Ids name each slot's architecture and variant. Selecting the operation and
+    architecture runs every variant there: the published one fails on its
+    missing bundle and the unpublished one skips. Selecting a variant
+    deselects the others, so its unpublished slot fails instead of passing
+    with nothing run. This does not execute GPU kernels.
+    """
+    import os
+    from xml.etree import ElementTree
+
+    import rocke
+
+    registry = second_variant.architectures
+    architecture = registry.ARCHITECTURES[0]
+    registry.baseline_lock(architecture, "wide").write_text("{}")
+    (tmp_path / "conftest.py").write_text(
+        _VARIANT_SESSION_CONFTEST.format(architecture=architecture)
+    )
+    tests = tmp_path / "test_fictional_pinned_reference.py"
+    tests.write_text(_VARIANT_SESSION_TESTS.format(operation=operation))
+    # The missing-launch control imports the operation's worker module.
+    (tmp_path / "fictional_reference/worker.py").write_text(
+        f"from {operation}_reference.worker import run\n"
+    )
+    env = dict(os.environ, AMDGPU_TARGETS=architecture)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(Path(rocke.__file__).resolve().parent.parent),
+            str(Path(__file__).parent),
+            str(tmp_path),
+        ]
+    )
+    selection = [] if variant is None else ["--rocke-reference-variant", variant]
+    report = tmp_path / "report.xml"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", str(tests), "-q", "-p", "no:cacheprovider"]
+        + [f"--junitxml={report}", "--rocke-reference-operation", "fictional"]
+        + ["--rocke-reference-arch", architecture, *selection],
+        check=False,
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    outcomes = {
+        case.get("name"): next(
+            (child.tag for child in case if child.tag in ("failure", "skipped")),
+            "passed",
+        )
+        for case in ElementTree.parse(report).iter("testcase")
+    }
+
+    def slot(name):
+        prefix = f"{architecture}-{name}"
+        return [
+            f"test_correctness_against_qualified_rocke[{prefix}-{case.id}]"
+            for case in registry.get_adapter(architecture, name).CASES
+        ] + [
+            f"test_rejects_perturbed_gpu_results[{prefix}-source]",
+            f"test_rejects_perturbed_gpu_results[{prefix}-replay]",
+            f"test_rejects_missing_gpu_launch[{prefix}]",
+        ]
+
+    expected = dict.fromkeys(
+        slot("narrow"), "skipped" if variant is None else "failure"
+    )
+    if variant is None:
+        expected.update(dict.fromkeys(slot("wide"), "failure"))
+    # The other processor's slots are deselected, not skipped.
+    assert outcomes == expected
 
 
 @pytest.mark.parametrize(
@@ -959,8 +1092,15 @@ def test_reference_fixture_selects_explicit_paths(
 
     monkeypatch.setattr(gpu_tests, "load_bundle", load)
     config = SimpleNamespace(getoption=options.get)
+    registry = gpu_tests.OPERATION.architectures
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
         open_slot = next(fixture)
+        if not (candidate or registry.baseline_lock(architecture, variant).is_file()):
+            # An unpublished variant has no lock for its default bundle.
+            with pytest.raises(pytest.skip.Exception, match="^not published: "):
+                open_slot(architecture, variant)
+            assert not calls
+            return
         target, bundle, manifest = open_slot(architecture, variant)
         assert target is gpu_tests.OPERATION.architectures.get_adapter(
             architecture, variant
@@ -991,6 +1131,10 @@ def test_reference_fixture_selects_explicit_paths(
             "explicit operation and architecture",
         ),
         (
+            {"--rocke-reference-operation": "sdpa", "--rocke-reference-variant": "x"},
+            "variant selection requires explicit operation and architecture",
+        ),
+        (
             {
                 "--rocke-reference-operation": "sdpa",
                 "--rocke-reference-arch": "gfx942",
@@ -1008,26 +1152,262 @@ def test_reference_path_options_require_explicit_scope(options, message):
         start_reference_session(SimpleNamespace(getoption=options.get))
 
 
-def test_reference_path_options_require_a_single_variant(monkeypatch):
-    """An override replaces one variant's bundle, which must be unambiguous."""
+@pytest.fixture
+def second_variant(tmp_path, monkeypatch, operation):
+    """The operation with a synthetic second variant, enrolled under tmp_path.
+
+    ``fictional_reference.architectures`` copies the operation's registry
+    module and enrolls its first two processors. The first enrolls ``wide``,
+    with the first processor's real cases, and ``narrow``, without the first
+    of them; the second enrolls ``wide`` with the same cases, so the two
+    ``wide`` slots share a cohort. A variant is published once a test writes
+    its lock. Pytest options name the package's operation ``fictional``; the
+    returned operation keeps the real name, so its manifests are the real ones.
+    """
+    import shutil
+    from dataclasses import replace
     from importlib import import_module
+
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    real = Path(spec.architectures.__file__).resolve().parent
+    first, second = spec.architectures.ARCHITECTURES[:2]
+    cases = spec.architectures.get_adapter(first).__name__
+    root = tmp_path / "fictional_reference/architectures"
+    root.mkdir(parents=True)
+    (root.parent / "__init__.py").touch()
+    shutil.copy(real / "__init__.py", root)
+    (root / "registry.json").write_text(json.dumps([first, second]))
+    for architecture in (first, second):
+        (root / architecture).mkdir()
+        shutil.copy(real / architecture / "__init__.py", root / architecture)
+    for slot, cohort in (
+        (f"{first}/narrow", "CASES = CASES[1:]\n"),
+        (f"{first}/wide", ""),
+        (f"{second}/wide", ""),
+    ):
+        (root / slot).mkdir()
+        (root / slot / "__init__.py").write_text(
+            f"from {cases} import CASES\nfrom .. import NAME\n\n{cohort}"
+        )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        architectures = import_module("fictional_reference.architectures")
+        yield replace(spec, architectures=architectures)
+    finally:
+        for name in [name for name in sys.modules if name.startswith("fictional_")]:
+            del sys.modules[name]
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(
+    "processor,selection,problem",
+    [
+        (0, {"variant": "missing"}, "reference variant is not enrolled: missing"),
+        (0, {"bundle": "candidate"}, "needs a selected reference variant"),
+        (0, {"variant": "narrow", "bundle": "candidate", "lock": "lock.json"}, None),
+        (0, {"variant": "wide"}, None),
+        (1, {"bundle": "candidate"}, None),
+    ],
+    ids=["unenrolled", "ambiguous-override", "override", "variant", "sole-variant"],
+)
+def test_reference_variant_option_selects_one_enrolled_variant(
+    second_variant, monkeypatch, processor, selection, problem
+):
+    """A selected variant must be enrolled; an override needs one variant.
+
+    An architecture with one variant selects it by default, so its override
+    needs no ``--rocke-reference-variant``. Each error lists the choices.
+    """
     from types import SimpleNamespace
 
     from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
 
-    registry = import_module("sdpa_reference.architectures")
-    # A second variant of the processor, as a second kernel family would enroll.
-    monkeypatch.setattr(registry._REGISTRY, "variants", lambda name: ("dense", "wide"))
+    architecture = second_variant.architectures.ARCHITECTURES[processor]
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+    monkeypatch.delenv("AMDGPU_TARGETS", raising=False)
     options = {
-        "--rocke-reference-operation": "sdpa",
-        "--rocke-reference-arch": "gfx942",
-        "--rocke-reference-bundle": "candidate",
+        "--rocke-reference-operation": "fictional",
+        "--rocke-reference-arch": architecture,
     }
-    with pytest.raises(
-        pytest.UsageError,
-        match="^SDPA gfx942 needs a selected reference variant; enrolled: dense, wide$",
-    ):
-        start_reference_session(SimpleNamespace(getoption=options.get))
+    options.update(
+        (f"--rocke-reference-{name}", value) for name, value in selection.items()
+    )
+    config = SimpleNamespace(getoption=options.get)
+    if problem is None:
+        start_reference_session(config)
+        return
+    with pytest.raises(pytest.UsageError) as error:
+        start_reference_session(config)
+    assert str(error.value) == (
+        f"--rocke-reference-variant: {second_variant.label} {architecture} "
+        f"{problem}; enrolled: narrow, wide"
+    )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(
+    "published,bundled,options,variant,outcome,expected",
+    [
+        pytest.param(("wide",), True, {}, "wide", "run", None, id="published-runs"),
+        pytest.param(
+            ("wide",),
+            False,
+            {"operation": True},
+            "wide",
+            "fail",
+            "required {arch} {name} reference bundle is missing",
+            id="published-missing-fails-when-selected",
+        ),
+        pytest.param(
+            ("wide",),
+            False,
+            {},
+            "wide",
+            "skip",
+            "no extracted {arch} {name} reference bundle at",
+            id="published-missing-skips-locally",
+        ),
+        pytest.param(
+            ("wide",),
+            True,
+            {},
+            "narrow",
+            "skip",
+            "not published: the {arch} narrow {name} reference is unpublished",
+            id="unpublished-skips-locally",
+        ),
+        pytest.param(
+            ("wide",),
+            True,
+            {"operation": True},
+            "narrow",
+            "skip",
+            "not published: the {arch} narrow {name} reference is unpublished",
+            id="unpublished-skips-beside-a-published-variant",
+        ),
+        pytest.param(
+            ("wide",),
+            True,
+            {"operation": True, "variant": "narrow"},
+            "narrow",
+            "fail",
+            "--rocke-reference-variant selects narrow, but the {arch} narrow "
+            "{name} reference is unpublished",
+            id="unpublished-fails-when-selected",
+        ),
+        pytest.param(
+            (),
+            True,
+            {"operation": True, "variant": "narrow", "bundle": True, "lock": True},
+            "narrow",
+            "run",
+            None,
+            id="unpublished-candidate-runs",
+        ),
+        pytest.param(
+            (),
+            True,
+            {"operation": True, "variant": "narrow", "bundle": True},
+            "narrow",
+            "fail",
+            "the {arch} narrow {name} reference is unpublished, so no committed "
+            "lock authenticates the candidate bundle",
+            id="unpublished-candidate-needs-its-lock",
+        ),
+        pytest.param(
+            (),
+            True,
+            {"operation": True},
+            "wide",
+            "fail",
+            "no {arch} {name} reference variant is published, so the selected "
+            "{arch} suite would run nothing",
+            id="nothing-published-fails-when-selected",
+        ),
+        pytest.param(
+            ("narrow", "wide"),
+            True,
+            {"operation": True, "variant": "narrow"},
+            "wide",
+            "skip",
+            "not selected: --rocke-reference-variant narrow selects another {arch} "
+            "variant",
+            id="another-variant-selected-skips",
+        ),
+    ],
+)
+def test_reference_fixture_runs_a_variant_by_its_publication(
+    second_variant,
+    tmp_path,
+    monkeypatch,
+    published,
+    bundled,
+    options,
+    variant,
+    outcome,
+    expected,
+):
+    """Each variant of the GPU's processor runs, skips, or fails on its own state.
+
+    ``published`` variants have a lock, and ``bundled`` says whether their
+    shared default bundle exists. A published variant runs its default bundle,
+    which an explicit selection requires. An unpublished one never reads it:
+    it runs only a candidate bundle and lock, and a selection that would run no
+    variant fails instead of passing empty.
+    """
+    from contextlib import closing
+    from types import SimpleNamespace
+
+    from reference_common.pinned_tests import select_bundle
+    from rocke.runtime import hip_module
+
+    spec = second_variant
+    registry = spec.architectures
+    architecture = registry.ARCHITECTURES[0]
+    for name in published:
+        registry.baseline_lock(architecture, name).write_text("{}")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+    default = tmp_path / "default"
+    if bundled:
+        default.mkdir()
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    lock = tmp_path / "qualification-lock.json"
+    selected = {
+        "--rocke-reference-operation": spec.name if options.get("operation") else None,
+        "--rocke-reference-variant": options.get("variant"),
+        "--rocke-reference-bundle": candidate if options.get("bundle") else None,
+        "--rocke-reference-lock": lock if options.get("lock") else None,
+    }
+    loads = []
+
+    def load(bundle, lock, *, architecture, variant):
+        loads.append((bundle, lock, architecture, variant))
+        return {}
+
+    config = SimpleNamespace(getoption=selected.get)
+    fixture = select_bundle(config, spec, lambda *args, **kwargs: default, load)
+    with closing(fixture):
+        open_slot = next(fixture)
+        if outcome == "run":
+            target = open_slot(architecture, variant)[0]
+            assert target is registry.get_adapter(architecture, variant)
+            run = (candidate, lock) if options.get("bundle") else (default, None)
+            assert loads == [(*run, architecture, variant)]
+            return
+        with pytest.raises(
+            pytest.fail.Exception if outcome == "fail" else pytest.skip.Exception
+        ) as result:
+            open_slot(architecture, variant)
+    assert not loads
+    assert expected.format(arch=architecture, name=spec.name.upper()) in str(
+        result.value
+    )
 
 
 def _relocate(monkeypatch, tmp_path, operation, layout):
@@ -1114,6 +1494,17 @@ def test_reference_missing_bundle_fails_only_when_selected(
     # in CI without running a comparison.
     assert outcome == ("fail" if selected else "skip")
     first = message.splitlines()[0]
+    if not published:
+        # Only a candidate can verify an unpublished variant, and selecting an
+        # architecture that publishes no variant must not pass with nothing run.
+        assert ("would run nothing" if selected else "unpublished") in first
+        assert architecture in first and operation.upper() in first
+        if not selected:
+            assert variant in first and _mentions(first, lock)
+        assert "--rocke-reference-bundle" in message
+        assert "--rocke-reference-lock" in message
+        assert _commands(message) == [] and "dvc pull" not in message
+        return
     key = "reference bundle is missing" if selected else "no extracted"
     assert _documented(key) and key in first
     assert architecture in first and operation.upper() in first
@@ -1121,14 +1512,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
     commands = _commands(message)
     installed = tmp_path / "bin/hip_kernel_provider/engines/test_arch_content/rocke"
     installed /= f"{operation}/{architecture}/{variant}"
-    if not published:
-        # Nothing is fetched or staged; qualification makes the bundle.
-        assert commands == [] and "dvc pull" not in message
-        assert "candidate" in message
-        assert _mentions(message, pointer if layout == "source" else lock)
-        assert not _mentions(message, installed)
-        assert "ROCKE_INSTALL_TEST_GPU_REFERENCES" not in message
-    elif layout == "installed":
+    if layout == "installed":
         # Installation stages published bundles; there is nothing to fetch.
         assert commands == [] and "dvc pull" not in message
         assert _mentions(message, installed)
@@ -1141,6 +1525,12 @@ def test_reference_missing_bundle_fails_only_when_selected(
         # The archive that the pointer tracks unpacks into the missing bundle.
         assert _same(args.archive, pointer.with_suffix(""))
         assert _same(args.bundle, missing) and _same(args.lock, lock)
+        assert args.variant == variant
+        # A checkout without the variant's DVC pointer has nothing to fetch.
+        pointer.unlink()
+        hint = spec.bundle_hint(architecture, missing, variant=variant)
+        assert "no published" in hint and _mentions(hint, pointer)
+        assert _commands(hint) == []
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1177,7 +1567,7 @@ def test_reference_fixture_explains_an_archive_passed_as_the_bundle(
     (extract,) = _commands(message)
     args = _unpacked(extract)
     assert (args.command, args.operation) == ("unpack", operation)
-    assert _same(args.archive, archive)
+    assert args.variant == variant and _same(args.archive, archive)
     assert _same(args.lock, registry.baseline_lock(architecture, variant))
     # The pytest option, not the CLI's --bundle, then selects the directory
     # that the command extracts beside the archive.
@@ -1245,7 +1635,7 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
         "fetch and extract it with dvc pull and artifact.py unpack:\n"
         f'    dvc pull "{archive}.dvc"\n'
         r"    python tests\library\tests\reference_common\artifact.py unpack "
-        f'--operation {operation} --archive "{archive}" '
+        f'--operation {operation} --variant {variant} --archive "{archive}" '
         rf'--bundle "D:\build root\rocke $1\missing" --lock {lock}'
     )
     assert "'" not in hint
@@ -1253,33 +1643,24 @@ def test_recovery_hint_shows_windows_paths_as_typed(tmp_path, monkeypatch, opera
 
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_reference_fixture_keeps_one_slot_open_at_a_time(
-    operation, tmp_path, monkeypatch
+    second_variant, tmp_path, monkeypatch
 ):
     """Another processor's slot skips untouched; another variant replaces the open one.
 
     So the tests, which run slot by slot, never keep two slots' workers alive.
     """
     from contextlib import closing, contextmanager
-    from importlib import import_module
     from types import SimpleNamespace
 
     from reference_common import pinned_tests
     from rocke.runtime import hip_module
 
-    gpu_tests = import_module(f"test_{operation}_pinned_reference")
-    registry = gpu_tests.OPERATION.architectures
-    architecture, other = registry.ARCHITECTURES[:2]
+    registry = second_variant.architectures
+    architecture, other = registry.ARCHITECTURES
+    for variant in registry.variants(architecture):
+        registry.baseline_lock(architecture, variant).write_text("{}")
     monkeypatch.setattr(
         hip_module, "get_device_target_id", lambda device=0: architecture
-    )
-    # Two variants of this processor, as a second kernel family would enroll.
-    monkeypatch.setattr(
-        registry,
-        "get_adapter",
-        lambda name, variant: SimpleNamespace(NAME=name, variant=variant),
-    )
-    monkeypatch.setattr(
-        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path
     )
     loads, workers = [], []
 
@@ -1295,22 +1676,26 @@ def test_reference_fixture_keeps_one_slot_open_at_a_time(
         finally:
             workers[workers.index("open")] = "closed"
 
-    monkeypatch.setattr(gpu_tests, "load_bundle", load)
     monkeypatch.setattr(pinned_tests, "reuse_workers", reuse_workers)
     config = SimpleNamespace(getoption=lambda option: None)
-    with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+    fixture = pinned_tests.select_bundle(
+        config, second_variant, lambda *args, **kwargs: tmp_path, load
+    )
+    with closing(fixture):
         open_slot = next(fixture)
-        assert open_slot(architecture, "first")[2] == {"variant": "first"}
+        assert open_slot(architecture, "narrow")[2] == {"variant": "narrow"}
         with pytest.raises(pytest.skip.Exception) as skip:
-            open_slot(other, "first")
+            open_slot(other, "wide")
         assert str(skip.value) == (
-            f"not selected: this {other} first reference runs only on a {other} "
+            f"not selected: this {other} wide reference runs only on a {other} "
             f"GPU, and this GPU is {architecture}"
         )
-        assert open_slot(architecture, "first")[0].variant == "first"
-        assert (loads, workers) == (["first"], ["open"])
-        assert open_slot(architecture, "second")[0].variant == "second"
-        assert (loads, workers) == (["first", "second"], ["closed", "open"])
+        narrow = registry.get_adapter(architecture, "narrow")
+        assert open_slot(architecture, "narrow")[0] is narrow
+        assert (loads, workers) == (["narrow"], ["open"])
+        wide = registry.get_adapter(architecture, "wide")
+        assert open_slot(architecture, "wide")[0] is wide
+        assert (loads, workers) == (["narrow", "wide"], ["closed", "open"])
     assert workers == ["closed", "closed"]
 
 
@@ -2034,9 +2419,11 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
         )
     env = dict(os.environ, PYTHONPATH=str(tmp_path), PYTHONNOUSERSITE="1")
     script = Path(__file__).with_name(f"run_{operation}_reference.py")
-    registry = import_module(f"{operation}_reference.architectures")
+    spec = import_module(f"{operation}_reference.cli").OPERATION
+    registry = spec.architectures
     for architecture in registry.ARCHITECTURES:
-        cases = registry.get_adapter(architecture).CASES
+        variant = registry.resolve_variant(architecture)
+        cases = registry.get_adapter(architecture, variant).CASES
         result = subprocess.run(
             [sys.executable, str(script), "cases", "--arch", architecture, "--json"],
             check=False,
@@ -2047,10 +2434,11 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
         )
         assert result.returncode == 0, result.stderr
         listing = json.loads(result.stdout)
-        assert (listing["operation"], listing["architecture"]) == (
-            operation,
-            architecture,
-        )
+        assert (
+            listing["operation"],
+            listing["architecture"],
+            listing["variant"],
+        ) == (operation, architecture, variant)
         assert [entry["id"] for entry in listing["cases"]] == [c.id for c in cases]
         assert [entry["case"] for entry in listing["cases"]] == [
             json.loads(json.dumps(asdict(case))) for case in cases
@@ -2069,7 +2457,92 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert [line.split()[0] for line in lines[:-1]] == [case.id for case in cases]
-    assert lines[-1].endswith(f"{architecture}: {len(cases)} enrolled cases")
+    # The count names the other slots whose locks pin the same cohort digest.
+    cohort = spec.enrolled_cohort_digest(architecture, variant)
+    shared = [
+        f"{name} {other}"
+        for name in registry.ARCHITECTURES
+        for other in registry.variants(name)
+        if (name, other) != (architecture, variant)
+        and spec.enrolled_cohort_digest(name, other) == cohort
+    ]
+    count = f"{spec.label} {architecture} {variant}: {len(cases)} enrolled cases"
+    assert lines[-1] == (
+        f"{count}; cohort shared with {', '.join(shared)}" if shared else count
+    )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_cases_command_groups_variants_and_names_shared_cohorts(second_variant, capsys):
+    """Text lists every variant of a processor; JSON describes one variant."""
+    spec = second_variant
+    registry = spec.architectures
+    first, second = registry.ARCHITECTURES
+    cases = registry.get_adapter(first, "wide").CASES
+    spec.main(["cases", "--arch", first])
+    narrow, wide = (
+        group.splitlines() for group in capsys.readouterr().out.split("\n\n")
+    )
+    assert [line.split()[0] for line in narrow[:-1]] == [c.id for c in cases[1:]]
+    assert narrow[-1] == f"{spec.label} {first} narrow: {len(cases) - 1} enrolled cases"
+    assert [line.split()[0] for line in wide[:-1]] == [c.id for c in cases]
+    assert wide[-1] == (
+        f"{spec.label} {first} wide: {len(cases)} enrolled cases; cohort shared "
+        f"with {second} wide"
+    )
+    spec.main(["cases", "--arch", first, "--variant", "narrow"])
+    assert capsys.readouterr().out.splitlines() == narrow
+    spec.main(["cases", "--arch", first, "--variant", "narrow", "--json"])
+    listing = json.loads(capsys.readouterr().out)
+    assert (listing["architecture"], listing["variant"]) == (first, "narrow")
+    assert [entry["id"] for entry in listing["cases"]] == [c.id for c in cases[1:]]
+    # A processor's only variant needs no selection.
+    spec.main(["cases", "--arch", second, "--json"])
+    assert json.loads(capsys.readouterr().out)["variant"] == "wide"
+    for selection, problem in (
+        ([], "needs a selected reference variant"),
+        (["--variant", "missing"], "reference variant is not enrolled: missing"),
+    ):
+        with pytest.raises(SystemExit) as exit:
+            spec.main(["cases", "--arch", first, "--json", *selection])
+        assert exit.value.code == 2
+        assert capsys.readouterr().err.endswith(
+            f"error: argument --variant: {spec.label} {first} {problem}; "
+            "enrolled: narrow, wide\n"
+        )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("command", ["qualify", "verify", "diff-bundle", "diff-lock"])
+def test_commands_need_a_variant_when_a_processor_has_several(
+    second_variant, tmp_path, capsys, command
+):
+    """Qualification, verification, and a selected bundle's diff use one variant.
+
+    Each refuses an ambiguous or unenrolled variant before reading any path,
+    and the error lists the processor's variants.
+    """
+    spec = second_variant
+    architecture = spec.architectures.ARCHITECTURES[0]
+    bundle = tmp_path / "bundle"
+    arguments = {
+        "qualify": ["qualify", "--baseline", tmp_path / "baseline", "--output", bundle],
+        "verify": ["verify", "--bundle", bundle],
+        "diff-bundle": ["diff", "--bundle", bundle],
+        "diff-lock": ["diff", "--lock", tmp_path / "lock.json"],
+    }[command]
+    for selection, problem in (
+        ([], "needs a selected reference variant"),
+        (["--variant", "missing"], "reference variant is not enrolled: missing"),
+    ):
+        with pytest.raises(SystemExit) as exit:
+            spec.main([*map(str, arguments), "--arch", architecture, *selection])
+        assert exit.value.code == 2
+        assert capsys.readouterr().err.endswith(
+            f"error: argument --variant: {spec.label} {architecture} {problem}; "
+            "enrolled: narrow, wide\n"
+        )
+    assert not bundle.exists()
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2189,7 +2662,72 @@ def test_diff_defaults_to_the_published_bundle_and_committed_lock(
     with pytest.raises(SystemExit) as exit:
         spec.main(["diff", "--arch", architecture])
     assert exit.value.code == 2
-    assert f"{architecture} has no published" in capsys.readouterr().err
+    variant = spec.architectures.resolve_variant(architecture)
+    assert f"{architecture} {variant} has no published" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_diff_compares_every_published_variant(
+    second_variant, tmp_path, capsys, monkeypatch, operation
+):
+    """Without a selection, diff reports each published variant of a processor.
+
+    It exits with status 1 when any variant differs and 2 when any variant's
+    data is unusable, after reporting the variants that it could compare.
+    """
+    import shutil
+
+    from reference_common import cli as common_cli
+
+    spec = second_variant
+    registry = spec.architectures
+    architecture = registry.ARCHITECTURES[0]
+    cases = registry.get_adapter(architecture, "wide").CASES
+    # The bundle records the wide cohort; narrow enrolls all but its first case.
+    _, _, bundle, lock = _qualified_cohort(tmp_path, operation)
+    published = tmp_path / "published" / architecture
+    monkeypatch.setattr(
+        common_cli,
+        "default_bundle_path",
+        lambda tests, name, *, operation, variant: published / variant,
+    )
+    for variant in ("narrow", "wide"):
+        shutil.copytree(bundle, published / variant)
+    matched = (
+        f"{spec.label} {architecture} wide: all {len(cases)} enrolled cases match "
+        f"{published / 'wide'}\n"
+    )
+    # An unpublished variant, without a lock, is not compared.
+    shutil.copy(lock, registry.baseline_lock(architecture, "wide"))
+    spec.main(["diff", "--arch", architecture])
+    assert capsys.readouterr().out == matched
+
+    shutil.copy(lock, registry.baseline_lock(architecture, "narrow"))
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["diff", "--arch", architecture])
+    assert exit.value.code == 1
+    output = capsys.readouterr().out
+    assert output.startswith(
+        f"{spec.label} {architecture} narrow: the enrolled cases differ from "
+        f"{published / 'narrow'}\n  in the bundle but not enrolled: {cases[0].id} ("
+    )
+    assert matched in output
+    assert output.endswith(f"requalification; see {_WORKFLOW_DOC}.\n")
+    # --variant compares only that variant.
+    spec.main(["diff", "--arch", architecture, "--variant", "wide"])
+    assert capsys.readouterr().out == matched
+
+    shutil.rmtree(published / "narrow")
+    with pytest.raises(SystemExit) as exit:
+        spec.main(["diff", "--arch", architecture])
+    assert exit.value.code == 2
+    output = capsys.readouterr()
+    assert output.out == matched
+    assert (
+        f"error: no {architecture} narrow {spec.label} bundle at "
+        f"{published / 'narrow.tar.gz'} or {published / 'narrow'}; fetch the "
+        "archive with DVC or pass --bundle\n"
+    ) in output.err
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2375,7 +2913,10 @@ def _check_published_cohort(operation, architecture, variant):
             + "A cohort or budget change needs a complete requalification and a "
             "new published archive, lock, and DVC pointer; see "
             f"{_WORKFLOW_DOC}. Repeat this comparison with: "
-            + display_command(["python", str(script), "diff", "--arch", architecture]),
+            + display_command(
+                ["python", str(script), "diff", "--arch", architecture]
+                + ["--variant", variant]
+            ),
             pytrace=False,
         )
 
@@ -2425,7 +2966,10 @@ def _check_locked_cohort(operation, architecture, variant):
             "inputs needs a complete requalification and a new published "
             f"archive, lock, and DVC pointer; see {_WORKFLOW_DOC}. List the "
             "differences with: "
-            + display_command(["python", str(script), "diff", "--arch", architecture]),
+            + display_command(
+                ["python", str(script), "diff", "--arch", architecture]
+                + ["--variant", variant]
+            ),
             pytrace=False,
         )
 
@@ -2476,7 +3020,7 @@ def test_locked_cohort_check_names_the_lock_and_the_requalification(
     (diff,) = _commands(message)
     assert _same(diff[0], Path(__file__).with_name(f"run_{operation}_reference.py"))
     args = spec._parser().parse_args(diff[1:])
-    assert (args.command, args.arch) == ("diff", architecture)
+    assert (args.command, args.arch, args.variant) == ("diff", architecture, variant)
 
 
 def test_published_variants_are_listed_without_importing_adapters(monkeypatch):
@@ -2567,7 +3111,7 @@ def test_published_cohort_check_names_unqualified_cases(
     (diff,) = _commands(message)
     assert _same(diff[0], Path(__file__).with_name(f"run_{operation}_reference.py"))
     args = spec._parser().parse_args(diff[1:])
-    assert (args.command, args.arch) == ("diff", architecture)
+    assert (args.command, args.arch, args.variant) == ("diff", architecture, variant)
     # Data the lock does not pin, such as an archive from an earlier pointer,
     # fails instead of skipping, though it records the enrolled cohort.
     monkeypatch.setattr(target, "CASES", cases[:-1])
@@ -3136,6 +3680,7 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     (extract,) = _commands(error)
     args = _unpacked(extract)
     assert (args.command, args.operation) == ("unpack", operation)
+    assert args.variant == spec.architectures.resolve_variant(architecture)
     assert _same(args.archive, archive) and _same(args.lock, lock)
     passed = _passed(error, "--bundle")
     assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
@@ -3167,6 +3712,7 @@ def test_verify_reports_an_unusable_lock_or_bundle_once(
         return output.err
 
     # An architecture with no published bundle has no committed lock.
+    variant = spec.architectures.resolve_variant(architecture)
     unpublished = (tmp_path / "unpublished/baseline_lock.json").resolve()
     monkeypatch.setattr(
         spec.architectures, "baseline_lock", lambda name, variant=None: unpublished
@@ -3174,8 +3720,8 @@ def test_verify_reports_an_unusable_lock_or_bundle_once(
     for selected in (bundle, archive):
         error = refused(selected)
         assert (
-            f"{architecture} has no published {spec.label} bundle: {unpublished} "
-            "does not exist; pass a candidate's --bundle and --lock"
+            f"{architecture} {variant} has no published {spec.label} bundle: "
+            f"{unpublished} does not exist; pass a candidate's --bundle and --lock"
         ) in error
         # No unpack command names the lock that does not exist.
         assert "artifact.py" not in error
@@ -3226,7 +3772,10 @@ def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
     with pytest.raises(SystemExit) as exit:
         spec.main([*command, "--case", "unenrolled"])
     assert exit.value.code == 2
-    assert f"not enrolled for {architecture}: unenrolled" in capsys.readouterr().err
+    variant = spec.architectures.resolve_variant(architecture)
+    error = capsys.readouterr().err
+    assert f"not enrolled for {architecture} {variant}: unenrolled" in error
+    assert error.endswith(f"cases --arch {architecture} --variant {variant}\n")
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -3403,9 +3952,11 @@ def test_verification_failures_name_side_values_cause_and_next_step(
         script, *arguments = _arguments(rerun)[1:]
         assert _same(script, Path(__file__).with_name(f"run_{operation}_reference.py"))
         args = spec._parser().parse_args(arguments)
-        assert (args.command, args.arch, args.cases, args.lock) == (
+        variant = spec.architectures.resolve_variant(architecture)
+        assert (args.command, args.arch, args.variant, args.cases, args.lock) == (
             "verify",
             architecture,
+            variant,
             [case.id],
             None,
         )
@@ -3599,6 +4150,7 @@ def test_rejected_bundles_say_how_to_replace_them(
         (extract,) = commands
         args = _unpacked(extract)
         assert (args.command, args.operation) == ("unpack", operation)
+        assert args.variant == variant
         assert _same(args.archive, archive) and _same(args.lock, lock)
         passed = _passed(message, "--bundle")
         assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
@@ -3620,6 +4172,7 @@ def test_rejected_bundles_say_how_to_replace_them(
         assert pull[:2] == ["dvc", "pull"] and _same(pull[2], pointer)
         args = _unpacked(extract)
         assert (args.command, args.operation) == ("unpack", operation)
+        assert args.variant == variant
         # The archive that the pointer tracks replaces the rejected bundle.
         assert _same(args.archive, pointer.with_suffix(""))
         assert _same(args.bundle, bundle) and _same(args.lock, lock)
@@ -3792,6 +4345,9 @@ def test_rerun_command_repeats_the_failing_bundle_and_lock(
     )
     args = spec._parser().parse_args(arguments)
     assert (args.command, args.arch, args.cases) == ("verify", architecture, [case.id])
+    # The variant is named even as the default, so another variant cannot make
+    # the command ambiguous.
+    assert args.variant == spec.architectures.resolve_variant(architecture)
     assert args.bundle.resolve() == bundle.resolve()
     # The committed lock is the default, so only a candidate lock is repeated.
     if lock == "candidate":

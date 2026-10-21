@@ -543,7 +543,7 @@ def _baseline_snapshot(tmp_path):
 
 @pytest.mark.parametrize("with_torch", [False, True])
 def test_qualification_freezes_self_contained_replay_support(
-    tmp_path, monkeypatch, with_torch
+    tmp_path, monkeypatch, capsys, with_torch
 ):
     """Exercise qualification plumbing with a synthetic GPU-worker result."""
     import subprocess
@@ -578,6 +578,10 @@ def test_qualification_freezes_self_contained_replay_support(
         )
     cli.qualify(
         baseline, bundle, repetitions=3, torch_reference="cpu" if with_torch else None
+    )
+    # The variant defaults to the processor's only one, so qualification names it.
+    assert capsys.readouterr().out.startswith(
+        "convolution gfx942 implicit_gemm_fwd: qualifying 1 enrolled cases\n"
     )
     manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
     # Configuration checks the lock's cohort digest against the manifest, and
