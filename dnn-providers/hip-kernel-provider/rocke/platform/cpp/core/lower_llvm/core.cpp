@@ -323,6 +323,71 @@ bool rocke_ll_live(const rocke_lower_t* L)
     return L != NULL;
 }
 
+static const char* ll_target_fact_name(rocke_ll_target_fact_t fact)
+{
+    switch(fact)
+    {
+    case ROCKE_LL_FACT_TDM:
+        return "memory.has_tdm";
+    case ROCKE_LL_FACT_CLUSTER_LAUNCH:
+        return "memory.has_cluster_launch";
+    case ROCKE_LL_FACT_MULTICAST_LOAD:
+        return "memory.has_multicast_load";
+    case ROCKE_LL_FACT_SCALAR_DATA_PREFETCH:
+        return "memory.has_scalar_data_prefetch";
+    case ROCKE_LL_FACT_GLOBAL_PREFETCH:
+        return "memory.has_global_prefetch";
+    case ROCKE_LL_FACT_GFX12_CDNA_FAMILY:
+        return "target_family gfx12_cdna";
+    }
+    return "(unknown fact)";
+}
+
+static bool ll_target_fact_holds(const rocke_arch_target_t* t, rocke_ll_target_fact_t fact)
+{
+    switch(fact)
+    {
+    case ROCKE_LL_FACT_TDM:
+        return t->memory.has_tdm;
+    case ROCKE_LL_FACT_CLUSTER_LAUNCH:
+        return t->memory.has_cluster_launch;
+    case ROCKE_LL_FACT_MULTICAST_LOAD:
+        return t->memory.has_multicast_load;
+    case ROCKE_LL_FACT_SCALAR_DATA_PREFETCH:
+        return t->memory.has_scalar_data_prefetch;
+    case ROCKE_LL_FACT_GLOBAL_PREFETCH:
+        return t->memory.has_global_prefetch;
+    case ROCKE_LL_FACT_GFX12_CDNA_FAMILY:
+        return strcmp(t->target_family, "gfx12_cdna") == 0;
+    }
+    return false;
+}
+
+void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
+                                         const char* op,
+                                         rocke_ll_target_fact_t fact)
+{
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
+    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
+    if(!target || !ll_target_fact_holds(target, fact))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires a target with %s, got %s",
+                      op,
+                      ll_target_fact_name(fact),
+                      gfx ? gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires LLVM flavor llvm23, got %s",
+                      op,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+}
+
 /* ====================================================================== */
 /* Block / CFG model (Python _Block)                                      */
 /* ====================================================================== */
@@ -912,6 +977,11 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
     {
         return v->name;
     }
+    if(op->opcode == ROCKE_OP_ARITH_ASSUME_RANGE && op->num_operands >= 1)
+    {
+        /* A range marker is its first operand: it emits no instruction. */
+        return rocke_ll_operand(L, op->operands[0]);
+    }
     if(op->opcode == ROCKE_OP_ARITH_CONSTANT)
     {
         const char* ity = rocke_attr_get_str(&op->attrs, "ity");
@@ -1027,6 +1097,8 @@ const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
         const char* signed_form;
         const char* unsigned_form;
     } k_icmp[] = {
+        /* "ult" is the explicit unsigned compare: unsigned whatever the type. */
+        {"ult", "ult", "ult"},
         {"lt", "slt", "ult"},
         {"le", "sle", "ule"},
         {"gt", "sgt", "ugt"},
@@ -1929,27 +2001,14 @@ const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_
 }
 
 /* gfx1250 workgroup-cluster shape; mirrors Python ir.check_cluster_dims (same
- * limits and messages) behind the gfx1250 + llvm23 gate. The backend copies
+ * limits and messages) behind the cluster-launch + llvm23 gate. The backend copies
  * the attribute to the code-object .cluster_dims metadata unchecked. */
 #define ROCKE_LL_MAX_CLUSTER_DIM 15
 #define ROCKE_LL_MAX_CLUSTER_WORKGROUPS 16
 
 static const char* rocke_ll_format_cluster_dims(rocke_lower_t* L, const rocke_attr_value_t* v)
 {
-    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "cluster_dims requires gfx1250, got %s",
-                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
-    }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "cluster_dims requires LLVM flavor llvm23, got %s",
-                      rocke_llvm_flavor_name(L->flavor));
-    }
+    rocke_ll_require_llvm23_target_fact(L, "cluster_dims", ROCKE_LL_FACT_CLUSTER_LAUNCH);
     if(!v || v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 3)
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_dims must be three integers (x, y, z)");

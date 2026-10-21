@@ -415,6 +415,17 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
+      # Native helpers some Python tests drive, as paths relative to the
+      # CTestTestfile: the portable-IR replay CLI, and the C API program whose
+      # --print-llvm output test_unsigned_int_ops.py compares with the Python
+      # builder's text.
+      set(_rocke_pytest_env
+          "PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}")
+      if("rocke_unsigned_int_ops" IN_LIST _ROCKE_INSTALL_TEST_TARGETS)
+        rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
+        string(APPEND _rocke_pytest_env
+               ";ROCKE_UNSIGNED_INT_OPS_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}")
+      endif()
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
       # directory (which contains the installed rocke package) so `import rocke`
       # resolves without the source-tree sys.path shims. The library tests have
@@ -422,9 +433,13 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_compiler_env \"\")\n"
+             "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
+             "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
+             "endif()\n"
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}\"\n"
+             "  ENVIRONMENT \"${_rocke_pytest_env}\${_rocke_compiler_env}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
