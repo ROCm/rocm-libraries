@@ -77,3 +77,8 @@ if(RPP_TEST_CTEST_PER_CASE)
 else()
     rpp_discover_grouped_tests(rpp_tests)
 endif()
+
+# Installed next to the ROCm libraries, so librpp and the HIP runtime resolve from ../lib.
+include(GNUInstallDirs)
+set_target_properties(rpp_tests PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS rpp_tests RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT test)
