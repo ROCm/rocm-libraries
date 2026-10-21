@@ -35,6 +35,9 @@ from kernels.common import attention_unified as au
 from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx1250Spec2D,
 )
+from kernels.gfx1250.attention_tiled_3d import (
+    UnifiedAttention3DTiledSpec as Gfx1250Spec3D,
+)
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx942Spec2D,
 )
@@ -79,10 +82,11 @@ def routing_env(monkeypatch):
 
 def _norm_spec(spec):
     """Spec identity as the emitter sees it: ``num_seqs`` only reaches IR
-    through ``binary_search_iters``."""
+    through ``binary_search_iters``, which the 3D decode grid does not emit."""
     fields = dataclasses.asdict(spec)
     fields.pop("num_seqs")
-    fields["binary_search_iters"] = spec.binary_search_iters
+    if not getattr(spec, "use_decode_grid", False):
+        fields["binary_search_iters"] = spec.binary_search_iters
     return fields
 
 
@@ -169,6 +173,11 @@ def _sweep(arch):
 # flip mid-process; pooling them catches a selector whose output only changes
 # when a knob flips.
 _ENV_STATES = {
+    "gfx942": (
+        {},
+        {"HIPDNN_GFX942_FLASH_WIDE": "0"},
+        {"HIPDNN_GFX942_FLASH_WIDE": "2"},
+    ),
     "gfx950": (
         {},
         {
@@ -286,17 +295,20 @@ def test_search_bucket_edge_splits_2d_key(routing_env, arch):
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
 def test_search_bucket_edge_splits_3d_key(routing_env, arch):
+    # Two query tokens per sequence, so the launch takes the searching prefill
+    # grid rather than the decode grid.
     base = dict(
         num_query_heads=32,
         num_kv_heads=8,
         head_size=128,
         block_size=16,
-        max_seqlen_q=1,
+        max_seqlen_q=2,
         max_seqlen_k=8192,
         dtype="bf16",
     )
-    a = P(total_q=3, num_seqs=3, **base)
-    b = P(total_q=4, num_seqs=4, **base)
+    a = P(total_q=6, num_seqs=3, **base)
+    b = P(total_q=8, num_seqs=4, **base)
+    assert not au._use_decode_grid(a, arch)
     _assert_split(au._tiled_3d_cache_key, _built_3d, a, b, "binary_search_iters", arch)
 
 
@@ -447,16 +459,17 @@ _SHARED_PAIRS = [
         P(total_q=1200, num_seqs=2, max_seqlen_q=600, max_seqlen_k=600, **_D64_GQA8),
         P(total_q=1400, num_seqs=2, max_seqlen_q=700, max_seqlen_k=700, **_D64_GQA8),
     ),
-    # The decode split rule sizes segments by num_seqs * num_kv_heads, so a
-    # shared 3D binary needs a shared segment count too: ns 32 and 63 both clamp
-    # to 2 segments and sit in one search bucket.
+    # The decode grid emits no search, so batch sizes in different search
+    # buckets share a binary. The decode split rule sizes segments by
+    # num_seqs * num_kv_heads, so the pair also needs a shared segment count:
+    # ns 31 and 64 both clamp to 2 segments, two buckets apart.
     *(
         (
-            f"{arch}-3d-ns32-vs-ns63",
+            f"{arch}-3d-decode-ns31-vs-ns64",
             arch,
             "3d",
-            P(total_q=32, num_seqs=32, **_D128_DECODE),
-            P(total_q=63, num_seqs=63, **_D128_DECODE),
+            P(total_q=31, num_seqs=31, **_D128_DECODE),
+            P(total_q=64, num_seqs=64, **_D128_DECODE),
         )
         for arch in ("gfx942", "gfx950")
     ),
@@ -522,14 +535,22 @@ def test_launch_meta_separates_num_seqs_under_one_key(routing_env):
 # ---------------------------------------------------------------------------
 
 
-# gfx1250 3D floors the search at 32 iterations, so it is checked through the key
-# (test_same_outputs_share_key_and_ir) rather than mirrored here.
-_SPEC_CLASSES = (Gfx942Spec2D, Gfx942Spec3D, Gfx950Spec2D, Gfx950Spec3D, Gfx1250Spec2D)
+# (spec class, floor). gfx1250 3D floors the search at 32 iterations.
+_SPEC_CLASSES = (
+    (Gfx942Spec2D, 1),
+    (Gfx942Spec3D, 1),
+    (Gfx950Spec2D, 1),
+    (Gfx950Spec3D, 1),
+    (Gfx1250Spec2D, 1),
+    (Gfx1250Spec3D, 32),
+)
 
 
 @pytest.mark.parametrize("num_seqs", (0, 1, 2, 3, 4, 7, 8, 15, 16, 450, 1 << 20))
-@pytest.mark.parametrize("spec_cls", _SPEC_CLASSES, ids=lambda c: c.__module__)
-def test_binary_search_iters_mirrors_spec(spec_cls, num_seqs):
+@pytest.mark.parametrize(
+    "spec_cls, floor", _SPEC_CLASSES, ids=[c.__module__ for c, _ in _SPEC_CLASSES]
+)
+def test_binary_search_iters_mirrors_spec(spec_cls, floor, num_seqs):
     # binary_search_iters is a pure function of num_seqs; bypass __init__
     # validation so the comparison needs no full geometry.
     spec = object.__new__(spec_cls)
@@ -545,4 +566,4 @@ def test_binary_search_iters_mirrors_spec(spec_cls, num_seqs):
         max_seqlen_k=1,
         dtype="bf16",
     )
-    assert au._binary_search_iters(problem) == spec.binary_search_iters
+    assert au._binary_search_iters(problem, floor=floor) == spec.binary_search_iters

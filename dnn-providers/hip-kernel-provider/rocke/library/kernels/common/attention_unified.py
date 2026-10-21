@@ -10,7 +10,6 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
-import math
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
@@ -45,10 +44,12 @@ from rocke.runtime.launcher import (
 )
 
 from rocke.helpers.attention import (
+    BINARY_SEARCH_FALLBACK_ITERS,
     Attention2DConfig,
     Attention3DConfig,
     PagedKvDescriptor,
     apply_softcap_log2,
+    binary_search_seq_idx_iters,
     select_2d_config,
     select_3d_config,
     use_2d_kernel,
@@ -1579,17 +1580,15 @@ def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
     return "fp8e4m3" if problem.use_fp8 else None
 
 
-def _binary_search_iters(problem: UnifiedAttentionProblem) -> int:
+def _binary_search_iters(problem: UnifiedAttentionProblem, *, floor: int = 1) -> int:
     """Trip count of the seq_idx binary search the tiled kernels bake into IR.
 
-    Mirrors ``binary_search_iters`` on the gfx942/gfx950/gfx1250 tiled 2D and
-    gfx942/gfx950 tiled 3D spec classes, which derive it from ``spec.num_seqs``.
-    It is the only way ``num_seqs`` reaches emitted IR, so the tiled cache keys
-    carry this bucket instead of the raw batch count.
+    Every tiled spec class derives ``binary_search_iters`` from ``spec.num_seqs``
+    through the same ``binary_search_seq_idx_iters`` (gfx1250 3D with a floor of
+    32). It is the only way ``num_seqs`` reaches emitted IR, so the tiled cache
+    keys carry this bucket instead of the raw batch count.
     """
-    if problem.num_seqs <= 0:
-        return 32
-    return max(1, int(math.ceil(math.log2(problem.num_seqs + 1))))
+    return binary_search_seq_idx_iters(problem.num_seqs, floor=floor)
 
 
 def _assert_cache_key_arch(cache_key: Tuple, arch: str, who: str) -> None:
@@ -1720,13 +1719,18 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _select_2d_compile_backend(problem, arch),
         _enable_gfx942_fp16_flash(problem, arch),
         _enable_gfx942_bf16_flash(problem, arch),
+        # What HIPDNN_GFX942_FLASH_WIDE resolves to. fp16 flash takes its warp
+        # count (keyed above) and cfvst / K buffering from it; bf16 flash takes
+        # only its warp count, and only on the sliced-K ring.
         (
-            _gfx942_flash_wide_setting()
-            if (
-                _enable_gfx942_fp16_flash(problem, arch)
-                or _enable_gfx942_bf16_flash(problem, arch)
+            _gfx942_flash_use_cfvst(problem)
+            if fp16_flash
+            else (
+                _gfx942_flash_wide_setting()
+                if _enable_gfx942_bf16_flash(problem, arch)
+                and _enable_gfx942_flash_k_sliced_ring(problem, arch)
+                else None
             )
-            else None
         ),
         (
             _gfx942_flash_kv_cache_policy(problem)
@@ -3747,6 +3751,15 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     outputs, no raw dynamic shape field. Grid and workspace values that scale
     with the shape are keyed separately through ``_shape_key``.
     """
+    decode_grid = _use_decode_grid(problem, arch)
+    if decode_grid:
+        # One CTA per sequence: the segment kernel indexes sequences directly
+        # and emits no search, so batch sizes in different buckets share it.
+        search_iters = None
+    elif arch == "gfx1250":
+        search_iters = _binary_search_iters(problem, floor=BINARY_SEARCH_FALLBACK_ITERS)
+    else:
+        search_iters = _binary_search_iters(problem)
     base = (
         "tiled3d",
         # Index 1 is the arch, matching every other key family here (see
@@ -3754,6 +3767,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # process aliased to a single cached pipeline, and _get_3d_pipeline had
         # no way to check the key against the arch it compiles for.
         arch,
+        search_iters,
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
@@ -3770,7 +3784,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),
-        _use_decode_grid(problem, arch),
+        decode_grid,
         _kv_cache_policy_3d(problem, arch),
         _gfx950_3d_tile_size_override(problem, arch),
         _kv_lds_swizzle_3d(problem, arch),
@@ -3779,9 +3793,6 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     if arch == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem, arch)
         return base + (
-            # gfx1250 floors the search at 32 iterations, so read it from the
-            # spec rather than _binary_search_iters.
-            sp.binary_search_iters,
             sp.use_invariant_hoist,
             sp.use_wide_kv_load,
             sp.use_register_p,
@@ -3793,7 +3804,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
             getattr(sp, "use_fused_reduce", False),
             getattr(sp, "use_dpp_softmax", False),
         )
-    return base + (_binary_search_iters(problem),)
+    return base
 
 
 def _3d_signature(
