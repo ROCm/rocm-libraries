@@ -208,6 +208,7 @@ def load_config(path: Path) -> IngestorConfig:
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
+        slug_override=engine_raw.get("slug"),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -1335,6 +1336,7 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
         "census_name_symbol",
         "shared_workspace",
+        "slug",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
@@ -2616,6 +2618,16 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
         raise ConfigError(
             f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
             "declared by IngestorPacks.hpp."
+        )
+
+    slug = config.engine.slug_override
+    if slug is not None and (
+        not isinstance(slug, str) or not PATH_STEM_PATTERN.fullmatch(slug)
+    ):
+        raise ConfigError(
+            f"engine.slug {slug!r} must be a single path stem, matching "
+            f"^[A-Za-z0-9_][A-Za-z0-9_-]*$: it names the descriptor directory and "
+            f"the stem of every descriptor file under it."
         )
 
     for derived, emitted_as in (
