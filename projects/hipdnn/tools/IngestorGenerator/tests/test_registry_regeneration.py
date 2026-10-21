@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -28,6 +30,17 @@ sys.path.insert(0, str(_ROOT / "tools"))
 
 import catalog_diff  # noqa: E402
 import registry_enumerator as enumerator  # noqa: E402
+
+# hkp_pack's own spec hydration and support predicate: g6 runs the pack-time checks that
+# need no compiler, so a spec hkp_pack would refuse fails here and not in a build.
+sys.path.insert(
+    0,
+    str(
+        enumerator._REPO
+        / "dnn-providers/hip-kernel-provider/descriptor-packaging/python"
+    ),
+)
+from hkp_pack import rocke_compile  # noqa: E402
 
 _PROVIDER = enumerator._REPO / "dnn-providers" / "hip-kernel-provider"
 _ROCKE_LIBRARY = _PROVIDER / "rocke" / "library"
@@ -276,3 +289,120 @@ def test_g4_the_selection_header_equals_the_manifest(
     assert selection.kernel_source_kind == built.kernel_source_kind
     assert selection.workspace_policy == built.workspace_policy
     assert selection.authored_subpath == built.authored_subpath
+
+
+#: The graph dtypes the C++ matcher translates, as ``return std::string("<spelling>")``.
+_MATCHER_DTYPE_SPELLING = re.compile(
+    r'DataType::\w+\)\s*\{\s*return std::string\("(\w+)"\)'
+)
+
+
+def _matcher_source(manifest: dict) -> Path:
+    """The engine's own ``*Native.cpp``, as its ``launch_surface`` names it."""
+    mirrors = [
+        surface["cpp_mirror"].split(":")[0]
+        for surface in manifest.get("launch_surface") or []
+        if surface.get("cpp_mirror", "").split(":")[0].endswith("Native.cpp")
+    ]
+    if not mirrors:
+        pytest.skip("manifest names no *Native.cpp in launch_surface")
+    return enumerator._REPO / mirrors[0]
+
+
+def _vocabulary_gaps(vocabulary: set, matcher_text: str) -> tuple:
+    """``(spellings the matcher never produces, spellings it produces that no
+    vocabulary entry carries)``; both empty when they agree. The second direction
+    catches a dtype the engine claims and ships nothing for."""
+    spellings = set(_MATCHER_DTYPE_SPELLING.findall(matcher_text))
+    assert spellings, "no dtype spellings read from the matcher source"
+    return sorted(vocabulary - spellings), sorted(spellings - vocabulary)
+
+
+def test_g5_the_dtype_vocabulary_is_what_the_cpp_matcher_compares(manifest):
+    """`specialization.vocabulary.dtype` is the spelling the generated KDP's metadata
+    carries; the hand-written matcher compares kernel dtype metadata against its own
+    literals. A spelling the matcher never produces matches nothing, silently."""
+    source = _matcher_source(manifest)
+    assert source.is_file(), f"matcher source not readable: {source}"
+    vocabulary = set(manifest["specialization"]["vocabulary"]["dtype"].values())
+    assert _vocabulary_gaps(vocabulary, source.read_text()) == ([], [])
+
+
+def test_g5_catches_a_misspelled_and_an_unclaimed_dtype(manifest):
+    """The positive control: each direction fails on its own, and a matcher whose
+    literals cannot be read fails rather than passing on an empty set."""
+    text = _matcher_source(manifest).read_text()
+    vocabulary = set(manifest["specialization"]["vocabulary"]["dtype"].values())
+    missing, unclaimed = _vocabulary_gaps(vocabulary | {"BFLOAT16"}, text)
+    assert (missing, unclaimed) == (["BFLOAT16"], [])
+    missing, unclaimed = _vocabulary_gaps({"BF16"}, text)
+    assert (missing, unclaimed) == ([], ["FP16"])
+    with pytest.raises(AssertionError, match="no dtype spellings"):
+        _vocabulary_gaps(vocabulary, "// no literals")
+
+
+def _hydration_failures(manifest: dict, specs: list) -> list:
+    """What `hkp_pack` does to a rocke spec before compiling it: hydrate the builder's
+    spec dataclass with ``build_spec`` and ask the builder's support predicate. Neither
+    needs comgr."""
+    arch = manifest["arch"]
+    module = importlib.import_module(
+        rocke_compile._module_from_source(manifest["source"])
+    )
+    builder = manifest["builder"]
+    spec_cls = rocke_compile._resolve_spec_class(module, getattr(module, builder))
+    failures = []
+    for name, source in specs:
+        compile_arch = rocke_compile.rocke_compile_arch(
+            arch, source.get("target", rocke_compile.ROCKE_TARGET_NATIVE)
+        )
+        try:
+            spec = rocke_compile.build_spec(spec_cls, source["spec"])
+            rocke_compile._check_support_predicate(module, builder, spec, compile_arch)
+        except Exception as exc:
+            failures.append(f"{name}: {type(exc).__name__}: {exc}")
+    return failures
+
+
+def test_g6_every_enumerated_spec_hydrates_and_passes_the_builders_predicate(
+    manifest, registry_config
+):
+    """A spec the registry yields but `hkp_pack` cannot build, or the builder's
+    predicate declines, ships a catalog that fails at pack time on a machine with
+    comgr -- and nowhere before it."""
+    specs = [
+        (k["name"], k["kernel_source"])
+        for pack in registry_config["packs"]
+        for k in pack["kernels"]
+    ]
+    assert specs
+    failures = _hydration_failures(manifest, specs)
+    assert not failures, failures[:5]
+
+
+def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
+    manifest, registry, shipped
+):
+    """The same check on the bytes that ship, which can name a spec field the
+    registry has since renamed."""
+    kdp = json.loads(shipped[0].read_text())
+    specs = [(k["name"], k["kernel_source"]) for k in kdp["kernelDescriptors"]]
+    assert specs
+    failures = _hydration_failures(manifest, specs)
+    assert not failures, failures[:5]
+
+
+def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_config):
+    """The positive control for g6: it fails on each way a spec can be refused, so a
+    green g5 is not a gate that checks nothing."""
+    name, source = next(
+        (k["name"], k["kernel_source"])
+        for pack in registry_config["packs"]
+        for k in pack["kernels"]
+    )
+    renamed = {**source, "spec": {**source["spec"], "no_such_field": 1}}
+    declined = {**source, "spec": {**source["spec"], "block_m": 17}}
+    failures = _hydration_failures(
+        manifest, [("renamed", renamed), ("declined", declined)]
+    )
+    assert [f.split(":")[0] for f in failures] == ["renamed", "declined"], failures
