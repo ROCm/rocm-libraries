@@ -624,7 +624,7 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     HeuristicDescriptor model;
     model.id = HEURISTIC_ID;
     model.adapter = UhdAdapter::NATIVE;
-    model.nativeSymbol = SCORE_SYMBOL; // the block size: K128 scores 128 tflops, K64 64
+    model.nativeSymbol = SCORE_SYMBOL; // scores each kernel by its block size, so K128 ranks first
     model.score = {"tflops", true, "identity"};
     auto ranker = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
     ASSERT_NE(ranker, nullptr);
@@ -640,7 +640,7 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     StubHandle handle;
     const auto properties = testDeviceProperties();
 
-    // K64 measured at 1 ms, K128 at 2 ms, covering the whole catalog.
+    // A stub record covering the whole catalog, in which K64 takes half K128's time.
     const auto measure = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
         WinnerRecord record;
         for(const auto& kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
@@ -691,7 +691,7 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     EXPECT_DOUBLE_EQ(inTime.value, 1.0);
     EXPECT_TRUE(inTime.uhd_id.empty()) << "a measured value was attributed to a model";
 
-    // Throughput derives from the measured time and the graph's work: 2*1024^3 flops in 1 ms.
+    // Throughput derives from the recorded time and the graph's FLOP count.
     const MatmulTestGraph matmul(1024, 1024, 1024);
     measure(matmul.graph());
     const auto inTflops = predict(matmul.graph(), "tflops");
@@ -763,7 +763,7 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
     const MatmulTestGraph matmul(1024, 1024, 1024, makeGraphId(0x6F));
     const auto& graph = matmul.graph();
 
-    // K64 measured at 1 ms, K128 at 2 ms, covering the whole catalog.
+    // A stub record covering the whole catalog, in which K64 takes half K128's time.
     WinnerRecord record;
     for(const auto& kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
     {
