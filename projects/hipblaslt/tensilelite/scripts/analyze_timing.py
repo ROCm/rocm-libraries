@@ -38,6 +38,14 @@ from typing import List, Dict, Optional, Tuple
 TIMING_HIERARCHY = {
     "python_benchmark_problems": {
         "python_cache_check": {},
+        # DuctileBackend (GA): evaluation pieces outside benchmark_runner, plus the GA's own time.
+        "python_ductile_setup": {},
+        "python_ductile_generate_solutions": {},
+        "python_ductile_clear_artifacts": {},
+        "python_ductile_read_scores": {},
+        "python_ductile_initial_sampling": {},
+        "python_ductile_ga_between_evaluations": {},
+        "python_ductile_verification": {},
         "python_solution_generation": {
             "python_solgen_fork_permutations": {},
             "python_solgen_forked_solutions": {},
@@ -214,7 +222,28 @@ TIMING_HIERARCHY = {
             "warmup_events_setup": {},
             "warmup_runs": {},
             "benchmark_runs": {
+                "benchmark_pre_syncs": {},
+                "benchmark_events_setup": {},
                 "gpu_kernel_execution": {},
+                # One row per listener's validateEnqueues(). BenchmarkTimer is where the GPU timing
+                # is read (event sync / elapsed time) and where --sleep-percent idles on purpose.
+                "benchmark_validate_enqueues": {
+                    "validate_enqueues_listener.BenchmarkTimer": {
+                        "benchmark_event_sync": {},
+                        "benchmark_event_elapsed_time": {},
+                        "benchmark_event_destroy": {},
+                        "benchmark_sleep": {},
+                    },
+                    "validate_enqueues_listener.ProgressListener": {},
+                    "validate_enqueues_listener.SynchronizerValidator": {},
+                    "validate_enqueues_listener.ReferenceValidator": {},
+                    "validate_enqueues_listener.MetaResultReporter": {},
+                    "validate_enqueues_listener.HardwareMonitorListener": {},
+                    "validate_enqueues_listener.DataInitialization": {},
+                    "validate_enqueues_listener.AllSolutionsIterator": {},
+                },
+                "benchmark_events_teardown": {},
+                "benchmark_post_syncs": {},
             },
             "post_solution": {
                 "post_solution_perf_calc": {},
@@ -243,7 +272,17 @@ TIMING_HIERARCHY = {
         "python_logic_analyze": {},
         "python_logic_write": {},
     },
-    "python_client_writer": {},
+    "python_client_writer": {
+        "python_library_client_setup": {},
+        # TensileCreateLibrary subprocess that builds the library client's library/code objects.
+        "python_library_client_create_library": {},
+        "python_library_client_write_configs": {},
+        # The library-client launch has its own timer names (it runs without C++ timing).
+        "python_library_client_execution": {
+            "python_library_client_write_run_script": {},
+            "python_library_client_subprocess": {},
+        },
+    },
 }
 
 # Display grouping for C++ phases (rendering concern only).
