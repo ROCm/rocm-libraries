@@ -91,6 +91,13 @@ a request to run the class. See the
     --emitted-root <provider-tests-dir>
 ```
 
+Every KDP a real run writes carries `provenance.generated_from`: the `--config` (and
+`--manifest`, when given) path, plus `generator_commit` and `rocke_commit`, each the last
+commit touching that tree (`-dirty` when it has local edits). It is informational:
+`catalog_diff` compares only `provenance.specialization_contract`, so a regeneration at a
+later commit still diffs clean. A config kernel may carry `provenance.rocke_spec_id` /
+`rocke_tuning_id`, which `registry_enumerator.py` fills from the pin and the registry.
+
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
 arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template

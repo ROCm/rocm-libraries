@@ -369,6 +369,10 @@ def load_config(path: Path) -> IngestorConfig:
                         kernel_raw.get("default", False),
                         f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
                     ),
+                    provenance=_kernel_provenance(
+                        kernel_raw.get("provenance", {}),
+                        f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
+                    ),
                 )
             )
         packs.append(
@@ -1191,8 +1195,30 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "shape_axes",
     }
 )
+#: Per-kernel ``provenance`` keys a config may author. Informational only; the
+#: compiler-owned ``effective_spec`` and the specialization contract are not among them.
+_KERNEL_PROVENANCE_KEYS = frozenset({"rocke_spec_id", "rocke_tuning_id"})
+
+
+def _kernel_provenance(raw, where: str) -> dict:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} provenance must be a mapping, got {raw!r}.")
+    unknown = sorted(set(raw) - _KERNEL_PROVENANCE_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{where} provenance has unknown key(s) {unknown}; known: "
+            f"{sorted(_KERNEL_PROVENANCE_KEYS)}."
+        )
+    for key, value in raw.items():
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                f"{where} provenance.{key} must be a non-empty string, got {value!r}."
+            )
+    return dict(raw)
+
+
 _KNOWN_KERNEL = frozenset(
-    {"name", "kernel_source", "metadata", "priority", "arch", "default"}
+    {"name", "kernel_source", "metadata", "priority", "arch", "default", "provenance"}
 )
 #: Each authored kind's MANDATORY ``kernel_source`` fields, mirroring
 #: ``hkp_pack._validate_ukd_fields``. Shared with `_KNOWN_KERNEL_SOURCE_BY_KIND`

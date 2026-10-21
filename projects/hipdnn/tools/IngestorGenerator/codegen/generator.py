@@ -440,8 +440,14 @@ def build_kdp(
     pack: PackSpec,
     ids: dict,
     seen_metadata: dict | None = None,
+    generated_from: dict | None = None,
 ) -> dict:
     """One pack's KDP.
+
+    ``generated_from`` (see `codegen.provenance`) is stamped as
+    ``provenance.generated_from`` when given. It names the inputs a generation
+    came from and changes with every commit, so it is opt-in: a render without
+    it stays a pure function of the config.
 
     ``seen_metadata`` carries de-duplication state across the packs of one
     engine; pass the same dict to every ``build_kdp`` call for a config.
@@ -536,6 +542,8 @@ def build_kdp(
             "metadata": metadata,
             "priority": kernel.priority,
         }
+        if kernel.provenance:
+            entry["provenance"] = dict(kernel.provenance)
         # hkp_pack validates the kernel's own arch for hsaco and rejects a
         # wildcard, so the inherited pack arch is stated on the descriptor.
         if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO:
@@ -589,6 +597,8 @@ def build_kdp(
         "provenance": {"specialization_contract": contract},
         "kernelDescriptors": kernel_descriptors,
     }
+    if generated_from:
+        kdp["provenance"]["generated_from"] = dict(generated_from)
     if pack.arch:
         kdp["arch"] = list(pack.arch)
     elif config.is_packaged:
@@ -599,12 +609,15 @@ def build_kdp(
     return kdp
 
 
-def build_kdp_documents(config: IngestorConfig, ids: dict) -> list:
+def build_kdp_documents(
+    config: IngestorConfig, ids: dict, generated_from: dict | None = None
+) -> list:
     """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide.
     The single de-duplication scope; see `build_kdp`."""
     seen_metadata: dict = {}
     return [
-        (pack, build_kdp(config, pack, ids, seen_metadata)) for pack in config.packs
+        (pack, build_kdp(config, pack, ids, seen_metadata, generated_from))
+        for pack in config.packs
     ]
 
 
@@ -728,9 +741,15 @@ class IngestorGenerator:
             files.append(f"fragments/{fragment}")
         return files
 
-    def render(self, config: IngestorConfig, output_dir: Path) -> list[str]:
+    def render(
+        self,
+        config: IngestorConfig,
+        output_dir: Path,
+        generated_from: dict | None = None,
+    ) -> list[str]:
         """Mint ids, write every descriptor JSON, the native/test C++ stubs and
         the CMake/registration fragments. Returns the relative paths written.
+        ``generated_from`` is stamped on every KDP (see `build_kdp`).
 
         Every KDP is built before rendering, since the templates are given the
         emitted inventory and that view needs the engine-wide de-duplication.
@@ -750,7 +769,7 @@ class IngestorGenerator:
         def write_json(rel: str, obj: dict) -> None:
             write_text(rel, _dump(obj))
 
-        kdp_documents = build_kdp_documents(config, ids)
+        kdp_documents = build_kdp_documents(config, ids, generated_from)
         emitted = emitted_inventory(config, kdp_documents)
 
         write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))

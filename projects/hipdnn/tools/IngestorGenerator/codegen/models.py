@@ -358,6 +358,9 @@ class KernelSpec:
     arch: list[str] = field(default_factory=list)
     #: The cell's declared default variant; never emitted into a descriptor.
     default: bool = False
+    #: Informational ``provenance`` keys (string values) emitted verbatim on the
+    #: kernel descriptor, e.g. ``rocke_spec_id``. Nothing selects on them.
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass

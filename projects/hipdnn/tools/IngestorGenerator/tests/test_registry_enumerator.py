@@ -441,3 +441,22 @@ def test_the_order_key_is_total_on_mixed_values_and_numeric():
     }
     assert len(orders) == 1
     assert sorted([128, None, 32, 1024], key=re_._order_key) == [32, 128, 1024, None]
+
+
+def test_each_kernel_carries_the_pins_spec_id(probe):
+    """`provenance.rocke_spec_id` is the pin's spec_id, so a shipped kernel traces to
+    the registry entry that produced it. The probe candidate hands back unwrapped
+    specs, so there is no tuning id to carry."""
+    assert _run_probe(probe) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert {k["provenance"]["rocke_spec_id"] for k in kernels} == {"grid"}
+    assert not any("rocke_tuning_id" in k["provenance"] for k in kernels)
+
+
+def test_the_dense_registry_names_a_tuning_id_for_every_kernel(manifest, registry):
+    config = re_.build_config(_one_head_config(manifest), registry)
+    kernels = [k for pack in config["packs"] for k in pack["kernels"]]
+    assert kernels
+    for kernel in kernels:
+        assert kernel["provenance"]["rocke_spec_id"] == "gfx950_dense_grid"
+        assert kernel["provenance"]["rocke_tuning_id"]
