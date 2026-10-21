@@ -1,0 +1,282 @@
+# Engine manifest for hipkernel:Gfx950AttentionUnified2D.
+#
+# Everything about the engine that rocKE does not know: identity, KMD schema,
+# metadata mapping, the registry space its kernels are drawn from, and how that
+# space is reduced. The shipped kernel set is configs/gfx950_attention_unified_2d.yaml;
+# tests/test_registry_regeneration.py gates it against this manifest.
+#
+#     python tools/registry_enumerator.py --manifest configs/gfx950_attention_unified_2d.engine.yaml --out <scratch>/config.yaml
+#
+# The kernel is rocKE's gfx950 paged unified-attention 2D prefill (vLLM
+# `unified_attention` family). It takes a paged K/V cache plus block_tables / seq_lens /
+# query_start_len, none of which a hipDNN SDPA graph carries: the provider derives them
+# on the host (identity block table over the graph's contiguous BSHD K/V) and stages them
+# in the plan's workspace. See packs/Gfx950AttentionUnified2DNative.cpp.
+#
+# The generated packs/Gfx950AttentionUnified2DNative.cpp and
+# tests/TestGfx950AttentionUnified2DMatchers.cpp are stubs; the provider's copies are
+# hand-maintained and must not be overwritten.
+
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_unified_2d
+engine:
+  name: hipkernel:Gfx950AttentionUnified2D
+  slug: gfx950_attention_unified_2d
+  census_name_symbol: GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
+  sdk_version: 1.0.0
+  knobs:
+  - tile_size
+  - num_warps
+  - block_m_per_warp
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+# The paged-KV block the identity block table is cut at. The graph's K/V are contiguous,
+# so any block size that divides Skv addresses the same bytes; it is baked because the
+# kernel strides K/V by block_size * Hkv * D.
+- name: block_size
+  type: int
+  default_value: 16
+# The mask kind, in hipDNN's / rocKE's AttentionMaskType numbering: 0 NO_MASK, 1
+# TOP_LEFT_CAUSAL, 2 BOTTOM_RIGHT_CAUSAL. The kernel's own band is two spec fields
+# (causal_top_left, right_bound), which map NO_MASK -> (false, -1), TOP_LEFT_CAUSAL ->
+# (true, 0), BOTTOM_RIGHT_CAUSAL -> (false, 0); this field carries them as one value
+# because a descriptor may not ship the -1 sentinel in metadata.
+- name: mask_type
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+# Batch CAPACITY, not the batch: it sets the kernel's binary-search trip count
+# (ceil(log2(num_seqs + 1))), which bounds the sequences one launch can address at
+# 2^iters - 1. kernel_match declines a graph whose batch exceeds that.
+- name: num_seqs
+  type: int
+  default_value: 511
+# Geometry, also public engine knobs.
+- name: tile_size
+  type: int
+  default_value: 64
+- name: num_warps
+  type: int
+  default_value: 4
+- name: block_m_per_warp
+  type: int
+  default_value: 16
+- name: use_mfma_32x32
+  type: int
+  default_value: 0
+- name: use_transposed_qk_32x32
+  type: int
+  default_value: 0
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - block_size
+  - mask_type
+  - sliding_window
+  - num_seqs
+  - tile_size
+  - num_warps
+  - block_m_per_warp
+  - use_mfma_32x32
+  - use_transposed_qk_32x32
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    block_size:
+      field: block_size
+    mask_type:
+      field: mask_type
+    sliding_window:
+      field: sliding_window
+    num_seqs:
+      field: num_seqs
+    tile_size:
+      field: tile_size
+    num_warps:
+      field: num_warps
+    block_m_per_warp:
+      field: block_m_per_warp
+    use_mfma_32x32:
+      field: use_mfma_32x32
+    use_transposed_qk_32x32:
+      field: use_transposed_qk_32x32
+kernel_source_kind: rocke
+workspace_policy: derived
+
+pack: gfx950_attention_unified_2d
+arch: gfx950
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/gfx950/attention_tiled_2d.py
+builder: build_unified_attention_2d_tiled
+kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}.gfx950
+
+# The registry space the selection is drawn from (see registry_enumerator.py).
+enumerate:
+  candidates: dispatch.attention:attention_candidates
+  request: dispatch.attention.common:AttentionRequest
+  # One geometry: the narrow 16x16 llvm path, 4 warps x 16 rows (BLOCK_M 64), KV tile 4
+  # pages (T = 64 at block_size 16). The sweep-widened geometries are a follow-up that
+  # needs measurements.
+  pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_narrow_nw4_mw16_t4xb_llvm}
+  # Request fields every cell shares. `batch` is the batch capacity the binaries serve
+  # (num_seqs in the spec): 511 -> 9 binary-search iterations -> up to 511 sequences.
+  fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
+  # Crossed in order, first group outermost (the catalog order).
+  cells:
+    - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+      values:
+        - [64, 64, 8, 1]
+        - [64, 64, 8, 8]
+        - [64, 64, 10, 10]
+        - [64, 64, 12, 12]
+        - [64, 64, 16, 2]
+        - [64, 64, 16, 16]
+        - [64, 64, 20, 20]
+        - [64, 64, 32, 4]
+        - [64, 64, 32, 8]
+        - [64, 64, 32, 32]
+        - [64, 64, 64, 8]
+        - [64, 64, 128, 128]
+        - [128, 128, 24, 24]
+        - [128, 128, 4, 4]
+        - [128, 128, 8, 1]
+        - [128, 128, 8, 2]
+        - [128, 128, 8, 8]
+        - [128, 128, 9, 9]
+        - [128, 128, 16, 2]
+        - [128, 128, 16, 16]
+        - [128, 128, 28, 4]
+        - [128, 128, 32, 4]
+        - [128, 128, 32, 8]
+        - [128, 128, 32, 32]
+        - [128, 128, 40, 8]
+        - [128, 128, 40, 10]
+        - [128, 128, 40, 40]
+        - [128, 128, 48, 8]
+        - [128, 128, 64, 4]
+        - [128, 128, 64, 8]
+        - [128, 128, 64, 64]
+        - [128, 128, 96, 8]
+        - [128, 128, 128, 8]
+    - fields: [dtype]
+      values: [bf16, fp16]
+    - fields: [mask_type]
+      values: [NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
+  sweep_level: production
+  space: slice
+  # Nothing varies away from the geometry's own default spec yet.
+  free_fields: []
+  spec_fields: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
+  # Frozen build cost: a registry that grows past this fails here, not at pack time.
+  max_kernels: 198
+
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, mask_type, sliding_window, block_size, num_seqs]
+    performance:
+      - {name: tile_size}
+      - {name: num_warps}
+      - {name: block_m_per_warp}
+      - {name: waves_per_eu}
+    ignored: []
+  aot_budget_per_arch: 1000
+
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
+      TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
+      BOTTOM_RIGHT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask_bottom_right: true}
+
+# Launch-surface audit (`tools/launch_surface.py --check <this file>`).
+launch_surface:
+  - name: grid
+    python_source: dispatch/attention/common.py:launch_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
+    kmd_fields: [num_warps, block_m_per_warp, num_query_heads, num_kv_heads]
+    guard: >
+      gfx950AttentionUnified2DGeometry() throws HipdnnPluginException for non-positive
+      dimensions, num_queries_per_kv outside 1..16 or a non-dividing GQA ratio. Grid is
+      (Hkv, total_q // block_q + batch, 1) with block_q = block_m / (Hq / Hkv).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DGeometry.cpp
+
+  - name: block
+    python_source: dispatch/attention/common.py:launch_block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
+    kmd_fields: [num_warps]
+    guard: >
+      64 * num_warps threads; num_warps outside {1, 2, 4, 8} throws.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DGeometry.cpp
+
+  - name: capacity
+    python_source: kernels/gfx950/attention_tiled_2d.py:binary_search_iters
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
+    kmd_fields: [num_seqs]
+    guard: >
+      gfx950AttentionUnified2DBatchCapacity() restates max(1, ceil(log2(num_seqs + 1)))
+      iterations and the 2^iters - 1 sequence bound; kernel_match declines a graph whose
+      batch exceeds it, and prepare() refuses one.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DGeometry.cpp
+
+  - name: workspace
+    python_source: kernels/common/attention_unified.py:_attn_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
+    kmd_fields: [block_size]
+    guard: >
+      gfx950AttentionUnified2DWorkspaceLayout() lays out the identity block_tables
+      [B, Skv / block_size], seq_lens [B] and query_start_len [B + 1] (int32, each 256-byte
+      aligned) the kernel reads as paged-KV metadata; it throws for a Skv that block_size
+      does not divide.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DGeometry.cpp
+
+  - name: matcher
+    python_source: kernels/gfx950/attention_tiled_2d.py:supports_tiled_2d
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DNative.cpp
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
+    guard: >
+      kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
+      num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
+      multiple of block_size, the batch exceeds the candidate's capacity, or the
+      candidate's geometry is one gfx950 does not build. The metadata's seqlen shape is
+      not a build input of this kernel and is not carried. score() ranks the applicable
+      baseline geometry first, then ascending (tile_size, num_warps, block_m_per_warp).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DMatchers.cpp
+
+  - name: kernargs
+    python_source: kernels/common/attention_unified.py:_attn_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DNative.cpp
+    kmd_fields: [dtype]
+    guard: >
+      unified2DKernelSignature() is the 18-argument form (10 pointers, 6 f32/i32 scalars,
+      block_table_stride, qq_bias_stride_0). Validated at prepare() time by
+      buildIngestorKernelCode(..., expectedSignature); names are load-bearing.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DSignature.cpp
