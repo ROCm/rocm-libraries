@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 
@@ -127,6 +128,10 @@ namespace TensileLite
                     for(auto const& reference : m_referenceInputs)
                         SolveCPU(problem, reference.get(), m_elementsToValidate);
                 }
+
+                if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
+                   gemm != nullptr && gemm->fusedGemmA2A())
+                    referenceRecvs(*gemm);
             }
         }
 
@@ -257,59 +262,49 @@ namespace TensileLite
                 {
                     auto const& inputs = (*m_devices)[d]->inputArr[slot];
                     validateSolution(d, inputs);
-                    if(m_fusedA2A && m_elementsToValidate != 0
-                       && !recvMatches(d, dynamic_cast<ContractionInputs const&>(*inputs)))
+                    if(m_fusedA2A && m_elementsToValidate != 0)
                     {
-                        m_errorInSolution = true;
-                        m_error           = true;
+                        auto const& problem
+                            = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
+                        auto const&  result = dynamic_cast<ContractionInputs const&>(*inputs);
+                        const size_t recv   = ContractionProblemGemm::TENSOR::A2A_RECV;
+                        checkResults(problem.tensors()[recv],
+                                     m_referenceRecvs[d].data(),
+                                     result.a2aRecv,
+                                     result.maxElements[recv],
+                                     result.gpu,
+                                     1,
+                                     -1.0);
                     }
                 }
             }
         }
 
-        bool ReferenceValidator::recvMatches(size_t dst, ContractionInputs const& inputs)
+        void ReferenceValidator::referenceRecvs(ContractionProblemGemm const& problem)
         {
-            auto const&  problem  = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
-            const size_t W        = m_devices->size();
+            const size_t W        = m_referenceInputs.size();
             const size_t N        = problem.freeSizeB(0);
             const size_t nShard   = (size_t)problem.fusedA2AExtent() / W;
             auto const&  dDesc    = problem.d();
+            const size_t elem     = dDesc.elementBytes();
             const size_t dMStride = dDesc.strides()[problem.freeIndices()[0].d];
             const size_t dNStride = dDesc.strides()[problem.freeIndices()[1].d];
 
-            // Slot src on card dst holds features [dst*nShard, (dst+1)*nShard) of
-            // card src's golden, for every token.
-            std::vector<BFloat16> host(W * N * nShard);
-            HIP_CHECK_EXC(hipMemcpy(host.data(),
-                                    inputs.a2aRecv,
-                                    host.size() * sizeof(BFloat16),
-                                    hipMemcpyDeviceToHost));
-            size_t mismatches = 0;
+            // Slot src of rank dst holds features [dst*nShard, (dst+1)*nShard) of rank src's
+            // golden D, [token, feature].
+            m_referenceRecvs.assign(W, std::vector<uint8_t>(W * N * nShard * elem));
             for(size_t src = 0; src < W; src++)
             {
-                auto const& golden
-                    = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]);
-                auto const* goldenD = static_cast<BFloat16 const*>(golden.d);
-                for(size_t t = 0; t < N; t++)
-                {
-                    for(size_t f = 0; f < nShard; f++)
-                    {
-                        BFloat16 got  = host[(src * N + t) * nShard + f];
-                        BFloat16 want = goldenD[(dst * nShard + f) * dMStride + t * dNStride];
-                        if(AlmostEqual(want, got))
-                            continue;
-                        if(mismatches < 5)
-                            std::cerr << "[fused-a2a] RECV MISMATCH card=" << dst << " src=" << src
-                                      << " t=" << t << " f=" << f << " got=" << (float)got
-                                      << " want=" << (float)want << "\n";
-                        mismatches++;
-                    }
-                }
+                auto const* goldenD = static_cast<uint8_t const*>(
+                    dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]).d);
+                for(size_t dst = 0; dst < W; dst++)
+                    for(size_t t = 0; t < N; t++)
+                        for(size_t f = 0; f < nShard; f++)
+                            std::memcpy(
+                                m_referenceRecvs[dst].data() + ((src * N + t) * nShard + f) * elem,
+                                goldenD + ((dst * nShard + f) * dMStride + t * dNStride) * elem,
+                                elem);
             }
-            if(mismatches)
-                std::cerr << "[fused-a2a] RECV card " << dst << ": " << mismatches
-                          << " mismatches\n";
-            return mismatches == 0;
         }
 
         bool ReferenceValidator::checkResults(TensorDescriptor const& tensor,
