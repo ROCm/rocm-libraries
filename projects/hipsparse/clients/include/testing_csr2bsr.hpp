@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -53,8 +54,7 @@ void testing_csr2bsr_bad_arg(const Arguments& argus)
     hipsparseIndexBase_t bsr_idx_base = HIPSPARSE_INDEX_BASE_ZERO;
     hipsparseDirection_t dir          = HIPSPARSE_DIRECTION_ROW;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
     std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
     hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
     std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
@@ -378,8 +378,7 @@ void testing_csr2bsr(Arguments argus)
     hipsparseDirection_t dir          = argus.dirA;
     std::string          filename     = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
     std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
     hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
     std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -49,8 +50,7 @@ void testing_csx2dense_bad_arg(FUNC& csx2dense)
     static constexpr int           M  = 1;
     static constexpr int           N  = 1;
     static constexpr int           LD = M;
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
     std::unique_ptr<descr_struct>  unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t            descr = unique_ptr_descr->descr;
 
@@ -111,8 +111,7 @@ void testing_csx2dense(const Arguments& argus, FUNC1& csx2dense, FUNC2& dense2cs
     int                  LD       = argus.lda;
     hipsparseIndexBase_t idx_base = argus.baseA;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
