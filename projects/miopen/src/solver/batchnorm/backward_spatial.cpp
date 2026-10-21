@@ -195,8 +195,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                                const miopen::batchnorm::ProblemDescription& problem,
                                                const PerformanceConfigBnBwdBackward& config) const
 {
-    const auto& handle      = context.GetStream();
-    const unsigned wavesize = (miopen::StartsWith(handle.GetDeviceName(), "gfx10") ? 32 : 64);
+    const auto& handle  = context.GetStream();
+    const auto wavesize = handle.GetWavefrontWidth();
 
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
