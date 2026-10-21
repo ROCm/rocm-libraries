@@ -24,8 +24,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Two layers of filtering:
+  #  1. The trigger-level `paths:` keeps this workflow off PRs that touch
+  #     neither hipDNN nor its providers (hipBLASLt-only, MIOpen-only, ...).
+  #  2. Within a PR that does match, this job skips the builds when every
+  #     changed hipDNN/provider file is documentation. A skipped build job
+  #     counts as passing, and the summary job below still reports, so a
+  #     docs-only PR never sits at "Expected - Waiting for status".
+  # Docs cannot be excluded in layer 1: a workflow skipped by `paths:` never
+  # reports a status at all.
+  changes:
+    name: Detect hipDNN changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+    steps:
+      # No checkout: on pull_request, paths-filter reads the changed-file list
+      # from the GitHub REST API (hence `pull-requests: read`), and the filters
+      # are inline.
+
+      # Schedule and manual dispatch always build; only PRs are filtered.
+      # `every` makes a file count only if it matches all patterns: inside the
+      # first (brace) pattern, and none of the exclusions. Docs-only PRs (RFCs,
+      # READMEs, guides) therefore do not run the superbuild; a PR that also
+      # touches any non-doc file still does.
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '!**/*.md'
+              - '!**/*.rst'
+              - '!projects/hipdnn/docs/**'
+              - '!dnn-providers/**/docs/**'
+
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -165,11 +208,10 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
-      # DVC the way the other Windows lane installs it (therock-ci-windows.yml),
-      # pinned to the same release. The action drops in the self-contained DVC
-      # installer, so no Python interpreter on this persistent self-hosted runner is
-      # mutated, and the lane does not silently move to a new DVC major. The Linux
-      # job below installs it the same way, for the same reasons.
+      # DVC pinned to an explicit release. The action drops in the self-contained
+      # DVC installer, so no Python interpreter on this persistent self-hosted
+      # runner is mutated, and the lane does not silently move to a new DVC
+      # major. The Linux job below installs it the same way, for the same reasons.
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
           version: '3.62.0'
@@ -200,6 +242,15 @@ jobs:
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
 
+      # HIPKERNELPROVIDER_ENABLE_ROCKE=ON with the default production root: pull the
+      # DVC-stored rocKE descriptors (the KDPs). Each pointer names the `ingestor`
+      # remote, so a bare pull resolves it. Configure sets REQUIRE_DVC_DESCRIPTORS=ON,
+      # so a missing file fails it instead of silently dropping the bundle.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
@@ -217,6 +268,7 @@ jobs:
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
+            -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
@@ -226,7 +278,8 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 
       - name: Build
         run: cmake --build build
@@ -245,8 +298,25 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
+      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        id: run-tests
+        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+
+      # ctest counts a disabled or not-run test as success. Read the junit
+      # "Run tests" wrote and fail if a declared packaging probe (listed in the
+      # manifest configure wrote) did not run or failed. Runs whenever "Run
+      # tests" ran, pass or fail, so a probe failure is reported by name.
+      # --min-probes 1: this lane never builds every architecture the descriptors
+      # name, so a manifest with no probe means discovery broke. Drop the flag if
+      # the lane starts building them all.
+      - name: Check packaging probes ran
+        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/ctest-junit.xml \
+            --manifest build/hkp-probes/manifest.txt \
+            --min-probes 1
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -286,6 +356,8 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-linux-scale-rocm
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
@@ -418,10 +490,10 @@ jobs:
       # the .deb on Linux, so no Python interpreter is touched and the version does
       # not drift.
       #
-      # The other Linux lanes in this repo (therock-ci-linux.yml,
-      # component-ci-miopen.yml) call `dvc pull` with no install step, but both run
-      # inside a container image that ships DVC. This job runs on a bare
-      # azure-linux-scale-rocm runner, which does not.
+      # The other Linux lane in this repo (component-ci-miopen.yml) calls
+      # `dvc pull` with no install step, but it runs inside a container image
+      # that ships DVC. This job runs on a bare azure-linux-scale-rocm runner,
+      # which does not.
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
           version: '3.62.0'
@@ -470,7 +542,8 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 
       - name: Build
         run: cmake --build build
@@ -485,11 +558,28 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
+      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
+        id: run-tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+
+      # ctest counts a disabled or not-run test as success. Read the junit
+      # "Run tests" wrote and fail if a declared packaging probe (listed in the
+      # manifest configure wrote) did not run or failed. Runs whenever "Run
+      # tests" ran, pass or fail, so a probe failure is reported by name.
+      # --min-probes 1: this lane never builds every architecture the descriptors
+      # name, so a manifest with no probe means discovery broke. Drop the flag if
+      # the lane starts building them all.
+      - name: Check packaging probes ran
+        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/ctest-junit.xml \
+            --manifest build/hkp-probes/manifest.txt \
+            --min-probes 1
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.
@@ -525,6 +615,7 @@ jobs:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
+      - changes
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
     runs-on: ubuntu-24.04

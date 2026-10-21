@@ -425,6 +425,12 @@ validParameters = { # we need to make sure this matches develop
     #            boundary (needs PrefetchGlobalRead=2).
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
+    # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
+    # two N-halves in different LDS segments and let SIMD pair 1 (odd waves) read its B vIdx groups
+    # rotated by half (v -> (v + nV/2) mod nV), so the two LDS read ports never read the same
+    # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
+    #   0 = off (default), 1 = on.
+    "LDSSegmentBRotate": [0, 1],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -523,9 +529,18 @@ validParameters = { # we need to make sure this matches develop
     # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
     # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
     "MinGRIncPerMfma": [-1] + list(range(1,10)),
-    # Interleave alpha scale calculation with beta loads and address calcs - rather
-    # than as a separate block of instructions
-    "InterleaveAlpha": [0, 1],
+    # How the alpha scale (rC *= alpha) is placed in the global write:
+    # 0: as a separate block of instructions, up front before the stores (default).
+    # 1: interleaved with the beta loads and address calcs rather than as a separate
+    #    block. Not supported with matrix instructions.
+    # 2: deferred per element to just before that element's conversion+pack in the
+    #    store loop, instead of scaling all elements up front. Alpha still lands on the
+    #    raw accumulator (before beta*C, bias, activation and pack), so it is general
+    #    across dest types; it routes through the up-front path like 0. The win is
+    #    register lifetime - an up-front scale of every element can clobber a prior
+    #    batch's still-draining store source regs (e.g. fp8 + GroupLoadStore). See
+    #    GlobalWriteBatch._interleaveAlphaWithPack.
+    "InterleaveAlpha": [0, 1, 2],
     # Create a copy of NoLoadLoop which interleaves the stores with the final mac
     # calculation and may perform other optimizations
     # 0 = no interleave
@@ -1221,7 +1236,7 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # StinkyTofu module-option overrides, e.g. {DsReadPerCap: 4, WmmaBatchSize: 2}. Tuning-only:
+    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2, WmmaQueueDepth: 8}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
@@ -1268,6 +1283,12 @@ validParameters = { # we need to make sure this matches develop
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
+    # Remap clusters onto the two AIDs (4 XCCs and one GL2 each) so that each GL2 reads
+    # one operand once and only the other operand is duplicated across GL2s.
+    # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
+    # -1: Disabled
+    # 0-7: XCC that the hardware round-robin dispatches cluster 0 to
+    "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
     # 1: Use PLR 0.5 for A

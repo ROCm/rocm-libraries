@@ -24,6 +24,9 @@ BenchmarkProblems:
   #######################################
   # Test DebugStreamK: 0, 1, 2, 3
   # 0: Full StreamK, 1: No fixup, 2: No partials, 3: No fixup and no partials
+  # TODO: UseSubtileImpl=1 currently rejects DebugStreamK != 0 in Solution.py,
+  # so this YAML only has an accepted subtile solution for mode 0. Add real
+  # modes 1-3 coverage here when DebugStreamK supports the subtile path.
   # TN transpose only
   #######################################
   -

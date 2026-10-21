@@ -262,7 +262,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
-        "use_sinks",
         "causal_bottom_right",
         "lds_num_buffers",
     }
@@ -308,7 +307,7 @@ _SPEC_PERTURBATIONS = {
     "interleave": (True, False),
     "persist_decode": ("qb_major", "hkv_major"),
     "lazy_rescale": (False, True),
-    "use_sinks": (),  # unbuildable (not yet supported)
+    "use_sinks": (True,),
 }
 
 # The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on
@@ -329,6 +328,7 @@ _PRIVATE_PERTURBATIONS = {
     "pv_priority": (1, 3),
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
+    "emit_lse": (True, False),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -654,6 +654,37 @@ def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
     assert len({_ir_body_sha(s) for s in specs}) == 1
 
 
+@pytest.mark.parametrize(
+    "make",
+    [
+        _spec,
+        lambda **kw: _persistent_spec(persist_decode="qb_major", **kw),
+        lambda **kw: _persistent_spec(persist_decode="hkv_major", **kw),
+    ],
+    ids=["ordinary", "persistent_qb", "persistent_hkv"],
+)
+def test_lse_ir_uses_runtime_sequence_and_head_counts(make):
+    """One LSE binary must serve different Sq/Hq values on every runtime path.
+
+    The LSE layout is [B,Hq,Sq,1], so a baked Hq or Sq in its flat output index
+    makes otherwise-shared binaries write the wrong row for another launch shape.
+    """
+    specs = [
+        make(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            emit_lse=True,
+        )
+        for batch, sq, hq, hkv in ((1, 512, 8, 2), (2, 1024, 16, 4))
+    ]
+    assert all(s.runtime_shape for s in specs)
+    assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
+    assert len({_ir_body_sha(s) for s in specs}) == 1
+
+
 def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
     """Positive control for every "one body across shapes" assertion above.
 
@@ -718,10 +749,10 @@ def test_supports_rejects_non_gfx942():
     [
         # persistent and sliding_window are NOT here anymore -- both are supported
         # (persistent P4; sliding_window via start_tile prune + window mask). See
-        # the persistent build/decode tests and the SWA coverage below.
+        # the persistent build/decode tests and the SWA coverage below. use_sinks
+        # is supported too; see the sink tests below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
-        (dict(use_sinks=True), "sinks"),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
@@ -790,6 +821,96 @@ def test_supports_accepts_sliding_window_in_range():
         _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
     )
     assert ok, why
+
+
+def test_supports_accepts_sinks_alone_and_with_sliding_window():
+    for kw in (dict(), dict(sliding_window=128), dict(persistent=True)):
+        ok, why = supports_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
+        assert ok, f"{kw}: {why}"
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+def test_supports_accepts_empty_window_with_sinks(persistent):
+    """With sinks the zero-trip KV loop leaves l at the l0 = 1 seed and o at zero, so
+    the empty-window rows output 0 (softmax over the sink alone) instead of NaN. The
+    guard is lifted for sinks only; the same shape without sinks is still rejected
+    by test_supports_rejects_sliding_window_past_seqlen_kv."""
+    spec = _spec(
+        seqlen_q=1024,
+        seqlen_kv=256,
+        sliding_window=128,
+        use_sinks=True,
+        persistent=persistent,
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    build_attention_dense(spec, arch="gfx942")
+
+
+def _sink_seed_sites(kernel):
+    """(region ops, index of the sink load, index of the KV loop) for every region
+    holding a load from ``sink_ptr``, plus the total sink-load count."""
+    sites, n_loads = [], 0
+
+    def visit(ops):
+        nonlocal n_loads
+        loads = [
+            i
+            for i, o in enumerate(ops)
+            if o.name == "memref.global_load_typed"
+            and str(o.operands[0]) == "%sink_ptr"
+        ]
+        n_loads += len(loads)
+        kv = [
+            i
+            for i, o in enumerate(ops)
+            if o.name == "scf.for" and o.attrs.get("iv") == "%kt"
+        ]
+        for i in loads:
+            sites.append((ops, i, kv))
+        for o in ops:
+            for region in getattr(o, "regions", ()):
+                visit(region.ops)
+
+    visit(kernel.body.ops)
+    return sites, n_loads
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(),
+        dict(head_size=64, dtype="fp16"),
+        dict(sliding_window=128),
+        dict(persistent=True, persist_decode="qb_major"),
+        dict(persistent=True, persist_decode="hkv_major"),
+    ],
+    ids=["d128_bf16", "d64_fp16", "swa128", "persist_qbmaj", "persist_hkvmaj"],
+)
+def test_sink_seed_is_loaded_once_before_the_kv_loop(kw):
+    """The sink seeds m/l exactly once per work item: one ``sink_ptr`` load, in the
+    same region as the KV loop and before it. A load inside the KV loop (or inside
+    the doubled 32x32x8 K steps it contains) would re-seed per tile and is the
+    failure mode this guards. On the persistent grid the region is the grid-stride
+    body, so ``hq`` is the per-work-item head."""
+    kernel = build_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
+    sites, n_loads = _sink_seed_sites(kernel)
+    assert n_loads == 1, f"expected one sink load, got {n_loads}"
+    ops, i_load, kv = sites[0]
+    assert len(kv) == 1, "sink load is not in the KV loop's region"
+    assert i_load < kv[0], "sink load must precede the KV loop"
+    # The loop-carried m/l inits are the seeds, not -inf / 0.
+    loop = ops[kv[0]]
+    m_init, l_init = (str(x) for x in loop.operands[3:5])
+    seeded = {str(r) for o in ops[i_load : kv[0]] for r in getattr(o, "results", ())}
+    assert m_init in seeded, f"m init {m_init} is not derived from the sink load"
+    assert l_init in seeded, f"l init {l_init} is not the sink's 1.0"
+
+
+def test_no_sinks_emits_no_sink_param_or_load():
+    kernel = build_attention_dense(_spec(), arch="gfx942")
+    assert "sink_ptr" not in [p.name for p in kernel.params]
+    assert _sink_seed_sites(kernel)[1] == 0
 
 
 def test_supports_rejects_over_budget_lds():
@@ -936,7 +1057,8 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast"})
+#   emit_lse: an optional extra output, legal on every config the body accepts.
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse"})
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -1015,6 +1137,9 @@ _CONTRACT_GRID = [
     dict(causal_diag_split=True),  # accepted
     dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
+    # --- private: emit_lse (no rejected region -- see the comment above) ---
+    dict(emit_lse=False),
+    dict(emit_lse=True, persistent=True, num_persistent=304),
 ]
 
 
@@ -1983,13 +2108,13 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     GPU only.
 
     The values are checked two ways: equal to
-    :func:`rocke.helpers.transforms.calculate_magic_numbers` for the divisor (magic
+    :func:`rocke.helpers.magic_division.calculate_magic_numbers` for the divisor (magic
     packed as its two's-complement i32), and -- through the host model of the
     in-kernel divide -- exact for dividends up to just under the 2**30 bound. Non-pow2
     divisors throughout (B=3, NQB=13, Hq=40, gqa=5), so the magic is not the trivial
     pow2 one.
     """
-    from rocke.helpers.transforms import calculate_magic_numbers
+    from rocke.helpers.magic_division import calculate_magic_numbers
 
     spec = _persistent_spec(
         batch=3,

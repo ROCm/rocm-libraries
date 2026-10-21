@@ -57,6 +57,7 @@ Kernel-shape abstractions (GEMM / conv / attention infrastructure):
  - `DirectEpilogue` - per-lane vector global stores
  - `CShuffleEpilogue` - LDS-staged wide-vector global stores
  - `compile_kernel` - one-shot IR -> LLVM IR -> HSACO pipeline
+ - `compile_module` - several kernels (`KernelModule`) -> ONE HSACO
  - `make_gemm_manifest` - the standard manifest.json schema
  - `make_conv_manifest` - manifest schema for convolution kernels
 
@@ -122,7 +123,13 @@ from .attention import (
     wave_reduce_stages,
     wave_reduce_sum,
 )
-from .compile import KernelArtifact, compile_kernel
+from .compile import (
+    KernelArtifact,
+    KernelModule,
+    ModuleArtifact,
+    compile_kernel,
+    compile_module,
+)
 from .mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -346,13 +353,18 @@ from .scan import (
 )
 from .schedule import SchedulePolicy
 from .streamk import (
+    StreamKIterArgs,
+    StreamKIterPartition,
     StreamKPartition,
     StreamKReductionStrategy,
     compute_streamk_grid_size,
     emit_streamk_decode,
-    emit_streamk_partial_load_accumulate,
-    emit_streamk_partial_store,
+    emit_streamk_iter_range,
+    emit_streamk_sk_start_iter,
+    streamk_end_iter,
+    streamk_iter_partition,
     streamk_num_macro_tiles,
+    streamk_start_iter,
 )
 from .spec import (
     IOSpecRule,
@@ -530,7 +542,10 @@ __all__ = [
     "run_fusion_validation_matrix",
     # Compile
     "KernelArtifact",
+    "KernelModule",
+    "ModuleArtifact",
     "compile_kernel",
+    "compile_module",
     # Manifest
     "MANIFEST_SCHEMA",
     "attention_args_signature",
@@ -611,12 +626,17 @@ __all__ = [
     "load_sorted_topk_weight",
     "scatter_token_offset",
     # StreamK partitioner ( StreamK GEMM)
+    "StreamKIterArgs",
+    "StreamKIterPartition",
     "StreamKPartition",
     "StreamKReductionStrategy",
     "compute_streamk_grid_size",
     "emit_streamk_decode",
-    "emit_streamk_partial_load_accumulate",
-    "emit_streamk_partial_store",
+    "emit_streamk_iter_range",
+    "emit_streamk_sk_start_iter",
+    "streamk_end_iter",
+    "streamk_iter_partition",
+    "streamk_start_iter",
     "mfma_attention_bwd_dot_do_o_inner_body",
     "mfma_attention_bwd_dq_dk_dv_inner_body",
     "streamk_num_macro_tiles",

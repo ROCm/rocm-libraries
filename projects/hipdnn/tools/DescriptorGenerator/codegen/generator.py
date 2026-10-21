@@ -22,6 +22,10 @@ _BACKEND_FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (
     ("fragments/operation_type_enum.j2", "operation_type_enum.txt"),
     ("fragments/node_unpack_override.j2", "node_unpack_override.txt"),
     ("fragments/packer_name_addition.j2", "packer_name_addition.txt"),
+    ("fragments/fbs_tensor_fields.j2", "fbs_tensor_fields.txt"),
+    ("fragments/node_flops_overload.j2", "node_flops_overload.txt"),
+    ("fragments/logical_flops_case.j2", "logical_flops_case.txt"),
+    ("fragments/work_model_test_case.j2", "work_model_test_case.txt"),
 )
 
 BACKEND_FRAGMENT_FILENAMES: tuple[str, ...] = tuple(

@@ -58,7 +58,7 @@ The current engine path is:
 
 1. `EngineHeuristicDescriptor` asks `EnginePluginResourceManager::getApplicableEngineIds()` for candidate engine IDs.
 2. `EngineHeuristicDescriptor::getEngineConfigs()` creates `EngineConfigDescriptor` objects.
-3. `EngineDescriptor::finalize()` fetches plugin `EngineDetails`.
+3. `EngineDescriptor::finalize()` validates engine applicability. The first engine-name, knob-info, or behavior-note attribute query fetches plugin `EngineDetails`.
 4. `Graph::create_execution_plans()` selects a single engine config.
 
 `EngineDetails` is the correct metadata boundary for behavior notes because plugins already use it to report per-engine details such as knobs.
@@ -125,7 +125,7 @@ Compatibility rules:
 - Existing plugin source should usually continue to compile because generated FlatBuffers builders default later fields, but CI must verify this.
 - The field must not be marked `required`.
 - `EngineDetailsWrapper` should expose raw `int32` values so the FlatBuffers SDK does not depend on backend headers.
-- `EngineDescriptor::finalize()` should convert raw values to `hipdnnBackendBehaviorNote_t` and reject invalid values.
+- `EngineDescriptor::ensureDetailsLoaded()` converts raw values to `hipdnnBackendBehaviorNote_t` and rejects invalid values at the first metadata query, not during finalization.
 
 Plugins may initially emit empty behavior-note lists. Non-empty notes should only be emitted where the engine can make a true statement, for example runtime compilation or an external library dependency.
 
@@ -135,7 +135,7 @@ Implement `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE` on `EngineDescriptor`.
 
 Backend behavior:
 
-- `EngineDescriptor::finalize()` reads behavior notes from `EngineDetailsWrapper` and caches them.
+- `EngineDescriptor::ensureDetailsLoaded()` reads and caches behavior notes on the first engine-name, knob-info, or behavior-note query. Count-only queries also load metadata. A failed load publishes no partial metadata and can be retried.
 - `getAttribute()` supports `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE` with `HIPDNN_TYPE_BEHAVIOR_NOTE`.
 - Count-only query works with `requestedElementCount == 0` and `arrayOfElements == nullptr`.
 - A second query copies values when `requestedElementCount >= elementCount`.
@@ -201,7 +201,7 @@ Bind:
 
 1. **Ambiguous semantics**: Plugins may emit notes inconsistently. Mitigation: keep the initial enum small and document each value precisely.
 2. **FlatBuffers compatibility mistakes**: Inserting fields or marking fields required would break old buffers. Mitigation: append optional fields only and add old-shape buffer tests.
-3. **Invalid raw metadata**: Plugins can emit invalid `int32` values. Mitigation: validate during `EngineDescriptor::finalize()`.
+3. **Invalid raw metadata**: Plugins can emit invalid `int32` values. Mitigation: validate on the first metadata query in `EngineDescriptor::ensureDetailsLoaded()`. Successful finalization alone is not metadata validation.
 4. **Future API pressure**: Users may ask for cuDNN-style filtering. Mitigation: document filtering as future work and keep this RFC scoped to per-engine queries.
 
 ## 8. Execution Plan
@@ -304,7 +304,7 @@ Backend tests:
 - Empty note list returns count zero.
 - Wrong attribute type fails.
 - Insufficient output count fails.
-- Invalid raw enum value in `EngineDetails` fails during `EngineDescriptor::finalize()`.
+- Invalid raw enum values in `EngineDetails` fail on the first metadata query after successful finalization; retrying valid metadata does not retain partial notes from the failed load.
 
 FlatBuffers and plugin compatibility tests:
 
