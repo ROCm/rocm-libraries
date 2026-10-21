@@ -268,20 +268,27 @@ def concern_scope(lane: str, rows):
     cmake = (
         lambda p: p.rsplit("/", 1)[-1] == "CMakeLists.txt"
         or p.endswith(".cmake")
-        or p == "CMakePresets.json"
+        or p.endswith(".cmake.in")
+        or p.rsplit("/", 1)[-1] == "CMakePresets.json"
         or p.startswith(".github/")
     )
+    name = lambda p: p.rsplit("/", 1)[-1]
     if lane == "BUILD":
         return [
-            r for r in rows if cmake(r[0]) or r[0].rsplit("/", 1)[-1] == "version.json"
+            r
+            for r in rows
+            if cmake(r[0])
+            or name(r[0]) == "version.json"
+            or re.fullmatch(r".*test_categories.*\.yaml", name(r[0]))
         ]
     if lane == "DEPS":
         return [
             r
             for r in rows
             if cmake(r[0])
-            or r[0].rsplit("/", 1)[-1] == "pyproject.toml"
-            or re.fullmatch(r"requirements.*\.txt", r[0].rsplit("/", 1)[-1])
+            or name(r[0]) == "pyproject.toml"
+            or re.fullmatch(r"requirements.*\.txt", name(r[0]))
+            or re.search(r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|hip|cu|cuh)$", name(r[0]))
         ]
     return rows
 

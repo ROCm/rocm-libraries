@@ -22,7 +22,7 @@ one to `IMPORTANT` or above, also run step 3.
 3. Run the proof [../findings.md](../findings.md) *Proof per kind* requires.
    - Reuse the build directory, configure line and binaries `RUN` recorded under **Checked, no finding**, and never mutate the
      shared `$SCRATCH/RUN/` tree. Every scratch build disables clang-tidy as `RUN` does
-     ([build-validate.md](build-validate.md) step 2). With none, build
+     ([build-validate.md](build-validate.md) step 3). With none, build
      the smallest target that holds the proof, or return `UNVERIFIED` with `no build
      available`.
    - **Mutating a built tree.** A build tree is bound to its absolute path (the generator hashes command lines), so a copy at

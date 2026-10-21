@@ -27,13 +27,15 @@ shared, published or swept, and no report or comment may depend on a reader open
 - Read the description (`pr/body.md` or `intent.md`) with its `Known issues` items (`K<n>`). Do not file a known item. File it
   only when the description understates it (worse effect, wider reach or higher tier than stated); the finding then says
   `understated: known-open-item K<n>`.
+- Shell blocks begin `. ./env.sh`, which exports the variables above and `GREP`: run them from `$EVIDENCE/r<N>/` (`cd` there
+  first; the absolute paths are in `dispatch-context.md`). A block that prints `STOP:` ends the lane with `STOP: <reason>`.
 - Never edit `$REPO`, `$REPO_BASE` or `$CLONE`, or write refs into `$CLONE`. To try a fetch,
   `git clone --shared --no-checkout` it into `$SCRATCH/<ID>/clone` and `git remote set-url
   origin https://github.com/<owner>/<repo>.git` there.
 - A path outside the sparse set is absent from `$REPO`, and absence there proves nothing.
   Read it with `git -C "$CLONE" show "$HEAD:<path>"`; search it with `git -C "$CLONE" grep
   -n -e <pattern> "$HEAD" -- <pathspec>` (always pass a pathspec; `$BASE` for the base).
-- Use GNU grep (`/usr/bin/grep` on Linux, `ggrep` on macOS).
+- Use GNU grep: `"$GREP"`, which `env.sh` exports (`ggrep` when present, else `/usr/bin/grep`).
 - Read beyond the diff when a claim depends on it; look for what is missing. Read the area
   files in your packet first: they describe `$BASE` and prove nothing. If one is wrong, add
   the Handoff `SCOUT: <correction>`.

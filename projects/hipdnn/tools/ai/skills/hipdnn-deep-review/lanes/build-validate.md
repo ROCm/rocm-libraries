@@ -6,12 +6,22 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
 
 ## Steps
 
-1. **Checkout.** When this lane builds, use a full (non-sparse) worktree of `$HEAD` at `$SCRATCH/RUN/head`: tests resolve paths
-   against the repository root. Add a full worktree of `$BASE` at `$SCRATCH/RUN/base` only for a base reproduction (step 6). A
-   change that builds nothing (docs or tooling only) runs its read-only checks in `$REPO`. Never build in `$REPO` or `$REPO_BASE`.
-   Without a ROCm install, CMake, Ninja and a C++ toolchain, build nothing and record `no build available (<missing>)` under
-   **Coverage**; `defect` and `test-gap` candidates then stay `UNVERIFIED`.
-2. **Route by what changed.** Use the PR's stated steps if it gives them; otherwise:
+1. **Checkout.** Create full (non-sparse) worktrees without writing to `$CLONE` (`$CLONE` is blobless, so the checkout fetches
+   blobs over the network, as expected):
+
+   ```bash
+   . ./env.sh; mkdir -p "$SCRATCH/RUN"
+   git clone --shared --no-checkout "$CLONE" "$SCRATCH/RUN/head" && git -C "$SCRATCH/RUN/head" checkout --detach "$HEAD"
+   git clone --shared --no-checkout "$CLONE" "$SCRATCH/RUN/base" && git -C "$SCRATCH/RUN/base" checkout --detach "$BASE"
+   ```
+
+   Tests resolve paths against the repository root, so `$SCRATCH/RUN/head` is a full worktree. Create `$SCRATCH/RUN/base` only for
+   a base reproduction (steps 6 and 7). A change that builds nothing (docs or tooling only) still needs `$SCRATCH/RUN/head` for
+   `pre-commit` (a sparse clone is fine there); other read-only checks may run in `$REPO`, but `pre-commit` never does. Never
+   build in `$REPO` or `$REPO_BASE`. Without a ROCm install, CMake, Ninja and a C++ toolchain, build nothing and write
+   `Build: none (<missing>)` under **Coverage**; `defect` and `test-gap` candidates then stay `UNVERIFIED`.
+2. **Select tests.** Only those that reach the changed files. Record each changed file's selected tests.
+3. **Route by what changed.** Use the PR's stated steps if it gives them; otherwise:
 
    | Changed | Build | Tests | Select |
    |---|---|---|---|
@@ -24,29 +34,36 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
    | Core C++ or CMake with new options or install rules | Also configure only: tests OFF, in the superbuild and (Linux) the standalone `projects/hipdnn` build (`projects/hipdnn/docs/Building.md`, `projects/hipdnn/CMakePresets.json`) | The configure exits 0 | — |
    | ASAN | Host-only configure with `-DBUILD_ADDRESS_SANITIZER=ON`; device ASAN (Linux, `HSA_XNACK=1`) needs a GPU: an approval request (`projects/hipdnn/docs/testing/KNOWN_TESTING_GAPS.md`, § "Sanitizers and platforms") | Host-runnable tests that exercise the ownership paths in question | `ctest -R <regex>` |
    | `plugin_sdk`, `data_sdk`, `flatbuffers_sdk` or `test_sdk` | The consumer providers' host builds, hipdnn-superbuild | The consumer providers' host tests that **Consumers** (`CONTEXT.md`) lists, hipdnn-superbuild-test | Those tests |
-   | Anything | — | `pre-commit run --files <changed files>` (hooks include `verify-support-claims`, `check-yaml`) | Changed files |
+   | Anything | — | `pre-commit run --files <changed files>`, only in `$SCRATCH/RUN/head` (hooks include `verify-support-claims`, `check-yaml`) | Changed files |
 
    A raw standalone build is used only when the PR's own steps or the change itself requires it (options the superbuild does not expose), and never on Windows: it skips the superbuild's DLL staging (`amd_comgr.dll`, `amdhip64_<N>.dll`), so load failures would also occur at `$BASE`, be labelled pre-existing and drop coverage.
 
-   `<regex>`, `<label>`, `<pattern>` and `<expr>` come from step 3; `<changed files>` is the path list in `numstat.txt`. Enable
+   Run `pre-commit` as `. ./env.sh; cd "$SCRATCH/RUN/head" && PRE_COMMIT_HOME="$SCRATCH/RUN/pre-commit" pre-commit run --files
+   <changed files>`. Its hooks include fixers (black, `clang-format -i`, end-of-file-fixer, trailing-whitespace), which is why it
+   never runs in `$REPO`. Then record `git -C "$SCRATCH/RUN/head" status --porcelain`: a hook that modified a file is a finding
+   (the change is not clean); discard the modification.
+
+   `<regex>`, `<label>`, `<pattern>` and `<expr>` come from step 2; `<changed files>` is the path list in `numstat.txt`. Enable
    every option the change depends on and say which; **Options and guards** (`CONTEXT.md`) lists them with their defaults.
-   Record each flag enabled as a **Coverage** line for `AUTH`. Every scratch configure passes `-DENABLE_CLANG_TIDY=OFF` (the
+   Write one `Flag: <NAME>=<value> (<configure line or preset>)` line under **Coverage** for each option enabled, for `AUTH`. Every scratch configure passes `-DENABLE_CLANG_TIDY=OFF` (the
    option of core and each provider, default ON off Windows, which makes CMake run clang-tidy on every translation unit) and,
    where the environment or a preset sets it, `-DCMAKE_CXX_CLANG_TIDY=`. Set a unique `TMPDIR` under `$SCRATCH/RUN/` for each
-   attempt and clear it when a run is killed. Cap parallelism to what the host allows. Keep full logs in
+   attempt and clear it when a run is killed. Take `-j` and test parallelism from `Cores:` in dispatch-context.md (or `Overrides:`). Keep full logs in
    `$SCRATCH/RUN/`; read only tails and error lines.
-3. **Select tests.** Only those that reach the changed files. Record each changed file's selected tests.
 4. **Registration.** Each new CTest test appears under its expected label: `ctest -N -L <label>`, or `ctest --show-only=json-v1`
    for every test's labels. Core registers through `add_hipdnn_test` (`projects/hipdnn/cmake/Tests.cmake`); providers through
    `add_unit_test_target`, `add_integration_test_target` (`dnn-providers/cmake/Tests.cmake`) and
    `add_external_integration_test_target` (`dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake`). Install
    with `cmake --install <build> --prefix $SCRATCH/RUN/prefix`; list installed core tests with
    `ctest --test-dir $SCRATCH/RUN/prefix/bin/hipdnn -N`.
-5. **Run.** Run CPU-only selections locally. Put each GPU selection under **Approval requests**; run it only when re-dispatched
-   with it approved.
+5. **Run.** Run CPU-only selections locally. Run a GPU selection only when it is listed under `Approved:` in dispatch-context.md;
+   put every other GPU selection under **Approval requests**.
 6. **Failures.** Rerun each failing selection once at `$HEAD` to separate flaky from broken, then at `$BASE` in
    `$SCRATCH/RUN/base`. A failure at both is pre-existing; attach both logs.
-7. **Account.** One row per suite under **Checked, no finding**: suite, arch, selected, passed, skipped, failed, engine, log; read
+7. **Regression tests (M1).** For each regression test a defect fix adds, run it at `$BASE` (or at `$HEAD` with the fix reverted in
+   a scratch copy of `$SCRATCH/RUN/head`) and record that it fails there and passes at `$HEAD`. Report the result under **Checked, no
+   finding**, with no finding, so `TESTQ` and `AUTH` can settle M1.
+8. **Account.** One row per suite under **Checked, no finding**: suite, arch, selected, passed, skipped, failed, engine, log; read
    counts and the serving engine from the logs. Record the build directory, install prefix, binaries, `compile_commands.json` path and the exact configure line so verifiers
    reuse them. A build tree is bound to its absolute path: do not relocate it, and mutate it only as [verify.md](verify.md) *Mutating a built tree* says.
 

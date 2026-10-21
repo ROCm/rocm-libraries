@@ -11,15 +11,15 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 `SKILL.md`). You are the orchestrator: execute [RUNBOOK.md](RUNBOOK.md). You pin the change, dispatch
 scouts, lanes and verifiers, merge their output and write the report; you do not review
 code. Your formats are in [report.md](report.md); [RUNBOOK.md](RUNBOOK.md) *Fan out* says
-what each agent reads, and `lanes/` holds the briefs. Install
-this skill with [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) and
-[hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); `RUN` builds with them.
+what each agent reads, and `lanes/` holds the briefs. `RUN` builds with
+[hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) and tests with
+[hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); install those skills alongside this one.
 
-Prerequisites: network access, an authenticated `gh` with read access, `git`, Python 3
-(it runs the scripts under `$SKILL/scripts/`; with `pre-commit` and `pytest` for lanes that run validators). `RUN` and verifiers also need
+Prerequisites: network access, an authenticated `gh` with read access, `git`, and Python 3 (it runs the scripts under
+`$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. `RUN` and verifiers also need
 a ROCm install (Linux: `/opt/rocm` or `ROCM_PATH`; Windows: the wheel SDK that [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) provisions), CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
 `test-gap` findings stay `UNVERIFIED` and the review closes only through human
-`ACCEPTED-RISK` decisions (`PIN.md` records `Build host`).
+`ACCEPTED-RISK` decisions, recorded with `ledger.py set` (`PIN.md` records `Build host`).
 
 Platforms: Linux, macOS and Windows. On Windows run the skill from Git Bash (Git for Windows): the runbook's shell blocks need
 `bash`, `awk`, `sed`, `grep` and `comm`. Blocks write the interpreter as `python3`; on Windows that name is the Microsoft Store
@@ -35,6 +35,7 @@ Ask for what is missing; record it in `PIN.md`:
 | `evidence:<dir>`, `scratch:<dir>`, `clone:<dir>` | `$EVIDENCE` outside the product tree; disposable `$SCRATCH`; optional clone (default `$SCRATCH/clone`) |
 | `terms:<file>`, `knowledge:<dir>` | Optional private terms, one fixed string per line, outside the repository; optional `$KNOWLEDGE` store |
 | `round:<N>` | Default: one more than the highest `$EVIDENCE/r<k>/`; 1 when none |
+| Agent limits | Ask the user or the host for `Agents:` (maximum concurrent agents), `Cores:` (CPU cores for builds and tests) and `Mutation:` (a host recipe for mutating a built tree, or none); the skill assumes no values. They go into `dispatch-context.md` ([RUNBOOK.md](RUNBOOK.md) *Fan out*) |
 
 Local builds and host-only tests are allowed. GPU, remote or shared compute, and every write
 to GitHub, Jira or a remote branch need the user's approval for that exact action. The

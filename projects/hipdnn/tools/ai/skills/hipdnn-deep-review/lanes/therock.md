@@ -9,15 +9,20 @@ The pin is `therock-ref` in `.github/actions/ci-env/action.yml`. Every `ROCm/The
 it; a mismatch is a finding. Read TheRock at the pin, never `main`, and `.github/` from `$CLONE`:
 
 ```bash
-pin() { git -C "$CLONE" show "$1:.github/actions/ci-env/action.yml" | /usr/bin/grep -A2 'therock-ref:' | /usr/bin/grep -o '[0-9a-f]\{40\}'; }
+. ./env.sh; mkdir -p "$SCRATCH/ROCK"
+pin() { git -C "$CLONE" show "$1:.github/actions/ci-env/action.yml" | "$GREP" -A2 'therock-ref:' | "$GREP" -o '[0-9a-f]\{40\}'; }
 ROCK_REF=$(pin "$HEAD"); ROCK_REF_BASE=$(pin "$BASE")
-git -C "$CLONE" -c gc.auto=0 grep -nE 'ROCm/TheRock.*@[0-9a-f]{40}|ref: .*[0-9a-f]{40}' "$HEAD" -- .github | /usr/bin/grep -v "$ROCK_REF"
+[ ${#ROCK_REF} -eq 40 ] && [ ${#ROCK_REF_BASE} -eq 40 ] || { echo "STOP: cannot read therock-ref at HEAD or BASE" >&2; exit 1; }
+git -C "$CLONE" -c gc.auto=0 grep -nE 'ROCm/TheRock.*@[0-9a-f]{40}|ref: .*[0-9a-f]{40}' "$HEAD" -- .github | "$GREP" -v "$ROCK_REF"
 T=$SCRATCH/ROCK/therock
-git clone -q --filter=blob:none https://github.com/ROCm/TheRock "$T" && git -C "$T" checkout -q "$ROCK_REF"
-export PYTHONPATH=$T/build_tools/github_actions
+printf '%s\n' "$ROCK_REF" > "$SCRATCH/ROCK/ref"; printf '%s\n' "$ROCK_REF_BASE" > "$SCRATCH/ROCK/ref-base"; printf '%s\n' "$T" > "$SCRATCH/ROCK/T"
+git clone -q --filter=blob:none https://github.com/ROCm/TheRock "$T" && git -C "$T" checkout -q "$ROCK_REF" || exit 1
 ```
 
-Each line `grep -v` leaves must check out another repository; a TheRock ref there is a finding. When `$ROCK_REF_BASE` differs from
+When the block stops, the lane returns `STOP: <reason>`. Later blocks begin with `. ./env.sh;
+T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); ROCK_REF_BASE=$(cat "$SCRATCH/ROCK/ref-base")` and set `PYTHONPATH` themselves.
+
+Each line the final `grep -v` leaves must check out another repository; a TheRock ref there is a finding. When `$ROCK_REF_BASE` differs from
 `$ROCK_REF`, the change bumps TheRock: every ref must move together, and you review the bump with `git -C "$T" log --oneline
 "$ROCK_REF_BASE..$ROCK_REF" -- <paths in the table below>`. Record `$ROCK_REF` in the report.
 
@@ -38,7 +43,8 @@ Classify every changed file with TheRock's skip-ci patterns: the base patterns p
 `load_skip_ci_config`, it falls back to `_is_path_skippable(path)` (no extension patterns); record that.
 
 ```bash
-mkdir -p "$SCRATCH/ROCK"; C="$SCRATCH/ROCK/skip-ci-config.toml"
+. ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); export PYTHONPATH=$T/build_tools/github_actions
+C="$SCRATCH/ROCK/skip-ci-config.toml"
 git -C "$CLONE" show "$HEAD:.github/skip-ci-config.toml" > "$C" || { echo "no skip-ci-config at HEAD" >&2; : > "$C"; }
 git -C "$CLONE" diff --name-only "$BASE" "$HEAD" | python3 -c '
 import sys; from pathlib import Path; import configure_ci_path_filters as f
@@ -65,6 +71,7 @@ projects:` in the configure job log; otherwise the `projects/`, `dnn-providers/`
 output names the job keys in `fetch_test_configurations.py`:
 
 ```bash
+. ./env.sh; T=$(cat "$SCRATCH/ROCK/T")
 python3 "$T/test_tools/determine_rocm_test_dependencies.py" --changed-projects "projects/hipdnn,dnn-providers/miopen-provider"
 ```
 
@@ -107,7 +114,7 @@ resolve it per workflow from four places:
 | `FLAGS.cmake` `THEROCK_FLAG_*` | ON injects the flag's CMake vars. OFF injects nothing, so the component default stands (`therock_flag_utils.cmake`) |
 | `extra_cmake_options` in each rocm-libraries workflow | Per-run overrides: `git -C "$CLONE" grep -n THEROCK_FLAG_ "$HEAD" -- .github/workflows` (PR, nightly, ASAN, flag-on lanes) |
 
-The code is covered only by workflows where it resolves ON and whose families test it. Count a family only from executed test counts in its job logs (`gh run view <run-id> -R <owner>/<repo> --log`).
+The code is covered only by workflows where it resolves ON and whose families test it. Count a family only from executed test counts in its job logs (`gh run view <run-id> -R <owner>/<repo> --log > "$EVIDENCE/r<N>/lanes/ROCK-evidence/run-<id>.log"`, then `"$GREP"` the file; the run id is the `/runs/<id>/` segment of a check's `html_url`).
 
 ## 4. Will TheRock package and run it?
 
@@ -115,10 +122,15 @@ Only a TheRock-layout build applies TheRock's post-processing, which the RPATH a
 request**: it needs `meson` (`pip install -r requirements.txt` in `$T`), fetched sources (`python3 ./build_tools/fetch_sources.py`) and
 the dist AMDGPU target selection, and builds the compiler and runtime from source (hours, tens of GB); state these, the architecture
 and the duration. Without approval, *Installed CTest*, *RPATH* and *Components* are `UNVERIFIED`: read the sources they name and say
-what was not run. Once approved, build in `$SCRATCH/ROCK/build`:
+what was not run. This section covers hipDNN core only: when the change touches only `dnn-providers/**` or integration tests, those
+three checks are `N/A (hipDNN core not touched)`, or `UNVERIFIED` with a Handoff when the PR claims provider packaging changes; do
+not parameterize them per provider. Once approved, build in `$SCRATCH/ROCK/build` from a full scratch checkout of `$HEAD`, never
+`$REPO` or `$REPO_BASE` (sparse checkouts lack sources) and never `-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR="$REPO"`:
 
 ```bash
-cmake -S "$T" -B "$SCRATCH/ROCK/build" -GNinja -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR="$REPO" \
+. ./env.sh; T=$(cat "$SCRATCH/ROCK/T")
+git clone --shared --no-checkout "$CLONE" "$SCRATCH/ROCK/src" && git -C "$SCRATCH/ROCK/src" checkout --detach "$HEAD" || exit 1
+cmake -S "$T" -B "$SCRATCH/ROCK/build" -GNinja -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR="$SCRATCH/ROCK/src" \
   -DTHEROCK_AMDGPU_TARGETS=<arch> -DTHEROCK_DIST_AMDGPU_TARGETS=<arch> -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_HIPDNN=ON
 ninja -C "$SCRATCH/ROCK/build" -j<cores> hipDNN+stage
 ```
@@ -135,11 +147,11 @@ The stage is `$SCRATCH/ROCK/build/ml-libs/hipDNN/stage`.
   unset; nothing is set on Windows. Project `INSTALL_RPATH` is discarded; check the TheRock layer: every new executable or shared
   library installed outside `bin/` or `lib/` sets `THEROCK_INSTALL_RPATH_ORIGIN` to its install dir (`git -C "$CLONE" grep -n
   THEROCK_INSTALL_RPATH_ORIGIN "$HEAD" -- dnn-providers projects/hipdnn` shows precedent). Any extra library dir it needs is added to
-  `THEROCK_PRIVATE_INSTALL_RPATH_DIRS` by an `ml-libs/post_hook_*.cmake`. On the stage, `readelf -d` shows no absolute RUNPATH entry,
-  and `grep -rl "$SCRATCH" <stage>` finds no build path baked into installed files.
+  `THEROCK_PRIVATE_INSTALL_RPATH_DIRS` by an `ml-libs/post_hook_*.cmake`. On the stage, `readelf -d` (Linux only; on macOS use `otool -L` or skip and report `UNVERIFIED`) shows no absolute RUNPATH entry,
+  and `"$GREP" -rl "$SCRATCH" <stage>` finds no build path baked into installed files.
 - **Components.** Save this scanner as `$SCRATCH/ROCK/components.py` and run it on the stage with the artifact TOML, the artifact name
-  and the build root (the TOML's `ml-libs/hipDNN/stage` key resolves under it). Use `PYTHONPATH="$T/build_tools"` in place of the
-  exported value: `PYTHONPATH="$T/build_tools" python3 "$SCRATCH/ROCK/components.py" "$T/ml-libs/artifact-hipdnn.toml" hipdnn
+  and the build root (the TOML's `ml-libs/hipDNN/stage` key resolves under it). Run it as `. ./env.sh; T=$(cat "$SCRATCH/ROCK/T");
+  PYTHONPATH="$T/build_tools" python3 "$SCRATCH/ROCK/components.py" "$T/ml-libs/artifact-hipdnn.toml" hipdnn
   "$SCRATCH/ROCK/build"`
 
   ```python

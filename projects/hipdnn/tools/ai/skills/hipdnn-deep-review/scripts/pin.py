@@ -30,6 +30,7 @@ ENV_SH = (
     r"""eval "$(awk '/^("""
     + PIN_VARS
     + r"""):/{v=$0; sub(/^[A-Z_]+: */,"",v); k=$1; sub(/:$/,"",k); gsub(/\047/,"\047\\\047\047",v); print "export " k "=\047" v "\047"}' "$(dirname "${BASH_SOURCE[0]}")/PIN.md")"
+GREP="$(command -v ggrep || echo /usr/bin/grep)"; export GREP
 : "${EVIDENCE:?}" "${SCRATCH:?}" "${CLONE:?}" "${KEY:?}"; cd "$(dirname "${BASH_SOURCE[0]}")"
 """
 )
@@ -337,6 +338,9 @@ def cmd_cleanup(args):
     clone, key = pin["CLONE"], pin["KEY"]
     clone_path, scratch_path = same_path(clone), same_path(pin["SCRATCH"])
     n = 0
+    if not Path(clone).is_dir():
+        print("removed 0 worktrees, 0 refs (no clone)")
+        return
     for line in git(clone, "worktree", "list", "--porcelain").splitlines():
         if line.startswith("worktree "):
             w = line[len("worktree ") :]

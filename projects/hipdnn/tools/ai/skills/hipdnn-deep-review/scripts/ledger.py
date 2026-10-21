@@ -5,6 +5,7 @@
 
 Usage: ledger.py <seed|ids|coverage|verdicts|mlines|counts> <evidence dir> <round>
        ledger.py seed <evidence dir> <round> [--lane NAME=<status text>]...
+       ledger.py set <evidence dir> <round> <ID> <FIXED@sha|ACCEPTED-RISK|OPEN> [--class C] [--note TEXT]
 
 Each subcommand reads `<evidence>/r<round>/` and `<evidence>/LEDGER.md` and exits 1 with a
 one-line reason on failure. Rows are only ever updated or appended, never deleted.
@@ -382,6 +383,49 @@ def cmd_counts(a):
     print("Closure: " + ("OPEN; waiting: " + ", ".join(waits) if waits else "CLOSED"))
 
 
+def cmd_set(a):
+    """Set one finding's status by hand: `FIXED@<sha>` (needs --class, the evidence class of
+    the proof that it no longer holds), `ACCEPTED-RISK` (needs --note, the human decision;
+    also appends a Decisions row) or `OPEN` (reopen a closed row; `verdicts` then re-verifies
+    it). Sets or clears the row's Round closed. `verdicts` never touches FIXED or
+    ACCEPTED-RISK rows."""
+    status = a.status
+    if (
+        status != "OPEN"
+        and status != "ACCEPTED-RISK"
+        and not re.fullmatch(r"FIXED@[0-9a-f]{7,40}", status)
+    ):
+        raise rl.Fail(f"status must be FIXED@<sha>, ACCEPTED-RISK or OPEN: {status}")
+    if status.startswith("FIXED") and a.evidence_class not in (
+        "rerun",
+        "text-read",
+        "not-exercised",
+    ):
+        raise rl.Fail("FIXED needs --class rerun|text-read|not-exercised")
+    if status == "ACCEPTED-RISK" and not a.note:
+        raise rl.Fail("ACCEPTED-RISK needs --note with the human decision")
+    tables = load_ledger(a.evidence)
+    rows = [r for r in rl.find_table(tables, "Findings").rows if r["ID"] == a.id]
+    if not rows:
+        raise rl.Fail(f"no finding row {a.id}")
+    row = rows[0]
+    row["Status"] = status
+    row["Round closed"] = "" if status == "OPEN" else str(a.round)
+    if status.startswith("FIXED"):
+        row["Evidence"] = collapse(f"{a.evidence_class}: {a.note or row['Evidence']}")
+    if status == "ACCEPTED-RISK":
+        rl.find_table(tables, "Decisions").add(
+            **{
+                "Round": a.round,
+                "Question": f"Accept the risk of {a.id}?",
+                "Decision": collapse(a.note),
+                "Findings affected": a.id,
+            }
+        )
+    save_ledger(a.evidence, tables)
+    print(f"{a.id}: {status}")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -392,12 +436,18 @@ def main(argv=None):
         ("verdicts", cmd_verdicts),
         ("mlines", cmd_mlines),
         ("counts", cmd_counts),
+        ("set", cmd_set),
     ):
         s = sub.add_parser(name, help=fn.__doc__.split("\n\n")[0].split(". ")[0])
         s.add_argument("evidence")
         s.add_argument("round", type=int)
         if name == "seed":
             s.add_argument("--lane", action="append", default=[], metavar="NAME=STATUS")
+        if name == "set":
+            s.add_argument("id")
+            s.add_argument("status")
+            s.add_argument("--class", dest="evidence_class")
+            s.add_argument("--note", default="")
         s.set_defaults(fn=fn)
     args = p.parse_args(argv)
     try:

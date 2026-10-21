@@ -1,6 +1,12 @@
 # Lane: leak sweep (`LEAK`)
 
 Find anything the push or PR publishes that should not be public (this is a public repository). Work in `$SCRATCH/LEAK/` (`$L`).
+
+**Sweep dispatch.** A fresh agent re-dispatched for the output sweep does only *Sweeping review output* (below), after defining
+`L`, `meta`, `search`, `scan` and the pattern and term files from steps 1 and 2 (`. "$L/lib.sh"` restores the functions; the
+files are in `$L`). It writes `$EVIDENCE/r<N>/lanes/LEAK-sweep.md`: the standard lane report ([../findings.md](../findings.md) *Lane report*)
+whose Checked-no-finding states `Sweep: clean`, or whose Findings list each counted hit as `<file>:<line>`.
+
 `$TERMS` is the `Leak terms:` path in `PIN.md`, empty when `absent`; `<owner>/<repo>`, `<pr>` and `<N>` (the round) come from `PIN.md` and the dispatch.
 
 ## 1. Collect what is published
@@ -8,7 +14,7 @@ Find anything the push or PR publishes that should not be public (this is a publ
 | Item | Source |
 |---|---|
 | Every commit (message, author, committer, added lines); the final diff (added lines with line numbers at `$HEAD`, changed paths) | `history` and `git diff -U0`, below |
-| PR title, description, reviews, comments, inline threads | `$EVIDENCE/r<N>/pr/`: `branch.txt`, `pr-text.txt`, `pr-comment.txt`, `pr-inline.txt`. No PR: the commit messages are the future description, and `intent.md` stands in for it |
+| PR title, description, reviews, comments, inline threads | `pr/` in the round directory (PR targets only): `branch.txt`, `pr-text.txt`, `pr-comment.txt`, `pr-inline.txt`. No PR: the commit messages are the future description, and `intent.md` stands in for it |
 | Earlier heads | Round N > 1: `history "$BASE..<previous head>"` too, the head in the previous round's `PIN.md` |
 
 `history` covers every commit: a leak removed later is still published. `--diff-merges=remerge` (git 2.36+; older `--cc`) includes
@@ -18,7 +24,8 @@ identity), or `branch:`, `pr-text:`, `pr-comment:`, `pr-inline:`, `path:` plus a
 `$BASE`, or `-`.
 
 ```bash
-L="$SCRATCH/LEAK"; mkdir -p "$L"; : > "$L/pub.anchor"; : > "$L/pub.content"
+. ./env.sh; L="$SCRATCH/LEAK"; mkdir -p "$L"; : > "$L/pub.anchor"; : > "$L/pub.content"
+cat > "$L/lib.sh" <<'EOF'
 records() {   # stdin: a -U0 diff or history stream
   awk -v A="$L/pub.anchor" -v C="$L/pub.content" '
     /^\001/ { pre = substr($0, 2, 8); mode = "m"; next }
@@ -38,12 +45,19 @@ history() {
   git -C "$REPO" log -p -U0 --no-color --src-prefix=a/ --dst-prefix=b/ --diff-merges=remerge \
     --format='%x01%H%n%an <%ae>%n%cn <%ce>%n%B' "$1" | records
 }
+EOF
+. "$L/lib.sh"
 history "$BASE..$HEAD"
 git -C "$REPO" diff -U0 --no-color --src-prefix=a/ --dst-prefix=b/ "$BASE" "$HEAD" | records
 git -C "$REPO" diff --name-only "$BASE" "$HEAD" | meta path
-# PR targets only (branch target: the branch name; range target: no branch): branch name, then PR text from the saved intake files
-P="$EVIDENCE/r<N>/pr"
-for k in branch pr-text pr-comment pr-inline; do meta "$k" < "$P/$k.txt"; done
+# Branch and PR text. pr/ exists only for a PR target; otherwise intent.md and a branch:<name> target's name stand in.
+if [ -d pr ]; then
+  for k in branch pr-text pr-comment pr-inline; do meta "$k" < "pr/$k.txt"; done
+else
+  [ -f intent.md ] && meta intent < intent.md
+  BRANCH_NAME=$(awk -F': *' '/^Change:/{print $2}' PIN.md)   # a range target has no branch
+  case $BRANCH_NAME in branch:*) printf '%s\n' "${BRANCH_NAME#branch:}" | meta branch ;; esac
+fi
 ```
 
 ## 2. Search
@@ -75,26 +89,31 @@ https?://[^[:space:])>"'`]+
 
 Build the two term files. **Your own identifiers** are the likeliest leaks when the reviewer is the author. **Private terms**
 (`$TERMS`: code names, cluster, site and node names, internal hosts) are what the repository cannot reveal; when absent, say so in
-Coverage. Strip CR, surrounding whitespace and blank lines first; a `STOP` here stops the lane.
+Coverage. Strip CR, surrounding whitespace and blank lines first. Whenever a block prints `STOP:`, the lane returns
+`STOP: <reason>` instead of continuing.
 
 ```bash
+. ./env.sh; L="$SCRATCH/LEAK"; . "$L/lib.sh"
 printf '%s\n' "$HOME" "${USERPROFILE:-}" "${USER:-}" "${USERNAME:-}" "${COMPUTERNAME:-}" "$(hostname)" "$(hostname -f 2>/dev/null)" "$(git config user.email)" "$(git config user.name)" \
   "$CLONE" "$REPO" "$REPO_BASE" "$EVIDENCE" "$SCRATCH" | awk 'length >= 3 && !/^[[:space:]]*$/' | sort -u > "$L/local-terms.txt"
-[ "$TERMS" = absent ] && TERMS=; if [ -n "$TERMS" ]; then [ -r "$TERMS" ] || echo "STOP: terms file unreadable: $TERMS" >&2
+[ "$TERMS" = absent ] && TERMS=; if [ -n "$TERMS" ]; then [ -r "$TERMS" ] || { echo "STOP: terms file unreadable: $TERMS" >&2; exit 1; }
   tr -d '\r' < "$TERMS" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF' | sort -u; fi > "$L/terms.txt"
 
+cat >> "$L/lib.sh" <<'EOF'
 # search <-E|-F> <file>: skipped when empty (an empty -f file matches every line); -a reads past NUL bytes;
 # patterns (-E) are case-sensitive, terms (-F) are not. The awk reads "<line>:<token>" and prints anchor, base path, token.
 search() {
   [ -s "$2" ] || return 0
   local ci=i; [ "$1" = -E ] && ci=
-  /usr/bin/grep -noa$ci "$1" -f "$2" "$L/pub.content" | awk -v ANCH="$L/pub.anchor" '
+  "$GREP" -noa$ci "$1" -f "$2" "$L/pub.content" | awk -v ANCH="$L/pub.anchor" '
     BEGIN { FS = ":"; while ((getline l < ANCH) > 0) { i++; split(l, p, "\t"); a[i] = p[1]; b[i] = p[2] } }
     { n = $1; t = substr($0, length(n) + 2)
       gsub("^[^[:alnum:]~$/-]+", "", t); gsub("[^[:alnum:]_/]+$", "", t)
       if (t != "") print a[n] "\t" b[n] "\t" t }'
 }
 scan() { { search -E "$L/patterns.txt"; search -F "$L/local-terms.txt"; search -F "$L/terms.txt"; } | sort -u; }
+EOF
+. "$L/lib.sh"
 scan > "$L/hits.tsv"; wc -l < "$L/hits.tsv"; head -n 200 "$L/hits.tsv"
 ```
 
@@ -109,6 +128,8 @@ view images, list archives, list printable runs of code objects (`strings`, else
   under FUTURE WORK with its BASE location.
 - **Identifying?** Names a real person, machine, host, path, credential or private system. Generic (`/home/user`,
   `user@example.com`): checked, no finding.
+- **`TODO`/`FIXME`/`XXX` comment?** A leak only when it names a person, ticket, internal system or process artifact; otherwise
+  checked, no finding (`CORR` owns code-quality TODOs).
 - **Public?** Present at `$BASE`, or in a public ROCm repository or AMD's public docs (cite the URL). If you cannot show it is
   public: **Needs human decision**, never passed silently.
 
@@ -116,6 +137,7 @@ Hits in commit messages, identities, the branch name and PR text have no file: a
 in the tree (`jira` at `$BASE` does not clear a new `jira.<host>/...`).
 
 ```bash
+. ./env.sh; L="$SCRATCH/LEAK"
 while IFS=$'\t' read -r anchor bpath tok; do
   s=added
   if [ "$bpath" != - ]; then
@@ -124,7 +146,7 @@ while IFS=$'\t' read -r anchor bpath tok; do
   fi
   printf '%s\t%s\t%s\n' "$s" "$anchor" "$tok"
 done < "$L/hits.tsv" > "$L/classified.tsv"
-/usr/bin/grep -cE '^(added|unknown)' "$L/classified.tsv"; /usr/bin/grep -E '^(added|unknown)' "$L/classified.tsv" | head -n 200
+"$GREP" -cE '^(added|unknown)' "$L/classified.tsv"; "$GREP" -E '^(added|unknown)' "$L/classified.tsv" | head -n 200
 ```
 
 A hit in a renamed file is checked under its old path. The author's commit identity and a `users/<name>/` branch prefix are expected
@@ -141,8 +163,10 @@ Evidence subdirectories (`verify/<ID>-evidence/`, `lanes/*-evidence/`, `lanes/<I
 the sweep skips them; they may hold local paths and private terms:
 
 ```bash
+. ./env.sh; L="$SCRATCH/LEAK"; . "$L/lib.sh"
 load_output() {
-  local R="$EVIDENCE/r<N>" K="$KNOWLEDGE/$KEY-r<N>" f n=0 miss=0
+  local RN; RN=$(basename "$PWD")   # the round directory, r<N>
+  local R="$EVIDENCE/$RN" K="$KNOWLEDGE/$KEY-$RN" f n=0 miss=0
   for f in "$R/REPORT.md" "$R/COMMENTS.md" "$R/CONTEXT.md" "$EVIDENCE/LEDGER.md"; do
     if [ -f "$f" ]; then meta "${f#"$EVIDENCE"/}" < "$f"; n=$((n + 1))
     else echo "sweep: missing $f" >&2; miss=1; fi
@@ -156,7 +180,7 @@ load_output() {
   echo "sweep: read $n files"; return $miss
 }
 : > "$L/pub.anchor"; : > "$L/pub.content"
-load_output || { echo "sweep: not clean, input missing" >&2; false; }
+load_output || { echo "STOP: sweep input missing, not clean" >&2; exit 1; }
 sed -i.bak 's#users/[A-Za-z0-9._-]*/#users/#g' "$L/pub.content" && rm "$L/pub.content.bak"   # the expected branch prefix
 cat > "$L/sweep-allow.txt" <<'EOF2'
 ^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
@@ -165,14 +189,14 @@ cat > "$L/sweep-allow.txt" <<'EOF2'
 EOF2
 scan |
 while IFS=$'\t' read -r anchor bpath tok; do
-  /usr/bin/grep -qiF -- "$tok" "$EVIDENCE/r<N>/pr/pr.json" 2>/dev/null && continue   # published by the author
-  printf '%s\n' "$tok" | /usr/bin/grep -qiE -f "$L/sweep-allow.txt" || printf '%s\t%s\n' "$anchor" "$tok"
+  "$GREP" -qiF -- "$tok" pr/pr.json 2>/dev/null && continue   # published by the author
+  printf '%s\n' "$tok" | "$GREP" -qiE -f "$L/sweep-allow.txt" || printf '%s\t%s\n' "$anchor" "$tok"
 done > "$L/sweep-hits.tsv"
 wc -l < "$L/sweep-hits.tsv"; head -n 200 "$L/sweep-hits.tsv"
 ```
 
 A hit counts unless `sweep-allow.txt` allows it or its token is in `pr/pr.json` (the author published it; the
 source leak is a separate finding). A public URL outside the list is checked under `Public?`; a GitHub URL outside `ROCm/` is
-public only when `gh api repos/<owner>/<repo> --jq .private` prints `false`. Report each counted hit as `<file>:<line>`
-without the token; the orchestrator redacts it in the file and in the `$KNOWLEDGE` copy to a repo-relative `path:line` or a
+public only when `gh api repos/<owner>/<repo> --jq .private` prints `false`. Write each counted hit to
+`$EVIDENCE/r<N>/lanes/LEAK-sweep.md` as `<file>:<line>` without the token (see *Sweep dispatch*); the orchestrator redacts it in the file and in the `$KNOWLEDGE` copy to a repo-relative `path:line` or a
 `$REPO`-style variable, then dispatches the sweep again. The sweep is clean when the load succeeded and `sweep-hits.tsv` is empty.

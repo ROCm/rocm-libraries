@@ -15,6 +15,7 @@ Every change to a public surface must be intentional and described in the PR.
 | Python | `hipdnn_frontend` exports and nanobind bindings: `projects/hipdnn/python/frontend_bindings`, `projects/hipdnn/python/frontend_wheel_package` |
 | CMake package | Exported targets, config files, option names consumers set |
 | Runtime contract | Environment variables, file formats and paths, status codes, log formats others parse |
+| Provider contracts | `dnn-providers/**` non-test source: environment variables a provider reads, engine names and IDs, `config/<ENGINE>.toml` and support-claim sidecar schemas, installed provider CMake packages and exported targets |
 
 A header outside `detail/` is public if it is installed. The `detail` namespace and `detail/` directories are not public even
 though the frontend install rule ships them; flag `detail` types in public signatures. Behavior is a surface too: status codes,

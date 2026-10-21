@@ -8,13 +8,17 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "hipdnn-deep-review" / "scripts"
+SCRIPTS = (
+    Path(__file__).resolve().parent.parent / "skills" / "hipdnn-deep-review" / "scripts"
+)
 
 
 def _load(name):
     sys.path.insert(0, str(SCRIPTS))
     try:
-        spec = importlib.util.spec_from_file_location(f"deep_review_{name}", SCRIPTS / f"{name}.py")
+        spec = importlib.util.spec_from_file_location(
+            f"deep_review_{name}", SCRIPTS / f"{name}.py"
+        )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -32,7 +36,14 @@ def rl():
     return _load("reviewlib")
 
 
-def finding(fid, tier="IMPORTANT", where="a.cpp:10", actual="It returns the wrong value.", kind="defect", extra=""):
+def finding(
+    fid,
+    tier="IMPORTANT",
+    where="a.cpp:10",
+    actual="It returns the wrong value.",
+    kind="defect",
+    extra="",
+):
     return (
         f"ID:        {fid}\nKind:      {kind}\nTier:      {tier}\nWhere:     {where}\n"
         f"Expected:  header says non-negative\nActual:    {actual}\n"
@@ -90,7 +101,16 @@ def with_reports(ledger, ev, **reports):
 
 
 def test_finding_block_parses_multiline_fenced_actual(rl):
-    text = report("CORR1", [finding("CORR1-p1", actual="First line.\n```\ncode\n\nmore code\n```\nafter") + "\n" + finding("CORR1-p2")])
+    text = report(
+        "CORR1",
+        [
+            finding(
+                "CORR1-p1", actual="First line.\n```\ncode\n\nmore code\n```\nafter"
+            )
+            + "\n"
+            + finding("CORR1-p2")
+        ],
+    )
     blocks = rl.parse_findings(text)
     assert [b["ID"] for b in blocks] == ["CORR1-p1", "CORR1-p2"]
     assert blocks[0]["Actual"] == "First line.\n```\ncode\n\nmore code\n```\nafter"
@@ -109,67 +129,131 @@ def test_seed_rows_and_round_two_appends_keeping_rows(ledger, rl, ev, capsys):
     seeded(ledger, ev)
     cov = table(rl, ev, "Coverage (round 1)").rows
     assert [(r["File"], r["Lines"], r["Owner lane"], r["Read depth"]) for r in cov] == [
-        ("a.cpp", "5", "CORR1", "pending"), ("b.bin", "0", "CORR1", "pending")]
-    assert [r["Lane"] for r in table(rl, ev, "Lanes (round 1)").rows] == ["CORR1", "TESTQ"]
+        ("a.cpp", "5", "CORR1", "pending"),
+        ("b.bin", "0", "CORR1", "pending"),
+    ]
+    assert [r["Lane"] for r in table(rl, ev, "Lanes (round 1)").rows] == [
+        "CORR1",
+        "TESTQ",
+    ]
     assert run(ledger, "seed", ev) == 1  # round 1 already seeded
     r2 = ev / "r2"
     (r2 / "packets").mkdir(parents=True)
     (r2 / "PIN.md").write_text("Round: 2\n")
     (r2 / "owners.tsv").write_text("CORR1\ta.cpp\n")
     (r2 / "numstat.txt").write_text("1\t1\ta.cpp\n")
-    (ev / "r1" / "lanes" / "CORR1.md").write_text(report("CORR1", [finding("CORR1-p1")]))
+    (ev / "r1" / "lanes" / "CORR1.md").write_text(
+        report("CORR1", [finding("CORR1-p1")])
+    )
     run(ledger, "ids", ev)
     assert run(ledger, "seed", ev, 2, "--lane", "BUILD=N/A: no cmake") == 0
     assert [r["ID"] for r in table(rl, ev, "Findings").rows] == ["CORR-1"]
-    assert [r["File"] for r in table(rl, ev, "Coverage (round 1)").rows] == ["a.cpp", "b.bin"]
-    assert [(r["Lane"], r["Status"]) for r in table(rl, ev, "Lanes (round 2)").rows] == [("BUILD", "N/A: no cmake")]
+    assert [r["File"] for r in table(rl, ev, "Coverage (round 1)").rows] == [
+        "a.cpp",
+        "b.bin",
+    ]
+    assert [
+        (r["Lane"], r["Status"]) for r in table(rl, ev, "Lanes (round 2)").rows
+    ] == [("BUILD", "N/A: no cmake")]
 
 
 def test_final_ids_are_stable_and_shared_across_correctness_lanes(ledger, rl, ev):
     seeded(ledger, ev)
-    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1"), finding("CORR1-p2")]),
-                 CORR2=report("CORR2", [finding("CORR2-p1")]), TESTQ=report("TESTQ", [finding("TESTQ-p1", kind="test-gap")]))
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report("CORR1", [finding("CORR1-p1"), finding("CORR1-p2")]),
+        CORR2=report("CORR2", [finding("CORR2-p1")]),
+        TESTQ=report("TESTQ", [finding("TESTQ-p1", kind="test-gap")]),
+    )
     run(ledger, "ids", ev)
     first = (ev / "r1" / "ID-MAP.md").read_text()
-    assert [r["Final ID"] for r in rl.parse_tables(first)[0].rows] == ["CORR-1", "CORR-2", "CORR-3", "TESTQ-1"]
+    assert [r["Final ID"] for r in rl.parse_tables(first)[0].rows] == [
+        "CORR-1",
+        "CORR-2",
+        "CORR-3",
+        "TESTQ-1",
+    ]
     run(ledger, "ids", ev)
     assert (ev / "r1" / "ID-MAP.md").read_text() == first
     # A follow-up and a later report continue the counters without renumbering.
     with_reports(ledger, ev, CORR1_f1=report("CORR1-f1", [finding("CORR1-p3")]))
     run(ledger, "ids", ev)
-    rows = {r["Lane / provisional"].split("/")[1]: r["Final ID"] for r in rl.parse_tables((ev / "r1" / "ID-MAP.md").read_text())[0].rows}
-    assert rows["CORR1-p1"] == "CORR-1" and rows["CORR2-p1"] == "CORR-3" and rows["CORR1-p3"] == "CORR-4"
+    rows = {
+        r["Lane / provisional"].split("/")[1]: r["Final ID"]
+        for r in rl.parse_tables((ev / "r1" / "ID-MAP.md").read_text())[0].rows
+    }
+    assert (
+        rows["CORR1-p1"] == "CORR-1"
+        and rows["CORR2-p1"] == "CORR-3"
+        and rows["CORR1-p3"] == "CORR-4"
+    )
     assert len(table(rl, ev, "Findings").rows) == 5
 
 
 def test_understated_known_item_and_supersede_flow_into_ledger(ledger, rl, ev):
     seeded(ledger, ev)
-    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1", extra="understated: known-open-item K2"), finding("CORR1-p2")]))
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report(
+            "CORR1",
+            [
+                finding("CORR1-p1", extra="understated: known-open-item K2"),
+                finding("CORR1-p2"),
+            ],
+        ),
+    )
     run(ledger, "ids", ev)
     mp = (ev / "r1" / "ID-MAP.md").read_text()
-    (ev / "r1" / "ID-MAP.md").write_text(mp.replace("| CORR-2 |  |", "| CORR-2 | CORR-1 |"))
+    (ev / "r1" / "ID-MAP.md").write_text(
+        mp.replace("| CORR-2 |  |", "| CORR-2 | CORR-1 |")
+    )
     run(ledger, "ids", ev)
     rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
     assert rows["CORR-1"]["known-open-item"] == "K2"
     assert rows["CORR-2"]["Status"] == "SUPERSEDED-BY:CORR-1"
-    assert rows["CORR-1"]["Claim"] == "It returns the wrong value." and rows["CORR-1"]["Tier"] == "IMPORTANT -> IMPORTANT"
+    assert (
+        rows["CORR-1"]["Claim"] == "It returns the wrong value."
+        and rows["CORR-1"]["Tier"] == "IMPORTANT -> IMPORTANT"
+    )
 
 
 def test_coverage_copies_owner_lane_depth_and_tests(ledger, rl, ev, capsys):
     seeded(ledger, ev)
-    with_reports(ledger, ev, CORR1=report("CORR1", coverage=[("a.cpp", "full", "t1 | t2"), ("unchanged.h", "full", "-")]),
-                 TESTQ=report("TESTQ", coverage=[("b.bin", "sampled", "-")]))
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report(
+            "CORR1",
+            coverage=[("a.cpp", "full", "t1 | t2"), ("unchanged.h", "full", "-")],
+        ),
+        TESTQ=report("TESTQ", coverage=[("b.bin", "sampled", "-")]),
+    )
     capsys.readouterr()
     assert run(ledger, "coverage", ev) == 0
     rows = {r["File"]: r for r in table(rl, ev, "Coverage (round 1)").rows}
-    assert (rows["a.cpp"]["Read depth"], rows["a.cpp"]["Tests reaching it"]) == ("full", "t1 | t2")
+    assert (rows["a.cpp"]["Read depth"], rows["a.cpp"]["Tests reaching it"]) == (
+        "full",
+        "t1 | t2",
+    )
     assert rows["b.bin"]["Read depth"] == "pending"  # TESTQ does not own it
     assert "pending: b.bin" in capsys.readouterr().out
 
 
 def make_candidates(ledger, ev, *tiers):
     seeded(ledger, ev)
-    with_reports(ledger, ev, CORR1=report("CORR1", [finding(f"CORR1-p{i}", tier=t, actual=f"claim {i}.") for i, t in enumerate(tiers, 1)]))
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report(
+            "CORR1",
+            [
+                finding(f"CORR1-p{i}", tier=t, actual=f"claim {i}.")
+                for i, t in enumerate(tiers, 1)
+            ],
+        ),
+    )
     run(ledger, "ids", ev)
 
 
@@ -187,8 +271,14 @@ def test_verdicts_status_tier_and_narrowed_claim(ledger, rl, ev, capsys):
     assert run(ledger, "verdicts", ev) == 0
     out = capsys.readouterr().out
     rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
-    assert (rows["CORR-1"]["Status"], rows["CORR-1"]["Claim"]) == ("OPEN", "Only wrong for n=0.")
-    assert rows["CORR-2"]["Status"] == "REFUTED" and rows["CORR-3"]["Tier"] == "BLOCKING -> SUGGESTION"
+    assert (rows["CORR-1"]["Status"], rows["CORR-1"]["Claim"]) == (
+        "OPEN",
+        "Only wrong for n=0.",
+    )
+    assert (
+        rows["CORR-2"]["Status"] == "REFUTED"
+        and rows["CORR-3"]["Tier"] == "BLOCKING -> SUGGESTION"
+    )
     assert rows["CORR-4"]["Status"] == "" and "missing: CORR-4" in out
     # PARTIAL that keeps its side of the IMPORTANT/SUGGESTION line needs no second verifier.
     assert "CORR-1" not in out
@@ -196,7 +286,9 @@ def test_verdicts_status_tier_and_narrowed_claim(ledger, rl, ev, capsys):
     assert "second verifier needed: CORR-3 (tier BLOCKING -> SUGGESTION)" in out
 
 
-def test_second_verifier_replaces_differing_verdict_and_is_not_requested_again(ledger, rl, ev, capsys):
+def test_second_verifier_replaces_differing_verdict_and_is_not_requested_again(
+    ledger, rl, ev, capsys
+):
     make_candidates(ledger, ev, "IMPORTANT", "SUGGESTION")
     write_verify(ev, "CORR-1", "REFUTED", "IMPORTANT")
     write_verify(ev, "CORR-1", "CONFIRMED", "IMPORTANT", second=True)
@@ -205,7 +297,10 @@ def test_second_verifier_replaces_differing_verdict_and_is_not_requested_again(l
     capsys.readouterr()
     run(ledger, "verdicts", ev)
     rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
-    assert (rows["CORR-1"]["Verdict"], rows["CORR-1"]["Status"]) == ("CONFIRMED", "OPEN")
+    assert (rows["CORR-1"]["Verdict"], rows["CORR-1"]["Status"]) == (
+        "CONFIRMED",
+        "OPEN",
+    )
     assert rows["CORR-2"]["Tier"] == "SUGGESTION -> IMPORTANT"
     assert "second verifier" not in capsys.readouterr().out
     assert run(ledger, "verdicts", ev) == 0  # idempotent
@@ -220,10 +315,19 @@ def test_verdicts_reject_nonconforming_verify_file(ledger, ev, capsys):
 
 def test_mlines_collect_fail_missing_and_vacuous_pass(ledger, ev, capsys):
     seeded(ledger, ev)
-    with_reports(ledger, ev,
-                 TESTQ=report("TESTQ", mlines=["M1: FAIL no regression test for the fix", "M3: WAIVED(W-HOTFIX) tracked"]),
-                 TESTB="# TESTB (round 1, abc)\nN/A: no product code\n",
-                 AUTH=report("AUTH", mlines=["- M4: UNVERIFIED tracker unreachable"]))
+    with_reports(
+        ledger,
+        ev,
+        TESTQ=report(
+            "TESTQ",
+            mlines=[
+                "M1: FAIL no regression test for the fix",
+                "M3: WAIVED(W-HOTFIX) tracked",
+            ],
+        ),
+        TESTB="# TESTB (round 1, abc)\nN/A: no product code\n",
+        AUTH=report("AUTH", mlines=["- M4: UNVERIFIED tracker unreachable"]),
+    )
     assert run(ledger, "mlines", ev) == 1
     out = capsys.readouterr().out
     assert "file ORCH process BLOCKING: M1 FAIL: no regression test for the fix" in out
@@ -234,9 +338,13 @@ def test_mlines_collect_fail_missing_and_vacuous_pass(ledger, ev, capsys):
 
 def test_mlines_complete_report_succeeds(ledger, ev):
     seeded(ledger, ev)
-    with_reports(ledger, ev,
-                 TESTQ=report("TESTQ", mlines=["M1: PASS ok", "M3: PASS ok"]), TESTB=report("TESTB", mlines=["M2: PASS ok"]),
-                 AUTH=report("AUTH", mlines=["M4: N/A (no PR)", "M5: N/A (no PR)"]))
+    with_reports(
+        ledger,
+        ev,
+        TESTQ=report("TESTQ", mlines=["M1: PASS ok", "M3: PASS ok"]),
+        TESTB=report("TESTB", mlines=["M2: PASS ok"]),
+        AUTH=report("AUTH", mlines=["M4: N/A (no PR)", "M5: N/A (no PR)"]),
+    )
     assert run(ledger, "mlines", ev) == 0
 
 
@@ -245,7 +353,10 @@ def test_counts_closure_and_known_open_item(ledger, rl, ev, capsys):
     capsys.readouterr()
     run(ledger, "counts", ev)
     out = capsys.readouterr().out
-    assert "BLOCKING: OPEN 0 UNVERIFIED 0 candidate 1" in out and "Closure: OPEN; waiting: CORR-1" in out
+    assert (
+        "BLOCKING: OPEN 0 UNVERIFIED 0 candidate 1" in out
+        and "Closure: OPEN; waiting: CORR-1" in out
+    )
     write_verify(ev, "CORR-1", "UNVERIFIED", "BLOCKING")
     write_verify(ev, "CORR-2", "REFUTED", "IMPORTANT")
     write_verify(ev, "CORR-3", "CONFIRMED", "SUGGESTION")
@@ -253,7 +364,10 @@ def test_counts_closure_and_known_open_item(ledger, rl, ev, capsys):
     capsys.readouterr()
     run(ledger, "counts", ev)
     out = capsys.readouterr().out
-    assert "BLOCKING: OPEN 0 UNVERIFIED 1" in out and "Closure: OPEN; waiting: CORR-1 (BLOCKING UNVERIFIED)" in out
+    assert (
+        "BLOCKING: OPEN 0 UNVERIFIED 1" in out
+        and "Closure: OPEN; waiting: CORR-1 (BLOCKING UNVERIFIED)" in out
+    )
     ft = table(rl, ev, "Findings")
     ft.rows[0]["Status"] = "ACCEPTED-RISK"
     ft.rows[0]["known-open-item"] = "K1"
@@ -262,11 +376,90 @@ def test_counts_closure_and_known_open_item(ledger, rl, ev, capsys):
     capsys.readouterr()
     run(ledger, "counts", ev)
     out = capsys.readouterr().out
-    assert "known-open-item: CORR-1 K1 (ACCEPTED-RISK)" in out and "Closure: CLOSED" in out
+    assert (
+        "known-open-item: CORR-1 K1 (ACCEPTED-RISK)" in out and "Closure: CLOSED" in out
+    )
 
 
 def test_failed_lane_keeps_closure_open(ledger, ev, capsys):
     assert run(ledger, "seed", ev, 1, "--lane", "RUN=FAILED (timed out)") == 0
     capsys.readouterr()
     run(ledger, "counts", ev)
-    assert "Closure: OPEN; waiting: lane RUN (FAILED (timed out))" in capsys.readouterr().out
+    assert (
+        "Closure: OPEN; waiting: lane RUN (FAILED (timed out))"
+        in capsys.readouterr().out
+    )
+
+
+def test_set_closes_accepts_and_reopens_and_verdicts_skip_closed_rows(
+    ledger, rl, ev, capsys
+):
+    make_candidates(ledger, ev, "IMPORTANT", "BLOCKING")
+    write_verify(ev, "CORR-1", "CONFIRMED", "IMPORTANT")
+    write_verify(ev, "CORR-2", "CONFIRMED", "BLOCKING")
+    run(ledger, "verdicts", ev)
+    assert (
+        run(
+            ledger,
+            "set",
+            ev,
+            2,
+            "CORR-1",
+            "FIXED@abcdef1",
+            "--class",
+            "rerun",
+            "--note",
+            "passes at head",
+        )
+        == 0
+    )
+    assert (
+        run(
+            ledger,
+            "set",
+            ev,
+            2,
+            "CORR-2",
+            "ACCEPTED-RISK",
+            "--note",
+            "owner accepts: GPU run not available",
+        )
+        == 0
+    )
+    rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
+    assert (rows["CORR-1"]["Status"], rows["CORR-1"]["Round closed"]) == (
+        "FIXED@abcdef1",
+        "2",
+    )
+    assert rows["CORR-1"]["Evidence"] == "rerun: passes at head"
+    decision = table(rl, ev, "Decisions").rows[0]
+    assert (
+        decision["Findings affected"] == "CORR-2" and "GPU run" in decision["Decision"]
+    )
+    run(ledger, "verdicts", ev)
+    rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
+    assert (
+        rows["CORR-1"]["Status"] == "FIXED@abcdef1"
+        and rows["CORR-2"]["Status"] == "ACCEPTED-RISK"
+    )
+    capsys.readouterr()
+    run(ledger, "counts", ev)
+    assert "Closure: CLOSED" in capsys.readouterr().out
+    run(ledger, "set", ev, 3, "CORR-1", "OPEN")
+    rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
+    assert (rows["CORR-1"]["Status"], rows["CORR-1"]["Round closed"]) == ("OPEN", "")
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("CORR-1", "FIXED@abcdef1"),
+        ("CORR-1", "ACCEPTED-RISK"),
+        ("CORR-1", "DONE"),
+        ("CORR-9", "OPEN"),
+    ],
+)
+def test_set_rejects_incomplete_or_unknown(ledger, ev, args, capsys):
+    make_candidates(ledger, ev, "IMPORTANT")
+    capsys.readouterr()
+    assert run(ledger, "set", ev, 1, *args) == 1

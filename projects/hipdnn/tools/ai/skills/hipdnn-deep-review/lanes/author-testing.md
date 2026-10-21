@@ -12,7 +12,8 @@ reports after `RUN` returns and does only *Reconcile with `RUN`*.
    with its evidence.
 2. **Executed in CI.** For every check run at `$HEAD` that executes tests, record suite, arch, OS, and executed and skipped counts:
    `gh api --paginate "repos/<owner>/<repo>/commits/$HEAD/check-runs" --jq '.check_runs[] | [.name,.conclusion,.html_url] | @tsv'`;
-   logs via `gh run view <run-id> -R <owner>/<repo> --log`. With no PR or no checks, record "no CI"; absent CI is a finding only
+   the run id is the `/runs/<id>/` segment of a check's `html_url`. Save each log, never print it:
+   `gh run view <id> -R <owner>/<repo> --log > "$EVIDENCE/r<N>/lanes/AUTH-evidence/run-<id>.log"`, then `"$GREP"` the file. With no PR or no checks, record "no CI"; absent CI is a finding only
    where step 3 requires an executed run. Sources:
    - `.github/workflows/hipdnn-superbuild-ci.yml` (PRs touching `projects/hipdnn/**` or `dnn-providers/**`): ctest and pytest on one
      Linux and one Windows target. `GPU_TARGET` selects only the build target. The runners (`azure-*-scale-rocm`) have shown no GPU
@@ -37,18 +38,26 @@ reports after `RUN` returns and does only *Reconcile with `RUN`*.
 
 Compare each `pending RUN` claim with the matching `RUN` suite row (selected, passed, skipped, failed, engine). Report a claim `RUN`
 contradicts or could not execute. Standing check: every consumer in **Consumers** ([orient.md](orient.md); `CONTEXT.md`) needs an
-executed test, from CI or `RUN`; report each one with none. Credit each flag `RUN` enabled (its Coverage lines) against the
+executed test, from CI or `RUN`; report each one with none. Credit each flag `RUN` enabled (its `Flag:` lines under **Coverage**) against the
 change's **Options and guards**: a changed file whose flag no run enabled is unexercised.
 
-## Flags
+## Red flags
 
-- Touched gfx90a, gfx942 and gfx950 paths, tested only one: IMPORTANT, listing the rest.
-- Testing section absent, or "tested locally" without a command: `process` finding.
-- Checklist items marked passed with no log or CI run.
-- Results from a head other than `$HEAD` when the delta touches the tested code.
-- Performance claims without method, baseline and hardware.
+- Touched paths for several architectures, tested only one: `test-gap` IMPORTANT, listing each architecture in the step-3 required
+  set that went untested.
+- Testing section absent, or "tested locally" without a command: `process` finding (IMPORTANT).
+- Checklist items marked passed with no log or CI run: `process` finding (IMPORTANT).
+- Results from a head other than `$HEAD` when the delta touches the tested code: `process` finding (IMPORTANT).
+- Performance claims without method, baseline and hardware: `process` finding (SUGGESTION).
 
 Close each gap with the suite, arch and run that covers it. For a family PR CI does not test, that is a `workflow_dispatch` of
 `therock-multi-arch-ci.yml` (inputs `linux_amdgpu_families`, `linux_test_labels`; it runs the `quick` tier, so check the tests
 carry it) or the PR labels `ci:<family>` and `ci:test:<family>`, not a PR rerun. Take supported families from TheRock's
-`build_tools/github_actions/amdgpu_family_matrix.py` at the pin, not the workflow's default build list.
+`build_tools/github_actions/amdgpu_family_matrix.py` at the pin, not the workflow's default build list. Fetch it without cloning
+TheRock (`AUTH` must not clone it):
+
+```bash
+. ./env.sh
+ref=$(git -C "$CLONE" show "$HEAD:.github/actions/ci-env/action.yml" | "$GREP" -A2 'therock-ref:' | "$GREP" -oE '[0-9a-f]{40}' | head -n1)
+gh api "repos/ROCm/TheRock/contents/build_tools/github_actions/amdgpu_family_matrix.py?ref=$ref" --jq .content | base64 -d
+```

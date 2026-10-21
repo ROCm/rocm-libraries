@@ -8,7 +8,7 @@ Read every changed line of your owned files, and the outside code each change de
 - Error paths: every failure returns a status or throws as the surrounding API does; nothing is swallowed; partial state unwinds.
 - Resource ownership (`projects/hipdnn/docs/ai-rules.md`, RAII & Resource Management): wrap owning raw pointers in RAII at once.
   FlatBuffers `Table::UnPack()` returns an owning raw pointer: wrap it in `std::unique_ptr<T>`. Only the `root_type` tables
-  (`grep -n root_type projects/hipdnn/flatbuffers_sdk/schemas/*.fbs`) have a generated `UnPack<Name>()` returning
+  (`git -C "$CLONE" grep -n root_type "$HEAD" -- 'projects/hipdnn/flatbuffers_sdk/schemas/*.fbs'`) have a generated `UnPack<Name>()` returning
   `std::unique_ptr`. `getAttribute()` with `HIPDNN_TYPE_BACKEND_DESCRIPTOR` allocates a descriptor the caller owns. Provider
   handles, workspace buffers, streams and external-library resources are released on every failure path.
 - PR CI does not catch leaks: its ASAN job builds sanitizer binaries without running tests

@@ -56,9 +56,9 @@ With no PR, save the intent document as `intent.md`. An empty description is an 
 `process` finding.
 
 Complete `PIN.md` by appending the `report.md` fields `init` does not write: `Change`,
-`Round`, `Repo`, `Stack parent`, `Description`, `Lines`, `Checks`, `PR bot`, `Build host`,
+`Round`, `Repo`, `Stack parent`, `Description`, `Checks`, `PR bot`, `Build host`,
 `Leak terms`. `Build host: yes` needs `cmake`, `ninja`, a C++ compiler, a ROCm install
-(Linux: `${ROCM_PATH:-/opt/rocm}`; Windows: the wheel SDK, which `windows_rocm_setup.py --provision auto --venv-path $SCRATCH/rocm-venv` from [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) finds or installs, with Clang present per that skill) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
+(Linux: `${ROCM_PATH:-/opt/rocm}`; Windows: the wheel SDK, which `windows_rocm_setup.py --provision never --venv-path $SCRATCH/rocm-venv` from [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) validates; `RUN` provisions it with `--provision auto`; Clang present per that skill) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
 the `therock-pr-bot` check. Round N > 1 also records the previous head and base, saves `git
 -C "$CLONE" range-diff <old-base>..<old-head> <new-base>..<new-head>` to `range-diff.txt` and
 writes `affected.txt` (*Iterate*); `partition.py packets` lists them when `range-diff.txt` exists.
@@ -104,7 +104,7 @@ nothing then:
 
 ```bash
 . <evidence dir>/r<N>/env.sh; : "${BASE:?}"
-cat CONTEXT.md orient/*.md | /usr/bin/grep -oE '`[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+(:[0-9]+)?`' |
+cat CONTEXT.md orient/*.md | "$GREP" -oE '`[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+(:[0-9]+)?`' |
   tr -d '`' | sed 's/:[0-9]*$//' | sort -u |
   while read -r p; do git -C "$CLONE" cat-file -e "$BASE:$p" 2>/dev/null || echo "not at base: $p"; done
 ```
@@ -143,9 +143,9 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `TESTQ` | [test-quality](lanes/test-quality.md) | Whether each test fails on a plausible bug | Non-documentation file changes |
 | `TESTB` | [test-breadth](lanes/test-breadth.md) | Which changed behaviors have tests at all | Non-documentation file changes |
 | `AUTH` | [author-testing](lanes/author-testing.md) | What the author and CI ran against what the change needs; M4, M5, PR bot. Its claims reconciliation against what `RUN` executed is the follow-up `AUTH-f1` | Always |
-| `BUILD` | [build-packaging](lanes/build-packaging.md) | CMake targets, option defaults and registration, install rules, exported config, CI files | `CMakeLists.txt`, `*.cmake`, `CMakePresets.json`, `.github/` or `version.json` changes |
-| `DEPS` | [dependencies](lanes/dependencies.md) | New dependencies and boundary crossings | CMake, `pyproject.toml`, `requirements*.txt` or `.github/` changes |
-| `API` | [public-api](lanes/public-api.md) | Public surfaces, behavior changes in source, docs of new public declarations | A file in the brief's surfaces table or non-test source under `projects/hipdnn/` changes |
+| `BUILD` | [build-packaging](lanes/build-packaging.md) | CMake targets, option defaults and registration, install rules, exported config, CI files | `CMakeLists.txt`, `*.cmake`, `*.cmake.in`, any `CMakePresets.json`, `*test_categories*.yaml`, `.github/` or `version.json` changes |
+| `DEPS` | [dependencies](lanes/dependencies.md) | New dependencies and boundary crossings | CMake, `pyproject.toml`, `requirements*.txt`, `.github/` or C/C++/HIP source (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hip`, `.cu`) changes |
+| `API` | [public-api](lanes/public-api.md) | Public surfaces, behavior changes in source, docs of new public declarations | A file in the brief's surfaces table, or non-test source under `projects/hipdnn/` or `dnn-providers/`, changes |
 | `ROCK` | [therock](lanes/therock.md) | Whether TheRock CI builds and tests the change: skip-ci, job, family and tier selection, flags, RPATH, CTest files, artifact split, Windows lookup | Non-documentation file changes |
 | `LEAK` | [leaks](lanes/leaks.md) | Private information in the change and in review output | Always |
 | `DUP` | [dedup](lanes/dedup.md) | Reuse of existing code; repetition within the change | Code is added |
@@ -162,7 +162,7 @@ host's agent limit requires it; split a concern lane over ~4000 changed lines by
 partition.py plan [--sampled <file>]       # writes owners.tsv; edit it for judgment
 partition.py gate                          # after every edit of owners.tsv
 partition.py packets [--sampled <file>] --lanes TESTQ,TESTB,AUTH,... [--parent <PR number>]
-ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest changes)' --lane ...
+ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest or source changes)' --lane ...
 ```
 
 `packets` writes `packets/<LANE>.md` ([lanes/common.md](lanes/common.md) *Context packet*) for
@@ -340,7 +340,13 @@ verify*: record the decision, run the follow-ups, re-verify what it affects and 
 *Synthesize*, updating the round's files in place.
 
 Close a finding only when its proof ([findings.md](findings.md) *Proof per kind*) no longer
-holds at the new head; author rationale alone closes it only as a human `ACCEPTED-RISK`.
+holds at the new head; author rationale alone closes it only as a human `ACCEPTED-RISK`. Record
+the closure with `ledger.py set "$EVIDENCE" <N> <ID> FIXED@<sha> --class rerun|text-read|not-exercised --note <proof>`,
+or `ledger.py set ... <ID> ACCEPTED-RISK --note <the human's decision>` (it also appends a
+Decisions row); both set `Round closed`. `verdicts` never touches a `FIXED` or `ACCEPTED-RISK`
+row, so when a later head breaks a closed finding, `ledger.py set ... <ID> OPEN` reopens it and
+`verdicts` re-verifies it. Record other decisions and open questions as rows of the ledger's
+Decisions and Open questions tables, by hand.
 
 **Gate:** [SKILL.md](SKILL.md) *Completion*. On closing, `pin.py cleanup --evidence "$EVIDENCE"
 --round <N>` removes the review worktrees under `$SCRATCH` (including the lanes') and this

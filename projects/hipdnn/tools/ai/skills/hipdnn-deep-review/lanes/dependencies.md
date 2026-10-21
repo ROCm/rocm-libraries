@@ -11,12 +11,14 @@ are separate projects and may carry their own.
 ## New dependencies
 
 Search the diff for `find_package`, `FetchContent`, `hipdnn_add_dependency`, `ExternalProject`, new `target_link_libraries`
-entries, third-party includes, `pyproject.toml` and requirements changes, and CI install steps. For each:
+entries, third-party includes (your packet lists changed C, C++ and HIP sources as well as manifests), `pyproject.toml` and requirements changes, and CI install steps. For each:
 
 - Is it new to the project, or only to this target?
 - Is it justified in the PR description? Tier an unjustified one per [../policy.md](../policy.md) *Tiers*.
 - Is it version-pinned, in TheRock's third-party set, and fetched only when `ALLOW_FETCH_DEPS` permits
-  (`projects/hipdnn/cmake/Dependencies.cmake`)?
+  (`projects/hipdnn/cmake/Dependencies.cmake`)? Read the set at TheRock's pin without cloning it: the pin is the `therock-ref:` value in
+  `.github/actions/ci-env/action.yml` at `$HEAD` ([therock.md](therock.md) *Setup*), the listing
+  `gh api "repos/ROCm/TheRock/contents/third-party?ref=<ref>" --jq '.[].name'`; when it cannot be read, mark the claim `[INFERENCE]`.
 - Is the license compatible and attributed where the project requires it?
 
 ## Boundary violations

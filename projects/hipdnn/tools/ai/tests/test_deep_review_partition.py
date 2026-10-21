@@ -19,7 +19,9 @@ SCRIPT = (
 
 @pytest.fixture
 def part() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("hipdnn_deep_review_partition", SCRIPT)
+    spec = importlib.util.spec_from_file_location(
+        "hipdnn_deep_review_partition", SCRIPT
+    )
     assert spec and spec.loader, f"could not load {SCRIPT}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -32,7 +34,9 @@ def run(part, cmd, rd, *extra):
 
 def make_round(tmp_path, numstat, files=None):
     """numstat: list of (added, deleted, path); files.txt defaults to the same paths."""
-    (tmp_path / "numstat.txt").write_text("".join(f"{a}\t{d}\t{p}\n" for a, d, p in numstat))
+    (tmp_path / "numstat.txt").write_text(
+        "".join(f"{a}\t{d}\t{p}\n" for a, d, p in numstat)
+    )
     paths = files if files is not None else [p for _, _, p in numstat]
     (tmp_path / "files.txt").write_text("".join(f"{p}\n" for p in paths))
     return tmp_path
@@ -94,7 +98,9 @@ def test_docs_detection(part, path, docs):
 
 
 def test_areas_writes_tsv(part, tmp_path):
-    rd = make_round(tmp_path, [(1, 1, "projects/hipdnn/backend/a.cpp"), (2, 0, "docs/x.md")])
+    rd = make_round(
+        tmp_path, [(1, 1, "projects/hipdnn/backend/a.cpp"), (2, 0, "docs/x.md")]
+    )
     run(part, "areas", rd)
     assert read_tsv(rd / "areas.tsv") == [
         ("projects/hipdnn/backend/a.cpp", "backend"),
@@ -142,7 +148,9 @@ def test_plan_groups_by_area_and_never_splits_a_file(part, tmp_path):
     flat = [p for ps in lanes.values() for p in ps]
     assert len(flat) == len(set(flat)) == 5
     backend = {o for o, ps in lanes.items() if "projects/hipdnn/backend/a.cpp" in ps}
-    assert backend == {o for o, ps in lanes.items() if "projects/hipdnn/backend/b.cpp" in ps}
+    assert backend == {
+        o for o, ps in lanes.items() if "projects/hipdnn/backend/b.cpp" in ps
+    }
     for owner, paths in lanes.items():
         if paths != ["projects/hipdnn/frontend/huge.hpp"]:
             lines = {"a.cpp": 900, "b.cpp": 900, "c.hpp": 900, "s.cpp": 50}
@@ -152,7 +160,10 @@ def test_plan_groups_by_area_and_never_splits_a_file(part, tmp_path):
 def test_plan_sampled_files_get_their_own_lane(part, tmp_path):
     rd = make_round(
         tmp_path,
-        [(5, 0, "projects/hipdnn/backend/a.cpp"), (9000, 0, "projects/hipdnn/backend/gen.cpp")],
+        [
+            (5, 0, "projects/hipdnn/backend/a.cpp"),
+            (9000, 0, "projects/hipdnn/backend/gen.cpp"),
+        ],
     )
     sampled = tmp_path / "sampled.tsv"
     sampled.write_text("projects/hipdnn/backend/gen.cpp\tcodegen tool\tsample\n")
@@ -164,8 +175,12 @@ def test_plan_sampled_files_get_their_own_lane(part, tmp_path):
 
 
 def test_plan_docs_only_change_is_owned_by_docs(part, tmp_path):
-    rd = make_round(tmp_path, [(3, 1, "docs/a.md"), (1, 0, "projects/hipdnn/backend/README.md")])
-    assert plan(part, rd) == {"DOCS": ["docs/a.md", "projects/hipdnn/backend/README.md"]}
+    rd = make_round(
+        tmp_path, [(3, 1, "docs/a.md"), (1, 0, "projects/hipdnn/backend/README.md")]
+    )
+    assert plan(part, rd) == {
+        "DOCS": ["docs/a.md", "projects/hipdnn/backend/README.md"]
+    }
 
 
 def test_plan_fails_when_numstat_path_has_no_area(part, tmp_path):
@@ -191,7 +206,12 @@ def gate(part, tmp_path, owners, capsys):
 
 
 def test_gate_passes_when_every_path_is_owned_once(part, tmp_path, capsys):
-    code, out = gate(part, tmp_path, [("CORR1", "a.cpp"), ("CORR1", "b.bin"), ("CORR2", "c.cpp")], capsys)
+    code, out = gate(
+        part,
+        tmp_path,
+        [("CORR1", "a.cpp"), ("CORR1", "b.bin"), ("CORR2", "c.cpp")],
+        capsys,
+    )
     assert code == 0
     assert "3 files, 22 lines" in out
 
@@ -200,8 +220,24 @@ def test_gate_passes_when_every_path_is_owned_once(part, tmp_path, capsys):
     "owners, message",
     [
         ([("CORR1", "a.cpp"), ("CORR1", "b.bin")], "unowned: c.cpp"),
-        ([("CORR1", "a.cpp"), ("CORR2", "a.cpp"), ("CORR1", "b.bin"), ("CORR1", "c.cpp")], "owned twice: a.cpp"),
-        ([("CORR1", "a.cpp"), ("CORR1", "b.bin"), ("CORR1", "c.cpp"), ("CORR1", "x.cpp")], "not in numstat: x.cpp"),
+        (
+            [
+                ("CORR1", "a.cpp"),
+                ("CORR2", "a.cpp"),
+                ("CORR1", "b.bin"),
+                ("CORR1", "c.cpp"),
+            ],
+            "owned twice: a.cpp",
+        ),
+        (
+            [
+                ("CORR1", "a.cpp"),
+                ("CORR1", "b.bin"),
+                ("CORR1", "c.cpp"),
+                ("CORR1", "x.cpp"),
+            ],
+            "not in numstat: x.cpp",
+        ),
     ],
 )
 def test_gate_failures(part, tmp_path, capsys, owners, message):
@@ -228,7 +264,11 @@ def test_gate_empty_owners(part, tmp_path):
 def test_planned_owners_pass_the_gate(part, tmp_path):
     rd = make_round(
         tmp_path,
-        [(1500, 0, "projects/hipdnn/backend/a.cpp"), (1500, 0, "projects/hipdnn/frontend/b.hpp"), ("-", "-", "tools/x.bin")],
+        [
+            (1500, 0, "projects/hipdnn/backend/a.cpp"),
+            (1500, 0, "projects/hipdnn/frontend/b.hpp"),
+            ("-", "-", "tools/x.bin"),
+        ],
     )
     plan(part, rd)
     run(part, "gate", rd)
@@ -272,7 +312,16 @@ def test_sampled_lane_without_sample_file_fails(part, tmp_path):
     sampled = rd / "sampled.tsv"
     sampled.write_text("projects/hipdnn/backend/gen.bin\tgen.py\n")
     run(part, "areas", rd)
-    (rd / "owners.tsv").write_text("".join(f"CORR1\t{p}\n" for p in ["projects/hipdnn/backend/a.cpp", "projects/hipdnn/backend/gen.bin", "CMakeLists.txt"]))
+    (rd / "owners.tsv").write_text(
+        "".join(
+            f"CORR1\t{p}\n"
+            for p in [
+                "projects/hipdnn/backend/a.cpp",
+                "projects/hipdnn/backend/gen.bin",
+                "CMakeLists.txt",
+            ]
+        )
+    )
     with pytest.raises(SystemExit) as exc:
         run(part, "packets", rd, "--sampled", str(sampled))
     assert "no sample file" in str(exc.value)
@@ -281,7 +330,14 @@ def test_sampled_lane_without_sample_file_fails(part, tmp_path):
 def test_concern_packets_scope_and_parent(part, tmp_path, capsys):
     rd = packets_round(part, tmp_path)
     run(part, "areas", rd)
-    plan_owners = "".join(f"CORR1\t{p}\n" for p in ["projects/hipdnn/backend/a.cpp", "projects/hipdnn/backend/gen.bin", "CMakeLists.txt"])
+    plan_owners = "".join(
+        f"CORR1\t{p}\n"
+        for p in [
+            "projects/hipdnn/backend/a.cpp",
+            "projects/hipdnn/backend/gen.bin",
+            "CMakeLists.txt",
+        ]
+    )
     (rd / "owners.tsv").write_text(plan_owners)
     run(part, "packets", rd, "--lanes", "BUILD,TESTQ,DEPS", "--parent", "#123")
     build = (rd / "packets" / "BUILD.md").read_text()
@@ -299,3 +355,20 @@ def test_concern_lane_without_files_in_scope_is_not_written(part, tmp_path, caps
     run(part, "packets", rd, "--lanes", "BUILD")
     assert not (rd / "packets" / "BUILD.md").exists()
     assert "BUILD: no changed file in scope" in capsys.readouterr().out
+
+
+def test_build_and_deps_scope_cover_registration_files_and_source(part):
+    rows = [
+        (p, 1, "")
+        for p in (
+            "projects/hipdnn/frontend/cmake/hipdnn_frontendConfig.cmake.in",
+            "projects/hipdnn/CMakePresets.json",
+            "dnn-providers/miopen-provider/test_categories.yaml",
+            "projects/hipdnn/backend/src/a.cpp",
+            "docs/guide.md",
+        )
+    ]
+    build = {r[0] for r in part.concern_scope("BUILD", rows)}
+    deps = {r[0] for r in part.concern_scope("DEPS", rows)}
+    assert build == {rows[0][0], rows[1][0], rows[2][0]}
+    assert deps == {rows[0][0], rows[1][0], rows[3][0]}

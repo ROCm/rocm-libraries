@@ -63,7 +63,9 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
 1. **Findings** in the format above (may be empty; **Checked, no finding** is then the
    content).
 2. **Coverage:** one row per examined file: path, read depth (`full`, `diff-only`,
-   `sampled`), tests that reach it.
+   `sampled`), tests that reach it. `RUN` adds two literal non-file lines, and no other lane does: `Flag: <NAME>=<value> (<configure
+   line or preset>)` for each option enabled, and `Build: none (<missing>)` when nothing built. Ledger and Coverage parsing ignore
+   them (a row counts only when its second cell is a read depth); keep them free of `|`.
 3. **Checked, no finding:** what was examined and found correct. A lane that owns an M-rule
    ([policy.md](policy.md) *M-rules*: `TESTQ` M1 and M3, `TESTB` M2, `AUTH` M4 and M5) puts
    one literal line per rule here: `M<n>: PASS|FAIL|WAIVED(<code>)|N/A|UNVERIFIED <evidence>`

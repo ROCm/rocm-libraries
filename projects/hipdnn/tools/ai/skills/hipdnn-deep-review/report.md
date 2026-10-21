@@ -11,7 +11,7 @@ Formats the orchestrator writes; lanes use [findings.md](findings.md).
 Change: <PR URL | branch:<name> | <base>..<head>>
 Round: <N>
 Repo: <owner>/<repo>
-<VAR>: <value>   one line each: SKILL EVIDENCE SCRATCH CLONE KEY TARGET HEAD BASE REPO REPO_BASE KNOWLEDGE
+<VAR>: <value>   one line each: SKILL EVIDENCE SCRATCH CLONE KEY TARGET HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE
 Stack parent: <PR number and URL | none>
 Description: pr/body.md | intent.md
 Files: <count> (GitHub <count> | unverifiable (>3000))
@@ -58,7 +58,7 @@ Lanes row per lane; copy each lane's read depth and tests in as it reports.
 
 A **candidate** is a reported finding with no verdict. A verdict sets the status:
 `REFUTED` and `UNVERIFIED` keep their name; any other verdict gives `OPEN`. Other statuses:
-`FIXED@<sha>`, `ACCEPTED-RISK` (human decision recorded), `SUPERSEDED-BY:<ID>`. **Closed**
+`FIXED@<sha>`, `ACCEPTED-RISK` (human decision recorded), `SUPERSEDED-BY:<ID>`. `ledger.py set` records `FIXED`, `ACCEPTED-RISK` and reopening to `OPEN` ([RUNBOOK.md](RUNBOOK.md) *Iterate*). **Closed**
 is every status except `OPEN` and `UNVERIFIED`. Never delete a row. A row closed by a fix
 begins its Evidence cell with the evidence class ([findings.md](findings.md) *Verdicts*).
 

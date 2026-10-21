@@ -271,3 +271,22 @@ def test_pr_file_count_mismatch(pin, origin, monkeypatch):
     with pytest.raises(SystemExit) as e:
         pin.main(init_args(origin, "--pr", "7"))
     assert "file lists differ" in str(e.value)
+
+
+def test_cleanup_without_a_clone_is_a_no_op(pin, tmp_path, capsys):
+    rd = tmp_path / "ev" / "r1"
+    rd.mkdir(parents=True)
+    (rd / "PIN.md").write_text(
+        f"CLONE: {tmp_path / 'missing'}\nSCRATCH: {tmp_path / 's'}\nKEY: k\n"
+    )
+    pin.main(["cleanup", "--evidence", str(tmp_path / "ev"), "--round", "1"])
+    assert "removed 0 worktrees, 0 refs" in capsys.readouterr().out
+
+
+@needs_posix_bash
+def test_env_sh_exports_gnu_grep(pin, origin):
+    pin.main(init_args(origin, "--branch", "feat/one"))
+    env = origin["tmp"] / "ev/r1/env.sh"
+    assert run("bash", "-c", f'. "{env}"; "$GREP" --version | head -n1').startswith(
+        "grep"
+    )
