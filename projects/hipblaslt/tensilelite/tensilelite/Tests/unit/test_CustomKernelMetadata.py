@@ -29,10 +29,10 @@ from textwrap import dedent, indent
 import pytest
 import yaml
 
-import Tensile
-from Tensile.resources import custom_kernel_text
-import Tensile.TensileLogic.HandleCustomKernel as hck_mod
-from Tensile.AddCustomConfig import (
+import tensilelite
+import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+from tensilelite.resources import custom_kernel_text
+from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,
     _fmt_yaml_scalar,
@@ -41,13 +41,13 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
-from Tensile.Common.ValidParameters import (
+from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from tensilelite.Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -57,8 +57,8 @@ from Tensile.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
-from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
-from Tensile.ValidateMetadata import validate_all
+from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
+from tensilelite.ValidateMetadata import validate_all
 
 pytestmark = pytest.mark.unit
 
@@ -1258,7 +1258,7 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
     m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
     host does not quick-return n == 0). The leading dimensions are kernargs, and
     tokens past the LDS stage are read from global memory, so K has no bound."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
 
@@ -1357,7 +1357,7 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
 
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     for name, key in ranges.items():
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):
