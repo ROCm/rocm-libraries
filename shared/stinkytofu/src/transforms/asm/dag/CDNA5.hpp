@@ -710,6 +710,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-barrier matching ds_load count collected in
     // computeBarrierBeforeThresholds.
     std::unordered_map<StinkyInstruction*, int> barrierDsLoadCounts_;
+    // Barriers whose source tokens match ds_reads before them: a s_wait_dscnt stalls in front of
+    // them.
+    std::unordered_set<StinkyInstruction*> barriersAfterDsReads_;
     struct BarrierBeforeOutput {
         int beforeThreshold = 0;
         int baseBeforeThreshold = 0;
@@ -924,6 +927,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool isBlockedCycle(int pos) const;
     void appendWindowSegment(const StinkyInstruction& wmma);
     void resetActiveWindow();
+    void settleAfterBarrierStall();
     void pruneWmmaQueue();
     int outstandingWmmas() const;
     int soonestQueueEnd() const;
@@ -1004,6 +1008,13 @@ void CDNA5ReadyQueue::appendWindowSegment(const StinkyInstruction& wmma) {
         activeWindowSlots_.push_back(slot);
     }
     activeWmmaLatency_ = static_cast<int>(activeWindowSlots_.size());
+}
+
+// A barrier that waits for ds_reads (token edge) has a s_wait_dscnt 0 in front of it, a stall (not
+// simulated) that lets the queued WMMAs finish, so the model takes the WMMA queue as empty and the
+// next WMMA refills it.
+void CDNA5ReadyQueue::settleAfterBarrierStall() {
+    resetActiveWindow();
 }
 
 void CDNA5ReadyQueue::resetActiveWindow() {
@@ -2534,6 +2545,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
         if (barrier) {
             updateWMMAStatus(barrier);
+            if (barriersAfterDsReads_.count(barrier->inst) && isBarrierWait(*barrier->inst))
+                settleAfterBarrierStall();
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -2856,6 +2869,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
+    barriersAfterDsReads_.clear();
     if (hasWMMAInRegion_) {
         // Layer 1/3 (base merge):
         // Build one threshold map from two independent estimators:
@@ -2867,6 +2881,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         auto beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
         for (auto& [barrier, afterOutput] : afterThresholds) {
             barrierWmmaThresholds_[barrier] = afterOutput.afterThreshold;
+            if (afterOutput.dsLoadCount > 0) barriersAfterDsReads_.insert(barrier);
         }
         for (auto& [barrier, beforeOutput] : beforeThresholds) {
             auto it = barrierWmmaThresholds_.find(barrier);
