@@ -228,7 +228,7 @@ _MAGIC_D_HOLDOUTS = [192, 160, 224, 384]
 _MAGIC_BUILDER = """
 def _magic(D):
     from rocke.core.ir import I32, IRBuilder, PtrType
-    from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
+    from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 
     b = IRBuilder("magic_div")
     out = b.param("out", PtrType(I32, "global"))

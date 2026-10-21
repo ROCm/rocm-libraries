@@ -83,6 +83,7 @@ _FORW_BIT = {"fwd": 1, "dgrad": 2}
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "int8",
@@ -221,15 +222,21 @@ def parse_miopen_cmd(cmd: str):
     import shlex
 
     tokens = shlex.split(cmd)
-    driver_idx = next(
-        (
-            i
-            for i, t in enumerate(tokens)
-            if t.split("/")[-1].lower() in _MIOPEN_DTYPE_MAP
-        ),
-        None,
-    )
-    if driver_idx is None:
+
+    # Strip binary path (anything before the driver keyword).
+    driver_kw = None
+    driver_idx = None
+    for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
+        key = t.split("/")[-1].lower()
+        if key in _MIOPEN_DTYPE_MAP:
+            driver_kw = key
+            driver_idx = i
+            break
+    if driver_kw is None:
         raise ValueError(
             f"No MIOpenDriver keyword found in command "
             f"(expected one of: {list(_MIOPEN_DTYPE_MAP)})"
