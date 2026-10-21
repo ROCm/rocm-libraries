@@ -185,6 +185,20 @@ namespace TensileLite::Serialization
             mapRequired(io, key, value);
         }
 
+        /// Mirrors the production outputs: a value equal to the one an absent
+        /// key would produce is not recorded, so the fixture carries the same
+        /// keys a written document would.
+        template <typename T>
+        static void mapOptional(PolicyMappingOutput& io,
+                                const char*          key,
+                                T&                   value,
+                                T const&             defaultValue)
+        {
+            if(value == defaultValue)
+                return;
+            mapRequired(io, key, value);
+        }
+
         static bool outputting(PolicyMappingOutput&)
         {
             return true;
