@@ -124,6 +124,10 @@ class BlockScaledGemmSpec:
         )
 
     def __post_init__(self) -> None:
+        if type(self.tensor_scale) is not bool:
+            raise TypeError("tensor_scale must be a bool")
+        if type(self.prefetch) is not bool:
+            raise TypeError("prefetch must be a bool")
         object.__setattr__(self, "dtype_a", normalize_dtype(self.dtype_a))
         object.__setattr__(self, "dtype_b", normalize_dtype(self.dtype_b))
 
@@ -177,6 +181,11 @@ def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
 def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for the gfx1250 block-scaled GEMM contract."""
     from ...core.arch import ArchTarget
+
+    if type(spec.tensor_scale) is not bool:
+        return False, "tensor_scale must be a bool"
+    if type(spec.prefetch) is not bool:
+        return False, "prefetch must be a bool"
 
     try:
         target = ArchTarget.from_gfx(arch)

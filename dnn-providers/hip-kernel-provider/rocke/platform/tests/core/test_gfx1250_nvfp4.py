@@ -121,6 +121,55 @@ def test_tensor_scale_requires_native_path():
     )[0]
 
 
+@pytest.mark.parametrize("field", ["tensor_scale", "prefetch"])
+@pytest.mark.parametrize(
+    "value",
+    ["false", "no", "", 0, 1, 0.0, None, np.bool_(False), np.bool_(True)],
+)
+@pytest.mark.parametrize("entrypoint", ["constructor", "validator", "builder"])
+def test_block_spec_rejects_non_boolean_flags(field, value, entrypoint, monkeypatch):
+    from rocke.instances.gfx1250 import block_scaled_gemm
+
+    spec = NvFp4GemmSpec("invalid_flag", 16, 16, 128).block_spec()
+    diagnostic = f"{field} must be a bool"
+    if entrypoint == "constructor":
+        with pytest.raises(TypeError, match=diagnostic):
+            replace(spec, **{field: value})
+        return
+
+    # Exercise the last admission gate even if construction was bypassed.
+    object.__setattr__(spec, field, value)
+    if entrypoint == "validator":
+        ok, reason = is_valid_block_spec(spec)
+        assert not ok and diagnostic in reason
+    else:
+
+        def unexpected(*args, **kwargs):
+            pytest.fail("invalid flag reached IR construction")
+
+        monkeypatch.setattr(block_scaled_gemm, "IRBuilder", unexpected)
+        with pytest.raises(ValueError, match=diagnostic):
+            build_block_scaled_gemm(spec)
+
+
+@pytest.mark.parametrize("tensor_scale", [False, True])
+@pytest.mark.parametrize("prefetch", [False, True])
+def test_block_spec_accepts_boolean_flags(tensor_scale, prefetch):
+    from rocke.instances.gfx1250.block_scaled_gemm import block_scaled_gemm_signature
+
+    spec = replace(
+        NvFp4GemmSpec("valid_flags", 16, 16, 256).block_spec(),
+        tensor_scale=tensor_scale,
+        prefetch=prefetch,
+    )
+    assert is_valid_block_spec(spec)[0]
+    kernel = build_block_scaled_gemm(spec)
+    signature = block_scaled_gemm_signature(spec)
+    assert len(kernel.params) == len(signature) == (10 if tensor_scale else 8)
+    assert ("_tensor_scale" in spec.kernel_name()) == tensor_scale
+    assert ("_pf" in spec.kernel_name()) == prefetch
+
+
 @pytest.mark.parametrize(
     "a,b,scale,path,bk",
     [
