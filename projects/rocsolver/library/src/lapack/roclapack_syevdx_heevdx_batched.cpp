@@ -36,42 +36,56 @@ rocblas_status rocsolver_syevdx_heevdx_batched_impl(rocblas_handle handle,
                                                     const rocblas_erange erange,
                                                     const rocblas_fill uplo,
                                                     const rocblas_int n,
-                                                    U A,
+                                                    U A_arg,
                                                     const rocblas_int lda,
                                                     const S vl,
                                                     const S vu,
                                                     const rocblas_int il,
                                                     const rocblas_int iu,
-                                                    rocblas_int* nev,
-                                                    S* W,
+                                                    rocblas_int* nev_arg,
+                                                    S* W_arg,
                                                     const rocblas_stride strideW,
-                                                    U Z,
+                                                    U Z_arg,
                                                     const rocblas_int ldz,
-                                                    rocblas_int* info,
-                                                    const rocblas_int batch_count)
+                                                    rocblas_int* info_arg,
+                                                    const rocblas_int batch_count_arg)
 try
 {
     const char* name = (!rocblas_is_complex<T> ? "syevdx_batched" : "heevdx_batched");
     ROCSOLVER_ENTER_TOP(name, "--evect", evect, "--erange", erange, "--uplo", uplo, "-n", n,
                         "--lda", lda, "--vl", vl, "--vu", vu, "--il", il, "--iu", iu, "--strideW",
-                        strideW, "--ldz", ldz, "--batch_count", batch_count);
+                        strideW, "--ldz", ldz, "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const nev = nev_arg;
+        auto const W = W_arg;
+        auto const Z = Z_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_syevdx_heevdx_argCheck(
-        handle, evect, erange, uplo, n, A, lda, vl, vu, il, iu, nev, W, Z, ldz, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st
+            = rocsolver_syevdx_heevdx_argCheck(handle, evect, erange, uplo, n, A, lda, vl, vu, il,
+                                               iu, nev, W, Z, ldz, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftZ = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftZ = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
     rocblas_stride strideZ = 0;
+
+    rocblas_int const max_batch_count = 64 * 1024 - 1;
+    rocblas_int const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    rocblas_int const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -81,10 +95,13 @@ try
     // size for temporary arrays
     size_t size_tmpT, size_D, size_E, size_iblock, size_isplit, size_tau, size_nsplit_workArr;
 
-    rocsolver_syevdx_heevdx_getMemorySize<true, T, S>(
-        evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2,
-        &size_work3, &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock,
-        &size_isplit, &size_tau, &size_nsplit_workArr);
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_syevdx_heevdx_getMemorySize<true, T, S>(
+            evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2,
+            &size_work3, &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E,
+            &size_iblock, &size_isplit, &size_tau, &size_nsplit_workArr);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_tmpT, size_work1,
@@ -119,12 +136,32 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_syevdx_heevdx_template<true, false, T>(
-        handle, evect, erange, uplo, n, A, shiftA, lda, strideA, vl, vu, il, iu, nev, W, strideW, Z,
-        shiftZ, ldz, strideZ, info, batch_count, (T*)scalars, (T*)tmpT, work1, work2, work3, work4,
-        work5, (rocblas_int*)work6_ifail, (S*)D, (S*)E, (rocblas_int*)iblock, (rocblas_int*)isplit,
-        (T*)tau, nsplit_workArr);
+    for(rocblas_int isweep = 0; isweep < nsweep; isweep++)
+    {
+        rocblas_int const bid = isweep * bid_inc;
+        rocblas_int const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        rocblas_int const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const Z = (Z_arg == nullptr) ? nullptr : Z_arg + bid;
+        auto const nev = (nev_arg == nullptr) ? nullptr : nev_arg + bid;
+        auto const W = (W_arg == nullptr) ? nullptr : W_arg + bid * strideW;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        auto const istat = rocsolver_syevdx_heevdx_template<true, false, T>(
+            handle, evect, erange, uplo, n, A, shiftA, lda, strideA, vl, vu, il, iu, nev, W,
+            strideW, Z, shiftZ, ldz, strideZ, info, batch_count, (T*)scalars, (T*)tmpT, work1,
+            work2, work3, work4, work5, (rocblas_int*)work6_ifail, (S*)D, (S*)E,
+            (rocblas_int*)iblock, (rocblas_int*)isplit, (T*)tau, nsplit_workArr);
+
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    } // end for isweep
+
+    return (rocblas_status_success);
 }
 catch(...)
 {
