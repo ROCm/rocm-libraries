@@ -11,10 +11,19 @@ kernel-performance claim; the emitted segment/reducer computation is unchanged.
 The ordinary gfx942/gfx950 3D path also reuses scratch and packed launch
 arguments without requiring callers to enter a replay scope. A bounded cache
 owns scratch by problem, segment count, device and effective stream. Its lock
-covers the complete segment/reducer submission; a recursive or concurrent call
-that cannot acquire that owner uses private scratch. Stream FIFO ordering
+covers the complete segment/reducer submission. Stream FIFO ordering
 protects sequential reuse. Capture is checked again after switching to the
 selected stream and always uses graph-private allocations.
+
+The host caller contract is serialized: one host thread submits shared 3D
+attention calls and performs completion cleanup across bindings, prepared
+executions and graph caches. Preparation, launch, rebind, replay and close stay
+on that thread. Stop submitting before each stream/device drain, including
+external synchronization followed by retention cleanup. Concurrent or reentrant
+host calls and cross-thread cleanup are unsupported. Submission locks and the
+private-scratch fallback do not coordinate with completion drains. Queued
+asynchronous GPU launches and sequential submission to multiple explicit streams
+remain supported. This contract requires no additional per-call synchronization.
 
 Every ordinary invocation retains its support and architecture checks and reads
 live tensor addresses and scalar values. Unchanged bindings reuse immutable
@@ -154,7 +163,8 @@ ROCKE_BACKEND=python ROCKE_REQUIRE_DECODE_GPU=gfx942 python -m pytest -q \
 Use each GPU command on its matching target with release-matched runtime
 libraries. The numeric suite compares independent FP32 references and covers
 paged/strided FP16/BF16 content updates and Q/output storage rebinding, plus
-existing eager/internal/external graph concurrency. Host tests cover context
+eager/internal/external GPU work on separate streams submitted sequentially
+from one host thread. Host tests cover context
 restoration, capture, bounded ownership, binding changes and LRU replacement.
 These commands establish correctness; they do not establish a performance win.
 

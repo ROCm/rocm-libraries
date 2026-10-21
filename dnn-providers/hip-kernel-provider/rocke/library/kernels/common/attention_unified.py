@@ -3868,9 +3868,13 @@ class Attention3DExecution:
     Create with :func:`prepare_unified_attention_torch` outside a timed loop.
     Sequential launches reuse scratch; separate streams need separate owners.
     ``close`` waits for queued work before releasing bindings and storage.
+    Prepare, launch, rebind, replay and close on the same host thread that
+    submits other shared 3D attention calls and performs completion cleanup.
+    Concurrent host submission or cleanup is unsupported. Stop submitting
+    before draining queued work; asynchronous GPU execution remains supported.
     External captures always receive private scratch, independent of this owner.
-    Caller-owned outer graphs and their bindings have a separate lifetime; do not
-    close concurrently with an outer capture, and drain its capture stream.
+    Caller-owned outer graphs and their bindings have a separate lifetime; stop
+    capture/replay submission before closing and drain the capture stream.
     """
 
     def __init__(self) -> None:
@@ -4008,7 +4012,7 @@ class Attention3DExecution:
         """Drain the prepared stream and release this owner's resources.
 
         Caller-owned outer graphs and their capture streams require caller cleanup.
-        Do not close concurrently with an outer capture using these bindings.
+        Close on the submitting host thread after capture/replay submission stops.
         """
         import torch
 
@@ -5556,7 +5560,12 @@ def run_unified_attention_torch(
     path, zero selects Torch's current stream on Q's device. Scratch allocation,
     initialization and both launches use that stream. On gfx942/gfx950, eager
     calls reuse bounded stream-owned scratch under a whole-pair submission lock;
-    overlapping submissions get private scratch. Captures use graph-private
+    this lock does not coordinate completion drains. Submit shared 3D attention
+    calls and perform completion cleanup on one host thread. Stop submitting
+    before each drain; concurrent or reentrant host calls and cross-thread
+    cleanup are unsupported, including calls through different bindings or
+    execution owners. Sequential submissions to multiple explicit streams and
+    queued asynchronous GPU launches remain supported. Captures use graph-private
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
     """

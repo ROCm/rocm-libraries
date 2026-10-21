@@ -86,10 +86,20 @@ production visible to it and wait before consuming outputs on another stream.
 
 Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
 reuse bounded scratch owned by the problem and effective device/stream. A
-whole-pair submission lock protects segment/reducer ordering; overlapping or
-recursive calls use private scratch. Unchanged pointers and scalars reuse an
-immutable packed pair. Changed bindings rebuild it, retaining previous input
-storage and argument buffers until completion.
+whole-pair submission lock protects segment/reducer ordering. Unchanged pointers
+and scalars reuse an immutable packed pair. Changed bindings rebuild it, retaining
+previous input storage and argument buffers until completion.
+
+Submit shared 3D attention calls and perform their completion cleanup on one
+host thread. This applies across ordinary calls, dispatcher bindings, prepared
+execution owners and graph-cache cleanup. Stop submitting before each stream
+or device drain, including an external synchronization followed by retention
+cleanup. Concurrent or reentrant host calls and cross-thread cleanup are
+unsupported; the submission locks and private-scratch fallback do not coordinate
+with completion drains. Queued asynchronous GPU launches and sequential host
+submission to multiple explicit streams remain supported. Keep preparation,
+launch, rebind, replay and close on that same thread.
+
 The asynchronous `no_fence()` path retains launch arguments until a runtime
 completion drain such as `synchronize_and_release()`; callers must drain it
 periodically. Request-local input storage is released by that completion drain;
@@ -138,16 +148,17 @@ queued work before restoring the caller's stream and releasing bound arguments.
 `rebind()` drains and validates new storage or scalar bindings between scopes;
 it also launches once. Ordinary `rebind()` is available on gfx1250 independently
 of the gfx942/gfx950 replay scope. Drain before changing tensor storage metadata. A different
-geometry, dtype, layout, device or stream requires a new execution. Concurrent
-launch, rebind, close or nested scope on one owner is rejected. Do not change the
+geometry, dtype, layout, device or stream requires a new execution. The owner
+rejects overlapping launch, rebind, close or nested scope, but this check does
+not make shared completion cleanup safe for concurrent callers. Do not change the
 active device/stream or begin an outer capture inside a scope; use `launch()`
 for outer capture. Both prepared eager and internal graph execution support
 this scope. A failed completion drain requires `close()` to retry cleanup.
 
 Prepared eager launches reuse three scratch tensors. The complete segment/reducer
 pair is submitted under one owner; concurrent or reentrant submission is rejected.
-Separate streams need separate execution owners. Do not close an execution while
-another thread is inside an outer capture using its bindings. Outer graph bindings
+Separate streams need separate execution owners. Close on the submitting host
+thread after capture and replay submission have stopped. Outer graph bindings
 and replay completion remain the caller's responsibility; closing the execution
 does not close the caller's graph or drain its capture-stream argument bucket.
 Closing waits for the prepared stream's
