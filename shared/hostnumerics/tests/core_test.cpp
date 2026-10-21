@@ -8,6 +8,7 @@
 #include <complex>
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
@@ -20,6 +21,17 @@
 #include <typeindex>
 #include <utility>
 #include <vector>
+
+namespace roc::hostnumerics {
+void PrintTo(const Shape& shape, std::ostream* output) {
+    *output << "Shape{";
+    for (size_t axis = 0; axis < shape.rank(); ++axis) {
+        if (axis != 0) *output << ", ";
+        *output << shape[axis];
+    }
+    *output << '}';
+}
+}  // namespace roc::hostnumerics
 
 namespace {
 using namespace roc::hostnumerics;
@@ -142,6 +154,8 @@ TEST(Core, ScalarTypes) {
 }
 
 TEST(ShapeCpp, ConstructionAndOwnership) {
+    EXPECT_EQ(::testing::PrintToString(Shape{}), "Shape{}");
+    EXPECT_EQ(::testing::PrintToString(Shape{2, 3, 4}), "Shape{2, 3, 4}");
     static_assert(!std::is_constructible_v<Shape, size_t>);
     static_assert(!std::is_convertible_v<std::vector<size_t>, Shape>);
     static_assert(!std::is_convertible_v<std::span<const size_t>, Shape>);
