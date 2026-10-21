@@ -24,6 +24,7 @@
 #include <thrust/random.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
@@ -32,6 +33,9 @@
 #include <vector>
 
 #include "test_seed.hpp"
+#include "bitwise_repro/bwr_db.hpp"
+
+#include <gtest/gtest.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
@@ -67,17 +71,17 @@
 // The lambda is invoked immediately as assertions that generate a fatal failure can
 // only be used in void-returning functions.
 #  ifndef HIP_CHECK
-#    define HIP_CHECK(condition)                                                 \
-      do                                                                         \
-      {                                                                          \
-        hipError_t error = condition;                                            \
-        if (error != hipSuccess)                                                 \
-        {                                                                        \
-          [error]() {                                                            \
-            FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); \
-          }();                                                                   \
-          exit(error);                                                           \
-        }                                                                        \
+#    define HIP_CHECK(condition)                                                    \
+      do                                                                            \
+      {                                                                             \
+        hipError_t error = condition;                                               \
+        if (error != hipSuccess)                                                    \
+        {                                                                           \
+          [error]() {                                                               \
+            std::cerr << "HIP error " << error << ": " << hipGetErrorString(error); \
+          }();                                                                      \
+          exit(error);                                                              \
+        }                                                                           \
       } while (0)
 #  endif
 
@@ -852,8 +856,8 @@ __host__ void test_future_value_retrieval(Future&& f, decltype(f.extract())& ret
 
   auto const r2 = f.extract();
 
-  ASSERT_THROW(auto x = f.extract(); // cppcheck-suppress unknownMacro
-               (void) x, thrust::event_error);
+  ASSERT_THROW(f.extract(),
+               thrust::event_error);
 
   ASSERT_EQ(false, f.ready());
   ASSERT_EQ(false, f.valid_stream());
