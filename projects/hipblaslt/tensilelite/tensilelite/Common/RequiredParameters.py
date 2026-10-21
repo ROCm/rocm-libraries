@@ -185,4 +185,5 @@ def getRequiredParametersMin() -> set:
         # their current names.
         'StinkySubtile',
         'ClusterDim',
+        'ClusterAIDMapping',
     })

@@ -70,7 +70,6 @@ CANONICAL_REMOTE_URL = re.compile(
 )
 
 WORKFLOWS = {
-    "therock-ci": "therock-ci.yml",
     "multi-arch": "therock-multi-arch-ci.yml",
     "hipdnn-superbuild": "hipdnn-superbuild-ci.yml",
 }

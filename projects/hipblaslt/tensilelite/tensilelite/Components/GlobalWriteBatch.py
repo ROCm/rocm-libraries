@@ -3936,6 +3936,12 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emitAtomicAdd(self, module: Module):
+    # The GSU slices accumulating into one D element run on different CUs, so on
+    # architectures whose default atomic scope is CU-local the add has to be
+    # widened to device scope or those slices never observe each other.
+    atomicScope = CacheScope.SCOPE_DEV \
+      if self.parentWriter.states.archCaps["DefaultScopeIsCULocal"] else CacheScope.SCOPE_NONE
+
     ########################################
     # first attempt write
     module.addComment1("issue first atomic writes")
@@ -3956,7 +3962,7 @@ class GlobalWriteBatchWriter:
                          vgpr(addrCalc.addrDVgpr,1), \
                          sgpr("SrdD", 4), \
                          0,
-                         MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset),
+                         MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset, scope=atomicScope),
                          "attempt write avi=%u" % (avi)))
           else:
             pass # TODO:

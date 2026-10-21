@@ -83,6 +83,7 @@ from rocke.core.ir import (
 )
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
+from rocke.helpers.spec import ceil_div
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -7817,10 +7818,6 @@ def build_direct_depthwise_spatial(
 DIRECT_PERSISTENT_BLOCKS = 256
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
-
-
 def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
     """``(grid, block)`` for launching ``spec``'s kernel on ``spec.problem``.
 
@@ -7840,46 +7837,46 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         else:
             # The kernel derives the tile count from p_Hi (see build_direct_conv).
             grid = (
-                _ceil_div(p.Wo, spec.block_q),
+                ceil_div(p.Wo, spec.block_q),
                 p.groups // spec.block_groups,
-                p.N * _ceil_div(p.H, spec.block_h),
+                p.N * ceil_div(p.H, spec.block_h),
             )
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpatialSpec):
         # Every channel of the image lives in one wavefront.
-        return (_ceil_div(p.Wo, spec.block_w), 1, p.N), (spec.threads_per_block, 1, 1)
+        return (ceil_div(p.Wo, spec.block_w), 1, p.N), (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpec):
-        grid = (_ceil_div(p.Wo, spec.block_w), _ceil_div(p.groups, spec.block_ch), p.N)
+        grid = (ceil_div(p.Wo, spec.block_w), ceil_div(p.groups, spec.block_ch), p.N)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseTiledSpec):
         grid = (
-            _ceil_div(p.Wo, spec.block_w),
-            _ceil_div(p.groups, spec.block_ch),
-            p.N * _ceil_div(p.Ho, spec.block_h),
+            ceil_div(p.Wo, spec.block_w),
+            ceil_div(p.groups, spec.block_ch),
+            p.N * ceil_div(p.Ho, spec.block_h),
         )
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseColSpec):
         # bz = n * n_h_tiles + h_tile; the kernel derives n_h_tiles from p_Ho.
         grid = (
-            _ceil_div(p.Wo, spec.block_w),
-            _ceil_div(p.groups, spec.block_ch),
-            p.N * _ceil_div(p.Ho, spec.block_h),
+            ceil_div(p.Wo, spec.block_w),
+            ceil_div(p.groups, spec.block_ch),
+            p.N * ceil_div(p.Ho, spec.block_h),
         )
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, (DirectDepthwiseDgradStreamSpec, DirectDepthwiseDgradSpec)):
         # dgrad tiles the gradient's *input* width.
-        grid = (_ceil_div(p.W, spec.block_w), _ceil_div(p.groups, spec.block_ch), p.N)
+        grid = (ceil_div(p.W, spec.block_w), ceil_div(p.groups, spec.block_ch), p.N)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectConvDgradSpec):
         block_ch = spec.block_groups * spec.wave_size
-        grid = (_ceil_div(p.W, spec.block_q), _ceil_div(p.total_c, block_ch), p.N)
+        grid = (ceil_div(p.W, spec.block_q), ceil_div(p.total_c, block_ch), p.N)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectConvWgradSpec):
         # bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
         # by = input-row block, bz = n * n_q_blocks + q_block. The kernel
         # derives n_q_blocks from p_Wo with the same ceilings as the spec.
-        n_k_tiles = _ceil_div(p.kpg, spec.block_k)
-        n_c_tiles = _ceil_div(p.cpg, spec.block_c)
+        n_k_tiles = ceil_div(p.kpg, spec.block_k)
+        n_c_tiles = ceil_div(p.cpg, spec.block_c)
         grid = (
             p.groups * n_k_tiles * n_c_tiles,
             spec.n_ho_blocks(),
@@ -7888,11 +7885,11 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectTransposeWeightsDgradSpec):
         # One (group, r, s) per x, a 64-wide kpg tile per y, one cpg per z.
-        return (p.groups * p.KH * p.KW, _ceil_div(p.kpg, 64), p.cpg), (64, 1, 1)
+        return (p.groups * p.KH * p.KW, ceil_div(p.kpg, 64), p.cpg), (64, 1, 1)
     if isinstance(spec, DirectReorganizeWeightsSpec):
         k_atom = 32 if spec.fold_k32 else 16
         n_blocks = (
-            p.groups * p.KH * p.KW * _ceil_div(p.kpg, k_atom) * _ceil_div(p.cpg, 16)
+            p.groups * p.KH * p.KW * ceil_div(p.kpg, k_atom) * ceil_div(p.cpg, 16)
         )
         return (n_blocks, 1, 1), (64, 1, 1)
     raise TypeError(f"no launch geometry for {type(spec).__name__}")
