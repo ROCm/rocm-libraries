@@ -133,6 +133,12 @@ struct RegisterAllocationOptions {
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRegisterAllocationPass(
     RegisterAllocationOptions options = {}, std::unique_ptr<RegisterAllocator> allocator = nullptr);
 
+/// A pass that, when it runs, reports that register allocation did not, and
+/// why: the same NotAllocated missed remark the allocation pass emits. For a
+/// pipeline that decides while it is being built not to allocate, before any
+/// PassContext exists to report through.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRegisterAllocationNotRunPass(std::string reason);
+
 /// Driver without a PassManager, for tests.
 ///
 /// Under UnbankableOperands::Auto this may colour twice, once allocating the

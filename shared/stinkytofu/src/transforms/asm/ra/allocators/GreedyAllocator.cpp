@@ -893,18 +893,13 @@ class Greedy {
             if (block.pinReason == nullptr) continue;
             const std::string unmoved = valueName(block.leader) + " is " + block.pinReason +
                                         ", so it must keep its original register, but ";
-            if (!block.hintBase.has_value()) {
-                error_ = unmoved + "it has none recorded";
-                refused_ = &block;
-                return false;
-            }
+            if (!block.hintBase.has_value()) return refuse(block, unmoved + "it has none recorded");
             if (!availableAt(block, *block.hintBase)) {
-                error_ = unmoved + regTypeToString(block.regClass) +
-                         std::to_string(*block.hintBase) +
-                         (reachableAt(block, *block.hintBase) ? " is already taken"
-                                                              : " is not allocatable");
-                refused_ = &block;
-                return false;
+                return refuse(block,
+                              unmoved + regTypeToString(block.regClass) +
+                                  std::to_string(*block.hintBase) +
+                                  (reachableAt(block, *block.hintBase) ? " is already taken"
+                                                                       : " is not allocatable"));
             }
             bindAt(block, *block.hintBase);
         }
@@ -932,13 +927,12 @@ class Greedy {
             // Distinct from the pressure refusal below: nothing has been placed
             // here except pinned blocks, so the reachable bank really is full
             // rather than merely full by the time this block was reached.
-            error_ = "no " + regTypeToString(block.regClass) + " register at or below index " +
-                     std::to_string(*block.maxIndex) + " is free for " + valueName(block.leader) +
-                     ", which its operands cannot address past (" +
-                     std::to_string(block.placementFreedom) + " legal base(s) before occupancy)" +
-                     refusalDetail(block);
-            refused_ = &block;
-            return false;
+            return refuse(
+                block, "no " + regTypeToString(block.regClass) + " register at or below index " +
+                           std::to_string(*block.maxIndex) + " is free for " +
+                           valueName(block.leader) + ", which its operands cannot address past (" +
+                           std::to_string(block.placementFreedom) +
+                           " legal base(s) before occupancy)" + refusalDetail(block));
         }
 
         std::vector<size_t> queue;
@@ -963,18 +957,17 @@ class Greedy {
 
             const std::optional<uint32_t> evictBase = findEvictableBase(block);
             if (!evictBase.has_value() || evictionBudget == 0) {
-                error_ = "no " + regTypeToString(block.regClass) + " register is free for " +
-                         valueName(block.leader) +
-                         (block.width > 1 ? " and the " + std::to_string(block.width - 1) +
-                                                " register(s) tied to it"
-                                          : "") +
-                         "; splitting and spilling are not implemented" +
-                         // How many bases it ever had, so a reader can tell a
-                         // full file from a shape with almost nowhere to go.
-                         " (" + std::to_string(block.placementFreedom) +
-                         " legal base(s) before occupancy)" + refusalDetail(block);
-                refused_ = &block;
-                return false;
+                return refuse(block,
+                              "no " + regTypeToString(block.regClass) + " register is free for " +
+                                  valueName(block.leader) +
+                                  (block.width > 1 ? " and the " + std::to_string(block.width - 1) +
+                                                         " register(s) tied to it"
+                                                   : "") +
+                                  "; splitting and spilling are not implemented" +
+                                  // How many bases it ever had, so a reader can tell a
+                                  // full file from a shape with almost nowhere to go.
+                                  " (" + std::to_string(block.placementFreedom) +
+                                  " legal base(s) before occupancy)" + refusalDetail(block));
             }
 
             for (size_t occupant : occupantsAt(block, *evictBase)) {
@@ -1092,6 +1085,13 @@ class Greedy {
             }
         }
         return best;
+    }
+
+    /// Stop placing: record why, and which block it stopped at.
+    bool refuse(const Block& block, std::string message) {
+        error_ = std::move(message);
+        refused_ = &block;
+        return false;
     }
 
     /// Write one row per block to AllocationContext::blockDumpPath: what it is,

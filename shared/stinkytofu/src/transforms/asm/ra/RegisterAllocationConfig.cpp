@@ -39,18 +39,6 @@ std::optional<Mode> modeNamed(std::string_view word) {
     return std::nullopt;
 }
 
-const char* unbankableName(Unbankable policy) {
-    switch (policy) {
-        case Unbankable::Hold:
-            return "hold";
-        case Unbankable::Allocate:
-            return "allocate";
-        case Unbankable::Auto:
-            return "auto";
-    }
-    return "auto";
-}
-
 std::string classesName(RegClassSet classes) {
     std::string text;
     if (classes.contains(RegType::V)) text += "v";
@@ -90,11 +78,32 @@ std::optional<std::string> unregisteredAllocator(const std::vector<std::string>&
     return std::nullopt;
 }
 
-bool isToolOnlyFlag(std::string_view word) {
-    return word == "report" || word == "emitRegisterMap" || word == "emitSymbolBreadcrumbs";
+/// Keys that only shape diagnostics. stinkytofu-opt takes them; for a kernel
+/// the pipeline chooses its own.
+bool isToolOnlyKey(std::string_view key) {
+    return key == "report" || key == "emitRegisterMap" || key == "emitSymbolBreadcrumbs" ||
+           key == "dumpBlocks";
+}
+
+/// Set \p config's mode, and with it whether the pass writes the colouring.
+void setModeOf(RegisterAllocationConfig& config, Mode mode) {
+    config.mode = mode;
+    config.options.applyToOperands = mode >= Mode::Apply;
 }
 
 }  // namespace
+
+const char* unbankableOperandsName(Unbankable policy) {
+    switch (policy) {
+        case Unbankable::Hold:
+            return "hold";
+        case Unbankable::Allocate:
+            return "allocate";
+        case Unbankable::Auto:
+            return "auto";
+    }
+    return "auto";
+}
 
 std::optional<RegClassSet> parseRegClasses(std::string_view spec) {
     RegClassSet classes;
@@ -178,6 +187,16 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
         if (token.empty()) continue;
         const size_t equals = token.find('=');
         const std::string_view key = trimmed(token.substr(0, equals));
+        const auto unknown = [&] {
+            return Result::Error("unknown register allocation setting '" + std::string(token) +
+                                 "'");
+        };
+        if (kernel && isToolOnlyKey(key)) {
+            return Result::Error("'" + std::string(key) +
+                                 "' is a stinkytofu-opt setting; for a kernel the pipeline "
+                                 "chooses its diagnostics (StinkyTofuEnableRemarks, "
+                                 "StinkyTofuRegisterAllocationDump)");
+        }
 
         if (equals == std::string_view::npos) {
             if (const std::optional<Mode> mode = modeNamed(key)) {
@@ -191,17 +210,14 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
                 options.rules.disableAll = true;
             } else if (key == "ruleAudit") {
                 options.rules.auditAll = true;
-            } else if (isToolOnlyFlag(key)) {
-                if (kernel)
-                    return Result::Error("'" + std::string(key) +
-                                         "' is a stinkytofu-opt setting; a kernel's "
-                                         "diagnostics are chosen by the pipeline");
-                if (key == "report") options.report = true;
-                if (key == "emitRegisterMap") options.emitRegisterMap = true;
-                if (key == "emitSymbolBreadcrumbs") options.emitSymbolBreadcrumbs = true;
+            } else if (key == "report") {
+                options.report = true;
+            } else if (key == "emitRegisterMap") {
+                options.emitRegisterMap = true;
+            } else if (key == "emitSymbolBreadcrumbs") {
+                options.emitSymbolBreadcrumbs = true;
             } else {
-                return Result::Error("unknown register allocation setting '" + std::string(token) +
-                                     "'");
+                return unknown();
             }
             continue;
         }
@@ -221,20 +237,19 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
             if (!classes.has_value()) return badValue("s, v or vs");
             options.allocate = *classes;
         } else if (key == "allocator") {
-            const std::vector<std::string> chain = splitPlusList(value);
+            const std::vector<std::string> chain = splitList(value, '+');
             if (chain.empty()) return badValue("an allocator name, or several joined with '+'");
             if (std::optional<std::string> problem = unregisteredAllocator(chain))
                 return Result::Error(*problem);
             options.allocator = joined(chain, "+");
         } else if (key == "unbankable") {
-            if (value == "hold")
-                options.unbankableOperands = Unbankable::Hold;
-            else if (value == "allocate")
-                options.unbankableOperands = Unbankable::Allocate;
-            else if (value == "auto")
-                options.unbankableOperands = Unbankable::Auto;
-            else
-                return badValue("hold, allocate or auto");
+            std::optional<Unbankable> policy;
+            for (const Unbankable candidate :
+                 {Unbankable::Hold, Unbankable::Allocate, Unbankable::Auto}) {
+                if (value == unbankableOperandsName(candidate)) policy = candidate;
+            }
+            if (!policy.has_value()) return badValue("hold, allocate or auto");
+            options.unbankableOperands = *policy;
         } else if (key == "quadrant") {
             if (value == "any")
                 options.quadrant = Quadrant::Any;
@@ -243,7 +258,7 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
             else
                 return badValue("any or prefer");
         } else if (key == "rules" || key == "noRule") {
-            const std::vector<std::string> names = splitPlusList(value);
+            const std::vector<std::string> names = splitList(value, '+');
             if (names.empty()) return badValue("rule names joined with '+'");
             for (const std::string& name : names) {
                 if (key == "noRule")
@@ -254,7 +269,7 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
                     options.rules.activate.push_back(name);
             }
         } else if (key == "pinReg") {
-            const std::vector<std::string> ranges = splitPlusList(value);
+            const std::vector<std::string> ranges = splitList(value, '+');
             if (ranges.empty()) return badValue("registers such as s0 or s0:19, joined with '+'");
             for (const std::string& spec : ranges) {
                 const std::optional<AllocationScope::HeldRange> range = parseHeldRange(spec);
@@ -265,49 +280,34 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
             if (value.empty()) return badValue("a block label");
             options.regionEnd = std::string(value);
         } else if (key == "dumpBlocks") {
-            if (kernel)
-                return Result::Error(
-                    "'dumpBlocks' is a stinkytofu-opt setting; a kernel's placement tables "
-                    "come from StinkyTofuRegisterAllocationDump");
             if (value.empty()) return badValue("a path prefix");
             options.blockDumpPrefix = std::string(value);
         } else {
-            return Result::Error("unknown register allocation setting '" + std::string(token) +
-                                 "'");
+            return unknown();
         }
     }
 
     if (!kernel && config.mode == Mode::Off)
         return Result::Error("mode off runs no register allocation; leave the pass out instead");
-    options.applyToOperands = config.mode >= Mode::Apply;
+    setModeOf(config, config.mode);
     return config;
 }
 
 Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
     std::string_view text, RegisterAllocationDialect dialect) {
-    std::vector<std::string> tokens;
-    size_t start = 0;
-    while (start <= text.size()) {
-        const size_t comma = text.find(',', start);
-        tokens.emplace_back(text.substr(
-            start, comma == std::string_view::npos ? std::string_view::npos : comma - start));
-        if (comma == std::string_view::npos) break;
-        start = comma + 1;
-    }
-    return parseRegisterAllocationConfig(tokens, dialect);
+    return parseRegisterAllocationConfig(splitList(text, ','), dialect);
 }
 
 Expected<RegisterAllocationConfig> kernelRegisterAllocationConfig(int mode, std::string_view text) {
     Expected<RegisterAllocationConfig> config =
         parseRegisterAllocationConfig(text, RegisterAllocationDialect::Kernel);
     if (config.hasError()) return config;
-    config->mode = static_cast<Mode>(std::clamp(mode, 0, 3));
-    config->options.applyToOperands = config->mode >= Mode::Apply;
+    setModeOf(*config, static_cast<Mode>(std::clamp(mode, 0, 3)));
     return config;
 }
 
 std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& config) {
-    const std::string mode = std::to_string(static_cast<int>(config.mode));
+    std::string mode = std::to_string(static_cast<int>(config.mode));
     if (config.mode == Mode::Off) return mode;
 
     const RegisterAllocationOptions& options = config.options;
@@ -318,7 +318,8 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
         words.push_back("classes=" + classesName(options.allocate));
     if (options.allocator != kKernelAllocator) words.push_back("allocator=" + options.allocator);
     if (options.unbankableOperands != defaults.unbankableOperands)
-        words.push_back(std::string("unbankable=") + unbankableName(options.unbankableOperands));
+        words.push_back(std::string("unbankable=") +
+                        unbankableOperandsName(options.unbankableOperands));
     if (options.quadrant != defaults.quadrant) words.push_back("quadrant=prefer");
 
     std::vector<std::string> activate = sortedUnique(options.rules.activate);
@@ -341,6 +342,7 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
                                  [&](const auto& a, const auto& b) { return key(a) == key(b); }),
                      ranges.end());
         std::vector<std::string> names;
+        names.reserve(ranges.size());
         for (const AllocationScope::HeldRange& range : ranges)
             names.push_back(heldRangeName(range));
         words.push_back("pinReg=" + joined(names, "+"));
@@ -350,14 +352,10 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
     return joined(words, ",");
 }
 
-bool rewritesRegisters(const RegisterAllocationConfig& config, RegType regClass) {
-    return config.mode >= Mode::Apply && config.options.allocate.contains(regClass);
-}
-
 bool kernelRewritesRegisters(int mode, std::string_view text, RegType regClass) {
     if (mode < static_cast<int>(Mode::Apply)) return false;
     const Expected<RegisterAllocationConfig> config = kernelRegisterAllocationConfig(mode, text);
-    return !config.hasError() && rewritesRegisters(*config, regClass);
+    return !config.hasError() && config->options.allocate.contains(regClass);
 }
 
 }  // namespace stinkytofu

@@ -85,15 +85,16 @@ STINKYTOFU_EXPORT Expected<RegisterAllocationConfig> kernelRegisterAllocationCon
 STINKYTOFU_EXPORT std::string canonicalRegisterAllocationConfig(
     const RegisterAllocationConfig& config);
 
-/// True when \p config writes new registers into operands of \p regClass: the
-/// mode applies, and the class is allocated. Passes that run after allocation
-/// ask this to learn whether the producer's register numbering still holds.
-STINKYTOFU_EXPORT bool rewritesRegisters(const RegisterAllocationConfig& config, RegType regClass);
-
-/// rewritesRegisters() for a kernel's \p mode and \p text, as
-/// kernelRegisterAllocationConfig() reads them. A configuration that does not
-/// parse runs no allocation, so it rewrites nothing.
+/// True when a kernel's \p mode and \p text, read as kernelRegisterAllocationConfig()
+/// reads them, write new registers into operands of \p regClass: the mode
+/// applies and the class is allocated. Passes that run after allocation ask
+/// this to learn whether the producer's register numbering still holds. A
+/// configuration that does not parse runs no allocation, so it rewrites nothing.
 STINKYTOFU_EXPORT bool kernelRewritesRegisters(int mode, std::string_view text, RegType regClass);
+
+/// How the configuration spells \p policy: "hold", "allocate" or "auto".
+STINKYTOFU_EXPORT const char* unbankableOperandsName(
+    RegisterAllocationOptions::UnbankableOperands policy);
 
 /// Parse a class list such as "vs", "v" or "s". Empty, or any other letter,
 /// is nullopt, so a typo is reported rather than selecting something else.
