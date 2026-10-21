@@ -815,6 +815,28 @@ struct FmhaFwdSplitKVKernel
             }
         }();
 
+        // Upper bound of the key range this split may touch. The TDM schedule
+        // prefetches a fixed number of tiles ahead with no "how many are left"
+        // test. Without split-kv that overshoot runs past the end of the cache
+        // and the TDM box clamp turns it into a zero-byte transfer; with
+        // num_splits > 1 it would instead land on real memory owned by the next
+        // split. Capping the view restores the clamp. A coarse bound (no mask
+        // intersection) is enough, it is always >= the range the pipeline walks.
+        // This does not replace the -inf erase inside the pipeline: the clamp
+        // zero-fills, and exp(0) == 1 would pollute softmax.
+        const index_t tdm_split_seqlen_k = [&, i_split_ = i_split]() {
+            if constexpr(kUsesTdmAffineDramPath)
+            {
+                const index_t x_per_split =
+                    max(1, integer_divide_ceil(kargs.seqlen_k, kargs.num_splits));
+                return min(kargs.seqlen_k, x_per_split * (i_split_ + 1));
+            }
+            else
+            {
+                return kargs.seqlen_k;
+            }
+        }();
+
         const auto make_k_dram = [&](const KDataType* data, index_t height) {
             const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global>(
                 data, // will update this pointer if using paged-kvcache
@@ -846,7 +868,7 @@ struct FmhaFwdSplitKVKernel
             }
             else
             {
-                return make_k_dram(k_ptr, kargs.seqlen_k);
+                return make_k_dram(k_ptr, tdm_split_seqlen_k);
             }
         }();
 
@@ -904,7 +926,7 @@ struct FmhaFwdSplitKVKernel
             }
             else
             {
-                return make_v_dram(v_ptr, kargs.seqlen_k);
+                return make_v_dram(v_ptr, tdm_split_seqlen_k);
             }
         }();
 

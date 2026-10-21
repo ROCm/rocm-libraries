@@ -191,6 +191,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp, // N0*K0 tile
         const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp, // N1*K1 tile
         LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,  // M0*1 tile
+        index_t num_splits,
+        index_t i_split,
         FmhaMask mask,
         float scale_s,
         void* __restrict__ smem_ptrk0,
@@ -259,23 +261,43 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
         auto l = MLBlockTileType{};
 
         // BiasEnum is asserted NO_BIAS above, so only the prefill pipeline's
-        // NO_BIAS branch survives here. A finite sink logit is deliberately NOT
-        // folded into m/l: the prefill pipeline defers it to a virtual-sink
-        // merge after the loop, which under split-kv would count the sink once
-        // per split. Sink tokens that participate in the mask (kHasSink) are
-        // unaffected -- they go through the normal tile range.
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        // NO_BIAS branch survives here. The prefill pipeline defers a finite
+        // sink logit to a virtual-sink merge after the loop; that merge is not
+        // carried over, since under split-kv it would count the sink once per
+        // split. The logit is folded into m/l up front instead, exactly once --
+        // in the first split that has work (see the i_split > 0 fixup below).
+        // Sink tokens that participate in the mask (kHasSink) are unaffected,
+        // they go through the normal tile range.
+        const auto init_ml = [&](bool take_sink) {
+            if(take_sink)
+            {
+                // CK_TILE_FMHA_FWD_FAST_EXP2 is asserted above and BiasEnum is
+                // NO_BIAS, so scale_s is folded into the score tiles, not here.
+                set_tile(m, sink_v * C_LOG2E);
+                set_tile(l, SMPLComputeDataType{1.0f});
+            }
+            else
+            {
+                set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+                clear_tile(l);
+            }
+        };
+        init_ml(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0);
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
+        // Split-aware tile range: [start, end) is this split's slice of the key
+        // sequence. The slice bound is not kN0 aligned, so the last tile of a
+        // split may reach past it -- kHasUnevenSplits (hardwired true below)
+        // erases that tail from s_acc.
         const auto tile_range_result = [&]() {
             if constexpr(kHasSink)
-                return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+                return mask.GetSinkTileRangeAlongX(
+                    q_origin.at(I0), number<kM0>{}, number<kN0>{}, num_splits, i_split);
             else
             {
-                auto [start, end] =
-                    mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+                auto [start, end] = mask.GetTileRangeAlongX(
+                    q_origin.at(I0), number<kM0>{}, number<kN0>{}, num_splits, i_split);
                 return ck_tile::make_tuple(0, start, end);
             }
         }();
@@ -298,7 +320,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    if(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0)
                     {
                         set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                     }
@@ -314,6 +336,17 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
                 // Note: q loaded but no fence, ignore it.
                 return Policy::OutputFragments::template Reconstruct<OaccBlockTileType>(o_acc);
             }
+        }
+
+        // The sink logit belongs to the first split that has work, which is not
+        // necessarily split 0: an earlier split can be empty under a mask. This
+        // split reaching here means it has work, so it owns the sink when the
+        // one before it was empty. Mirrors block_fmha_fwd_splitkv_pipeline_qr_ks_vs.
+        if(i_split > 0)
+        {
+            auto [prev_start, prev_end] = mask.GetTileRangeAlongX(
+                q_origin.at(I0), number<kM0>{}, number<kN0>{}, num_splits, i_split - 1);
+            init_ml(__builtin_isinf_sign(sink_v) >= 0 && prev_start >= prev_end);
         }
 
         // ---------------------------------------------------------------------
@@ -925,10 +958,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
     //     bias is asserted away above, the variant hooks are not part of the
     //     hand-tuned schedule, and the other two are paged-kv only.
     //
-    // num_splits / i_split are accepted but not acted on yet: the kernel already
-    // partitions the grid and the workspace, while this pipeline still walks the
-    // full [0, seqlen_k) range. O therefore comes out correct and LSE is off by
-    // log(num_splits). Honouring the split range is the next step.
+    // num_splits / i_split select this split's slice of the key sequence through
+    // the mask's split-aware tile-range overloads; the kernel caps the K/V DRAM
+    // views at the same bound so the schedule's fixed-depth prefetch cannot read
+    // past it.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
               typename KPageBlockNavigator,
@@ -947,8 +980,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
                const VPageBlockNavigator& v_page_block_navigator,
                const BiasDramBlockWindowTmp& /*bias_dram_block_window_tmp*/, // M0*N0 tile
                LSEaccDramBlockWindowTmp& lse_acc_dram_block_window_tmp,      // M0*1 tile
-               index_t /*num_splits*/,
-               index_t /*i_split*/,
+               index_t num_splits,
+               index_t i_split,
                FmhaMask mask,
                PositionEncoding /*position_encoding*/,
                float scale_s,
@@ -980,6 +1013,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmSched
                    k_dram_block_window,
                    v_dram_block_window,
                    lse_acc_dram_block_window_tmp,
+                   num_splits,
+                   i_split,
                    mask,
                    scale_s,
                    arena + Policy::GetLdsOffsetK0(),
