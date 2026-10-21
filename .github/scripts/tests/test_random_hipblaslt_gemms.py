@@ -93,13 +93,23 @@ class RandomGemmTests(unittest.TestCase):
                 "import json, sys, time\nfrom pathlib import Path\n"
                 "p = {k: json.loads(v) for k, v in (line.lstrip('- ').split(': ', 1) "
                 "for line in Path(sys.argv[-1]).read_text().splitlines())}\n"
-                "d = Path(json.loads(Path(sys.argv[2]).read_text())['sinks']['dir'])\n"
+                "config = json.loads(Path(sys.argv[2]).read_text())\n"
+                "d = Path(config['sinks']['dir'])\n"
                 "started = time.monotonic()\ntime.sleep(0.1)\n"
                 "(d / 'interval.json').write_text(json.dumps([started, time.monotonic()]))\n"
                 "(d / 'race.log').write_text('[rocjitsu] Kernel dispatch: symbol=\"gemm_kernel\"\\n' "
-                "+ ('RACE found\\n' if p['M'] == 12 else ''))\n"
+                "+ ('RACE found\\n' if p['M'] == 12 and config.get('failure', 'race') == 'race' else ''))\n"
                 f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
                 "from test_random_hipblaslt_gemms import bench_result\n"
+                "if p['M'] == 12:\n"
+                "    mode = config.get('failure', 'race')\n"
+                "    if mode == 'numerical-exit': sys.exit(1)\n"
+                "    if mode == 'emulator-exit': sys.exit(7)\n"
+                "    if mode == 'no-solution':\n"
+                "        print('error: NO solution found!'); sys.exit(0)\n"
+                "    if mode == 'timeout': time.sleep(60)\n"
+                "    if mode == 'allclose':\n"
+                "        print(bench_result(p, atol='failed')); sys.exit(0)\n"
                 "print(bench_result(p))\n"
             )
             emulator.chmod(0o755)
@@ -177,6 +187,54 @@ class RandomGemmTests(unittest.TestCase):
                             for b in intervals[i + 1 :]
                         )
                     )
+
+            for mode, reason, exit_code in (
+                ("numerical-exit", "bench exited 1", 1),
+                ("allclose", "missing or failed numerical checks", 0),
+                ("emulator-exit", "bench exited 7", 7),
+                ("no-solution", "expected one completed bench result", 0),
+                ("timeout", "bench exited 124", 124),
+            ):
+                for early_stop in (False, True):
+                    with self.subTest(mode=mode, early_stop=early_stop):
+                        config.write_text(json.dumps({"failure": mode}))
+                        output = root / f"{mode}-{early_stop}"
+                        command = [
+                            "--count",
+                            "3",
+                            "--timeout",
+                            "1",
+                            "--bench",
+                            str(bench),
+                            "--rocjitsu",
+                            str(emulator),
+                            "--config",
+                            str(config),
+                            "--output",
+                            str(output),
+                        ]
+                        if early_stop:
+                            command.append("--stop-on-failure")
+                        self.assertEqual(runner.main(command), 1)
+                        summary = json.loads((output / "summary.json").read_text())
+                        self.assertEqual(summary["failed"], 1)
+                        self.assertEqual(summary["passed"], 1 if early_stop else 2)
+                        self.assertEqual(summary["sampled"], 2 if early_stop else 3)
+                        self.assertEqual(summary["complete"], not early_stop)
+                        self.assertEqual(summary["known_failures"], 0)
+                        result = json.loads(
+                            (output / "case-0002/result.json").read_text()
+                        )
+                        self.assertEqual(result["reason"], reason)
+                        self.assertEqual(result["exit_code"], exit_code)
+                        self.assertEqual(result["outcome"], "failed")
+                        if early_stop:
+                            self.assertFalse((output / "case-0003").exists())
+                        else:
+                            result = json.loads(
+                                (output / "case-0003/result.json").read_text()
+                            )
+                            self.assertEqual(result["outcome"], "passed")
 
     def test_threads_do_not_change_generated_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
