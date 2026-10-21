@@ -964,9 +964,16 @@ class ValidityGateTest(unittest.TestCase):
                 )
             )
         )
+        # The llvm23-gated target ops (TDM tensor moves, ...) word it this way.
+        self.assertTrue(
+            V._requires_newer_flavor(
+                ValueError("tensor_load_to_lds requires LLVM flavor llvm23, got llvm22")
+            )
+        )
         for exc in (
             NotImplementedError("no handler for op 'tile.frobnicate'"),
             NotImplementedError("unsupported dtype combination"),
+            ValueError("tensor_load_to_lds requires a target with tdm, got gfx950"),
         ):
             with self.subTest(exc=str(exc)):
                 self.assertFalse(V._requires_newer_flavor(exc))

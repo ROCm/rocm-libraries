@@ -768,6 +768,37 @@ C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
 `rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
 
+## Direct Dgrad on WMMA (gfx1250)
+
+`library/kernels/common/conv_direct_dgrad_wmma.py`, spec `DirectDgradWmmaSpec`,
+builder `build_direct_dgrad_wmma` (C++ twin `instance_conv_direct_dgrad_wmma.h`).
+A stride-1 dgrad for gfx1250 (wave32, WMMA 16x16x32, TDM), dense and grouped:
+
+    dX[n, h, w, c] = sum_{r, s, k} dY[n, h + PAD - r, w + PAD - s, k] * W[k, r, s, c]
+
+A workgroup owns `block_c = waves_c * tiles_c * 16` dX channels of one group
+and `tile_n` images of `tile_h x tile_w` dX pixels (`waves_p * tiles_p * 16` in
+all). Its loop walks the group's dY channels in chunks of `ck` through an LDS
+ring of `stages` slots:
+
+- one 3-D TDM transfer per image stages the dY halo
+  `[tile_h + KH - 1][tile_w + KW - 1][ck]`, zero-filled past the image;
+- one 3-D TDM transfer stages the chunk's weights for every tap as `[tap][k][c]`;
+- each tap reads the weights transposed (`ds_read_tr16_b128`, the WMMA A
+  operand) and a window of the halo shifted by `(KH-1-r, KW-1-s)` (B), so there
+  is no weight pre-pass and no im2col.
+
+A wave holds `tiles_c x tiles_p` 16x16 accumulators. The epilogue stages the
+dX tile in LDS and stores it with one TDM transfer per image, clipped to the
+image and the group's channels. `prefetch` reads the next tap's fragments
+before the current tap's WMMAs; `sched` sets the machine-scheduler strategy.
+
+Runtime (kernargs): batch, extents, the group count and both channel counts.
+Build-time: filter, padding, dtype and the tile geometry. Constraints: stride
+1, no dilation, `PAD` in 0..K-1, every tensor below 2 GiB (i32 byte offsets), `cpg` and `kpg` multiples of 8, and the ring and the staged dX
+tile within the 320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`).
+
 ## Img2Col
 
 Source: `library/kernels/common/img2col.py`.

@@ -2729,7 +2729,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     "cdna",
     "gfx12_cdna",
     32,
-    163840,
+    327680,
     6,
     {k_mma_gfx1250.ops, K_NUM(k_mma_gfx1250.ops)},
     {false, true, false, true, 4, 0, true, true, true, true},

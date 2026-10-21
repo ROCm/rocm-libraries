@@ -17,13 +17,15 @@ import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
-from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
+from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.conv.direct_variants import direct_mfma_knobs_reason
+from kernels.conv.direct_variants import DIRECT_DGRAD_WMMA, direct_mfma_knobs_reason
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
+# Variants the grid builds only for wave32 targets.
+_WAVE32_ONLY = {DIRECT_DGRAD_WMMA}
 
 
 @pytest.fixture(scope="module")
@@ -134,8 +136,28 @@ def test_every_capability_row_is_built(jobs):
         for j in jobs
     }
     for variant, (_, caps_list) in dks.DIRECT_CAPABILITIES.items():
+        if variant in _WAVE32_ONLY:
+            # No tuning for this arch at all (see the gfx1250 test below).
+            assert not any(True for _ in _knob_grid(variant, _ARCH, "fp16"))
+            continue
         for c in caps_list:
             assert (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg) in built, (variant, c)
+
+
+def test_wave32_only_capability_rows_are_built_on_gfx1250():
+    jobs = dks.enumerate_direct_jobs(
+        arch="gfx1250",
+        target=ArchTarget.from_gfx("gfx1250"),
+        directions=("dgrad",),
+    )
+    built = {
+        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        for j in jobs
+        if j.identity.algorithm in _WAVE32_ONLY
+    }
+    for variant in _WAVE32_ONLY:
+        for c in dks.DIRECT_CAPABILITIES[variant][1]:
+            assert (variant, c.KH, c.PAD) in built, (variant, c)
 
 
 def test_identities_are_unique(jobs):

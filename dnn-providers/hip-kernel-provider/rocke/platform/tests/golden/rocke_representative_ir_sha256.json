@@ -1876,6 +1876,14 @@
         }
       },
       "expected_failures": {
+        "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_direct_dgrad_wmma/gfx1250/fp16_tn2_st3_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
         "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32 requires llvm23 (ROCm 7.13+), got llvm20",
           "type": "NotImplementedError"
@@ -1901,12 +1909,12 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 158
         },
-        "expected_failures": 4,
+        "expected_failures": 6,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -1924,10 +1932,11 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 222
+        "ok_cases": 234
       }
     },
     "llvm22": {
@@ -3806,6 +3815,14 @@
         }
       },
       "expected_failures": {
+        "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_direct_dgrad_wmma/gfx1250/fp16_tn2_st3_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
         "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32 requires llvm23 (ROCm 7.13+), got llvm22",
           "type": "NotImplementedError"
@@ -3831,12 +3848,12 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 158
         },
-        "expected_failures": 4,
+        "expected_failures": 6,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -3854,10 +3871,11 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 222
+        "ok_cases": 234
       }
     },
     "llvm23": {
@@ -4966,6 +4984,22 @@
           "sha256": "d5b1a37511abc6f0011cc7e2933ad1bf8e05f1d14b03f623d0a01054c915d865",
           "status": "ok"
         },
+        "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
+          "arch": "gfx1250",
+          "bytes": 279634,
+          "family": "conv_direct_dgrad_wmma",
+          "kernel_name": "direct_dgrad_wmma_f3x3_p1_wc2_wp4_tc4_tp4_tw16_ck32_st2_bf16",
+          "sha256": "2ffce2d79e1e661bc17be30038f08d7be99bf045e4bc9f4202e83323b1d6879c",
+          "status": "ok"
+        },
+        "conv_direct_dgrad_wmma/gfx1250/fp16_tn2_st3_pf": {
+          "arch": "gfx1250",
+          "bytes": 164762,
+          "family": "conv_direct_dgrad_wmma",
+          "kernel_name": "direct_dgrad_wmma_f3x3_p1_wc2_wp4_tc2_tp2_tw8_tn2_ck32_st3_pf_siterative-ilp",
+          "sha256": "e4771c078bbb769c9be609e47d3f3ca46705ffe6e24c93c01af06ed426ef045b",
+          "status": "ok"
+        },
         "conv_direct_nongrouped/gfx942/fp16_a32x32x8": {
           "arch": "gfx942",
           "bytes": 72253,
@@ -5774,14 +5808,14 @@
           "gfx1151": 10,
           "gfx12-generic": 1,
           "gfx1201": 8,
-          "gfx1250": 8,
+          "gfx1250": 10,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 158
         },
         "expected_failures": 0,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -5790,6 +5824,7 @@
           "conv_direct": 21,
           "conv_direct_depthwise_tiled": 3,
           "conv_direct_dgrad": 5,
+          "conv_direct_dgrad_wmma": 2,
           "conv_direct_nongrouped": 7,
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
@@ -5799,10 +5834,11 @@
           "gemm": 17,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 226
+        "ok_cases": 240
       }
     }
   },
