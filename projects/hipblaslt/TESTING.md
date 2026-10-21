@@ -236,9 +236,9 @@ sits at the opposite, much weaker end.
 
 #### C++ library and clients (weak, and structurally blocked)
 
-There is no separate unit-test binary. The host-only tests that do exist are compiled into
-`hipblaslt-test` alongside the GPU tests, in
-[`clients/tests/src/`](clients/tests/src/):
+Most of the host-only tests that exist are compiled into `hipblaslt-test` alongside the GPU tests,
+in [`clients/tests/src/`](clients/tests/src/). The last two rows are in
+[`clients/tests/unit/`](clients/tests/unit/), described after the table:
 
 | File | Suites | What it covers |
 | --- | --- | --- |
@@ -250,12 +250,16 @@ There is no separate unit-test binary. The host-only tests that do exist are com
 | `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
+| `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
+| `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
+
+The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
+([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
+GPU. Every tier selects them by their `HostUnit*` suite prefix. CI still runs them through
+`hipblaslt-test`: the CPU-only binary ships in the test artifact, but no lane executes it yet.
 
 That is a handful of test cases of genuinely hardware-independent logic, against a library of
 substantial size. It is not a meaningful unit-test suite; it is a few useful islands.
-[PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733) is in flight and adds the first
-dedicated host-only unit target along with a `HostUnit*` suite-naming convention, covering the
-client datatype and scaling-format helpers.
 
 The reason the C++ side is thin is structural rather than cultural, and worth naming precisely so
 the fix is obvious:
