@@ -6,6 +6,7 @@
 from contextlib import contextmanager
 import importlib
 import sys
+from enum import IntEnum
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -20,6 +21,16 @@ def benchmark(request):
 
 def fake_runtime(monkeypatch, benchmark, path, *, scoped=False, fail_timer=False):
     events = []
+
+    class AttentionMaskType(IntEnum):
+        BOTTOM_RIGHT_CAUSAL = 2
+
+    def dispatch(request):
+        if benchmark.__name__.split(".")[1] == "gfx950":
+            assert request.mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+        return SimpleNamespace(
+            spec=SimpleNamespace(path=path, kernel_name=lambda: "selected_kernel")
+        )
 
     def module(name, **attributes):
         stub = ModuleType(name)
@@ -68,10 +79,9 @@ def fake_runtime(monkeypatch, benchmark, path, *, scoped=False, fail_timer=False
     module("kernels.common.attention_unified", _resolve_attention_arch=lambda: "gfx950")
     module(
         "dispatch.attention",
+        AttentionMaskType=AttentionMaskType,
         AttentionRequest=lambda **kw: SimpleNamespace(**kw),
-        dispatch_attention=lambda req: SimpleNamespace(
-            spec=SimpleNamespace(path=path, kernel_name=lambda: "selected_kernel")
-        ),
+        dispatch_attention=dispatch,
     )
     module(
         "rocke.runtime",

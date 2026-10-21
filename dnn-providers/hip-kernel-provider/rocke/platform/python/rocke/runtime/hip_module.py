@@ -339,7 +339,10 @@ def device_supports_cluster_launch(device: int = 0) -> Optional[bool]:
     return _cluster_launch_support[device]
 
 
-def _current_device() -> int:
+def current_device() -> int:
+    """HIP's current device for this thread: the one rocke's runtime launches
+    kernels on. Returns ``0``, HIP's default device, when the runtime cannot be
+    queried."""
     cur = ctypes.c_int(0)
     try:
         rc = _hipGetDevice(ctypes.byref(cur))
@@ -596,7 +599,7 @@ class Runtime:
                 if evt is not None:
                     evt.destroy()
         self._pending_args.clear()
-        device = _current_device()
+        device = current_device()
         for key in list(self._pending_bound_args):
             if key[0] == device:
                 self._pending_bound_args.pop(key, None)
@@ -624,7 +627,7 @@ class Runtime:
     def _bound_stream_key(stream: int):
         # The HIP null and per-thread default streams have shared handles
         # across devices. Device synchronization drains only the current one.
-        return (_current_device(), int(stream))
+        return (current_device(), int(stream))
 
     def retain_until_drain(self, stream: int, owner: Any, *, resources=None) -> None:
         """Retain an immutable bound launch owner through an explicit drain.
@@ -709,7 +712,7 @@ class Runtime:
             return ()
 
         shape = check_launch_cluster(grid, cluster)
-        device = _current_device()
+        device = current_device()
         if device_supports_cluster_launch(device) is False:
             raise HipError(
                 f"{where}: device {device} does not support cluster launch "

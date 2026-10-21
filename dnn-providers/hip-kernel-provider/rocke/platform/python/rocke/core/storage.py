@@ -4,11 +4,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import gcd
-from collections.abc import Sequence
+
+from .dtypes import DTypeCategory, dtype_info
 
 _MAX_BITS = (1 << 64) - 1
+_REGISTER_BITS = 32
 
 
 def _checked(value: int) -> int:
@@ -120,6 +123,66 @@ class FragmentPacking:
             int.from_bytes(data[i : i + width], "little")
             for i in range(0, len(data), width)
         )
+
+
+def _require_int_at_least(name: str, value: int, minimum: int) -> int:
+    """Return ``value`` if it is an int (not a bool) of at least ``minimum``, else raise."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer, got {value!r}")
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {value}")
+    return value
+
+
+def register_packing(dtype: str, count: int) -> FragmentPacking | None:
+    """How ``count`` elements of a sub-byte ``dtype`` sit densely in 32-bit registers.
+
+    Elements pack low-bit-first with no padding between them, and must fill
+    whole registers. A dtype of 8 or more bits returns None: it has an LLVM
+    element type, and LLVM packs its vectors into registers itself (a
+    ``<4 x half>`` occupies two registers), so rocke never packs it by hand. A
+    predicate raises.
+    """
+    info = dtype_info(dtype)
+    _require_int_at_least("element count", count, 1)
+    if info.category is DTypeCategory.PREDICATE:
+        raise ValueError(f"{info.name} is a predicate, not register data")
+    if info.encoded_bits >= 8:
+        return None
+    bits = count * info.encoded_bits
+    if bits % _REGISTER_BITS:
+        raise ValueError(
+            f"{count} {info.name} elements occupy {bits} bits, not a whole number of "
+            f"{_REGISTER_BITS}-bit registers -- packed operands must fill whole "
+            "registers"
+        )
+    return FragmentPacking(
+        BitPacking(info.encoded_bits), count, _REGISTER_BITS, bits // _REGISTER_BITS
+    )
+
+
+def packed_word_range(packing: FragmentPacking, start: int, length: int) -> range:
+    """The registers that hold elements ``[start, start + length)`` of ``packing``."""
+    end = _require_int_at_least("start", start, 0) + _require_int_at_least(
+        "length", length, 1
+    )
+    if end > packing.count:
+        raise ValueError(
+            f"elements [{start}, {end}) run past the fragment's {packing.count} "
+            "elements"
+        )
+    first_bit = packing.packing.bit_offset(start)
+    end_bit = packing.packing.bit_offset(end)
+    word = packing.carrier_bits
+    if first_bit % word or end_bit % word:
+        step, _ = packing.packing.group(word)
+        raise ValueError(
+            f"elements [{start}, {end}) of a fragment packed at "
+            f"{packing.packing.slot_bits} bits per element do not start and end on "
+            f"a register boundary ({word} bits) -- start and length must be "
+            f"multiples of {step} elements"
+        )
+    return range(first_bit // word, end_bit // word)
 
 
 @dataclass(frozen=True)

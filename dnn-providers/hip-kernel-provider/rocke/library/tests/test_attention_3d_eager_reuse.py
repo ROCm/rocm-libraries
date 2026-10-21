@@ -172,7 +172,7 @@ def test_failed_pair_remains_retained_and_unlocks(eager, monkeypatch):
 def test_bound_retention_waits_for_explicit_successful_drain(monkeypatch):
     from rocke.runtime import hip_module
 
-    monkeypatch.setattr(hip_module, "_current_device", lambda: 0)
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
     rt = Runtime.__new__(Runtime)
     rt._pending_args = {}
     rt._pending_bound_args = {}
@@ -211,7 +211,7 @@ def test_completed_request_storage_is_not_kept_by_binding_cache(eager):
 def test_resources_are_snapshotted_once_per_completion_batch(monkeypatch):
     from rocke.runtime import hip_module
 
-    monkeypatch.setattr(hip_module, "_current_device", lambda: 0)
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
     rt = Runtime.__new__(Runtime)
     rt._pending_args = {}
     rt._pending_bound_args = {}
@@ -230,20 +230,25 @@ def test_resources_are_snapshotted_once_per_completion_batch(monkeypatch):
     assert not rt._pending_bound_args
 
 
-def test_null_stream_retention_is_device_scoped(monkeypatch):
+@pytest.mark.parametrize("device_sync", [False, True])
+def test_null_stream_retention_is_device_scoped(monkeypatch, device_sync):
     from rocke.runtime import hip_module
 
     rt = Runtime.__new__(Runtime)
     rt._pending_args = {}
     rt._pending_bound_args = {}
     device = [0]
-    monkeypatch.setattr(hip_module, "_current_device", lambda: device[0])
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    monkeypatch.setattr(hip_module, "_hipDeviceSynchronize", lambda: 0)
     monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
     first, second = object(), object()
     rt.retain_until_drain(0, first)
     device[0] = 1
     rt.retain_until_drain(0, second)
-    rt.wait_stream(0)
+    if device_sync:
+        rt.sync()
+    else:
+        rt.wait_stream(0)
     assert rt._pending_bound_args == {(0, 0): {id(first): first}}
     device[0] = 0
     rt.wait_stream(0)

@@ -64,9 +64,8 @@ run_unified_attention_torch(
 For registry consumers, set `AttentionRequest.kv_layout="strided"`; the
 [candidate](../library/dispatch/attention/strided_decode.py) provides spec building
 and `bind_torch`. Direct and dispatched launches share the same spec policy.
-Automatic strided selection keeps invariant hoisting disabled regardless of
-`HIPDNN_GFX942_3D_HOIST`; an explicit kernel spec may enable it. A non-`None`
-`problem.clamp_arch` must match the selected target (the active device at launch).
+A non-`None` `problem.clamp_arch` must match the selected target (the active device
+at launch).
 The binding accepts only `softmax_scale` and `stream` keyword overrides; it
 rejects softcap, bias/sinks tensors, and unknown arguments. Explicit segment
 and reducer specs must agree with the runtime problem's shapes, dtype, window,
