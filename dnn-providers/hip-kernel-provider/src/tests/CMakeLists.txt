@@ -293,6 +293,45 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # Census for the gfx950 unified-attention 2D production pack, gated and narrowed exactly
+    # as the dense one above.
+    hkp_gfx950_attention_unified_2d_available(_hkp_gfx950_attention_unified_2d)
+    if(_hkp_gfx950_attention_unified_2d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionUnified2DPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+
+        # Hand-written companion census over the same shard: every shipped kernel's geometry
+        # passes the engine's own isSupportedGfx950Unified2DGeometry() check and bakes the
+        # batch capacity the manifest promises.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionUnified2DCatalogTiles
+            EXPECTED_CASES
+                EveryShippedKernelsGeometryIsOneTheEngineLaunches
+                EveryShippedKernelServesTheManifestsBatchCapacity
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950AttentionUnified2D for "
+            "gfx950, so its census is not registered.")
+    endif()
+
     # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
     # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
     # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.

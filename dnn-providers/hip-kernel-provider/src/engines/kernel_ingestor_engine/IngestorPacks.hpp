@@ -58,6 +58,15 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
+/// The engine name gfx950_attention_unified_2d.ued.json declares, shared the same way.
+inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
+    = "hipkernel:Gfx950AttentionUnified2D";
+
+/// @see packs/Gfx950AttentionUnified2DNative.cpp
+void registerGfx950AttentionUnified2DSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950AttentionUnified2DModuleCache();
+
 /// @see packs/Gfx1151WmmaAttentionNative.cpp
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();
