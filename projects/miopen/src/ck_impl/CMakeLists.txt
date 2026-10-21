@@ -170,6 +170,10 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # behind a public wrapper that exports only the C API.
     target_link_libraries(${lib_name} PRIVATE ${_MIOPEN_IMPL_TARGET})
 
+    # Embed a Windows VERSIONINFO resource (ROCM-20937); see miopen_embed_version_resource() in
+    # src/CMakeLists.txt, defined before this subdirectory is added and so visible here.
+    miopen_embed_version_resource(${lib_name} "MIOpen CK Grouped-Conv Plugin (${arch_base})" ${lib_name})
+
     # Install alongside MIOpen
     set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")
     install(TARGETS ${lib_name}
@@ -181,3 +185,10 @@ endforeach()
 # Propagate the list to the parent scope so src/CMakeLists.txt can wire
 # build-order dependencies into the MIOpen_with_plugins proxy target.
 set(CK_PLUGIN_TARGETS "${CK_PLUGIN_TARGETS}" PARENT_SCOPE)
+
+# Also stash it as a CACHE INTERNAL variable (ROCM-20937) so test/CMakeLists.txt -- added via
+# add_subdirectory(test) from the top-level CMakeLists.txt, in a sibling directory scope that
+# doesn't inherit src/'s PARENT_SCOPE chain -- can enumerate the exact per-arch plugin DLLs this
+# configure produced without re-deriving the GPU_TARGETS arch-filtering logic above.
+set(MIOPEN_CK_PLUGIN_TARGETS "${CK_PLUGIN_TARGETS}" CACHE INTERNAL
+    "CK per-arch plugin DLL target names, for test/CMakeLists.txt")
