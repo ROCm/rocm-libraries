@@ -19,8 +19,7 @@ graph where they do not raises.
 The value sets of ``dtype`` and ``head_dim`` are not in the schema, which
 types them only as tensors. They list what the op is meant to support; a graph
 outside them raises ``FeatureError`` rather than widening the denominator.
-q's data_type is read as written, not through the support matrix's labels,
-which name FNUZ fp8 as OCP fp8: gfx942 runs ``fp8e4m3_fnuz``, gfx950
+FNUZ fp8 is not folded into OCP fp8: gfx942 runs ``fp8e4m3_fnuz``, gfx950
 ``fp8e4m3``, and the two are not bit-compatible.
 """
 

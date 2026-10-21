@@ -14,9 +14,7 @@ as false. The dtypes are those the CPU reference executor registers
 pairs, and only fused into its matmul. By group:
 
 - ``dtype`` (exclusive): the dtype of ``x``: an OCP MX dtype (fp8, fp6 or
-  fp4) or a float one. The data_type is read as written, not through the
-  support matrix's labels, which name FNUZ fp8 as OCP fp8; MX is OCP only,
-  so a FNUZ ``x`` raises.
+  fp4) or a float one. MX is OCP only, so a FNUZ ``x`` raises.
 - ``scale_dtype`` (exclusive): ``fp8e8m0`` (a power of two, the MX scale)
   or ``fp32``.
 - ``block`` (exclusive): which dims of ``x`` are blocked. ``block_size``

@@ -69,22 +69,29 @@ from support_claim_schema import (  # noqa: E402
 # so it cannot be misread as "unsupported" inside a layout list.
 NO_LAYOUT = "n/a"
 
-# Graph dtype token -> matrix label.
+# Graph dtype token, as the serializer writes DataType (Common.hpp) -> matrix
+# label. One entry per enumerator but UNSET; test_support_features locks it to
+# data_types.fbs. FNUZ fp8 keeps its own label: gfx942 runs it, gfx950 runs
+# OCP fp8, and the two are not bit-compatible.
 DTYPE_LABELS = {
     "bfloat16": "bf16",
     "half": "fp16",
     "float": "fp32",
     "double": "fp64",
+    "int4": "int4",
     "int8": "int8",
     "int32": "int32",
     "int64": "int64",
     "uint8": "uint8",
     "boolean": "bool",
-    "e4m3_fnuz": "fp8e4m3",
-    "e5m2_fnuz": "fp8e5m2",
+    "fp4_e2m1": "fp4e2m1",
+    "fp6_e2m3": "fp6e2m3",
+    "fp6_e3m2": "fp6e3m2",
     "fp8_e4m3": "fp8e4m3",
     "fp8_e5m2": "fp8e5m2",
     "fp8_e8m0": "fp8e8m0",
+    "fp8_e4m3_fnuz": "fp8e4m3_fnuz",
+    "fp8_e5m2_fnuz": "fp8e5m2_fnuz",
 }
 
 # Layout tokens recognised in case ids and bundle path segments. Keyed by the

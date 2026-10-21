@@ -78,7 +78,13 @@ from support_features.feature_matrix import (
 )
 from support_features.feature_matrix import main as feature_matrix_main
 from support_features.feature_matrix import render as render_feature_matrix
-from support_matrix_units import ClaimUnit, collect_units, node_label, node_type_label
+from support_matrix_units import (
+    DTYPE_LABELS,
+    ClaimUnit,
+    collect_units,
+    node_label,
+    node_type_label,
+)
 
 # --------------------------------------------------------------------------
 # Schema reading
@@ -165,6 +171,51 @@ def test_catalog_accounts_for_every_schema_field(node_type: str) -> None:
     module = registry.OPS[node_type]
     fields = table_fields(module.SCHEMA_FILE, module.SCHEMA_TABLE)
     assert catalog_problems(module, fields) == []
+
+
+class TestDataTypeLabels:
+    """The matrix's dtype labels, and every catalog's, against the schema."""
+
+    def test_serializer_writes_every_schema_enumerator(self) -> None:
+        assert set(_serialized_enum("DataType")) == _schema_enum(
+            "data_types.fbs", "DataType"
+        )
+
+    def test_every_serialized_dtype_has_a_label(self) -> None:
+        serialized = set(_serialized_enum("DataType").values()) - {"unset"}
+        assert set(DTYPE_LABELS) == serialized
+
+    def test_labels_are_distinct(self) -> None:
+        # Two dtypes on one label would merge their rows: FNUZ fp8 into OCP.
+        assert len(set(DTYPE_LABELS.values())) == len(DTYPE_LABELS)
+
+    @pytest.mark.parametrize(
+        "name, mapping",
+        [
+            ("block_scale_dequantize.DTYPES", block_scale_dequantize.DTYPES),
+            (
+                "block_scale_dequantize.SCALE_DTYPES",
+                block_scale_dequantize.SCALE_DTYPES,
+            ),
+            ("block_scale_quantize.DTYPES", block_scale_quantize.DTYPES),
+            ("sdpa.DTYPES", sdpa.DTYPES),
+            ("sdpa_backward.DTYPES", sdpa_backward.DTYPES),
+        ],
+    )
+    def test_catalog_map_agrees_with_the_matrix(self, name: str, mapping) -> None:
+        # A catalog names a dtype as the matrix does, so one view's fp4e2m1
+        # is the other's.
+        assert {raw: DTYPE_LABELS.get(raw) for raw in mapping} == mapping, name
+
+    @pytest.mark.parametrize(
+        "name, labels",
+        [
+            ("convolution.DTYPES", convolution.DTYPES),
+            ("pointwise._PORT_DTYPES", pointwise._PORT_DTYPES),
+        ],
+    )
+    def test_catalog_labels_are_matrix_labels(self, name: str, labels) -> None:
+        assert set(labels) <= set(DTYPE_LABELS.values()), name
 
 
 class TestCatalogProblems:
@@ -1139,7 +1190,7 @@ class TestSdpaExtract:
         "dtype, expected",
         [
             ("fp8_e4m3", "dtype:fp8e4m3"),
-            # Not folded into OCP fp8, as the support matrix's labels fold it.
+            # Not folded into OCP fp8: the two are not bit-compatible.
             ("fp8_e4m3_fnuz", "dtype:fp8e4m3_fnuz"),
         ],
     )
@@ -4506,9 +4557,8 @@ class TestBlockScaleDequantizeExtract:
 
     @pytest.mark.parametrize(
         "dtype",
-        # FNUZ fp8 by the name the serializer writes, and by the support
-        # matrix's: neither is OCP, which MX requires.
-        ["fp8_e4m3_fnuz", "fp8_e5m2_fnuz", "e4m3_fnuz", "fp8_e8m0", "int8", None],
+        # FNUZ fp8 is not OCP, which MX requires.
+        ["fp8_e4m3_fnuz", "fp8_e5m2_fnuz", "fp8_e8m0", "int8", None],
     )
     def test_uncatalogued_x_dtype_raises(self, dtype: str | None) -> None:
         node, tensors = _bsdq()
@@ -4831,9 +4881,8 @@ class TestBlockScaleQuantizeExtract:
 
     @pytest.mark.parametrize(
         "dtype",
-        # FNUZ fp8 by the name the serializer writes, and by the support
-        # matrix's: neither is OCP, which MX requires.
-        ["fp8_e4m3_fnuz", "fp8_e5m2_fnuz", "e4m3_fnuz", "fp8_e8m0", "int8", None],
+        # FNUZ fp8 is not OCP, which MX requires.
+        ["fp8_e4m3_fnuz", "fp8_e5m2_fnuz", "fp8_e8m0", "int8", None],
     )
     def test_uncatalogued_y_dtype_raises(self, dtype: str | None) -> None:
         node, tensors = _bsq()
