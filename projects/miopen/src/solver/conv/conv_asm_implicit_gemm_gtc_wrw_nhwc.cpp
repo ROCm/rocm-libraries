@@ -407,8 +407,14 @@ ComputeWrwGemmKSplit(const ProblemDescription& problem,
 // of the last gemm-k split. They rely on the buffer range check to return zero for those rows,
 // but the row offsets are 32-bit, so a row whose offset reaches 4 GiB wraps back into the
 // tensor and adds real data to the weight gradient. Accept a config only if every row it can
-// read starts below 4 GiB in both activation tensors. One extra gemm-k block of margin covers
-// the last prefetch.
+// read ends at or below 4 GiB in both activation tensors.
+//
+// Workgroup bz reads exactly the gemm-k range [bz * gemmk_per_wg, (bz + 1) * gemmk_per_wg). The
+// kernels load one gemm-k block in the prologue and one per body iteration while s_kitr > 0,
+// with s_knum = round_up(gemmk_per_wg << log2(tensor_a_thread_lengths[1]), gemm_k_per_block),
+// and ComputeWrwGemmKSplit() rounds gemmk_per_wg up to nb_per_block, which is
+// gemm_k_per_block / tensor_a_thread_lengths[1]. So the end of the last split is the last row
+// read and no margin is needed.
 static bool
 WrwPaddedBatchFitsBufferOffsets(const ExecutionContext& ctx,
                                 const ProblemDescription& problem,
@@ -442,9 +448,7 @@ WrwPaddedBatchFitsBufferOffsets(const ExecutionContext& ctx,
     const size_t rows_per_gemm_k = config.nxe == 1 ? std::max(config.tensor_a_thread_lengths[1],
                                                               config.tensor_b_thread_lengths[1])
                                                    : 1;
-    const size_t nb_per_block =
-        config.nxe == 1 ? config.tensor_a_cluster_lengths[1] : config.gemm_k_per_block;
-    const size_t gemm_k_read = gemm_k_global_splits * gemmk_per_wg + nb_per_block;
+    const size_t gemm_k_read     = gemm_k_global_splits * gemmk_per_wg;
     const size_t rows_read =
         integer_divide_ceil(gemm_k_read, static_cast<size_t>(ho) * wo) * rows_per_gemm_k;
 
