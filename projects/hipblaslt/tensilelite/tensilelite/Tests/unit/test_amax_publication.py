@@ -13,11 +13,11 @@ import shutil
 import pytest
 import rocisa
 from rocisa.container import ContinuousRegister
-from Tensile.Common import IsaVersion
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Common import IsaVersion
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
