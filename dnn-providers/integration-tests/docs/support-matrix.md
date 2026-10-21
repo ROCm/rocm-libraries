@@ -27,7 +27,10 @@ with every bundle and every gfx target, which would mean a large diff on every
 sidecar edit and a file near the size at which GitHub stops rendering markdown.
 Run the command above to produce your own copy; it is git-ignored, so it will
 not show up in `git status`. The matrix is a pure view of the sidecars, so two
-people rendering the same checkout get byte-identical files.
+people rendering the same checkout get byte-identical files. Every
+`hipdnn-superbuild-ci` Linux run also renders it, with the overview and the
+feature matrix, and uploads all three as the `hipdnn-support-matrix` artifact,
+so you can download it from a PR's checks instead of rendering it.
 
 The renderer is three files in `scripts/`: `support_matrix_units.py` collects
 one unit per graph from the bundle tree, `support_matrix_markdown.py` renders
