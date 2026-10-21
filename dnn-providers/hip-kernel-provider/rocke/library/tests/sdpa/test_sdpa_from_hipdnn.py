@@ -238,17 +238,32 @@ def test_scale_tensor():
     assert "scale_tensor" in req.features()
 
 
-def test_by_value_scale_tensor_folds_to_value():
-    scale = _tensor(
-        10,
-        (1,),
-        "float",
-        is_runtime_pass_by_value=True,
-        value_type="Float32Value",
-        value=0.5,
-    )
+def test_compile_time_constant_scale_tensor_folds_to_value():
+    """A stored value that is not runtime pass-by-value never changes: bake it."""
+    scale = _tensor(10, (1,), "float", value_type="Float32Value", value=0.5)
     req = _request(inputs={"scale_tensor_uid": 10}, tensors=[scale])
     assert (req.scale_source, req.scale, req.scale_tensor) == ("value", 0.5, None)
+
+
+def test_runtime_by_value_scale_tensor_is_not_baked():
+    """The caller supplies a runtime scalar per call, so its stored value must not
+    be frozen into the request or split the cache key."""
+
+    def request(value):
+        scale = _tensor(
+            10,
+            (1,),
+            "float",
+            is_runtime_pass_by_value=True,
+            value_type="Float32Value",
+            value=value,
+        )
+        return _request(inputs={"scale_tensor_uid": 10}, tensors=[scale])
+
+    first, second = request(0.25), request(0.5)
+    assert first.scale_source == "tensor" and first.scale_tensor.by_value
+    assert "scale_tensor" in first.features()
+    assert first == second and first.normalized() == second.normalized()
 
 
 def test_scale_tensor_and_value_are_exclusive():

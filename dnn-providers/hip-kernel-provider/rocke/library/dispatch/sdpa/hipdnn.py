@@ -253,8 +253,13 @@ def from_hipdnn(
     if scale_value is not None and scale_entry is not None:
         raise ValueError("attn_scale tensor and attn_scale_value cannot both be set")
     if scale_entry is not None:
+        # A stored value that is not runtime pass-by-value is a compile-time
+        # constant, so it is a baked scale. A runtime pass-by-value scalar arrives
+        # as a host pointer at execution, so any stored value is only the
+        # build-time one: baking it would freeze a number the caller may change
+        # per call and split the cache key per value. That one stays a tensor.
         folded = scale_entry.get("value")
-        if scale_entry.get("is_runtime_pass_by_value") and folded is not None:
+        if folded is not None and not scale_entry.get("is_runtime_pass_by_value"):
             kwargs.update(scale_source="value", scale=float(folded))
         else:
             kwargs.update(scale_source="tensor", scale_tensor=_sdpa_tensor(scale_entry))
