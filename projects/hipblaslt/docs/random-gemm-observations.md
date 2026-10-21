@@ -120,3 +120,9 @@ no epilogue or block scales, and `hpl` initialization. The reduced K192 case
 selects a 32×16 kernel and the original shape selects a 256×128 kernel; neither
 is the 256×160 custom schedule in #14147. These passes therefore establish
 shape execution, not a before/after verification of that particular race.
+
+The builds also differ: the race reproducer records source version `1ae074b37e89`,
+while the shipping benchmark prints Git version `4126b24e`. The reproducer
+explicitly selects the reported kernel from a one-solution library; these runs
+use heuristic selection from the full library. No comparison with the same
+version and selection method has isolated the effect of the version difference.
