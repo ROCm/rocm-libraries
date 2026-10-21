@@ -34,8 +34,7 @@
 #endif
 
 #include _THRUST_STD_INCLUDE(utility)
-
-#include <stdexcept>
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN
 

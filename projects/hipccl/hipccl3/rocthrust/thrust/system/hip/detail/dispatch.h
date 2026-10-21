@@ -28,13 +28,13 @@
 #endif // no system header
 
 #include <thrust/detail/integer_math.h>
-#include <thrust/detail/libcxx_wrapper/std/detail/libcxx/include/stdexcept.h>
 #include <thrust/detail/preprocessor.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(cstdint)
 #  include _THRUST_STD_INCLUDE(limits)
 #  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 #endif
 
 #include <string>

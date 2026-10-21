@@ -153,16 +153,10 @@ _THRUST_STD_NAMESPACE_BEGIN
 THRUST_NAMESPACE_BEGIN
 #endif
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-template <class... Ts>
-struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
-{};
-#endif
-
 // define tuple_size, tuple_element, etc.
 template <class... Ts>
 struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-    : integral_constant<size_t, sizeof...(Ts)>
+    : std::integral_constant<size_t, sizeof...(Ts)>
 {};
 
 template <size_t Id, class... Ts>

@@ -17,7 +17,7 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-#  include _THRUST_STD_INCLUDE(detail/libcxx/include/__config)
+#  include _THRUST_STD_INCLUDE(detail/__config)
 
 #  define THRUST_CTAD_SUPPORTED_FOR_TYPE(_ClassName) _LIBCUDACXX_CTAD_SUPPORTED_FOR_TYPE(_ClassName)
 

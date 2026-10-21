@@ -37,7 +37,7 @@
 
 #include <nv/target>
 
-#include <stdexcept> // for std::runtime_error
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN
 

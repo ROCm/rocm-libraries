@@ -640,18 +640,10 @@ THRUST_HOST_DEVICE zip_iterator(Iterators...) -> zip_iterator<_THRUST_STD::tuple
 //! \return A newly created \p zip_iterator which zips the iterators encapsulated in \p t.
 //! \see zip_iterator
 template <typename... Iterators>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 inline THRUST_HOST_DEVICE zip_iterator<_THRUST_STD::tuple<Iterators...>>
 make_zip_iterator(_THRUST_STD::tuple<Iterators...> t)
-#else
-inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_iterator(thrust::tuple<Iterators...> t)
-#endif
 {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   return zip_iterator<_THRUST_STD::tuple<Iterators...>>(t);
-#else
-  return zip_iterator<thrust::tuple<Iterators...>>(t);
-#endif
 }
 
 //! \p make_zip_iterator creates a \p zip_iterator from
@@ -662,17 +654,9 @@ inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_ite
 //!
 //! \see zip_iterator
 template <typename... Iterators>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 inline THRUST_HOST_DEVICE zip_iterator<_THRUST_STD::tuple<Iterators...>> make_zip_iterator(Iterators... its)
-#else
-inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_iterator(Iterators... its)
-#endif
 {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  return make_zip_iterator(_THRUST_STD::make_tuple(its...));
-#else
-  return make_zip_iterator(thrust::make_tuple(its...));
-#endif
+    return zip_iterator<_THRUST_STD::tuple<Iterators...>>(_THRUST_STD::make_tuple(its...));
 }
 
 //! \} // end fancyiterators

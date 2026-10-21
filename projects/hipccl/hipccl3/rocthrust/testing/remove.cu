@@ -22,8 +22,6 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/remove.h>
 
-#include <stdexcept>
-
 #include <unittest/unittest.h>
 
 template <typename T>

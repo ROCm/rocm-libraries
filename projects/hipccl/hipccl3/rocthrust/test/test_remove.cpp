@@ -22,8 +22,6 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/remove.h>
 
-#include <stdexcept>
-
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
