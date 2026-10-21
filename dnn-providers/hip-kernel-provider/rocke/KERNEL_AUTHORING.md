@@ -88,7 +88,8 @@ when no device). Scope while iterating with:
 - `--steps <subset>` — pick stages, e.g. `--steps numeric` (just the on-GPU
   correctness lane) or `--steps gate,parity`.
 - `--op <operator>` — scope to one operator/family across parity, pytest,
-  numeric, and the gate, e.g. `--steps numeric --op fmha_bwd`.
+  numeric, and the gate, e.g. `--steps numeric --op fmha_bwd`. The pinned GPU
+  reference suites are never scoped; the summary says when they did not run.
 - `--flavor <llvm>` — pin one LLVM flavor; `--list` — dry-run.
 
 This replaces hand-maintaining a list of tests to run.
