@@ -146,10 +146,15 @@ def test_identities_are_unique(jobs):
     assert len(hashes) == len(set(hashes))
 
 
-@pytest.fixture
-def cache(tmp_path, jobs):
-    """A cache holding every job with a placeholder binary."""
-    c = KernelCache(tmp_path, _ARCH)
+@pytest.fixture(scope="module")
+def cache(tmp_path_factory, jobs):
+    """A cache holding every job with a placeholder binary.
+
+    Filling it is the slow part of this file, and the tests that take it only
+    read it (the ones that add or discard entries build their own), so the
+    module shares one.
+    """
+    c = KernelCache(tmp_path_factory.mktemp("direct_cache"), _ARCH)
     for job in jobs:
         c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
     return c
@@ -785,6 +790,9 @@ def test_dgrad_rtc_serves_any_channels_its_tiles_fit(cache, groups, cpg, kpg):
             or knobs["k_atoms"] not in dks.dgrad_rtc_k_atoms(wk, k32)
             or knobs["m_tiles"] not in dks.DGRAD_RTC_M_TILES
             or dks.dgrad_rtc_spills(knobs, 3, 3, _ARCH)
+            # The preload budget the enumerator also applies: past it comgr's
+            # AGPR spilling has miscomputed dX.
+            or direct_mfma_knobs_reason(problem, knobs)
         )
         assert why, f"JIT config {knobs} has no cached binary"
 
