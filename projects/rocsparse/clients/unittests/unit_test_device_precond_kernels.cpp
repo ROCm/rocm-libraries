@@ -177,8 +177,9 @@ namespace
         expect_small_residual(ilu_pattern_residual(a, got), a);
     }
 
-    // spildlt0 with I / J indices. `boost` sets the numeric boost (read from the matrix
-    // info) with a tolerance that replaces every pivot by one; `copy_diag` also requests D
+    // spildlt0 with I / J indices. `boost` sets the numeric boost, on both the matrix info
+    // and the descriptor because the library has read each of them, with a tolerance
+    // that replaces every pivot by one; `copy_diag` also requests D
     // in a separate array. The singularity tolerance of the exact-pivot case is above every
     // pivot.
     template <typename T, typename I, typename J>
@@ -226,6 +227,21 @@ namespace
             numeric->set_tol_datatype(dt_of<real_t>());
             numeric->set_tol(&boost_tol);
             numeric->set_val(&boost_val);
+        }
+        const int32_t boost_enable  = 1;
+        const double  descr_tol     = 1.0e20;
+        const void*   boost_val_ptr = &boost_val;
+        if(boost)
+        {
+            ASSERT_EQ(set_value<Kind::ildlt>(
+                          handle, descr, In::boost_enable, &boost_enable, sizeof(int32_t)),
+                      rocsparse_status_success);
+            ASSERT_EQ(
+                set_value<Kind::ildlt>(handle, descr, In::boost_tol, &descr_tol, sizeof(double)),
+                rocsparse_status_success);
+            ASSERT_EQ(
+                set_value<Kind::ildlt>(handle, descr, In::boost_val, boost_val_ptr, sizeof(void*)),
+                rocsparse_status_success);
         }
 
         size_t analysis_size = 0, compute_size = 0;
