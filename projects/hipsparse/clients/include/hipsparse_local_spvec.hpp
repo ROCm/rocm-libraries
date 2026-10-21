@@ -41,8 +41,8 @@ public:
                         hipsparseIndexBase_t idxBase,
                         hipDataType          valueType)
     {
-        const hipsparseStatus_t status = hipsparseCreateSpVec(
-            &descr, size, nnz, indices, values, idxType, idxBase, valueType);
+        const hipsparseStatus_t status
+            = hipsparseCreateSpVec(&descr, size, nnz, indices, values, idxType, idxBase, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
             if(descr != nullptr)
