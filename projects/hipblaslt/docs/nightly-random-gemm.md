@@ -1,129 +1,70 @@
-# Nightly random GEMMs: script design
+# Nightly random GEMMs
 
-Status: initial design. The sampling distribution and executable runner are pending.
+The runner in [run_random_hipblaslt_gemms.py](../../../.github/scripts/run_random_hipblaslt_gemms.py)
+executes GEMMs through rocJITsu entirely on CPUs. No physical GPU is required.
+Bench chooses its kernel through the ordinary heuristic; the runner does not
+read solution metadata or select solution indices. Nightly workflow integration
+is pending.
 
-The nightly test samples GEMM inputs from a fixed distribution and runs them with
-`hipblaslt-bench` under rocJITsu entirely on CPUs. It requires no physical GPU.
-A fixed seed gives the same ordered inputs on each night.
-The bench client chooses a kernel through its ordinary heuristic. The script
-does not read solution metadata or select solution indices.
+## Provisional sampling
 
-## Script interface
+Iterations start at 1. Iteration `i` uses `M=N=K=i`, alternating FP32 and BF16
+storage, starting with FP32. Computation is FP32, with no transposes, one batch,
+alpha 1 and beta 0. This sequence is a placeholder for the eventual distribution.
+The separate `sample_gemm(iteration, rng)` function is the place to change it.
 
-Proposed location: `.github/scripts/run_random_hipblaslt_gemms.py`.
+The script accepts a seed, but this provisional sampler does not use it.
+Execution and logging do not draw random values. Increasing the case count
+preserves the existing prefix; `--case` reproduces one 1-based iteration.
 
-The script accepts the bench executable, seed, case count, per-case timeout and
-output directory. The case count is configurable, with a default of 100; seed 0
-is proposed. The timeout will be chosen once the workload sizes are known.
-A dry-run option writes inputs without executing them. A case option reproduces
-one position in the sequence.
+## Running
 
-The caller supplies the ROCm environment, matching device library and
-rocJITsu executable/configuration. rocJITsu executes GPU code under emulation
-for race detection. Each case runs bench through rocJITsu with race reporting
-enabled and a separate directory for its detector output. The runner does not
-build clients or download libraries.
+Supply the matching ROCm runtime/device library, bench client with its converter
+and template, and a rocJITsu executable with race and logging plugins. The Python
+interpreter needs PyYAML for the bench converter. The config must describe CPU
+emulation, such as rocJITsu's `gfx942_cdna3_kmd.json`.
 
-## Sampling and execution
-
-Keep one sampling function separate from the runner:
-
-```python
-def sample_gemm(rng):
-    # Return one complete bench input using the agreed distribution.
-    ...
-
-def main():
-    rng = random.Random(args.seed)
-    counts = Counter()
-    for case_number in range(args.count):
-        problem = sample_gemm(rng)
-        save_input(case_number, problem)
-        if not args.dry_run:
-            outcome = process_case(case_number, problem)
-            counts[outcome] += 1
-    write_summary(counts)
+```sh
+HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx942 python .github/scripts/run_random_hipblaslt_gemms.py \
+    --bench /path/to/hipblaslt-bench --rocjitsu /path/to/rocjitsu \
+    --config /path/to/gfx942_cdna3_kmd.json --count 100 --seed 0 \
+    --output /path/to/results
 ```
 
-The distribution will define dimensions, storage and compute types,
-transposes, scalars, batching, strides and any optional output operations.
-There is no provisional distribution in this draft. Execution and logging
-never draw from the sampling generator. Increasing the case count preserves
-the existing prefix. Changing the distribution can change that sequence;
-saved inputs remain the authoritative reproduction of an earlier run.
+`--count` defaults to 100 and `--timeout` defaults to 180 seconds per command.
+`--dry-run` writes the inputs without requiring bench or rocJITsu. The output
+directory must be new so stale detector logs cannot affect results. Reproduce
+one case with the same count/seed and `--case 42` in another output directory.
 
-Run cases sequentially, with one bench process per case. Each input is a YAML
-list containing one record with ordinary heuristic selection and one requested
-algorithm. Enable numerical checks and `norm_check_assert` in that record: the
-direct command-line `--verify` path computes diagnostics but disables that assertion.
-Use the matching bench client's `--yaml` conversion environment.
+## The loop
 
-Use zero warmup iterations, fixed timing and one timed iteration initially.
-Numerical validation also executes the GEMM. This avoids depending on a client
-change to make zero timed iterations suppress execution. This test measures
-correctness rather than performance, and does not require exactly one dispatch.
+For each sampled GEMM, the script writes one bench YAML record, converts it with
+the matching bench template, then runs bench under rocJITsu. The active Python
+interpreter performs conversion, avoiding bench's build-time Python dependency.
+Each case has its own input, command, rocJITsu config, conversion/bench/detector
+logs and result. Execution is sequential, with a separate process per case.
 
-## Known failures and counts
+The input enables numerical assertions and all-close checking. A pass requires
+a successful exit, one numerical result matching the input, and the selected
+GEMM kernel in the race-detector log, with no race reports or rocJITsu warnings.
+The runner uses zero warmup iterations and one timed iteration; validation also
+executes the GEMM. The test does not require exactly one dispatch.
 
-Initially assume there are no kernels with known races. Execute every sampled
-GEMM and treat any race report as a failure. There is no genuine-race exclusion
-list in the initial runner. This is a starting assumption, not evidence that
-every kernel is free of races.
+Individual case failures and timeouts are counted, and later cases continue.
+The final `summary.json` reports requested/sampled counts, passed, failed and
+blacklisted totals. Any failure makes the script exit unsuccessfully. An
+incomplete run is marked `complete: false`.
 
-The rocJITsu blacklist starts empty. Add entries only for confirmed
-core-emulator or race-detector-plugin problems. Each entry identifies a
-complete GEMM input, the observed failure and its tracker. A race report alone
-does not establish a rocJITsu bug; investigate it before adding an exclusion.
+Initially there are no known kernel races and the rocJITsu blacklist is empty.
+Every case executes, every race report is a failure, and `blacklisted` is zero.
+Confirmed emulator or detector bugs can later be tracked by complete GEMM
+parameters and a tracker. The runner never replaces rejected inputs or retries
+failures. Saved inputs reproduce earlier runs even after the sampler changes;
+the chosen kernel can change when the library changes.
 
-Identify entries by their GEMM parameters rather than a solution index or just
-a seed and case number. Changing the distribution must not make an old entry
-match an unrelated input. Keep the blacklist empty until a failure is confirmed;
-do not import unrelated historical exclusions automatically.
+Focused runner tests cover sequence/reproduction, full-loop failure counting,
+missing/invalid numerical results, missing race instrumentation and timeouts:
 
-Process all requested samples and print these totals:
-
-| Outcome | Meaning |
-| --- | --- |
-| Known rocJITsu problem | Input listed for a confirmed emulator or detector bug |
-| Passed | Executed and passed both numerical checking and race detection |
-| Unexpected failure | Unlisted failure, timeout, no solution or missing result |
-
-Every sample contributes to exactly one total. Known failures consume a sample
-slot; they are not replaced with another random input. The summary includes the
-number sampled so the outcome counts can be checked against the requested
-count. Being listed or skipped never establishes a pass; a pass requires execution
-and successful numerical and race checks.
-
-Continue after individual case failures to collect totals for the whole loop.
-An unexpected failure makes the final script exit unsuccessful. Failure to
-start the runner, load its configuration or write results aborts the run and
-reports how many samples were processed.
-
-With an empty blacklist, no case is skipped or classified as a known failure.
-Decide how to handle listed cases when the first confirmed rocJITsu problem
-is added; that decision does not hold up the initial runner.
-
-## Results and reproduction
-
-Write the input before launching each case. Save its bench command and combined
-stdout/stderr alongside it. Print progress with the case number and GEMM
-parameters, so a stalled or failing case is identifiable in the job log.
-Record the seed, sampling-code version, Python version and bench version once
-for the run. The selected kernel may change when the library changes, even
-when the sampled input stays fixed.
-
-A pass requires a completed numerical result for the requested input, a
-successful process exit and no race reports. An unlisted no-solution response,
-missing result, numerical failure, timeout or race report fails the run. A
-race report remains a failure even when bench exits successfully. Do not
-silently resample rejected inputs or retry failures. Preserve failed cases'
-files for reproduction and continue the loop.
-
-## Next steps
-
-1. Specify the distribution.
-2. Implement the sampling function and sequential runner on this branch.
-3. Check deterministic prefixes, reproduction and failure propagation with
-   small inputs, then run a focused test through rocJITsu.
-4. Add a nightly caller using the existing artifact setup and upload the input
-   and result directory even when the job fails.
+```sh
+python -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
+```
