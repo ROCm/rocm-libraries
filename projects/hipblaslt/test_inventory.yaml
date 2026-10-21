@@ -207,6 +207,38 @@ suites:
     tickets: []
     workstreams: [cadence]
 
+  - id: hipblaslt-kernel-corpus
+    product: hipblaslt
+    kind: numerical_correctness
+    mode: default
+    oracle: "fast_check exact checks, every shipped solution pinned by index; a CPU-reference sample per solution planned"
+    current:
+      - system: local
+        lane: cluster
+        cadence: on_demand
+        archs: [gfx90a, gfx942, gfx950, gfx1100, gfx1101, gfx1200, gfx1201]
+        gates: false
+        notes: "First smoke pass, run by hand on a GPU cluster against TheRock CI artifacts. Not in develop yet."
+        evidence: ["doc:TESTING.md#kernel-corpus-testing"]
+        action: change
+    target:
+      - {system: therock, cadence: presubmit, archs: "every architecture with pull-request runners", notes: "Smoke on every kernel the change affects, boundary up to a cap"}
+      - {system: therock, cadence: postsubmit, archs: "every architecture with pull-request runners", notes: "Every kernel changed since the last postsubmit run"}
+      - {system: therock, cadence: nightly, archs: "every supported architecture", notes: "Changed kernels, a rotating seventh of the corpus, nightly stress checks"}
+      - {system: therock, cadence: weekly, archs: "every supported architecture", notes: "Smoke over the whole corpus, a boundary slice, deep repeats on gfx1250"}
+      - {system: local, cadence: weekly, notes: "Cluster sweep for the devices CI has no runner for, such as MI355X, MI300A and MI308X"}
+    disposition: new
+    rationale: >-
+      The only suite that runs the kernels that ship, rather than whichever ones the client suite's
+      problems happen to select. Its first pass found ROCM-33314. Budgets are starting proposals until
+      each profile has been timed. Once it runs in CI, the kernel-level cases in the client suite
+      become candidates to retire, one at a time and with evidence.
+    tickets: [AIHPBLAS-3894]
+    workstreams: [fill_the_holes]
+    open_questions:
+      - "Who owns it, and where its harness lives once it lands in develop."
+      - "Whether hipSPARSELt, which also ships TensileLite kernels, shares this corpus."
+
   - id: hipblaslt-tuning-store-test
     product: hipblaslt
     kind: host_unit
