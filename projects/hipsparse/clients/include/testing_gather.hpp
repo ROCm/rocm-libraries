@@ -61,11 +61,9 @@ void testing_gather_bad_arg(const Arguments& argus)
     float* dy     = (float*)dy_managed.get();
 
     // Structures
-    hipsparseSpVecDescr_t x;
+    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, dataType);
     hipsparseDnVecDescr_t y;
 
-    verify_hipsparse_status_success(
-        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, dataType), "Success");
     verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, dataType), "Success");
 
     // Gather
@@ -76,7 +74,6 @@ void testing_gather_bad_arg(const Arguments& argus)
                                             "Error: x is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpVec(x), "Success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
 #endif
 }
@@ -121,11 +118,9 @@ void testing_gather(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(T) * size, hipMemcpyHostToDevice));
 
     // Create structures
-    hipsparseSpVecDescr_t x;
+    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, dataType);
     hipsparseDnVecDescr_t y;
 
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, dataType));
     CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, dataType));
 
     if(argus.unit_check)
@@ -175,7 +170,6 @@ void testing_gather(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 #endif
 }

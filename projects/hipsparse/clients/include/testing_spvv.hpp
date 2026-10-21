@@ -67,11 +67,9 @@ void testing_spvv_bad_arg(const Arguments& argus)
     Y*   dy     = (Y*)dy_managed.get();
 
     // Structures
-    hipsparseSpVecDescr_t x;
+    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, xType);
     hipsparseDnVecDescr_t y;
 
-    verify_hipsparse_status_success(
-        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType), "Success");
     verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, yType), "Success");
 
     // SpVV bufferSize
@@ -111,7 +109,6 @@ void testing_spvv_bad_arg(const Arguments& argus)
         "Error: buffer is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpVec(x), "Success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
 
     CHECK_HIP_ERROR(hipFree(buffer));
@@ -168,11 +165,9 @@ void testing_spvv(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(Y) * size, hipMemcpyHostToDevice));
 
     // Create structures
-    hipsparseSpVecDescr_t x;
+    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, xType);
     hipsparseDnVecDescr_t y;
 
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType));
     CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, yType));
 
     T hresult;
@@ -255,7 +250,6 @@ void testing_spvv(Arguments argus)
 
     CHECK_HIP_ERROR(hipFree(externalBuffer));
 
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 
 #endif
