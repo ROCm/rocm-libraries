@@ -163,7 +163,7 @@ these changes in order, under `library/tests/` unless shown otherwise:
 | `<operation>_reference/architectures/<arch>/baseline_lock.json` | The reviewed `qualification-lock.json` from qualifying on that processor ([steps 2 to 5](gpu-reference-workflow.md#2-prepare-reproducible-qualification-inputs)) |
 | `reference_bundles/<operation>/<arch>.tar.gz` and its `.dvc` pointer | Pack the archive and track it with `dvc add`. Commit the pointer and any `.gitignore` change that `dvc add` makes, not the archive, and upload the archive |
 | `platform/cmake/PublishedGpuReferences.cmake` (from the rocKE root) | Add the processor to `ROCKE_PUBLISHED_<OPERATION>_ARCHITECTURES` |
-| The operation guide and the [test inventory](../../../../platform/tests/README.md#installed-pinned-reference-suites) | Describe the new coverage |
+| The operation guide | Describe the new coverage; the [test inventory](../../../../platform/tests/README.md#installed-pinned-reference-suites) needs no edit for a new architecture |
 
 The `rocke_<operation>_gpu_<arch>_pytest` CTest, its installation path, and its
 selection by the provider's category YAML follow automatically from the

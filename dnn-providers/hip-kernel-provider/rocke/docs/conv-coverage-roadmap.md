@@ -12,9 +12,13 @@ kernel, and successful GPU numerical execution are different evidence levels.
 
 | Direction | gfx942 | gfx950 |
 |---|---|---|
-| Forward | 32 pinned cases; explicit 64x64x64 configuration | 32 pinned cases; production implicit-GEMM selection |
-| Backward-data | 12 explicit-spec cases | 10 production implicit-GEMM cases and 2 explicit K=33 cases |
-| Backward-weight | 14 explicit cases; atomic and two-stage split-K | 14 explicit cases; atomic, two-stage, and merged groups |
+| Forward | Pinned cases; explicit 64x64x64 configuration | Pinned cases; production implicit-GEMM selection |
+| Backward-data | Explicit-spec cases | Production implicit-GEMM cases, except explicit K=33 cases |
+| Backward-weight | Explicit cases; atomic and two-stage split-K | Explicit cases; atomic, two-stage, and merged groups |
+
+From the rocKE root, `python library/tests/run_conv_reference.py cases --arch <arch>`
+lists the pinned forward cases. The gradient cases are in
+[`gradient_cases.py`](../library/tests/conv_reference/gradient_cases.py).
 
 The [reference guide](../library/tests/conv_reference/docs/conv-test-reference.md) owns the numerical contracts.
 The [validation record](conv-six-lane-validation.md) distinguishes historical

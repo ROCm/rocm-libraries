@@ -116,7 +116,7 @@ the strategy's biggest holes live (see
   exercise end-to-end kernel wiring for real model shapes.
 - The pinned SDPA reference lane qualifies old rocKE
   against independent NumPy SDPA offline, then executes old and current rocKE
-  on gfx942, gfx950, gfx1151, or gfx1201 using a conservative triangle-inequality
+  on each published architecture using a conservative triangle-inequality
   error budget. The gfx1151/gfx1201 cohorts exercise standalone FP16 WMMA kernels. The gfx1201
   replacement compiles for `gfx12-generic`; gfx1200 uses the same compile target
   but remains qualification-only until its own certificate and archive exist. Required
@@ -179,25 +179,24 @@ the strategy's biggest holes live (see
   When reference installation is enabled, CMake installs each pair in
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
-  not publication status. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201,
-  and convolution/gfx942 and convolution/gfx950 are published. Adding another
-  published pair requires its adapter, independently qualified lock, retrievable
-  bundle, and publication entry.
+  not publication status; that CMake file is the list of published pairs. Adding
+  another published pair requires its adapter, independently qualified lock,
+  retrievable bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
   adapters into the new bundle. Existing bundles keep their original frozen code.
 
 - The [convolution reference lane](library/tests/conv_reference/docs/conv-test-reference.md) implements the
-  same offline qualification and GPU replay workflow for bounded gfx942 and gfx950
-  forward cohorts, with 32 cases each. It shares artifact, digest, budget, snapshot,
-  and worker transport code with SDPA. Both published bundles are installed by default
-  alongside SDPA. Verify replacement candidates with explicit bundle and lock
-  paths through the offline CLI. Both operations use NumPy and ROCm without
-  Torch in CI.
+  same offline qualification and GPU replay workflow for bounded forward cohorts.
+  It shares artifact, digest, budget, snapshot, and worker transport code with
+  SDPA. Its published bundles are installed by default alongside SDPA's. Verify
+  replacement candidates with explicit bundle and lock paths through the
+  offline CLI. Both operations use NumPy and ROCm without Torch in CI.
   Optional Torch cross-checking belongs only to offline qualification: CPU Torch
   for convolution, and CPU or ROCm GPU Torch for SDPA.
-  Separate gradient tests run 12 dgrad and 14 wgrad cases per processor against
-  live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md) distinguishes
-  production-selected instances from explicit kernel configurations.
+  Separate gradient tests run the dgrad and wgrad cases in
+  `library/tests/conv_reference/gradient_cases.py` on gfx942 and gfx950
+  against live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md)
+  distinguishes production-selected instances from explicit kernel configurations.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -699,18 +698,19 @@ compatibility, the baseline lifecycle, and a glossary.
 
 ## Pinned convolution references
 
-The gfx942 and gfx950 forward suites each run 32 numerical cases and three
-failure controls without Torch. Both bundles are published and installed by
-default for provider artifact builds. See the [convolution reference guide](library/tests/conv_reference/docs/conv-test-reference.md)
+Each published forward suite runs the cases its architecture enrolls and three
+failure controls without Torch; from the rocKE root,
+`python library/tests/run_conv_reference.py cases --arch <arch>` lists them.
+Published bundles are installed by default for provider artifact builds. See the
+[convolution reference guide](library/tests/conv_reference/docs/conv-test-reference.md)
 for the numerical contract and the [shared workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
 for qualification, publication, and candidate verification.
 
-From an installed provider test directory, run the matching suite:
+From an installed provider test directory, run the convolution suites; the
+suites of other processors skip as described below:
 
 ```bash
-ctest -R '^rocke_conv_gpu_gfx942_pytest$' --output-on-failure
-# On gfx950:
-ctest -R '^rocke_conv_gpu_gfx950_pytest$' --output-on-failure
+ctest -R '^rocke_conv_gpu_gfx[0-9a-z]+_pytest$' --output-on-failure
 ```
 
 The shared selector consumes TheRock's concrete `AMDGPU_TARGETS` and detected
@@ -720,9 +720,10 @@ processor or authorize reuse of another processor's certificate.
 
 Gradient host checks join `rocke_library_conv_pytest`; gradient GPU checks join
 `rocke_library_gpu_pytest`. They use live NumPy oracles, including atomic and
-two-stage execution, with three repetitions per case. Inspect that all 26
-matching gradient cases executed; aggregate passes in the omnibus suite can
-include host checks and skip unrelated GPU tests. For a focused installed run:
+two-stage execution, with three repetitions per case. Inspect that every
+gradient case in `library/tests/conv_reference/gradient_cases.py` executed on
+the matching processor; aggregate passes in the omnibus suite can include host
+checks and skip unrelated GPU tests. For a focused installed run:
 
 ```bash
 python -m pytest tests/library/tests/test_conv_gradient_correctness.py \
@@ -762,15 +763,18 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx(942|950))_pytest$' --output-on-failure --no-tests=error
+ctest -V -R '^rocke_(reference_common|[a-z0-9_]+_reference_unit|[a-z0-9_]+_gpu_gfx[0-9a-z]+)_pytest$' --output-on-failure --no-tests=error
 ```
 
-Inspect the selected tests: disabling reference installation omits the GPU
-entries, and entries for other architectures skip. A successful CTest command
-alone does not establish GPU coverage. On the matching GPU, expect eight SDPA
-comparisons on gfx942, gfx1151, or gfx1201, or seven on gfx950, plus three failure
-controls. Each matching convolution entry adds 32 comparisons and three failure
-controls. Confirm the matching entries executed with zero selected GPU skips.
+The patterns follow the `rocke_<operation>_reference_unit_pytest` and
+`rocke_<operation>_gpu_<arch>_pytest` names, so they need no edit when a pair
+is published. Inspect the selected tests: disabling reference installation omits
+the GPU entries, and entries for other architectures skip. A successful CTest
+command alone does not establish GPU coverage. On the matching GPU, each
+operation's entry runs one comparison for every case that
+`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists
+from the rocKE root, plus three failure controls. Confirm the matching entries
+executed with zero selected GPU skips.
 
 For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
 entry with code 77. There is no installed gfx1200 pinned entry until its own
@@ -778,9 +782,9 @@ archive is qualified and published. See
 [gfx120X family selection](library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
 for the distinction between a valid skip and GPU reference coverage.
 
-Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
-and two convolution bundles (gfx942, gfx950). Fetch all six DVC archives before configuring;
-missing published archives fail configuration.
+Default publication supplies one bundle for each pair that
+`PublishedGpuReferences.cmake` lists. Fetch all of their DVC archives before
+configuring; missing published archives fail configuration.
 
 The generic gfx1201 replacement is published. A fresh anonymous download matches
 its committed DVC pointer and baseline lock. From the rocm-libraries root:

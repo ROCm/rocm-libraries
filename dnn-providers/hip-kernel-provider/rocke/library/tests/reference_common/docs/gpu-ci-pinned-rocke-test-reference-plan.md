@@ -11,10 +11,11 @@ and the [reference workflow](gpu-reference-workflow.md) for all authoring and pu
 and [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
-SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
-each on gfx1151 and gfx1201. Convolution has 32 qualified forward cases on each of
-gfx942 and gfx950; the operation guides and DVC pointers record the current bundle
-identities. All six pairs are enrolled for default installation. Both operations share
+Each architecture adapter's `CASES` defines its cohort; from the rocKE root,
+`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists it,
+and [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
+lists the pairs enrolled for default installation. The operation guides and DVC
+pointers record the current bundle identities. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging were validated in CI for
 gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
@@ -34,8 +35,8 @@ five pairs then published. These checks used a CMake installation of the Python
 reference suites without native binaries, and local archive transport; native
 provider execution needs separate coverage.
 Further architectures, pinned gradient replay, KDA, and GDN remain future work.
-Separate convolution gradient suites check 12 dgrad and 14 wgrad cases per
-processor directly against live NumPy oracles; see the [coverage guide](../../../../docs/conv-coverage-roadmap.md).
+Separate convolution gradient suites check dgrad and wgrad cases on gfx942 and
+gfx950 directly against live NumPy oracles; see the [coverage guide](../../../../docs/conv-coverage-roadmap.md).
 
 Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
@@ -289,7 +290,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
 | `operation.json` | Operation id that bundle manifests declare; a package with `architectures/registry.json` is registered as an operation without any shared list |
-| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942/gfx950 for convolution |
+| `architectures/registry.json` | Processors enrolled for qualification, verification, and the `cases` and `diff` commands; enrollment does not publish a pair |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
 | `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; `wmma.py` also defines the cohort shared by the gfx1151, gfx1200, and gfx1201 adapters, so editing it requires requalifying every published WMMA pair. Dense adapters retain their own cohorts, and every adapter its candidate selection |
@@ -301,7 +302,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
 | `../reference_common/targets.py` / `pytest_support.py` | Physical processor identity and suite selection, independent of generic compiler/catalog targets |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 and convolution/gfx950 |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
@@ -331,11 +332,12 @@ matching test artifact. Do not place references in release `engines/arch_content
 or leave architecture-specific code objects in the generic test tree.
 
 One archive per operation/architecture keeps qualification and updates independent.
-The gfx942 archive currently contains 1,900,516 compressed bytes; most extracted
-bytes are the frozen Python runtime, not the eight code objects. Additional cases
-usually add kernels and manifest records, but runtime/runner changes and new
-operation/architecture archives can add overhead too. Do not assume all future
-growth is kernel payload or introduce cross-bundle deduplication prematurely.
+When published, the gfx942 archive contained 1,900,516 compressed bytes; most
+extracted bytes were the frozen Python runtime, not its code objects. Its DVC
+pointer records the current size. Additional cases usually add kernels and
+manifest records, but runtime/runner changes and new operation/architecture
+archives can add overhead too. Do not assume all future growth is kernel
+payload or introduce cross-bundle deduplication prematurely.
 
 ## 6. Extend coverage deliberately
 
@@ -356,7 +358,7 @@ The numerical requirements below supplement the common workflow.
 The operation-specific paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
 `engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
 now used by the [forward-convolution infrastructure](../../conv_reference/docs/conv-test-reference.md).
-That harness has published bounded gfx942 and gfx950 forward cohorts. Further convolution coverage still needs:
+That harness has published bounded forward cohorts. Further convolution coverage still needs:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
    separately. Record dimensions, groups, strides, padding, dilation, layouts,

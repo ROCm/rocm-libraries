@@ -8,20 +8,23 @@ SPDX-License-Identifier: MIT
 The convolution harness compares current GPU kernels with precompiled baseline
 kernels qualified offline against an independent NumPy reference. Ordinary
 verification computes neither CPU reference answers nor replacement budgets and
-requires no Torch. Each of gfx942 and gfx950 has a published 32-case forward
-bundle with its own trusted lock and DVC pointer. Gradients use separate live
-NumPy checks and do not reuse the forward certificate.
+requires no Torch. Each architecture in
+[`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
+has a published forward bundle with its own trusted lock and DVC pointer.
+Gradients use separate live NumPy checks and do not reuse the forward certificate.
 
 See the [shared compatibility and baseline policy](../../reference_common/docs/README.md#kernel-arguments-and-compatibility)
 for kernel argument changes, frozen replay, and when a baseline must be replaced.
 
 ## Coverage and execution
 
-Each forward cohort contains FP16 and BF16 cases for sixteen geometries:
+The forward cohorts contain FP16 and BF16 cases for these geometries:
 padded 3x3, pointwise 1x1, stride-2, dilation-2, groups=2, asymmetric spatial
 dimensions, K=96, K=33, C=33, stem C=3, larger spatial/channel dimensions,
 5x5 reduction, odd per-group channels, depthwise, anisotropic filter, and one
-output pixel. Exact geometry lives in the architecture adapters.
+output pixel. Exact geometry lives in the architecture adapters' `CASES`; from
+the rocKE root, `python library/tests/run_conv_reference.py cases --arch <arch>`
+lists them.
 Inputs are NHWC, weights KYXC with C/groups channels, and outputs NHWK.
 
 The gfx942 current adapter uses an explicit 64x64x64 implicit-GEMM configuration;
@@ -44,10 +47,11 @@ import current convolution geometry or dispatch. Both workers poison output with
 NaNs, count launches, synchronize, check all outputs, and check unchanged inputs.
 Baseline and current interpreters remain separate even when reused across cases.
 
-The separate gradient suite contains 12 dgrad and 14 wgrad cases per processor,
-including grouped/strided/dilated geometry and odd channels. gfx950 dgrad uses
-production implicit-GEMM selection for ten cases; its two K=33 cases and all
-gfx942 dgrad cases are explicitly configured. All wgrad cases are explicit
+The separate gradient suite runs the dgrad and wgrad cases in
+[`gradient_cases.py`](../gradient_cases.py) on gfx942 and gfx950, including
+grouped/strided/dilated geometry and odd channels. gfx950 dgrad uses production
+implicit-GEMM selection except for its K=33 cases, which, like all gfx942 dgrad
+cases, are explicitly configured. All wgrad cases are explicit
 configurations because no wgrad instance lists are registered. They cover atomic
 split-K, two-stage workspace reduction, and gfx950 merged groups. Each execution
 is checked against a live float64 NumPy oracle at a normalized max-error limit
@@ -134,9 +138,9 @@ published operation/architecture bundle separately. The
 installed bundle is beneath
 `engines/test_arch_content/rocke/conv/<processor>/`, preserving architecture-specific,
 test-only artifact packaging. The generic artifact contains the harness and trusted
-lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entries
-`rocke_conv_gpu_gfx942_pytest` and `rocke_conv_gpu_gfx950_pytest` register only when
-reference installation is enabled and their published bundles pass validation.
+lock. Host checks register as `rocke_conv_reference_unit_pytest`; a GPU entry,
+`rocke_conv_gpu_<processor>_pytest`, registers for each published processor only
+when reference installation is enabled and its bundle passes validation.
 The provider category YAML selects these entries by pattern.
 
 Test a replacement candidate before publication with the offline CLI's `verify`
@@ -165,9 +169,10 @@ Archive packaging uses the [packing and publication workflow](../../reference_co
 The [six-lane record](../../../../docs/conv-six-lane-validation.md) separates the original
 October 14 qualification and installed checks from validation of the current
 port and the October 21 requalification of both bundles at develop revision
-`9b4fee7d990`. Each published baseline was independently qualified against NumPy
-over all 32 cases, without the optional Torch cross-check. Do not infer
-current GPU validation from a successful replay of the old branch history.
+`9b4fee7d990`. At that requalification, each baseline was independently
+qualified against NumPy over all 32 cases of its cohort, without the optional
+Torch cross-check. Do not infer current GPU validation from a successful replay
+of the old branch history.
 
 ## Bundle identity
 
@@ -176,11 +181,11 @@ revision and manifest identity. Its matching DVC pointer records the archive
 hash and size. Keep the lock and pointer together; a branch refresh or a current
 adapter change does not itself replace the frozen baseline.
 
-Fetch both archives from the rocm-libraries root before provider configuration:
+Fetch the published archives from the rocm-libraries root before provider
+configuration:
 
 ```bash
-dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx942.tar.gz.dvc \
-  dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv/gfx950.tar.gz.dvc
+dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/conv
 ```
 
 For qualification, candidate verification, publication, and installed checks,

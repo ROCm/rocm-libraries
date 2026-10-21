@@ -477,13 +477,16 @@ entries. Adding cases to an existing pair uses its existing entry. Preserve
 explicit architecture selection and check that expected GPU cases did not skip;
 a passing empty selection proves nothing.
 
-Update the operation's coverage description and the
+Update the operation's coverage description, and add a new operation's CTest
+entries to the
 [test inventory](../../../../platform/tests/README.md#installed-pinned-reference-suites).
-Review case changes, pointer, lock, and qualification evidence together. Report
-host cases, GPU comparisons, negative controls, and skips separately. The bundle
-and matching source cohort must be available together when CI runs. Keep this
-guide as the single procedure; operation guides should explain their contracts
-and link here rather than reproduce these steps.
+The inventory points to code for cases and published pairs, so a new case or
+architecture needs no edit there. Review case changes, pointer, lock, and
+qualification evidence together. Report host cases, GPU comparisons, negative
+controls, and skips separately. The bundle and matching source cohort must be
+available together when CI runs. Keep this guide as the single procedure;
+operation guides should explain their contracts and link here rather than
+reproduce these steps.
 
 ## Triage
 

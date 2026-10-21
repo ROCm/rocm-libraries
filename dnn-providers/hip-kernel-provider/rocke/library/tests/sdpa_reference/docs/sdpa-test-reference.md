@@ -6,11 +6,13 @@ SPDX-License-Identifier: MIT
 # SDPA correctness with a pinned rocKE reference
 
 The gfx942 lane runs current rocKE against a previously qualified rocKE kernel
-on the GPU. It covers the eight base parameterizations in
+on the GPU. It covers the base parameterizations in
 [`test_attention_dense_gfx942_numeric.py`](../../test_attention_dense_gfx942_numeric.py):
 fp16/bf16, D64/D128, GQA/MHA, causal/full attention, and default/persistent grids.
-The gfx950 lane adds seven causal base configurations, described below.
-The gfx1151 and gfx1201 lanes each add eight standalone FP16 WMMA cases.
+The gfx950 lane adds causal base configurations, described below.
+The gfx1151 and gfx1201 lanes add standalone FP16 WMMA cases.
+From the rocKE root, `python library/tests/run_sdpa_reference.py cases --arch <arch>`
+lists an architecture's enrolled cases.
 A gfx1200 adapter is available for qualification; its archive and installation
 enrollment remain pending on-device qualification.
 For gfx942/gfx950, current execution uses the same dispatch factory and `run_attention_dense_torch`
@@ -27,8 +29,8 @@ passed through the kernel ABI. It preserves the original maximum absolute error
 tolerances (`0.02` for fp16, `0.04` for bf16); it does not claim identical Torch
 random inputs or bitwise equivalence between NumPy and Torch's reference outputs.
 
-See [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md#the-eight-required-cases)
-for the exact eight configurations and broader gaps, and the
+See [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md#the-gfx942-required-cases)
+for the gfx942 configurations and broader gaps, and the
 [strategy and extension guide](../../reference_common/docs/gpu-ci-pinned-rocke-test-reference-plan.md) for adding
 architectures and operations. This is not a drop-in replacement for the skipped
 Torch suites: it covers equivalent base configurations with different samples,
@@ -63,7 +65,7 @@ request; current sources continue through the tuning API.
 
 ## gfx950 base dense cohort
 
-The gfx950 lane covers the seven base configurations from
+The gfx950 lane covers the base configurations from
 [`test_attention_dense_gfx950_numeric.py`](../../test_attention_dense_gfx950_numeric.py),
 using an independent gfx950 bundle and lock. All cases are causal, B=1,
 Sq=Sk=512, Hq=16, with the default softmax scale:
@@ -98,11 +100,12 @@ error bounds ranged from 0.000981060 to 0.001102120; BF16 bounds ranged from
 0.007636342 to 0.008060832 (upper endpoints rounded upward here). Exact bounds
 and compiler identity are in the authenticated manifest. No tolerance was widened.
 
-Torch-free source verification passed all seven comparisons and three failure
-controls. The installed `rocke_sdpa_gpu_gfx950_pytest` entry also passed all ten
-checks with the source tree moved aside. The installed shared and SDPA host
-suites passed 82 and 26 tests respectively. This validates Python reference
-installation and execution, not native provider execution or final artifact splitting.
+Torch-free source verification of that bundle passed all seven comparisons
+and three failure controls. The installed `rocke_sdpa_gpu_gfx950_pytest` entry
+also passed all ten checks with the source tree moved aside. The installed shared
+and SDPA host suites passed 82 and 26 tests respectively. This validates Python
+reference installation and execution, not native provider execution or final
+artifact splitting.
 
 The archive is `library/tests/reference_bundles/sdpa/gfx950.tar.gz`, with MD5
 `45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. The archive was uploaded to DVC, downloaded into a new empty cache, and
@@ -115,9 +118,9 @@ The gfx1151 and gfx1201 bundles each cover the complete Cartesian product below,
 with B=2, Sq=Sk=64, Hq=4, contiguous `[B,S,H,D]` tensors, default SDPA scale,
 and a nonpersistent grid:
 
-| Dtype | Head dimension | KV heads | Mask | Cases per target |
-|---|---|---|---|---:|
-| FP16 | 64, 128 | 4 (MHA), 1 (GQA) | Full, causal | 8 |
+| Dtype | Head dimension | KV heads | Mask |
+|---|---|---|---|
+| FP16 | 64, 128 | 4 (MHA), 1 (GQA) | Full, causal |
 
 Both adapters use the production `WmmaFmhaFwdSpec` and builder from
 `kernels.gfx1151.wmma_fmha_fwd`, selecting the target's MMA implementation.
@@ -157,9 +160,9 @@ for qualification and publication.
 
 | Processor | Compiler target | Status |
 |---|---|---|
-| gfx1151 | gfx1151 | Existing eight-case archive published and enrolled |
+| gfx1151 | gfx1151 | Existing archive published and enrolled |
 | gfx1200 | gfx12-generic | Adapter and host tests ready; GPU qualification, archive, and installation enrollment pending |
-| gfx1201 | gfx12-generic | Replacement eight-case archive qualified, published, and enrolled |
+| gfx1201 | gfx12-generic | Replacement archive qualified, published, and enrolled |
 
 The gfx1201 replacement uses committed baseline
 `32bcaf47b7482ef815ce997808979e50cfa36323`, which contains generic WMMA support.
@@ -211,7 +214,7 @@ For a job with that target list:
 | Hardware and requested suite | Behavior |
 |---|---|
 | gfx1200 running `rocke_sdpa_gpu_gfx1201_pytest` | pytest exits with code 77; CTest reports **Skipped** |
-| gfx1201 running `rocke_sdpa_gpu_gfx1201_pytest` | Runs all eight comparisons and three failure controls; missing or invalid reference data fails |
+| gfx1201 running `rocke_sdpa_gpu_gfx1201_pytest` | Runs every enrolled comparison and the three failure controls; missing or invalid reference data fails |
 | No GPU, or a processor outside the requested target list, running the gfx1201 suite | Fails with a required-GPU error |
 | gfx1200 with an explicit `--rocke-reference-arch gfx1200` request | Requires its own qualified bundle and lock; missing data or a gfx1201 certificate fails |
 
@@ -359,10 +362,10 @@ python library/tests/run_sdpa_reference.py verify --arch gfx942 \
   --current-root .
 ```
 
-This command requires gfx942 and runs all eight cases, with two old and two
-current executions per case. It exits unsuccessfully on a missing case, missing
-GPU, qualification failure, or comparison failure. It never generates independent
-answers or fetches a reference during verification.
+This command requires gfx942 and runs every case that `cases --arch gfx942`
+lists, with two old and two current executions per case. It exits unsuccessfully
+on a missing case, missing GPU, qualification failure, or comparison failure. It
+never generates independent answers or fetches a reference during verification.
 
 The same cases can be run through pytest:
 
@@ -423,8 +426,8 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    prepares the Python/runtime dependencies. The existing provider runner selects
    CTest entries using the provider's category YAML. The
    `rocke_sdpa_gpu_<arch>_pytest` entries run the same pytest file used locally:
-   eight numerical cases for gfx942, gfx1151, and gfx1201, and seven for gfx950,
-   plus three negative checks on each architecture. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   one numerical comparison for each case the architecture enrolls, plus three
+   negative checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
    `rocke_reference_common_pytest` runs shared archive and worker-isolation checks
    and compares each installed bundle's cases with the enrolled cohort. Neither
    host entry requires a GPU bundle.

@@ -169,20 +169,18 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, and that each installed bundle records the enrolled cohort | Host suite; skips the cohort check for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
-| `rocke_sdpa_gpu_gfx950_pytest` | Seven gfx950 numerical cases and three failure checks | When the gfx950 SDPA bundle is installed |
-| `rocke_sdpa_gpu_gfx1151_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1151 SDPA bundle is installed |
-| `rocke_sdpa_gpu_gfx1201_pytest` | Eight FP16 WMMA cases compiled for gfx12-generic and three failure checks | When the gfx1201 SDPA bundle is installed |
-| `rocke_conv_gpu_gfx942_pytest` | 32 gfx942 forward cases and three failure checks | When the gfx942 convolution bundle is installed |
-| `rocke_conv_gpu_gfx950_pytest` | 32 gfx950 forward cases and three failure checks | When the gfx950 convolution bundle is installed |
+| `rocke_sdpa_gpu_<arch>_pytest` | The SDPA cases enrolled for `<arch>` and three failure checks | For each published SDPA architecture, when its bundle is installed |
+| `rocke_conv_gpu_<arch>_pytest` | The forward convolution cases enrolled for `<arch>` and three failure checks | For each published convolution architecture, when its bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 and convolution/gfx950 are enrolled
-for installation by default in provider builds. Publication is listed in
-`platform/cmake/PublishedGpuReferences.cmake` relative to the rocKE root. CMake
-uses the standard archives and committed locks; verify replacement candidates
-with the offline CLI using explicit `--bundle` and `--lock` paths. Each operation
-and architecture retains a separate archive, lock, and installed payload.
+operation/architecture pairs and is on by default in provider builds.
+`platform/cmake/PublishedGpuReferences.cmake`, relative to the rocKE root, lists
+the published pairs. From the rocKE root,
+`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists an
+architecture's enrolled cases and their count without a GPU. CMake uses the
+standard archives and committed locks; verify replacement candidates with the
+offline CLI using explicit `--bundle` and `--lock` paths. Each operation and
+architecture retains a separate archive, lock, and installed payload.
 
 The optional `conv_reference/check_torch_reference.py` and
 `sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
@@ -194,8 +192,9 @@ and the [convolution guide](../../library/tests/conv_reference/docs/conv-test-re
 publication requirements, and coverage limits.
 
 The convolution gradient host contract joins `rocke_library_conv_pytest`.
-`rocke_library_gpu_pytest` also runs 12 dgrad and 14 wgrad cases on each of
-gfx942/gfx950 against live NumPy oracles, with three executions per case.
+`rocke_library_gpu_pytest` also runs the dgrad and wgrad cases in
+`conv_reference/gradient_cases.py` on each of gfx942/gfx950 against live NumPy
+oracles, with three executions per case.
 These gradients are not pinned-reference replay. Their buffers, auxiliary
 tables, and workspaces have explicit initialization and integrity checks.
 See the [coverage inventory](../../docs/conv-coverage-roadmap.md) for explicit

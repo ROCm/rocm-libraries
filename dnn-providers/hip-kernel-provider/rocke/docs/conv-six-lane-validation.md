@@ -6,9 +6,9 @@ SPDX-License-Identifier: MIT
 # Six-lane convolution implementation and validation
 
 The October 14 results below describe the original implementation. The current
-port uses production instance selection only for gfx950 forward and ten dgrad
-cases; other lanes use the explicit configurations described in the
-[coverage inventory](conv-coverage-roadmap.md). Historical production-selection
+port uses production instance selection only for gfx950 forward and gfx950 dgrad
+cases other than K=33; other lanes use the explicit configurations described in
+the [coverage inventory](conv-coverage-roadmap.md). Historical production-selection
 claims do not describe the current registry.
 
 ## October 21 requalification on develop
