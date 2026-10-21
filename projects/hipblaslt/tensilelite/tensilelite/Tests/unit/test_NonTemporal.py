@@ -300,3 +300,38 @@ def test_tdm_cache_modifiers_shared_set_all_fields_disagree():
     """The shipped gfx1250 TDM logic pattern (THA != THB on one set) stays byte-identical."""
     hints = [(0, TemporalHint.TH_RT_NT, NV), (1, TemporalHint.TH_LU, NO_NV)]
     assert tdmCacheModifiers(GFX1250_CAPS, hints) is None
+
+
+# ---------------------------------------------------------------------------
+# tdmCacheModifiers - decider: only some members of a set decide
+# ---------------------------------------------------------------------------
+def test_tdm_cache_modifiers_decider_ignores_the_other_members():
+    """A data tensor and a scale tensor in one set: the data tensor's hints are emitted."""
+    hints = [(2, NT, NV), (0, HT, NO_NV)]
+    assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints, decider=(0,))) == (
+        CacheScope.SCOPE_DEV, NT, NV)
+    # Without a decider both members vote, and they disagree on every field.
+    assert tdmCacheModifiers(GFX1250_CAPS, hints) is None
+
+
+@pytest.mark.parametrize(
+    "decider, expected",
+    [
+        ((0,), (CacheScope.SCOPE_NONE, HT, NO_NV)),
+        ((1,), (CacheScope.SCOPE_SYS, NT, NV)),
+    ],
+)
+def test_tdm_cache_modifiers_decider_picks_by_position(decider, expected):
+    hints = [(0, HT, NO_NV), (3, NT, NV)]
+    assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints, decider=decider)) == expected
+
+
+def test_tdm_cache_modifiers_deciders_still_have_to_agree():
+    """Several deciders keep only the fields they agree on; a third member never votes."""
+    hints = [(2, NT, NV), (2, HT, NO_NV), (0, RT, NO_NV)]
+    assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints, decider=(0, 1))) == (
+        CacheScope.SCOPE_DEV, TemporalHint.TH_NONE, NO_NV)
+    # Every position in order is the same as no decider; no position emits nothing.
+    assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints, decider=(0, 1, 2))) == _fields(
+        tdmCacheModifiers(GFX1250_CAPS, hints))
+    assert tdmCacheModifiers(GFX1250_CAPS, hints, decider=()) is None

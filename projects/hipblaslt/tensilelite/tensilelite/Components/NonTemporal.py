@@ -65,19 +65,26 @@ def decodeNonTemporal(
     return (False, False, False, scope, temporal_hint, non_volatile)
 
 
-def tdmCacheModifiers(asm_caps, hints):
+def tdmCacheModifiers(asm_caps, hints, decider=None):
     """Return ``TENSORModifiers`` for one ``tensor_load_to_lds``, or ``None``.
 
     ``hints`` holds one ``(nt_value, temporal_hint, non_volatile)`` tuple per
     tensor the instruction loads.  Wave-separated TDM issues a single
     instruction for every member of a descriptor set, and its TH/SCOPE/NV bits
-    cannot differ per wave, so a field is kept only when all members decode to
-    the same value; otherwise it stays at the ISA default.  The defaults
-    (SCOPE_CU, TH_RT, no nv) encode as zero and are left out, so a load without
-    hints is emitted exactly as before.
+    cannot differ per wave.  ``decider`` lists the positions in ``hints`` of the
+    members that decide them: the hints of the other members are ignored, so the
+    instruction follows the deciders (``None``: every member decides).  Among the
+    deciders a field is kept only when all of them decode to the same value;
+    otherwise it stays at the ISA default.  The defaults (SCOPE_CU, TH_RT, no nv)
+    encode as zero and are left out, so a load without hints is emitted exactly
+    as before.
     """
     if not _has_temporal_hint(asm_caps) or not hints:
         return None
+    if decider is not None:
+        hints = [hints[i] for i in decider]
+        if not hints:
+            return None
     decoded = [decodeNonTemporal(asm_caps, nt, th, nv)[3:] for nt, th, nv in hints]
 
     def agreed(values, default):
