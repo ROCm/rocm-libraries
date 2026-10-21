@@ -207,6 +207,51 @@ RppStatus rppt_yuv_to_rgb_linear_v(RppPtr_t srcYPtr, RppPtr_t srcUVPtr, RpptDesc
                                    RpptColorRange color_range, rppHandle_t rppHandle,
                                    RppBackend executionBackend);
 
+/*! \brief Bayer to RGB (demosaic) operation on HIP/HOST backend
+ * \details Reconstructs an RGB image from a single-channel Bayer colour filter array mosaic by
+ * bilinear interpolation. At each pixel the colour sampled by the sensor is copied, and each
+ * missing colour is the mean of the nearest pixels of that colour in the 3x3 neighbourhood:
+ * - G at an R or B pixel: the 4 edge neighbours.
+ * - R/B at a G pixel: the 2 neighbours in the row or column that holds that colour.
+ * - B at an R pixel (R at a B pixel): the 4 diagonal neighbours.
+ * <br>
+ * The pattern is anchored at the ROI's top-left pixel: bayerPattern names the colours of the
+ * 2x2 block starting at (roi.x, roi.y). For an ROI at an odd x or y offset, pass the pattern as
+ * seen from that pixel. Neighbours outside the ROI are mirrored without repeating the edge pixel
+ * (RpptImageBorderType::REFLECT_NO_EDGE), which keeps every neighbour on its own colour.<br>
+ * - srcPtr depth ranges - Rpp8u (0 to 255), Rpp16f (0 to 1), Rpp32f (0 to 1), Rpp8s (-128 to 127).
+ * - dstPtr depth ranges - Will be same depth as srcPtr.
+ * \param [in] srcPtr source tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)
+ * \param [in] srcDescPtr source tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0,
+ * dataType = U8/F16/F32/I8, layout = NCHW, c = 1)
+ * \param [out] dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)
+ * \param [in] dstDescPtr destination tensor descriptor (Restrictions - numDims = 4,
+ * offsetInBytes >= 0, dataType = same as that of srcDescPtr, layout = NCHW/NHWC, c = 3, channel
+ * order R, G, B)
+ * \param [in] bayerPattern colour filter array pattern of the source (a single
+ * \ref RpptBayerPattern that applies to all images in the batch)
+ * \param [in] borderType border type for neighbours outside the ROI (Restrictions -
+ * RpptImageBorderType::REFLECT_NO_EDGE only mode supported)
+ * \param [in] roiTensorPtrSrc ROI data in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend), for each image in source tensor (2D tensor of size batchSize * 4, in either format -
+ * XYWH(xy.x, xy.y, roiWidth, roiHeight) or LTRB(lt.x, lt.y, rb.x, rb.y)), with roiWidth >= 2 and
+ * roiHeight >= 2
+ * \param [in] roiType ROI type used (RpptRoiType::XYWH or RpptRoiType::LTRB)
+ * \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt>
+ * \param [in] executionBackend backend for execution (RppBackend::RPP_HOST_BACKEND or
+ * RppBackend::RPP_HIP_BACKEND)
+ * \return A <tt> \ref RppStatus</tt> enumeration.
+ * \retval RPP_SUCCESS Successful completion.
+ * \retval RPP_ERROR* Unsuccessful completion.
+ */
+RppStatus rppt_bayer_to_rgb(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
+                            RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
+                            RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
+                            RpptRoiType roiType, rppHandle_t rppHandle,
+                            RppBackend executionBackend);
+
 /*! @}
  */
 
