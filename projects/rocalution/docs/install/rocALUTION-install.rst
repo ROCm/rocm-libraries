@@ -26,7 +26,9 @@ You need a ROCm enabled platform to use rocALUTION. For more information, includ
 You need the following prerequisites to build rocALUTION from source:
 
 - `git <https://git-scm.com/>`__
-- `CMake <https://cmake.org/>`__ (version 3.5 or later)
+- `CMake <https://cmake.org/>`__ (version 3.19 or later)
+- `ROCm CMake <https://github.com/ROCm/rocm-cmake>`__ (version 0.11.0 or later)
+- `GoogleTest <https://github.com/google/googletest>`__ (only to build the tests)
 - `rocBLAS <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html>`__
 - `rocSPARSE <https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/index.html>`__
 - `rocRAND <https://rocm.docs.amd.com/projects/rocRAND/en/latest/index.html>`__
@@ -85,6 +87,13 @@ You need the `AMD ROCm Platform <https://github.com/ROCm/ROCm>`__ to compile and
 When you build rocALUTION from source, select supported versions of the math library dependencies (rocBLAS, rocSPARSE, rocRAND, and rocPRIM).
 Given a version of rocALUTION, you must use versions of these dependencies that are the same or later.
 
+By default, the CMake build doesn't download any dependencies. ROCm CMake 0.11.0 or later (the ``rocm-cmake`` package) must be installed,
+and building the tests additionally requires GoogleTest.
+If CMake can't find a dependency, the configuration step stops with an error naming it.
+Add the install prefix of the dependency to ``CMAKE_PREFIX_PATH`` if it isn't installed in a default location.
+To download ROCm CMake and GoogleTest when they aren't installed, configure with ``-DALLOW_FETCH_DEPS=ON``. This requires network access during configuration.
+If GoogleTest isn't installed, you can instead build it from a local source tree without network access by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
+
 Download rocALUTION
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -126,7 +135,7 @@ Build rocALUTION using the install script
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use the ``install.sh`` script to install rocALUTION.
-The following tables describe how to build different packages of the library, including the dependencies and clients.
+The following tables describe how to install the build dependencies and build different packages of the library and clients.
 
 .. note::
 
@@ -135,7 +144,7 @@ The following tables describe how to build different packages of the library, in
 Use install.sh to build rocALUTION with dependencies
 """""""""""""""""""""""""""""""""""""""""""""""""""""
 
-The following table lists the common ways to use ``install.sh`` to build the rocALUTION dependencies and library.
+The following table lists the common ways to use ``install.sh`` to install the rocALUTION build dependencies and build the library.
 
 .. list-table::
    :header-rows: 1
@@ -146,7 +155,7 @@ The following table lists the common ways to use ``install.sh`` to build the roc
    * - ``./install.sh -h``
      - Print the help information.
    * - ``./install.sh -d``
-     - Build the dependencies and library in your local directory. Use the ``-d`` flag only once. For subsequent invocations of ``install.sh``, you don't need to rebuild the dependencies.
+     - Install the build dependencies using the distribution package manager, then build the library in your local directory. Use the ``-d`` flag only once. For subsequent invocations of ``install.sh``, you don't need to reinstall the dependencies.
    * - ``./install.sh``
      - Build the library in your local directory. The script assumes the dependencies are available.
    * - ``./install.sh -i``
@@ -158,7 +167,7 @@ Use install.sh to build rocALUTION with dependencies and clients
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 The clients contain example code, unit tests, and benchmarks.
-The following table lists common ways to use ``install.sh`` to build the library, dependencies, and clients.
+The following table lists common ways to use ``install.sh`` to install the build dependencies and build the library and clients.
 
 .. list-table::
    :header-rows: 1
@@ -167,11 +176,11 @@ The following table lists common ways to use ``install.sh`` to build the library
    * - Command
      - Description
    * - ``./install.sh -dc``
-     - Build the dependencies, library, and client in your local directory. Use the ``-d`` flag only once. For subsequent invocations of ``install.sh``, you don't need to rebuild the dependencies.
+     - Install the build dependencies using the distribution package manager, then build the library and client in your local directory. GoogleTest isn't installed by ``-d`` and must already be available. Use the ``-d`` flag only once. For subsequent invocations of ``install.sh``, you don't need to reinstall the dependencies.
    * - ``./install.sh -c``
      - Build the library and client in your local directory. The script assumes the dependencies are available.
    * - ``./install.sh -idc``
-     - Build the library, dependencies, and client, then build and install the rocALUTION package in ``/opt/rocm``. The script prompts you for sudo access. This installs rocALUTION for all users.
+     - Install the build dependencies, build the library and client, then build and install the rocALUTION package in ``/opt/rocm``. The script prompts you for sudo access. This installs rocALUTION for all users.
    * - ``./install.sh -ic``
      - Build the library and client, then build and install the rocALUTION package in ``/opt/rocm``. The script prompts you for sudo access. This installs rocALUTION for all users.
    * - ``./install.sh -o``
@@ -190,7 +199,7 @@ You can build rocALUTION using the following commands:
 
 .. note::
 
-   You need CMake 3.5 or later to build rocALUTION.
+   You need CMake 3.19 or later to build rocALUTION.
 
 .. code-block:: shell
 
@@ -214,6 +223,7 @@ You can also configure the following optional CMake directives:
 - ``SUPPORT_MPI``: Enable MPI support for multi-node execution. This option is ``OFF`` by default.
 - ``BUILD_SHARED_LIBS``: Build rocALUTION as a shared library. This option is ``ON`` by default and is recommended.
 - ``BUILD_EXAMPLES``: Build the example programs. This option is ``ON`` by default.
+- ``ALLOW_FETCH_DEPS``: Download ROCm CMake and GoogleTest if they aren't installed. This option is ``OFF`` by default.
 
 For example, to build rocALUTION with MPI support enabled:
 
