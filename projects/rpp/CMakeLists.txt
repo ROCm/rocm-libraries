@@ -534,9 +534,12 @@ write_basic_package_version_file(
 )
 
 # Install the rpp-config.cmake and rpp-config-version.cmake
+# FindHALF.cmake is required so find_package(rpp) can recreate HALF::half for the
+# public link interface of rpp::rpp (rppdefs.h includes half.hpp).
 install(FILES
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake"
+    "${PROJECT_SOURCE_DIR}/cmake/FindHALF.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
     COMPONENT dev
 )
