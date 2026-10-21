@@ -53,10 +53,9 @@ from rocke.helpers.attention import (
     use_2d_kernel,
 )
 
+from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.transforms import (
     TensorDescriptor,
-    calculate_magic_numbers,
-    do_magic_division,
 )
 
 # Alias the promoted log2-domain softcap helper under the local name used by
@@ -244,7 +243,7 @@ def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
     (a grid axis or a KV position), well inside the documented 31-bit
     unsigned range of the magic sequence -- so the unsigned magic quotient
     equals the signed ``b.div`` it replaces. This is the device lowering of
-    ``merge_v2_magic_division`` (``transforms.do_magic_division``).
+    ``merge_v2_magic_division`` (``magic_division.do_magic_division``).
     """
     mult, shift = calculate_magic_numbers(divisor)
     return do_magic_division(b, dividend, mult, shift)
@@ -2742,31 +2741,208 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem, arch: str) -> 
     return _enable_transposed_qk_32x32(problem, arch)
 
 
+# Largest paged KV cache, in bytes, that i32 addressing reads correctly on the
+# tiled builders. They bound K/V buffer loads at num_records=0x7FFF0000, so a
+# load at or past that offset returns zero.
+_I32_KV_BUFFER_BYTES = 0x7FFF_0000
+# Kernels that index K/V with an i32 element offset instead (scalar 2D, gfx942
+# 4-warp GQA, gfx1250 tiled 2D) have no i64 path and wrap past 2^31 elements.
+_I32_KV_ELEMENTS = 0x8000_0000
+
+
+def kv_cache_needs_i64_addr(num_kv_blocks: int, block_bytes: int) -> bool:
+    """True when ``num_kv_blocks`` blocks of ``block_bytes`` each need i64 addressing.
+
+    The single threshold for the spec builders, the dispatcher's tuning specs
+    and the launch guard, so they cannot disagree. ``num_kv_blocks <= 0`` means
+    the cache size is unknown, so assume small.
+    """
+    return num_kv_blocks > 0 and num_kv_blocks * block_bytes > _I32_KV_BUFFER_BYTES
+
+
+# Tuning builder kinds with no i64 KV path: K/V are i32 element offsets, so the
+# kernel reads correctly up to 2^31 elements and refuses use_i64_kv_addr.
+_I32_ELEMENT_KV_BUILDERS = frozenset({"gfx942_4warp_gqa"})
+
+
+def builder_supports_i64_kv_addr(builder_kind: str) -> bool:
+    """False for a tuning builder kind whose kernel has no i64 KV path."""
+    return builder_kind not in _I32_ELEMENT_KV_BUILDERS
+
+
+def kv_addr_width_for_builder(
+    builder_kind: str, num_kv_blocks: int, block_bytes: int, elem_bytes: int
+) -> bool:
+    """``use_i64_kv_addr`` for a ``builder_kind`` kernel on this paged cache.
+
+    The single rule for every dispatch entry point that builds a tuning spec. A
+    builder with no i64 path stays i32 up to 2^31 elements and raises past that,
+    instead of compiling a kernel that reads wrong data.
+    """
+    if builder_supports_i64_kv_addr(builder_kind):
+        return kv_cache_needs_i64_addr(num_kv_blocks, block_bytes)
+    if num_kv_blocks * block_bytes > _I32_KV_ELEMENTS * elem_bytes:
+        raise NotImplementedError(
+            f"{builder_kind} kernel has no i64 KV path: {num_kv_blocks} blocks of "
+            f"{block_bytes} bytes is past the 2^31 elements its i32 offsets index"
+        )
+    return False
+
+
+def _kv_block_bytes(problem: UnifiedAttentionProblem) -> int:
+    """Byte size of one paged K (or V) block for ``problem``."""
+    elem_bytes = 1 if problem.use_fp8 else 2
+    return problem.block_size * problem.num_kv_heads * problem.head_size * elem_bytes
+
+
 def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     """Enable 64-bit paged-KV addressing when the cache may exceed ~2 GiB.
 
     The default load path puts the full byte offset (incl.
-    ``physical_block * block_stride``) in a 32-bit buffer voffset, which
-    overflows -- and silently corrupts -- once the paged cache exceeds
-    2 GiB. When the cache is that large we fold the per-block offset into a
+    ``physical_block * block_stride``) in a 32-bit buffer voffset, bounded at
+    ``_I32_KV_BUFFER_BYTES``; past that, loads silently return zeros. When the
+    cache is that large we fold the per-block offset into a
     64-bit buffer base (a tiny, wave-uniform ``make_buffer_rsrc`` per
     block; measured within ~1-2% of the i32 path). Below the cap we keep
     the fast i32 path. ``num_kv_blocks == 0`` means the cache size is
     unknown (caller did not supply it) -> assume small / fast path.
     """
-    if problem.num_kv_blocks <= 0:
-        return False
-    elem_bytes = 1 if problem.use_fp8 else 2
-    block_stride = (
-        problem.block_size * problem.num_kv_heads * problem.head_size * elem_bytes
+    return kv_cache_needs_i64_addr(problem.num_kv_blocks, _kv_block_bytes(problem))
+
+
+_KV_LIMIT_NO_I64_PATH = "no_i64_path"
+_KV_LIMIT_I32_BUFFER = "i32_buffer"
+
+
+@dataclass(frozen=True)
+class _KvAddrLimit:
+    """Largest paged K cache, in bytes, a compiled kernel reads, and what bounds it."""
+
+    nbytes: int
+    # _KV_LIMIT_NO_I64_PATH, _KV_LIMIT_I32_BUFFER, or the _I32_ONLY_KV_LOADERS
+    # flag that caps an i64 spec. Picks the fix the launch guard suggests.
+    cause: str
+
+
+def _kv_addr_limit(
+    problem: UnifiedAttentionProblem, use_i64_kv_addr: bool | None
+) -> _KvAddrLimit | None:
+    """The cache limit implied by the K/V address width alone.
+
+    ``use_i64_kv_addr`` is the compiled kernel's flag. ``None`` means the
+    kernel has no i64 path (scalar 2D, gfx942 4-warp GQA, gfx1250 tiled 2D)
+    and indexes K/V with an i32 element offset. Returns ``None`` (no limit)
+    for i64 addressing. This does not see the i32-only loaders an i64 tiled
+    spec can still select, so bound a tiled launch with ``_spec_kv_addr_limit``.
+    """
+    if use_i64_kv_addr is None:
+        return _KvAddrLimit(
+            _I32_KV_ELEMENTS * (1 if problem.use_fp8 else 2), _KV_LIMIT_NO_I64_PATH
+        )
+    if use_i64_kv_addr:
+        return None
+    return _KvAddrLimit(_I32_KV_BUFFER_BYTES, _KV_LIMIT_I32_BUFFER)
+
+
+# Tiled spec flags that select a K/V loader with no i64 branch, mapped to the
+# cache it still reads correctly under use_i64_kv_addr. Such a loader forms an
+# i32 byte offset from the cache base. A flat global load indexes with it, so it
+# is correct below 2^31 bytes and wraps past that; a buffer load from the whole
+# cache rsrc returns zeros from 0x7FFF0000. Conservative: the builder can
+# decline a flagged loader for a given geometry, and the flag still caps the
+# cache.
+_I32_KV_FLAT_BYTES = 0x8000_0000
+_I32_ONLY_KV_LOADERS = {
+    "use_conflict_free_v": _I32_KV_FLAT_BYTES,  # gfx942 _issue_v_transposed
+    "use_conflict_free_v_store": _I32_KV_FLAT_BYTES,  # gfx942 _cfvst_load_v_regs
+    "use_v_hbm_direct": _I32_KV_FLAT_BYTES,  # gfx942 _v_hbm_elem
+    "use_k_hbm_direct": _I32_KV_BUFFER_BYTES,  # gfx942 _read_k8_mfma_operand
+    # _issue_v_fp8_mfma_async is a buffer load, _issue_v_fp8_mfma_stripe a flat
+    # one (gfx942 and gfx950); the tighter limit covers both.
+    "use_fp8_mfma_pv": _I32_KV_BUFFER_BYTES,
+}
+
+
+def _spec_kv_addr_limit(
+    problem: UnifiedAttentionProblem, spec, *, builder_kind: str = "tiled"
+) -> _KvAddrLimit | None:
+    """Largest paged K cache, in bytes, that the kernel built from ``spec`` reads.
+
+    Reads the compiled spec rather than the problem, so a builder branch that
+    leaves ``use_i64_kv_addr`` unset fails safe. A spec class without the field
+    (gfx1250 tiled 2D) or a ``builder_kind`` with no i64 path (gfx942 4-warp
+    GQA) gets the element-count limit.
+    """
+    if not builder_supports_i64_kv_addr(builder_kind) or not hasattr(
+        spec, "use_i64_kv_addr"
+    ):
+        return _kv_addr_limit(problem, None)
+    if not spec.use_i64_kv_addr:
+        return _kv_addr_limit(problem, False)
+    limits = [
+        _KvAddrLimit(nbytes, flag)
+        for flag, nbytes in _I32_ONLY_KV_LOADERS.items()
+        if getattr(spec, flag, False)
+    ]
+    return min(limits, key=lambda limit: limit.nbytes, default=None)
+
+
+def _kv_addr_fix(
+    problem: UnifiedAttentionProblem, num_kv_blocks: int, kv_addr_limit: _KvAddrLimit
+) -> str:
+    """What a caller can do about a cache past ``kv_addr_limit``."""
+    if kv_addr_limit.cause == _KV_LIMIT_NO_I64_PATH:
+        return (
+            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA and "
+            "gfx1250 kernels index at most 2^31 elements), so fixing "
+            "num_kv_blocks will not help. Use a smaller cache."
+        )
+    if kv_addr_limit.cause != _KV_LIMIT_I32_BUFFER:
+        return (
+            f"The {kv_addr_limit.cause} K/V loader has no i64 path yet, so the "
+            "kernel cannot address this cache whatever num_kv_blocks says. Use a "
+            f"smaller cache, or for a hand-built spec set {kv_addr_limit.cause}"
+            "=False."
+        )
+    if problem.num_kv_blocks < num_kv_blocks:
+        return (
+            f"problem.num_kv_blocks={problem.num_kv_blocks} is below the cache's "
+            "block count. Build the problem with num_kv_blocks=k.shape[0] and the "
+            "spec from that problem (run_unified_attention_torch fills it when "
+            "the caller leaves it at 0)."
+        )
+    return (
+        "problem.num_kv_blocks already covers the cache, so the kernel itself "
+        "is i32. Rebuild a hand-built spec with use_i64_kv_addr=True."
     )
-    cache_bytes = problem.num_kv_blocks * block_stride
-    # The within-block voffset is always < block_stride, so the i32 offset
-    # overflows exactly when cache_bytes > 2^31 (the last block's base alone
-    # reaches 2^31). Keep the fast i32 path at/below that; switch to i64
-    # strictly above. (Verified: cap=65536 bf16 = 2^31 bytes, max offset
-    # 2147483646 < 2^31 -> still correct on i32.)
-    return cache_bytes > 0x8000_0000
+
+
+def _check_kv_addr_width(
+    problem: UnifiedAttentionProblem, k, kv_addr_limit: _KvAddrLimit | None
+) -> None:
+    """Reject a launch whose K cache is larger than the kernel can address.
+
+    ``_enable_i64_kv_addr`` only sees ``problem.num_kv_blocks``. A caller that
+    builds the problem without it (0 means unknown, so assume small) or with a
+    stale count gets the i32 path, and past the i32 limit the loads read zeros
+    or wrong data, or fault. Some kernels have no i64 path at all, and some
+    i64 specs still select an i32-only loader. ``k`` is the real cache, so check
+    it at launch against ``kv_addr_limit`` (see ``_spec_kv_addr_limit``).
+    Overcounting only costs the i64 path on a small cache, which is still
+    correct, so it is allowed.
+    """
+    if kv_addr_limit is None or not hasattr(k, "shape") or len(k.shape) < 1:
+        return
+    num_kv_blocks = int(k.shape[0])
+    cache_bytes = num_kv_blocks * _kv_block_bytes(problem)
+    if cache_bytes <= kv_addr_limit.nbytes:
+        return
+    raise ValueError(
+        f"paged KV cache of {num_kv_blocks} blocks ({cache_bytes} bytes) exceeds "
+        f"the {kv_addr_limit.nbytes} bytes this kernel's i32 KV addressing reads "
+        "correctly; past that, loads return zeros or wrong data. "
+        + _kv_addr_fix(problem, num_kv_blocks, kv_addr_limit)
+    )
 
 
 # --- LDS-budget resolver ----------------------------------------------------
@@ -3113,6 +3289,15 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
     # universally-safe ceiling: clamping to it can never do worse than shipped.
 
     if arch == "gfx942" and problem.sliding_window == 0:
+        # Decode split rule (``_gfx942_3d_decode_ctas_per_segment``): about 4
+        # CTAs per CU (6 at head size 64), the target of the formula above
+        # without its decode distortions, as on gfx950. The measured counts
+        # below stay for everything else.
+        ctas = _gfx942_3d_decode_ctas_per_segment(problem, arch=arch)
+        if ctas is not None:
+            per_cu = 6 if problem.head_size == 64 else 4
+            cap = 64 if problem.max_seqlen_k < 8192 else 128
+            return max(2, min(per_cu * problem.num_cus // ctas, cap))
         pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
@@ -3161,11 +3346,23 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
         # also why the knob's contract ("replaces num_cus*4 for routing AND
         # segmentation") only holds here if the clamp steps aside.
         #
-        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
-        # every shape is clamped, none falls through. Carve-outs for shapes where
-        # a finer split is measured to win on gfx950 can be added here later, each
-        # gated by its own measurement -- never assumed from gfx942, whose CU
-        # count, LDS, and reduce cost all differ.
+        # Measured carve-out, gated by its own gfx950 measurement -- never
+        # assumed from gfx942, whose CU count, LDS, and reduce cost all differ:
+        # decode (``_gfx950_3d_decode_ctas_per_segment``) gets about 4 CTAs per
+        # CU, the target the formula above aims at, without its decode
+        # distortions (q-blocks counted as for prefill, powers of 2, at least
+        # 16 segments). When 64 segments still leave fewer than 2 CTAs per CU,
+        # the kernel runs 64-token tiles (``_gfx950_3d_tile_size_override``)
+        # with 64 segments, 128 from 64K KV tokens when under 1 CTA per CU, and
+        # at most one tile per segment.
+        # Every other shape is clamped.
+        ctas = _gfx950_3d_decode_ctas_per_segment(problem, arch=arch)
+        if ctas is not None:
+            cus, kv = problem.num_cus, problem.max_seqlen_k
+            if ctas * 32 <= cus:
+                segments = 128 if kv >= 65536 and ctas * 64 <= cus else 64
+                return max(1, min(segments, kv // 64))
+            return max(2, min(4 * cus // ctas, 64 if kv < 8192 else 128))
         pre_bump = _pre_bump_segments(problem)
         return min(segments, pre_bump)
     return segments
@@ -3189,21 +3386,10 @@ def _select_3d_waves_per_eu(
     return None
 
 
-def _enable_gfx942_3d_invariant_hoist(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
-    if arch != "gfx942":
-        return False
-    env = __import__("os").environ.get("HIPDNN_GFX942_3D_HOIST", "").strip().lower()
-    return env in ("1", "on", "enable", "enabled", "yes", "true")
-
-
 def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Wide 128-bit direct global->register->LDS KV feed for the 3D decode
-    segment kernel (replaces the gfx942 1-DWORD async DMA). fp16/bf16 only.
-
-    Opt-in via HIPDNN_GFX942_3D_WKV while it is A/B'd against the async path;
-    promoted to default once the win is confirmed.
+    segment kernel (instead of the gfx942 1-DWORD async DMA). fp16/bf16, head
+    size up to 128; ``HIPDNN_GFX942_3D_WKV=0`` turns it off.
     """
     if arch != "gfx942":
         return False
@@ -3212,11 +3398,174 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem, arch: str) 
     env = __import__("os").environ.get("HIPDNN_GFX942_3D_WKV", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
         return False
-    # Default ON: validated bit-identical and ~8% faster on D128 decode, neutral
-    # on D64, never slower (decode_ab.py A/B). Strict improvement over the 1-DWORD
-    # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
-    # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
+    # The wide feed loads each 16-byte chunk into registers and stores it to LDS
+    # right away, so its copies overlap only if the compiler schedules the loads
+    # ahead of the stores. LLVM 22 does; at head size 256 (more chunks, high
+    # register pressure) LLVM 23 serializes them (each load waits before its
+    # store), which makes the kernel several times slower. The async DMA does
+    # not depend on that schedule.
+    if problem.head_size > 128:
+        return False
+    # Default on up to head size 128: bit-identical to the async DMA and faster
+    # there.
     return True
+
+
+def _use_decode_grid(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """All-decode launch grid: one CTA per sequence along the q-block axis.
+
+    Derived from the problem, not tuned: legal exactly when every sequence has
+    at most one query token (``all_decode``). The q-block axis is then
+    ``num_seqs`` instead of the prefill upper bound (:func:`_num_q_blocks`),
+    which removes the empty early-exit CTAs and the per-CTA binary search over
+    ``query_start_len``; at BLOCK_Q == 1 the upper bound also left every useful
+    CTA on an even index and so on half of the XCDs. Implemented by the
+    gfx942/gfx950 3D segment kernels (``use_decode_grid``).
+    """
+    return problem.all_decode and arch in ("gfx942", "gfx950")
+
+
+def _kv_cache_policy_3d(problem: UnifiedAttentionProblem, arch: str) -> str:
+    """Cache policy of the gfx942/gfx950 3D segment kernels' K/V copies.
+
+    "stream" (NT) when every sequence decodes: each K/V byte is then read once,
+    so keeping it in the caches only evicts other data. Otherwise "all". fp8
+    K/V loads synchronously and keeps "all".
+    """
+    if (
+        arch in ("gfx942", "gfx950")
+        and problem.all_decode
+        and _kv_storage_dtype(problem) is None
+    ):
+        return "stream"
+    return "all"
+
+
+def _gfx950_3d_decode_ctas_per_segment(
+    problem: UnifiedAttentionProblem, arch: str
+) -> int | None:
+    """CTAs per split-KV segment (``num_seqs * num_kv_heads``) of a gfx950 3D
+    decode problem in the measured scope of the decode split rule
+    (``_num_segments``, ``_gfx950_3d_tile_size_override``), else None.
+
+    Scope as measured: all-decode, fp16/bf16 K/V (paged with 16-token pages, or
+    strided), head_size 128 or 256, no sliding window and no explicit
+    ``target_ctas``. Head size 256 only with enough CTAs for page-sized tiles:
+    its few-CTA splits measured faster under one compiler and slower under
+    another.
+    """
+    ctas = problem.num_seqs * problem.num_kv_heads
+    if (
+        arch == "gfx950"
+        and problem.all_decode
+        and (
+            problem.head_size == 128
+            or (problem.head_size == 256 and ctas * 32 > problem.num_cus)
+        )
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and _kv_storage_dtype(problem) is None
+    ):
+        return ctas
+    return None
+
+
+def _gfx942_3d_decode_ctas_per_segment(
+    problem: UnifiedAttentionProblem, arch: str
+) -> int | None:
+    """CTAs per split-KV segment (``num_seqs * num_kv_heads``) of a gfx942 3D
+    decode problem in the measured scope of the decode split rule
+    (``_num_segments``), else None.
+
+    Scope as measured: all-decode, fp16/bf16 K/V (paged with 16-token pages, or
+    strided), head_size 64 or 128, no sliding window and no explicit
+    ``target_ctas``; at least ``num_cus / 16`` CTAs per segment or fewer than
+    8K KV tokens. Few CTAs at long KV keep the previous counts, which measured
+    as good there.
+    """
+    ctas = problem.num_seqs * problem.num_kv_heads
+    if (
+        arch == "gfx942"
+        and problem.all_decode
+        and problem.head_size in (64, 128)
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and _kv_storage_dtype(problem) is None
+        and (ctas * 16 >= problem.num_cus or problem.max_seqlen_k < 8192)
+    ):
+        return ctas
+    return None
+
+
+def _gfx950_3d_tile_size_override(
+    problem: UnifiedAttentionProblem, arch: str
+) -> int | None:
+    """gfx950 3D KV tile, in tokens; None keeps one page per tile.
+
+    Decode with too few CTAs to fill the device even at 64 segments (at most
+    ``num_cus / 32`` per segment) is latency-bound per CTA: 64-token tiles
+    (with the swizzled K/V LDS) shorten each CTA's KV loop. Measured scope:
+    ``_gfx950_3d_decode_ctas_per_segment``.
+    """
+    ctas = _gfx950_3d_decode_ctas_per_segment(problem, arch=arch)
+    if ctas is not None and ctas * 32 <= problem.num_cus:
+        return 64
+    return None
+
+
+def _wave_page_id_load_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_wave_page_id_load``. gfx950: on for decode in the measured
+    scope of the split rule (``_gfx950_3d_decode_ctas_per_segment``), whose
+    segment counts assume it. gfx942: on with the K/V LDS swizzle
+    (``_kv_lds_swizzle_3d``), with which it was measured, for page-sized tiles."""
+    if arch == "gfx950":
+        return _gfx950_3d_decode_ctas_per_segment(problem, arch=arch) is not None
+    if arch == "gfx942":
+        return (
+            _kv_lds_swizzle_3d(problem, arch=arch)
+            and _gfx942_3d_tile_size_override(problem, arch=arch) is None
+        )
+    return False
+
+
+def _kv_lds_swizzle_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_kv_lds_swizzle``. gfx950: on with multi-page KV tiles
+    (``_gfx950_3d_tile_size_override``); with page-sized tiles it measured
+    neutral. gfx942, all-decode: head size 64/128 on the wide K/V loader
+    (``_enable_gfx942_3d_wide_kv_load``); head size 256 (async copies) with
+    page-sized fp16/bf16 tiles, where it pays only together with the page ids
+    (``_wave_page_id_load_3d``): alone it is slower under some compilers."""
+    if arch == "gfx950":
+        return _gfx950_3d_tile_size_override(problem, arch=arch) is not None
+    if arch == "gfx942":
+        if not problem.all_decode:
+            return False
+        if problem.head_size in (64, 128):
+            return _enable_gfx942_3d_wide_kv_load(problem, arch)
+        return (
+            problem.head_size == 256
+            and _kv_storage_dtype(problem) is None
+            and _gfx942_3d_tile_size_override(problem, arch=arch) is None
+        )
+    return False
+
+
+def _num_q_blocks(
+    problem: UnifiedAttentionProblem, block_q: int, *, decode_grid: bool = False
+) -> int:
+    """Length of the q-block launch axis: ``num_seqs`` on the all-decode grid
+    (:func:`_use_decode_grid`), else the prefill upper bound
+    ``total_q // block_q + num_seqs`` (each sequence may start mid-block)."""
+    if decode_grid:
+        if not problem.all_decode:
+            raise ValueError(
+                "the decode grid requires an all-decode problem "
+                f"(max_seqlen_q == 1, got {problem.max_seqlen_q})"
+            )
+        return int(problem.num_seqs)
+    return problem.total_q // block_q + problem.num_seqs
 
 
 def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
@@ -3358,7 +3707,8 @@ def _tiled_3d_spec_from_problem(
 
 
 def _tiled_3d_segment_lds_bytes(spec) -> int:
-    """Q[M,D], K/V[2,T,D], P[M,T] in the gfx942/gfx950 3D schedule.
+    """Q[M,D], K[2,T,D] and V[T,D] in the gfx942/gfx950 3D schedule (P stays in
+    registers).
 
     These tiles overlap in lifetime. Supported tile dimensions need no
     inter-allocation padding; the lowering aligns the final pool to 16 bytes.
@@ -3370,7 +3720,7 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
     if bits % 8:
         raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
     m, d, t = spec.block_m, spec.head_size, spec.tile_size
-    size = (m * d + 4 * t * d + m * t) * (bits // 8)
+    size = (m * d + 3 * t * d) * (bits // 8)
     return (size + 15) & ~15
 
 
@@ -3418,9 +3768,18 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         num_segments=_num_segments(problem, arch),
         num_seqs=problem.num_seqs,
         waves_per_eu=waves,
-        tile_size_override=_gfx942_3d_tile_size_override(problem, arch=arch),
-        use_invariant_hoist=False,
+        tile_size_override=(
+            _gfx950_3d_tile_size_override(problem, arch=arch)
+            if arch == "gfx950"
+            else _gfx942_3d_tile_size_override(problem, arch=arch)
+        ),
         kv_layout="strided",
+        use_decode_grid=_use_decode_grid(problem, arch=arch),
+        **(
+            {"kv_cache_policy": _kv_cache_policy_3d(problem, arch=arch)}
+            if arch in ("gfx942", "gfx950")
+            else {}
+        ),
     )
     reduce = reduce_type(
         head_size=problem.head_size,
@@ -3493,10 +3852,14 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _num_segments(problem, arch),
         _gfx942_3d_tile_size_override(problem, arch),
         _select_3d_waves_per_eu(problem, arch),
-        _enable_gfx942_3d_invariant_hoist(problem, arch),
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),
+        _use_decode_grid(problem, arch),
+        _kv_cache_policy_3d(problem, arch),
+        _gfx950_3d_tile_size_override(problem, arch),
+        _kv_lds_swizzle_3d(problem, arch),
+        _wave_page_id_load_3d(problem, arch),
     ) + _mask_key(problem)
     if arch == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem, arch)
@@ -3631,7 +3994,14 @@ def _attn_values(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    kv_addr_limit: _KvAddrLimit | None,
 ):
+    # Production 2D and scalar launches and the torch direct-launch harnesses
+    # pack kernargs here, so check the real K cache against what the compiled
+    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). Not
+    # covered: the 3D path and the gfx1250 tiled_2d_verify harness, which pack
+    # their own.
+    _check_kv_addr_width(problem, k, kv_addr_limit)
     vals = {
         "output_ptr": out,
         "query_ptr": q,
@@ -4180,6 +4550,8 @@ class _Attention3DPrepared:
 class _Attention2DLaunchMeta:
     grid: Tuple[int, int, int]
     block: Tuple[int, int, int]
+    # What the compiled kernel addresses, from ``_spec_kv_addr_limit``.
+    kv_addr_limit: _KvAddrLimit | None
 
 
 # Compiled state is shared; scratch belongs to an execution, invocation or graph.
@@ -4189,6 +4561,9 @@ _3D_GRAPH_LOCK = RLock()
 _3D_GRAPHS: OrderedDict[tuple, _Attention3DGraph] = OrderedDict()
 _2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
 _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
+# Per-cache-key ``_spec_kv_addr_limit`` of the default-route spec. The spec is a
+# function of the cache key, so it is built once per kernel, not per total_q.
+_2D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
@@ -4256,6 +4631,12 @@ def _explicit_path_supported(
     if tuning_spec is not None and tuning_spec.allow_unsupported:
         return True, f"explicit {kind} tuning spec (unsupported override)"
     if kind == "3d":
+        if (
+            tuning_spec is not None
+            and getattr(tuning_spec.kernel_spec, "use_decode_grid", False)
+            and not problem.all_decode
+        ):
+            return False, "use_decode_grid requires an all-decode problem"
         return supports_native_unified_attention_3d_tiled(problem, arch)
     if kind == "2d":
         return supports_native_unified_attention_tiled(problem, arch)
@@ -4429,6 +4810,7 @@ def _run_2d_graphed(
 
     key = _tiled_cache_key(problem, _launch_arch_2dg)
     launcher = _get_2d_launcher(problem, key, arch=_launch_arch_2dg)
+    meta = _get_2d_launch_meta(problem, key, arch=_launch_arch_2dg)
     vals = _attn_values(
         problem=problem,
         q=q,
@@ -4450,8 +4832,8 @@ def _run_2d_graphed(
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
+        kv_addr_limit=meta.kv_addr_limit,
     )
-    meta = _get_2d_launch_meta(problem, key, arch=_launch_arch_2dg)
     cfg = LaunchConfig(grid=meta.grid, block=meta.block, stream=int(stream))
 
     def _do():
@@ -4635,10 +5017,17 @@ def _get_3d_pipeline(
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
+    if tuning_spec is not None:
+        decode_grid = getattr(tuning_spec.kernel_spec, "use_decode_grid", False)
+    elif strided_kv:
+        segment_spec, _ = _strided_3d_specs_from_problem(problem, arch=arch)
+        decode_grid = segment_spec.use_decode_grid
+    else:
+        decode_grid = _tiled_3d_spec_from_problem(problem, arch).use_decode_grid
     block_q = (
         16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
     )
-    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
+    total_num_q_blocks = _num_q_blocks(problem, block_q, decode_grid=decode_grid)
     # gfx1250 (gfx1250) runs the split-KV segment + reduce as one wave32 CTA; the
     # CDNA wave64 archs (gfx950/gfx942) use a wave64 CTA.
     wave_size = 32 if arch == "gfx1250" else 64
@@ -4878,7 +5267,13 @@ def _get_2d_launch_meta(
         return _2D_LAUNCH_META[meta_key]
     if tuning_spec is not None:
         meta = _Attention2DLaunchMeta(
-            grid=tuning_spec.launch_grid(problem), block=tuning_spec.launch_block()
+            grid=tuning_spec.launch_grid(problem),
+            block=tuning_spec.launch_block(),
+            kv_addr_limit=_spec_kv_addr_limit(
+                problem,
+                tuning_spec.kernel_spec,
+                builder_kind=tuning_spec.builder_kind,
+            ),
         )
         _2D_LAUNCH_META[meta_key] = meta
         return meta
@@ -4901,7 +5296,12 @@ def _get_2d_launch_meta(
             # head. grid = (num_query_heads, q-token-blocks + per-seq padding).
             total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
             grid = (int(problem.num_query_heads), int(total_num_q_blocks), 1)
-        meta = _Attention2DLaunchMeta(grid=grid, block=route.block_dim)
+        # The 4-warp builder has no i64 path.
+        meta = _Attention2DLaunchMeta(
+            grid=grid,
+            block=route.block_dim,
+            kv_addr_limit=_kv_addr_limit(problem, None),
+        )
         _2D_LAUNCH_META[meta_key] = meta
         return meta
     if _enable_gfx942_bf16_flash(problem, arch):
@@ -4925,9 +5325,16 @@ def _get_2d_launch_meta(
     )
     total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
     wave_size = 32 if arch == "gfx1250" else 64
+    # The limit comes off the same spec _get_2d_launcher compiles, so a branch
+    # of _tiled_spec_from_problem that drops use_i64_kv_addr fails safe.
+    if cache_key not in _2D_KV_ADDR_LIMITS:
+        _2D_KV_ADDR_LIMITS[cache_key] = _spec_kv_addr_limit(
+            problem, _tiled_spec_from_problem(problem, arch)
+        )
     meta = _Attention2DLaunchMeta(
         grid=(int(problem.num_kv_heads), int(total_num_q_blocks), 1),
         block=(int(wave_size * num_warps), 1, 1),
+        kv_addr_limit=_2D_KV_ADDR_LIMITS[cache_key],
     )
     _2D_LAUNCH_META[meta_key] = meta
     return meta
@@ -5173,11 +5580,7 @@ def run_unified_attention_torch(
     # keep ``num_kv_blocks=0`` -> the correct fast i32 path -> no per-call
     # replace, which otherwise dominates tiny-shape host latency.
     if problem.num_kv_blocks <= 0 and hasattr(k, "shape") and len(k.shape) >= 1:
-        _eb = 1 if problem.use_fp8 else 2
-        _blk_stride = (
-            problem.block_size * problem.num_kv_heads * problem.head_size * _eb
-        )
-        if int(k.shape[0]) * _blk_stride > 0x8000_0000:
+        if kv_cache_needs_i64_addr(int(k.shape[0]), _kv_block_bytes(problem)):
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
     if tuning_spec is not None:
         # Explicit specs are initially selected before framework tensors exist.
@@ -5292,6 +5695,12 @@ def run_unified_attention_torch(
             launcher = _get_2d_launcher(
                 problem, key, arch=_launch_arch, tuning_spec=tuning_spec
             )
+            # The dispatcher must launch with the same BLOCK_Q/threads the
+            # kernel was built for. Cache that fixed metadata per kernel key so
+            # repeated same-shape calls avoid selector math on the hot path.
+            meta = _get_2d_launch_meta(
+                problem, key, arch=_launch_arch, tuning_spec=tuning_spec
+            )
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -5313,12 +5722,7 @@ def run_unified_attention_torch(
                 k_scale=k_scale,
                 v_scale=v_scale,
                 out_scale=out_scale,
-            )
-            # The dispatcher must launch with the same BLOCK_Q/threads the
-            # kernel was built for. Cache that fixed metadata per kernel key so
-            # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(
-                problem, key, arch=_launch_arch, tuning_spec=tuning_spec
+                kv_addr_limit=meta.kv_addr_limit,
             )
             return launcher(
                 vals,
@@ -5356,6 +5760,8 @@ def run_unified_attention_torch(
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
+        # No i64 mode: K/V are i32 element offsets.
+        kv_addr_limit=_kv_addr_limit(problem, None),
     )
     return launcher(
         vals,

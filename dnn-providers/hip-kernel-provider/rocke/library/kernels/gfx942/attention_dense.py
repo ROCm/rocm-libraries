@@ -2567,7 +2567,7 @@ _FASTDIV_DIVIDEND_LIMIT = 1 << 30
 
 def _fastdiv_kernargs(spec: Gfx942AttentionDenseSpec) -> dict[str, int]:
     """``{<divisor>_magic, <divisor>_shift}`` for every ``spec.fastdiv_divisors``
-    entry, from :func:`rocke.helpers.transforms.calculate_magic_numbers`. The magic
+    entry, from :func:`rocke.helpers.magic_division.calculate_magic_numbers`. The magic
     is a uint32 passed as its two's-complement i32 bit pattern, which is what the
     kernel's unsigned mul-hi reads.
 
@@ -2575,7 +2575,7 @@ def _fastdiv_kernargs(spec: Gfx942AttentionDenseSpec) -> dict[str, int]:
     decode dividend is below it, and past it the quotient is wrong with no fault."""
     if not spec.fastdiv_divisors:
         return {}
-    from rocke.helpers.transforms import calculate_magic_numbers
+    from rocke.helpers.magic_division import calculate_magic_numbers
 
     nqb = spec.seqlen_q // spec.block_m
     work = nqb * spec.num_query_heads * spec.batch
