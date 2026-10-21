@@ -100,9 +100,9 @@ convenient interactively. Prefer the target when the resulting library needs to
 be identifiable — CI points `ROCKE_ONLINE_LIB` at it, and a named library that
 does not exist is now an error rather than a cue to go and find another one.
 
-> **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
-> emitted IR flavor must match it: set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2
-> `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
+> **Toolchain/runtime flags.** AUTO queries the loaded COMGR compiler’s LLVM
+> version to select the emitted IR flavor. An explicit `ROCKE_LLVM_FLAVOR`
+> supports offline emission; it does not select COMGR or bypass compiler checks.
 > Full flag list: [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
 > The two engines must stay byte-identical — see the parity rule in
 > [`dsl_docs/development/engine_parity.md`](dsl_docs/development/engine_parity.md).
@@ -200,21 +200,33 @@ This includes anything matching: `build*/`, `cmake-build*/`, `CMakeFiles/`,
 
 ## Freshness stamps
 
-The engine carries an explicit freshness stamp so a consumer can *detect* a
-mismatch rather than rely on rebuild discipline. At CMake configure time
-`cmake/rocke_build_id.cmake` computes a deterministic, git-independent content hash
-of the engine sources (`cpp/**`) and of the inputs of the generated arch-domain table
-(the committed columns, `arch_domain_waivers.json`, `domain.py` and
-`tools/gen_arch_domain_cpp.py`), and injects it (plus a human `engine_version`)
-into `cpp/core/rocke_build_id.cpp` as compile definitions — scoped to that single
-TU so no emission object is touched (the `.ll` byte-identity contract holds). The
-stamp is exposed by `rocke_build_id()` / `rocke_engine_version()`
-(`cpp/include/rocke/rocke_build_id.h`), printed by `tools/check_byte_identity.py` on
-every run, and surfaced through the pybind `build_id` attribute. Changing any
-tracked byte changes the build-id the next time CMake configures, so a stale or
-mixed-build archive is detectable. An edit to a table input makes the next build
-re-run CMake. An edit to an engine source does not: re-run CMake, or use a new
-build directory, before you read the id of an edited tree.
+The portable-IR native bundle carries an explicit provenance stamp so a consumer
+can detect a mismatch rather than rely on rebuild discipline.
+`cmake/rocke_build_id.cmake` computes a deterministic, git-independent content
+hash over the repository-owned inputs to the shared engine and replay CLI: the
+linked C++ sources and headers (excluding pybind-only sources), the replay CLI
+source, the CMake recipes that build and stamp both artifacts, and the inputs of
+the generated arch-domain table (the committed columns, `arch_domain_waivers.json`,
+`domain.py` and `tools/gen_arch_domain_cpp.py`).
 
-Remaining follow-on: a manifest/bundle version + provider-side validation that a
-loaded prebuilt-HSACO bundle matches the engine build-id it was built against.
+CMake computes the ID while configuring for diagnostics, then
+`cmake/generate_rocke_build_id.cmake` recomputes it on every build. A source or
+recipe edit therefore refreshes the generated header before
+`cpp/core/rocke_build_id.cpp` is rebuilt; `copy_if_different` avoids recompiling
+that object when the ID is unchanged. No lowering/emission translation unit
+includes the generated header, so the LLVM-IR byte-identity contract is
+unchanged.
+
+The engine exposes the stamp through `rocke_build_id()` and
+`rocke_engine_version()` (`cpp/include/rocke/rocke_build_id.h`), and the replay
+CLI exposes the same identity through `--provenance`. Source-less installed
+tests use the independently generated provenance manifest installed beside the
+CLI. Source checkouts validate a native artifact against the current source ID
+before admitting it to the process; subsequent online calls reuse that immutable
+loaded image without re-hashing the source tree. Native source changes therefore
+require a rebuild and a new process.
+
+`tools/check_byte_identity.py` prints the engine stamp on every run, and the
+pybind extension surfaces it through the `build_id` attribute. Remaining
+follow-on work is provider-side validation that a loaded prebuilt-HSACO bundle
+matches the engine build ID it was built against.

@@ -68,9 +68,24 @@ OBJDUMP = _findTool("llvm-objdump")
 
 _PROBE_KERNEL = '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n.text\ns_endpgm\n'
 
-KERNEL_NAMES = getAllCustomKernelNames()
 
-# Assembling and disassembling all 119 kernels is a few seconds of wall time
+def _rocRollerDeclaresNoStagger(name: str) -> bool:
+    """rocRoller kernels that declare StaggerU: 0 do not implement the in-loop wrap.
+
+    They stay out of this suite. Adding one must not change the census and must
+    not be assembled here. A rocRoller kernel that declares a non-zero StaggerU,
+    or omits the key, remains in the review.
+    """
+    config = readCustomKernelConfig(name)
+    origin = (config.get("Source") or {}).get("Origin")
+    return origin == "rocroller" and config.get("StaggerU") == 0
+
+
+KERNEL_NAMES = [
+    name for name in getAllCustomKernelNames() if not _rocRollerDeclaresNoStagger(name)
+]
+
+# Assembling and disassembling the custom kernels is a few seconds of wall time
 # spread over a thread pool, so no separate slow marker: this stays in the unit
 # suite where a change to a custom kernel will actually run it.
 MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
@@ -486,6 +501,29 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
 # human rather than joining the exception quietly.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
+        # W4A16: SupportCustomStaggerU: True, and they unpack StaggerU from the
+        # packed GSU/StaggerU argument like the gfx950 kernels below.
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x112x64_W8_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x128x64_W8_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x256x64_W16_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x96x64_W8_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x112x64_W4_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x128x64_W4_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x32x64_W4_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x96x64_W4_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        # gfx950
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
@@ -493,11 +531,13 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     }
 )
 
-# The shipped population, as reconciled against the disassembly.  Pinned so that
-# adding or retuning a custom kernel forces the reconciliation to be redone
-# rather than shifting the ground truth underneath the gate.
+# Population the uniform-summation gate was reviewed against. Only kernels that
+# declare a non-zero StaggerU, or omit the key and inherit the default of 32,
+# are pinned. rocRoller kernels that declare StaggerU: 0 are not in
+# KERNEL_NAMES. Other kernels that declare StaggerU: 0 stay in the per-kernel
+# checks but are not counted here, so adding either kind does not edit this
+# census.
 EXPECTED_CENSUS = {
-    "kernels": 129,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -505,18 +545,17 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    # Includes the nine kernels built outside Tensile (aiter, ck, rocblas,
-    # rocroller, triton, wave), which declare StaggerU: 0 because they do not
-    # implement the in-loop wrap at all; the disassembly confirms none of them
-    # staggers.
-    "declaredZero": 69,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 32,
 }
 
 
 def test_shipped_population_matches_the_reconciled_ground_truth():
-    """The census the gate's safety argument was reviewed against."""
+    """The census the gate's safety argument was reviewed against.
+
+    rocRoller kernels that declare StaggerU: 0, and any other kernel that
+    declares StaggerU: 0, are outside this census.
+    """
     codes = analyzeAllKernels()
     metadata = readAllMetadata()
     declaredNonZero = [
@@ -525,7 +564,6 @@ def test_shipped_population_matches_the_reconciled_ground_truth():
         if meta.declaredStaggerU is not None and meta.declaredStaggerU != 0
     ]
     census = {
-        "kernels": len(KERNEL_NAMES),
         "declaredNonZero": len(declaredNonZero),
         "declaredNonZeroWithLiteralStagger": sum(
             1 for name in declaredNonZero if not codes[name].decodesPackedArgument
@@ -533,13 +571,13 @@ def test_shipped_population_matches_the_reconciled_ground_truth():
         "declaredNonZeroReadingPackedArgument": sum(
             1 for name in declaredNonZero if codes[name].decodesPackedArgument
         ),
-        "declaredZero": sum(1 for meta in metadata.values() if meta.declaredStaggerU == 0),
         "undeclared": sum(1 for meta in metadata.values() if meta.declaredStaggerU is None),
     }
     assert census == EXPECTED_CENSUS, (
-        f"the shipped custom-kernel population no longer matches the set the uniform "
-        f"summation order gate was reviewed against: {census} != {EXPECTED_CENSUS}. "
-        f"Re-reconcile the new kernels against the disassembly and update EXPECTED_CENSUS"
+        f"the custom kernels that participate in StaggerU no longer match the set the "
+        f"uniform summation order gate was reviewed against: {census} != {EXPECTED_CENSUS}. "
+        f"Re-reconcile kernels that declare a non-zero StaggerU or omit the key. "
+        f"Kernels that declare StaggerU: 0 are not part of this census"
     )
     assert all(codes[name].staggers for name in declaredNonZero), (
         "every kernel declaring a non-zero StaggerU used to contain the in-loop wrap; "

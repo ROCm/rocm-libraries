@@ -26,7 +26,7 @@ These tests pin ACTUAL observed behavior; they do not assert anything aspiration
 
 import pytest
 
-from Tensile.Common.Utilities import versionIsCompatible
+from tensilelite.Common.Utilities import versionIsCompatible
 
 pytestmark = pytest.mark.unit
 
