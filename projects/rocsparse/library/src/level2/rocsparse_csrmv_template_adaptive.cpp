@@ -49,7 +49,7 @@ static_assert(rocsparse::adaptive_block_nnz == BLOCK_SIZE,
 namespace rocsparse
 {
     // numThreadsForReduction() and flp2() were lifted (behavior-preserving) into
-    // library/src/include/rocsparse_csrmv_adaptive_analysis.hpp so they can be
+    // library/src/level2/rocsparse_csrmv_adaptive_analysis.hpp so they can be
     // unit-tested without linking this device translation unit. The call sites
     // below use the default wg_size argument, which equals WG_SIZE (256).
 

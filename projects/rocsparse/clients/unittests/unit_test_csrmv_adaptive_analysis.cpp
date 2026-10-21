@@ -29,10 +29,10 @@
 // translation unit
 //   library/src/level2/rocsparse_csrmv_template_adaptive.cpp
 // into the header
-//   library/src/include/rocsparse_csrmv_adaptive_analysis.hpp
+//   library/src/level2/rocsparse_csrmv_adaptive_analysis.hpp
 // so they can be tested directly without linking device code.
 //
-#include "rocsparse_csrmv_adaptive_analysis.hpp"
+#include "../../library/src/level2/rocsparse_csrmv_adaptive_analysis.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
