@@ -445,6 +445,18 @@ def check(
     kmd = bundles[0].kmd
     engine_id = bundles[0].engine["id"]
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
+    # Every check below reads one `kernel_source` (its spec, symbol and code
+    # object). A `sources` descriptor has one per launch; none of these is
+    # defined per launch here, so refuse rather than skip the descriptor.
+    multi_launch = sorted(
+        d.get("name", "<unnamed>") for d in descriptors if "sources" in d
+    )
+    if multi_launch:
+        raise GateError(
+            f"{len(multi_launch)} descriptor(s) carry a 'sources' map instead of "
+            f"'kernel_source' (e.g. {multi_launch[0]}), which this gate does not "
+            f"check per launch. Refusing rather than passing them unexamined."
+        )
     failures: list[str] = []
     unchecked: list[str] = []
     unverified: list[str] = []
