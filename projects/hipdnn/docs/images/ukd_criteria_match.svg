@@ -8,7 +8,7 @@
 
   <!-- Stage titles -->
   <text x="135" y="40" text-anchor="middle" font-weight="600">Live graph</text>
-  <text x="485" y="40" text-anchor="middle" font-weight="600">UMD matcher: pattern + criteria expression</text>
+  <text x="485" y="40" text-anchor="middle" font-weight="600">UED pattern, then UMD criteria</text>
   <text x="800" y="40" text-anchor="middle" font-weight="600">Bound variables</text>
 
   <!-- STAGE 1: Live graph container -->
@@ -43,21 +43,23 @@
   <line x1="255" y1="200" x2="325" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
   <text x="290" y="192" text-anchor="middle" font-weight="600">match</text>
 
-  <!-- STAGE 2: criteria box (amber) -->
+  <!-- STAGE 2: the engine's pattern (blue), then the pack's criteria (amber) -->
   <rect x="330" y="55" width="310" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="345" y="82"  font-family="Consolas, monospace" font-size="11">nodes:  op sdpa_fwd</text>
-  <text x="345" y="100" font-family="Consolas, monospace" font-size="11">  operands { Q:$q, K:$k, V:$v }</text>
-  <text x="345" y="118" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
-  <text x="345" y="142" font-family="Consolas, monospace" font-size="11" fill="#8a6d1f">criteria (expression tree):</text>
-  <text x="345" y="162" font-family="Consolas, monospace" font-size="11">{"and": [</text>
-  <text x="345" y="180" font-family="Consolas, monospace" font-size="11">  {"in": ["$q.dtype", ["BFLOAT16"]]},</text>
-  <text x="345" y="198" font-family="Consolas, monospace" font-size="11">  {"shape": ["$q", [b, h, sq, d]]},</text>
-  <text x="345" y="216" font-family="Consolas, monospace" font-size="11">  {"shape": ["$k", [b, h, sk, d]]},</text>
-  <text x="345" y="234" font-family="Consolas, monospace" font-size="11">  {"shape": ["$v", [b, h, sk, d]]},</text>
-  <text x="345" y="252" font-family="Consolas, monospace" font-size="11">  {"==": ["$sdpa_fwd.head_size", 128]}</text>
-  <text x="345" y="270" font-family="Consolas, monospace" font-size="11">]}</text>
-  <text x="345" y="290" font-family="Consolas, monospace" font-size="10" fill="#555">fields: Tensor·Graph·Attrs·$kernel·$device</text>
-  <text x="345" y="308" font-size="10" fill="#8a6d1f">one matcher of the KDP's set, run once, memoized</text>
+  <text x="345" y="76" font-size="10" fill="#4a72c4" font-weight="600">UED nodes &#183; the engine's pattern</text>
+  <rect x="340" y="82" width="290" height="64" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.2"/>
+  <text x="352" y="101" font-family="Consolas, monospace" font-size="11">nodes:  op sdpa_fwd</text>
+  <text x="352" y="119" font-family="Consolas, monospace" font-size="11">  operands { Q:$q, K:$k, V:$v }</text>
+  <text x="352" y="137" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
+  <text x="345" y="168" font-size="10" fill="#8a6d1f" font-weight="600">UMD criteria &#183; one expression tree</text>
+  <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"and": [</text>
+  <text x="345" y="206" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.dtype", "$kernel.dtype"]},</text>
+  <text x="345" y="224" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.rank", 4]},</text>
+  <text x="345" y="242" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.dims[3]", "$kernel.head_size"]},</text>
+  <text x="345" y="260" font-family="Consolas, monospace" font-size="11">  {"==": ["$k.dims[3]", "$q.dims[3]"]},</text>
+  <text x="345" y="278" font-family="Consolas, monospace" font-size="11">  {"!": ["$sdpa_fwd.causal_mask"]}</text>
+  <text x="345" y="296" font-family="Consolas, monospace" font-size="11">]}</text>
+  <text x="345" y="318" font-family="Consolas, monospace" font-size="10" fill="#555">fields: Tensor&#183;Graph&#183;Attrs&#183;$kernel&#183;$device</text>
+  <text x="345" y="336" font-size="10" fill="#8a6d1f">one matcher of the KDP's set, run once, memoized</text>
 
   <!-- Arrow Stage2 -> Stage3 (bind) -->
   <line x1="645" y1="200" x2="695" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
@@ -69,9 +71,9 @@
   <text x="715" y="115" font-family="Consolas, monospace" font-size="11">$k → K</text>
   <text x="715" y="140" font-family="Consolas, monospace" font-size="11">$v → V</text>
   <text x="715" y="165" font-family="Consolas, monospace" font-size="11">$o → O</text>
-  <text x="715" y="200" font-family="Consolas, monospace" font-size="11">b, h, sq, d</text>
-  <text x="715" y="220" font-family="Consolas, monospace" font-size="11">  (bound dims)</text>
+  <text x="715" y="200" font-family="Consolas, monospace" font-size="11">$q.dims[0..3]</text>
+  <text x="715" y="220" font-family="Consolas, monospace" font-size="11">$q.strides[0..3]</text>
 
   <!-- Caption -->
-  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The same matcher that accepts a graph also binds the handles that launch and workspace formulas reference.</text>
+  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The engine's pattern accepts the graph and binds the handles the criteria, the UHD, and the UDD's formulas all read.</text>
 </svg>

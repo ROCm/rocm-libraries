@@ -34,8 +34,6 @@
 #include <vector>
 
 #define MIO_BN_CPP_PROF 0
-#define MIOPEN_BN_CPP_DEBUG 0
-#define MIO_BN_STATIC_WGSIZE 256
 #define MIO_BN_TIME_EVERYTHING 0
 
 namespace miopen {
@@ -50,118 +48,6 @@ MIOPEN_INTERNALS_EXPORT void DeriveBNTensorDescriptor(TensorDescriptor& derivedB
 
 MIOPEN_INTERNALS_EXPORT TensorDescriptor
 BuildReshaped4DTensorDescriptor(const miopen::TensorDescriptor& tDesc);
-
-void bnBwdTrainSelectSingle(const Handle& handle,
-                            miopenDataType_t dtype,
-                            const std::string& program_name,
-                            const std::string& algo_name,
-                            const std::string& kernel_name,
-                            const std::string& network_config,
-                            const std::string& parms,
-                            const std::vector<size_t>& vld,
-                            const std::vector<size_t>& vgd,
-                            ConstData_t x,
-                            ConstData_t dy,
-                            Data_t dx,
-                            ConstData_t bnScale,
-                            Data_t dScale,
-                            Data_t dBias,
-                            bool useSaved,
-                            double epsilon,
-                            ConstData_t savedMean,
-                            ConstData_t savedInvVariance,
-                            float inhw);
-
-void bnFwdTrainSelectSingleFull(const Handle& handle,
-                                int variant,
-                                miopenDataType_t dtype,
-                                const std::string& algo_name,
-                                const std::string& network_config,
-                                ConstData_t x,
-                                Data_t y,
-                                ConstData_t bnScale,
-                                ConstData_t bnBias,
-                                bool resultsave,
-                                bool resultrunning,
-                                double expAvgFactor,
-                                Data_t resultRunningMean,
-                                Data_t resultRunningVariance,
-                                double epsilon,
-                                Data_t resultSaveMean,
-                                Data_t resultSaveInvVariance,
-                                float inhw,
-                                unsigned int in_cstride,
-                                unsigned int in_nstride);
-
-void bnBwdTrainSelectMulti(const Handle& handle,
-                           miopenDataType_t dtype,
-                           const std::string& program_name,
-                           const std::string& algo_name,
-                           const std::string& kernel_name,
-                           const std::string& network_config,
-                           const std::string& parms,
-                           const std::vector<size_t>& vld,
-                           const std::vector<size_t>& vgd,
-                           ConstData_t x,
-                           ConstData_t dy,
-                           Data_t dx,
-                           ConstData_t bnScale,
-                           Data_t dScale,
-                           Data_t dBias,
-                           bool useSaved,
-                           double epsilon,
-                           ConstData_t savedMean,
-                           ConstData_t savedInvVariance,
-                           float inhw);
-
-void bnFwdTrainSelectSingleEmpty(const Handle& handle,
-                                 int variant,
-                                 miopenDataType_t dtype,
-                                 const std::string& program_name,
-                                 const std::string& algo_name,
-                                 const std::string& kernel_name,
-                                 const std::string& network_config,
-                                 const std::string& parms,
-                                 const std::vector<size_t>& vld,
-                                 const std::vector<size_t>& vgd,
-                                 ConstData_t x,
-                                 Data_t y,
-                                 ConstData_t bnScale,
-                                 ConstData_t bnBias,
-                                 bool resultsave,
-                                 bool resultrunning,
-                                 double expAvgFactor,
-                                 Data_t resultRunningMean,
-                                 Data_t resultRunningVariance,
-                                 double epsilon,
-                                 Data_t resultSaveMean,
-                                 Data_t resultSaveInvVariance,
-                                 float inhw,
-                                 unsigned int in_cstride,
-                                 unsigned int in_nstride);
-
-void bnFwdTrainSelectMulti(const Handle& handle,
-                           miopenDataType_t dtype,
-                           const std::string& program_name,
-                           const std::string& algo_name,
-                           const std::string& kernel_name,
-                           const std::string& network_config,
-                           const std::string& parms,
-                           const std::vector<size_t>& vld,
-                           const std::vector<size_t>& vgd,
-                           ConstData_t x,
-                           Data_t y,
-                           ConstData_t bnScale,
-                           ConstData_t bnBias,
-                           bool resultsave,
-                           bool resultrunning,
-                           double expAvgFactor,
-                           Data_t resultRunningMean,
-                           Data_t resultRunningVariance,
-                           double epsilon,
-                           Data_t resultSaveMean,
-                           Data_t resultSaveInvVariance,
-                           float inhw);
 
 void profileSequence(const Handle& handle, unsigned char select, float* ctime);
 

@@ -135,6 +135,10 @@ static int run_one(int idx)
         rocke_ir_builder_free(&b0);
         return 1;
     }
+    if(idx == 0)
+    {
+        rocke_attr_set_str(&b0, &k0->attrs, "scheduler_strategy", "iterative-ilp");
+    }
 
     /* serialize(k0) */
     char* s0 = NULL;
@@ -151,6 +155,14 @@ static int run_one(int idx)
     {
         fprintf(stderr, "[%d] lower(original) failed\n", idx);
         free(s0);
+        rocke_ir_builder_free(&b0);
+        return 1;
+    }
+    if(idx == 0 && strstr(ll0, "\"amdgpu-sched-strategy\"=\"iterative-ilp\"") == NULL)
+    {
+        fprintf(stderr, "[%d] scheduler strategy attribute missing\n", idx);
+        free(s0);
+        free(ll0);
         rocke_ir_builder_free(&b0);
         return 1;
     }

@@ -23,6 +23,8 @@
  */
 
 #include "rocke/verify.h"
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -30,6 +32,7 @@
 #include <string.h>
 
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 
 /* ----------------------------------------------------- diagnostic buffer */
 
@@ -290,8 +293,14 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     static const char* mma_keys[] = {"op_id"};
     static const char* yield_keys[] = {"num"};
     static const char* asm_keys[] = {"template", "constraints"};
+    static const char* scope_order_keys[] = {"scope", "ordering"};
+    static const char* scope_keys[] = {"scope"};
+    static const char* assume_range_keys[] = {"multiple_of", "residue"};
     switch(o)
     {
+    case ROCKE_OP_ARITH_ASSUME_RANGE:
+        *n = 2;
+        return assume_range_keys;
     case ROCKE_OP_ARITH_CONSTANT:
         *n = 2;
         return constant_keys;
@@ -308,6 +317,13 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     case ROCKE_OP_TILE_INLINE_ASM:
         *n = 2;
         return asm_keys;
+    case ROCKE_OP_MEMREF_FENCE:
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE:
+        *n = 2;
+        return scope_order_keys;
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ:
+        *n = 1;
+        return scope_keys;
     default:
         *n = 0;
         return NULL;
@@ -319,8 +335,109 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 
 /* ---- contracts ---- */
 
+/* IRBuilder._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_fence_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_fence_orderings[] = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+static bool in_set(const char* s, const char* const* set)
+{
+    for(; *set; ++set)
+        if(!strcmp(s, *set))
+            return true;
+    return false;
+}
+
+/* Python Verifier._check_sync_attrs: scope / ordering values of a fence or
+ * flag op (presence is checked by the required-attrs pass). */
+static void check_sync_attrs(verifier_t* v, const rocke_op_t* op, const char* const* orderings)
+{
+    const char* scope = rocke_attr_get_str(&op->attrs, "scope");
+    const char* ordering = rocke_attr_get_str(&op->attrs, "ordering");
+    if(scope && !in_set(scope, k_fence_scopes))
+        v_errf(v, op, "%s: unknown scope '%s'", op->name, scope);
+    if(orderings && ordering && !in_set(ordering, orderings))
+        v_errf(v, op, "%s: unknown ordering '%s'", op->name, ordering);
+}
+
+/* Python ir._assume_range_errors: every rule an arith.assume_range marker's
+ * attrs break, in order, with the same texts. */
+static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
+{
+    /* ir._ASSUME_RANGE_INT_ATTRS: every present attr must be an integer before
+     * the value rules below compare it. */
+    static const char* const int_attrs[] = {"multiple_of", "residue", "lo", "hi", "hi_plus"};
+    bool typed = true;
+    for(const char* key : int_attrs)
+    {
+        const rocke_attr_value_t* value = rocke_attr_get(&op->attrs, key);
+        if(value && value->kind != ROCKE_ATTR_INT)
+        {
+            v_errf(v, op, "arith.assume_range: %s must be an integer", key);
+            typed = false;
+        }
+    }
+    if(!typed)
+    {
+        return;
+    }
+    int64_t multiple_of = 1;
+    int64_t residue = 0;
+    int64_t lo = 0;
+    int64_t hi = 0;
+    int64_t unused = 0;
+    rocke_attr_get_int(&op->attrs, "multiple_of", &multiple_of);
+    rocke_attr_get_int(&op->attrs, "residue", &residue);
+    if(multiple_of < 1)
+    {
+        v_errf(v,
+               op,
+               "arith.assume_range: multiple_of must be >= 1, got %lld",
+               (long long)multiple_of);
+    }
+    else if(!(residue >= 0 && residue < multiple_of))
+    {
+        v_errf(v,
+               op,
+               "arith.assume_range: residue must be in [0, %lld), got %lld",
+               (long long)multiple_of,
+               (long long)residue);
+    }
+    const bool has_hi_value = op->num_operands == 2;
+    const bool has_lo = rocke_attr_get_int(&op->attrs, "lo", &lo);
+    const bool has_hi = rocke_attr_get_int(&op->attrs, "hi", &hi);
+    if(has_hi && has_hi_value)
+    {
+        v_errf(v, op, "arith.assume_range: hi and hi_value are both given; state at most one end");
+    }
+    if(rocke_attr_get_int(&op->attrs, "hi_plus", &unused) && !has_hi_value)
+    {
+        v_errf(v, op, "arith.assume_range: hi_plus is given without hi_value");
+    }
+    if(has_lo && has_hi && lo >= hi)
+    {
+        v_errf(v,
+               op,
+               "arith.assume_range: lo (%lld) must be below hi (%lld)",
+               (long long)lo,
+               (long long)hi);
+    }
+}
+
 static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
+    if(op->opcode == ROCKE_OP_TILE_MMA)
+    {
+        const char* id = rocke_attr_get_str(&op->attrs, "op_id");
+        if(const char* error = rocke_scaled_mfma_error(id, op->operands, op->num_operands))
+            v_errf(v, op, "%s", error);
+        if(rocke_gfx950_scaled_mfma(id)
+           && (op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0))
+            v_errf(v, op, "scaled MFMA result must be vec<f32x16>");
+    }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        v_errf(v, op, "%s", tf32_error);
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
     if(is_binary_same_type(o))
@@ -346,6 +463,15 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: result type %s != operand type %s", name, tn(r), tn(a));
         }
+        char wrap_buf[128];
+        const char* wrap_error
+            = o == ROCKE_OP_ARITH_ADD
+                  ? rocke_i_add_wrap_error(&op->attrs, a, wrap_buf, sizeof wrap_buf)
+                  : NULL;
+        if(wrap_error)
+        {
+            v_errf(v, op, "%s", wrap_error);
+        }
     }
     else if(is_unary_same_type(o))
     {
@@ -368,6 +494,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
         }
+        if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
+        {
+            v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
+        }
     }
     else if(is_cmp(o))
     {
@@ -386,6 +516,48 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: result must be i1, got %s", name, tn(op->results[0]->type));
         }
+        char pred_buf[128];
+        const char* pred_error
+            = o == ROCKE_OP_ARITH_CMP
+                  ? rocke_i_cmp_pred_error(&op->attrs, a, pred_buf, sizeof pred_buf)
+                  : NULL;
+        if(pred_error)
+        {
+            v_errf(v, op, "%s", pred_error);
+        }
+    }
+    else if(o == ROCKE_OP_ARITH_ASSUME_RANGE)
+    {
+        if((op->num_operands != 1 && op->num_operands != 2) || op->num_results != 1)
+        {
+            v_errf(v,
+                   op,
+                   "%s: expected 1 or 2 operands / 1 result, got %d / %d",
+                   name,
+                   op->num_operands,
+                   op->num_results);
+            return;
+        }
+        const rocke_type_t* t = op->operands[0]->type;
+        if(!rocke_type_eq(op->results[0]->type, t))
+        {
+            v_errf(v,
+                   op,
+                   "%s: result type %s != operand type %s",
+                   name,
+                   tn(op->results[0]->type),
+                   tn(t));
+        }
+        if(op->num_operands == 2 && !rocke_type_eq(op->operands[1]->type, t))
+        {
+            v_errf(v,
+                   op,
+                   "%s: hi_value type %s != operand type %s",
+                   name,
+                   tn(op->operands[1]->type),
+                   tn(t));
+        }
+        check_assume_range_attrs(v, op);
     }
     else if(o == ROCKE_OP_ARITH_SELECT)
     {
@@ -465,6 +637,45 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: must have no operands and no results", name);
         }
+    }
+    else if(o == ROCKE_OP_MEMREF_FENCE)
+    {
+        if(op->num_operands || op->num_results)
+        {
+            v_errf(v, op, "%s: must have no operands and no results", name);
+        }
+        check_sync_attrs(v, op, k_fence_orderings);
+    }
+    else if(o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE || o == ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ)
+    {
+        if(op->num_operands != 3 || op->num_results)
+        {
+            v_errf(v,
+                   op,
+                   "%s: expected 3 operands / 0 results, got %d / %d",
+                   name,
+                   op->num_operands,
+                   op->num_results);
+            return;
+        }
+        const rocke_type_t* pt = op->operands[0]->type;
+        /* ir._is_flag_ptr: both lowerers address the flag as an i32. */
+        if(!pt || pt->kind != ROCKE_TYPE_PTR || !pt->space || strcmp(pt->space, "global")
+           || strcmp(tn(pt->pointee), "i32"))
+        {
+            v_errf(v, op, "%s: expected a global i32 pointer, got %s", name, tn(pt));
+        }
+        const char* what[] = {"index", "value"};
+        for(int i = 0; i < 2; ++i)
+        {
+            const rocke_type_t* t = op->operands[i + 1]->type;
+            if(strcmp(tn(t), "i32"))
+            {
+                v_errf(v, op, "%s: %s must be i32, got %s", name, what[i], tn(t));
+            }
+        }
+        check_sync_attrs(
+            v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
     }
 }
 

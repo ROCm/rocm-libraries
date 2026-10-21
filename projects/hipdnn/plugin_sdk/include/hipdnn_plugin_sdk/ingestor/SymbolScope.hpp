@@ -41,10 +41,17 @@ public:
     SymbolScope& operator=(SymbolScope&&) = delete;
 
     /// @throws std::runtime_error if @p symbol is already registered.
-    void add(const std::string& symbol, GraphMatcherFn matcher)
+    void add(const std::string& symbol, GraphMatchFn matcher)
     {
-        GraphMatcherRegistry::registerSymbol(symbol, matcher);
-        recordUndo(&GraphMatcherRegistry::unregisterSymbol, symbol);
+        GraphMatchRegistry::registerSymbol(symbol, matcher);
+        recordUndo(&GraphMatchRegistry::unregisterSymbol, symbol);
+    }
+
+    /// @throws std::runtime_error if @p symbol is already registered.
+    void add(const std::string& symbol, GraphCriterionFn matcher)
+    {
+        GraphCriterionRegistry::registerSymbol(symbol, matcher);
+        recordUndo(&GraphCriterionRegistry::unregisterSymbol, symbol);
     }
 
     /// @throws std::runtime_error if @p symbol is already registered.

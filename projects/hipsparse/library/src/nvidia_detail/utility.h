@@ -772,10 +772,8 @@ namespace hipsparse
             return CUSPARSE_SPMV_CSR_ALG2;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return CUSPARSE_SPMV_SELL_ALG1;
-#ifdef HIPSPARSE_WITH_SPMV_BSR
         case HIPSPARSE_SPMV_BSR_ALG1:
             return CUSPARSE_SPMV_BSR_ALG1;
-#endif
         default:
             throw "Non existant hipsparseSpMVAlg_t";
         }

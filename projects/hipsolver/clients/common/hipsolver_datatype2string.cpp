@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,19 @@ char hipsolver2char_fill(hipsolverFillMode_t value)
         return 'U';
     case HIPSOLVER_FILL_MODE_LOWER:
         return 'L';
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}
+
+char hipsolver2char_diag(hipsolverDiagType_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_DIAG_NON_UNIT:
+        return 'N';
+    case HIPSOLVER_DIAG_UNIT:
+        return 'U';
     default:
         throw std::invalid_argument("Invalid enum");
     }
@@ -110,6 +123,32 @@ char hipsolver2char_erange(hipsolverEigRange_t value)
     }
 }
 
+char hipsolver2char_direct(hipsolverDirectMode_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_DIRECT_FORWARD:
+        return 'F';
+    case HIPSOLVER_DIRECT_BACKWARD:
+        return 'B';
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}
+
+char hipsolver2char_storev(hipsolverStorevMode_t value)
+{
+    switch(value)
+    {
+    case HIPSOLVER_STOREV_COLUMNWISE:
+        return 'C';
+    case HIPSOLVER_STOREV_ROWWISE:
+        return 'R';
+    default:
+        throw std::invalid_argument("Invalid enum");
+    }
+}
+
 /* ============================================================================================ */
 /*  Convert lapack char constants to hipsolver type. */
 
@@ -158,6 +197,21 @@ hipsolverFillMode_t char2hipsolver_fill(char value)
     case 'l':
     case 'L':
         return HIPSOLVER_FILL_MODE_LOWER;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverDiagType_t char2hipsolver_diag(char value)
+{
+    switch(value)
+    {
+    case 'n':
+    case 'N':
+        return HIPSOLVER_DIAG_NON_UNIT;
+    case 'u':
+    case 'U':
+        return HIPSOLVER_DIAG_UNIT;
     default:
         throw std::invalid_argument("Invalid character");
     }
@@ -218,6 +272,32 @@ hipsolverEigRange_t char2hipsolver_erange(char value)
         return HIPSOLVER_EIG_RANGE_V;
     case 'I':
         return HIPSOLVER_EIG_RANGE_I;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverDirectMode_t char2hipsolver_direct(char value)
+{
+    switch(value)
+    {
+    case 'F':
+        return HIPSOLVER_DIRECT_FORWARD;
+    case 'B':
+        return HIPSOLVER_DIRECT_BACKWARD;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverStorevMode_t char2hipsolver_storev(char value)
+{
+    switch(value)
+    {
+    case 'C':
+        return HIPSOLVER_STOREV_COLUMNWISE;
+    case 'R':
+        return HIPSOLVER_STOREV_ROWWISE;
     default:
         throw std::invalid_argument("Invalid character");
     }

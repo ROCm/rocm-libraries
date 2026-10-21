@@ -257,27 +257,19 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
-    def test_retrieve_projects_runs_ci_for_workflow_paths(self, mock_get_modified):
-        mock_get_modified.return_value = [".github/workflows/therock-ci.yml"]
+    def test_workflow_paths_enable_full_matrix(self, mock_get_modified):
+        mock_get_modified.return_value = [
+            ".github/workflows/therock-ci-linux.yml",
+            "projects/hiprand/CMakeLists.txt",
+        ]
 
         projects, test_type = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
         # Changes to the shared TheRock CI machinery intentionally expand the
-        # product matrix to every project. The rocjitsu marker must still follow
-        # the hipBLASLt subtree through dependency folding and attach to exactly
-        # one final row; otherwise a workflow-only PR could launch duplicate
-        # instrumentation jobs for unrelated projects.
-        rocjitsu_rows = [
-            project for project in projects if project["run_rocjitsu_race_check"]
-        ]
+        # product matrix to every project.
         self.assertGreaterEqual(len(projects), 3)
-        self.assertEqual(len(rocjitsu_rows), 1)
-        self.assertIn(
-            "tensilelite",
-            rocjitsu_rows[0]["projects_to_test"].split(","),
-        )
         self.assertEqual(test_type, "quick")
 
     def test_parse_test_labels_single_project(self):
@@ -303,23 +295,6 @@ class ConfigureCITest(unittest.TestCase):
 
         self.assertGreater(len(projects), 0)
         self.assertIn("BLAS", str(projects))
-        self.assertFalse(
-            any(project["run_rocjitsu_race_check"] for project in projects)
-        )
-        self.assertEqual(test_type, "standard")
-
-    @patch("therock_configure_ci.get_modified_paths")
-    def test_retrieve_projects_hipblaslt_label_enables_rocjitsu(
-        self, mock_get_modified
-    ):
-        mock_get_modified.return_value = []
-
-        pr_labels_json = '{"labels": [{"name": "test:hipblaslt"}]}'
-        projects, test_type = therock_configure_ci.retrieve_projects(
-            {"is_pull_request": True, "base_ref": "HEAD^", "pr_labels": pr_labels_json}
-        )
-
-        self.assertTrue(any(project["run_rocjitsu_race_check"] for project in projects))
         self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -512,6 +487,49 @@ class ConfigureCITest(unittest.TestCase):
             )
 
         self.assertEqual(projects, [])
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_skips_ci_for_draft_pr(self, mock_get_modified):
+        # A draft PR must skip CI even though it touched a real source file,
+        # and must do so WITHOUT diffing modified paths at all (the draft
+        # check short-circuits before get_modified_paths is ever called).
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "is_draft": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertEqual(projects, [])
+        self.assertEqual(test_type, "standard")
+        mock_get_modified.assert_not_called()
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_runs_ci_once_marked_ready(self, mock_get_modified):
+        # Once a PR leaves draft state (is_draft=False), the same changed
+        # file must produce the normal, non-empty project list.
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "is_draft": False, "base_ref": "HEAD^"}
+        )
+
+        self.assertIn("rocprim", str(projects))
+        self.assertEqual(test_type, "standard")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_draft_flag_ignored_outside_pull_request(
+        self, mock_get_modified
+    ):
+        # is_draft only makes sense for pull_request events; a push (e.g. to
+        # develop) must never be affected even if is_draft were somehow set.
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_push": True, "is_draft": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertIn("rocprim", str(projects))
+        self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_retrieve_projects_nightly_ignores_labels(self, mock_get_modified):

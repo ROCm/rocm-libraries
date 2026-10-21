@@ -106,9 +106,8 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): identical to
- * the LLVM22 set for the declares rocke emits today; split entries here if an
- * LLVM 23 host proves drift. */
+/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
+ * set plus declarations whose ABI changed again. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
@@ -129,6 +128,8 @@ typedef struct rocke_ll_anyptr_space
 
 extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[];
 extern const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[];
+extern const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT;
 extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
 extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
 
@@ -195,6 +196,13 @@ typedef struct rocke_isa_backend
      * backend fact rather than tested by gfx-string prefix so the capability
      * has one definition site per backend, as in Python. */
     bool has_async_lds_counter;
+    /* Python Gfx1250Backend.blocks_ds_load_tr16: when true, vec==8
+     * smem_load_vN emits `volatile` to block the WMMA-aware backend pass from
+     * substituting ds_load_tr16_b128 (transposed LDS read) for the plain
+     * sequential ds_read_b128. Row-major LDS tiles (stored for coalesced
+     * writes) are mis-read by ds_load_tr16_b128, producing garbage WMMA
+     * inputs. Volatile is opaque to the substitution. True only on gfx1250. */
+    bool blocks_ds_load_tr16;
     /* Python ISABackend.emits_legacy_s_waitcnt. gfx1250 replaced the
      * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
      * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt
@@ -212,8 +220,9 @@ typedef struct rocke_isa_backend
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
 } rocke_isa_backend_t;
 
-/* Resolve a gfx string to its backend (Python backend_for). NULL => "gfx950".
- * Returns NULL and sets *st on an unknown arch. */
+/* Resolve a gfx string to its backend (Python backend_for). Returns NULL and
+ * sets *st to ROCKE_ERR_VALUE for a NULL arch (there is no default) and to
+ * ROCKE_ERR_KEY for an unknown one. */
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st);
 
 /* The two CDNA waitcnt encoders (Python _encode_waitcnt_gfx9_10 /
@@ -249,6 +258,90 @@ typedef struct rocke_ll_block
 } rocke_ll_block_t;
 
 /* ====================================================================== */
+/* Debug metadata (Python _DebugInfo)                                     */
+/* ====================================================================== */
+
+/* LLVM drops every !dbg attachment in a module that does not carry this flag,
+ * silently and with no diagnostic, so it is not optional. */
+#define ROCKE_LL_DEBUG_INFO_VERSION 3
+
+/* finalize hardcodes low metadata ids for the AMDGPU markers (fp-atomic, agent
+ * scope). Debug nodes start above them and are numbered in a fixed allocation
+ * order, which is what lets this engine reproduce the Python bytes exactly. */
+#define ROCKE_LL_DEBUG_MD_BASE 10
+
+/* IRBuilder caps a captured chain at 16 frames (ir._MAX_LOC_FRAMES). */
+#define ROCKE_LL_DEBUG_MAX_FRAMES 16
+
+/* One authoring call-stack entry parsed out of an Op.loc (Python _Frame). */
+typedef struct rocke_ll_dbg_frame
+{
+    const char* path;
+    int line;
+    int col;
+    const char* func;
+} rocke_ll_dbg_frame_t;
+
+/* path -> metadata id (the _file_ids / _block_ids dicts). */
+typedef struct rocke_ll_dbg_str_id
+{
+    const char* key;
+    int id;
+} rocke_ll_dbg_str_id_t;
+
+/* (path, func) -> DISubprogram id (the _inlined_subprograms dict). */
+typedef struct rocke_ll_dbg_func_id
+{
+    const char* path;
+    const char* func;
+    int id;
+} rocke_ll_dbg_func_id_t;
+
+/* (frame, scope, parent) -> DILocation id (the _locations dict). Keying on the
+ * parent as well is what keeps two call sites of the same helper distinct. */
+typedef struct rocke_ll_dbg_loc
+{
+    const char* path;
+    const char* func;
+    int line;
+    int col;
+    int scope;
+    int parent; /* -1 when this is the outermost frame */
+    int id;
+} rocke_ll_dbg_loc_t;
+
+/* How many lines a block held before an op lowered into it, so only what that
+ * op added gets its location (Python's marks dict, keyed on block identity). */
+typedef struct rocke_ll_dbg_mark
+{
+    const rocke_ll_block_t* block;
+    size_t len;
+} rocke_ll_dbg_mark_t;
+
+/* Line-table debug metadata assembled from the Op.loc of lowered ops. Line
+ * tables only: enough for a profiler to map a program counter back to the
+ * Python line that emitted it, without the variable and type DWARF a
+ * source-level debugger would want. */
+typedef struct rocke_ll_debug
+{
+    const char* kernel_name;
+    int flag_id;
+    int empty_id;
+    int subroutine_id;
+    int primary_file_id;
+    int cu_id;
+    int subprogram_id;
+    int next_id;
+    const char* primary_file; /* NULL until the first location is interned */
+    int primary_line;
+    ROCKE_VEC(rocke_ll_dbg_str_id_t) file_ids;
+    ROCKE_VEC(rocke_ll_dbg_str_id_t) block_ids;
+    ROCKE_VEC(rocke_ll_dbg_func_id_t) inlined;
+    ROCKE_VEC(rocke_ll_dbg_loc_t) locations;
+    ROCKE_VEC(char*) nodes; /* rendered in allocation order, which is id order */
+} rocke_ll_debug_t;
+
+/* ====================================================================== */
 /* Lowerer state (Python _Lowerer)                                        */
 /* ====================================================================== */
 
@@ -280,6 +373,13 @@ typedef struct rocke_ll_smem_base_cache
     const char* base;
 } rocke_ll_smem_base_cache_t;
 
+/* Provenance of an i64 LDS address (smem_addr_of / smem_ptr_add result). */
+typedef struct
+{
+    const rocke_value_t* value;
+    const char* gname;
+} rocke_ll_lds_prov_t;
+
 /* A "needed intrinsic" record: the decl key plus the resolved decl text. The
  * decl text is captured at _need() time so dynamically-built decls (Python
  * self._decls[intrin] = ... for vector smax) are preserved in emit order. */
@@ -309,6 +409,7 @@ struct rocke_lower
     ROCKE_VEC(rocke_ll_need_t) needs;
     bool needs_fp_atomic_md; /* _needs_fp_atomic_md      */
     bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
+    bool needs_nontemporal_md; /* _needs_nontemporal_md: "!5 = !{i32 1}" */
 
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
      * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */
@@ -321,6 +422,11 @@ struct rocke_lower
     /* smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
      * Populated by rocke_ll_compute_smem_layout() after _collect_smem. */
     ROCKE_VEC(int) smem_offsets; /* parallel to smem_globals: byte offset per alloc */
+    /* LDS alias scopes (kernel attr lds_alias_scopes; Python _lds_aa*). */
+    bool lds_aa; /* attr set */
+    bool lds_aa_used; /* any access annotated -> render metadata */
+    ROCKE_VEC(int) smem_sizes; /* parallel to smem_globals: pool bytes, -1 if unused */
+    ROCKE_VEC(rocke_ll_lds_prov_t) lds_prov; /* i64 LDS address value -> gname */
     int smem_pool_size; /* total pool size in bytes (rounded to 16) */
     const char* smem_pool_name; /* "@smem_pool.<kernel>" */
     ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
@@ -332,6 +438,15 @@ struct rocke_lower
     /* unroll trailing-sync elision marker (Python _unroll_elide_sync_op):
      * points at the specific tile.sync op to skip, or NULL. */
     const rocke_op_t* unroll_elide_sync_op;
+
+    /* DWARF line-table metadata, or NULL when the kernel was built without
+     * location capture (Python self._debug). */
+    rocke_ll_debug_t* debug;
+
+    /* Scratch: per-op block-length marks, reused across ops (Python's marks
+     * dict). Nested lower_op calls append and restore len so they do not
+     * clobber the parent. */
+    ROCKE_VEC(rocke_ll_dbg_mark_t) dbg_marks;
 
     /* sticky error (the lowerer has no builder to carry it). */
     rocke_status_t status;
@@ -352,6 +467,29 @@ struct rocke_lower
 /* True if the lowerer is usable (non-null). The lowerer no longer carries a
  * sticky error -- a failure raises instead -- so this is just a null guard. */
 bool rocke_ll_live(const rocke_lower_t* L);
+
+/* The recorded target fact that admits an LLVM-23-only operation (Python
+ * _OpTargetFact). The memory.* flags name one hardware feature each;
+ * target_family gfx12_cdna covers the instructions no flag records: the split
+ * and named barriers, s_setreg (hardware-register field layouts differ between
+ * families), global_load_tr16_b128 and global_store_async_from_lds. */
+typedef enum rocke_ll_target_fact
+{
+    ROCKE_LL_FACT_TDM, /* memory.has_tdm */
+    ROCKE_LL_FACT_CLUSTER_LAUNCH, /* memory.has_cluster_launch */
+    ROCKE_LL_FACT_MULTICAST_LOAD, /* memory.has_multicast_load */
+    ROCKE_LL_FACT_SCALAR_DATA_PREFETCH, /* memory.has_scalar_data_prefetch */
+    ROCKE_LL_FACT_GLOBAL_PREFETCH, /* memory.has_global_prefetch */
+    ROCKE_LL_FACT_GFX12_CDNA_FAMILY /* target_family gfx12_cdna */
+} rocke_ll_target_fact_t;
+
+/* Fail unless the target records `fact` and the flavor is llvm23 (Python
+ * _Lowerer._require_llvm23_target_fact). The rule reads the target's facts,
+ * never its name, so a target whose row records the fact lowers `op` with no
+ * code change. */
+void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
+                                         const char* op,
+                                         rocke_ll_target_fact_t fact);
 
 /* ====================================================================== */
 /* Core plumbing (Python _Lowerer helpers) -- DEFINED IN BUCKET 0         */
@@ -384,6 +522,29 @@ void rocke_ll_emitf(rocke_lower_t* L, const char* fmt, ...);
  * stable for the lowerer's lifetime. */
 const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint);
 
+/* ====================================================================== */
+/* Debug metadata (Python _DebugInfo) -- DEFINED IN debug.cpp             */
+/* ====================================================================== */
+
+/* Allocate the per-kernel debug state. Called only when the kernel carries the
+ * debug_info attr, so a kernel built without location capture pays nothing. */
+rocke_ll_debug_t* rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_name);
+
+/* Whether any location was interned; false means render nothing and leave the
+ * define line bare (Python has_locations). */
+bool rocke_ll_debug_has_locations(const rocke_ll_debug_t* D);
+
+/* Intern an Op.loc and return the innermost !DILocation id, or -1 when the
+ * location carries no usable frame (Python location_id). */
+int rocke_ll_debug_location_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char* loc);
+
+/* Attach ", !dbg !<id>" to the lines `blk` grew from `start` on (Python
+ * annotate). */
+void rocke_ll_debug_annotate(rocke_lower_t* L, rocke_ll_block_t* blk, size_t start, int dbg);
+
+/* Append the module-level debug metadata block (Python render). */
+void rocke_ll_debug_render(rocke_lower_t* L, const rocke_ll_debug_t* D, rocke_strbuf_t* out);
+
 /* Mark an intrinsic as needed by its canonical key (Python _need). Resolves
  * the decl text now (flavor overrides + dyn_decls) so emit order is the table
  * order and dynamic decls survive. No-op if already present. */
@@ -405,6 +566,13 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v);
 
 /* "<type> <operand>" (Python _operand_with_type). */
 const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v);
+
+/* Emit one `bitcast` of `v` to `register_type` and return the new name
+ * (Python _Lowerer._reinterpret). Only renders: the caller has established
+ * that the bit widths match (rocke_mma_operand_needs_reinterpret). */
+const char* rocke_ll_reinterpret(rocke_lower_t* L,
+                                 const rocke_value_t* v,
+                                 const rocke_type_t* register_type);
 
 /* Map an IR Type to its LLVM textual form (Python _llvm_type). Sets NOTIMPL on
  * an unmapped type and returns "" . */
@@ -432,10 +600,6 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
                           int count,
                           const char** out_ptr_ty);
 
-/* Map an IR type-NAME string (from op.attrs, e.g. iter_args metadata) back to
- * LLVM text (Python _llvm_type_from_name). Handles scalars + "vec<exN>". */
-const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name);
-
 /* LLVM aggregate storage type for a SmemType: nested arrays of the element
  * (Python _smem_storage_type). Arena-owned. */
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem);
@@ -446,8 +610,9 @@ bool rocke_ll_is_constant(const rocke_value_t* v);
  * + returns 0 if not a constant. */
 int64_t rocke_ll_eval_constant(rocke_lower_t* L, const rocke_value_t* v);
 
-/* fp32 / fp16 LLVM hex constant spellings (Python _fp32_hex / _fp16_hex).
- * Arena-owned. */
+/* fp64 / fp32 / fp16 LLVM hex constant spellings (Python _fp64_hex / _fp32_hex /
+ * _fp16_hex). Arena-owned. */
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x);
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x);
 const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x);
 
@@ -483,6 +648,12 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L);
  * _emit_smem_base_ptr). */
 const char*
     rocke_ll_emit_smem_base_ptr(rocke_lower_t* L, const char* gname, const rocke_type_t* stype);
+/* ", !alias.scope !A, !noalias !N" for an LDS access to gname, or "" (Python
+ * _lds_aa_suffix). */
+const char* rocke_ll_lds_aa_suffix(rocke_lower_t* L, const char* gname);
+/* Provenance helpers for i64 LDS addresses. */
+void rocke_ll_lds_prov_set(rocke_lower_t* L, const rocke_value_t* v, const char* gname);
+const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const rocke_value_t* v);
 
 /* ====================================================================== */
 /* yield-stack helpers (Python _yield_stack manipulation)                 */
@@ -536,6 +707,15 @@ void rocke_ll_binop(rocke_lower_t* L, const rocke_op_t* op, const char* llvm_op)
 
 /* Vector same-type binary op (Python _vector_binop). */
 void rocke_ll_vector_binop(rocke_lower_t* L, const rocke_op_t* op, const char* llvm_op);
+
+/* The icmp predicate for an arith.cmp / vector.cmp predicate ("lt", ...) on
+ * operands of type `t`: ordered compares of unsigned integers are unsigned
+ * (Python _icmp_predicate). An unknown predicate fails "<op_name>: unknown pred
+ * <pred>". */
+const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
+                                    const char* op_name,
+                                    const char* pred,
+                                    const rocke_type_t* t);
 
 /* Shared FP8/BF8 MFMA lowering body (Python _lower_mfma_fp8_bf8): bitcasts the
  * <8 x i8> A/B to the flavor-correct packed type (i64 on LLVM22, <2 x i32> on

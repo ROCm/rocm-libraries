@@ -30,6 +30,7 @@
 #include "blas3/Tensile/gemm_templates.hpp"
 #include "blas3/rocblas_gemm.hpp"
 #include "blas3/rocblas_gemm_grouped_batched.hpp"
+#include "blas_ex/rocblas_gemm_ex.hpp"
 
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
@@ -74,6 +75,60 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
     RETURN_IF_ROCBLAS_ERROR(
         rocblas_copy_alpha_beta_to_host_if_on_device(handle, alpha, beta, alpha_h, beta_h, k));
     auto saved_pointer_mode = handle->push_pointer_mode(rocblas_pointer_mode_host);
+
+    // A unit free dimension makes this problem a GEMV. gemm_ex has routed such
+    // problems to the GEMV kernels since 5.0.0; the plain GEMM entry points never
+    // consulted that machinery, so they reached Tensile with a length-one output
+    // to tile. GEMM writes its result through C for both C and D, so the in-place
+    // requirement of rocblas_can_use_gemv_in_gemm holds by construction.
+    // Restricted to batch_count == 1. gemm_ex threads batch_count into the same
+    // launcher, but that path has no upstream coverage -- gemm_ex_gemv is
+    // non-batched -- and adding batched cases surfaced mismatches against the
+    // reference for strided problems with negative batch strides. Extending the
+    // dispatch to batched is left as separate work.
+    if constexpr(rocblas_is_gemv_supported_types<BATCHED, const TScal*, TConstPtr, TPtr, TPtr>())
+    {
+        if(batch_count == 1
+           && rocblas_use_gemv_in_gemm<BATCHED, const TScal*, TConstPtr, TPtr, TPtr>(handle,
+                                                                                     trans_a,
+                                                                                     trans_b,
+                                                                                     m,
+                                                                                     n,
+                                                                                     k,
+                                                                                     lda,
+                                                                                     ldb,
+                                                                                     C,
+                                                                                     offset_c,
+                                                                                     ldc,
+                                                                                     stride_c,
+                                                                                     C,
+                                                                                     offset_c,
+                                                                                     ldc,
+                                                                                     stride_c))
+        {
+            return rocblas_gemv_in_gemm_launcher(handle,
+                                                 trans_a,
+                                                 trans_b,
+                                                 m,
+                                                 n,
+                                                 k,
+                                                 alpha,
+                                                 A,
+                                                 offset_a,
+                                                 lda,
+                                                 stride_a,
+                                                 B,
+                                                 offset_b,
+                                                 ldb,
+                                                 stride_b,
+                                                 beta,
+                                                 C,
+                                                 offset_c,
+                                                 ldc,
+                                                 stride_c,
+                                                 batch_count);
+        }
+    }
 
 #ifdef BUILD_WITH_TENSILE
 

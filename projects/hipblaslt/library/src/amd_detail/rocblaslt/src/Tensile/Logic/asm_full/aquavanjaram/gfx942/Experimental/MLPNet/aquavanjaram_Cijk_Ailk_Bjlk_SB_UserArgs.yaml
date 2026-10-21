@@ -14044,7 +14044,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -14223,6 +14223,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 0
+  SolutionUID: 0uR2vpoK635a
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x256x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB1024_LPA0_LPB0_MIWT8_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -14329,7 +14330,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -14508,6 +14509,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 1
+  SolutionUID: 0uR2vpoJje51
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x224x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB896_LPA0_LPB16_MIWT8_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -14614,7 +14616,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -14793,6 +14795,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 2
+  SolutionUID: 0uR2vpoJosip
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x192x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB768_LPA0_LPB0_MIWT8_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -14899,7 +14902,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -15078,6 +15081,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 3
+  SolutionUID: 0uR2vpoJmfqx
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x160x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB640_LPA0_LPB16_MIWT8_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -15184,7 +15188,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -15363,6 +15367,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 4
+  SolutionUID: 0uR2vpoKGWuj
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x128x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB512_LPA0_LPB0_MIWT8_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -15469,7 +15474,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -15648,6 +15653,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 5
+  SolutionUID: 0uR2vpoKLHyC
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x96x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB384_LPA0_LPB16_MIWT8_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -15754,7 +15760,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -15933,6 +15939,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 6
+  SolutionUID: 0uR2vpoIxjj5
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x64x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB256_LPA0_LPB0_MIWT8_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -16039,7 +16046,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -16218,6 +16225,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 7
+  SolutionUID: 0uR2vpoIRGyC
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x32x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_LPA0_LPB16_MIWT8_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -16324,7 +16332,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -16503,6 +16511,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 8
+  SolutionUID: 0uR2vpoJENyA
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x256x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB1024_LPA16_LPB0_MIWT7_8_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -16609,7 +16618,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -16788,6 +16797,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 9
+  SolutionUID: 0uR2vpoIEYd9
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x224x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB896_LPA16_LPB16_MIWT7_7_NLCA7_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -16894,7 +16904,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -17073,6 +17083,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 10
+  SolutionUID: 0uR2vpoIDr9E
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x192x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB768_LPA16_LPB0_MIWT7_6_NLCA7_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -17179,7 +17190,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -17358,6 +17369,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 11
+  SolutionUID: 0uR2vpoILpz5
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x160x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB640_LPA16_LPB16_MIWT7_5_NLCA7_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -17464,7 +17476,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -17643,6 +17655,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 12
+  SolutionUID: 0uR2vpoIoxT7
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x128x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB512_LPA16_LPB0_MIWT7_4_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -17749,7 +17762,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -17928,6 +17941,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 13
+  SolutionUID: 0uR2vpoIMoZx
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x96x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB384_LPA16_LPB16_MIWT7_3_NLCA7_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -18034,7 +18048,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -18213,6 +18227,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 14
+  SolutionUID: 0uR2vpoIrT2J
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x64x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB256_LPA16_LPB0_MIWT7_2_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -18319,7 +18334,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -18498,6 +18513,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 15
+  SolutionUID: 0uR2vpoJCfwT
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x32x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB128_LPA16_LPB16_MIWT7_1_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -18604,7 +18620,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -18783,6 +18799,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 16
+  SolutionUID: 0uR2vpoIqMxK
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x256x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB1024_LPA0_LPB0_MIWT6_8_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -18889,7 +18906,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -19068,6 +19085,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 17
+  SolutionUID: 0uR2vpoJ15N0
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x224x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB896_LPA0_LPB16_MIWT6_7_NLCA3_NLCB7_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -19174,7 +19192,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -19353,6 +19371,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 18
+  SolutionUID: 0uR2vpoIiDOR
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x192x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB768_LPA0_LPB0_MIWT6_6_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -19459,7 +19478,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -19638,6 +19657,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 19
+  SolutionUID: 0uR2vpoJ3F0Q
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x160x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB640_LPA0_LPB16_MIWT6_5_NLCA3_NLCB5_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -19744,7 +19764,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -19923,6 +19943,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 20
+  SolutionUID: 0uR2vpoJ5CKg
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x128x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB512_LPA0_LPB0_MIWT6_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -20029,7 +20050,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -20208,6 +20229,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 21
+  SolutionUID: 0uR2vpoILyDb
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x96x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB384_LPA0_LPB16_MIWT6_3_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -20314,7 +20336,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -20493,6 +20515,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 22
+  SolutionUID: 0uR2vpoIunX7
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x64x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB256_LPA0_LPB0_MIWT6_2_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -20599,7 +20622,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -20778,6 +20801,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 23
+  SolutionUID: 0uR2vpoITb5C
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x32x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB128_LPA0_LPB16_MIWT6_1_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -20884,7 +20908,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -21063,6 +21087,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 24
+  SolutionUID: 0uR2vpoITkhP
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x256x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB1024_LPA16_LPB0_MIWT5_8_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -21169,7 +21194,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -21348,6 +21373,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 25
+  SolutionUID: 0uR2vpoJ7eGC
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x224x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB896_LPA16_LPB16_MIWT5_7_NLCA5_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -21454,7 +21480,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -21633,6 +21659,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 26
+  SolutionUID: 0uR2vpoIfAU1
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x192x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB768_LPA16_LPB0_MIWT5_6_NLCA5_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -21739,7 +21766,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -21918,6 +21945,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 27
+  SolutionUID: 0uR2vpoIpmed
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x160x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB640_LPA16_LPB16_MIWT5_5_NLCA5_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -22024,7 +22052,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -22203,6 +22231,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 28
+  SolutionUID: 0uR2vpoJBbau
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x128x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB512_LPA16_LPB0_MIWT5_4_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -22309,7 +22338,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -22488,6 +22517,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 29
+  SolutionUID: 0uR2vpoITvqx
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x96x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB384_LPA16_LPB16_MIWT5_3_NLCA5_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -22594,7 +22624,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -22773,6 +22803,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 30
+  SolutionUID: 0uR2vpoJ4H3h
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x64x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB256_LPA16_LPB0_MIWT5_2_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -22879,7 +22910,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -23058,6 +23089,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 31
+  SolutionUID: 0uR2vpoH5yhj
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x32x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB128_LPA16_LPB16_MIWT5_1_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -23164,7 +23196,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -23343,6 +23375,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 32
+  SolutionUID: 0uR2vpoHC0SH
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x256x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPA0_LPB0_MIWT4_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -23449,7 +23482,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -23628,6 +23661,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 33
+  SolutionUID: 0uR2vpoHVbbS
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x224x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB896_LPA0_LPB16_MIWT4_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -23734,7 +23768,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -23913,6 +23947,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 34
+  SolutionUID: 0uR2vpoI5sNt
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x192x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB768_LPA0_LPB0_MIWT4_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -24019,7 +24054,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -24198,6 +24233,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 35
+  SolutionUID: 0uR2vpoH6Zx9
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x160x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB640_LPA0_LPB16_MIWT4_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -24304,7 +24340,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -24483,6 +24519,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 36
+  SolutionUID: 0uR2vpoHJGpM
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x128x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPA0_LPB0_MIWT4_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -24589,7 +24626,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -24768,6 +24805,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 37
+  SolutionUID: 0uR2vpoHS4vo
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x96x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB384_LPA0_LPB16_MIWT4_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -24874,7 +24912,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -25053,6 +25091,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 38
+  SolutionUID: 0uR2vpoIAz5B
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x64x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB256_LPA0_LPB0_MIWT4_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -25159,7 +25198,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -25338,6 +25377,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 39
+  SolutionUID: 0uR2vpoHqHV6
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x32x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA0_LPB16_MIWT4_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -25444,7 +25484,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -25623,6 +25663,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 40
+  SolutionUID: 0uR2vpoHakbu
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x256x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB1024_LPA16_LPB0_MIWT3_8_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -25729,7 +25770,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -25908,6 +25949,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 41
+  SolutionUID: 0uR2vpoHQZ0U
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x224x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB896_LPA16_LPB16_MIWT3_7_NLCA3_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -26014,7 +26056,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -26193,6 +26235,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 42
+  SolutionUID: 0uR2vpoHH2w8
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x192x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB768_LPA16_LPB0_MIWT3_6_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -26299,7 +26342,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -26478,6 +26521,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 43
+  SolutionUID: 0uR2vpoHVy2h
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x160x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB640_LPA16_LPB16_MIWT3_5_NLCA3_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -26584,7 +26628,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -26763,6 +26807,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 44
+  SolutionUID: 0uR2vpoHjbr6
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x128x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB512_LPA16_LPB0_MIWT3_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -26869,7 +26914,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -27048,6 +27093,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 45
+  SolutionUID: 0uR2vpoHgHuy
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x96x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB384_LPA16_LPB16_MIWT3_3_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -27154,7 +27200,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -27333,6 +27379,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 46
+  SolutionUID: 0uR2vpoICWmc
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x64x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB256_LPA16_LPB0_MIWT3_2_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -27439,7 +27486,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -27618,6 +27665,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 47
+  SolutionUID: 0uR2vpoHZwhf
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x32x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB128_LPA16_LPB16_MIWT3_1_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -27724,7 +27772,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -27903,6 +27951,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 48
+  SolutionUID: 0uR2vpoHIVbt
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x256x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPA0_LPB0_MIWT2_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -28009,7 +28058,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -28188,6 +28237,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 49
+  SolutionUID: 0uR2vpoHVyuP
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x224x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB896_LPA0_LPB16_MIWT2_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -28294,7 +28344,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -28473,6 +28523,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 50
+  SolutionUID: 0uR2vpoHFvPf
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x192x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB768_LPA0_LPB0_MIWT2_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -28579,7 +28630,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -28758,6 +28809,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 51
+  SolutionUID: 0uR2vpoHd0lC
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x160x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB640_LPA0_LPB16_MIWT2_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -28864,7 +28916,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -29043,6 +29095,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 52
+  SolutionUID: 0uR2vpoHXqXY
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x128x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPA0_LPB0_MIWT2_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -29149,7 +29202,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -29328,6 +29381,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 53
+  SolutionUID: 0uR2vpoHJ3xc
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x96x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB384_LPA0_LPB16_MIWT2_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -29434,7 +29488,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -29613,6 +29667,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 54
+  SolutionUID: 0uR2vpoHI0LA
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x64x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB256_LPA0_LPB0_MIWT2_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -29719,7 +29774,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -29898,6 +29953,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 55
+  SolutionUID: 0uR2vpoI1G3M
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x32x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_LPA0_LPB16_MIWT2_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -30004,7 +30060,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -30183,6 +30239,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 56
+  SolutionUID: 0uR2vpoFyfAL
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x256x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB1024_LPA16_LPB0_MIWT1_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -30289,7 +30346,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -30468,6 +30525,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 57
+  SolutionUID: 0uR2vpoGqnXi
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x224x16_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB896_LPA16_LPB16_MIWT1_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -30574,7 +30632,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -30753,6 +30811,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 58
+  SolutionUID: 0uR2vpoGlgkI
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x192x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB768_LPA16_LPB0_MIWT1_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -30859,7 +30918,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -31038,6 +31097,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 59
+  SolutionUID: 0uR2vpoGSais
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x160x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB640_LPA16_LPB16_MIWT1_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -31144,7 +31204,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -31323,6 +31383,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 60
+  SolutionUID: 0uR2vpoGtjIR
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x128x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPA16_LPB0_MIWT1_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -31429,7 +31490,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -31608,6 +31669,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 61
+  SolutionUID: 0uR2vpoGRRRx
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x96x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB384_LPA16_LPB16_MIWT1_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -31714,7 +31776,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -31893,6 +31955,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 62
+  SolutionUID: 0uR2vpoH1juB
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x64x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB256_LPA16_LPB0_MIWT1_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -31999,7 +32062,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -32178,6 +32241,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 63
+  SolutionUID: 0uR2vpoG6pKD
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x32x16_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_LPA16_LPB16_MIWT1_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -32284,7 +32348,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -32463,6 +32527,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 64
+  SolutionUID: 0uR2vpoGqyz7
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x240x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB960_LPA0_LPB0_MIWT4_15_NLCA1_NLCB15_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -32569,7 +32634,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -32748,6 +32813,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 65
+  SolutionUID: 0uR2vpoGG9tt
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x208x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB832_LPA0_LPB0_MIWT4_13_NLCA1_NLCB13_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -32854,7 +32920,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -33033,6 +33099,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 66
+  SolutionUID: 0uR2vpoGBjJ5
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x176x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB704_LPA0_LPB0_MIWT4_11_NLCA1_NLCB11_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -33139,7 +33206,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -33318,6 +33385,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 67
+  SolutionUID: 0uR2vpoGGxLp
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x144x16_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB576_LPA0_LPB0_MIWT4_9_NLCA1_NLCB9_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -33424,7 +33492,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -33603,6 +33671,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 68
+  SolutionUID: 0uR2vpoGvyOp
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x112x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB448_LPA0_LPB0_MIWT4_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -33709,7 +33778,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -33888,6 +33957,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 69
+  SolutionUID: 0uR2vpoH1oAP
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x80x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB320_LPA0_LPB0_MIWT4_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -33994,7 +34064,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -34173,6 +34243,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 70
+  SolutionUID: 0uR2vpoG6OAZ
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x48x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB192_LPA0_LPB0_MIWT4_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -34279,7 +34350,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -34458,6 +34529,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 71
+  SolutionUID: 0uR2vpoGfsQo
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x16x16_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB1_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB64_LPA0_LPB0_MIWT4_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -34564,7 +34636,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -34743,6 +34815,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 72
+  SolutionUID: 0uR2vpoGzWbn
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT240x256x16_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA960_LBSPPB1024_LPA0_LPB0_MIWT15_4_NLCA15_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -34849,7 +34922,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -35028,6 +35101,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 73
+  SolutionUID: 0uR2vpoFxk0T
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT208x256x16_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA832_LBSPPB1024_LPA0_LPB0_MIWT13_4_NLCA13_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -35134,7 +35208,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -35313,6 +35387,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 74
+  SolutionUID: 0uR2vpoGxXiR
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT176x256x16_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA704_LBSPPB1024_LPA0_LPB0_MIWT11_4_NLCA11_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -35419,7 +35494,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -35598,6 +35673,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 75
+  SolutionUID: 0uR2vpoGdrLi
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT144x256x16_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA576_LBSPPB1024_LPA0_LPB0_MIWT9_4_NLCA9_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -35704,7 +35780,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -35883,6 +35959,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 76
+  SolutionUID: 0uR2vpoGgOjB
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT112x256x16_MI16x16x1_SN_LDSB1_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA448_LBSPPB1024_LPA0_LPB0_MIWT7_4_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -35989,7 +36066,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -36168,6 +36245,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 77
+  SolutionUID: 0uR2vpoGue5D
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT80x256x16_MI16x16x1_SN_LDSB1_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA320_LBSPPB1024_LPA0_LPB0_MIWT5_4_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -36274,7 +36352,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -36453,6 +36531,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 78
+  SolutionUID: 0uR2vpoFwIvN
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT48x256x16_MI16x16x1_SN_LDSB1_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA192_LBSPPB1024_LPA0_LPB0_MIWT3_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -36559,7 +36638,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -36738,6 +36817,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 79
+  SolutionUID: 0uR2vpoGTWC5
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT16x256x16_MI16x16x1_SN_LDSB1_GRVWA1_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA64_LBSPPB1024_LPA0_LPB0_MIWT1_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -36844,7 +36924,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -37023,6 +37103,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 80
+  SolutionUID: 0uR2vpoGnKTO
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB1024_LPA0_LPB0_MIWT8_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -37129,7 +37210,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -37308,6 +37389,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 81
+  SolutionUID: 0uR2vpoGQp6E
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB896_LPA0_LPB16_MIWT8_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -37414,7 +37496,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -37593,6 +37675,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 82
+  SolutionUID: 0uR2vpoFNKaT
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB768_LPA0_LPB0_MIWT8_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -37699,7 +37782,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -37878,6 +37961,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 83
+  SolutionUID: 0uR2vpoF0Lbx
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB640_LPA0_LPB16_MIWT8_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -37984,7 +38068,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -38163,6 +38247,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 84
+  SolutionUID: 0uR2vpoFsUHX
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB512_LPA0_LPB0_MIWT8_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -38269,7 +38354,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -38448,6 +38533,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 85
+  SolutionUID: 0uR2vpoFmZXj
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB384_LPA0_LPB16_MIWT8_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -38554,7 +38640,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -38733,6 +38819,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 86
+  SolutionUID: 0uR2vpoFKLW2
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x64x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB256_LPA0_LPB0_MIWT8_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -38839,7 +38926,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -39018,6 +39105,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 87
+  SolutionUID: 0uR2vpoFhwz1
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x32x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_LPA0_LPB16_MIWT8_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -39124,7 +39212,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -39303,6 +39391,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 88
+  SolutionUID: 0uR2vpoFThHl
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB1024_LPA16_LPB0_MIWT7_8_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -39409,7 +39498,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -39588,6 +39677,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 89
+  SolutionUID: 0uR2vpoFr8Vn
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB896_LPA16_LPB16_MIWT7_7_NLCA7_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -39694,7 +39784,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -39873,6 +39963,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 90
+  SolutionUID: 0uR2vpoFSIpz
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB768_LPA16_LPB0_MIWT7_6_NLCA7_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -39979,7 +40070,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -40158,6 +40249,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 91
+  SolutionUID: 0uR2vpoFrvDy
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB640_LPA16_LPB16_MIWT7_5_NLCA7_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -40264,7 +40356,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -40443,6 +40535,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 92
+  SolutionUID: 0uR2vpoF7N3J
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB512_LPA16_LPB0_MIWT7_4_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -40549,7 +40642,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -40728,6 +40821,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 93
+  SolutionUID: 0uR2vpoFF9jL
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB384_LPA16_LPB16_MIWT7_3_NLCA7_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -40834,7 +40928,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -41013,6 +41107,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 94
+  SolutionUID: 0uR2vpoFVJT6
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x64x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB256_LPA16_LPB0_MIWT7_2_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -41119,7 +41214,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -41298,6 +41393,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 95
+  SolutionUID: 0uR2vpoFQID6
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT224x32x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA896_LBSPPB128_LPA16_LPB16_MIWT7_1_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -41404,7 +41500,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -41583,6 +41679,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 96
+  SolutionUID: 0uR2vpoFRqPl
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB1024_LPA0_LPB0_MIWT6_8_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -41689,7 +41786,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -41868,6 +41965,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 97
+  SolutionUID: 0uR2vpoFjps9
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB896_LPA0_LPB16_MIWT6_7_NLCA3_NLCB7_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -41974,7 +42072,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -42153,6 +42251,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 98
+  SolutionUID: 0uR2vpoFmdb6
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB768_LPA0_LPB0_MIWT6_6_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -42259,7 +42358,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -42438,6 +42537,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 99
+  SolutionUID: 0uR2vpoFijo9
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB640_LPA0_LPB16_MIWT6_5_NLCA3_NLCB5_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -42544,7 +42644,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -42723,6 +42823,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 100
+  SolutionUID: 0uR2vpoFL4Qr
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB512_LPA0_LPB0_MIWT6_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -42829,7 +42930,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -43008,6 +43109,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 101
+  SolutionUID: 0uR2vpoFblyo
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB384_LPA0_LPB16_MIWT6_3_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -43114,7 +43216,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -43293,6 +43395,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 102
+  SolutionUID: 0uR2vpoFtVDj
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x64x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB256_LPA0_LPB0_MIWT6_2_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -43399,7 +43502,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -43578,6 +43681,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 103
+  SolutionUID: 0uR2vpoFAmwb
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x32x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB128_LPA0_LPB16_MIWT6_1_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -43684,7 +43788,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -43863,6 +43967,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 104
+  SolutionUID: 0uR2vpoEyYlv
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB1024_LPA16_LPB0_MIWT5_8_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -43969,7 +44074,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -44148,6 +44253,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 105
+  SolutionUID: 0uR2vpoF7nEZ
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB896_LPA16_LPB16_MIWT5_7_NLCA5_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -44254,7 +44360,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -44433,6 +44539,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 106
+  SolutionUID: 0uR2vpoF5st8
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB768_LPA16_LPB0_MIWT5_6_NLCA5_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -44539,7 +44646,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -44718,6 +44825,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 107
+  SolutionUID: 0uR2vpoFKbbF
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB640_LPA16_LPB16_MIWT5_5_NLCA5_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -44824,7 +44932,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -45003,6 +45111,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 108
+  SolutionUID: 0uR2vpoFgOHW
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB512_LPA16_LPB0_MIWT5_4_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -45109,7 +45218,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -45288,6 +45397,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 109
+  SolutionUID: 0uR2vpoEEVUx
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB384_LPA16_LPB16_MIWT5_3_NLCA5_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -45394,7 +45504,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -45573,6 +45683,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 110
+  SolutionUID: 0uR2vpoEfC9A
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x64x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB256_LPA16_LPB0_MIWT5_2_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -45679,7 +45790,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -45858,6 +45969,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 111
+  SolutionUID: 0uR2vpoEVxnv
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x32x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB128_LPA16_LPB16_MIWT5_1_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -45964,7 +46076,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -46143,6 +46255,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 112
+  SolutionUID: 0uR2vpoEDi9O
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPA0_LPB0_MIWT4_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -46249,7 +46362,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -46428,6 +46541,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 113
+  SolutionUID: 0uR2vpoECZVX
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB896_LPA0_LPB16_MIWT4_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -46534,7 +46648,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -46713,6 +46827,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 114
+  SolutionUID: 0uR2vpoElKUY
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB768_LPA0_LPB0_MIWT4_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -46819,7 +46934,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -46998,6 +47113,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 115
+  SolutionUID: 0uR2vpoEDEaw
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB640_LPA0_LPB16_MIWT4_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -47104,7 +47220,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -47283,6 +47399,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 116
+  SolutionUID: 0uR2vpoEisK2
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPA0_LPB0_MIWT4_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -47389,7 +47506,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -47568,6 +47685,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 117
+  SolutionUID: 0uR2vpoEMTXF
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB384_LPA0_LPB16_MIWT4_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -47674,7 +47792,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -47853,6 +47971,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 118
+  SolutionUID: 0uR2vpoElbe5
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x64x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB256_LPA0_LPB0_MIWT4_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -47959,7 +48078,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -48138,6 +48257,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 119
+  SolutionUID: 0uR2vpoERbz3
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x32x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA0_LPB16_MIWT4_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -48244,7 +48364,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -48423,6 +48543,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 120
+  SolutionUID: 0uR2vpoEJKqj
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB1024_LPA16_LPB0_MIWT3_8_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -48529,7 +48650,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -48708,6 +48829,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 121
+  SolutionUID: 0uR2vpoET5ur
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB896_LPA16_LPB16_MIWT3_7_NLCA3_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -48814,7 +48936,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -48993,6 +49115,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 122
+  SolutionUID: 0uR2vpoEF9df
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB768_LPA16_LPB0_MIWT3_6_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -49099,7 +49222,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -49278,6 +49401,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 123
+  SolutionUID: 0uR2vpoESwQb
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB640_LPA16_LPB16_MIWT3_5_NLCA3_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -49384,7 +49508,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -49563,6 +49687,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 124
+  SolutionUID: 0uR2vpoENJg2
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB512_LPA16_LPB0_MIWT3_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -49669,7 +49794,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -49848,6 +49973,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 125
+  SolutionUID: 0uR2vpoDsUKJ
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB384_LPA16_LPB16_MIWT3_3_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -49954,7 +50080,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -50133,6 +50259,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 126
+  SolutionUID: 0uR2vpoDs2g5
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x64x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB256_LPA16_LPB0_MIWT3_2_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -50239,7 +50366,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -50418,6 +50545,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 127
+  SolutionUID: 0uR2vpoEXIbc
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x32x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB128_LPA16_LPB16_MIWT3_1_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -50524,7 +50652,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -50703,6 +50831,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 128
+  SolutionUID: 0uR2vpoEnMKC
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPA0_LPB0_MIWT2_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -50809,7 +50938,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -50988,6 +51117,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 129
+  SolutionUID: 0uR2vpoDqRaK
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB896_LPA0_LPB16_MIWT2_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -51094,7 +51224,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -51273,6 +51403,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 130
+  SolutionUID: 0uR2vpoDzqfb
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB768_LPA0_LPB0_MIWT2_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -51379,7 +51510,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -51558,6 +51689,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 131
+  SolutionUID: 0uR2vpoDoGLu
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB640_LPA0_LPB16_MIWT2_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -51664,7 +51796,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -51843,6 +51975,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 132
+  SolutionUID: 0uR2vpoDwf40
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPA0_LPB0_MIWT2_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -51949,7 +52082,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -52128,6 +52261,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 133
+  SolutionUID: 0uR2vpoElXJI
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB384_LPA0_LPB16_MIWT2_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -52234,7 +52368,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -52413,6 +52547,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 134
+  SolutionUID: 0uR2vpoEdCAg
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB256_LPA0_LPB0_MIWT2_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -52519,7 +52654,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -52698,6 +52833,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 135
+  SolutionUID: 0uR2vpoERBbE
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_LPA0_LPB16_MIWT2_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -52804,7 +52940,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -52983,6 +53119,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 136
+  SolutionUID: 0uR2vpoDWcaU
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x256x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB1024_LPA16_LPB0_MIWT1_8_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -53089,7 +53226,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -53268,6 +53405,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 137
+  SolutionUID: 0uR2vpoCfG6E
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x224x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB896_LPA16_LPB16_MIWT1_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -53374,7 +53512,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -53553,6 +53691,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 138
+  SolutionUID: 0uR2vpoD0UFN
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x192x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB768_LPA16_LPB0_MIWT1_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -53659,7 +53798,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -53838,6 +53977,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 139
+  SolutionUID: 0uR2vpoDHeIq
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x160x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB640_LPA16_LPB16_MIWT1_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -53944,7 +54084,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -54123,6 +54263,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 140
+  SolutionUID: 0uR2vpoCxyvX
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x128x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPA16_LPB0_MIWT1_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -54229,7 +54370,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -54408,6 +54549,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 141
+  SolutionUID: 0uR2vpoCzMDA
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x96x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB384_LPA16_LPB16_MIWT1_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -54514,7 +54656,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -54693,6 +54835,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 142
+  SolutionUID: 0uR2vpoD91ms
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x64x32_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB256_LPA16_LPB0_MIWT1_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -54799,7 +54942,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -54978,6 +55121,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 143
+  SolutionUID: 0uR2vpoCuhp9
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_LPA16_LPB16_MIWT1_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -55084,7 +55228,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -55263,6 +55407,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 144
+  SolutionUID: 0uR2vpoDDrQR
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x240x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB960_LPA0_LPB0_MIWT4_15_NLCA1_NLCB15_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -55369,7 +55514,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -55548,6 +55693,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 145
+  SolutionUID: 0uR2vpoChSeo
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x208x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB832_LPA0_LPB0_MIWT4_13_NLCA1_NLCB13_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -55654,7 +55800,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -55833,6 +55979,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 146
+  SolutionUID: 0uR2vpoDHJPj
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x176x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB704_LPA0_LPB0_MIWT4_11_NLCA1_NLCB11_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -55939,7 +56086,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -56118,6 +56265,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 147
+  SolutionUID: 0uR2vpoCcfWn
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x144x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB576_LPA0_LPB0_MIWT4_9_NLCA1_NLCB9_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -56224,7 +56372,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -56403,6 +56551,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 148
+  SolutionUID: 0uR2vpoDLdIk
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x112x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB448_LPA0_LPB0_MIWT4_7_NLCA1_NLCB7_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -56509,7 +56658,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -56688,6 +56837,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 149
+  SolutionUID: 0uR2vpoCgnOd
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x80x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB320_LPA0_LPB0_MIWT4_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -56794,7 +56944,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -56973,6 +57123,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 150
+  SolutionUID: 0uR2vpoDXUsR
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x48x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB192_LPA0_LPB0_MIWT4_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -57079,7 +57230,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -57258,6 +57409,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 151
+  SolutionUID: 0uR2vpoCixLQ
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT256x16x32_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB2_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB64_LPA0_LPB0_MIWT4_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG64_4_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -57364,7 +57516,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -57543,6 +57695,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 152
+  SolutionUID: 0uR2vpoDHoWt
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT240x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA960_LBSPPB1024_LPA0_LPB0_MIWT15_4_NLCA15_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -57649,7 +57802,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -57828,6 +57981,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 153
+  SolutionUID: 0uR2vpoCybfJ
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT208x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA832_LBSPPB1024_LPA0_LPB0_MIWT13_4_NLCA13_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -57934,7 +58088,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -58113,6 +58267,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 154
+  SolutionUID: 0uR2vpoCy4Sh
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT176x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA704_LBSPPB1024_LPA0_LPB0_MIWT11_4_NLCA11_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -58219,7 +58374,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -58398,6 +58553,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 155
+  SolutionUID: 0uR2vpoCjpVN
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT144x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA576_LBSPPB1024_LPA0_LPB0_MIWT9_4_NLCA9_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -58504,7 +58660,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -58683,6 +58839,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 156
+  SolutionUID: 0uR2vpoCxa8d
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT112x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA448_LBSPPB1024_LPA0_LPB0_MIWT7_4_NLCA7_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -58789,7 +58946,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -58968,6 +59125,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 157
+  SolutionUID: 0uR2vpoD87XA
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT80x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA320_LBSPPB1024_LPA0_LPB0_MIWT5_4_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -59074,7 +59232,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -59253,6 +59411,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 158
+  SolutionUID: 0uR2vpoCaDYv
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT48x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA192_LBSPPB1024_LPA0_LPB0_MIWT3_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -59359,7 +59518,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -59538,6 +59697,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 159
+  SolutionUID: 0uR2vpoCZHNf
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT16x256x32_MI16x16x1_SN_LDSB1_GRVWA2_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA64_LBSPPB1024_LPA0_LPB0_MIWT1_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG16_16_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -59644,7 +59804,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -59823,6 +59983,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 160
+  SolutionUID: 0uR2vpoDOR0m
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x64x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB256_LPA0_LPB0_MIWT6_2_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -59929,7 +60090,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -60108,6 +60269,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 161
+  SolutionUID: 0uR2vpoD7kWq
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT192x32x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA768_LBSPPB128_LPA0_LPB16_MIWT6_1_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -60214,7 +60376,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -60393,6 +60555,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 162
+  SolutionUID: 0uR2vpoCn997
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x64x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB256_LPA16_LPB0_MIWT5_2_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -60499,7 +60662,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -60678,6 +60841,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 163
+  SolutionUID: 0uR2vpoCsPbX
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT160x32x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA640_LBSPPB128_LPA16_LPB16_MIWT5_1_NLCA5_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -60784,7 +60948,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -60963,6 +61127,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 164
+  SolutionUID: 0uR2vpoBvL22
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x128x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPA0_LPB0_MIWT4_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -61069,7 +61234,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -61248,6 +61413,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 165
+  SolutionUID: 0uR2vpoBVsry
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x96x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB384_LPA0_LPB16_MIWT4_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -61354,7 +61520,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -61533,6 +61699,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 166
+  SolutionUID: 0uR2vpoCQ601
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB256_LPA0_LPB0_MIWT4_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -61639,7 +61806,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -61818,6 +61985,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 167
+  SolutionUID: 0uR2vpoCD7yY
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT128x32x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA0_LPB16_MIWT4_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -61924,7 +62092,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -62103,6 +62271,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 168
+  SolutionUID: 0uR2vpoBlAxU
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x128x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB512_LPA16_LPB0_MIWT3_4_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -62209,7 +62378,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -62388,6 +62557,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 169
+  SolutionUID: 0uR2vpoCRwry
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x96x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB384_LPA16_LPB16_MIWT3_3_NLCA3_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -62494,7 +62664,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -62673,6 +62843,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 170
+  SolutionUID: 0uR2vpoBVaH8
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x64x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB256_LPA16_LPB0_MIWT3_2_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -62779,7 +62950,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -62958,6 +63129,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 171
+  SolutionUID: 0uR2vpoBXUyl
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT96x32x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA384_LBSPPB128_LPA16_LPB16_MIWT3_1_NLCA3_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -63064,7 +63236,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -63243,6 +63415,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 172
+  SolutionUID: 0uR2vpoBkt1x
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x192x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB768_LPA0_LPB0_MIWT2_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -63349,7 +63522,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -63528,6 +63701,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 173
+  SolutionUID: 0uR2vpoBmOOa
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x160x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB640_LPA0_LPB16_MIWT2_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -63634,7 +63808,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -63813,6 +63987,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 174
+  SolutionUID: 0uR2vpoCUSt8
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPA0_LPB0_MIWT2_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -63919,7 +64094,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -64098,6 +64273,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 175
+  SolutionUID: 0uR2vpoCUOAt
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x96x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB384_LPA0_LPB16_MIWT2_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -64204,7 +64380,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -64383,6 +64559,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 176
+  SolutionUID: 0uR2vpoC5ET9
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x64x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB256_LPA0_LPB0_MIWT2_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -64489,7 +64666,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -64668,6 +64845,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 177
+  SolutionUID: 0uR2vpoBVuro
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_LPA0_LPB16_MIWT2_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW2_VWA2_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -64774,7 +64952,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -64953,6 +65131,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 178
+  SolutionUID: 0uR2vpoCWf4e
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x192x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB768_LPA16_LPB0_MIWT1_6_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -65059,7 +65238,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -65238,6 +65417,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 179
+  SolutionUID: 0uR2vpoBbKxl
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x160x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB640_LPA16_LPB16_MIWT1_5_NLCA1_NLCB5_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -65344,7 +65524,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -65523,6 +65703,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 180
+  SolutionUID: 0uR2vpoBq7U7
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x128x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPA16_LPB0_MIWT1_4_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB4_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -65629,7 +65810,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -65808,6 +65989,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 181
+  SolutionUID: 0uR2vpoCJaxk
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x96x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB384_LPA16_LPB16_MIWT1_3_NLCA1_NLCB3_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -65914,7 +66096,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -66093,6 +66275,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 182
+  SolutionUID: 0uR2vpoBqSvl
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x64x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB256_LPA16_LPB0_MIWT1_2_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB2_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
@@ -66199,7 +66382,7 @@ Solutions:
   ISA: [9, 4, 2]
   InnerUnroll: 1
   InterleaveAlpha: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   KernelLanguage: Assembly
@@ -66378,6 +66561,7 @@ Solutions:
   ScheduleIterAlg: 3
   ScheduleLocalWrite: 1
   SolutionIndex: 183
+  SolutionUID: 0uR2vpoBza45
   SolutionNameMin: Cijk_Ailk_Bjlk_SB_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB1_GRVWA4_GRVWB4_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_LPA16_LPB16_MIWT1_1_NLCA1_NLCB1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM6_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0

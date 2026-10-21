@@ -3,7 +3,14 @@
 
 """Shared helper functions for hipDNN Python binding tests."""
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
+import pytest
 
 import hipdnn_frontend as hipdnn
 
@@ -27,6 +34,20 @@ def set_stub_engine_active(value):
 def stub_engine_active():
     """Return True once the ABSOLUTE-mode test stub has replaced engine discovery."""
     return _stub_engine_active
+
+
+_stub_engine_path = None
+
+
+def set_stub_engine_path(path):
+    """Record the plugin file conftest loaded, for tests needing a sibling plugin."""
+    global _stub_engine_path
+    _stub_engine_path = path
+
+
+def stub_engine_path():
+    """Path of the loaded test stub plugin, or None when no stub was loaded."""
+    return _stub_engine_path
 
 
 def create_float_graph():
@@ -136,3 +157,45 @@ def call_attribute_methods(value, calls):
         assert (
             actual == expected
         ), f"{getter} returned {actual!r}, expected {expected!r}"
+
+
+# Child-process probes, in probes/.
+#
+# The session's conftest pins test_good_plugin in ABSOLUTE mode, and that engine
+# declares no knobs and cannot prime, so knob and priming behaviour needs another
+# plugin. hipdnnSetEnginePluginPaths_ext refuses to re-pin while a handle is
+# alive and would change the engine set every later test sees, so each probe
+# runs in its own interpreter and loads exactly one plugin file: the engine set
+# is then fixed, and plugins added to the test directory later cannot perturb
+# these results. probes/ holds scripts, not test modules; pytest does not
+# collect them, and importing one would perform that very re-pin.
+PROBE_DIR = Path(__file__).parent / "probes"
+
+
+def run_plugin_probe(probe, plugin, reason):
+    """Run probes/`probe` in a child process against exactly one test plugin.
+
+    `plugin` is the plugin file name; the child loads it in ABSOLUTE mode, so the
+    engine set is exactly that plugin's. Returns the JSON report the child
+    prints, and fails the calling test with the child's stderr if it exits
+    non-zero.
+    """
+    stub = stub_engine_path()
+    if stub is None:
+        pytest.skip("no test plugin directory known")
+    plugin_path = Path(stub).parent / plugin
+    if not plugin_path.is_file():
+        pytest.skip(f"{plugin_path} not installed; {reason}")
+
+    env = dict(os.environ)
+    env["HIPDNN_TEST_PROBE_PLUGIN"] = str(plugin_path)
+    env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
+    completed = subprocess.run(
+        [sys.executable, str(PROBE_DIR / probe)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout.strip().splitlines()[-1])

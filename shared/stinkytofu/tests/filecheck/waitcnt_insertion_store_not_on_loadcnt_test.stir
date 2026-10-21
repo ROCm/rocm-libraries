@@ -1,0 +1,81 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Per the ISA's "Memory Dependency Counters" section (5.7.1 in the public
+# gfx1250 doc), a vector STORE increments STOREcnt, not LOADcnt. Because a
+# loadcnt immediate is derived from a queue position, a store sitting in the
+# CK_Load FIFO would shift every load's position and make the emitted
+# s_wait_loadcnt too weak. CK_Load therefore tracks loads (and returning
+# atomics) only; see defaultCounterPolicy() in WaitDataflow.cpp.
+
+##===----------------------------------------------------------------------===##
+# 1. A trailing store must not inflate the wait for an earlier load.
+##===----------------------------------------------------------------------===##
+#
+#   L1 = buffer_load   <- consumed below
+#   L2 = buffer_load
+#        buffer_store   (STOREcnt, not LOADcnt)
+#   v_add_f32 L1
+#
+# LOADcnt queue at the consumer is [L1, L2], so draining L1 leaves L2 in flight
+# -> vlcnt = 1. Counting the store would give a queue of 3 and vlcnt = 2, which
+# hardware satisfies while L1 is still outstanding.
+#
+# CHECK-LABEL: @waitcnt_insertion_trailing_store_not_counted
+# CHECK: buffer_store_b128
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 1
+# CHECK-NEXT: v_add_f32
+
+st.func @waitcnt_insertion_trailing_store_not_counted() {
+^entry:
+  v[0:3] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[4:7] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
+  "st.buffer_store_b128"(v[20:23], v9, s[4:7], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v100 = "st.v_add_f32"(v0, v0)
+}
+
+##===----------------------------------------------------------------------===##
+# 2. A store between the only load and its consumer still needs a full drain.
+##===----------------------------------------------------------------------===##
+#
+# Just one load is on LOADcnt, so the consumer needs vlcnt = 0. Counting the
+# store would emit vlcnt = 1, which is already true on entry and drains nothing.
+#
+# CHECK-LABEL: @waitcnt_insertion_store_between_load_and_consumer
+# CHECK: buffer_store_b128
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 0
+# CHECK-NEXT: v_add_f32
+
+st.func @waitcnt_insertion_store_between_load_and_consumer() {
+^entry:
+  v[0:3] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.buffer_store_b128"(v[20:23], v9, s[4:7], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v100 = "st.v_add_f32"(v0, v0)
+}
+
+##===----------------------------------------------------------------------===##
+# 3. Crediting an incoming s_wait_loadcnt must not evict a live load.
+##===----------------------------------------------------------------------===##
+#
+# creditObservedWait() trims the CK_Load queue to the immediate it observes.
+# With stores in the queue, `s_wait_loadcnt 2` against [L, S, S] would keep the
+# two stores and drop L -- the consumer would then see nothing pending and get
+# NO wait at all, even though hardware LOADcnt is 1 here and the incoming wait
+# is a no-op. With loads only, the queue is [L], the credit trims nothing, and
+# the consumer still gets its drain.
+#
+# CHECK-LABEL: @waitcnt_insertion_observed_credit_keeps_live_load
+# CHECK: "st.s_wait_loadcnt"(2)
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 0
+# CHECK-NEXT: v_add_f32
+
+st.func @waitcnt_insertion_observed_credit_keeps_live_load() {
+^entry:
+  v[0:3] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.buffer_store_b128"(v[20:23], v9, s[4:7], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.buffer_store_b128"(v[24:27], v9, s[4:7], 0) { mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
+  "st.s_wait_loadcnt"(2)
+  v100 = "st.v_add_f32"(v0, v0)
+}

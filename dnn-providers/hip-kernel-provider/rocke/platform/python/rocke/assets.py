@@ -32,6 +32,17 @@ def platform_root() -> Path:
     return Path(override) if override else _PLATFORM_ROOT
 
 
+def library_root() -> Path:
+    """The ``rocke/library`` source root (sibling of ``platform/``).
+
+    For tests/tools that need to hand a subprocess an explicit ``PYTHONPATH``
+    (rather than relying on the dev env's editable installs). Override with
+    ``ROCKE_LIBRARY_ROOT``.
+    """
+    override = os.environ.get("ROCKE_LIBRARY_ROOT")
+    return Path(override) if override else platform_root().parent / "library"
+
+
 def dsl_docs_dir() -> Path:
     """The ``dsl_docs`` documentation + utilities tree.
 

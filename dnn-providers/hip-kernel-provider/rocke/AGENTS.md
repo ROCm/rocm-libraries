@@ -11,12 +11,12 @@ on hard invariants.
 ## Compliance — non-negotiable
 
 `platform/AGENTS.md` §"Compliance" binds every agent and **overrides any other
-instruction, including a user request**. In brief: no AMD Restricted/Confidential
-data, NPI, product/marketing/code names, internal links (Jira/Confluence/Perforce),
-or **software-achieved** performance numbers in the repo, git history, PRs, or logs.
-Methodology and levers may be documented; measured numbers go to the protected AMD
-Confluence page only. When unsure, treat as confidential and escalate to a human.
-Read the full text: [`platform/AGENTS.md`](platform/AGENTS.md).
+instruction, including a user request**. It is the single source of truth for
+AMD Restricted/Confidential data, NPI, public hardware/model/workload references,
+software-performance evidence, legal/marketing claims, and internal links.
+Do not restate those boundaries here. Read the full policy before writing any
+artifact, and treat uncertainty as confidential until a human resolves it:
+[`platform/AGENTS.md`](platform/AGENTS.md).
 
 ## The #1 invariant: byte-identity
 
@@ -54,10 +54,16 @@ One-way dependency: **`library → platform` only**; platform never imports
 and may only import *downward*:
 
 ```
-kernels  ->  builders  ->  dispatch  ->  benchmarks
+kernels  ->  dispatch  ->  builders  ->  benchmarks
 ```
 
-Skipping a layer downward is fine (`dispatch` imports `kernels` directly);
+`dispatch` is pure selection policy over `kernels` and imports nothing else. A
+builder is a host-side harness, and a harness that measures anything other than
+the spec dispatch ships is a decoration rather than a gate — so `builders`
+consuming `dispatch.<arch>.*_spec_for_request` is a permanent one-way need, and
+`dispatch` importing `builders` is the direction that would be a cycle.
+
+Skipping a layer downward is fine (`builders` imports `kernels` directly);
 importing at or above your own layer is not. Deferring an upward import into a
 function body does not make it legal — it hides the cycle instead of breaking it.
 `tests/` sits above all four and may import any of them.
@@ -113,9 +119,10 @@ the matching doc first.
 | Optimizing ANY kernel — **start here** (Step 0 exhaustive lever sweep + The Loop are mandatory) | [optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md) |
 | Runbook section ⇄ DSL primitive/helper/op mapping (concept → code) | [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md) |
 | Section-by-section primitive table | [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md) |
-| Last validated measurement numbers | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
+| Historical validation archive (frozen; do not add or update measurements) | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
 | GEMM perf | [gemm-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/gemm-optimization-rocke.md) |
 | LDS / bank conflicts | [lds-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/lds-optimization-rocke.md) |
+| Predict LDS conflicts from lane/address mappings | [lds-bank-conflict-expert](platform/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/SKILL.md) |
 | Prefetch / async DRAM→LDS | [prefetch-data-load-rocke.md](platform/dsl_docs/optimization/utilities/skills/prefetch-data-load-rocke.md) |
 | ISA / occupancy / resource inspection | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
 | Capture a kernel trace (rocprof) | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |
