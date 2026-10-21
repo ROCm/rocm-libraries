@@ -1076,7 +1076,8 @@ TEST_P(TdmLogitsSoftCap, DataTypeConfig)
 
 // Dropout on the TDM pipelines (fwd and batch_prefill), also with a logits soft cap and a
 // sink. Validation also compares the stored random values. The 1024-row causal case takes
-// qr_tdm's staged M128 traversal.
+// qr_tdm's staged M128 traversal; unpadded qr_tdm_pingpong also takes unaligned sequences.
+// qr_tdm_sched and qr_tdm_pingpong take dropout on masked attention only.
 // api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask, logits_soft_cap, init_sink
 using TdmDropoutCase =
     std::tuple<const char*, const char*, mode_enum, int, int, int, const char*, float, int>;
@@ -1092,7 +1093,11 @@ INSTANTIATE_TEST_SUITE_P(
            TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
            TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 1024, 1024, 0, "t", 0.0f, 0},
            TdmDropoutCase{"fwd", "qr_tdm", mode_enum::group, 100, 500, 0, "t:64,32", 0.0f, 0},
-           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.5f, 1}));
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.5f, 1},
+           TdmDropoutCase{"fwd", "qr_tdm_sched", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm_sched", mode_enum::group, 300, 500, 0, "t", 0.5f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, 8, 532, 0, "b", 0.5f, 1}));
 
 #if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 INSTANTIATE_TEST_SUITE_P(
@@ -1100,8 +1105,11 @@ INSTANTIATE_TEST_SUITE_P(
     TdmDropout,
     Values(TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 100, 500, 16, "0", 0.0f, 0},
            TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 1, "b", 0.0f, 0},
+           TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 16, "t", 0.5f, 1},
            TdmDropoutCase{
-               "batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 16, "t", 0.5f, 1}));
+               "batch_prefill", "qr_tdm_sched", mode_enum::group, 300, 500, 16, "b", 0.0f, 0},
+           TdmDropoutCase{
+               "batch_prefill", "qr_tdm_pingpong", mode_enum::group, 100, 500, 16, "b", 0.0f, 0}));
 #endif
 
 TEST_P(TdmDropout, DataTypeConfig)

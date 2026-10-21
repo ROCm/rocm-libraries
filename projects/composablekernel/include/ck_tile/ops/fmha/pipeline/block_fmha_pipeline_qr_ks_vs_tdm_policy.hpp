@@ -195,7 +195,7 @@ template <typename Problem, typename QPadding, typename KPadding, typename VPadd
 struct QrTdmLdsArenaLayout;
 
 inline constexpr bool is_qr_tdm_padding_supported_arch_v =
-#if(defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)) || \
+#if (defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)) || \
     (!defined(__HIP_DEVICE_COMPILE__) && defined(CK_USE_GFX1250))
     true;
 #else
@@ -972,8 +972,8 @@ struct QrTdmLdsArenaLayout
             return integer_least_multiple(max(kQBytes, kV0Offset + kVBytes), kArenaAlignment);
         }
     }();
-    // Dropout: the random values of a P step go through LDS (BlockDropout::Run) while K/V
-    // tiles are in flight, so they get their own region past the K/V buffers.
+    // Dropout: the random values of a P step go through LDS (BlockDropout::Run)
+    // while K/V tiles are in flight, so they get their own region past the K/V buffers.
     static constexpr index_t kRandValOffset = kKVArenaBytes;
     static constexpr index_t kRandValBytes  = [] {
         if constexpr(Problem::kHasDropout)

@@ -24,18 +24,6 @@ namespace ck_tile {
 #define CK_TILE_FMHA_TDM_IGLP_BULK 1
 #endif
 
-// Dropout of P for the qr_tdm bodies: the BlockDropout of the block, and its randval window
-// (kM0 x kN0 at the block's first query row; each K tile's step is cut from it).
-struct BlockFmhaTdmNoDropout
-{
-};
-template <typename Dropout, typename RandValWindow>
-struct BlockFmhaTdmDropout
-{
-    Dropout dropout;
-    RandValWindow randval_window;
-};
-
 // This pipeline is qkv all located in LDS, targeting gfx1250
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaultPolicy>
 struct BlockFmhaPipelineQRKSVSTdm
@@ -332,9 +320,6 @@ struct BlockFmhaPipelineQRKSVSTdm
     // LogitsSoftCapTransform, applied to the scores after gemm0 (STAGE 2).
     static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "qr_tdm pipeline: a logits soft cap comes without a bias");
-
-    // Dropout (BlockDropout on P, as qr) takes P in gemm_0's C distribution: one warp along N.
-    static_assert(!kHasDropout || kNWarp == 1, "qr_tdm pipeline: dropout needs one N warp");
 
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
@@ -1313,6 +1298,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 auto randval_window =
                     dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
                         randval_block_window, kv_tile_start);
+                // Run's LDS round trip per 16 columns measured a few percent ahead of
+                // RunWholeTile here (qr_tdm_sched and qr_tdm_pingpong take RunWholeTile).
                 dropout_args.dropout
                     .template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
                         static_cast<char*>(smem_arena) + Layout::kRandValOffset,
@@ -2320,6 +2307,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 auto randval_window =
                     dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
                         randval_block_window, kv_tile_start);
+                // Run's LDS round trip per 16 columns measured a few percent ahead of
+                // RunWholeTile here (qr_tdm_sched and qr_tdm_pingpong take RunWholeTile).
                 dropout_args.dropout
                     .template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
                         static_cast<char*>(smem_arena) + Layout::kRandValOffset,

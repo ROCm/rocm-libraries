@@ -3572,8 +3572,9 @@ struct FmhaFwdKernel
                     ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
                     : -numeric<float>::infinity();
 
-            // Dropout (qr_tdm): the BlockDropout of the block and its randval window, as the
-            // generic path builds them.
+            // Dropout: the BlockDropout of the block and its randval window, as the generic
+            // path builds them. The window is bounds-checked element by element: unpadded
+            // qr_tdm_pingpong instances also take unaligned sequences.
             [[maybe_unused]] const auto dropout = [&, i_nhead_ = i_nhead, i_batch_ = i_batch]() {
                 if constexpr(kHasDropout)
                 {
@@ -3608,10 +3609,10 @@ struct FmhaFwdKernel
                                             rand_val_ptr,
                                             make_tuple(kargs.seqlen_q, kargs.seqlen_k),
                                             make_tuple(kargs.stride_randval, 1),
-                                            number<FmhaPipeline::kAlignmentRandVal>{},
+                                            number<1>{},
                                             number<1>{}),
                                         lengths,
-                                        sequence<kPadSeqLenQ, kPadSeqLenK>{});
+                                        sequence<true, true>{});
                     return make_tile_window(randval_dram, lengths, {i_m0, 0});
                 }
                 else
@@ -3672,21 +3673,39 @@ struct FmhaFwdKernel
                     if constexpr(kUsesFixedSegmentedLdsArena)
                     {
                         using Policy = typename FmhaPipeline::Policy;
-                        static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
-                        __shared__ char smem_arena[Policy::GetLdsArenaSize()];
-                        return invoke_fmha_pipeline(q_dram_window,
-                                                    k_dram_window,
-                                                    v_dram_window,
-                                                    bias_dram_window,
-                                                    lse_dram_window,
-                                                    mask,
-                                                    score_transform,
-                                                    scale_s,
-                                                    sink_value,
-                                                    smem_arena + Policy::GetLdsOffsetK0(),
-                                                    smem_arena + Policy::GetLdsOffsetK1(),
-                                                    smem_arena + Policy::GetLdsOffsetV0(),
-                                                    smem_arena + Policy::GetLdsOffsetV1());
+                        // Dropout adds its random-value LDS past the arena.
+                        static_assert(FmhaPipeline::GetSmemSize() >= Policy::GetLdsArenaSize());
+                        __shared__ char smem_arena[FmhaPipeline::GetSmemSize()];
+                        if constexpr(kHasDropout)
+                            return FmhaPipeline{}(q_dram_window,
+                                                  k_dram_window,
+                                                  v_dram_window,
+                                                  bias_dram_window,
+                                                  randval_dram_window,
+                                                  lse_dram_window,
+                                                  mask,
+                                                  score_transform,
+                                                  scale_s,
+                                                  sink_value,
+                                                  smem_arena + Policy::GetLdsOffsetK0(),
+                                                  smem_arena + Policy::GetLdsOffsetK1(),
+                                                  smem_arena + Policy::GetLdsOffsetV0(),
+                                                  smem_arena + Policy::GetLdsOffsetV1(),
+                                                  dropout);
+                        else
+                            return invoke_fmha_pipeline(q_dram_window,
+                                                        k_dram_window,
+                                                        v_dram_window,
+                                                        bias_dram_window,
+                                                        lse_dram_window,
+                                                        mask,
+                                                        score_transform,
+                                                        scale_s,
+                                                        sink_value,
+                                                        smem_arena + Policy::GetLdsOffsetK0(),
+                                                        smem_arena + Policy::GetLdsOffsetK1(),
+                                                        smem_arena + Policy::GetLdsOffsetV0(),
+                                                        smem_arena + Policy::GetLdsOffsetV1());
                     }
                     else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> && kHasDropout)
                     {

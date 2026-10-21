@@ -1410,7 +1410,27 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                         reinterpret_cast<const float*>(kargs.v_descale_ptr) + head_offset;
                     page_descale_stride = kargs.nblock_stride_kv_block_descale;
                 }
-                if constexpr(kIsSegmentedTdmPipeline)
+                if constexpr(kIsSegmentedTdmPipeline && kHasDropout)
+                {
+                    using Policy = typename FmhaPipeline::Policy;
+                    return FmhaPipeline{}(q_window_tdm,
+                                          k_window_tdm,
+                                          v_window_tdm,
+                                          bias_dram_window,
+                                          randval_dram_window,
+                                          lse_dram_window,
+                                          mask,
+                                          score_transform,
+                                          variant_params.sm_scale,
+                                          sink_value,
+                                          smem_ptr + Policy::GetLdsOffsetK0(),
+                                          smem_ptr + Policy::GetLdsOffsetK1(),
+                                          smem_ptr + Policy::GetLdsOffsetV0(),
+                                          smem_ptr + Policy::GetLdsOffsetV1(),
+                                          dropout,
+                                          kv_rows);
+                }
+                else if constexpr(kIsSegmentedTdmPipeline)
                 {
                     using Policy = typename FmhaPipeline::Policy;
                     return FmhaPipeline{}(q_window_tdm,

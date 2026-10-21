@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
 #include "ck_tile/ops/fmha/block/block_fmha_kv_rows.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
@@ -84,8 +85,6 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                   "scale_s");
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "qr_tdm_sched does not implement attention bias");
-    static_assert(!kHasLogitsSoftCap, "qr_tdm_sched does not implement logits soft cap");
-    static_assert(!kHasDropout, "qr_tdm_sched does not support dropout");
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
                   "qr_tdm_sched does not implement quantized attention yet");
 
@@ -133,10 +132,21 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                   "gemm_1 dispatched a different physical WMMA shape");
 #endif
 
+    // Dropout: the random values of a P tile go through LDS (BlockDropout::RunWholeTile)
+    // past the K/V buffers.
+    static constexpr index_t kRandValLdsBytes = [] {
+        if constexpr(kHasDropout)
+            return BlockDropout::template MakeRandValLdsTileDescriptor<
+                       remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>>()
+                .get_element_space_size();
+        else
+            return 0;
+    }();
+
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         static_assert(Policy::template GetSmemSize<Problem>() == Policy::GetLdsArenaSize());
-        return Policy::GetLdsArenaSize();
+        return Policy::GetLdsArenaSize() + kRandValLdsBytes;
     }
 
     // Re-pack gemm_0 C into gemm_1 A: C is M-outer (MIter,KIter), A is K-outer.
@@ -208,7 +218,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding,
-              typename KVRows = BlockFmhaDenseKVRows>
+              typename KVRows      = BlockFmhaDenseKVRows,
+              typename DropoutArgs = BlockFmhaTdmNoDropout>
     CK_TILE_HOST_DEVICE auto
     run(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
@@ -223,7 +234,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         void* __restrict__ smem_ptrv0,
         void* __restrict__ smem_ptrv1,
         float sink_v,
-        const KVRows& kv_rows = {}) const
+        const KVRows& kv_rows           = {},
+        const DropoutArgs& dropout_args = {}) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -242,6 +254,11 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
                       "wrong!");
+        if constexpr(!kHasDropout)
+            ignore = dropout_args;
+        // A logits soft cap leaves the scores scaled (see LogitsSoftCapTransform).
+        const float softmax_scale = kHasLogitsSoftCap ? 1.0f : scale_s;
+
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
@@ -532,6 +549,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
             FmhaTdmPreparedKRead::Address qk_stage0_base{};
+            // first K/V column of this iteration's tile (dropout)
+            [[maybe_unused]] index_t kv_tile_start = 0;
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
@@ -748,6 +767,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                         });
                     });
                 }
+                else if constexpr(kHasLogitsSoftCap)
+                {
+                    tile_elementwise_inout([&](auto& x) { x = position_encoding(x); }, s_acc);
+                }
 
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
                 if constexpr(!kDeferTensorReady)
@@ -770,6 +793,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                         return make_tuple(
                             kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
                 }();
+                if constexpr(kHasDropout)
+                    kv_tile_start = k_origin.at(I0);
                 if constexpr(kUseCountdownLoop)
                 {
                     bool need_split_check = false;
@@ -874,7 +899,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     Schedule::template RunSplitSoftmax<Mode>(
                         [&]() {
                             Policy::template RunSplitSoftmaxPart01<Problem>(
-                                s_new, m, scale_s, delta_m0, delta_m1);
+                                s_new, m, softmax_scale, delta_m0, delta_m1);
                         },
                         [&]() {
                             s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount * kKVTdmInsts>();
@@ -894,12 +919,28 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                                 s_new,
                                 m,
                                 l,
-                                scale_s,
+                                softmax_scale,
                                 delta_m0,
                                 delta_m1,
                                 pv_output_scale_m0,
                                 pv_output_scale_m1);
                         });
+                    if constexpr(kHasDropout)
+                    {
+                        // As qr: drop P after its row sum went into l.
+                        auto randval_block_window = dropout_args.randval_window;
+                        auto randval_window =
+                            dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
+                                randval_block_window, kv_tile_start);
+                        dropout_args.dropout.template RunWholeTile<decltype(gemm_0),
+                                                                   SMPLComputeDataType,
+                                                                   RandValOutputDataType>(
+                            static_cast<char*>(smem_ptrk0) - Policy::GetLdsOffsetK0() +
+                                Policy::GetLdsArenaSize(),
+                            kv_tile_start,
+                            s_new,
+                            randval_window);
+                    }
                     return MakePForGemm1<decltype(gemm_1)>(s_new);
                 }();
                 return p_tile;
@@ -980,7 +1021,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     }
                     else
                     {
-                        lse_acc(i_idx) = m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]);
+                        lse_acc(i_idx) = m_[i_idx] * softmax_scale / C_LOG2E + log(l_[i_idx]);
                     }
                 });
 
@@ -1029,7 +1070,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     }
                     else
                     {
-                        const float real_log2   = m[i_idx] * scale_s;
+                        const float real_log2   = m[i_idx] * softmax_scale;
                         const float merged_max  = max(real_log2, sink_log2);
                         const float real_weight = SplitSoftmax::Exp2(real_log2 - merged_max);
                         const float sink_weight = SplitSoftmax::Exp2(sink_log2 - merged_max);
@@ -1105,6 +1146,58 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                    smem_ptrv0,
                    smem_ptrv1,
                    sink_v);
+    }
+
+    // Dropout: the BlockDropout of the block and its randval window (kM0 x kN0 at the
+    // block's first query row); paged K/V (batch_prefill) pass their kv_rows.
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename Dropout,
+              typename KVRows = BlockFmhaDenseKVRows>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+               const RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
+               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               float sink_v,
+               void* smem_ptrk0,
+               void* smem_ptrk1,
+               void* smem_ptrv0,
+               void* smem_ptrv1,
+               const Dropout& dropout,
+               const KVRows& kv_rows = {}) const
+    {
+        static_assert(kHasDropout);
+        if constexpr(KVRows::kIsPaged)
+            static_assert(KVRows::kIsGather ||
+                              KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
+                          "the K/V rows of one warp must not straddle two pages");
+        return run(q_dram_block_window_tmp,
+                   k_dram_block_window_tmp,
+                   v_dram_block_window_tmp,
+                   bias_dram_block_window_tmp,
+                   lse_acc_dram_window_tmp,
+                   mask,
+                   position_encoding,
+                   scale_s,
+                   smem_ptrk0,
+                   smem_ptrk1,
+                   smem_ptrv0,
+                   smem_ptrv1,
+                   sink_v,
+                   kv_rows,
+                   BlockFmhaTdmDropout<Dropout, RandValDramBlockWindowTmp>{
+                       dropout, randval_dram_block_window_tmp});
     }
 
     // Paged K/V (batch_prefill): k/v_dram_block_window_tmp span the whole KV cache pool

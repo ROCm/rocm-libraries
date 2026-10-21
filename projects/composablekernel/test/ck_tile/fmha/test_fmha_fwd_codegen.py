@@ -59,6 +59,8 @@ _D192_SELECTOR = (
     "a.hdim_q == 192 && a.hdim_v == 128 && a.sink_ptr == nullptr && "
     "t.hdim_q == 192 && t.hdim_v == 128"
 )
+# qr_tdm_sched kernels without a logits soft cap or dropout, which the counts below cover.
+_SCHED_PLAIN = "_qr_tdm_sched_*_nlogits_*_ndropout_*"
 # Chooses qr_tdm_sched over qr_tdm, so skipped when the caller names a pipeline.
 _D192_SELECT = "(!t.pipeline.empty() || (a.max_seqlen_q >= 128))"
 
@@ -235,6 +237,9 @@ class _CompiledDispatcher:
         test.assertEqual(compile_result.returncode, 0, compile_result.stderr)
 
     def expected_id(self, **fields):
+        # the dispatch runs take no logits soft cap and no dropout
+        fields = {"logits": "f", "dropout": "f", **fields}
+
         def value(kernel, name):
             if name in ("mode", "hdim", "dtype"):
                 return getattr(kernel, "F_" + name)
@@ -491,8 +496,8 @@ endforeach()
                 self.assertIn(_D192_PIPELINE, candidate.name)
 
     def test_filtered_unsupported_feature_keeps_ungated_generic_fallback(self):
+        # (qr_tdm_sched takes a logits soft cap, and dropout on masked attention)
         filters = {
-            "logits": "fmha_fwd_d*_bf16_*_logits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*",
             "bias": "fmha_fwd_d*_bf16_*_nlogits*_bias*_nmask*_nlse*_ndropout*_nskip*_nqscale*",
             "dropout": "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_dropout*_nskip*_nqscale*",
             "skip": "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_ndropout*_skip*_nqscale*",
@@ -595,7 +600,7 @@ endforeach()
     def check_n128_masks(self, dtype, mask_impl, masks):
         _, kernels = get_fwd_blobs(
             targets=["gfx1250"],
-            kernel_filter=f"*{dtype}*{_D192_PIPELINE}*",
+            kernel_filter=f"*{dtype}*{_SCHED_PLAIN}",
             receipt=600,
             optdim_list=[192],
             mask_impl=mask_impl,
@@ -647,7 +652,9 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
         return _CompiledDispatcher(self, pool, kernels, filter_fn, mutate), kernels
 
     @staticmethod
-    def candidate_id(dispatch, mode, mask="s_no", lse="f", bn0=64, dtype="bf16"):
+    def candidate_id(
+        dispatch, mode, mask="s_no", lse="f", bn0=64, dtype="bf16", logits="f"
+    ):
         return dispatch.expected_id(
             mode=mode,
             dtype=dtype,
@@ -657,6 +664,7 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
             lse=lse,
             bn0=bn0,
             sink="f",
+            logits=logits,
         )
 
     @staticmethod
@@ -1075,7 +1083,11 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                     )
                     self.assertEqual(dispatch.run(group=group, seqlen_q=127), [-1])
                     self.assertEqual(dispatch.run(group=group, hdim_q=160), [-1])
-                    self.assertEqual(dispatch.run(group=group, logits=1), [-1])
+                    # qr_tdm_sched takes a logits soft cap too
+                    self.assertEqual(
+                        dispatch.run(group=group, logits=1),
+                        [self.candidate_id(dispatch, mode, logits="t")],
+                    )
 
     def test_real_dispatch_receipt_and_optdim_baseline(self):
         cmake = (_FMHA_EXAMPLE_DIR / "CMakeLists.txt").read_text()
@@ -1205,7 +1217,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
 
     def check_sched_filter(self, dtype, receipt, count, dimensions):
         _, kernels = get_fwd_blobs(
-            ["gfx1250"], f"*{dtype}*_qr_tdm_sched_*", receipt, dimensions, "simplified"
+            ["gfx1250"], f"*{dtype}*{_SCHED_PLAIN}", receipt, dimensions, "simplified"
         )
         selected_dims = (
             {64, 128, 192}
@@ -1227,7 +1239,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
         self.assertTrue(
             all(
                 kernel.F_pipeline.tag == "qr_tdm_sched"
-                and fnmatch(kernel.name, f"*{dtype}*_qr_tdm_sched_*")
+                and fnmatch(kernel.name, f"*{dtype}*{_SCHED_PLAIN}")
                 for kernel in kernels
             )
         )
@@ -1263,7 +1275,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
             pool, kernels = get_fwd_blobs(
                 ["gfx1250"], f"*d64_{dtype}*_qr_tdm_sched_*", 600, [64], "simplified"
             )
-            self.assertEqual(len(kernels), 12)
+            # and the same with a logits soft cap and/or (masked) dropout
+            plain = [
+                k
+                for k in kernels
+                if k.F_pipeline.F_logits == "f" and k.F_pipeline.F_dropout == "f"
+            ]
+            self.assertEqual(len(plain), 12)
             for kernel in kernels:
                 self.assertEqual(kernel.F_tile.F_bm0, 128)
                 self.assertEqual(kernel.F_tile.F_bn0, 64)
@@ -1289,7 +1307,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
 
     def check_d128_emission(self, dtype, receipt, count):
         pool, kernels = get_fwd_blobs(
-            ["gfx1250"], f"*d128_{dtype}*_qr_tdm_sched_*", receipt, [128], "simplified"
+            ["gfx1250"], f"*d128_{dtype}*{_SCHED_PLAIN}", receipt, [128], "simplified"
         )
         family = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched"]
         self.assertEqual(len(family), count)
@@ -1315,7 +1333,16 @@ class TestGfx125V128Codegen(unittest.TestCase):
             )
             kernels.extend(selected)
         family = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched"]
-        self.assertEqual(len(family), 48)
+        self.assertEqual(
+            len(
+                [
+                    k
+                    for k in family
+                    if k.F_pipeline.F_logits == "f" and k.F_pipeline.F_dropout == "f"
+                ]
+            ),
+            48,
+        )
         rule = KernelComponentFactoryGfx125.get_rules()[-1]
         for kernel in family:
             with self.subTest(shape=kernel.F_hdim, name=kernel.filename):
@@ -2159,7 +2186,10 @@ class TestGfx125TdmDropoutCodegen(unittest.TestCase):
             for k in kernels
             if k.F_pipeline.F_dropout == "t" and k.F_pipeline.tag.startswith("qr_tdm")
         ]
-        self.assertEqual({k.F_pipeline.tag for k in tdm_dropout}, {"qr_tdm"})
+        self.assertEqual(
+            {k.F_pipeline.tag for k in tdm_dropout},
+            {"qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"},
+        )
         self.assertEqual({k.F_tile.F_bn1 for k in tdm_dropout}, hdims)
         for kernel in tdm_dropout:
             with self.subTest(kernel=kernel.name):
@@ -2181,7 +2211,7 @@ class TestGfx125TdmDropoutCodegen(unittest.TestCase):
         _, kernels = get_bp_blobs(
             "*_bf16_*", 0, [64, 128, 256], "simplified", ["gfx1250"]
         )
-        self._check(kernels, {64, 128})
+        self._check(kernels, {64, 128, 256})
 
 
 if __name__ == "__main__":

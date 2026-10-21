@@ -123,8 +123,23 @@ struct QrTdmPingPongLdsArenaLayout
     static constexpr index_t kV0Offset =
         integer_least_multiple(kSOffset + kSBytes, kRegionAlignment);
     static constexpr index_t kQOffset = kV0Offset;
-    static constexpr index_t kArenaBytes =
+    static constexpr index_t kKVArenaBytes =
         integer_least_multiple(max(kQOffset + kQBytes, kV0Offset + kVBytes), kArenaAlignment);
+    // Dropout: the random values of a P tile go through LDS past the K/V buffers.
+    static constexpr index_t kRandValOffset = kKVArenaBytes;
+    static constexpr index_t kRandValBytes  = [] {
+        if constexpr(Problem::kHasDropout)
+        {
+            using BlockGemm = remove_cvref_t<decltype(BlockFmhaPipelineQRKSVSTdmDefaultPolicy::
+                                                          template GetQKBlockGemm<Problem>())>;
+            return BlockDropout::template MakeRandValLdsTileDescriptor<BlockGemm>()
+                .get_element_space_size();
+        }
+        else
+            return 0;
+    }();
+    static constexpr index_t kArenaBytes =
+        integer_least_multiple(kRandValOffset + kRandValBytes, kArenaAlignment);
 
     static_assert(!KPadding::kEnabled || (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
     static_assert(kArenaBytes <= 128 * 1024);

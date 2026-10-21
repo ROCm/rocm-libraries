@@ -28,6 +28,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     using typename Base::Policy;
     using typename Base::Problem;
     using typename Base::QDataType;
+    using typename Base::RandValOutputDataType;
     using typename Base::SaccDataType;
     using typename Base::SMPLComputeDataType;
     using typename Base::VDataType;
@@ -35,6 +36,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     using Base::BiasEnum;
     using Base::I0;
     using Base::I1;
+    using Base::kHasDropout;
     using Base::kHasLogitsSoftCap;
     using Base::kHasSink;
     using Base::kHasUnevenSplits;
@@ -65,13 +67,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     static_assert(!Problem::kUseDoubleKVLdsBuffer && !Problem::kProgressiveDsLoadK,
                   "qr_tdm_pingpong has its own K/V buffering");
     static_assert(kSubQKHeaddim == kQKHeaddim, "qr_tdm_pingpong stages whole K rows");
-    static_assert(!Problem::kHasDropout, "qr_tdm_pingpong has no dropout");
 
     // P is summed on the matrix unit when one gemm_1 warp tile of columns spans a row,
     // i.e. the gemm_1 warps are all on M; the short-query tile spends them on N and
-    // takes the fp32 sum, which the LSE then shares.
-    static constexpr bool kRowSumOnMatrixUnit = BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1;
-    static constexpr bool kSeparateLseSum     = kStoreLSE && kRowSumOnMatrixUnit;
+    // takes the fp32 sum, which the LSE then shares. Dropout sums P before dropping it,
+    // in fp32.
+    static constexpr bool kRowSumOnMatrixUnit =
+        BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1 && !kHasDropout;
+    static constexpr bool kSeparateLseSum = kStoreLSE && kRowSumOnMatrixUnit;
 
     // Row sum of P as a pairwise tree per thread, then the cross-lane sync. The
     // serial fold of block_tile_reduce is a dependent v_add_f32 chain the
@@ -381,7 +384,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding,
-              typename KVRows>
+              typename KVRows,
+              typename DropoutArgs = BlockFmhaTdmNoDropout>
     CK_TILE_HOST_DEVICE auto run(const QDramBlockWindowTmp& q_dram_block_window_tmp,
                                  const KDramBlockWindowTmp& k_dram_block_window_tmp,
                                  const VDramBlockWindowTmp& v_dram_block_window_tmp,
@@ -392,9 +396,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                  float scale_s,
                                  void* smem_arena,
                                  float sink_v,
-                                 const KVRows& kv_rows) const
+                                 const KVRows& kv_rows,
+                                 const DropoutArgs& dropout_args = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
+        if constexpr(!kHasDropout)
+            ignore = dropout_args;
 
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -831,12 +838,32 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             static_assert(BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1 ||
                           remove_cvref_t<decltype(gemm_1)>::MIterPerWarp == 1);
             [[maybe_unused]] int32_t p_scale = 0;
+            if constexpr(kHasDropout)
+            {
+                // As qr: l{j} takes P before dropout.
+                const auto rowsum_p = BlockRowSum(p_compute);
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    l(i_idx) += rowsum_p[i_idx];
+                });
+                auto randval_block_window = dropout_args.randval_window;
+                auto randval_window =
+                    dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
+                        randval_block_window, kv_tile_start);
+                dropout_args.dropout.template RunWholeTile<decltype(gemm_0),
+                                                           SMPLComputeDataType,
+                                                           RandValOutputDataType>(
+                    static_cast<char*>(smem_arena) + Layout::kRandValOffset,
+                    kv_tile_start,
+                    p_compute,
+                    randval_window);
+            }
             auto p_tile = Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
 
             // l{j}; o_acc is already in p's m_base frame.
             if constexpr(kRowSumOnMatrixUnit)
                 AccumulateRowSumOnMatrixUnit(l, p_tile);
-            if constexpr(!kRowSumOnMatrixUnit || kSeparateLseSum)
+            if constexpr(!kHasDropout && (!kRowSumOnMatrixUnit || kSeparateLseSum))
             {
                 const auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
@@ -954,6 +981,53 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                    smem_arena,
                    sink_v,
                    kv_rows);
+    }
+
+    // Dropout: the BlockDropout of the block and its randval window (kM0 x kN0 at the
+    // block's first query row); paged K/V (batch_prefill) pass their kv_rows.
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename Dropout,
+              typename KVRows = BlockFmhaDenseKVRows>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+               const RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
+               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               float sink_v,
+               void* smem_arena,
+               const Dropout& dropout,
+               const KVRows& kv_rows = {}) const
+    {
+        static_assert(kHasDropout);
+        if constexpr(KVRows::kIsPaged)
+            static_assert(
+                KVRows::kIsGather ||
+                    KVRows::kPageSize_ % (kN0 / (Problem::kBlockSize / get_warp_size())) == 0,
+                "the K/V rows of one warp must not straddle two pages");
+        return run(q_dram_block_window_tmp,
+                   k_dram_block_window_tmp,
+                   v_dram_block_window_tmp,
+                   bias_dram_block_window_tmp,
+                   lse_acc_dram_window_tmp,
+                   mask,
+                   position_encoding,
+                   scale_s,
+                   smem_arena,
+                   sink_v,
+                   kv_rows,
+                   BlockFmhaTdmDropout<Dropout, RandValDramBlockWindowTmp>{
+                       dropout, randval_dram_block_window_tmp});
     }
 
     // Dense K/V (fmha_fwd).

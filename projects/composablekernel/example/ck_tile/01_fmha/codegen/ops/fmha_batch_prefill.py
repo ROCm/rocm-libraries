@@ -86,7 +86,9 @@ FMHA_BATCH_PREFILL_PIPELINE_MAP = {
 }
 
 # fp16/bf16 qr_tdm runs with double K/V LDS buffers and progressive K LDS loading, as in
-# fmha_fwd; its fp8 instances keep the defaults, also as in fmha_fwd.
+# fmha_fwd; its fp8 instances keep the defaults, also as in fmha_fwd. d256 with dropout
+# keeps one V buffer (as fmha_fwd's d256): the random values need the LDS of the other.
+QR_TDM_D256_DROPOUT_PROBLEM_EXTRA = ", false, true"
 PROBLEM_EXTRA_MAP = {
     "qr_async": "",
     "qr_tdm": ", true, true",
@@ -703,7 +705,13 @@ class FmhaFwdKernel:
             F_problem_extra=(
                 ""
                 if self.F_dtype == "fp8bf16"
-                else PROBLEM_EXTRA_MAP[self.F_pipeline.tag]
+                else (
+                    QR_TDM_D256_DROPOUT_PROBLEM_EXTRA
+                    if self.F_pipeline.tag == "qr_tdm"
+                    and self.F_hdim == 256
+                    and self.F_pipeline.F_dropout == "t"
+                    else PROBLEM_EXTRA_MAP[self.F_pipeline.tag]
+                )
             ),
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
@@ -1012,20 +1020,33 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
             ):
                 if sink == "t" and mask in ("no", "s_no"):
                     continue
+
                 pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "f", "f", qscale, mask, sink, "linear", kv_lookup_table))  # fmt: skip
-        # dropout on fp16/bf16 qr_tdm (not qr_tdm_sched/qr_tdm_pingpong).
-        # At d256 the random-value LDS would not fit beside the double K/V buffers.
-        if hdim != 256:
-            pipelines += [
-                replace(p, F_dropout="t")
-                for p in pipelines
-                if p.tag == "qr_tdm" and p.F_qscale == "no"
-            ]
-        # logits soft cap on qr_tdm and qr_tdm_pingpong (not qr_tdm_sched), without a bias
+        # dropout on the fp16/bf16 TDM pipelines; as in fmha_fwd, qr_tdm_sched and
+        # qr_tdm_pingpong only on masked attention, qr_tdm_sched from 1024 rows
+        def dropout_copy(p):
+            if p.tag == "qr_tdm_sched":
+                return replace(
+                    p,
+                    F_dropout="t",
+                    F_constraint=CppConstraint(
+                        p.F_constraint.bool_expr,
+                        f"{p.F_constraint.select_expr} && a.max_seqlen_q >= 1024",
+                    ),
+                )
+            return replace(p, F_dropout="t")
+
+        pipelines += [
+            dropout_copy(p)
+            for p in pipelines
+            if p.F_qscale == "no"
+            and (p.tag == "qr_tdm" or p.F_mask not in ("no", "s_no"))
+        ]
+        # logits soft cap on the TDM pipelines, without a bias
         pipelines += [
             replace(p, F_logits="t")
             for p in pipelines
-            if p.tag in ("qr_tdm", "qr_tdm_pingpong")
+            if p.tag in ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong")
             and p.F_bias == "no"
             and p.F_qscale == "no"
         ]

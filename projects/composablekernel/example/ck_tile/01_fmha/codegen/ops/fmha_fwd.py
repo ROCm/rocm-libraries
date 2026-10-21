@@ -1888,10 +1888,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx125 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
-            # Dropout runs on qr_tdm only (not on qr_tdm_sched/qr_tdm_pingpong);
-            # with a soft cap or sink, unpadded and fully padded only.
-            # Logits soft cap (qr_tdm and qr_tdm_pingpong, not qr_tdm_sched) comes
-            # without a bias, as everywhere.
+            # Dropout runs on every TDM pipeline; qr_tdm's and qr_tdm_pingpong's with a
+            # soft cap or sink unpadded and fully padded only.
+            # Logits soft cap comes without a bias, as everywhere.
             if (hdim, hdim_v) in {
                 (32, 32),
                 (64, 64),
@@ -1956,6 +1955,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                         if not plain and spad != dpad:
                             continue
                         pipelines.append(FmhaFwdPipeline("qr_tdm", "row", spad, spad, dpad, dpad, logits, bias, lse, "t", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
+                        # with dropout, qr_tdm_pingpong measured ahead of qr_tdm on masked
+                        # grids only
+                        if (hdim, hdim_v) == (128, 128) and mask not in ("no", "s_no"):
+                            pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", spad, spad, dpad, dpad, logits, bias, lse, "t", qscale, mask, "f", "f", sink))  # fmt: skip
 
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.
@@ -1968,12 +1971,23 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}",
                     sched_seqlen_q,
                 )
-                for mask, lse in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["t", "f"]
+                # With dropout qr_tdm_sched measured ahead of qr_tdm on masked attention
+                # from 1024 rows only.
+                sched_dropout_constraint = CppConstraint(
+                    sched_constraint.bool_expr,
+                    f"{sched_seqlen_q} && a.max_seqlen_q >= 1024",
+                )
+                for logits, mask, lse, dropout in itertools.product(
+                    ["f", "t"], get_mask_map(mask_impl).keys(), ["t", "f"], ["f", "t"]
                 ):
+                    if dropout == "t" and mask in ("no", "s_no"):
+                        continue
+                    constraint = (
+                        sched_dropout_constraint if dropout == "t" else sched_constraint
+                    )
                     head_pad = "f" if hdim == 64 else "t"
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, logits, "no", lse, dropout, qscale, mask, "f", "f", "f", F_constraint=constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, logits, "no", lse, dropout, qscale, mask, "f", "f", "f", F_constraint=constraint))  # fmt: skip
 
             # min_seqlen_q (aiter's mha_varlen_fwd) only skips whole group-mode
             # sequences in the kernel, so qr_tdm and qr_tdm_pingpong take it too: a
