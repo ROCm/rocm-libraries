@@ -937,7 +937,10 @@ TEST_F(MessagePackWritingLazyTest, IndexedDocumentKeepsFormatVersion2)
     auto eagerHandle
         = msgpack::unpack(reinterpret_cast<const char*>(eagerBare.data()), eagerBare.size());
     auto eagerKeys = mapKeys(eagerHandle.get());
+    // Both keys carry their absent value here, so the optional mapping with a
+    // default omits them rather than writing the default back out.
     EXPECT_EQ(std::find(eagerKeys.begin(), eagerKeys.end(), "version"), eagerKeys.end());
+    EXPECT_EQ(std::find(eagerKeys.begin(), eagerKeys.end(), "format_version"), eagerKeys.end());
 
     auto bareBytes
         = MessagePackWriteIndexedLibraryData(*bare);

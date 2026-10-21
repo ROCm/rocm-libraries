@@ -176,6 +176,15 @@ namespace TensileLite
                 }
             }
 
+            /// Absent means defaultValue, so that what the writer omitted and
+            /// what the reader produces are the same statement.
+            template <typename T>
+            void mapOptional(const char* key, T& obj, T const& defaultValue)
+            {
+                obj = defaultValue;
+                mapOptional(key, obj);
+            }
+
             // Hands back a view of a BIN value without converting it to a C++
             // type. Used for the indexed library format's solution blob, which
             // is copied wholesale and deliberately left unparsed.
@@ -360,6 +369,15 @@ namespace TensileLite
                 io.mapOptional(key, obj);
             }
 
+            template <typename T>
+            static void mapOptional(MessagePackInput& io,
+                                    const char*       key,
+                                    T&                obj,
+                                    T const&          defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
+            }
+
             static bool
                 mapRawBytes(MessagePackInput& io, const char* key, const uint8_t*& ptr, size_t& size)
             {
@@ -529,9 +547,24 @@ namespace TensileLite
                 lastKey = nullptr;
             }
 
+            /// With no value meaning "absent", an output has nothing to decide
+            /// from and writes the key with whatever the member holds -- which
+            /// for a key the source document omitted is its default. Prefer the
+            /// overload below wherever a default can be named: it is the only
+            /// form that can reproduce an absent key.
             template <typename T>
             void mapOptional(const char* key, T& obj)
             {
+                mapRequired(key, obj);
+            }
+
+            /// Omits the key when the value is the one an absent key would
+            /// produce, so a document that did not carry it does not grow one.
+            template <typename T>
+            void mapOptional(const char* key, T& obj, T const& defaultValue)
+            {
+                if(obj == defaultValue)
+                    return;
                 mapRequired(key, obj);
             }
 
@@ -706,6 +739,15 @@ namespace TensileLite
             static void mapOptional(MessagePackOutput& io, const char* key, T& obj)
             {
                 io.mapOptional(key, obj);
+            }
+
+            template <typename T>
+            static void mapOptional(MessagePackOutput& io,
+                                    const char*        key,
+                                    T&                 obj,
+                                    T const&           defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
             }
 
             static bool mapRawBytes(MessagePackOutput& io,

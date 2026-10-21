@@ -279,11 +279,11 @@ namespace TensileLite
                 // Read above the format branch so both layouts pick it up, and
                 // so an indexed file does not leave the key unconsumed for
                 // checkUsedKeys() to flag under TENSILE_DB=0x1000.
-                // An absent version is omitted. An empty version is not a version.
+                // An empty version is not a version, so it is the value an
+                // absent key stands for and the key is omitted on output.
                 if(iot::outputting(io))
                 {
-                    if(!lib.version.empty())
-                        iot::mapOptional(io, "version", lib.version);
+                    iot::mapOptional(io, "version", lib.version, std::string());
                 }
                 else if(iot::hasKey(io, "version"))
                 {
@@ -296,13 +296,11 @@ namespace TensileLite
                 // indexed layout. Anything higher is a format this build does
                 // not know: fail rather than misread it as 2.
                 //
-                // Eager output omits format_version. MessagePackOutput writes
-                // every mapOptional key, and a 0 here would no longer match the
-                // on-disk eager documents. Indexed files are emitted by
-                // MessagePackWriteIndexedLibraryData, not this mapping.
+                // 0 is the absent value, so eager output omits the key. Indexed
+                // files are emitted by MessagePackWriteIndexedLibraryData, not
+                // this mapping.
                 int formatVersion = 0;
-                if(!iot::outputting(io))
-                    iot::mapOptional(io, "format_version", formatVersion);
+                iot::mapOptional(io, "format_version", formatVersion, 0);
 
                 if(!iot::outputting(io) && formatVersion > IndexedFormatVersion)
                 {
