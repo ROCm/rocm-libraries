@@ -43,6 +43,7 @@ def _result(**overrides):
         max_seqlen_k=MAX_K,
         arch="gfx942",
         num_cus=304,
+        absorbed_query=True,
     )
     req.update(overrides)
     return dispatch_mla(MLARequest(**req))

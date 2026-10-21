@@ -50,7 +50,7 @@ def test_served_head_counts_dispatch_to_decode(arch):
     served = [s for s in _shapes(arch) if s.num_query_heads in DECODE_NUM_HEADS]
     assert len(served) == 26
     for s in served:
-        result = dispatch_mla(s.to_request(arch=arch))
+        result = dispatch_mla(s.to_request(arch=arch, absorbed_query=True))
         assert result.candidate.name == f"mla_decode_{arch}", s.signature
 
 
@@ -60,7 +60,7 @@ def test_tensor_parallel_rank_is_refused(arch):
     assert {s.num_query_heads for s in refused} == {16}
     for s in refused:
         with pytest.raises(ValueError, match="num_heads=16 not in"):
-            dispatch_mla(s.to_request(arch=arch))
+            dispatch_mla(s.to_request(arch=arch, absorbed_query=True))
 
 
 @pytest.mark.parametrize("arch", ARCHES)

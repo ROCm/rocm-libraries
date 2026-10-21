@@ -1086,13 +1086,18 @@ class TestRequestTypes(unittest.TestCase):
             ("d_rope", None),
         ):
             # max_seqlen_q's stand-in (1) is decode's regime, so it is the
-            # decode candidate that names it; prefill refuses it on the range.
-            name_of = "mla_decode_gfx942" if name == "max_seqlen_q" else _NAME
+            # decode candidate -- given the contract it requires -- that names
+            # it; prefill refuses it on the range.
+            overrides = {name: value}
+            name_of = _NAME
+            if name == "max_seqlen_q":
+                overrides["absorbed_query"] = True
+                name_of = "mla_decode_gfx942"
             with self.subTest(name=name, value=value):
-                ok, why = MLA_REGISTRY.get(name_of).admits(_req(**{name: value}))
+                ok, why = MLA_REGISTRY.get(name_of).admits(_req(**overrides))
                 self.assertFalse(ok)
                 self.assertIn(f"{name} must be an int", why)
-                self.assertIn(f"{name} must be an int", self._refused(**{name: value}))
+                self.assertIn(f"{name} must be an int", self._refused(**overrides))
 
     def test_non_str_dtype_is_refused_not_raised(self):
         ok, why = MLA_REGISTRY.get(_NAME).admits(_req(dtype=None))

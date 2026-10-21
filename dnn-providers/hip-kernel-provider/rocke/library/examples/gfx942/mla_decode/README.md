@@ -55,12 +55,13 @@ kernel argument, so one compiled split kernel serves every segment count.
 
 ## Contract
 
-Decode serves `max_seqlen_q == 1` with the **absorbed** input contract: the
-caller absorbs `W_UK_nope` into the query and applies `W_UV` to the latent.
-The prefill kernel serves `max_seqlen_q >= 2` with a different contract (the
-projected query plus `W_UK` in, the attention output out), so it is never
-substituted for decode: a one-query request that decode cannot serve -- a
-head count other than 64 or 128 -- is refused.
+Decode serves `max_seqlen_q == 1` with the **absorbed** input contract only:
+the caller absorbs `W_UK_nope` into the query and applies `W_UV` to the
+latent, and the request must state it (`MLARequest(absorbed_query=True)`); a
+one-query request without it is refused. The request states the contract and
+`max_seqlen_q` picks the regime. Prefill serves `max_seqlen_q >= 2` under
+either contract, so it is never substituted for decode: a one-query request
+that decode cannot serve -- a head count other than 64 or 128 -- is refused.
 
 | Argument | Shape | |
 |---|---|---|
@@ -102,8 +103,10 @@ caller's tensors against the dispatched request before launching:
 from builders.mla.mla_decode_runner import MlaDecodeRunner
 from dispatch.mla import MLARequest, dispatch_mla
 
+# The kernel takes the absorbed qa; forward() absorbs q_nope/w_uk itself.
 req = MLARequest(num_heads=128, total_q=T, num_seqs=B, max_seqlen_q=1,
-                 max_seqlen_k=max_k, arch="gfx942", num_kv_blocks=c_kv.shape[0])
+                 max_seqlen_k=max_k, arch="gfx942", num_kv_blocks=c_kv.shape[0],
+                 absorbed_query=True)
 runner = MlaDecodeRunner(dispatch_mla(req))           # compiles once per request shape
 out, lse = runner.forward(q_nope=q_nope, q_rope=q_rope, w_uk=w_uk, c_kv=c_kv,
                           k_rope=k_rope, cu_seqlens_q=cu_q, cu_seqlens_k=cu_k,
@@ -266,8 +269,8 @@ Compiled through comgr (llvm22) and read from the code object. Zero scratch, and
   smaller per-workgroup head group and is refused; the shape files keep two
   16-head rows so `--mode resolve` shows the refusal.
 - Decode is `max_seqlen_q == 1` only. Multi-token decode steps (speculative or
-  multi-token prediction, `max_seqlen_q` 2–4) route to prefill, with prefill's
-  input contract.
+  multi-token prediction, `max_seqlen_q` 2–4) route to prefill, under the
+  contract the request states (`absorbed_query`).
 - `qa`, `out` and the split workspace use 32-bit element offsets: dispatch
   refuses batches that would overflow them (about 29K tokens at 128 heads) and
   caps the segment count to fit the workspace. The key cache is 64-bit

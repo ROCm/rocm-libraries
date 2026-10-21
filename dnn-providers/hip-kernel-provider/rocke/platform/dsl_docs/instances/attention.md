@@ -580,9 +580,12 @@ widths all differ, which a single `head_size` cannot name.
 | decode latent (weight-absorbed) | `MlaDecodeSpec` / `MlaDecodeGfx950Spec` | `build_mla_decode` / `build_mla_decode_gfx950` | gfx942 / gfx950 |
 | decode split-KV combine | `MlaDecodeCombineSpec` | `build_mla_decode_combine` | gfx942, gfx950 |
 
-`max_seqlen_q == 1` routes to decode, `max_seqlen_q >= 2` to prefill (gfx942
-only), and the two take different inputs, so neither stands in for the other:
-a one-query request that decode cannot serve is refused. The decode kernel
+`max_seqlen_q` picks the regime and `MLARequest.absorbed_query` states the
+input contract. `max_seqlen_q == 1` routes to decode, which serves only the
+absorbed contract and so requires the flag (decode's capability lists it in
+`requires_features`); `max_seqlen_q >= 2` routes to prefill (gfx942 only),
+which serves both. Prefill takes no one-query request, so a one-query request
+that decode cannot serve is refused. The decode kernel
 takes the absorbed query `[Q_nope @ W_UK_nopeᵀ | Q_rope]` and returns the
 normalized latent and the LSE; `W_UV` is the caller's batched GEMM. The prefill kernel
 takes the projected, RoPE-rotated query and the per-head `W_UK` and returns the

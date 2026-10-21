@@ -5,9 +5,10 @@
 
 The request describes the problem and never names the regime: one
 ``MLARequest`` and one op (``mla_fwd``), with decode selected by
-``max_seqlen_q == 1`` and prefill by ``max_seqlen_q >= 2``. The two regimes
-take different input contracts (absorbed query vs projected query + ``W_UK``),
-so neither stands in for the other. These tests pin that routing contract --
+``max_seqlen_q == 1`` and prefill by ``max_seqlen_q >= 2``. Prefill serves
+both input contracts (projected query + ``W_UK``, or the absorbed query);
+decode serves the absorbed one only and requires ``absorbed_query``, so a
+fused one-query request has no kernel. These tests pin that routing contract --
 each regime goes to its own kernel, a one-query request that decode cannot
 serve is refused rather than handed to prefill, and every refusal says why.
 
@@ -45,7 +46,8 @@ def _llvm22(monkeypatch):
 
 
 def _decode(**overrides) -> MLARequest:
-    """A DeepSeek-V3-shaped decode batch: 4 sequences, one query each.
+    """A DeepSeek-V3-shaped decode batch: 4 sequences, one query each, in the
+    absorbed-query contract decode requires.
 
     ``num_kv_blocks`` defaults to the pool the batch needs, every sequence at
     ``max_seqlen_k``: decode ignores it, but the prefill candidate refuses 0,
@@ -59,6 +61,7 @@ def _decode(**overrides) -> MLARequest:
         max_seqlen_k=8192,
         arch="gfx942",
         num_cus=304,
+        absorbed_query=True,
     )
     base.update(overrides)
     base.setdefault("num_kv_blocks", base["num_seqs"] * -(-base["max_seqlen_k"] // 16))
@@ -90,8 +93,8 @@ class TestRouting:
         assert result.kernel_id.op == MLA_OP
 
     def test_prefill_refuses_one_query_per_sequence(self):
-        # Prefill could compute S_q = 1, but under its own input contract
-        # (projected query + W_UK), so it is not offered for decode's regime.
+        # Prefill could compute S_q = 1, but decode owns that regime: prefill
+        # is not offered for it under either input contract.
         req = _decode()
         ok, why = MLA_REGISTRY.get(PREFILL).admits(req)
         assert not ok and "max_seqlen_q=1 < min 2" in why
@@ -104,6 +107,25 @@ class TestRouting:
         assert not ok and "max_seqlen_q=2 > max 1" in why
         assert dispatch_mla(req).candidate.name == PREFILL
 
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    def test_one_query_request_without_absorbed_query_is_refused(self, arch):
+        # Decode's only contract is the absorbed query; a request for the
+        # fused one must not be served qa-shaped tensors it did not describe.
+        req = _decode(arch=arch, absorbed_query=False)
+        ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(req)
+        assert not ok and "requires features ['absorbed_query']" in why
+        with pytest.raises(ValueError, match="no candidate supports request"):
+            dispatch_mla(req)
+
+    @pytest.mark.parametrize("value", [None, 0])
+    def test_mistyped_absorbed_query_is_named(self, value):
+        # A falsy non-bool must pass the required-feature prefilter so the
+        # predicate names the type error, not a missing feature.
+        ok, why = MLA_REGISTRY.get(DECODE["gfx942"]).admits(
+            _decode(absorbed_query=value)
+        )
+        assert not ok and "absorbed_query must be a bool" in why
+
     def test_decode_batch_may_hold_a_sequence_without_a_query(self):
         # total_q < num_seqs is still decode: the kernel exits for that sequence.
         assert dispatch_mla(_decode(total_q=3)).candidate.name == DECODE["gfx942"]
@@ -112,8 +134,8 @@ class TestRouting:
     @pytest.mark.parametrize("arch", sorted(DECODE))
     def test_one_query_request_decode_cannot_serve_is_refused(self, arch, num_heads):
         # 16 / 32 heads do not fill a 64-head workgroup; 192 lowers but has no
-        # GPU evidence yet. No other kernel takes the absorbed query, so the
-        # request is refused with every reason.
+        # GPU evidence yet. Prefill takes no one-query request, so the request
+        # is refused with every reason.
         req = _decode(arch=arch, num_heads=num_heads)
         reason = f"num_heads={num_heads} not in (64, 128)"
         ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(req)

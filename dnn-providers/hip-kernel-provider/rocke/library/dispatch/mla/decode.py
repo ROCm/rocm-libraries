@@ -6,15 +6,17 @@
 The decode kernel is one builder for both arches (see
 :mod:`kernels.mla.mla_decode`); the arch module picks its spec class and
 occupancy and registers what :func:`make_mla_decode_candidate` returns. The
-candidate is selected by the request's ``max_seqlen_q`` alone: the caller
-states the problem, and this candidate owns the decode regime and its
-split-KV count.
+caller states the problem: ``max_seqlen_q == 1`` is the decode regime, which
+this candidate owns along with its split-KV count.
 
 Input contract: the *absorbed* query ``qa = [Q_nope @ W_UK_nopeᵀ | Q_rope]``
 (``[total_q, H, r_kv + d_rope]``) in, the normalized latent (before
-``W_UV``) and the LSE out. That is not the prefill kernel's contract, so no
-other candidate stands in for decode: a one-query request that decode cannot
-serve is refused.
+``W_UV``) and the LSE out. It is the only contract decode serves, so the
+candidate *requires* ``MLARequest.absorbed_query``: a one-query request
+without it is refused rather than served tensors it did not describe.
+Prefill takes no one-query request under either contract, so no other
+candidate stands in for decode: a one-query request that decode cannot serve
+is refused.
 
 A split-KV selection is two launches -- the latent kernel writing fp32
 partials, then the combine. :func:`mla_decode_launch` describes both from the
@@ -304,8 +306,10 @@ def make_mla_decode_candidate(
             ),
             # At S_q = 1 the bottom-right causal mask admits every key, so a
             # causal and a non-causal request are the same problem: the
-            # feature is served, not required.
+            # feature is served, not required. The absorbed query is the
+            # kernel's only input contract, so the request must state it.
             supports_features=MLA_FEATURES,
+            requires_features=frozenset({"absorbed_query"}),
         ),
         _supports=support,
         select_spec=select,

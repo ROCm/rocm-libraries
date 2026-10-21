@@ -275,6 +275,7 @@ class TestSplitMerge:
                 max_seqlen_k=max(sc.k_lens),
                 arch="gfx942",
                 num_cus=num_cus,
+                absorbed_query=True,
             )
         ).spec.num_seg
         spike_tile = sc.spike_key // BLOCK_SIZE

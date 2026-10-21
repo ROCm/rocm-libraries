@@ -307,7 +307,8 @@ def to_device(a: np.ndarray, dtype: torch.dtype) -> torch.Tensor:
 def _request(
     p: Problem, *, arch: str, algorithm: str = "auto", max_seqlen_q: int | None = None
 ) -> MLARequest:
-    """The request describing ``p``; ``max_seqlen_q`` defaults to its own."""
+    """The absorbed-query request describing ``p``; ``max_seqlen_q`` defaults
+    to its own. Every kernel this harness runs takes ``qa``."""
     from dispatch.mla import MLARequest
 
     k_lens = np.diff(p.cu_seqlens_k)
@@ -323,6 +324,7 @@ def _request(
         arch=arch,
         num_kv_blocks=int(p.c_kv.shape[0]),
         algorithm=algorithm,
+        absorbed_query=True,
     )
 
 
@@ -406,12 +408,10 @@ def run_prefill_oracle(
     pack is the decode kernel's, so only the grid differs.
 
     Dispatch does not route one query per sequence to prefill (that is
-    decode's regime and contract), so the oracle asks for prefill's layout at
+    decode's regime), so the oracle asks for prefill's absorbed layout at
     ``max_seqlen_q = 2``: the layout and the grid read ``total_q``,
     ``num_seqs`` and the key length, never ``max_seqlen_q``.
     """
-    import dataclasses
-
     import torch
     from dispatch.mla import dispatch_mla, num_q_blocks_for
     from kernels.mla.mla_prefill_gfx942 import (
@@ -424,7 +424,7 @@ def run_prefill_oracle(
     from rocke.runtime import KernelLauncher, LaunchConfig
 
     req = _request(p, arch=arch, algorithm="mla_prefill_chunked", max_seqlen_q=2)
-    spec = dataclasses.replace(dispatch_mla(req).spec, absorbed_query=True)
+    spec = dispatch_mla(req).spec
     art = compile_kernel(build_mla_prefill_fwd(spec, arch=arch), arch=arch)
     launcher = KernelLauncher(
         hsaco=art.hsaco,

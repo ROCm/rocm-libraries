@@ -70,6 +70,7 @@ def _dispatch_decode(*, num_heads, max_seqlen_k, arch):
                 arch=arch,
                 # Pinned so the split choice does not come from the host.
                 num_cus=256,
+                absorbed_query=True,
             )
         )
 

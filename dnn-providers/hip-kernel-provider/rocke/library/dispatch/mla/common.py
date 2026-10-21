@@ -105,16 +105,20 @@ class MLARequest(OperatorRequest):
     numbering its in-kernel binary search inverts, which a rectangular request
     cannot express for ragged inputs.
 
-    ``max_seqlen_q`` picks the regime, and with it the input contract the
-    caller must hold -- the two are not interchangeable:
+    ``max_seqlen_q`` picks the regime; ``absorbed_query`` states the input
+    contract the caller holds. The two contracts are not interchangeable:
 
-    * **decode** (``max_seqlen_q == 1``) takes the absorbed query
+    * **fused** (``absorbed_query=False``) takes the query projected by
+      ``W_UQ`` and RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``)
+      plus the per-head ``W_UK``, and returns the attention output and LSE;
+    * **absorbed** (``absorbed_query=True``) takes
       ``qa = [Q_nope @ W_UK_nopeᵀ | Q_rope]`` (``[total_q, num_heads,
       kv_lora_rank + d_rope]``) and returns the normalized latent (before
-      ``W_UV``) and the LSE;
-    * **prefill** (``max_seqlen_q >= 2``) takes the query projected by
-      ``W_UQ`` and RoPE-rotated (``[total_q, num_heads, d_nope + d_rope]``)
-      plus the per-head ``W_UK``, and returns the attention output and LSE.
+      ``W_UV``) and the LSE.
+
+    Prefill (``max_seqlen_q >= 2``) serves both. Decode (``max_seqlen_q ==
+    1``) serves the absorbed contract only and requires the flag, so a
+    one-query request without it is refused, not served the other contract.
 
     Neither ``W_UQ`` nor the rotation is in-tree; the caller applies both, and
     a pre-kernel for them is a follow-up.
@@ -162,8 +166,9 @@ class MLARequest(OperatorRequest):
     tuning_knobs: tuple[tuple[str, Any], ...] = ()
     # Unfused head projections: the kernel takes the absorbed query
     # ``[total_q, H, kv_lora_rank + d_rope]`` and writes the normalized latent
-    # output plus the LSE (``MlaPrefillSpec.absorbed_query``). Two-heads
-    # layouts only, so an odd head count is refused.
+    # output plus the LSE. Prefill serves it in its two-heads layouts only
+    # (``MlaPrefillSpec.absorbed_query``), so an odd head count is refused;
+    # decode serves nothing else, so it requires it.
     absorbed_query: bool = False
 
     def __post_init__(self) -> None:
@@ -198,8 +203,10 @@ class MLARequest(OperatorRequest):
 
         ``max_seqlen_q`` is the one dim the regimes split (decode ``<= 1``,
         prefill ``>= 2``), so no stand-in passes both: its 1 lets the decode
-        candidate's predicate name the error, and a prefill candidate refuses it
-        on the range.
+        candidate's predicate name the error for an absorbed-query request, and
+        a prefill candidate refuses it on the range. A fused request is refused
+        too, but only on capability (decode's required feature, prefill's
+        range), so its message shows the stand-in, not the mistyped value.
         """
         value = getattr(self, name)
         if type(value) is int:
@@ -225,11 +232,13 @@ class MLARequest(OperatorRequest):
 
     def features(self) -> frozenset[str]:
         active = set()
-        # ``is not False``: a non-bool ``causal`` (0, None) must pass the
-        # capability prefilter so ``_request_errors`` names the type error.
+        # ``is not False``: a non-bool flag (0, None) must pass the capability
+        # prefilter -- each is required by some candidate (prefill requires
+        # ``causal``, decode ``absorbed_query``) -- so ``_request_errors``
+        # names the type error instead of a missing feature.
         if self.causal is not False:
             active.add("causal")
-        if self.absorbed_query:
+        if self.absorbed_query is not False:
             active.add("absorbed_query")
         return frozenset(active)
 

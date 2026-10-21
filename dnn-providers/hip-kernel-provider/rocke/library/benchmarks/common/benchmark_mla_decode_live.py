@@ -76,7 +76,7 @@ def _resolve(shape: MLAShape, *, arch: str, build: bool) -> dict:
 
     row = {"shape": shape.signature}
     try:
-        result = dispatch_mla(shape.to_request(arch=arch))
+        result = dispatch_mla(shape.to_request(arch=arch, absorbed_query=True))
     except ValueError as exc:
         # Only a head count decode does not serve yet is an expected refusal;
         # any other refusal of a file shape (flavor, grid limit, regression)
@@ -127,7 +127,7 @@ def _dispatch_or_none(shape: MLAShape, *, arch: str):
     from dispatch.mla import dispatch_mla
 
     try:
-        return dispatch_mla(shape.to_request(arch=arch))
+        return dispatch_mla(shape.to_request(arch=arch, absorbed_query=True))
     except ValueError as exc:
         if not _refusal_expected(shape):
             raise
