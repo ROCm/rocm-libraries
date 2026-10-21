@@ -785,11 +785,17 @@ TEST(CPU_WrapperRoutingLastError_NONE, LastForwardedFailureFollowsRecordAndClear
     hipdnn::ClearForwardedFailure();
     EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));
 
+    // Not InternalError: every forwarded failure the process tests can cause has
+    // that status, so only this test would catch a record that ignores its input.
     testing::internal::CaptureStderr();
-    hipdnn::RecordFailure(miopenStatusInternalError, "hipDNN's reason");
+    hipdnn::RecordFailure(miopenStatusUnsupportedOp, "hipDNN's reason");
     static_cast<void>(testing::internal::GetCapturedStderr());
     EXPECT_TRUE(hipdnn::LastForwardedFailure(&status));
-    EXPECT_EQ(status, miopenStatusInternalError);
+    EXPECT_EQ(status, miopenStatusUnsupportedOp);
+
+    status = miopenStatusSuccess;
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&status));
+    EXPECT_EQ(status, miopenStatusUnsupportedOp);
 
     hipdnn::ClearForwardedFailure();
     EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));

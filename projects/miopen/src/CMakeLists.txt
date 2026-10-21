@@ -1202,8 +1202,9 @@ set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
 set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
-# This only installs the header; the MIOpen target gets its build-tree include
-# path above.
+# Installs hipdnn_forwarding.h. rocm_install_targets also adds the directory to
+# the include path of every target it installs, MIOpen_private included, but
+# MIOpen does not rely on that: it gets the path from its own include above.
 set(MIOPEN_WRAPPER_HEADER_PATH)
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 set(MIOPEN_WRAPPER_HEADER_PATH ${PROJECT_SOURCE_DIR}/include_wrapper)

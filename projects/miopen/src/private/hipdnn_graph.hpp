@@ -34,7 +34,8 @@ namespace hipdnn {
 
 // True when hipDNN can serve a forwarded call. Loads the backend on first use, so
 // a process that forwards nothing should never reach it. The answer is cached for
-// the process, and a false one also prints one line to stderr saying why.
+// the process, and a false one also prints one line to stderr saying why, unless
+// MIOPEN_LOG_LEVEL hides errors.
 bool IsAvailable();
 
 // Drops whatever hipDNN state was created for this MIOpen handle. Called from

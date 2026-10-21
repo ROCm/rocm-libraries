@@ -7,11 +7,12 @@
 // is read once per process, which is why script/test_forwarding_failure_modes.py
 // runs this once per environment instead of testing in-process.
 //
-//   conv_forward    miopenConvolutionForward; prints the status
-//   error_string    miopenGetErrorString of the last conv_forward status
-//   last_forwarded  the status miopenGetLastForwardedError reports
-//   get_version     miopenGetVersion, which MIOpen always serves; prints the status
-//   repeat N        runs the previous step N more times
+//  conv_forward        miopenConvolutionForward; prints status
+//  error_string        miopenGetErrorString of last conv_forward status
+//  last_forwarded      status miopenGetLastForwardedError reports
+//  last_forwarded_null miopenGetLastForwardedError(NULL); prints returned status
+//  get_version         miopenGetVersion, which MIOpen always serves; prints status
+//  repeat N            runs the previous step N more times
 
 #include <miopen/hipdnn_forwarding.h>
 #include <miopen/miopen.h>
@@ -117,6 +118,11 @@ int main(int argc, char** argv)
             if(!Check(miopenGetLastForwardedError(&forwarded), "miopenGetLastForwardedError"))
                 return false;
             std::printf("last_forwarded=%d\n", static_cast<int>(forwarded));
+        }
+        else if(step == "last_forwarded_null")
+        {
+            std::printf("last_forwarded_null=%d\n",
+                        static_cast<int>(miopenGetLastForwardedError(nullptr)));
         }
         else if(step == "get_version")
         {

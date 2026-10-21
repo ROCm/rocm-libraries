@@ -112,23 +112,16 @@ class ForwardingFailureModesTest(unittest.TestCase):
         self.assertEqual(len(run.lines_starting(FORWARDED_FAILURE)), 3, run.stderr)
 
     def test_trace_names_the_unavailable_backend_as_the_reason(self):
-        run = self.run_probe(
-            ["conv_forward"], {**FORWARDING_ON, "MIOPEN_LOG_LEVEL": "6"}
-        )
-        self.assertIn(
-            CONV_TRACE + "mode=enabled route=hipdnn reason=hipdnn-unavailable",
-            run.stderr_lines,
-        )
-
-    def test_trace_is_on_above_level_6_too(self):
-        """Level 7 (Trace) includes everything level 6 prints."""
-        run = self.run_probe(
-            ["conv_forward"], {**FORWARDING_ON, "MIOPEN_LOG_LEVEL": "7"}
-        )
-        self.assertIn(
-            CONV_TRACE + "mode=enabled route=hipdnn reason=hipdnn-unavailable",
-            run.stderr_lines,
-        )
+        # Level 7 (Trace) includes everything level 6 prints.
+        for level in ("6", "7"):
+            with self.subTest(MIOPEN_LOG_LEVEL=level):
+                run = self.run_probe(
+                    ["conv_forward"], {**FORWARDING_ON, "MIOPEN_LOG_LEVEL": level}
+                )
+                self.assertIn(
+                    CONV_TRACE + "mode=enabled route=hipdnn reason=hipdnn-unavailable",
+                    run.stderr_lines,
+                )
 
     def test_trace_prints_once_per_entry_point(self):
         run = self.run_probe(
@@ -159,6 +152,17 @@ class ForwardingFailureModesTest(unittest.TestCase):
         first, second = run.values("error_string")
         self.assertTrue(first.startswith(FORWARDED_PREFIX), first)
         self.assertEqual(second, first[len(FORWARDED_PREFIX) :])
+
+    def test_null_is_rejected_and_reading_does_not_clear_the_failure(self):
+        run = self.run_probe(
+            ["conv_forward", "last_forwarded_null", "last_forwarded", "last_forwarded"],
+            FORWARDING_ON,
+        )
+        self.assertEqual(run.statuses("conv_forward"), [INTERNAL_ERROR])
+        self.assertEqual(run.statuses("last_forwarded_null"), [BAD_PARM])
+        self.assertEqual(
+            run.statuses("last_forwarded"), [INTERNAL_ERROR, INTERNAL_ERROR]
+        )
 
     def test_forwarding_off_never_loads_hipdnn(self):
         run = self.run_probe(
