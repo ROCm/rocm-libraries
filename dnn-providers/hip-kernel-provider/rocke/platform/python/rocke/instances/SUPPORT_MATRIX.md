@@ -93,9 +93,10 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `conv_implicit_gemm` | ✅ | ✅ | ✅ | gfx1151: WMMA 16x16x16, `mem`+`default`, `wave_size=32`, `groups=1` |
-| `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
+| `conv_implicit_gemm` / `_dgrad` / `_wgrad` TF32 (`mma_dtype="tf32"`, fp32 storage) | ✅ | ✅ | ❌ | gfx942 native XF32 16x16x8 / 32x32x4; gfx950 BF16x3 emulation 16x16x32 / 32x32x16; MFMA only, M-outer LDS (no `lds_k_outer` / wgrad `async_dma`); dgrad 2-D only, as for every dtype |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
-| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog |
+| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog; fp16/bf16 only (no 4x4 fp32/TF32 atom: fp32 / tf32 problems use the generic kernel) |
+| direct conv fp32 / TF32 (`dtype="fp32"` / `"tf32"`, fp32 storage) | ✅ | ✅ | ❌ | 16c, 8c, 32c, generic, MFMA dgrad, direct wgrad, nongrouped: TF32 atoms (gfx942 native XF32, gfx950 BF16x3), `fp32` uses the exact fp32 atoms; scalar-FMA depthwise / scalar dgrad run fp32 math for both |
 | `conv_implicit_gemm_wgrad` | ✅ | ✅ | ✅ | gfx1151/gfx1201/gfx1250: WMMA, `default` epilogue, `split_k=1` |
 | `conv_implicit_gemm_wgrad` stream-K | ✅ | ✅ | ❌ | CK iteration-balanced partition; `linear`/`tree` deterministic fixups need the cross-workgroup flag ops |
 | `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
@@ -175,9 +176,8 @@ parity runs on the matching device and is not implied by the ✅ here.
   `gemm_multi_abd`) is rejected on gfx1151.
 - **Convolution on gfx1151:** `conv_implicit_gemm` runs on WMMA
   (16x16x16, `mem` pipeline, `default` epilogue, `wave_size=32`, `groups=1`).
-  `conv_implicit_gemm_auto` is a separate MFMA-specialized autotuned path
-  (raw `MfmaAtom`, K=32 kpack) that has not been ported to the WMMA atom
-  contract, so it stays MFMA-only.
+  TF32 compute (`ConvDataSpec.mma_dtype="tf32"`) is MFMA-only: no WMMA
+  catalog carries a TF32 atom, so `is_valid_spec` rejects it on gfx1151.
 - **Merged groups (`group_merge`)** is available in the forward
   (`conv_implicit_gemm`) and wgrad (`conv_implicit_gemm_wgrad`) directions for
   **depthwise** problems only (`cpg == kpg == 1`), on `wave_size == 64` (MFMA)
