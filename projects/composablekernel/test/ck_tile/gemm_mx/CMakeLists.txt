@@ -33,7 +33,8 @@ if(GPU_TARGETS MATCHES "gfx125")
     add_gtest_executable(test_ck_tile_mx_gemm_pipeline_tdm_wmma_smoke test_mx_gemm_pipeline_comp_tdm_wmma_smoke.cpp)
     # bf16 C on TDM V1/V2 for FP8 and FP4, sized for the gfx1250 emulator smoke stage.
     add_gtest_executable(test_ck_tile_mx_gemm_tdm_bf16c test_mx_gemm_tdm_bf16c.cpp)
-    # Host-only: the TDM MX shape gates of MxGemmKernel::IsSupportedArgument.
+    # Host-only: the TDM MX argument gates of MxGemmKernel::IsSupportedArgument and the LDS sizing
+    # of the TDM policies, pipelines and kernels.
     add_gtest_executable(test_ck_tile_mx_gemm_tdm_gates test_mx_gemm_tdm_gates.cpp)
     # TDM exists only on gfx125. add_gtest_executable drops a source whose name matches a type missing
     # from DTYPES ("_bf16" for the bf16c test), so the targets may not exist.
