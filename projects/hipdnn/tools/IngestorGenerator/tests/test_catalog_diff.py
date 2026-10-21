@@ -726,3 +726,77 @@ class TestMultiLaunchEntries:
         entry.pop("kernel_source")
         entry["sources"] = sources
         assert run(_kdp([entry]), _kdp([entry]), "--ignore-ids") == 2
+
+
+class TestNativeSymbolsAreComparedWhenDirectoriesAreGiven:
+    """The KDP names no native symbol, so a renamed `graph_match` / `score` /
+    `dispatch` / `kernel_match` symbol orphans the hand-written pack with the catalog
+    diff green. Each case is one rename or omission the comparison must not swallow."""
+
+    _FILES = {
+        "e.ued.json": {"graph_match": {"native": "hipkernel.e.graph_match"}},
+        "e.uhd.json": {"kind": "native", "payload": "hipkernel.e.score"},
+        "e.udd.json": {"dispatch_symbol": "hipkernel.e.dispatch"},
+        "k.umd.json": {"scope": "kernel", "match_symbol": "hipkernel.e.kernel_match"},
+    }
+
+    def _write(self, root: Path, files: dict) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        for name, doc in files.items():
+            (root / name).write_text(json.dumps(doc))
+        return root
+
+    def _run(self, run, tmp_path, regenerated_files: dict) -> int:
+        kdp = _kdp([_entry("k0")])
+        shipped = self._write(tmp_path / "shipped", self._FILES)
+        regenerated = self._write(tmp_path / "regenerated", regenerated_files)
+        return run(
+            kdp,
+            kdp,
+            "--shipped-descriptors",
+            str(shipped),
+            "--regenerated-descriptors",
+            str(regenerated),
+        )
+
+    def test_identical_symbols_pass(self, run, tmp_path):
+        """The positive control: the comparison is not vacuously failing."""
+        assert self._run(run, tmp_path, self._FILES) == 0
+
+    @pytest.mark.parametrize(
+        "name,doc",
+        [
+            ("e.ued.json", {"graph_match": {"native": "hipkernel.e.graph_match2"}}),
+            ("e.uhd.json", {"kind": "native", "payload": "hipkernel.e.rank"}),
+            ("e.udd.json", {"dispatch_symbol": "hipkernel.e.run"}),
+            ("k.umd.json", {"scope": "kernel", "match_symbol": "hipkernel.e.other"}),
+        ],
+        ids=["ued", "uhd", "udd", "umd"],
+    )
+    def test_a_renamed_symbol_is_a_difference(self, run, tmp_path, name, doc, capsys):
+        changed = {**self._FILES, name: doc}
+        assert self._run(run, tmp_path, changed) == 1
+        assert name in capsys.readouterr().out
+
+    def test_a_descriptor_missing_from_the_regenerated_side_is_a_difference(
+        self, run, tmp_path
+    ):
+        fewer = {k: v for k, v in self._FILES.items() if k != "e.udd.json"}
+        assert self._run(run, tmp_path, fewer) == 1
+
+    def test_ids_and_other_fields_are_not_symbols(self, run, tmp_path):
+        """Minted ids differ on every run, so they must not count."""
+        noisy = {
+            k: {**v, "id": f"fresh-{k}", "name": "other"}
+            for k, v in self._FILES.items()
+        }
+        assert self._run(run, tmp_path, noisy) == 0
+
+    def test_without_the_directories_symbols_are_not_read(self, run):
+        kdp = _kdp([_entry("k0")])
+        assert run(kdp, kdp) == 0
+
+    def test_one_directory_alone_is_bad_usage(self, run, tmp_path):
+        kdp = _kdp([_entry("k0")])
+        shipped = self._write(tmp_path / "shipped", self._FILES)
+        assert run(kdp, kdp, "--shipped-descriptors", str(shipped)) == 2

@@ -214,6 +214,10 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
             str(shipped_kmd),
             "--regenerated-kmd",
             str(kmd),
+            "--shipped-descriptors",
+            str(shipped_kmd.parent),
+            "--regenerated-descriptors",
+            str(descriptors),
         ]
     )
     report = capsys.readouterr()
@@ -248,6 +252,10 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
             str(shipped_kmd),
             "--regenerated-kmd",
             str(kmd),
+            "--shipped-descriptors",
+            str(shipped_kmd.parent),
+            "--regenerated-descriptors",
+            str(descriptors),
         ]
     )
     report = capsys.readouterr()

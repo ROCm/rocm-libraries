@@ -23,8 +23,9 @@ from the dispatcher):
     kernels, and dropping one silently halves what ships.
   * the ENGINE-LEVEL blocks -- ``engine``/``dispatch``/``matchers`` reference
     arity and ``provenance.specialization_contract`` content -- compared with ids
-    masked. Native symbol strings in the UED/UHD/UDD/UMD are NOT compared here
-    (only the KDP is read); symbol drift is a separate follow-up gate.
+    masked. Native symbol strings in the UED/UHD/UDD/UMD are compared only when
+    ``--shipped-descriptors`` / ``--regenerated-descriptors`` name the two
+    directories; without them only the KDP is read and symbol drift goes unseen.
 
 Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage or
 unreadable input, including an ``--expect-ids`` name present in both catalogs used a
@@ -45,6 +46,14 @@ passes. And a KDP carries no UUID stability of its own -- the ``--ignore-ids``
 mask is why this exits 0 at all, so preserving the SHIPPED ids through a splice
 is a separate obligation (``extend.md``: resolve by UUID, not filename), checked
 by ``--expect-ids``.
+
+Symbol comparison (``--shipped-descriptors`` / ``--regenerated-descriptors``):
+
+The UED's ``graph_match.native``, a native UHD's ``payload``, the UDD's
+``dispatch_symbol`` and every UMD's ``match_symbol`` name the C++ the provider
+resolves at load. Renaming one of them silently orphans the hand-written native
+pack, and nothing in the KDP shows it. Files are paired by name, so a descriptor
+present on one side only is reported too.
 
 KMD comparison (``--shipped-kmd`` / ``--regenerated-kmd``):
 
@@ -369,6 +378,55 @@ def compare_engine_blocks(
     return problems
 
 
+#: Descriptor type -> how its native symbol is read. A UHD carries a symbol only when
+#: its ``kind`` is ``native``.
+_SYMBOL_FIELDS = {
+    "ued": lambda doc: (doc.get("graph_match") or {}).get("native"),
+    "uhd": lambda doc: doc.get("payload") if doc.get("kind") == "native" else None,
+    "udd": lambda doc: doc.get("dispatch_symbol"),
+    "umd": lambda doc: doc.get("match_symbol"),
+}
+
+
+def _load_symbols(directory: str, label: str) -> dict:
+    """``{file name: symbol}`` for every UED/UHD/UDD/UMD directly under ``directory``
+    that carries one."""
+    root = Path(directory)
+    if not root.is_dir():
+        raise CatalogDiffError(
+            f"the {label} descriptor directory {directory} is not a directory"
+        )
+    symbols: dict = {}
+    for kind, read in _SYMBOL_FIELDS.items():
+        for path in sorted(root.glob(f"*.{kind}.json")):
+            try:
+                doc = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise CatalogDiffError(f"cannot read {label} {path}: {exc}") from exc
+            if not isinstance(doc, dict):
+                raise CatalogDiffError(f"{label} {path} must be a JSON object")
+            symbol = read(doc)
+            if symbol is not None:
+                symbols[path.name] = symbol
+    return symbols
+
+
+def compare_symbols(shipped: dict, regenerated: dict) -> list[str]:
+    problems = []
+    for name in sorted(shipped.keys() - regenerated.keys()):
+        problems.append(f"{name}: shipped symbol {shipped[name]!r}, none regenerated")
+    for name in sorted(regenerated.keys() - shipped.keys()):
+        problems.append(
+            f"{name}: regenerated symbol {regenerated[name]!r}, none shipped"
+        )
+    for name in sorted(shipped.keys() & regenerated.keys()):
+        if shipped[name] != regenerated[name]:
+            problems.append(
+                f"{name}: shipped {shipped[name]!r}, regenerated {regenerated[name]!r}"
+            )
+    return problems
+
+
 def _load_kmd(path: str, label: str) -> dict:
     try:
         text = Path(path).read_text()
@@ -580,6 +638,18 @@ def main(argv=None) -> int:
         help="regenerated *.kmd.json to compare against --shipped-kmd.",
     )
     parser.add_argument(
+        "--shipped-descriptors",
+        default=None,
+        help="directory holding the shipped *.ued/uhd/udd/umd.json; when given, "
+        "their native symbol strings are compared against "
+        "--regenerated-descriptors.",
+    )
+    parser.add_argument(
+        "--regenerated-descriptors",
+        default=None,
+        help="directory holding the regenerated *.ued/uhd/udd/umd.json.",
+    )
+    parser.add_argument(
         "--subset",
         action="store_true",
         help="require only shipped ⊆ regenerated; regenerated-only kernels are "
@@ -601,6 +671,14 @@ def main(argv=None) -> int:
         )
         return 2
 
+    if bool(args.shipped_descriptors) != bool(args.regenerated_descriptors):
+        print(
+            "FAIL: --shipped-descriptors and --regenerated-descriptors must be "
+            "given together",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         shipped = _load(args.shipped, "shipped")
         regenerated = _load(args.regenerated, "regenerated")
@@ -614,6 +692,18 @@ def main(argv=None) -> int:
         try:
             shipped_kmd = _load_kmd(args.shipped_kmd, "shipped")
             regenerated_kmd = _load_kmd(args.regenerated_kmd, "regenerated")
+        except CatalogDiffError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 2
+
+    shipped_symbols: dict | None = None
+    regenerated_symbols: dict | None = None
+    if args.shipped_descriptors:
+        try:
+            shipped_symbols = _load_symbols(args.shipped_descriptors, "shipped")
+            regenerated_symbols = _load_symbols(
+                args.regenerated_descriptors, "regenerated"
+            )
         except CatalogDiffError as exc:
             print(f"FAIL: {exc}", file=sys.stderr)
             return 2
@@ -638,6 +728,13 @@ def main(argv=None) -> int:
                 compare_kmd_fields(shipped_kmd, regenerated_kmd),
             )
         )
+    if shipped_symbols is not None:
+        sections.append(
+            (
+                "native symbols (ued graph_match, uhd payload, udd, umd)",
+                compare_symbols(shipped_symbols, regenerated_symbols),
+            )
+        )
     if args.expect_ids:
         try:
             sections.append(
@@ -654,6 +751,9 @@ def main(argv=None) -> int:
     print(f"  spec fields  {_spec_mode(shipped, regenerated, args.strict_spec)}")
     print(
         f"  catalog      {'subset (shipped kernels must all be regenerated)' if args.subset else 'equal'}"
+    )
+    print(
+        f"  symbols      {'compared' if shipped_symbols is not None else 'not provided (native symbol strings unchecked)'}"
     )
     print(
         f"  kmd          {'compared' if shipped_kmd is not None else 'not provided (types/defaults unchecked)'}"
