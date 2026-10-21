@@ -8,8 +8,8 @@ include initialization, leading dimensions, strides and all benchmark controls.
 `unsupported` means the loaded library supplied no heuristic solution for that
 exact configuration. It does not prove that the public API forbids the input.
 The benchmark prints `error: NO solution found!` and exits 0; the runner counts
-the case as unsupported. Random missing solutions are tolerated only below 10%
-of completed random attempts; explicit missing solutions always fail the run.
+the case as unsupported and makes the overall run unsuccessful. The random
+missing-solution rate is also reported to assess how often samples execute.
 No replacement input is sampled. Unsupported cases have no completed GEMM
 numerical result. The label describes heuristic selection, not proof that no
 working kernel exists in the library.

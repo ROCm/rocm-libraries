@@ -38,9 +38,10 @@ The numerical configurations follow the project's
 [combination tables](reference/api-reference.rst) and gfx950 MX tests.
 Bench's normal heuristic checks the complete configuration against the loaded
 library. A reported lack of a heuristic solution is counted as `unsupported`
-and retains its input and logs; cases are never resampled. Random samples must
-have a missing-solution rate below 10%: at most 9 of 100 or 99 of 1,000.
-The denominator is completed random attempts, excluding explicit cases.
+and retains its input and logs; cases are never resampled. The distribution
+aims to produce executable GEMMs. Its minimum dimension is 32, so random
+samples cannot have M, N or K equal to 1. Missing solutions remain failures
+to investigate when assessing or extending a sampling profile.
 The public `hipblasLtMatmulAlgoGetHeuristic` query checks one set of descriptors;
 there is no public query that enumerates all legal numerical combinations.
 Alignment and a documented type pairing do not guarantee that the loaded
@@ -65,14 +66,14 @@ HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python .github/scripts/run_ran
 `--threads` controls the number of concurrent GEMMs; each rocJITsu process uses
 one emulator worker. Each GEMM has one YAML record and its own logs, so a failure
 has a separate reproduction. `--stop-on-failure` stops workers from taking new
-cases after a race, numerical or execution failure, or a missing solution for
-an explicit case; cases already running finish. Random missing solutions are
-assessed after sampling finishes so an early miss does not end the run.
+cases after a failure, including a missing solution; cases already running
+finish. The CI callers attempt the full loop without early stopping.
 
 The summary counts passes, failures, unsupported cases and known failures, and
 records elapsed time and sampled families, transposes and epilogues.
-It also records the random missing-solution rate and whether it reaches the
-exclusive 10% limit. A list-only run has no random rate.
+It also records the random missing-solution rate as a coverage metric, using
+completed random attempts as the denominator. A list-only run has no random
+rate. Explicit regression inputs can deliberately include size-1 dimensions.
 A pass requires successful numerics and race detection. Known-failure exclusions
 start empty, and every race report fails. Inputs and results are saved under the
 output directory. Use `--help` for all options.
@@ -112,9 +113,8 @@ validation and remain visible in the advisory job; no blacklist hides them.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
 but they do not change the required Multi-Arch summary. No known-failure entries
-are enabled. Every sample is attempted. A random missing-solution rate of 10%
-or more, any explicit missing solution, race report or numerical failure makes
-the test step fail. Runner unit tests execute on a
+are enabled. Every sample is attempted. Missing solutions, race reports and
+numerical failures make the test step fail. Runner unit tests execute on a
 small GitHub-hosted runner when the runner or its workflows change.
 
 The race-check workflow also supports manual dispatch with `artifact_run_id`,
