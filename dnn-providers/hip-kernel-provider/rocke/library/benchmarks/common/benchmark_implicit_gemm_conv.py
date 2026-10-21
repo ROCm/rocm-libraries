@@ -49,6 +49,7 @@ import random
 import re
 import sys
 from dataclasses import dataclass
+from dataclasses import replace as dc_replace
 from collections.abc import Sequence
 from typing import NamedTuple
 from typing import List
@@ -650,6 +651,7 @@ def _verify_kernel(
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "fp16",  # int8 not supported; fall back to fp16 and warn
@@ -840,6 +842,10 @@ def parse_miopen_cmd(cmd: str):
     driver_kw = None
     driver_idx = None
     for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
         key = t.split("/")[-1].lower()
         if key in _MIOPEN_DTYPE_MAP:
             driver_kw = key
@@ -1733,8 +1739,6 @@ def main() -> int:
         _csv_writer = csv.DictWriter(_csv_file, fieldnames=_csv_fields)
         _csv_writer.writeheader()
         _csv_file.flush()
-
-    _INT32_MAX = 2**31 - 1
 
     n_csv_rows = 0
     try:
@@ -4512,15 +4516,33 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         case_direction = case[2] if len(case) > 2 else args.direction
 
         for direction in directions or (case_direction,):
+            # The problem the kernels launch on (dgrad runs width-folded, as
+            # the dispatcher launches it); the tensors, the reference and the
+            # FLOP count stay the case's own -- the fold keeps every byte.
+            run_problem = _launch_problem(direction, problem)
+            try:
+                batch_chunks = _batch_chunks(direction, run_problem, case_dtype)
+            except ValueError as e:
+                print(
+                    f"Case {case_idx} {problem.short()} {case_dtype} {direction}: {e}",
+                    flush=True,
+                )
+                overall_rc = 1
+                continue
+            # A kernel launches on one batch slice at a time, so it is offered
+            # against the largest slice: the grid limits apply to that.
+            fit_problem = dc_replace(run_problem, N=batch_chunks[0][1])
             candidates = [
                 (ident, path, meta)
-                for ident, path, meta in cache.compatible(problem, direction=direction)
+                for ident, path, meta in cache.compatible(
+                    fit_problem, direction=direction
+                )
                 if ident.dtype_a == case_dtype
             ]
             if not candidates:
                 _, why = next(
                     (
-                        (i, cache.supports_problem(i, problem)[1])
+                        (i, cache.supports_problem(i, fit_problem)[1])
                         for i, _ in cache.list_all(direction)
                     ),
                     (None, "cache has no kernels for this direction"),
@@ -4625,6 +4647,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 ),
                 flush=True,
             )
+            if len(batch_chunks) > 1:
+                print(
+                    f"  operands exceed the kernels' 2^31-byte addressing: each "
+                    f"kernel runs as {len(batch_chunks)} launches over batch "
+                    f"slices of N={', '.join(str(n) for _, n in batch_chunks)} "
+                    f"and is timed over all of them",
+                    flush=True,
+                )
 
             torch_dt = _TORCH_DT[case_dtype]
             torch.manual_seed(42)
@@ -4759,9 +4789,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     # early-stopped kernel returns from it too), and both
                     # exception handlers below drain before skipping a kernel.
                     _free_extras(rt, live_extras)
-                    bound = sk_bound or _cached_bind(
+                    bound = sk_bound or _cached_bind_batch(
+                        batch_chunks,
                         direction,
-                        problem,
+                        run_problem,
                         ident,
                         meta,
                         rt,
@@ -4893,6 +4924,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
+
+
+def _launch_problem(direction, problem):
+    """The problem the cached kernels of ``direction`` launch on for ``problem``.
+
+    A dgrad whose width folds into its channels runs folded
+    (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`) -- the same
+    bytes in all three tensors, in fewer and wider sub-GEMMs -- exactly as
+    ``dispatch.grouped_convolution`` launches it, so what is benchmarked here
+    is what dispatch runs. Every other problem launches as it is.
+    """
+    if direction != "dgrad":
+        return problem
+    from kernels.common.conv_implicit_gemm_dgrad import fold_width
+
+    return fold_width(problem)
 
 
 def _free_extras(rt, live_extras: list) -> None:
@@ -5343,6 +5390,89 @@ def _runtime_split_ks(
     )
 
 
+_INT32_MAX = 2**31 - 1
+
+
+def _batch_chunks(direction, problem, dtype) -> list:
+    """``[(n0, n), ...]``: the batch slices one launch each covers.
+
+    An AOT conv kernel takes its operand byte sizes as i32 kernargs and
+    addresses each operand through a buffer resource whose out-of-bounds
+    sentinel is the i32 maximum, so no operand it is launched on may exceed
+    2^31 - 1 bytes. fwd and dgrad compute every image independently, and N is
+    a kernarg: a batch whose activations are larger runs as consecutive
+    launches of the same binary over equal slices of N, at offset pointers.
+    wgrad reduces over N, so it cannot be split that way; neither can a weight
+    tensor, which has no batch.
+
+    Raises ``ValueError`` for a problem no split can bring into range.
+    """
+    elem = 4 if dtype == "fp32" else 2
+    spatial_in = (problem.Di or 1) * problem.Hi * problem.Wi
+    spatial_out = (problem.Do if problem.is_3d else 1) * problem.Ho * problem.Wo
+    per_image = max(spatial_in * problem.C, spatial_out * problem.K) * elem
+    weights = problem.K * (problem.Z or 1) * problem.Y * problem.X * problem.cpg * elem
+    if weights > _INT32_MAX:
+        raise ValueError(
+            f"the weight tensor ({weights} bytes) exceeds the kernels' "
+            f"2^31-byte operand addressing"
+        )
+    if per_image * problem.N <= _INT32_MAX:
+        return [(0, problem.N)]
+    if direction == "wgrad":
+        raise ValueError(
+            f"the activations ({per_image * problem.N} bytes) exceed the "
+            f"kernels' 2^31-byte operand addressing, and wgrad reduces over the "
+            f"batch, so it cannot run as batch slices"
+        )
+    if per_image > _INT32_MAX:
+        raise ValueError(
+            f"one image's activations ({per_image} bytes) exceed the kernels' "
+            f"2^31-byte operand addressing"
+        )
+    n_chunks = -(-problem.N // (_INT32_MAX // per_image))
+    step = -(-problem.N // n_chunks)
+    return [(n0, min(step, problem.N - n0)) for n0 in range(0, problem.N, step)]
+
+
+def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
+    """:func:`_cached_bind` over the batch slices of :func:`_batch_chunks`.
+
+    ``rest`` is the rest of :func:`_cached_bind`'s arguments. One slice binds
+    the problem as is; several bind one launch each -- the A and D operands
+    (the activations; B is the weights) offset to the slice's first image --
+    and ``run`` issues them in order.
+    """
+    if len(batch_chunks) == 1:
+        return _cached_bind(direction, problem, ident, *rest)
+    (meta, rt, launcher, case_dtype, split_k, ptrs, sizes, *tail) = rest
+    a_image, d_image = sizes[0] // problem.N, sizes[2] // problem.N
+    runs = []
+    for n0, n in batch_chunks:
+        bound = _cached_bind(
+            direction,
+            dc_replace(problem, N=n),
+            ident,
+            meta,
+            rt,
+            launcher,
+            case_dtype,
+            split_k,
+            (ptrs[0] + n0 * a_image, ptrs[1], ptrs[2] + n0 * d_image),
+            (n * a_image, sizes[1], n * d_image),
+            *tail,
+        )
+        if bound is None:
+            return None
+        runs.append(bound[0])
+
+    def run(runs=tuple(runs)):
+        for launch in runs:
+            launch()
+
+    return run, bound[1]
+
+
 def _cached_bind(
     direction,
     problem,
@@ -5443,30 +5573,14 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
 
     extras: dict = {}
     if direction == "dgrad":
-        from dataclasses import replace as dc_replace
-
         import numpy as np
 
-        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
-        from kernels.common.conv_implicit_gemm_dgrad import (
-            DgradConvSpec,
-            pack_sub_gemm_buffer,
-        )
+        from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+        from kernels.conv.kernel_identity import dgrad_sub_gemms
 
-        spec = DgradConvSpec(
-            problem=problem,
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=ident.tile_m,
-            tile_n=ident.tile_n,
-            tile_k=ident.tile_k,
-            warp_m=ident.warp_m,
-            warp_n=ident.warp_n,
-            warp_tile_m=ident.warp_tile_m,
-            warp_tile_n=ident.warp_tile_n,
-            warp_tile_k=ident.warp_tile_k,
-            max_sub_gemms=ident.max_sub_gemms or 64,
-        )
-        sub_gemms = spec.compute_sub_gemms()
+        # The records of the binary's own decomposition (a patch kernel's one
+        # record over the filter, say), as the dispatcher builds them.
+        sub_gemms = dgrad_sub_gemms(ident, problem)
         if len(sub_gemms) > (ident.max_sub_gemms or 64):
             raise ValueError(
                 f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel's "

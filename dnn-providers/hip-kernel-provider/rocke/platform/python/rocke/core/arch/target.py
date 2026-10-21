@@ -72,9 +72,10 @@ def _expand_mma_rows(gfx: str, declarations: list[dict]) -> list[dict]:
             rows = [declaration]
         else:
             # JSON text comparison also rejects bools masquerading as integers.
-            if gfx != "gfx1250" or json.dumps(
-                declaration, sort_keys=True
-            ) != json.dumps(_GFX1250_SCALED_FAMILY, sort_keys=True):
+            # Admitted by content: any arch may declare the family.
+            if json.dumps(declaration, sort_keys=True) != json.dumps(
+                _GFX1250_SCALED_FAMILY, sort_keys=True
+            ):
                 raise ValueError(
                     f"unsupported MMA family declaration for {gfx}: {declaration!r}"
                 )
@@ -1076,8 +1077,9 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 
 
 # Scaled operands share the padded <16 x i32> ABI, byte-carrier scales,
-# and gfx12 accumulator map. Derive every ID from the expanded catalog.
-for _row in _load_specs()["gfx1250"]["mma"]:
+# and gfx12 accumulator map. Derive every ID from the expanded catalog of
+# every arch that lists the family.
+for _row in (row for spec in _load_specs().values() for row in spec["mma"]):
     if _row["family"] == "wmma_scaled":
         _scale_frag_len = 128 // _row["scale_block_k"]
         _MMA_FRAGMENT_INFO[_row["op_id"]] = _FragInfo(
@@ -1184,8 +1186,9 @@ class MemoryCapabilities:
     # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
     # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
     async_lds_max_dwords: int
-    # gfx1250 feature flags. An arch sets one only after its feature passes a
-    # functional run on a device; the ops themselves are gated separately.
+    # Feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the lowerers admit the feature's operations
+    # only on a target that sets it.
     has_scalar_data_prefetch: bool = False
     has_global_prefetch: bool = False
     has_cluster_launch: bool = False
@@ -1574,6 +1577,22 @@ def _op_id_physical_op_id() -> Dict[str, str]:
                     f"list it; fix the catalog so every row agrees."
                 )
     return out
+
+
+def _mma_op_by_id(op_id: str) -> MmaOp | None:
+    """The catalog atom named ``op_id``, or ``None`` when no arch lists it.
+
+    For a caller that holds only an op_id, such as the operand contract of a
+    scaled atom, which does not depend on the target lowering it. An op_id
+    names one atom, so every arch that lists it holds the same row; the first
+    hit in :func:`known_arches` order is returned. Mirrored by
+    ``rocke_arch_mma_op_by_id`` in ``query.cpp``.
+    """
+    for gfx in known_arches():
+        atom = _build_target(gfx).mma.by_op_id(op_id)
+        if atom is not None:
+            return atom
+    return None
 
 
 @lru_cache(maxsize=1)

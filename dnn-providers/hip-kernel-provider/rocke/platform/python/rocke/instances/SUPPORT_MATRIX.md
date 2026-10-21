@@ -122,6 +122,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
+| `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
 ---
 
@@ -135,6 +136,17 @@ as described in the notes.
 | `kda_chunk_fused` | ✅ | ✅ | ❌ | bf16 only; fused prefill; gfx942 partitions V, gfx950 owns a full head |
 | `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
 | `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
+
+## Sparse attention (DSA lightning indexer)
+
+Added with the DSA lightning-indexer family. The kernel is arch-neutral
+(`kernels/common/lightning_indexer.py`): the ✅ cells are compile- and
+golden-verified (spec, wiring, IR sha, Python/C++ byte-identity); on-GPU numeric
+parity runs on the matching device and is not implied by the ✅ here.
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `lightning_indexer` | ✅ | ✅ | ❌ | bf16; score-only DSA scorer (no softmax/value); runtime seqlen_q/seqlen_k; scalar body (sub-tile seqlen_q / single-query decode fallback, correctness oracle) + MFMA body (tail-masked for any seqlen_q/seqlen_k; index_head_dim 16-aligned); fp8 is a later phase; gfx1151 (RDNA wave32) unsupported |
 
 ## Linear attention / recurrent-state decode
 

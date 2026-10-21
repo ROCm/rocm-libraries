@@ -212,8 +212,9 @@ typedef struct rocke_memory_caps
      * width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
      * Mirrors MemoryCapabilities.async_lds_max_dwords. */
     int async_lds_max_dwords;
-    /* gfx1250 feature flags; an arch sets one only after its feature passes a
-     * functional run on a device. */
+    /* Feature flags; an arch sets one only after its feature passes a
+     * functional run on a device. The lowerers admit the feature's operations
+     * only on a target that sets it. */
     bool has_scalar_data_prefetch;
     bool has_global_prefetch;
     bool has_cluster_launch;
@@ -362,6 +363,11 @@ bool rocke_arch_mma_op_id_emulated_operands(const char* op_id, int* a_len, int* 
 /* Target-independent family projection. Unknown/NULL IDs return NULL;
  * conflicting families for one ID raise ROCKE_ERR_VALUE. */
 const char* rocke_arch_mma_op_id_family(const char* op_id);
+
+/* The catalog atom named op_id: the first hit in known-arch order (an op_id
+ * names one atom, so every arch that lists it holds the same row). NULL when
+ * no arch lists it. Mirrors target._mma_op_by_id. */
+const rocke_mma_op_t* rocke_arch_mma_op_by_id(const char* op_id);
 
 /* ============================== arch target =========================== */
 
