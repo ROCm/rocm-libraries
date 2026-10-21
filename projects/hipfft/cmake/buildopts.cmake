@@ -1,4 +1,4 @@
-# Copyright(C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright(C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,14 +24,5 @@
 # presented in the superbuild GUI, but then passed into the ExternalProject as -D
 # parameters, which would already define them.
 
-if( NOT BUILD_CLIENTS_TESTS )
-  option( BUILD_CLIENTS_TESTS "Build rocFFT unit tests" OFF )
-endif( )
-
-if( NOT BUILD_CLIENTS_BENCH )
-  option( BUILD_CLIENTS_BENCH "Build rocFFT benchmarks" OFF )
-endif( )
-
-if( NOT BUILD_CLIENTS_SAMPLES )
-  option( BUILD_CLIENTS_SAMPLES "Build rocFFT samples" OFF )
-endif( )
+option( ALLOW_FETCH_DEPS  "Allow using default URLs to fetch external dependencies" ON )
+option( ALLOW_BUILD_DEPS  "Allow building of external dependencies" ON )

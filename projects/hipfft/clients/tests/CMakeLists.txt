@@ -35,6 +35,7 @@ endif( )
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   project( hipfft-clients-tests LANGUAGES CXX )
   find_package( hipfft REQUIRED CONFIG PATHS )
+  include( ../../cmake/buildopts.cmake )
 endif()
 
 find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )

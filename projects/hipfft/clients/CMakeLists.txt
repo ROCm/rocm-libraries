@@ -55,6 +55,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   # Declare a project only if we are building from the current directory
   # This project may compile dependencies for clients
   project( hipfft-clients LANGUAGES CXX )
+  include( ../cmake/buildopts.cmake )
   set( BUILD_CLIENTS_SAMPLES ON)
   set( BUILD_CLIENTS_TESTS ON)
   set( BUILD_CLIENTS_BENCH ON)

@@ -52,6 +52,8 @@ set( HIPFFT_BUILD_SCOPE ON )
 
 project( hipfft LANGUAGES CXX )
 
+include( cmake/buildopts.cmake )
+
 # Build options
 option( BUILD_SHARED_LIBS "Build ${PROJECT_NAME} as a shared library" ON )
 option( BUILD_VERBOSE "Output additional build information" OFF )
