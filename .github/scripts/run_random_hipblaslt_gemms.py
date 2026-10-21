@@ -78,12 +78,9 @@ def load_explicit_cases(path):
         if not isinstance(case, dict) or set(case) != {
             "id",
             "description",
-            "tracking",
             "problem",
         }:
-            raise ValueError(
-                "each explicit case needs id, description, tracking and problem"
-            )
+            raise ValueError("each explicit case needs id, description and problem")
         name = case["id"]
         if (
             not isinstance(name, str)
@@ -107,13 +104,8 @@ def load_explicit_cases(path):
             problem[key] not in ("N", "T") for key in ("transA", "transB")
         ):
             raise ValueError(f"{name}: requires nonzero alpha and N/T transposes")
-        if (
-            not isinstance(case["description"], str)
-            or not case["description"]
-            or not isinstance(case["tracking"], str)
-            or not case["tracking"].startswith("https://")
-        ):
-            raise ValueError(f"{name}: description and HTTPS tracking link required")
+        if not isinstance(case["description"], str) or not case["description"]:
+            raise ValueError(f"{name}: description required")
     return cases
 
 
@@ -473,14 +465,7 @@ def main(argv=None):
                         "problem": problem,
                         "bench_input": bench_input(problem),
                         "result": result,
-                        **(
-                            {
-                                "description": case["description"],
-                                "tracking": case["tracking"],
-                            }
-                            if case
-                            else {}
-                        ),
+                        **({"description": case["description"]} if case else {}),
                     }
                 )
 

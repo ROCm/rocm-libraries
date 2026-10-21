@@ -66,7 +66,6 @@ class RandomGemmTests(unittest.TestCase):
                         {
                             "id": "required",
                             "description": "Regression input",
-                            "tracking": "https://github.com/ROCm/rocm-libraries/issues/14129",
                             "problem": problem,
                         }
                     ]

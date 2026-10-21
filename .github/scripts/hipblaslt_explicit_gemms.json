@@ -2,7 +2,6 @@
   {
     "id": "fp16-gelu-near-zero",
     "description": "relative norm 1 for absolute difference 2.98e-7",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14123",
     "problem": {
       "family": "fp16",
       "a_type": "f16_r",
@@ -29,7 +28,6 @@
   {
     "id": "mxfp8-fp16-overflow-k4096",
     "description": "relative norm NaN when CPU and emulated output contain matching infinities",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14123",
     "problem": {
       "family": "mxfp8",
       "a_type": "f8_r",
@@ -56,7 +54,6 @@
   {
     "id": "mxfp8-fp16-overflow-k2048",
     "description": "relative norm NaN when CPU and emulated output contain matching infinities",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14123",
     "problem": {
       "family": "mxfp8",
       "a_type": "f8_r",
@@ -83,7 +80,6 @@
   {
     "id": "mxfp8-fp16-overflow-seed42-case503",
     "description": "relative norm NaN with 32 matching infinities; every output equals CPU reference",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14123",
     "problem": {
       "family": "mxfp8",
       "a_type": "f8_r",
@@ -110,7 +106,6 @@
   {
     "id": "mxfp8-fp16-overflow-seed42-case683",
     "description": "relative norm NaN with 32 matching infinities; every output equals CPU reference",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14123",
     "problem": {
       "family": "mxfp8",
       "a_type": "f8_r",
@@ -137,7 +132,6 @@
   {
     "id": "bf16-tn-prefetch-k64",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -164,7 +158,6 @@
   {
     "id": "bf16-tn-prefetch-k65",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -191,7 +184,6 @@
   {
     "id": "bf16-tn-prefetch-k128",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -218,7 +210,6 @@
   {
     "id": "bf16-tn-prefetch-k129",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -245,7 +236,6 @@
   {
     "id": "bf16-tn-prefetch-k192",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -272,7 +262,6 @@
   {
     "id": "bf16-tn-prefetch-k193",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -299,7 +288,6 @@
   {
     "id": "bf16-tn-prefetch-k256",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -326,7 +314,6 @@
   {
     "id": "bf16-tn-prefetch-k512",
     "description": "Exercise the reported 16-bit TN prefetch race shape through normal heuristic selection.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/pull/14147",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
@@ -353,7 +340,6 @@
   {
     "id": "bf16-tn-prefetch-reported",
     "description": "Original reported BF16 TN batched shape; the heuristic may select a different kernel.",
-    "tracking": "https://github.com/ROCm/rocm-libraries/issues/14129",
     "problem": {
       "family": "bf16",
       "a_type": "bf16_r",
