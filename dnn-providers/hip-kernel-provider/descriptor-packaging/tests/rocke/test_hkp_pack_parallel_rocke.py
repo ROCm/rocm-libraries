@@ -128,6 +128,9 @@ _EDITABLE_MODULE = """
     class EditableSpec:
         tile: int
 
+    def is_valid_spec(spec: EditableSpec, *, arch="gfx942"):
+        return True, ""
+
     def build_editable(spec: EditableSpec, *, arch="gfx942"):
         return ("kernel", spec, arch)
 """

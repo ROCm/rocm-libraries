@@ -198,11 +198,47 @@ static int test_invalid_store_alignment()
     return 0;
 }
 
+/* Mirrors test_rejects_unsupported_target: a target whose MMA catalog does not
+ * list the XF32 instruction refuses it in both C++ lowerers, with the text
+ * Python raises. The HIP lowerer reports it on the builder's error channel. */
+static int test_rejects_unsupported_target()
+{
+    for(const char* gfx : {"gfx950", "gfx1151", "gfx1250"})
+    {
+        char message[256];
+        std::snprintf(message,
+                      sizeof(message),
+                      "no MMA instruction found for 'mfma_f32_16x16x8_xf32' on '%s' -- the "
+                      "target's MMA catalog does not list it; it is listed for gfx942",
+                      gfx);
+        rocke_ir_builder_t b;
+        auto* kernel = rocke_build_tf32_mma_probe(&b, 16, "raw");
+        CHECK(kernel);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        CHECK(rocke_lower_kernel_to_llvm_ex(
+                  kernel, ROCKE_LLVM_FLAVOR_LLVM20, gfx, &ll, err, sizeof(err))
+              == ROCKE_ERR_VALUE);
+        CHECK(std::strcmp(err, message) == 0);
+        std::free(ll);
+        rocke_strbuf_t hip;
+        CHECK(rocke_strbuf_init(&hip, 0) == 0);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = gfx;
+        CHECK(rocke_lower_kernel_to_hip(&b, kernel, &opts, &hip) == ROCKE_ERR_VALUE);
+        CHECK(std::strcmp(rocke_ir_builder_error(&b), message) == 0);
+        rocke_strbuf_free(&hip);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main()
 {
     CHECK(test_invalid_store_alignment() == 0);
     CHECK(test_invalid_tf32_ops_rejected() == 0);
     CHECK(test_vector_load() == 0);
+    CHECK(test_rejects_unsupported_target() == 0);
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_i32()));
     CHECK(!rocke_type_eq(rocke_tf32(), rocke_f32()));
     CHECK(rocke_scalar_by_name("tf32") == rocke_tf32());
