@@ -536,6 +536,8 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
 | `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
+| `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: 198 rocKE kernels (one narrow-16x16 geometry per head/dtype/mask cell), served through a host-derived identity paged-KV block table |
+| `configs/gfx950_attention_unified_2d.engine.yaml` | That engine's manifest: the pinned `unified_tuning` geometry, the batch capacity (`enumerate.fixed.batch` -> the spec's `num_seqs`, which bounds the sequences one launch resolves at `2^ceil(log2(num_seqs+1)) - 1`), `mask_type` as the KMD's mask field, and the `engine.slug` override |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
