@@ -64,6 +64,9 @@ from support_features.coverage import (
     share,
 )
 from support_features.feature_matrix import (
+    DATA_CENTER,
+    FAMILIES,
+    GPUS,
     compute_feature_claims,
     display_name,
     group_of,
@@ -684,6 +687,12 @@ class TestFeatureMatrixNames:
         assert group_of("RMSNormBackwardAttributes") == "RMSNorm"
         assert group_of("MoeGroupedMatmulBwdAttributes") == "Matmul"
 
+    def test_every_gpu_is_in_a_dashboard_family(self) -> None:
+        assert {gpu.family for gpu in GPUS.values()} == set(FAMILIES)
+
+    def test_gfx1250_is_data_center_despite_its_gfx1_name(self) -> None:
+        assert GPUS["gfx1250"].family == DATA_CENTER
+
     def test_display_name_drops_only_the_first_suffix(self) -> None:
         assert display_name("SdpaAttributes") == "Sdpa"
         assert (
@@ -845,6 +854,40 @@ class TestFeatureMatrixMarkdown:
             "options-per-op",
         } <= targets
         assert targets <= defined
+
+    def test_unknown_arch_is_a_defect(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Two graphs claim it; it is reported once, naming the first.
+        for name in ("a", "b"):
+            _bundle(
+                tmp_path,
+                name,
+                [_node(features=["dtype:fp16"])],
+                claims={"E": {"gfx9999": ["linux"], "gfx942": ["linux"]}},
+            )
+        errors: list[str] = []
+        compute_feature_claims(collect_units(tmp_path, errors), errors)
+        assert len(errors) == 1
+        assert "'gfx9999' is not in GPUS" in errors[0]
+        output = tmp_path / "out.md"
+        argv = ["--bundles-dir", str(tmp_path), "--output", str(output)]
+        assert feature_matrix_main(argv) == 1
+        assert not output.exists()
+        assert "error: 1 defect(s); nothing rendered" in capsys.readouterr().err
+
+    def test_gfx1250_lands_in_the_data_center_table(self, tmp_path: Path) -> None:
+        _bundle(
+            tmp_path,
+            "a",
+            [_node(features=["dtype:fp16"])],
+            claims={"E": {"gfx1250": ["linux"]}},
+        )
+        document = render_feature_matrix(_feature_claims(tmp_path))
+        rdna = document.split("### RDNA (consumer)", 1)[1].split("\n### ", 1)[0]
+        cdna = document.split("### CDNA (data center)", 1)[1].split("\n## ", 1)[0]
+        assert "_No support claimed yet._" in rdna
+        assert "gfx1250-linux" in cdna
 
 
 @pytest.mark.usefixtures("fake_registry")
@@ -7199,3 +7242,12 @@ class TestRealBundleTree:
         counted = sum(op.graphs for op in coverage.ops.values())
         assert units
         assert counted >= len(units)
+
+    def test_feature_matrix_knows_every_claimed_arch(
+        self, units: list[ClaimUnit]
+    ) -> None:
+        # An arch missing from GPUS would fail the render; catch it here first.
+        errors: list[str] = []
+        claims = compute_feature_claims(units, errors)
+        assert errors == []
+        assert claims.targets

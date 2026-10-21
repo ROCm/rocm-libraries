@@ -36,14 +36,15 @@ import pathlib
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from support_features import registry  # noqa: E402
-from support_features.coverage import unit_features  # noqa: E402
+from support_features.coverage import unit_features, unit_location  # noqa: E402
 from support_matrix_markdown import FULL, PARTIAL  # noqa: E402
-from support_matrix_units import ClaimUnit, collect_units  # noqa: E402
+from support_matrix_units import ClaimUnit, collect_units, report_error  # noqa: E402
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[4]
@@ -74,27 +75,38 @@ GROUP_RULES = (
     ("Block scale", lambda op: op.startswith("BlockScale")),
 )
 
-# arch -> (architecture generation, example products)
-GPU_INFO = {
-    "gfx908": ("CDNA", "Instinct MI100"),
-    "gfx90a": ("CDNA 2", "Instinct MI200 series"),
-    "gfx942": ("CDNA 3", "Instinct MI300 series"),
-    "gfx950": ("CDNA 4", "Instinct MI350 series"),
-    "gfx1030": ("RDNA 2", "Radeon RX 6800 / 6900, Radeon PRO W6800"),
-    "gfx1100": ("RDNA 3", "Radeon RX 7900, Radeon PRO W7900"),
-    "gfx1101": ("RDNA 3", "Radeon RX 7800 / 7700"),
-    "gfx1102": ("RDNA 3", "Radeon RX 7600"),
-    "gfx1150": ("RDNA 3.5", "Ryzen AI 300 (Strix Point)"),
-    "gfx1151": ("RDNA 3.5", "Ryzen AI Max (Strix Halo)"),
-    "gfx1200": ("RDNA 4", "Radeon RX 9060"),
-    "gfx1201": ("RDNA 4", "Radeon RX 9070, Radeon AI PRO R9700"),
-}
+CONSUMER = "RDNA (consumer)"
+DATA_CENTER = "CDNA (data center)"
+# Dashboard order: one table per family.
+FAMILIES = (CONSUMER, DATA_CENTER)
 
-# gfx1xxx is RDNA; gfx9xx is CDNA.
-FAMILIES = (
-    ("RDNA (consumer)", lambda arch: arch.startswith("gfx1")),
-    ("CDNA (data center)", lambda arch: arch.startswith("gfx9")),
-)
+
+class Gpu(NamedTuple):
+    family: str
+    generation: str
+    products: str
+
+
+# Every arch a sidecar may claim. The family is spelled out per arch, never
+# read off the name: gfx1250 is a gfx1 target in the data-center family. A
+# claimed arch missing here is a defect, so a new GPU fails the render
+# instead of dropping out of the dashboard.
+GPUS = {
+    "gfx908": Gpu(DATA_CENTER, "CDNA", "Instinct MI100"),
+    "gfx90a": Gpu(DATA_CENTER, "CDNA 2", "Instinct MI200 series"),
+    "gfx942": Gpu(DATA_CENTER, "CDNA 3", "Instinct MI300 series"),
+    "gfx950": Gpu(DATA_CENTER, "CDNA 4", "Instinct MI350 series"),
+    # No product announced yet.
+    "gfx1250": Gpu(DATA_CENTER, "CDNA 5", "—"),
+    "gfx1030": Gpu(CONSUMER, "RDNA 2", "Radeon RX 6800 / 6900, Radeon PRO W6800"),
+    "gfx1100": Gpu(CONSUMER, "RDNA 3", "Radeon RX 7900, Radeon PRO W7900"),
+    "gfx1101": Gpu(CONSUMER, "RDNA 3", "Radeon RX 7800 / 7700"),
+    "gfx1102": Gpu(CONSUMER, "RDNA 3", "Radeon RX 7600"),
+    "gfx1150": Gpu(CONSUMER, "RDNA 3.5", "Ryzen AI 300 (Strix Point)"),
+    "gfx1151": Gpu(CONSUMER, "RDNA 3.5", "Ryzen AI Max (Strix Halo)"),
+    "gfx1200": Gpu(CONSUMER, "RDNA 4", "Radeon RX 9060"),
+    "gfx1201": Gpu(CONSUMER, "RDNA 4", "Radeon RX 9070, Radeon AI PRO R9700"),
+}
 
 
 def display_name(node_type: str) -> str:
@@ -226,9 +238,20 @@ def compute_feature_claims(
     claims.unit_count = len(units)
     engines: set[str] = set()
     found: set[Target] = set()
+    # Reported once each; the first claiming graph is named.
+    unknown: set[str] = set()
     for unit in units:
         engines |= set(unit.claims)
         for pairs in unit.claims.values():
+            for arch, _ in pairs:
+                if arch not in GPUS and arch not in unknown:
+                    unknown.add(arch)
+                    report_error(
+                        errors,
+                        f"{unit_location(unit)}: claimed arch {arch!r} is not in "
+                        "GPUS in support_features/feature_matrix.py; add its "
+                        "family, generation and products",
+                    )
             found |= pairs
         found_features = unit_features(unit, errors)
         for group in {group_of(t) for t in found_features}:
@@ -288,8 +311,8 @@ def render_dashboard(claims: FeatureClaims) -> list[str]:
         "names those ops.",
         "",
     ]
-    for family, in_family in FAMILIES:
-        targets = [t for t in claims.targets if in_family(t[0])]
+    for family in FAMILIES:
+        targets = [t for t in claims.targets if GPUS[t[0]].family == family]
         out += [f"### {family}", ""]
         if not targets:
             out += ["_No support claimed yet._", ""]
@@ -425,12 +448,12 @@ def render_features_per_op(claims: FeatureClaims) -> list[str]:
 def render_gpu_targets(claims: FeatureClaims) -> list[str]:
     rows = []
     for target in claims.targets:
-        generation, products = GPU_INFO.get(target[0], ("", ""))
+        gpu = GPUS[target[0]]
         rows.append(
             [
                 f'<a id="{target_anchor(target)}"></a>**{target_name(target)}**',
-                generation,
-                products,
+                gpu.generation,
+                gpu.products,
             ]
         )
     return [
@@ -447,7 +470,7 @@ TITLE = "Support matrix by API option"
 
 def render(claims: FeatureClaims) -> str:
     sections = [
-        *(name for name, _ in FAMILIES),
+        *FAMILIES,
         "By engine",
         "Op groups",
         "Options per op",
