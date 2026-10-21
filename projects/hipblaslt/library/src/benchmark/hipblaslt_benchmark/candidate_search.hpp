@@ -372,6 +372,11 @@ namespace hipblaslt_bench
             if(!measured)
                 continue;
             const bool eligible = detail::call_hook(callbacks.on_measured, sol, measurement);
+            if(newly_failed())
+            {
+                result.aborted = true;
+                return result;
+            }
 
             if(eligible && best_gpu_time > measurement.median_us)
             {
