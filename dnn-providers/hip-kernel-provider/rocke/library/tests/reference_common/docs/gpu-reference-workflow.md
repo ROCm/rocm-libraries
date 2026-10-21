@@ -54,9 +54,12 @@ kernel binary while still exercising distinct address calculations.
 For existing operations, edit
 `library/tests/<operation>_reference/architectures/<arch>/__init__.py` and its
 `CASES`. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`, `prepare`,
-`launch`, and `exported_kernel`. It must use the production dispatch/launch path
-and freeze the complete replay ABI. Keep the independent oracle independent of
-production indexing and geometry helpers.
+`launch`, and `exported_kernel`. `CASE_BY_ID` indexes `CASES` with
+`reference_common.cases.index_cases`, so colliding case ids fail on import. An
+adapter that compiles a family code object also exports `COMPILER_TARGET`, and
+its exported kernel metadata records the same `compiler_target`. It must use the
+production dispatch/launch path and freeze the complete replay ABI. Keep the
+independent oracle independent of production indexing and geometry helpers.
 
 For a new architecture, add it to the operation's `architectures/registry.json`
 so offline tools can load the adapter. This enables qualification only; it does
@@ -65,9 +68,24 @@ reusing another architecture's adapter. Never transfer error bounds or output
 digests across architectures.
 
 For a new operation, implement its case model, deterministic quantized inputs,
-independent oracle, fixed comparison metric and budgets, qualification CLI, and
-source/replay worker. Reuse `reference_common` for archives, numerics, snapshots,
-and worker isolation. No shared list names the operations: each
+independent oracle, fixed comparison metric and budgets, and architecture
+adapters. Its `Case` is a frozen dataclass with `id`, `dtype`, `tolerance`,
+`input_shapes`, and `output_shape`. `reference_common` provides archives,
+numerics, snapshots, worker isolation, and the qualification, verification,
+worker, and GPU test code that every operation shares. The package declares
+only its own parts:
+
+| File | Declares |
+|---|---|
+| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, `Metric`, and `TorchReference`; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
+| `worker.py` | `run(request, output)`, which passes a `WorkerOperation` with the adapter's launch call and the frozen replay-argument binding to `reference_common.worker.run_case` |
+| `test_<operation>_pinned_reference.py` | A `reference_bundle` fixture from `select_bundle` and the tests from `pinned_reference_tests`, with a negative-control perturbation that exceeds the comparison limit in the operation's metric |
+
+Qualification freezes the package's `contract.py`, `worker.py`, `architectures/`,
+and `implementations/`, with all of `reference_common/`, into each bundle; the
+worker must not import anything else from the tests tree.
+
+No shared list names the operations: each
 `library/tests/<operation>_reference/` package with `architectures/registry.json`
 is an operation for the shared artifact CLI, the `--rocke-reference-operation`
 pytest option, and the CMake installation and CTest loops. Record the operation

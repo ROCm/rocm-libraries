@@ -801,6 +801,28 @@ def test_reference_worker_requires_the_physical_processor(
         worker.run(request, tmp_path)
 
 
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_operation_packages_plug_into_the_shared_plumbing(operation):
+    """Each package declares its own parts; qualification and tests are shared."""
+    from importlib import import_module
+
+    cli = import_module(f"{operation}_reference.cli")
+    spec = cli.OPERATION
+    assert spec.name == operation
+    assert spec.contract is import_module(f"{operation}_reference.contract")
+    assert spec.architectures is import_module(f"{operation}_reference.architectures")
+    assert set(spec.reference) == {"implementation", "metric", "input_generator"}
+    assert callable(import_module(spec.worker_module).run)
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    assert gpu_tests.load_bundle == spec.load_bundle
+    for name in (
+        "correctness_against_qualified_rocke",
+        "rejects_perturbed_gpu_results",
+        "rejects_missing_gpu_launch",
+    ):
+        assert callable(getattr(gpu_tests, f"test_{operation}_{name}"))
+
+
 def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
     values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
     encoded = encode(values.view(np.float32), "bf16")
@@ -975,7 +997,7 @@ def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
     manifest = (
         fixtures._bundle(tmp_path) if operation == "sdpa" else fixtures._manifest()
     )
-    cli._validate_cases(manifest, "gfx942")
+    cli.OPERATION.validate_cases(manifest, "gfx942")
     manifest.pop("budget_policy")
     for entry in manifest["cases"].values():
         budget = ErrorBudget(
@@ -985,13 +1007,13 @@ def test_legacy_budget_limits_are_preserved_and_policy_is_validated(
         )
         entry["budget"] = asdict(budget)
         entry["comparison_limit"] = budget.comparison_limit
-    cli._validate_cases(manifest, "gfx942")
+    cli.OPERATION.validate_cases(manifest, "gfx942")
     manifest["budget_policy"] = "max-reference-bound-v1"
     with pytest.raises(ValueError, match="budget changed"):
-        cli._validate_cases(manifest, "gfx942")
+        cli.OPERATION.validate_cases(manifest, "gfx942")
     manifest["budget_policy"] = "unknown"
     with pytest.raises(ValueError, match="unsupported reference budget policy"):
-        cli._validate_cases(manifest, "gfx942")
+        cli.OPERATION.validate_cases(manifest, "gfx942")
 
 
 def test_manifest_cases_match_by_contract_and_ids_cannot_collide():

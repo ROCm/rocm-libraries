@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from reference_common import cli as common_cli
 from reference_common.numeric import (
     encode,
     file_digest,
@@ -58,7 +59,7 @@ def test_qualification_bounds_all_enabled_references(
             "compiler": {"fixture": True},
         }
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     monkeypatch.setattr(torch_reference, "validate_device", lambda *args: None)
     report = {
         "device": "cpu",

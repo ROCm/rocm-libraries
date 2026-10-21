@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from reference_common.numeric import array_digest, decode, encode
+from reference_common.numeric import decode, encode
 
 SCHEMA_VERSION = 2
 INPUT_GENERATOR = {
@@ -62,6 +62,15 @@ class Case:
         return self.batch, self.sequence_length, self.query_heads, self.head_dim
 
     @property
+    def input_shapes(self) -> dict[str, tuple[int, ...]]:
+        kv_shape = (*self.shape[:2], self.kv_heads, self.head_dim)
+        return {"q": self.shape, "k": kv_shape, "v": kv_shape}
+
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        return self.shape
+
+    @property
     def scale(self) -> float:
         # The launch ABI stores scale as f32. Qualify that same scalar value.
         return float(np.float32(1.0 / math.sqrt(self.head_dim)))
@@ -80,17 +89,6 @@ def make_inputs(case: Case) -> dict[str, np.ndarray]:
         name: encode(rng.standard_normal(shape, dtype=np.float32), case.dtype)
         for name, shape in (("q", case.shape), ("k", kv_shape), ("v", kv_shape))
     }
-
-
-def checked_inputs(case: Case, digests: dict[str, str]) -> dict[str, np.ndarray]:
-    """Require generated input bytes to match the independently qualified corpus."""
-    arrays = make_inputs(case)
-    if {name: array_digest(array) for name, array in arrays.items()} != digests:
-        raise ValueError(
-            f"generated SDPA input digest mismatch: {case.id}; "
-            "the generator or NumPy implementation differs from qualification"
-        )
-    return arrays
 
 
 def independent_reference(case: Case, inputs: dict[str, np.ndarray]) -> np.ndarray:

@@ -16,15 +16,15 @@ import pytest
 
 from sdpa_reference.architectures import ARCHITECTURES, baseline_lock, get_architecture
 from sdpa_reference.architectures.gfx942 import CASES
-from sdpa_reference.cli import load_bundle, verify_case
+from sdpa_reference.cli import OPERATION, load_bundle, verify_case
 from sdpa_reference.contract import (
     INPUT_GENERATOR,
     SCHEMA_VERSION,
-    checked_inputs,
     make_inputs,
     Case,
     independent_reference,
 )
+from reference_common import cli as common_cli
 from reference_common.numeric import (
     ErrorBudget,
     array_digest,
@@ -351,7 +351,7 @@ def test_bundle_keyed_by_published_ids_loads_and_replays(
             "torch_imported": False,
         }
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     verify_case(
         case,
         bundle=tmp_path,
@@ -379,8 +379,6 @@ def test_bundle_keyed_by_published_ids_loads_and_replays(
 
 
 def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypatch):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path)
     manifest["cases"][CASES[0].id]["input_digests"] = {
         name: array_digest(a) for name, a in make_inputs(CASES[0]).items()
@@ -391,14 +389,14 @@ def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypat
         calls.append(request["mode"])
         return [np.zeros(CASES[0].shape, np.float16)], {}
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     with pytest.raises(AssertionError, match="reference qualification failure"):
         verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
     assert calls == ["replay"]
 
 
 def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatch):
-    from sdpa_reference.cli import _worker
+    from reference_common.runner import run_worker
 
     runner = tmp_path / "tests"
     library = tmp_path / "library"
@@ -422,12 +420,13 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
         "(output / 'report.json').write_text(json.dumps({'launches': 1}))\n"
     )
     monkeypatch.setenv("PYTHONPATH", str(runner))
-    outputs, report = _worker(
+    outputs, report = run_worker(
         {"mode": "source", "repetitions": 1},
         runner=runner,
         platform=platform,
         library=library,
         work=tmp_path / "work",
+        module=OPERATION.worker_module,
     )
     np.testing.assert_array_equal(outputs[0], np.ones(1))
     assert report["launches"] == 1
@@ -487,8 +486,6 @@ def test_generic_wmma_bundle_keeps_processor_qualification(
 def test_generic_wmma_replay_requires_qualified_processor(
     tmp_path, monkeypatch, architecture, mismatch
 ):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path, architecture)
     case = get_architecture(architecture).CASES[0]
     entry = manifest["cases"][case.id]
@@ -506,7 +503,7 @@ def test_generic_wmma_replay_requires_qualified_processor(
             device = architecture + ":xnack+"
         return [out], {"device_target": device, "launches": 1, "torch_imported": False}
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     with pytest.raises(ValueError, match="qualified target|different target features"):
         verify_case(
             case,
@@ -518,14 +515,28 @@ def test_generic_wmma_replay_requires_qualified_processor(
 
 
 def test_generated_input_mismatch_prevents_any_worker(tmp_path, monkeypatch):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path)
     calls = []
-    monkeypatch.setattr(cli, "_worker", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(
+        common_cli, "run_worker", lambda *args, **kwargs: calls.append(args)
+    )
     with pytest.raises(ValueError, match="generated SDPA input digest mismatch"):
         verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
     assert not calls
+
+
+@pytest.mark.parametrize("declared", ["sdpa", "conv-fwd"])
+def test_declared_operation_must_be_sdpa(tmp_path, declared):
+    # Published SDPA manifests omit the field; one that declares it must agree.
+    manifest = _bundle(tmp_path)
+    assert "operation" not in manifest
+    manifest["operation"] = declared
+    _lock(tmp_path, manifest)
+    if declared == "sdpa":
+        assert load_bundle(tmp_path, tmp_path / "lock.json") == manifest
+    else:
+        with pytest.raises(ValueError, match="wrong reference operation"):
+            load_bundle(tmp_path, tmp_path / "lock.json")
 
 
 def test_changed_generator_contract_is_rejected(tmp_path):
@@ -540,8 +551,6 @@ def test_changed_generator_contract_is_rejected(tmp_path):
 def test_generated_inputs_are_temporary_and_shared_by_both_workers(
     tmp_path, monkeypatch, fail
 ):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path)
     case = CASES[0]
     entry = manifest["cases"][case.id]
@@ -567,7 +576,7 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
             "torch_imported": False,
         }
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     if fail:
         with pytest.raises(RuntimeError, match="deliberate worker failure"):
             verify_case(
@@ -614,10 +623,10 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
 )
 def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, digests):
     case = Case(dtype, 2, 4, 2, False, True, sequence_length=2)
-    checked_inputs(case, digests)
+    OPERATION.checked_inputs(case, digests)
     # Other generator instances must not change the freshly seeded corpus.
     np.random.default_rng(123).standard_normal(99)
-    checked_inputs(case, digests)
+    OPERATION.checked_inputs(case, digests)
 
 
 def _wmma_grid(prepared):
@@ -972,10 +981,8 @@ def test_frozen_runner_imports_all_adapters_without_source_checkout(tmp_path):
     import subprocess
     import sys
 
-    from sdpa_reference.cli import _freeze_runner
-
     runner = tmp_path / "runner"
-    _freeze_runner(runner)
+    OPERATION.freeze_runner(runner)
     assert not list(runner.rglob("baseline_lock.json"))
     assert not list(runner.rglob("__pycache__"))
     # Isolated mode ignores inherited PYTHONPATH and the source working directory.
@@ -1002,6 +1009,7 @@ for name in ("dense", "wmma"):
 for name, module in tuple(sys.modules.items()):
     if name.split(".")[0] in ("sdpa_reference", "reference_common"):
         assert Path(module.__file__).resolve().is_relative_to(root), name
+assert "reference_common.worker" in sys.modules
 assert "kernels" not in sys.modules
 assert "dispatch" not in sys.modules
 assert "torch" not in sys.modules

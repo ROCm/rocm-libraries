@@ -291,9 +291,10 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
 | `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
-| `worker.py` | Operation-specific HIP execution and replay |
+| `worker.py` | Operation-specific launch and replay-argument binding for `../reference_common/worker.py`, the shared HIP execution loop |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
-| `cli.py` | Snapshot, qualification, and verification commands |
+| `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands |
+| `../reference_common/pinned_tests.py` | The required GPU comparisons and failure controls each `test_<operation>_pinned_reference.py` binds |
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
@@ -372,8 +373,8 @@ That harness has published bounded gfx942 and gfx950 forward cohorts. Further co
 4. **Execution and replay adapters.** Invoke production dispatch for current code,
    export the exact baseline code objects and ABI, initialize workspaces, and check
    all required outputs. Multi-kernel operations need ordered replay and complete
-   observable-state checks; the existing single-kernel SDPA worker is not a generic
-   convolution runner.
+   observable-state checks; the shared single-kernel, single-output worker loop is
+   not a generic convolution runner.
 
 Use the [reference workflow](gpu-reference-workflow.md) for implementation
 integration, tests, qualification, and publication. Direction-specific failure

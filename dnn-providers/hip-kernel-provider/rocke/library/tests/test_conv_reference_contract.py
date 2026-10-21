@@ -13,17 +13,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conv_reference import cli
+from conv_reference import cli, contract
 from conv_reference.architectures import ARCHITECTURES, get_architecture
 from conv_reference.contract import (
     Case,
     INPUT_GENERATOR,
-    checked_inputs,
     independent_reference,
     make_inputs,
     normalized_distance,
     reference_scale,
 )
+from reference_common import cli as common_cli
 from reference_common.numeric import (
     ErrorBudget,
     array_digest,
@@ -123,14 +123,14 @@ def test_spatial_reference_matches_explicit_patch_sums(stride, dilation, padding
 def test_corpus_and_oracle_are_finite_reproducible_and_authenticated(case):
     arrays = make_inputs(case)
     digests = {name: array_digest(value) for name, value in arrays.items()}
-    regenerated = checked_inputs(case, digests)
+    regenerated = cli.OPERATION.checked_inputs(case, digests)
     reference = independent_reference(case, regenerated)
     assert reference.shape == case.output_shape
     assert np.isfinite(reference).all()
     assert reference_scale(reference) >= 1
     digests["a"] = "0" * 64
     with pytest.raises(ValueError, match="input digest mismatch"):
-        checked_inputs(case, digests)
+        cli.OPERATION.checked_inputs(case, digests)
 
 
 @pytest.mark.parametrize(
@@ -210,6 +210,7 @@ def _manifest():
         "scale",
         "target",
         "operation",
+        "undeclared",
         "payload",
         "manifest",
     ],
@@ -230,6 +231,8 @@ def test_locked_bundle_rejects_invalid_contracts(tmp_path, change):
         entry["device_target"] = "gfx950"
     if change == "operation":
         manifest["operation"] = "sdpa"
+    if change == "undeclared":
+        del manifest["operation"]
     (tmp_path / "payload").mkdir()
     write_json(tmp_path / "manifest.json", manifest)
     lock = tmp_path / "lock.json"
@@ -262,10 +265,61 @@ def test_bundle_target_is_the_physical_processor(device_target, accepted):
     for entry in manifest["cases"].values():
         entry["device_target"] = device_target
     if accepted:
-        cli._validate_cases(manifest, "gfx942")
+        cli.OPERATION.validate_cases(manifest, "gfx942")
     else:
         with pytest.raises(ValueError, match="different architecture"):
-            cli._validate_cases(manifest, "gfx942")
+            cli.OPERATION.validate_cases(manifest, "gfx942")
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
+def test_bundle_must_record_the_enrolled_cohort_one_to_one(change):
+    manifest = _manifest()
+    case = get_architecture("gfx942").CASES[0]
+    entry = manifest["cases"][case.id]
+    if change == "missing":
+        del manifest["cases"][case.id]
+        expected = rf"missing: {case.id} \(.*name={case.name},.*\); extra: none"
+    elif change == "extra":
+        manifest["cases"]["variant"] = dict(entry, case=asdict(replace(case, K=48)))
+        expected = r"missing: none; extra: variant \(.*K=48,.*\)"
+    else:
+        manifest["cases"]["copy"] = entry
+        expected = rf"records case {case.id} more than once: copy, {case.id}$"
+    with pytest.raises(ValueError, match=expected):
+        cli.OPERATION.validate_cases(manifest, "gfx942")
+
+
+def test_colliding_case_ids_cannot_share_an_entry(monkeypatch):
+    target = get_architecture("gfx942")
+    # Adapters index ids on import, so a collision fails instead of dropping a case.
+    assert list(target.CASE_BY_ID.values()) == list(target.CASES)
+    case = target.CASES[0]
+    monkeypatch.setattr(target, "CASES", (*target.CASES, replace(case, K=48)))
+    with pytest.raises(ValueError, match=f"duplicate convolution case id: {case.id}"):
+        cli.OPERATION.validate_cases(_manifest(), "gfx942")
+
+
+@pytest.mark.parametrize("recorded", [None, "gfx942", "gfx9-4-generic"])
+def test_adapter_compiler_target_must_match_the_bundle(monkeypatch, recorded):
+    """An adapter that compiles a family code object pins its compiler target."""
+    target = get_architecture("gfx942")
+    monkeypatch.setattr(target, "COMPILER_TARGET", "gfx9-4-generic", raising=False)
+    manifest = _manifest()
+    if recorded is not None:
+        for entry in manifest["cases"].values():
+            entry["kernel"]["compiler_target"] = recorded
+    if recorded == target.COMPILER_TARGET:
+        cli.OPERATION.validate_cases(manifest, "gfx942")
+    else:
+        with pytest.raises(ValueError, match="different compiler target"):
+            cli.OPERATION.validate_cases(manifest, "gfx942")
+
+
+def test_unsupported_torch_device_fails_before_creating_output(tmp_path):
+    output = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="must be one of cpu"):
+        cli.qualify(tmp_path / "missing", output, 3, torch_reference="cuda")
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("failure", [None, "old", "current", "target"])
@@ -292,8 +346,8 @@ def test_verification_uses_gpu_outputs_and_frozen_scale_only(
     def forbidden(*args):
         raise AssertionError("CI must never compute an independent answer")
 
-    monkeypatch.setattr(cli, "_worker", worker)
-    monkeypatch.setattr(cli, "independent_reference", forbidden)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    monkeypatch.setattr(contract, "independent_reference", forbidden)
     if failure:
         with pytest.raises((AssertionError, ValueError)):
             cli.verify_case(
@@ -499,7 +553,7 @@ def test_qualification_freezes_self_contained_replay_support(
             "compiler": {"fixture": True},
         }
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     bundle = tmp_path / "bundle"
     if with_torch:
         import types
@@ -511,7 +565,9 @@ def test_qualification_freezes_self_contained_replay_support(
             "cross_check",
             lambda *args: {"results": {"float32": {"baseline_error_bound": 0.001}}},
         )
-    cli.qualify(baseline, bundle, repetitions=3, torch_reference=with_torch)
+    cli.qualify(
+        baseline, bundle, repetitions=3, torch_reference="cpu" if with_torch else None
+    )
     manifest = cli.load_bundle(bundle, bundle / "qualification-lock.json")
     assert manifest["cases"][case.id]["budget"]["baseline_error_bound"] == (
         0.001 if with_torch else 0
@@ -520,21 +576,27 @@ def test_qualification_freezes_self_contained_replay_support(
     assert not list(bundle.rglob("*.npz"))
     assert (bundle / "payload/runner/reference_common/numeric.py").is_file()
     # -I removes inherited source paths; the frozen runner must import alone.
+    script = """
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+import conv_reference.worker
+from conv_reference.architectures import get_architecture
+
+get_architecture('gfx942')
+get_architecture('gfx950')
+for name, module in tuple(sys.modules.items()):
+    if name.split(".")[0] in ("conv_reference", "reference_common"):
+        assert Path(module.__file__).resolve().is_relative_to(root), name
+assert "reference_common.worker" in sys.modules
+assert 'kernels' not in sys.modules
+assert 'dispatch' not in sys.modules
+assert 'torch' not in sys.modules
+"""
     subprocess.run(
-        [
-            sys.executable,
-            "-I",
-            "-c",
-            "import sys; sys.path.insert(0, sys.argv[1]); "
-            "import conv_reference.worker; "
-            "from conv_reference.architectures import get_architecture; "
-            "get_architecture('gfx942'); "
-            "get_architecture('gfx950'); "
-            "assert 'kernels' not in sys.modules; "
-            "assert 'dispatch' not in sys.modules; "
-            "assert 'torch' not in sys.modules",
-            str(bundle / "payload/runner"),
-        ],
+        [sys.executable, "-I", "-c", script, str(bundle / "payload/runner")],
         cwd=tmp_path,
         check=True,
     )

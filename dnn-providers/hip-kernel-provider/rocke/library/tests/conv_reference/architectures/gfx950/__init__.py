@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from reference_common.cases import index_cases
+
 from ...contract import Case
 from ...implementations import implicit_gemm_fwd
 from ..common import convolution_request, validate_library_root
@@ -37,7 +39,7 @@ CASES = tuple(
     )
     for dtype in ("fp16", "bf16")
 )
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="convolution")
 
 
 def prepare(case: Case, library_root: str) -> tuple[KernelLauncher, dict]:

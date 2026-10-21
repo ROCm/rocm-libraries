@@ -19,6 +19,8 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from reference_common.cases import index_cases
+
 from ...contract import Case
 
 if TYPE_CHECKING:
@@ -47,7 +49,7 @@ CASES = tuple(
     )
     for dtype in ("fp16", "bf16")
 )
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="convolution")
 
 
 # The gfx942 forward configuration the cohort was qualified on.
