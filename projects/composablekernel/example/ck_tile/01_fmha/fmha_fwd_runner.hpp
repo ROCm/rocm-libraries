@@ -1610,7 +1610,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.selected_kernel_name = selected_kernel_name;
         }
         if constexpr(std::is_same_v<fmha_batch_prefill_args, std::decay_t<decltype(args)>> ||
-                     std::is_same_v<fmha_fwd_pagedkv_args, std::decay_t<decltype(args)>>)
+                     std::is_same_v<fmha_fwd_pagedkv_args, std::decay_t<decltype(args)>> ||
+                     std::is_same_v<fmha_fwd_splitkv_args, std::decay_t<decltype(args)>>)
         {
             args.selected_kernel_name = selected_kernel_name;
         }

@@ -2082,5 +2082,68 @@ class TestGfx125PagedKVCodegen(unittest.TestCase):
                 self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_pagedkv"})
 
 
+class TestGfx125SplitKVCodegen(unittest.TestCase):
+    """fwd_splitkv on gfx1250: the TDM pipelines of fmha_fwd (no sink, no soft cap) before qr,
+    which keeps sink and soft cap, and other archs unchanged."""
+
+    def test_tdm_instances_and_dispatch(self):
+        from codegen.ops.fmha_fwd_splitkv import (
+            FmhaFwdSplitKVApiPool,
+            get_fwd_splitkv_blobs,
+        )
+
+        kernels = get_fwd_splitkv_blobs(
+            ["gfx1250"], "*d128_bf16*", 0, "simplified", [128]
+        )
+        tags = Counter(k.F_pipeline.tag for k in kernels)
+        self.assertEqual(set(tags), {"qr", "qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"})
+        for kernel in kernels:
+            with self.subTest(kernel=kernel.name):
+                tdm = kernel.F_pipeline.tag != "qr"
+                self.assertEqual(
+                    "BlockFmhaFwdSplitKVTdmPipelineProblem" in kernel.template, tdm
+                )
+                if tdm:
+                    self.assertEqual(kernel.F_pipeline.F_sink, "f")
+                    self.assertEqual(kernel.F_pipeline.F_logits, "f")
+        self.assertTrue(
+            any(k.F_pipeline.F_sink == "t" for k in kernels if k.F_pipeline.tag == "qr")
+        )
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            from codegen.ops.fmha_fwd_splitkv import write_blobs
+
+            write_blobs(
+                ["gfx1250"], Path(output_dir), "@*d128_bf16*", 0, [128], "simplified"
+            )
+            api = (Path(output_dir) / "fmha_fwd_splitkv_api.cpp").read_text()
+        merged_rows = "(a.max_seqlen_q == 1 && a.nhead_k < a.nhead_q ? a.nhead_q / a.nhead_k : a.max_seqlen_q)"
+        # the 16-row tile up to 16 query rows (decode merges the heads of a K/V head)
+        self.assertIn(f"({merged_rows} <= 16)", api)
+        # qr_tdm_sched from 128 rows, the 64-row pingpong tile on big split grids below
+        self.assertIn(f"(!t.pipeline.empty() || ({merged_rows} >= 128))", api)
+        self.assertIn("a.batch * a.nhead_q * a.num_splits >= 4 * ", api)
+        # paged TDM: each warp's K/V rows in one page
+        self.assertIn("(a.page_block_size % 32 == 0) && !a.is_gappy", api)
+        self.assertIn("(a.page_block_size % 16 == 0) && !a.is_gappy", api)
+        order = [
+            api.index(f't.pipeline == "{tag}"')
+            for tag in ("qr_tdm_pingpong", "qr_tdm_sched", "qr_tdm", "qr")
+        ]
+        self.assertEqual(order, sorted(order))
+
+    def test_other_archs_keep_their_pipelines(self):
+        from codegen.ops.fmha_fwd_splitkv import get_fwd_splitkv_blobs
+
+        for target in ("gfx950", "gfx1201"):
+            with self.subTest(target=target):
+                kernels = get_fwd_splitkv_blobs([target], "", 0, "simplified", [-1])
+                self.assertTrue(kernels)
+                self.assertFalse(
+                    {k.F_pipeline.tag for k in kernels}
+                    & {"qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"}
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

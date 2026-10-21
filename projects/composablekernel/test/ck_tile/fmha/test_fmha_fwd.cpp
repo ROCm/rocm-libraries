@@ -723,8 +723,7 @@ TEST_P(QrTdmPingPongEdges, DataTypeConfig)
 // qr_tdm_sched or qr_tdm on a big one -- with the pipeline's own tile choice (16 rows up
 // to s_q 16), and no other API or pipeline when it has no kernel for the args. "small" is
 // 2 x 4 heads; otherwise the grid is sized as for QrTdmPingPong. One K/V head; splitkv runs
-// 2 splits. tile: a part of the kernel name, nullptr where the API does not report it
-// (splitkv), "" for no kernel at all.
+// 2 splits. tile: a part of the kernel name, "" for no kernel at all.
 // api, pipeline, mode, small grid, seqlen_q, seqlen_k, page_block_size, tile
 using ForcedPipelineCase =
     std::tuple<const char*, const char*, mode_enum, bool, int, int, int, const char*>;
@@ -810,10 +809,18 @@ TEST_P(ForcedPipeline, DataTypeConfig)
 }
 
 #if CK_TILE_FMHA_FWD_SPLITKV_API
-INSTANTIATE_TEST_SUITE_P(SplitKV,
-                         ForcedPipeline,
-                         Values(ForcedPipelineCase{
-                             "splitkv", "qr", mode_enum::batch, true, 100, 300, 0, nullptr}));
+// splitkv: qr, and on gfx1250 qr_tdm and qr_tdm_pingpong (its 16-row tile for decode: one
+// query row, the 4 heads of the K/V head merged into the rows), dense and paged.
+INSTANTIATE_TEST_SUITE_P(
+    SplitKV,
+    ForcedPipeline,
+    Values(ForcedPipelineCase{"splitkv", "qr", mode_enum::batch, true, 100, 300, 0, "_b64x"},
+           ForcedPipelineCase{"splitkv", "qr_tdm", mode_enum::batch, true, 100, 300, 0, "_b64x"},
+           ForcedPipelineCase{"splitkv", "qr_tdm", mode_enum::group, true, 100, 531, 128, "_b64x"},
+           ForcedPipelineCase{
+               "splitkv", "qr_tdm_pingpong", mode_enum::batch, true, 1, 1000, 128, "_b16x"},
+           ForcedPipelineCase{
+               "splitkv", "qr_tdm_pingpong", mode_enum::batch, false, 1, 531, 0, "_b16x"}));
 #endif
 
 #if CK_TILE_FMHA_FWD_PAGEDKV_API
