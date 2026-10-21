@@ -182,6 +182,18 @@ namespace TensileLite
                 if(iot::outputting(io))
                 {
                     sc = std::dynamic_pointer_cast<Subclass>(p);
+                    // The caller dispatched on p->type(); a failed cast means
+                    // the object reports a type it is not, which is only
+                    // reachable if two classes share a Type() string or a
+                    // type() override drifts. Report it rather than
+                    // dereferencing null below.
+                    if(sc == nullptr)
+                    {
+                        iot::setError(io,
+                                      "Object reports type " + p->type()
+                                          + " but is not that type.");
+                        return false;
+                    }
                 }
                 else
                 {
@@ -207,6 +219,13 @@ namespace TensileLite
                 if(iot::outputting(io))
                 {
                     sc = std::dynamic_pointer_cast<Subclass>(p);
+                    if(sc == nullptr)
+                    {
+                        iot::setError(io,
+                                      "Object reports type " + p->type()
+                                          + " but is not that type.");
+                        return false;
+                    }
                 }
                 else
                 {
