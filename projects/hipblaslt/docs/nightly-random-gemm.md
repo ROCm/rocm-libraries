@@ -87,8 +87,8 @@ same numerical assertions and race checks as random tests; there are no expected
 failure exemptions.
 
 The checked-in [required cases](../../../.github/scripts/hipblaslt_explicit_gemms.json)
-include five numerical-validation reproducers and nine BF16 TN inputs covering
-the reduced, tail and original batched shapes from
+include five numerical-validation reproducers and one BF16 TN input,
+256×160×192 with one batch, matching the reduced shape from
 [the reported prefetch race](https://github.com/ROCm/rocm-libraries/pull/14147).
 The heuristic may select a different kernel, so these check the shapes rather
 than guaranteeing coverage of that particular custom schedule. Results record
@@ -106,8 +106,8 @@ nightly samples 1,000. Both use gfx950, seed 0 and eight concurrent GEMMs, so
 the per-PR inputs are the first 100 nightly inputs. The job fetches the matching
 BLAS runtime, device library and bench test payload from that workflow run.
 The emulator is pinned independently to a revision validated with these types.
-Both callers also run the same 14 required cases, giving 114 per-PR inputs and
-1,014 nightly inputs. The known numerical reproducers currently fail strict
+Both callers also run the same six required cases, giving 106 per-PR inputs and
+1,006 nightly inputs. The known numerical reproducers currently fail strict
 validation and remain visible in the advisory job; no blacklist hides them.
 
 These GEMM jobs are advisory: a failed test step and its reports remain visible,
