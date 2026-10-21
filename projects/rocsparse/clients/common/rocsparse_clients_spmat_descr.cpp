@@ -315,8 +315,10 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
                            rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
                            matrix_factory.init_coo(that.host());
                            //
-                           // Scale values.
+                           // Scale values, unless they are exact integers: scaling would
+                           // make them inexact.
                            //
+                           if(!to_int)
                            {
                                auto&              that_host = that.host();
                                const size_t       size      = that_host.nnz;
@@ -340,8 +342,10 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
                            matrix_factory.init_csr(that.host());
 
                            //
-                           // Scale values.
+                           // Scale values, unless they are exact integers: scaling would
+                           // make them inexact.
                            //
+                           if(!to_int)
                            {
                                auto&              that_host = that.host();
                                const size_t       size      = that_host.nnz;

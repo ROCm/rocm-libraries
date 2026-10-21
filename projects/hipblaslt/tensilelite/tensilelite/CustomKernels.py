@@ -57,6 +57,8 @@ _METADATA_NAME_TO_SEMANTIC = {
     "ComputeUnits":           "ComputeUnits",
     "AddressScaleA":          "AddressScaleA",
     "AddressScaleB":          "AddressScaleB",
+    "AddressScaleZeroA":      "AddressScaleZeroA",
+    "groupSize":              "ScaleBlockSizeA",
     "AddressScaleC":          "AddressScaleC",
     "AddressScaleD":          "AddressScaleD",
     "AddressMXScaleA":        "AddressMXScaleA",
@@ -298,6 +300,13 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
         idx = INDEX_CHARS.index(m.group(2))
         return {"type": argType, "semantic": m.group(1), "index": idx}
 
+    # rocRoller suffixes (Subtract_21, MagicMultiple_26, WGM_18) are not
+    # stable. The expression tree selects the launch semantic.
+    from .RocRollerWgm import custom_arg_for_metadata
+    wgmArg = custom_arg_for_metadata(metaArg)
+    if wgmArg is not None:
+        return wgmArg
+
     where = f" in kernel '{kernelName}'" if kernelName else ""
     raise RuntimeError(
         f"Unknown amdgpu_metadata arg name '{name}'{where} while auto-inferring "
@@ -347,6 +356,19 @@ def validateCustomPersistentArgs(kernelConfig):
         raise ValueError("DataParallel custom kernels with argument layout version 1 cannot require partial workspace")
 
 
+def _hasRocRollerWgmArgs(args):
+    """True when the metadata expressions are rocRoller's workgroup-mapping kernargs.
+
+    The kernel name is not consulted. A kernel that merely ends in ``_WGM``
+    does not match, and neither does a rocRoller kernel that does not hoist
+    these libdivide arguments.
+    """
+    from .RocRollerWgm import WGM_ROLE_ORDER
+
+    roles = frozenset(WGM_ROLE_ORDER)
+    return any(arg.get("semantic") in roles for arg in args)
+
+
 def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
     if not isinstance(fullYaml, dict):
@@ -366,7 +388,13 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
             f"section to custom.config."
         )
 
-    args = [_metadataArgToCustomArg(a, kernelName) for a in kernelMeta[".args"]]
+    metadataArgs = kernelMeta[".args"]
+    args = [_metadataArgToCustomArg(a, kernelName) for a in metadataArgs]
+    if args and args[-1]["semantic"] == "ScaleBlockSizeA":
+        last = metadataArgs[-1]
+        padding = kernelMeta[".kernarg_segment_size"] - last[".offset"] - last[".size"]
+        if padding:
+            args[-1]["padding"] = padding
 
     # UseUniversalArgs kernels expect a header (GemmInfo, InternalArgs, ...) at
     # the start of the kernel argument buffer, followed by the data args.  The
@@ -411,6 +439,12 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         # Version >= 1 kernels receive numWorkGroups as arg and decompose
         # the flat 1-D work-group index internally.
         grid = ["TilesXYBatchGSU", "One", "One"]
+    elif _hasRocRollerWgmArgs(args):
+        # rocRoller workgroup mapping consumes the flattened tile index in
+        # workgroup X and does not read workgroup Y. A TilesX x TilesY launch
+        # repeats the first row of tiles and never runs the remaining ids.
+        # Presence of the libdivide kernargs is the signal, not the file name.
+        grid = ["TilesXY", "One", "Batch"]
     else:
         # Version 0 kernels rely on hardware gridDim for tile decomposition,
         # so the grid must be multi-dimensional. Like generated kernels, they

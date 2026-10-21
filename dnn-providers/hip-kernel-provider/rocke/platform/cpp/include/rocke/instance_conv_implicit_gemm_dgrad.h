@@ -12,9 +12,9 @@
  *   K_dg  = Y*X*kpg       (filter spatial x output channels per group -- reduction)
  *   A: dY (NHWK), B: W (KYXC, per-group packed [K, Y, X, cpg]), D: dX (NHWC)
  *
- * Grouped convolution (problem.groups > 1, channels-per-group > 1) runs
- * grid-per-group with the conv group on blockIdx.y, as the Python builder
- * does; depthwise (cpg == 1) is rejected.
+ * Grouped convolution (problem.groups > 1) runs grid-per-group with the conv
+ * group on blockIdx.y, as the Python builder does; depthwise (cpg == 1) is a
+ * one-column GEMM per group.
  *
  * For stride=1 a single GEMM is used (compile-time descriptor transforms).
  * For stride>1 a tilde decomposition splits the problem into up to 64+
