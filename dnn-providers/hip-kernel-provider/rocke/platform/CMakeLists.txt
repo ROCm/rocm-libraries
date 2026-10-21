@@ -303,7 +303,7 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
     # The harness above builds LIBRARY kernels for its attention, attention_dense,
-    # attention_d256 and kda_chunkwise families (the one platform -> library
+    # attention_d256, kda_chunkwise and lightning_indexer families (the one platform -> library
     # exception), so the library packages must be importable by both runners.
     # Without them those cases degrade to expected failures and
     # rocke_golden_static reports drift instead of passing.
@@ -415,6 +415,17 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
+      # Native helpers some Python tests drive, as paths relative to the
+      # CTestTestfile: the portable-IR replay CLI, and the C API program whose
+      # --print-llvm output test_unsigned_int_ops.py compares with the Python
+      # builder's text.
+      set(_rocke_pytest_env
+          "PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}")
+      if("rocke_unsigned_int_ops" IN_LIST _ROCKE_INSTALL_TEST_TARGETS)
+        rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
+        string(APPEND _rocke_pytest_env
+               ";ROCKE_UNSIGNED_INT_OPS_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}")
+      endif()
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
       # directory (which contains the installed rocke package) so `import rocke`
       # resolves without the source-tree sys.path shims. The library tests have
@@ -422,9 +433,13 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_compiler_env \"\")\n"
+             "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
+             "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
+             "endif()\n"
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}\"\n"
+             "  ENVIRONMENT \"${_rocke_pytest_env}\${_rocke_compiler_env}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -480,6 +495,51 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
+
+    # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
+    # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
+    # lane. The on-GPU numeric tests are enrolled in the GPU lane below.
+    set(_ROCKE_LIBRARY_DSA_TEST_RELPATHS
+        "tests/library/tests/test_dsa_indexer_gfx942_spec.py"
+        "tests/library/tests/test_dsa_indexer_golden.py"
+        "tests/library/tests/dispatch/dsa/test_gfx942_wiring.py"
+        "tests/library/tests/dispatch/dsa/test_gfx950_wiring.py")
+    set(_ROCKE_LIBRARY_DSA_TESTS "")
+    foreach(_rocke_dsa_test ${_ROCKE_LIBRARY_DSA_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_DSA_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_dsa_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_dsa_pytest python -m pytest${_ROCKE_LIBRARY_DSA_TESTS} -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_dsa_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;dsa\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+
+    # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
+    # wiring, the IR golden, the fp32 oracle, and the benchmark shape loader. Same
+    # PYTHONPATH contract as the conv entry above; the staged library tree carries
+    # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
+    # tests/golden/mla_prefill_gfx942_ir_sha256.json.
+    set(_ROCKE_LIBRARY_MLA_TEST_RELPATHS
+        "tests/library/tests/test_mla_prefill_gfx942.py"
+        "tests/library/tests/dispatch/mla/test_mla_prefill_gfx942_wiring.py"
+        "tests/library/tests/test_mla_prefill_gfx942_golden.py"
+        "tests/library/tests/test_mla_reference.py"
+        "tests/library/tests/test_mla_benchmark_shapes.py")
+    set(_ROCKE_LIBRARY_MLA_TESTS "")
+    foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_MLA_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_mla_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_mla_pytest python -m pytest${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 900)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
@@ -586,13 +646,15 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
+        "tests/library/tests/test_mla_prefill_gfx942_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
         "tests/library/tests/test_wmma_fmha_decode_numeric.py"
         "tests/library/tests/test_wmma_fmha_paged_guard.py"
         "tests/library/tests/test_wmma_fp8_decode_numeric.py"
-        "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py")
+        "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py"
+        "tests/library/tests/test_dsa_indexer_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")
     foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_GPU_TESTS
