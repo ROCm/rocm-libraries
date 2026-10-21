@@ -14,6 +14,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import importlib
+import inspect
 import json
 import re
 import sys
@@ -406,3 +407,85 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
         manifest, [("renamed", renamed), ("declined", declined)]
     )
     assert [f.split(":")[0] for f in failures] == ["renamed", "declined"], failures
+
+
+def _observation_failures(manifest: dict, kernels: list) -> list:
+    """What hkp_pack's specialization agreement does after a compile, minus the compile:
+    observe each metadata field through its binding (a direct field, or a bound method) on
+    the hydrated spec, translate strings through the vocabulary, and compare with the
+    kernel's metadata."""
+    arch = manifest["arch"]
+    module = importlib.import_module(
+        rocke_compile._module_from_source(manifest["source"])
+    )
+    builder = manifest["builder"]
+    spec_cls = rocke_compile._resolve_spec_class(module, getattr(module, builder))
+    specialization = manifest["specialization"]
+    vocabulary = specialization.get("vocabulary") or {}
+    types = {f["name"]: f["type"] for f in manifest["kmd_fields"]}
+    failures = []
+    for name, source, metadata in kernels:
+        spec = rocke_compile.build_spec(spec_cls, source["spec"])
+        for field, binding in specialization["bindings"].items():
+            mode, attribute = next(iter(binding.items()))
+            try:
+                if mode == "method":
+                    observed = getattr(spec, attribute)()
+                else:
+                    assert not isinstance(
+                        inspect.getattr_static(type(spec), attribute, None), property
+                    ), f"{attribute} is a property, not a direct field"
+                    observed = getattr(spec, attribute)
+            except Exception as exc:
+                failures.append(f"{name}: {field} via {binding}: {exc}")
+                continue
+            if isinstance(observed, str):
+                observed = vocabulary.get(field, {}).get(observed, observed)
+            if types[field] == "int" and isinstance(observed, bool):
+                observed = int(observed)
+            if observed != metadata[field]:
+                failures.append(
+                    f"{name}: {field} observed {observed!r}, metadata {metadata[field]!r}"
+                )
+    return failures
+
+
+def test_g7_every_enumerated_kernels_metadata_is_what_its_spec_observes(
+    manifest, registry_config
+):
+    """hkp_pack refuses a kernel whose metadata disagrees with what its compiled spec
+    reports through the manifest's bindings -- or whose binding names an attribute the
+    spec lacks -- and only after a comgr build. This runs that comparison without one.
+    """
+    kernels = [
+        (k["name"], k["kernel_source"], k["metadata"])
+        for pack in registry_config["packs"]
+        for k in pack["kernels"]
+    ]
+    assert kernels
+    failures = _observation_failures(manifest, kernels)
+    assert not failures, failures[:5]
+
+
+def test_g7_catches_a_missing_accessor_and_a_disagreeing_value(
+    manifest, registry_config
+):
+    """The positive control for g7."""
+    k = registry_config["packs"][0]["kernels"][0]
+    name, source, metadata = k["name"], k["kernel_source"], k["metadata"]
+    field = next(iter(manifest["specialization"]["bindings"]))
+    wrong = {**metadata, field: "not-the-observed-value"}
+    assert _observation_failures(manifest, [("wrong", source, wrong)])
+
+    broken = {
+        **manifest,
+        "specialization": {
+            **manifest["specialization"],
+            "bindings": {
+                **manifest["specialization"]["bindings"],
+                field: {"method": "no_such_accessor"},
+            },
+        },
+    }
+    failures = _observation_failures(broken, [(name, source, metadata)])
+    assert any("no_such_accessor" in f for f in failures), failures
