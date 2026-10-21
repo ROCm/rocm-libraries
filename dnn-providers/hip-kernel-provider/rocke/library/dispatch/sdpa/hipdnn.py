@@ -308,11 +308,15 @@ def from_hipdnn(
     if fp8 != SdpaFp8():
         kwargs["fp8"] = fp8
 
+    # The hipDNN frontend creates the stats output exactly when generate_stats is
+    # true, so either one without the other is contradictory input. Dropping it
+    # would let a kernel that writes no LSE be admitted for a node that asked for it.
     stats = tensor(outputs, "stats_tensor_uid")
     if attrs.get("generate_stats"):
+        if stats is None:
+            raise ValueError("generate_stats is true but stats_tensor_uid is not set")
         kwargs["stats"] = stats
     elif stats is not None:
-        # The hipDNN frontend only creates a stats output when generate_stats is true.
         raise ValueError("stats_tensor_uid is set but generate_stats is not true")
     kwargs["max"] = tensor(outputs, "max_tensor_uid")
     kwargs["sum_exp"] = tensor(outputs, "sum_exp_tensor_uid")

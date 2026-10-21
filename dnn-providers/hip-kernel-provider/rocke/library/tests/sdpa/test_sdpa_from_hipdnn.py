@@ -248,6 +248,10 @@ def test_stats_needs_generate_stats_and_a_tensor():
         tensors=lse,
     )
     assert req.stats.dims == (B, H, S, 1) and "lse" in req.features()
+    # And the reverse: asking for stats without a tensor must not drop the LSE
+    # request, or a kernel that writes no LSE would be admitted.
+    with pytest.raises(ValueError, match="stats_tensor_uid is not set"):
+        _request(attributes={"generate_stats": True})
 
 
 @pytest.mark.parametrize(
