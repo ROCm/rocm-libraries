@@ -329,7 +329,12 @@ def direct_spec_for_problem(
         why = direct_mfma_knobs_reason(problem, knobs)
         if why:
             return None, why
-    spec = make_direct_spec(variant, problem, knobs)
+    try:
+        # Some specs validate on construction: a variant with no kernel for
+        # the problem's dtype (fp32 / tf32) raises there.
+        spec = make_direct_spec(variant, problem, knobs)
+    except ValueError as e:
+        return None, str(e)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why

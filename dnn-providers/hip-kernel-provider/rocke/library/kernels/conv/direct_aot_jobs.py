@@ -17,6 +17,7 @@ from __future__ import annotations
 import itertools
 import json
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
@@ -42,10 +43,58 @@ _FWD_HELPER = "direct_fwd_helper"
 # time (--compile-all --dtype); each binary records its dtype and is only
 # offered to problems of that dtype. Variants without a kernel for a dtype
 # (the 4c atom is fp16-only) are dropped by their spec validators.
-DIRECT_DTYPES = ("fp16", "bf16")
+#
+# "fp32" and "tf32" both store fp32 tensors: "fp32" runs the MFMA kernels on
+# the exact fp32 atoms, "tf32" feeds them TF32 operands (native XF32 on gfx942,
+# BF16x3 emulation on gfx950). The scalar-FMA kernels serve both in fp32.
+DIRECT_DTYPES = ("fp16", "bf16", "fp32", "tf32")
+# What --compile-all builds when --dtype names none; fp32/tf32 are opt-in
+# (--dtype fp32 / --dtype tf32), as for implicit GEMM.
+DIRECT_COMPILE_DTYPES = ("fp16", "bf16")
 DIRECT_DTYPE = "fp16"  # the default dtype
+# Problem dtype -> tensor storage dtype.
+_DIRECT_STORAGE = {"fp16": "fp16", "bf16": "bf16", "fp32": "fp32", "tf32": "fp32"}
 # Convolution directions the direct cache holds kernels for.
 DIRECT_DIRECTIONS = ("fwd", "dgrad", "wgrad")
+
+
+def direct_storage_dtype(dtype: str) -> str:
+    """The element type of a direct problem's tensors: ``fp32`` for tf32."""
+    try:
+        return _DIRECT_STORAGE[dtype]
+    except KeyError:
+        raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}") from None
+
+
+def direct_dtype_triple(dtype: str) -> Tuple[str, str, str]:
+    """``(dtype_a, dtype_b, dtype_d)`` of a direct kernel's cache identity.
+
+    TF32 is fp32 storage with TF32 operands at the MMA, so its triple is
+    ``("tf32", "tf32", "fp32")`` -- the implicit-GEMM cache's spelling. Every
+    other dtype is all three, which keeps the fp16/bf16 identities (and their
+    cache hashes) exactly as they were.
+    """
+    direct_storage_dtype(dtype)  # reject an unknown dtype
+    return ("tf32", "tf32", "fp32") if dtype == "tf32" else (dtype,) * 3
+
+
+@lru_cache(maxsize=None)
+def tf32_is_emulated(arch: str) -> bool:
+    """Does ``arch`` run TF32 as BF16x3 emulation (gfx950) rather than as
+    native XF32 (gfx942)? Asked of the catalog's 16x16 TF32 atom; an arch with
+    no TF32 atom counts as native (the looser bound)."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except Exception:  # noqa: BLE001 - unknown arch: no catalog to ask
+        return False
+    family = "wmma" if target.wave_size == 32 else "mma"
+    op = target.mma.select_largest_k(
+        family=family, a_dtype="tf32", b_dtype="tf32", c_dtype="fp32", m=16, n=16
+    )
+    return op is not None and not op.is_native
+
 
 # ---------------------------------------------------------------------------
 # Tuning grids -- shared with benchmark_direct_conv's JIT sweep so the cache
@@ -56,6 +105,9 @@ DIRECT_DIRECTIONS = ("fwd", "dgrad", "wgrad")
 BLOCK_Q = (16, 32)
 BLOCK_GROUPS = (1, 2, 4, 8, 16)
 DOUBLE_BUFFER = (True, False)
+# Grouped forward K-atom width for fp32-storage problems only (fp32/tf32):
+# fold_k32 reduces 32 channels per atom (cpg % 32 == 0), else 16.
+GROUPED_FOLD_K32 = (False, True)
 # Depthwise (cpg == 1) forward and dgrad.
 # block_w=32 is omitted from both directions: across the depthwise corpus, at
 # both dtypes, it never won a single geometry -- every shape whose best config
@@ -115,6 +167,26 @@ DGRAD_WAVES = (
     (1, 2, False, False, True),
     (1, 6, False, False, True),
 )
+
+
+def dgrad_waves(dtype: str) -> Tuple[Tuple[int, int, bool, bool, bool], ...]:
+    """The MFMA dgrad fprop-pass waves grid for problem dtype ``dtype``.
+
+    fp16/bf16 get :data:`DGRAD_WAVES` as is. fp32-storage problems (fp32 and
+    tf32) also get the K-32 fold of every unfolded entry: gfx950's emulated
+    TF32 atom is K-32 wide, so an unfolded (16-channel) atom is zero-padded to
+    it, and :func:`tf32_narrow_reason` keeps the padded one only where the
+    fold cannot run the shape.
+    """
+    if direct_storage_dtype(dtype) != "fp32":
+        return DGRAD_WAVES
+    out = list(DGRAD_WAVES)
+    for wq, wk, rk, pg, k32 in DGRAD_WAVES:
+        if not k32 and (wq, wk, rk, pg, True) not in out:
+            out.append((wq, wk, rk, pg, True))
+    return tuple(out)
+
+
 # Direct wgrad (DirectConvWgradSpec): (waves_k, waves_c, waves_q). The JIT
 # sweep tries waves_c in {1, 2, ceil(cpg/16)}; with runtime channels the cache
 # cannot know cpg, so it carries the ceil(cpg/16) values of the common channel
@@ -460,7 +532,17 @@ def _knob_grid(
         yield from grouped_knobs(arch, dtype)
     elif variant == "direct_grouped":
         for bq, bg, db in itertools.product(BLOCK_Q, BLOCK_GROUPS, DOUBLE_BUFFER):
-            yield dict(block_q=bq, block_groups=bg, double_buffer=db)
+            if direct_storage_dtype(dtype) != "fp32":
+                # The 16-bit grid predates the fold knob: its knobs (and so
+                # its identities) carry none.
+                yield dict(block_q=bq, block_groups=bg, double_buffer=db)
+                continue
+            # fp32 storage: the K-32 fold is what feeds gfx950's emulated
+            # 16x16x32 TF32 atom one-to-one (a 16-channel atom is zero-padded
+            # to it); tf32_narrow_reason drops the narrow one where the fold
+            # covers the shape.
+            for k32 in GROUPED_FOLD_K32:
+                yield dict(block_q=bq, block_groups=bg, double_buffer=db, fold_k32=k32)
     elif variant == "direct_depthwise":
         for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
@@ -485,7 +567,7 @@ def _knob_grid(
             yield dict(block_q=bq, block_groups=bg)
     elif variant == "direct_grouped_dgrad_mfma":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
-            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
+            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, dgrad_waves(dtype)
         ):
             yield dict(
                 block_q=bq,
@@ -499,7 +581,7 @@ def _knob_grid(
             )
     elif variant == "direct_dgrad_mfma_rtc":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
-            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
+            BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, dgrad_waves(dtype)
         ):
             if wk > 1 and rk:
                 # A K split preloads its weights, which takes precedence over
@@ -566,13 +648,14 @@ def _identity(
     knobs: dict,
     dtype: str = DIRECT_DTYPE,
 ) -> KernelIdentity:
+    dtype_a, dtype_b, dtype_d = direct_dtype_triple(dtype)
     return KernelIdentity(
         arch=arch,
         direction=direction,
         algorithm=variant,
-        dtype_a=dtype,
-        dtype_b=dtype,
-        dtype_d=dtype,
+        dtype_a=dtype_a,
+        dtype_b=dtype_b,
+        dtype_d=dtype_d,
         # Direct conv is not a GEMM: no tile, warp or vector fields.
         tile_m=0,
         tile_n=0,
@@ -785,6 +868,68 @@ def _job(identity: KernelIdentity, caps: DirectCaps, knobs: dict) -> BuildJob:
     )
 
 
+# Non-grouped atoms whose K is half the wide atom of the same tile; on an arch
+# that emulates TF32 only the wide (K-32 / K-16) atoms exist, so these are
+# zero-padded to them.
+_NONGROUPED_NARROW_ATOMS = {"32x32x8": "32x32x16", "16x16x16": "16x16x32"}
+
+
+def tf32_narrow_reason(variant: str, problem, knobs: dict, arch: str) -> Optional[str]:
+    """Why a TF32 config is not worth building or timing, or ``None``.
+
+    gfx950 has only the wide emulated TF32 atoms (16x16x32 / 32x32x16, eight
+    fp32 per lane); a 16-channel K-atom (four per lane) is zero-padded to one,
+    so it issues the same three bf16 MFMAs for half the work. Such a config is
+    dropped -- but only where a wide config computes the same ``problem``;
+    elsewhere the padded one is the only kernel and stays. Never drops
+    anything for another dtype or on an arch with native TF32 (gfx942, where a
+    narrow fragment is split exactly, not padded).
+    """
+    if getattr(problem, "dtype", None) != "tf32" or not tf32_is_emulated(arch):
+        return None
+    if variant == "direct_grouped":
+        if not knobs.get("fold_k32") and problem.cpg % 32 == 0:
+            return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers cpg"
+        return None
+    if variant in _MFMA_DGRAD:
+        if knobs.get("fold_k32"):
+            return None
+        # The fprop pass reduces over kpg: the fold covers it when the grid
+        # has the folded twin, kpg is a multiple of 32 and its atom count
+        # splits over the same waves_k.
+        twin = (
+            knobs.get("waves_q", 1),
+            knobs["waves_k"],
+            knobs.get("runtime_k_loop", False),
+            knobs.get("persistent_grid", False),
+            True,
+        )
+        if twin not in dgrad_waves("tf32"):
+            return None
+        wide = dict(knobs, fold_k32=True)
+        if variant == "direct_dgrad_mfma_rtc":
+            if problem.kpg % 32 or problem.kpg // 32 not in dgrad_rtc_k_atoms(
+                knobs["waves_k"], True
+            ):
+                return None
+            wide["k_atoms"] = problem.kpg // 32
+        if _mfma_knobs_reason(problem, wide) is None:
+            return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers kpg"
+        return None
+    if variant == "direct_nongrouped":
+        if knobs.get("atom") in _NONGROUPED_NARROW_ATOMS and problem.cpg % 32 == 0:
+            return (
+                f"tf32 atom {knobs['atom']} zero-padded on an emulated arch; "
+                f"{_NONGROUPED_NARROW_ATOMS[knobs['atom']]} covers C"
+            )
+        return None
+    if variant == "direct_wgrad":
+        # The wgrad MFMA K is the output-column axis: mfma_k=16 pads.
+        if knobs.get("mfma_k", 32) < 32:
+            return "tf32 mfma_k=16 zero-padded on an emulated arch; mfma_k=32 covers it"
+    return None
+
+
 def _caps_jobs(
     arch: str,
     wave_size: int,
@@ -812,7 +957,20 @@ def _caps_jobs(
                 continue
         if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs):
             continue
-        spec = make_spec(variant, probe, knobs)
+        # The probe's channel counts are the binary's own when they are
+        # baked; a runtime-channel binary is judged per problem in plan_for.
+        if (
+            caps.cpg
+            and not rtc_dgrad
+            and tf32_narrow_reason(variant, probe, knobs, arch)
+        ):
+            continue
+        try:
+            # Some specs validate on construction: a variant with no kernel
+            # for this dtype (fp32/tf32) raises there.
+            spec = make_spec(variant, probe, knobs)
+        except ValueError:
+            continue
         if not validate_spec(variant, spec, arch)[0]:
             continue
         if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
@@ -950,7 +1108,10 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         # computes (a dilated grouped kernel, say): ask the kernel's validator.
         variant = identity.algorithm
         probe = probe_problem(caps, identity.dtype_a, variant, knobs)
-        spec = make_spec(variant, probe, knobs)
+        try:
+            spec = make_spec(variant, probe, knobs)
+        except ValueError as e:
+            raise LookupError(f"the direct grid cannot build this identity: {e}")
         ok, why = validate_spec(variant, spec, identity.arch)
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")
