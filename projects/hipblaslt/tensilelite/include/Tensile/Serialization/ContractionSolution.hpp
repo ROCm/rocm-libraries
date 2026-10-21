@@ -110,8 +110,8 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "type", s.type);
                 iot::mapRequired(io, "semantic", s.semantic);
-                iot::mapOptional(io, "padding", s.padding);
-                iot::mapOptional(io, "index", s.index);
+                iot::mapOptional(io, "padding", s.padding, size_t(0));
+                iot::mapOptional(io, "index", s.index, size_t(0));
             }
             const static bool flow = true;
         };
