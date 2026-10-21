@@ -63,7 +63,7 @@ public:
         }
     }
 
-    hipsparseLocalCooAoS(const hipsparseLocalCooAoS&)            = delete;
+    hipsparseLocalCooAoS(const hipsparseLocalCooAoS&) = delete;
     hipsparseLocalCooAoS& operator=(const hipsparseLocalCooAoS&) = delete;
 
     operator hipsparseSpMatDescr_t&()

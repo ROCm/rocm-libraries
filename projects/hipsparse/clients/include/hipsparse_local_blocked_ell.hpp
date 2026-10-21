@@ -72,7 +72,7 @@ public:
         }
     }
 
-    hipsparseLocalBlockedEll(const hipsparseLocalBlockedEll&)            = delete;
+    hipsparseLocalBlockedEll(const hipsparseLocalBlockedEll&) = delete;
     hipsparseLocalBlockedEll& operator=(const hipsparseLocalBlockedEll&) = delete;
 
     operator hipsparseSpMatDescr_t&()

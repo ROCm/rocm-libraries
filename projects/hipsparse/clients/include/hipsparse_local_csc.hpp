@@ -74,7 +74,7 @@ public:
         }
     }
 
-    hipsparseLocalCsc(const hipsparseLocalCsc&)            = delete;
+    hipsparseLocalCsc(const hipsparseLocalCsc&) = delete;
     hipsparseLocalCsc& operator=(const hipsparseLocalCsc&) = delete;
 
     operator hipsparseSpMatDescr_t&()

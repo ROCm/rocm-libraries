@@ -78,7 +78,7 @@ public:
         }
     }
 
-    hipsparseLocalSlicedEll(const hipsparseLocalSlicedEll&)            = delete;
+    hipsparseLocalSlicedEll(const hipsparseLocalSlicedEll&) = delete;
     hipsparseLocalSlicedEll& operator=(const hipsparseLocalSlicedEll&) = delete;
 
     operator hipsparseSpMatDescr_t&()

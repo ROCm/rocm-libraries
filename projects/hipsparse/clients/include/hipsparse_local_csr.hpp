@@ -74,7 +74,7 @@ public:
         }
     }
 
-    hipsparseLocalCsr(const hipsparseLocalCsr&)            = delete;
+    hipsparseLocalCsr(const hipsparseLocalCsr&) = delete;
     hipsparseLocalCsr& operator=(const hipsparseLocalCsr&) = delete;
 
     operator hipsparseSpMatDescr_t&()

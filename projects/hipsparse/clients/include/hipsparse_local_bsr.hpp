@@ -80,7 +80,7 @@ public:
         }
     }
 
-    hipsparseLocalBsr(const hipsparseLocalBsr&)            = delete;
+    hipsparseLocalBsr(const hipsparseLocalBsr&) = delete;
     hipsparseLocalBsr& operator=(const hipsparseLocalBsr&) = delete;
 
     operator hipsparseSpMatDescr_t&()
