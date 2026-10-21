@@ -400,8 +400,8 @@ COL_CAT_MIN = 44
 COL_CNT = 8
 COL_TOT = 14
 COL_MEAN = 14
-COL_WALL = 11
-COL_PAR = 11
+COL_PCT_PARENT = 11
+COL_PCT_WALL = 11
 
 
 def _label_len(depth: int, name: str) -> int:
@@ -424,11 +424,57 @@ def _max_label_len(nodes: List['PhaseNode'], extra_names: List[str]) -> int:
     return longest
 
 
-def _table_layout(nodes: List['PhaseNode'], extra_names: List[str]):
-    """Return (col_cat, table_width) wide enough that no category label runs into the numbers."""
-    col_cat = max(COL_CAT_MIN, _max_label_len(nodes, extra_names) + 1)
-    numeric = 1 + COL_CNT + 1 + COL_TOT + 1 + COL_MEAN + 1 + COL_WALL + 3 + COL_PAR
-    return col_cat, max(TABLE_WIDTH_MIN, col_cat + numeric)
+def _table_layout(nodes: List['PhaseNode'], extra_rows: List[Tuple[str, int, float, float, float]],
+                  wall_clock_ms: float) -> Dict[str, int]:
+    """Return the column widths of the phase table, sized from the data.
+
+    The category column fits the longest label and each numeric column fits its widest value
+    (formatted exactly as ``fmt_row`` does), so large counts or totals, e.g. when several runs
+    are summed, cannot push the columns out of line. ``extra_rows`` are the unknown /
+    overlapping-total rows as ``(name, count, total_ms, mean_ms, pct_of_wall)``.
+    Keys: cat, cnt, tot, mean, parent, wall, table.
+    """
+    width = {
+        "cnt": max(COL_CNT, len("Count")),
+        "tot": max(COL_TOT, len("Total (ms)")),
+        "mean": max(COL_MEAN, len("Mean (ms)")),
+        "parent": max(COL_PCT_PARENT, len("% of Parent")),
+        "wall": max(COL_PCT_WALL, len("% of Wall")),
+    }
+
+    def note(count, total_ms, mean_ms, pct_parent, pct_wall):
+        if count is not None:
+            width["cnt"] = max(width["cnt"], len(f"{count:,}"))
+        if total_ms is not None:
+            width["tot"] = max(width["tot"], len(f"{total_ms:,.2f}"))
+        if mean_ms is not None:
+            width["mean"] = max(width["mean"], len(f"{mean_ms:,.2f}"))
+        # A percentage is printed as "<value>%", so it needs one more column than its digits.
+        if pct_parent is not None:
+            width["parent"] = max(width["parent"], len(f"{pct_parent:.1f}") + 1)
+        if pct_wall is not None:
+            width["wall"] = max(width["wall"], len(f"{pct_wall:.1f}") + 1)
+
+    def walk(node: 'PhaseNode', parent_ms: Optional[float]):
+        pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
+        note(node.count, node.total_ms, node.mean_ms, pct_parent,
+             as_percentage(node.total_ms, wall_clock_ms))
+        # Same two views the renderer walks: plain children and display-grouped children.
+        for child in list(node.children) + list(_get_display_children(node)):
+            walk(child, node.total_ms)
+
+    for node in nodes:
+        walk(node, None)
+    for _name, count, total_ms, mean_ms, pct in extra_rows:
+        note(count, total_ms, mean_ms, pct, None)
+
+    cat = max(COL_CAT_MIN, _max_label_len(nodes, [r[0] for r in extra_rows]
+                                          + ["(untracked C++ overhead)", "Overlapping Totals"]) + 1)
+    numeric = 1 + width["cnt"] + 1 + width["tot"] + 1 + width["mean"] + 1 + width["parent"] + 3 \
+        + width["wall"]
+    width["cat"] = cat
+    width["table"] = max(TABLE_WIDTH_MIN, cat + numeric)
+    return width
 
 
 @dataclass
@@ -848,10 +894,29 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     """Print a summary of timing data."""
     global TABLE_WIDTH
     nodes = build_hierarchy(timings) if timings else []
-    extra = [c for c in timings
-             if c not in ALL_KNOWN_CATEGORIES] if timings else []
-    COL_CAT, TABLE_WIDTH = _table_layout(
-        nodes, extra + ["(untracked C++ overhead)", "Overlapping Totals"])
+
+    total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
+
+    wall_clock_ms = sum(total_time_by_category.get(c, 0) for c in TIMING_HIERARCHY)
+    if wall_clock_ms == 0:
+        wall_clock_ms = sum(total_time_by_category.values())
+    wall_clock_s = wall_clock_ms / 1000.0
+
+    def extra_row(cat):
+        values = timings[cat]
+        count = len(values)
+        total_ms = sum(values)
+        mean_ms = total_ms / count if count > 0 else 0
+        return (cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms))
+
+    # Rows shown below the tree: categories the hierarchy does not know, and the overlapping totals.
+    unknown_rows = [extra_row(c) for c in sorted(
+        set(timings.keys()) - ALL_KNOWN_CATEGORIES - OVERLAPPING_TOTALS)]
+    overlapping_rows = [extra_row(c) for c in OVERLAPPING_TOTALS_ORDER if c in timings]
+
+    layout = _table_layout(nodes, unknown_rows + overlapping_rows, wall_clock_ms)
+    COL_CAT = layout["cat"]
+    TABLE_WIDTH = layout["table"]
 
     print("=" * TABLE_WIDTH)
     print("TIMING ANALYSIS SUMMARY")
@@ -865,23 +930,19 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         print("and captured stderr output (2>&1).")
         return
 
-    total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
-
-    wall_clock_ms = sum(total_time_by_category.get(c, 0) for c in TIMING_HIERARCHY)
-    if wall_clock_ms == 0:
-        wall_clock_ms = sum(total_time_by_category.values())
-    wall_clock_s = wall_clock_ms / 1000.0
-
     # -- Hierarchical table --------------------------------------------------
+
+    w_cnt, w_tot, w_mean = layout["cnt"], layout["tot"], layout["mean"]
+    w_parent, w_wall = layout["parent"], layout["wall"]
 
     def fmt_row(indent, name, count, total_ms, mean_ms, pct_parent, pct_wall):
         prefix = "  " * indent
         cat = f"  {prefix}{name}"
-        c = f"{count:>{COL_CNT},}" if count is not None else " " * COL_CNT
-        t = f"{total_ms:>{COL_TOT},.2f}" if total_ms is not None else " " * COL_TOT
-        m = f"{mean_ms:>{COL_MEAN},.2f}" if mean_ms is not None else " " * COL_MEAN
-        par = f"{pct_parent:>{COL_WALL - 1}.1f}%" if pct_parent is not None else " " * COL_WALL
-        wall = f"{pct_wall:>{COL_PAR - 1}.1f}%" if pct_wall is not None else " " * COL_PAR
+        c = f"{count:>{w_cnt},}" if count is not None else " " * w_cnt
+        t = f"{total_ms:>{w_tot},.2f}" if total_ms is not None else " " * w_tot
+        m = f"{mean_ms:>{w_mean},.2f}" if mean_ms is not None else " " * w_mean
+        par = f"{pct_parent:>{w_parent - 1}.1f}%" if pct_parent is not None else " " * w_parent
+        wall = f"{pct_wall:>{w_wall - 1}.1f}%" if pct_wall is not None else " " * w_wall
         print(f"{cat:<{COL_CAT}} {c} {t} {m} {par}   {wall}")
 
     print("TIMING BY PHASE")
@@ -889,11 +950,11 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     hdr_cat = "Category"
     print(
         f"  {hdr_cat:<{COL_CAT - 2}}"
-        f" {'Count':>{COL_CNT}}"
-        f" {'Total (ms)':>{COL_TOT}}"
-        f" {'Mean (ms)':>{COL_MEAN}}"
-        f" {'% of Parent':>{COL_WALL}}"
-        f"   {'% of Wall':>{COL_PAR}}"
+        f" {'Count':>{w_cnt}}"
+        f" {'Total (ms)':>{w_tot}}"
+        f" {'Mean (ms)':>{w_mean}}"
+        f" {'% of Parent':>{w_parent}}"
+        f"   {'% of Wall':>{w_wall}}"
     )
     print("-" * TABLE_WIDTH)
 
@@ -940,30 +1001,21 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
             render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
     # Unknown categories
-    unknown_cats = set(timings.keys()) - ALL_KNOWN_CATEGORIES - OVERLAPPING_TOTALS
-    if unknown_cats:
+    if unknown_rows:
         print()
         print("  Unknown Categories")
         print(f"  {'-' * (TABLE_WIDTH - 2)}")
-        for cat in sorted(unknown_cats):
-            values = timings[cat]
-            count = len(values)
-            total_ms = sum(values)
-            mean_ms = total_ms / count if count > 0 else 0
-            fmt_row(0, cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms), None)
+        for cat, count, total_ms, mean_ms, pct in unknown_rows:
+            fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
 
     # Overlapping totals: wrap other timers, so they are not part of the tree (they would be
     # double counted) but are useful to check that the tree accounts for all the time.
-    present_totals = [c for c in OVERLAPPING_TOTALS_ORDER if c in timings]
-    if present_totals:
+    if overlapping_rows:
         print()
         print("  Overlapping Totals (wrap other timers; not summed into the tree)")
         print(f"  {'-' * (TABLE_WIDTH - 2)}")
-        for cat in present_totals:
-            values = timings[cat]
-            total_ms = sum(values)
-            fmt_row(0, cat, len(values), total_ms, total_ms / len(values),
-                    as_percentage(total_ms, wall_clock_ms), None)
+        for cat, count, total_ms, mean_ms, pct in overlapping_rows:
+            fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
 
     print()
     print("-" * TABLE_WIDTH)

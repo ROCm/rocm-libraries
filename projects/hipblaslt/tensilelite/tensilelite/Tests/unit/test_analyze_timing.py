@@ -11,6 +11,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 import gzip
+import re
 import sys
 import os
 from pathlib import Path
@@ -27,6 +28,8 @@ from analyze_timing import (
     build_hierarchy,
     timings_to_tree,
     tree_to_timings,
+    print_summary,
+    TimingSeries,
     TimingRecord,
     ProblemTiming,
     ALL_KNOWN_CATEGORIES,
@@ -402,3 +405,53 @@ class TestTimingTree:
         for category, values in timings.items():
             assert len(back[category]) == len(values)
             assert sum(back[category]) == pytest.approx(sum(values))
+
+
+class TestColumnAlignment:
+    """The numeric columns of the phase table stay aligned however large the values get."""
+
+    def _table_numeric_edges(self, out):
+        lines = out.split("\n")
+        header_i = next(i for i, l in enumerate(lines) if l.strip().startswith("Category"))
+        end_i = next(i for i, l in enumerate(lines) if "ESTIMATED WALL CLOCK" in l)
+        header = lines[header_i]
+        allowed = {header.index(k) + len(k)
+                   for k in ("Count", "Total (ms)", "Mean (ms)", "% of Parent", "% of Wall")}
+        checked = 0
+        for line in lines[header_i + 1:end_i]:
+            ends = [m.end() for m in re.finditer(r"[\d,]+(?:\.\d+)?%?(?=\s|$)", line)
+                    if m.start() > header.index("Count") - 14]
+            for end in ends:
+                assert end in allowed, f"misaligned: {line!r}"
+            checked += bool(ends)
+        return checked
+
+    def test_huge_counts_and_totals(self, capsys):
+        # Counts in the millions and totals in the billions of ms, as when many runs are summed.
+        timings = {
+            "python_benchmark_problems": TimingSeries(184, 9_876_543_210.12),
+            "python_client_execution": TimingSeries(855, 9_800_000_000.5),
+            "pre_problem": TimingSeries(28_641_123, 1_035_798_421.42),
+            "cpu_reference_gemm": TimingSeries(28_596_001, 928_712_973.97),
+            "solve_cpu_fast": TimingSeries(26_656_000, 200_931_330.0),
+            "made_up_category": TimingSeries(12_345_678, 5_000_000.0),
+            "main_total": TimingSeries(855, 8_000_000_000.0),
+        }
+        print_summary(timings, [])
+        out = capsys.readouterr().out
+
+        assert self._table_numeric_edges(out) >= 6
+        # The rule lines are as wide as the table.
+        widths = {len(l) for l in out.split("\n")[:3] if l.strip() and set(l.strip()) <= set("=-")}
+        assert len(widths) == 1
+
+    def test_small_values_keep_the_default_widths(self, capsys, tmp_path):
+        log = tmp_path / "run.log"
+        log.write_text(SAMPLE_TIMING_LOG)
+        timings, problems = analyze_timing_file(str(log))
+        print_summary(timings, problems)
+        out = capsys.readouterr().out
+
+        assert self._table_numeric_edges(out) > 0
+        header = next(l for l in out.split("\n") if l.strip().startswith("Category"))
+        assert header.index("Count") + len("Count") == 44 + 1 + 8  # category column + gap + count column
