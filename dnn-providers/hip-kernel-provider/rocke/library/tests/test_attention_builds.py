@@ -4220,7 +4220,7 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
         divisor of the resolved decode, in the built kernel's param order; the
         launcher's values are ``calculate_magic_numbers`` of the divisors, packed
         as two's-complement i32, and divide every work-item index exactly."""
-        from rocke.helpers.transforms import calculate_magic_numbers
+        from rocke.helpers.magic_division import calculate_magic_numbers
         from kernels.gfx942.attention_dense import (
             attention_dense_runtime_args,
             attention_dense_signature,
