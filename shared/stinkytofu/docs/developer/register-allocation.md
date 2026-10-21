@@ -184,7 +184,8 @@ The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by 
 | Option | Meaning |
 |---|---|
 | `shadow`, `apply`, `force`, or `0`..`3` | the mode, also spelled `mode=<word>`. `apply` and `force` write the colouring through `destroyAttachedSSA`; `shadow` colours without writing. Default: `shadow` in the tool, `off` in a kernel |
-| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact` in a kernel |
+| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `greedy-compact-loopbank`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact` in a kernel |
+| `choose` | colour with every allocator in the chain and apply the colouring with the most waves per SIMD, then the fewest `s_set_vgpr_msb` per iteration of the innermost loops, then the lowest highest VGPR; a tie goes to the allocator named first. Section 12.1 shows the remark |
 | `classes=<vs>` | class axis of allocation scope; see section 3. Default: `v` in the tool, `s` in a kernel |
 | `regionEnd=<label>` | region axis: only values whose live range ends at or before this block may move (`^` prefix optional). Empty = whole function. See section 3.2 |
 | `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key, or join with `+`, for disjoint runs |
@@ -634,11 +635,12 @@ They constrain each other only when they appear together in one operand.
 | `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | the same again, but ordering blocks by how few legal bases they have rather than by how hot they are |
 | `greedy-compact-program` | `ProgramOrderedGreedyAllocator` | packing from the bottom in program order: the block that becomes live first goes first |
 | `greedy-compact-largest` | `LargestFirstGreedyAllocator` | packing from the bottom, the block needing the most register-time (width × live span) first |
+| `greedy-compact-loopbank` | `LoopBankGreedyAllocator` | packing from the bottom in weight order, with each value an innermost loop names given the bank that costs the loop the fewest `s_set_vgpr_msb` |
 | `legacy` | `LegacyIdentityAllocator` | hands every value straight back the producer's register, via `createLegacyColoring()` |
 
-All six report empty `AllocatorCapabilities`, so none is refused by the gate in section 2.
+All seven report empty `AllocatorCapabilities`, so none is refused by the gate in section 2.
 
-[The greedy allocator](register-allocation-GreedyAllocator.md) covers the five greedy policies in full: how tuple runs and affinity sets fold into placeable blocks, how a pairing rule can fold two blocks into one, how each order places, the eviction rule and why it terminates, why hint-following reproduces the input, and how `reachableAt` / `pickBase` honour the rules table.
+[The greedy allocator](register-allocation-GreedyAllocator.md) covers the six greedy policies in full: how tuple runs and affinity sets fold into placeable blocks, how a pairing rule can fold two blocks into one, how each order places, the eviction rule and why it terminates, why hint-following reproduces the input, and how `reachableAt` / `pickBase` honour the rules table.
 
 ## 10. Verifier
 
@@ -967,6 +969,18 @@ It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `Insert
 
 `peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]`, and a pairing rule adds `pref[...]` with its satisfaction, so a report is interpretable without knowing the triple or the caps. `unbankable[...]` says what was done about operands that cannot name a VGPR bank — `held <registers>` or `allocated <n> value(s) max <ceiling>`, prefixed `auto` when the treatment was found by trying — and when `auto` held them because allocating them was refused, a second line, `held them because the allocate attempt was refused: ...`, quotes that refusal (section 12.2). It explains the treatment; it is not a refusal of the kernel, which only a `missed` remark is.
 
+`loopMsb=a->b`, present when the function has a loop, is the number of `s_set_vgpr_msb` one iteration of each innermost loop needs, summed over those loops, under the producer's numbering and under this colouring. `LoopMsbCost` counts it before anything is applied, by the rule `InsertVgprMsbPass` emits with (`vgprMsbNeed` and `VgprMsbState` in `VgprMsbEncoding.hpp`): the byte in force is forgotten at a block start, a label and a call, and an instruction needs a new byte when a slot selects another bank than the byte in force. It counts instructions, not cycles. The loop summary of `LoopRegionRemarkPass`, which runs after `InsertVgprMsbPass`, counts what was emitted, so the two can be checked against each other.
+
+Under `choose`, a second line says which colouring won and on what:
+
+```text
+@kernel: chose greedy-compact (waves=2 loopMsb=63 highest=380) over greedy-compact-program (waves=2 loopMsb=63 highest=406), greedy-compact-largest (waves=2 loopMsb=102 highest=404), legacy (waves=2 loopMsb=103 highest=406)
+```
+
+The keys rank in the order printed, so a cheaper loop never costs a wave, and a tie goes to the allocator named first. An allocator that refuses drops out and is named after a `;`. Every candidate is coloured and verified, but only the winner is applied.
+
+**Unused bank selectors.** By default `InsertVgprMsbPass` treats every slot an instruction does not use as wanting bank 0, so a `ds_load` or `v_mov` between two instructions that want a high bank in that slot costs two extra bytes. `StinkyTofuVgprMsbKeepUnusedSlots` (`ModuleOptions::VgprMsbKeepUnusedSlots`, `stinkytofu-opt --vgpr-msb-keep-unused-slots`) makes only the slots an instruction encodes have to match, and gives each unused slot of a new byte the bank the next instruction in the block wants there. `LoopMsbCost` reads the same option, so `loopMsb` and `choose` count what will be emitted. It is off by default: it is correct only if the hardware ignores the selector of a slot an instruction does not encode, which the gfx1250 ISA has yet to confirm.
+
 Three cautions on reading it, all of which have caught someone out.
 
 The word `shadow` is part of the report string, so an `apply` run prints it too. It says nothing about whether the colouring was written.
@@ -999,6 +1013,7 @@ The words may come in any order:
 | `allocator=` | a registered name, or several joined with `+` | `greedy-compact` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
 | `unbankable=` | `auto`, `allocate`, `hold` | `auto` | operands that cannot name a VGPR bank; see below |
 | `quadrant=` | `any`, `prefer` | `any` | `prefer` searches the producer's 256-register bank for each block before the rest of the file |
+| `choose` | bare word | off | colour with the whole chain and apply the best colouring: most waves, then fewest loop `s_set_vgpr_msb`, then lowest highest VGPR (section 12.1) |
 | `rules=`, `noRule=`, `noRules`, `ruleAudit` | as in section 2.1 | none | force rule statuses (section 14) |
 | `pinReg=`, `regionEnd=`, `noVerify` | as in section 2.1 | none | scope, and a testing hatch |
 

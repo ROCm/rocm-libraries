@@ -1,12 +1,12 @@
 # The greedy allocator
 
-Weighted first-fit with eviction. Five registered names share one implementation, differing only in two flags and a placement policy.
+Weighted first-fit with eviction. Six registered names share one implementation, differing only in two flags and a placement policy.
 
 - [Register allocation](register-allocation.md) — the framework this plugs into, including the scope axes of `AllocationScope` (section 3) and the rules table (section 14)
 - [SSA representation](ssa-representation.md) — values, use lists, `AllocationResult`
 - [Lift Asm registers to SSA](lift-asm-registers-to-ssa-pass.md) — where the `PhysicalBinding` hints come from
 
-## 1. Five names, one implementation
+## 1. Six names, one implementation
 
 | Registered name | Class | Hints | Policy | Purpose |
 |---|---|---|---|---|
@@ -15,8 +15,9 @@ Weighted first-fit with eviction. Five registered names share one implementation
 | `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | ignore | freedom | the same, ordered by how boxed-in a block is rather than how hot |
 | `greedy-compact-program` | `ProgramOrderedGreedyAllocator` | ignore | program | the same, in the order blocks become live |
 | `greedy-compact-largest` | `LargestFirstGreedyAllocator` | ignore | largest | the same, the block needing the most register-time first |
+| `greedy-compact-loopbank` | `LoopBankGreedyAllocator` | ignore | loopbank | weight order, with the values a loop names banked to cut its `s_set_vgpr_msb` (section 5.2) |
 
-All five are thin wrappers over one file-private `Greedy` class, reached through `runGreedyPlacement(context, followHints, policy)`. All five report an empty `AllocatorCapabilities`:
+All six are thin wrappers over one file-private `Greedy` class, reached through `runGreedyPlacement(context, followHints, policy)`. All six report an empty `AllocatorCapabilities`:
 
 - `mayRecolourMerges = false` — an affinity set keeps a merge and its incoming values on one register, so lowering never needs a copy on a merge edge;
 - `maySpill = false` — no range is ever split, so there is nothing for scratch or waitcnt to integrate.
@@ -138,7 +139,7 @@ Folding cannot produce a wrong colouring — two values are folded only when the
 
 ## 5. Order
 
-Order is most of the policy, and a policy is three small decisions:
+Order is most of the policy, and a policy is three small decisions and a switch:
 
 ```cpp
 struct PlacementPolicy {
@@ -146,6 +147,7 @@ struct PlacementPolicy {
     bool (*placesEarly)(const Block&);                       // ahead of the queue
     bool (*placesBefore)(const Block& lhs, const Block& rhs); // order within it
     bool (*mayEvict)(const Block& evictor, const Block& occupant);
+    bool banksLoopValues;                                     // section 5.2
 };
 ```
 
@@ -189,6 +191,22 @@ The program and largest-first policies reuse those decisions and change only the
 - **Largest first** is the order LLVM's greedy allocator assigns in: a long or wide block needs the same registers free for all of its life, so it is the hardest to place late. It evicts by weight, as LLVM evicts by spill weight.
 
 Neither is the default. On the 39-kernel corpus that motivated them, program order with held scale operands coloured every kernel, but packing late values into low registers can add `s_set_vgpr_msb` switches inside a loop, so the choice is per kernel, through an allocator chain if need be (register-allocation.md section 12.2).
+
+### 5.2. Banking a loop's values
+
+A loop pays an `s_set_vgpr_msb` whenever a slot's bank changes between the instructions that use it. None of the orders above looks at banks, and `ProducerPinMatrix` keeps every matrix operand in the bank the producer gave it, so in a WMMA loop what is left to choose is the bank of everything else the loop names: addresses, counters, data staged through LDS. `greedy-compact-loopbank` is the weight policy with `banksLoopValues` set. Before placing, `loopBankings` (`LoopBanking.cpp`) gives each such block a bank, and `pickBase` searches that bank first, as it searches the producer's under `quadrant=prefer` (section 6.1).
+
+The search scores with `AllocationContext::loopMsb`, the `LoopMsbCost` the driver builds for `choose` and the report (register-allocation.md section 12.1), with the main loop ranked first: in `mainLoopFirstCount` one switch in the innermost loop with the most instructions outweighs every switch in the others, so a cheaper tail is never bought with a costlier main loop. Block by block, it keeps the bank that lowers that count, within three limits:
+
+- only movable VGPR blocks the loops name through a bank slot are searched, at most 512 of them, since every try walks the loops again;
+- only the banks the live peak needs or the pinned values already use, so a move does not raise the highest register past where packing or the pins put it;
+- a block moves only into a bank with room for it beside the pinned blocks, the capped ones in bank 0, and the blocks already given that bank. Room is counted per slot, each member over its own live segments, and an odd-width tuple also takes the register its alignment skips.
+
+The search only goes downhill, so it runs from two starts: the banks the producer used, and the lowest bank each block fits in the order blocks start, which is roughly where packing puts them. A producer that spread a loop's values over two banks can leave the first start nowhere better to go.
+
+A per-slot count can promise more than placement finds: a bank can have a free register at every slot while no one register in it is free for a value's whole life. So each banking is placed, and the colouring whose loops cost least by the same count is kept, the producer's start on a tie. The banked blocks are placed after the pinned and capped ones and ahead of the queue, in the order they start: placing left to right is what lets one value take the register another has just left, so a bank the count says has room mostly does. A banked block that finds no room in its bank takes its turn in the queue like any other. If every banking is refused, the engine places with none, as `greedy-compact` does, and without a loop or without `loopMsb` that is the only placement.
+
+It does not replace `greedy-compact`. Where packing happens to cost a loop less, `choose` keeps that colouring when both are in the chain. On the 39-kernel corpus it never gives a main loop more switches than the producer's numbering, and gives 10 fewer, including mxf8's WMMA loop at 402 per iteration against 417.
 
 ## 6. Placement and candidates
 
@@ -308,7 +326,7 @@ The same input yields the same colouring. Five things guarantee it:
 - folding walks preferences in table order;
 - first fit and the evictable-base search both scan up from index 0.
 
-`GreedyAllocatorTest.ColouringIsDeterministic` covers this, and `HintIsHonouredSoASimpleFunctionMatchesLegacy` covers section 8. `AllocationRulesTest.APreferenceChangesPlacementWithoutForbiddingAnything` covers a `baseCost` that is not a mere function of the index, `PlacementBlocksEvictionToo` covers a veto that `reachableAt` applies to eviction as well as placement, and the folding tests cover a fold that widens a block, a fold that gives way rather than refusing, and the same chain folding under `greedy-compact-freedom`. `ProgramOrderColoursAPathThatWeightOrderCannot` is the case section 5.1 describes, and the two `PreferringTheProducerQuadrant` tests cover section 6.1's bank preference and its fallback.
+`GreedyAllocatorTest.ColouringIsDeterministic` covers this, and `HintIsHonouredSoASimpleFunctionMatchesLegacy` covers section 8. `AllocationRulesTest.APreferenceChangesPlacementWithoutForbiddingAnything` covers a `baseCost` that is not a mere function of the index, `PlacementBlocksEvictionToo` covers a veto that `reachableAt` applies to eviction as well as placement, and the folding tests cover a fold that widens a block, a fold that gives way rather than refusing, and the same chain folding under `greedy-compact-freedom`. `ProgramOrderColoursAPathThatWeightOrderCannot` is the case section 5.1 describes, and the two `PreferringTheProducerQuadrant` tests cover section 6.1's bank preference and its fallback. `LoopBankingWithoutALoopCostColoursAsGreedyCompactDoes` covers section 5.2's fallback, `RegisterAllocationLoopBankTest` a loop whose values follow held operands into their bank, and `tests/filecheck/register_allocation_loopbank.stir` an address following a pinned WMMA operand into its bank.
 
 ## 10. The placement table
 
@@ -322,5 +340,6 @@ When `AllocationContext::blockDumpPath` is set (the pipeline sets it under `Stin
 | `capped`, `pinned`, `hint` | whether a ceiling limits it, whether it may not move, and its hint base (`-1` for none) |
 | `placed`, `base`, `evictions`, `rank` | where it went, how often it was evicted, and its position in placement order (`0` for pinned blocks) |
 | `refused` | `1` on the block the colouring stopped at |
+| `bank` | the VGPR bank the block was given to search first (section 5.2), or `-1` |
 
 The allocation driver names the file after the allocator and the attempt, `<prefix><allocator>.<allocate|hold>.tsv` (the pipeline's prefix is `<kernel>/ra/blocks.`), so both attempts of `unbankable=auto` leave a table. When folding is retried without folds, the table is from the retry.
