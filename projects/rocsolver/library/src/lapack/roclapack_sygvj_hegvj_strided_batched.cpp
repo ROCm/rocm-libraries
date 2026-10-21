@@ -79,8 +79,8 @@ try
     }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftB = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftB = 0;
 
     // break up large batch_count into multiple invocations, each with
     // batch_count no larger than max_batch_count

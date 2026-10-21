@@ -73,7 +73,7 @@ try
     }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -205,4 +205,36 @@ rocblas_status rocsolver_cheevj_batched(rocblas_handle handle,
                                         const float abstol,
                                         float* residual,
                                         const rocblas_int max_sweeps,
-                                        rocblas_int
+                                        rocblas_int* n_sweeps,
+                                        float* W,
+                                        const rocblas_stride strideW,
+                                        rocblas_int* info,
+                                        const rocblas_int batch_count)
+{
+    return rocsolver::rocsolver_syevj_heevj_batched_impl<rocblas_float_complex>(
+        handle, esort, evect, uplo, n, A, lda, abstol, residual, max_sweeps, n_sweeps, W, strideW,
+        info, batch_count);
+}
+
+rocblas_status rocsolver_zheevj_batched(rocblas_handle handle,
+                                        const rocblas_esort esort,
+                                        const rocblas_evect evect,
+                                        const rocblas_fill uplo,
+                                        const rocblas_int n,
+                                        rocblas_double_complex* const A[],
+                                        const rocblas_int lda,
+                                        const double abstol,
+                                        double* residual,
+                                        const rocblas_int max_sweeps,
+                                        rocblas_int* n_sweeps,
+                                        double* W,
+                                        const rocblas_stride strideW,
+                                        rocblas_int* info,
+                                        const rocblas_int batch_count)
+{
+    return rocsolver::rocsolver_syevj_heevj_batched_impl<rocblas_double_complex>(
+        handle, esort, evect, uplo, n, A, lda, abstol, residual, max_sweeps, n_sweeps, W, strideW,
+        info, batch_count);
+}
+
+} // extern C

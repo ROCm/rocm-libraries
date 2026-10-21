@@ -75,7 +75,7 @@ try
     }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // break up large batch_count into multiple invocations, each with
     // batch_count no larger than max_batch_count
@@ -243,4 +243,28 @@ rocblas_status rocsolver_cgesdd_strided_batched(rocblas_handle handle,
         strideV, info, batch_count);
 }
 
-rocblas_status rocsolver_zgesdd_strided_ba
+rocblas_status rocsolver_zgesdd_strided_batched(rocblas_handle handle,
+                                                const rocblas_svect left_svect,
+                                                const rocblas_svect right_svect,
+                                                const rocblas_int m,
+                                                const rocblas_int n,
+                                                rocblas_double_complex* A,
+                                                const rocblas_int lda,
+                                                const rocblas_stride strideA,
+                                                double* S,
+                                                const rocblas_stride strideS,
+                                                rocblas_double_complex* U,
+                                                const rocblas_int ldu,
+                                                const rocblas_stride strideU,
+                                                rocblas_double_complex* V,
+                                                const rocblas_int ldv,
+                                                const rocblas_stride strideV,
+                                                rocblas_int* info,
+                                                const rocblas_int batch_count)
+{
+    return rocsolver::rocsolver_gesdd_strided_batched_impl<rocblas_double_complex>(
+        handle, left_svect, right_svect, m, n, A, lda, strideA, S, strideS, U, ldu, strideU, V, ldv,
+        strideV, info, batch_count);
+}
+
+} // extern C

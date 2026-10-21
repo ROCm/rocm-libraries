@@ -74,7 +74,7 @@ try
     }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // break up large batch_count into multiple invocations, each with
     // batch_count no larger than max_batch_count
@@ -210,4 +210,33 @@ rocblas_status rocsolver_cheevj_strided_batched(rocblas_handle handle,
                                                 float* W,
                                                 const rocblas_stride strideW,
                                                 rocblas_int* info,
-                               
+                                                const rocblas_int batch_count)
+{
+    return rocsolver::rocsolver_syevj_heevj_strided_batched_impl<rocblas_float_complex>(
+        handle, esort, evect, uplo, n, A, lda, strideA, abstol, residual, max_sweeps, n_sweeps, W,
+        strideW, info, batch_count);
+}
+
+rocblas_status rocsolver_zheevj_strided_batched(rocblas_handle handle,
+                                                const rocblas_esort esort,
+                                                const rocblas_evect evect,
+                                                const rocblas_fill uplo,
+                                                const rocblas_int n,
+                                                rocblas_double_complex* A,
+                                                const rocblas_int lda,
+                                                const rocblas_stride strideA,
+                                                const double abstol,
+                                                double* residual,
+                                                const rocblas_int max_sweeps,
+                                                rocblas_int* n_sweeps,
+                                                double* W,
+                                                const rocblas_stride strideW,
+                                                rocblas_int* info,
+                                                const rocblas_int batch_count)
+{
+    return rocsolver::rocsolver_syevj_heevj_strided_batched_impl<rocblas_double_complex>(
+        handle, esort, evect, uplo, n, A, lda, strideA, abstol, residual, max_sweeps, n_sweeps, W,
+        strideW, info, batch_count);
+}
+
+} // extern C
