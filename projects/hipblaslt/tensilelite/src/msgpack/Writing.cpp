@@ -47,10 +47,12 @@ namespace TensileLite
             return const_cast<MasterContractionLibrary&>(*master);
         }
 
-        // format_version written by MessagePackWriteIndexedLibraryData. Matches
-        // INDEXED_FORMAT_VERSION in tensilelite/LibraryIO.py and
-        // MasterSolutionLibrary's IndexedFormatVersion.
-        constexpr int IndexedFormatVersion = 2;
+        // format_version written by MessagePackWriteIndexedLibraryData. Taken
+        // from the reader's own constant so a bump cannot be half-applied.
+        constexpr int IndexedFormatVersion
+            = Serialization::MappingTraits<MasterContractionLibrary,
+                                           Serialization::MessagePackOutput>::
+                  IndexedFormatVersion;
 
         std::map<int, std::shared_ptr<ContractionSolution>>
             solutionsForIndex(MasterContractionLibrary& lib)
@@ -115,7 +117,16 @@ namespace TensileLite
     {
         auto& lib = writableMaster(library);
 
-        LibraryIOContext<ContractionSolution> context{std::string(""), {}, &lib.solutions};
+        // Snapshot under the lock, as libraryTreeBytes does. Handing the
+        // context a pointer to the live map would read it unlocked while the
+        // trait that this call drives copies the same map under solutionsGuard.
+        decltype(lib.solutions) solutions;
+        {
+            std::lock_guard<std::mutex> lock(lib.solutionsGuard);
+            solutions = lib.solutions;
+        }
+
+        LibraryIOContext<ContractionSolution> context{std::string(""), {}, &solutions};
 
         Serialization::MessagePackOutput out(&context);
         out.output(lib);
