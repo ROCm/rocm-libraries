@@ -283,7 +283,7 @@ That vocabulary is pipeline policy and lives in `instances/` — see
 - supported MMA or WMMA shapes by dtype combination, including mixed-dtype
   variants (`fp8_bf8_fp32`, `bf8_fp8_fp32`) and packed-fp4
   (`pk_fp4_pk_fp4_fp32` on gfx950);
-- waitcnt encoding variant (4-bit vs 6-bit VMCNT);
+- waitcnt encoding variant and VMCNT field width;
 - kernel attribute policy;
 - architecture-specific resource limits (VGPRs, AGPRs, SGPRs, occupancy
   math, max-block-size) usable by any kernel family;
@@ -823,9 +823,9 @@ drives backend selection.
 
 | gfx | async LDS | fp8/bf8 MFMA | bf16 atom | VMCNT bits | LDS KB | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| gfx908 | no | no | classic | 4 | 64 | MI100 |
-| gfx90a | no | no | `.1k` | 4 | 64 | MI200 |
-| gfx942 | yes | yes | `.1k` | 4 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
+| gfx908 | no | no | classic | 6 | 64 | MI100 |
+| gfx90a | no | no | `.1k` | 6 | 64 | MI200 |
+| gfx942 | yes | yes | `.1k` | 6 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
 | gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | MI350; `ds_read_*_tr_*`; adds k=32 f16/bf16 atoms 16x16x32, 32x32x16 |
 | gfx1100 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3, wave32 |
 | gfx1151 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3.5 (Strix Halo), wave32; shipped RDNA target |
@@ -845,10 +845,10 @@ This collapses into the following concrete backend classes:
 
 ```text
 Gfx908Backend         (no async, no fp8, classic bf16)
-Gfx9MfmaBackend       (gfx90a, gfx942: 4-bit VMCNT, .1k bf16)
+Gfx9MfmaBackend       (gfx90a, gfx942: .1k bf16)
                       flag: async_lds = (gfx != gfx90a)
                       flag: fp8       = (gfx in {gfx942})
-Gfx950Backend         (6-bit VMCNT, fp8/bf8/fp4, ds_read transpose, 160 KB LDS)
+Gfx950Backend         (fp8/bf8/fp4, ds_read transpose, 160 KB LDS)
 Gfx11RdnaBackend      (RDNA3, wave32, WMMA)
 Gfx12RdnaBackend      (RDNA4, wave32, WMMA)
 ```

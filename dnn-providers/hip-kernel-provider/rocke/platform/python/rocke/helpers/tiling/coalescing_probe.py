@@ -118,16 +118,18 @@ def achieved_widths(objdump_text, *, direction, space, dtype_bits):
     return hist
 
 
+# Axis names per GEMM operand, in the order of its tile descriptor (TileMma's a_desc / b_desc /
+# c_desc): A (M, K), B (N, K), C (M, N).
 _OPERAND_DIMS = {
     "a": ("M", "K"),
-    "b": ("K", "N"),
+    "b": ("N", "K"),
     "c": ("M", "N"),
-}  # natural axes per GEMM operand
+}
 
 
 def _dims_for_transaction(txn, pipeline):
     """Best-effort axis NAMES for a recorded transaction, matched by ENCODING IDENTITY against the MMA op's
-    a/b/c operand encodings (A=(M,K), B=(K,N), C=(M,N)). Returns ``None`` when it can't attribute the
+    a/b/c operand encodings (A=(M,K), B=(N,K), C=(M,N)). Returns ``None`` when it can't attribute the
     transaction to an operand -- the caller must then pass ``dims`` explicitly (never guessed here).
     """
     enc = txn.encoding

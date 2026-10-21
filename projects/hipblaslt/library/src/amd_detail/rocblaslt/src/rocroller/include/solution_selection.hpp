@@ -96,16 +96,16 @@ size_t maxNumberSolutions();
  * @param preSwizzleTileMN The tileMN value from preSwizzleTile (0 if no pre-swizzle)
  * @return MachineInstructionSize The selected machine instruction dimensions
  */
-inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
-                                     rocRoller::DataType typeB,
+inline MachineInstructionSize pickMI(hipblaslt::DataType typeA,
+                                     hipblaslt::DataType typeB,
                                      WorkGroupTileSize   wgt,
                                      size_t              preSwizzleTileMN = 0)
 {
-    if(typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16)
+    if(typeA == hipblaslt::DataType::Half || typeA == hipblaslt::DataType::BFloat16)
     {
         return {32, 32, 8, 1};
     }
-    else if(typeA == rocRoller::DataType::Float)
+    else if(typeA == hipblaslt::DataType::Float)
     {
         return {32, 32, 2, 1};
     }
@@ -120,8 +120,8 @@ inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
         }
 
         // Default selection logic when no pre-swizzle constraint
-        if((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6
-            || typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6)
+        if((typeA == hipblaslt::DataType::FP6 || typeA == hipblaslt::DataType::BF6
+            || typeB == hipblaslt::DataType::FP6 || typeB == hipblaslt::DataType::BF6)
            && ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256)))
         {
             return {32, 32, 64, 1};
@@ -137,8 +137,8 @@ inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
     }
 }
 
-constexpr int preferredUnrolling(rocRoller::DataType typeA,
-                                  rocRoller::DataType typeB,
+constexpr int preferredUnrolling(hipblaslt::DataType typeA,
+                                  hipblaslt::DataType typeB,
                                   WorkGroupTileSize   wgt,
                                   bool hasPreSwizzle,
                                   bool hasPreTile)
@@ -147,7 +147,7 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA,
     // large.
     // There is an error with smaller tile sizes and larger prefetchInFlight.
     // For 256x256x256 tile with FP4, use unroll=2 to reduce register pressure
-    if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
+    if(typeA == hipblaslt::DataType::FP4 && typeB == hipblaslt::DataType::FP4 && wgt.m > 32
        && wgt.n > 32)
     {
         // When hasPreSwizzle and hasPreTile are true, use unroll=2
@@ -176,6 +176,6 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
 // Shared with the rocRoller codegen path. Defined next to chooseSolutionIndexParameters
 // so a build that does not link rocRoller still classifies a problem the same way.
-rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type);
-rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_type type);
+hipblaslt::DataType hipDataType_to_kernel_data_type(hipDataType type);
+hipblaslt::DataType rocblaslt_compute_type_to_kernel_data_type(rocblaslt_compute_type type);
 KernelType          genKernelType(const RocblasltContractionProblem& prob);
