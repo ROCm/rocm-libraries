@@ -250,7 +250,8 @@ Note FA use bottom-right by default to express swa case, here we require you exp
 `-p_drop` sets the dropout probability, `-drop_seed`/`-drop_offset` the Philox seed and offset
 (`-drop_prefs=1` reads them from device memory). With validation on, the kernel also stores its
 random values and the check compares them with the reference. On gfx1250 fp16/bf16 dropout runs
-on `qr_tdm` for fmha_fwd and batch_prefill (not `qr_tdm_sched`/`qr_tdm_pingpong`); split-KV and
+on `qr_tdm` for fmha_fwd and batch_prefill, also with sink or a logits soft cap (not
+`qr_tdm_sched`/`qr_tdm_pingpong`); split-KV and
 pagedkv_prefill take no dropout.
 
 ### sequence padding and variable length support

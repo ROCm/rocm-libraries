@@ -1074,28 +1074,34 @@ TEST_P(TdmLogitsSoftCap, DataTypeConfig)
     }
 }
 
-// Dropout on qr_tdm (fwd and batch_prefill). Validation also compares the stored random values.
-// The 1024-row causal case takes the staged M128 traversal.
-// api, mode, seqlen_q, seqlen_k, page_block_size, mask
-using TdmDropoutCase = std::tuple<const char*, mode_enum, int, int, int, const char*>;
+// Dropout on the TDM pipelines (fwd and batch_prefill), also with a logits soft cap and a
+// sink. Validation also compares the stored random values. The 1024-row causal case takes
+// qr_tdm's staged M128 traversal.
+// api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask, logits_soft_cap, init_sink
+using TdmDropoutCase =
+    std::tuple<const char*, const char*, mode_enum, int, int, int, const char*, float, int>;
 
 class TdmDropout : public TestWithParam<TdmDropoutCase>
 {
 };
 
-INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         TdmDropout,
-                         Values(TdmDropoutCase{"fwd", mode_enum::batch, 300, 531, 0, "0"},
-                                TdmDropoutCase{"fwd", mode_enum::batch, 300, 531, 0, "b"},
-                                TdmDropoutCase{"fwd", mode_enum::batch, 1024, 1024, 0, "t"},
-                                TdmDropoutCase{"fwd", mode_enum::group, 100, 500, 0, "t:64,32"}));
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    TdmDropout,
+    Values(TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "0", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 1024, 1024, 0, "t", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::group, 100, 500, 0, "t:64,32", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.5f, 1}));
 
 #if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 INSTANTIATE_TEST_SUITE_P(
     BatchPrefill,
     TdmDropout,
-    Values(TdmDropoutCase{"batch_prefill", mode_enum::group, 100, 500, 16, "0"},
-           TdmDropoutCase{"batch_prefill", mode_enum::group, 300, 500, 1, "b"}));
+    Values(TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 100, 500, 16, "0", 0.0f, 0},
+           TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 1, "b", 0.0f, 0},
+           TdmDropoutCase{
+               "batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 16, "t", 0.5f, 1}));
 #endif
 
 TEST_P(TdmDropout, DataTypeConfig)
@@ -1105,48 +1111,63 @@ TEST_P(TdmDropout, DataTypeConfig)
         if(!ck_tile::is_gfx125_supported())
             GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
 
-        const auto [api, mode, seqlen_q, seqlen_k, page_block_size, mask_str] = GetParam();
+        const auto [api,
+                    pipeline,
+                    mode,
+                    seqlen_q,
+                    seqlen_k,
+                    page_block_size,
+                    mask_str,
+                    logits_soft_cap,
+                    init_sink] = GetParam();
         std::string selected_kernel;
-        auto result = fmha_fwd_run<DataTypeConfig>(mode,
-                                                   3,
-                                                   4,
-                                                   2,
-                                                   std::vector<int>(3, seqlen_q),
-                                                   std::vector<int>(3, seqlen_k),
-                                                   128,
-                                                   128,
-                                                   0,
-                                                   {-1},
-                                                   {-1},
-                                                   {},
-                                                   {},
-                                                   0,
-                                                   false,
-                                                   false,
-                                                   0,
-                                                   0.0f,
-                                                   true,
-                                                   true, // lse
-                                                   page_block_size,
-                                                   false,
-                                                   "n",
-                                                   0.2f, // p_drop
-                                                   7,
-                                                   123,
-                                                   false,
-                                                   mask_str,
-                                                   qscale_str,
-                                                   true,
-                                                   1,
-                                                   COMMON_ARGS,
-                                                   std::nullopt,
-                                                   &selected_kernel,
-                                                   "linear",
-                                                   "vllm",
-                                                   api,
-                                                   "qr_tdm");
+        auto result = fmha_fwd_run<DataTypeConfig>(
+            mode,
+            3,
+            4,
+            2,
+            std::vector<int>(3, seqlen_q),
+            std::vector<int>(3, seqlen_k),
+            128,
+            128,
+            0,
+            {-1},
+            {-1},
+            {},
+            {},
+            0,
+            false,
+            false,
+            0,
+            logits_soft_cap,
+            true,
+            true, // lse
+            page_block_size,
+            false,
+            "n",
+            0.2f, // p_drop
+            7,
+            123,
+            false,
+            mask_str,
+            qscale_str,
+            true,
+            1,
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1,
+            init_sink,
+            1,
+            stream_config,
+            std::nullopt,
+            &selected_kernel,
+            "linear",
+            "vllm",
+            api,
+            pipeline);
         CHECK_RESULT(result);
-        EXPECT_NE(selected_kernel.find("_qr_tdm_v"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
         EXPECT_NE(selected_kernel.find("_dropout_"), std::string::npos) << selected_kernel;
     }
 }

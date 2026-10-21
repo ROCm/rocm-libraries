@@ -2150,7 +2150,7 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
 
 class TestGfx125TdmDropoutCodegen(unittest.TestCase):
     """Dropout on gfx1250 runs on fp16/bf16 qr_tdm (fmha_fwd, and batch_prefill below
-    d256), without sink or logits soft cap, and never on qr_tdm_sched/qr_tdm_pingpong.
+    d256), also with sink or a logits soft cap, and never on qr_tdm_sched/qr_tdm_pingpong.
     """
 
     def _check(self, kernels, hdims):
@@ -2163,9 +2163,11 @@ class TestGfx125TdmDropoutCodegen(unittest.TestCase):
         self.assertEqual({k.F_tile.F_bn1 for k in tdm_dropout}, hdims)
         for kernel in tdm_dropout:
             with self.subTest(kernel=kernel.name):
-                self.assertEqual(kernel.F_pipeline.F_sink, "f")
-                self.assertEqual(kernel.F_pipeline.F_logits, "f")
+                if kernel.F_pipeline.F_logits == "t":
+                    self.assertEqual(kernel.F_pipeline.F_bias, "no")
                 self.assertEqual(kernel.F_pipeline.F_qscale, "no")
+        self.assertEqual({k.F_pipeline.F_sink for k in tdm_dropout}, {"f", "t"})
+        self.assertEqual({k.F_pipeline.F_logits for k in tdm_dropout}, {"f", "t"})
 
     def test_fwd(self):
         _, kernels = get_fwd_blobs(
