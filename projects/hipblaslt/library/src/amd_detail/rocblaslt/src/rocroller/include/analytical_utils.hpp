@@ -2,43 +2,37 @@
 // SPDX-License-Identifier: MIT
 
 /*********************************************************
- * Helper for using Origami with rocRoller. *
+ * Helper for describing a kernel's operands to Origami. *
  *********************************************************/
 
 #pragma once
 
-// See kernel_type.hpp for why this is a compile definition and not
-// __has_include.
-#ifdef HIPBLASLT_USE_ROCROLLER
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#else
-#include "rocroller_enums.hpp"
-#endif
+#include "kernel_data_types.hpp"
 
 #include "origami/types.hpp"
 
 /**
- * @brief Convert rocRoller::Datatype to analytical::DataType
+ * @brief Convert hipblaslt::DataType to analytical::DataType
  */
-inline origami::data_type_t rocroller_type_to_analytical_type(rocRoller::DataType type)
+inline origami::data_type_t kernel_data_type_to_analytical_type(hipblaslt::DataType type)
 {
     switch(type)
     {
-        case rocRoller::DataType::Half:
+        case hipblaslt::DataType::Half:
             return origami::data_type_t::Half;
-        case rocRoller::DataType::Float:
+        case hipblaslt::DataType::Float:
             return origami::data_type_t::Float;
-        case rocRoller::DataType::BFloat16:
+        case hipblaslt::DataType::BFloat16:
             return origami::data_type_t::BFloat16;
-        case rocRoller::DataType::FP8:
+        case hipblaslt::DataType::FP8:
             return origami::data_type_t::Float8;
-        case rocRoller::DataType::BF8:
+        case hipblaslt::DataType::BF8:
             return origami::data_type_t::BFloat8;
-        case rocRoller::DataType::FP6:
+        case hipblaslt::DataType::FP6:
             return origami::data_type_t::Float6;
-        case rocRoller::DataType::BF6:
+        case hipblaslt::DataType::BF6:
             return origami::data_type_t::BFloat6;
-        case rocRoller::DataType::FP4:
+        case hipblaslt::DataType::FP4:
             return origami::data_type_t::Float4;
         default:
             return origami::data_type_t::None;

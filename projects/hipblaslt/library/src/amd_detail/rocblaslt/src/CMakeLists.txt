@@ -42,9 +42,10 @@ target_include_directories(hipblaslt-rocroller-selection
         "${CMAKE_CURRENT_SOURCE_DIR}/../include"
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_BINARY_DIR}/library/include")
-# No rocRoller include directory, and so no libfmt either: the ranker names two
-# rocRoller enumerations and nothing else, and takes them from rocroller_enums.hpp.
-# That is what lets a checkout without shared/rocroller build this target.
+# No rocRoller include directory, and so no libfmt either: the ranker describes a
+# kernel with hipBLASLt's own enumerations (kernel_data_types.hpp) and names
+# nothing of rocRoller's. That is what lets a checkout without shared/rocroller
+# build this target.
 target_compile_definitions(hipblaslt-rocroller-selection PRIVATE
     __HIP_PLATFORM_AMD__)
 target_link_libraries(hipblaslt-rocroller-selection PRIVATE

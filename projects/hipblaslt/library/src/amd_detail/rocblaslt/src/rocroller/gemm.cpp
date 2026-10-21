@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "gemm.hpp"
+#include "rocroller_interop.hpp"
 #include "runtime_args_selection.hpp"
 
 #include "utility.hpp"
@@ -63,12 +64,10 @@ void RocRollerGemmKernel::setPredicates()
     commandKernel->addPredicate(unrollKPredicate);
 }
 
-std::string genScaleModeString(Operations::ScaleMode mode)
+std::string genScaleModeString(hipblaslt::ScaleMode mode)
 {
-    if(mode == Operations::ScaleMode::Separate)
+    if(mode == hipblaslt::ScaleMode::Separate)
         return "B";
-    if(mode == Operations::ScaleMode::SingleScale)
-        return "S";
     return "";
 }
 
@@ -86,11 +85,11 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
                          gemm->kernelType.typeAcc})
         rv << toString(t) << "_";
 
-    if(gemm->kernelType.scaleTypeA.mode != Operations::ScaleMode::None)
+    if(gemm->kernelType.scaleTypeA.mode != hipblaslt::ScaleMode::None)
     {
         rv << "SA_" << genScaleModeString(gemm->kernelType.scaleTypeA.mode);
         rv << toString(gemm->kernelType.scaleTypeA.type) << "_";
-        if(gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+        if(gemm->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::Separate)
         {
             rv << gemm->kernelType.scaleTypeA.blockRowSize;
             if(gemm->kernelType.scaleTypeA.blockColSize != 1)
@@ -112,11 +111,11 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
         }
     }
 
-    if(gemm->kernelType.scaleTypeB.mode != Operations::ScaleMode::None)
+    if(gemm->kernelType.scaleTypeB.mode != hipblaslt::ScaleMode::None)
     {
         rv << "SB_" << genScaleModeString(gemm->kernelType.scaleTypeB.mode);
         rv << toString(gemm->kernelType.scaleTypeB.type) << "_";
-        if(gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+        if(gemm->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::Separate)
         {
             rv << gemm->kernelType.scaleTypeB.blockColSize;
             if(gemm->kernelType.scaleTypeB.blockRowSize != 1)
@@ -162,10 +161,10 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
     // -------------------------------------------------------------
     // Create Command object describing problem
 
-    auto dataTypeA = gemm->kernelType.typeA;
-    auto dataTypeB = gemm->kernelType.typeB;
-    auto dataTypeC = gemm->kernelType.typeC;
-    auto dataTypeD = gemm->kernelType.typeD;
+    auto dataTypeA = hipblaslt::toRocRoller(gemm->kernelType.typeA);
+    auto dataTypeB = hipblaslt::toRocRoller(gemm->kernelType.typeB);
+    auto dataTypeC = hipblaslt::toRocRoller(gemm->kernelType.typeC);
+    auto dataTypeD = hipblaslt::toRocRoller(gemm->kernelType.typeD);
 
     auto command = std::make_shared<Command>();
 
@@ -201,14 +200,12 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
     auto mulInputA = tagLoadA;
     auto mulInputB = tagLoadB;
 
-    AssertFatal(gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::None
-                    || gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::SingleScale
-                    || gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate,
+    AssertFatal(gemm->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::None
+                    || gemm->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::Separate,
                 "Scale mode not supported!",
                 ShowValue(gemm->kernelType.scaleTypeA.mode));
-    AssertFatal(gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::None
-                    || gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::SingleScale
-                    || gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate,
+    AssertFatal(gemm->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::None
+                    || gemm->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::Separate,
                 "Scale mode not supported!",
                 ShowValue(gemm->kernelType.scaleTypeB.mode));
 
@@ -216,11 +213,11 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
         tagTensorScaleB, tagLoadScaleB, tagBlockScaleB, tagSKGrid, tagWGM;
     std::map<Operations::ScratchPolicy, Operations::OperationTag> tagScratch;
 
-    if(gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+    if(gemm->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::Separate)
     {
         tagTensorScaleA = command->addOperation(
             rocRoller::Operations::Tensor(2,
-                                          gemm->kernelType.scaleTypeA.type,
+                                          hipblaslt::toRocRoller(gemm->kernelType.scaleTypeA.type),
                                           {},
                                           gemm->kernelType.transA ? oneStridesT : oneStridesN));
         Operations::OperationTag loadScaleInputA = *tagTensorScaleA;
@@ -269,11 +266,11 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
             {gemm->kernelType.scaleTypeA.blockColSize, gemm->kernelType.scaleTypeA.blockRowSize}));
     }
 
-    if(gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+    if(gemm->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::Separate)
     {
         tagTensorScaleB = command->addOperation(
             rocRoller::Operations::Tensor(2,
-                                          gemm->kernelType.scaleTypeB.type,
+                                          hipblaslt::toRocRoller(gemm->kernelType.scaleTypeB.type),
                                           {},
                                           gemm->kernelType.transB ? oneStridesT : oneStridesN));
         Operations::OperationTag loadScaleInputB = *tagTensorScaleB;
@@ -449,7 +446,7 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
         params->setDimensionInfo(tagLoadA, macTileA);
     }
 
-    if(gemm->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+    if(gemm->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::Separate)
     {
         // TODO: verify the division of scale block size is correct
         auto const scaleBlockSize
@@ -480,7 +477,7 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
         params->setDimensionInfo(tagLoadB, macTileB);
     }
 
-    if(gemm->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+    if(gemm->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::Separate)
     {
         // TODO: verify the division of scale block size is correct
         auto const scaleBlockSize
@@ -672,8 +669,9 @@ bool RocRollerGemmKernel::exceedsBufferAddressingLimit(
     // createCommandArguments builds {M,N}/{M,K}/{K,N} descriptors with no leading-dimension
     // padding, and batch_count is always 1 on this path (enforced in getRocRollerBestSolutions).
     constexpr size_t kMaxBufferBytes = size_t(1) << 32; // 4 GiB
-    auto             bytesOf = [](size_t elems, rocRoller::DataType t) -> size_t {
-        return (elems * rocRoller::DataTypeInfo::Get(t).elementBits + 7u) / 8u; // ceil for sub-byte types
+    auto             bytesOf = [](size_t elems, hipblaslt::DataType t) -> size_t {
+        return (elems * rocRoller::DataTypeInfo::Get(hipblaslt::toRocRoller(t)).elementBits + 7u)
+               / 8u; // ceil for sub-byte types
     };
     const size_t M = prob.m, N = prob.n, K = prob.k;
     auto         over = [&](const char* name, size_t bytes) -> bool {
@@ -720,43 +718,47 @@ CommandArguments RocRollerGemmKernel::createCommandArguments(const RocblasltCont
     size_t N = prob.n;
     size_t K = prob.k;
 
-    TensorDescriptor descA(
-        params->kernelType.typeA, {M, K}, params->kernelType.transA ? "T" : "N");
-    TensorDescriptor descB(
-        params->kernelType.typeB, {K, N}, params->kernelType.transB ? "T" : "N");
+    TensorDescriptor descA(hipblaslt::toRocRoller(params->kernelType.typeA),
+                           {M, K},
+                           params->kernelType.transA ? "T" : "N");
+    TensorDescriptor descB(hipblaslt::toRocRoller(params->kernelType.typeB),
+                           {K, N},
+                           params->kernelType.transB ? "T" : "N");
 
     // TODO: Have to typecast void* pointer to something that CommandArgumentValue accepts
     setCommandTensorArg(commandArgs, tagTensorA, descA, (float*)nullptr);
     setCommandTensorArg(commandArgs, tagTensorB, descB, (float*)nullptr);
 
-    if(params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::Separate)
     {
         auto const scaleBlockSize = params->kernelType.scaleTypeA.blockRowSize
                                     * params->kernelType.scaleTypeA.blockColSize;
         TensorDescriptor descAScale(
-            params->kernelType.scaleTypeA.type,
+            hipblaslt::toRocRoller(params->kernelType.scaleTypeA.type),
             {size_t(M), size_t(K / scaleBlockSize)},
             params->kernelType.transA ? "T" : "N");
         setCommandTensorArg(commandArgs, tagTensorScaleA, descAScale, (float*)nullptr);
     }
-    if(params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::Separate)
     {
         auto const scaleBlockSize = params->kernelType.scaleTypeB.blockRowSize
                                     * params->kernelType.scaleTypeB.blockColSize;
         TensorDescriptor descBScale(
-            params->kernelType.scaleTypeB.type,
+            hipblaslt::toRocRoller(params->kernelType.scaleTypeB.type),
             {size_t(K / scaleBlockSize), size_t(N)},
             params->kernelType.transB ? "T" : "N");
         setCommandTensorArg(commandArgs, tagTensorScaleB, descBScale, (float*)nullptr);
     }
 
-    TensorDescriptor descC(params->kernelType.typeC, {M, N}, "N");
+    TensorDescriptor descC(
+        hipblaslt::toRocRoller(params->kernelType.typeC), {M, N}, "N");
     setCommandTensorArg(commandArgs, tagTensorC, descC, (float*)nullptr);
 
     commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, *((float*)prob.alpha));
     commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, *((float*)prob.beta));
 
-    TensorDescriptor descD(params->kernelType.typeD, {M, N}, "N");
+    TensorDescriptor descD(
+        hipblaslt::toRocRoller(params->kernelType.typeD), {M, N}, "N");
     setCommandTensorArg(commandArgs, tagTensorD, descD, (float*)nullptr);
 
     commandArgs.setArgument(tagTensorA, ArgumentType::Value, (float*)prob.A);
@@ -764,12 +766,12 @@ CommandArguments RocRollerGemmKernel::createCommandArguments(const RocblasltCont
     commandArgs.setArgument(tagTensorC, ArgumentType::Value, (float*)prob.C);
     commandArgs.setArgument(tagTensorD, ArgumentType::Value, (float*)prob.D);
 
-    if(params->kernelType.scaleTypeA.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeA.mode == hipblaslt::ScaleMode::Separate)
     {
         commandArgs.setArgument(tagTensorScaleA, ArgumentType::Value, (uint8_t*)prob.scaleA);
     }
 
-    if(params->kernelType.scaleTypeB.mode == Operations::ScaleMode::Separate)
+    if(params->kernelType.scaleTypeB.mode == hipblaslt::ScaleMode::Separate)
     {
         commandArgs.setArgument(tagTensorScaleB, ArgumentType::Value, (uint8_t*)prob.scaleB);
     }
