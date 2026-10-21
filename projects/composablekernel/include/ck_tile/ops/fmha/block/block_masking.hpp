@@ -536,6 +536,25 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // IsOutOfBoundUnsigned for rows that are written out (i_y < y_total); for rows at or past
+    // y_total the answer is unspecified. Without the row test the width is plain arithmetic, so
+    // per element only the subtract, the unsigned compare and the select remain, all in VALU,
+    // instead of lane masks ORed in SALU (each OR waits on the VALU compare it reads).
+    CK_TILE_HOST_DEVICE constexpr bool IsOutOfBoundUnsignedStoredRow(index_t i_y, index_t i_x) const
+    {
+        if constexpr(!IsMasking)
+        {
+            return IsOutOfBound(i_y, i_x);
+        }
+        else
+        {
+            const index_t x_start = -y + i_y + 1;
+            const index_t x_end   = min(i_y + x, x_total);
+            const uint32_t width  = uint32_t(max(x_end - x_start, 0));
+            return uint32_t(i_x) - uint32_t(x_start) >= width;
+        }
+    }
+
     CK_TILE_HOST_DEVICE constexpr auto IsOutOfSinkBound(index_t i_y, index_t i_x) const
     {
         if constexpr(!IsMasking)
