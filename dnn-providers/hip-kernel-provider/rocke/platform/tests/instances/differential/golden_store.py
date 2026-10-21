@@ -122,19 +122,21 @@ class GoldenStore:
         flavor: str | None,
         shas: Mapping[str, Mapping[str, str]],
         families: Iterable[str] | None = None,
-    ) -> None:
-        """Store `shas` for `kind` (and `flavor`).
+    ) -> list[str]:
+        """Store `shas` for `kind` (and `flavor`); return the families whose
+        hashes this removed, sorted, so the caller can say so.
 
         `families=None` is a full record: the section becomes exactly `shas`.
         Otherwise only the named families are replaced (removed when `shas` has
         nothing for one); every other family in the section is kept.
         """
         _check_section(kind, flavor)
+        before = self.section(kind, flavor)
         fresh = {family: dict(configs) for family, configs in shas.items()}
         if families is None:
             merged = fresh
         else:
-            merged = dict(self.section(kind, flavor))
+            merged = dict(before)
             for family in families:
                 if family in fresh:
                     merged[family] = fresh[family]
@@ -144,6 +146,7 @@ class GoldenStore:
             self.ll[flavor] = merged
         else:
             self.ir_canonical = merged
+        return sorted(set(before) - set(merged))
 
 
 @dataclass(frozen=True)

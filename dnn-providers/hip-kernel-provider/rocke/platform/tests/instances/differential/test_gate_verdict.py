@@ -585,6 +585,75 @@ class TestLlModeInvariant(unittest.TestCase):
         self.assertIn(ll, GATE_FAIL)
 
 
+class TestModeRejection(unittest.TestCase):
+    """Only the emitter's own refusal of a mode counts as MODE_UNSUPPORTED.
+
+    A config that raises exits 1 with a traceback, and a traceback can contain
+    any text: file paths, and on newer Pythons the whole multi-line call that
+    failed, including an emitter's `usage="usage: ..."` argument. Reading that
+    as a refused mode used to drop the whole family from the golden."""
+
+    TRACEBACK = (
+        "Traceback (most recent call last):\n"
+        '  File "/src/usage/parity/conv_emit.py", line 9, in main\n'
+        "    return run_emit(\n"
+        '        usage="usage: conv_emit.py <config_index> [ll|ir|verify]\\n",\n'
+        "    )\n"
+        "ValueError: invalid conv spec for gfx950: tile does not divide\n"
+    )
+
+    def test_the_emitters_refusal_is_recognized(self):
+        for message in ("unknown mode 'ir'\n", "usage: gemm_emit <idx> [mode]\n"):
+            with self.subTest(message=message):
+                emission = run_diff.Emission(2, False, None, message)
+                self.assertTrue(run_diff.mode_unsupported(emission))
+
+    def test_a_failing_config_is_not_a_refused_mode(self):
+        emission = run_diff.Emission(1, False, None, self.TRACEBACK)
+        self.assertFalse(run_diff.mode_unsupported(emission))
+
+    def test_a_refusal_needs_the_usage_exit_status_and_no_output(self):
+        refused = "unknown mode 'ir'\n"
+        self.assertFalse(
+            run_diff.mode_unsupported(run_diff.Emission(1, False, None, refused))
+        )
+        self.assertFalse(
+            run_diff.mode_unsupported(run_diff.Emission(2, True, "sha", refused))
+        )
+        # Earlier lines do not count; the refusal is the last thing printed.
+        self.assertFalse(
+            run_diff.mode_unsupported(
+                run_diff.Emission(2, False, None, refused + "error: bad index\n")
+            )
+        )
+
+    def reference_shas(self, emissions):
+        with mock.patch.object(
+            run_diff,
+            "_run_python_batch",
+            return_value=run_diff.BatchResult(emissions),
+        ):
+            return run_diff.python_reference_shas("conv", "ir", True, Path("."))
+
+    def test_a_failing_config_keeps_its_family_in_the_golden(self):
+        end = run_diff.Emission(1, False, None, "unknown config 2\n")
+        shas, error = self.reference_shas(
+            [
+                run_diff.Emission(0, True, "out0", "", canonical_sha="canon0"),
+                run_diff.Emission(1, False, None, self.TRACEBACK),
+                end,
+            ]
+        )
+        self.assertIsNone(error)
+        self.assertEqual(shas, {"0": "canon0"})
+
+    def test_a_refused_mode_records_nothing_for_the_family(self):
+        shas, error = self.reference_shas(
+            [run_diff.Emission(2, False, None, "unknown mode 'ir'\n")]
+        )
+        self.assertEqual((shas, error), ({}, None))
+
+
 class TestMainReturnsTheGateVerdict(unittest.TestCase):
     """The pure rule is only a gate if main() actually returns it."""
 

@@ -566,9 +566,21 @@ def _run_python_batch(
                 reader.join(timeout=1)
 
 
-def mode_unsupported(err: str) -> bool:
-    e = err.lower()
-    return "usage" in e or "unknown mode" in e or "too many arg" in e
+# How an emitter that does not implement a mode rejects it: the same way it
+# rejects any bad argv -- exit status 2, no output, and its own one-line
+# message as the last line on stderr. Only that line is read. A failing config
+# exits 1 with a traceback whose source lines and file paths can contain any
+# text (a traceback can print an emitter's `usage="usage: ..."` argument), so
+# searching the whole stderr would let one rejected config drop its family.
+_MODE_REJECTION_PREFIXES = ("unknown mode", "usage:")
+
+
+def mode_unsupported(emission: Emission) -> bool:
+    """True when `emission` is the emitter refusing the mode itself."""
+    if emission.returncode != 2 or emission.has_output:
+        return False
+    lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
+    return bool(lines) and lines[-1].lower().startswith(_MODE_REJECTION_PREFIXES)
 
 
 def _is_end_emission(emission: Emission) -> bool:
@@ -688,7 +700,7 @@ def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) 
         _is_end_emission(tail)
         or tail.returncode < 0
         or tail.returncode == 124
-        or (mode != "ll" and mode_unsupported(tail.error))
+        or (mode != "ll" and mode_unsupported(tail))
     )
 
 
@@ -743,7 +755,7 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
     range_drift = None
     for idx, (c_emission, p_emission) in enumerate(zip(c_emissions, p_emissions)):
         if mode != "ll" and (
-            mode_unsupported(c_emission.error) or mode_unsupported(p_emission.error)
+            mode_unsupported(c_emission) or mode_unsupported(p_emission)
         ):
             return configs, range_drift, True, None
         c_end = _is_end_emission(c_emission)
@@ -962,7 +974,7 @@ def python_reference_shas(name, mode, canonical, src_dir):
         return {}, f"Python returned {len(emissions)} records{detail}"
     shas = {}
     for idx, emission in enumerate(emissions):
-        if mode != "ll" and mode_unsupported(emission.error):
+        if mode != "ll" and mode_unsupported(emission):
             return {}, None
         if _is_end_emission(emission):
             break
@@ -1239,7 +1251,7 @@ def _golden_step(args, kind, flavor, cur, scope, failures):
                 "nothing blesses FEWER configs than a clean run would, and the "
                 "missing ones return later as NEW (unblessed), not as MISSING."
             )
-        store.record(kind, flavor, cur, families=scope)
+        removed = store.record(kind, flavor, cur, families=scope)
         store.save(golden_file)
         nblessed = sum(len(v) for v in cur.values())
         what = (
@@ -1249,6 +1261,11 @@ def _golden_step(args, kind, flavor, cur, scope, failures):
             f"\nrecorded golden {where} ({what}): {len(cur)} families, {nblessed} "
             f"configs -> {golden_file}"
         )
+        if removed:
+            print(
+                f"REMOVED from the golden {where} (no hashes in this run): "
+                + ", ".join(removed)
+            )
         return 0
 
     blessed = store.section(kind, flavor)

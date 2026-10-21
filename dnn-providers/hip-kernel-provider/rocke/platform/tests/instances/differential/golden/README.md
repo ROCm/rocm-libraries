@@ -47,7 +47,8 @@ Re-bless in the same commit as the change that alters the output, and say in rev
 families changed and why. With `--only <family>` only the matching families are re-recorded;
 every other family keeps its blessed hashes; `--exclude` likewise keeps the excluded families'
 hashes. Without `--only` or `--exclude` the whole section is replaced, so a family that no
-longer exists drops out.
+longer exists drops out. Either way the record prints every family whose hashes it removed;
+check that list before committing.
 
 Never edit the file by hand: it is refused if a key repeats (JSON would silently keep only the
 last copy), and the record step writes it sorted.

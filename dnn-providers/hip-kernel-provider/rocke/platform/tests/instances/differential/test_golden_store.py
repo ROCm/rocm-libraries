@@ -77,8 +77,9 @@ def test_the_ll_section_needs_a_flavor():
 def test_a_full_record_replaces_the_section():
     store = GoldenStore()
     store.record(LL, "llvm20", {"conv": {"0": "a"}, "gemm": {"0": "b"}})
-    store.record(LL, "llvm20", {"conv": {"0": "c"}})
+    removed = store.record(LL, "llvm20", {"conv": {"0": "c"}})
     assert store.section(LL, "llvm20") == {"conv": {"0": "c"}}
+    assert removed == ["gemm"]
 
 
 def test_a_filtered_record_replaces_only_its_families():
@@ -87,13 +88,16 @@ def test_a_filtered_record_replaces_only_its_families():
         IR_CANONICAL, None, {"conv": {"0": "a"}, "gemm": {"0": "b"}, "norm": {"0": "n"}}
     )
     # gemm re-blessed, norm ran but produced nothing, conv was not selected.
-    store.record(
+    removed = store.record(
         IR_CANONICAL, None, {"gemm": {"0": "B", "1": "B1"}}, families=["gemm", "norm"]
     )
     assert store.section(IR_CANONICAL, None) == {
         "conv": {"0": "a"},
         "gemm": {"0": "B", "1": "B1"},
     }
+    # The caller is told which anchors went, so a record that silently
+    # produced nothing for a family cannot pass unnoticed.
+    assert removed == ["norm"]
 
 
 def test_a_check_reports_changed_missing_and_new_configs():
