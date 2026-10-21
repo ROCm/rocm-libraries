@@ -172,6 +172,33 @@ For MIOpen version 2.4 and later
 MIOpen's kernel cache directory is versioned, so cached kernels don't collide when upgrading
 from an earlier version.
 
+.. _build-hipdnn-forwarding:
+
+hipDNN forwarding support
+--------------------------------------------------------------------------------------------------------
+
+To build MIOpen so that it can pass some calls to hipDNN, set ``-DMIOPEN_ENABLE_HIPDNN_WRAPPER=On``.
+The default is ``Off``. hipDNN must be installed where CMake can find it, for example through
+``CMAKE_PREFIX_PATH``.
+
+.. code:: shell
+
+   cmake -DMIOPEN_BACKEND=HIP -DMIOPEN_ENABLE_HIPDNN_WRAPPER=On ..
+
+With this option, MIOpen is built as two libraries instead of one:
+
+* ``libMIOpen.so``: the library your program links against, with the same name and API as before.
+* ``libMIOpen_private.so``: the MIOpen implementation, which ``libMIOpen.so`` depends on.
+
+Always install both libraries from the same build. Mixing versions is not supported.
+
+Programs that link to MIOpen through CMake (``find_package(miopen)``) need no changes. A program
+that links with a hand-written ``-lMIOpen`` and uses functions that aren't declared in
+``miopen/miopen.h`` must also link with ``-lMIOpen_private``.
+
+Building with this option doesn't turn forwarding on. To turn it on, see
+:doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.
+
 Changing the CMake configuration
 --------------------------------------------------------------------------------------------------------
 
