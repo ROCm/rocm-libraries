@@ -147,48 +147,4 @@ private:
     bool        graph_testing;
 };
 
-/*! \brief  Sparse vector descriptor which is destroyed when it goes out of scope. */
-class hipsparseLocalSpVec
-{
-    hipsparseSpVecDescr_t descr{};
-
-public:
-    hipsparseLocalSpVec(int64_t              size,
-                        int64_t              nnz,
-                        void*                indices,
-                        void*                values,
-                        hipsparseIndexType_t idxType,
-                        hipsparseIndexBase_t idxBase,
-                        hipDataType          valueType)
-    {
-        const hipsparseStatus_t status = hipsparseCreateSpVec(
-            &descr, size, nnz, indices, values, idxType, idxBase, valueType);
-        if(status != HIPSPARSE_STATUS_SUCCESS)
-        {
-            if(descr != nullptr)
-            {
-                hipsparseDestroySpVec(descr);
-                descr = nullptr;
-            }
-            throw(status);
-        }
-    }
-
-    ~hipsparseLocalSpVec()
-    {
-        if(descr != nullptr)
-        {
-            hipsparseDestroySpVec(descr);
-        }
-    }
-
-    hipsparseLocalSpVec(const hipsparseLocalSpVec&)            = delete;
-    hipsparseLocalSpVec& operator=(const hipsparseLocalSpVec&) = delete;
-
-    operator hipsparseSpVecDescr_t() const
-    {
-        return descr;
-    }
-};
-
 #endif // HIPSPARSE_LOCAL_HANDLE_HPP
