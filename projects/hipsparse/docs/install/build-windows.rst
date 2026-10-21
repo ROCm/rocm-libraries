@@ -38,7 +38,8 @@ Building hipSPARSE from source also requires the following components and depend
 
 *  `rocSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
 *  `git <https://git-scm.com/>`_
-*  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
+*  `CMake <https://cmake.org/>`_ (Version 3.25.2 or later)
+*  `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.11.0 or later, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it)
 *  `vcpkg <https://github.com/Microsoft/vcpkg.git>`_
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 *  `Python <https://www.python.org/>`_

@@ -35,8 +35,18 @@ The build also requires the following compile-time dependencies:
 
 *  `rocSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
 *  `git <https://git-scm.com/>`_
-*  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
+*  `CMake <https://cmake.org/>`_ (Version 3.25.2 or later)
+*  `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.11.0 or later)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
+
+By default, the CMake build doesn't download ROCm CMake or GoogleTest. If CMake can't find one of them,
+the configuration step stops with an error naming it.
+Add the install prefix of the dependency to ``CMAKE_PREFIX_PATH`` if it isn't installed in a default location.
+To download ROCm CMake and GoogleTest when they aren't installed, configure with ``-DALLOW_FETCH_DEPS=ON``.
+This requires network access during configuration.
+If GoogleTest isn't installed, you can instead build it from a local source tree without network access
+by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
+Building the tests still downloads the test matrices unless ``CMAKE_MATRICES_DIR`` points at a directory that contains them.
 
 Downloading hipSPARSE
 -------------------------
@@ -97,7 +107,7 @@ The following table lists the common ways to use ``install.sh`` to build the hip
    :widths: 30, 100
 
    "``./install.sh -h``", "Print the help information."
-   "``./install.sh -d``", "Build the dependencies and library in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of the script, it isn't necessary to rebuild the dependencies."
+   "``./install.sh -d``", "Install the build dependencies using the distribution package manager, then build the library in your local directory. The ``-d`` flag only needs to be used once."
    "``./install.sh``", "Build the library in your local directory. The script assumes the dependencies are available."
    "``./install.sh -i``", "Build the library, then build and install the hipSPARSE package in ``/opt/rocm/hipsparse``. The script prompts you for ``sudo`` access. This installs hipSPARSE for all users."
 
@@ -111,9 +121,9 @@ The clients contains example code and unit tests. Common use cases of ``install.
    :widths: 30, 100
 
    "``./install.sh -h``", "Print the help information."
-   "``./install.sh -dc``", "Build the dependencies, library, and client in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of the script, it isn't necessary to rebuild the dependencies."
+   "``./install.sh -dc``", "Install the build dependencies using the distribution package manager, then build the library and client in your local directory. The ``-d`` flag doesn't install GoogleTest, which the client requires. The ``-d`` flag only needs to be used once."
    "``./install.sh -c``", "Build the library and client in your local directory. The script assumes the dependencies are available."
-   "``./install.sh -idc``", "Build the library, dependencies, and client, then build and install the hipSPARSE package in ``/opt/rocm/hipsparse``. The script prompts you for ``sudo`` access. This installs hipSPARSE and the clients for all users."
+   "``./install.sh -idc``", "Install the build dependencies, build the library and client, then build and install the hipSPARSE package in ``/opt/rocm/hipsparse``. The script prompts you for ``sudo`` access. This installs hipSPARSE and the clients for all users."
    "``./install.sh -ic``", "Build the library and client, then build and install the hipSPARSE package in ``opt/rocm/hipsparse``. The script prompts you for ``sudo`` access. This installs hipSPARSE and the clients for all users"
 
 Building hipSPARSE using individual make commands
@@ -127,7 +137,7 @@ You can build hipSPARSE using the following commands:
 
 .. note::
 
-   CMake 3.5 or later is required to build hipSPARSE.
+   CMake 3.25.2 or later is required to build hipSPARSE.
 
 .. code-block:: bash
 
@@ -147,17 +157,13 @@ You can build hipSPARSE with the dependencies and clients using the following co
 
 .. note::
 
-   GoogleTest is required to build the hipSPARSE clients.
+   GoogleTest is required to build the hipSPARSE clients. Install it, for example the ``libgtest-dev`` or
+   ``gtest-devel`` package, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it.
 
 .. code-block:: shell
 
-   # Install GoogleTest
-   mkdir -p build/release/deps ; cd build/release/deps
-   cmake ../../../deps
-   make -j$(nproc) install
-
-   # Change to build directory
-   cd ..
+   # Create and change to build directory
+   mkdir -p build/release ; cd build/release
 
    # Default install path is /opt/rocm, use -DCMAKE_INSTALL_PREFIX=<path> to adjust it
    cmake ../.. -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_SAMPLES=ON
