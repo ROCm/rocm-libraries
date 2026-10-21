@@ -646,6 +646,10 @@ private:
 
             std::vector<KernelDefinition> packDefinitions;
             packDefinitions.reserve(pack.kernels.size());
+            // What this pack's native handler launches, read once per pack. The empty set is
+            // a single-launch handler, which reads `kernel_source`.
+            const std::set<std::string> handlerLaunches
+                = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
             for(const auto& kernel : pack.kernels)
             {
                 const auto isAdaptable = [](const KernelSource& source) {
@@ -668,6 +672,40 @@ private:
                                      << " declares a source kind this build has no adapter for;"
                                         " only EMBEDDED_SOURCE and KPACK are implemented,"
                                         " dropping it");
+                    continue;
+                }
+
+                // RFC 0017 §8.6: an accepted kernel is always launchable. A handler launches
+                // exactly the launches it declares, so a kernel carrying any other set --
+                // fewer, more, or the same number under other names -- is dropped here,
+                // before applicability, rather than failing at plan build.
+                std::set<std::string> kernelLaunches;
+                for(const auto& launch : kernel.sources)
+                {
+                    kernelLaunches.insert(launch.first);
+                }
+                if(kernelLaunches != handlerLaunches)
+                {
+                    const auto spell = [](const std::set<std::string>& names) {
+                        if(names.empty())
+                        {
+                            return std::string("{} (one launch, 'kernel_source')");
+                        }
+                        std::string text = "{";
+                        for(const auto& name : names)
+                        {
+                            text += (text.size() > 1 ? ", " : "") + name;
+                        }
+                        return text + "}";
+                    };
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                     << " carries the launches " << spell(kernelLaunches)
+                                     << ", but the dispatch handler of "
+                                     << describeDescriptor("pack", pack.name, pack.id)
+                                     << " launches " << spell(handlerLaunches)
+                                     << "; a variant with a different launch set belongs in its"
+                                        " own pack, dropping it");
                     continue;
                 }
 
