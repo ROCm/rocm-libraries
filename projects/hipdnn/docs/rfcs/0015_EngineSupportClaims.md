@@ -761,25 +761,37 @@ default: it multiplies the document size to no visual effect, and a large enough
 stops rendering on GitHub at all.
 
 **Sidecar as source of truth.** The `support.json` sidecars are authoritative; the matrix is
-derived. It is **generated on demand and not committed** — a contributor who wants it runs the
-renderer against their checkout. This is deliberate: the rendered document is large and grows
-with every bundle and every gfx target added, which makes it both a large diff on every sidecar
-edit and close enough to the size at which GitHub stops rendering markdown to be a liability.
-Not committing it also removes the drift problem outright rather than policing it: there is no
-second copy to go stale.
+derived. The full matrix is **generated on demand and not committed** — a contributor who wants
+it runs the renderer against their checkout. This is deliberate: the rendered document is large
+and grows with every bundle and every gfx target added, which makes it both a large diff on every
+sidecar edit and close enough to the size at which GitHub stops rendering markdown to be a
+liability. Not committing it also removes its drift problem outright: there is no full second
+copy to go stale. The one committed projection, the overview below, is checked instead.
 
-The cost is that a support change is no longer visible in a pull request diff, and a reader
-cannot browse the matrix on the web without a checkout. Reviewers of a sidecar change should
-regenerate locally to see the delta. If the document is ever made small enough to commit —
-projecting only the overview and per-variant tables, which are ~18% of it and carry essentially
-every claim change — the freshness lint below should come back with it.
+The cost is that the full document is not in a pull request diff, and a reader cannot browse
+it on the web without a checkout. A compact overview recovers most of that:
+`render_support_matrix.py --overview-only` writes
+`dnn-providers/integration-tests/SUPPORT_MATRIX_OVERVIEW.md`, the per-target overview tables
+alone, small enough to render on GitHub. The overview **is committed**, so a claim change shows
+in the diff as a changed family row, and it is regenerated in the same commit as the sidecars
+it reflects — `harvest_support_claims.py --write` (§12.3) does so itself. Reviewers who want
+the per-variant detail regenerate the full matrix locally.
 
-What remains in CI is the weaker but still useful half: the `render-support-matrix` pre-commit
-hook renders the matrix and discards it, failing if any sidecar cannot be resolved. That catches
-a malformed or orphaned sidecar at commit time. `render_support_matrix.py --check` still exists
-and compares a rendering against a file on disk, for anyone who does keep a local copy; it is no
-longer wired into CI. Claim *correctness* is enforced separately by `verify-support-claims`
-(§9.3) and by the integration tests themselves (§4).
+**Freshness.** Three checks keep the sidecars and the overview in step:
+
+- The `render-support-matrix` pre-commit hook renders the full matrix and discards it, failing
+  if any sidecar cannot be resolved: a malformed or orphaned sidecar, or a claim on an unknown
+  case.
+- The `check-support-matrix-overview` pre-commit hook runs `--overview-only --check`, failing
+  if the committed overview differs from a fresh render.
+- Both hooks see only the files pre-commit passes them, and the top-level `exclude` in
+  `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook, so a commit
+  that changes only sidecars triggers neither. The `hipdnn_support_matrix_renderer_python_tests`
+  ctest covers that case: it runs in `hipdnn-superbuild-ci` on every change under
+  `dnn-providers/`, renders the real tree, and fails if the committed overview is stale.
+
+Claim *correctness* is enforced separately by `verify-support-claims` (§9.3) and by the
+integration tests themselves (§4).
 
 Two clarifications. (1) The matrix row key `(operation, layout, dtype, scenario)` is
 *coarser* than the actual claim key (the on-disk graph, §4): two bundles — or two sweep cases —
