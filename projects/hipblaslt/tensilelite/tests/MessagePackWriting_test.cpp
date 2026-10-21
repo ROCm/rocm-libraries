@@ -662,12 +662,22 @@ TEST(MessagePackWritingTest, IndexedLibraryWritesAsItsEagerForm)
         return;
     }
 
-    auto eager   = MessagePackWriteLibraryData(*lib);
-    auto indexed = loadData(MessagePackWriteIndexedLibraryData(*lib));
+    auto eager        = MessagePackWriteLibraryData(*lib);
+    auto indexedBytes = MessagePackWriteIndexedLibraryData(*lib);
+    auto indexed      = loadData(indexedBytes);
     ASSERT_NE(indexed, nullptr) << "solution slices from the writer did not load as a blob";
     ASSERT_NE(indexed->blobCache, nullptr);
     EXPECT_EQ(indexed->blobCache->materializedCount(), 0u);
 
+    // The indexed writer copies the slices a blob cache already holds, so
+    // writing a lazily loaded library reproduces the document without parsing
+    // any of it. Check this before the eager write below, which must parse.
+    EXPECT_EQ(MessagePackWriteIndexedLibraryData(*indexed), indexedBytes)
+        << "copied slices must reproduce the document they came from";
+    EXPECT_EQ(indexed->blobCache->materializedCount(), 0u)
+        << "the indexed writer must not materialize a lazy library";
+
+    // The eager layout has nowhere to put unparsed bytes, so this one does.
     EXPECT_EQ(MessagePackWriteLibraryData(*indexed), eager)
         << "an indexed library must write the same document as its eager form";
     EXPECT_EQ(indexed->blobCache->materializedCount(), lib->solutions.size());
@@ -937,7 +947,10 @@ TEST_F(MessagePackWritingLazyTest, IndexedDocumentKeepsFormatVersion2)
     auto eagerHandle
         = msgpack::unpack(reinterpret_cast<const char*>(eagerBare.data()), eagerBare.size());
     auto eagerKeys = mapKeys(eagerHandle.get());
+    // Both keys carry their absent value here, so the optional mapping with a
+    // default omits them rather than writing the default back out.
     EXPECT_EQ(std::find(eagerKeys.begin(), eagerKeys.end(), "version"), eagerKeys.end());
+    EXPECT_EQ(std::find(eagerKeys.begin(), eagerKeys.end(), "format_version"), eagerKeys.end());
 
     auto bareBytes
         = MessagePackWriteIndexedLibraryData(*bare);

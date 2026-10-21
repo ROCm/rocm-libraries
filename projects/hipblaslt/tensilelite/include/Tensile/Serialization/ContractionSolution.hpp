@@ -70,7 +70,12 @@ namespace TensileLite
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
                 iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
-                s.validatePersistentLoopArgs();
+                // Read path only: this throws, and a throw out of a trait on the
+                // write path leaves the output half-built and bypasses the error
+                // list that finish() reports through. Re-encoding a solution that
+                // already loaded must not fail for a reason unrelated to encoding.
+                if(!iot::outputting(io))
+                    s.validatePersistentLoopArgs();
                 iot::mapRequired(io, "problemType", s.problemType);
             }
 
