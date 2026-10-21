@@ -973,14 +973,16 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>), gemvt_KARGS(alpha, beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(alpha, beta));
             }
             else
             {
                 if(!*alpha && *beta == 1)
                     return rocblas_status_success;
 
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>), gemvt_KARGS(*alpha, *beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(*alpha, *beta));
             }
         }
 
@@ -1303,14 +1305,16 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             dim3                 gemvt_threads(NB);
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>), gemvt_KARGS(alpha, beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(alpha, beta));
             }
             else
             {
                 if(!*alpha && *beta == 1)
                     return rocblas_status_success;
 
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>), gemvt_KARGS(*alpha, *beta));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                      gemvt_KARGS(*alpha, *beta));
             }
         }
         //Using kernel code with warp reduction.
