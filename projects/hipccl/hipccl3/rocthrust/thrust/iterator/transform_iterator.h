@@ -275,18 +275,18 @@ public:
   THRUST_HOST_DEVICE transform_iterator& operator=(transform_iterator const& other)
   {
     super_t::operator=(other);
-    if constexpr (THRUST_TRAIT(_THRUST_STD::is_copy_assignable, AdaptableUnaryFunction))
+    if constexpr (_THRUST_STD::is_copy_assignable_v<AdaptableUnaryFunction>)
     {
       m_f = other.m_f;
     }
-    else if constexpr (THRUST_TRAIT(_THRUST_STD::is_copy_constructible, AdaptableUnaryFunction))
+    else if constexpr (_THRUST_STD::is_copy_constructible_v<AdaptableUnaryFunction>)
     {
       ::internal::__destroy_at(&m_f);
       ::internal::__construct_at(&m_f, other.m_f);
     }
     else
     {
-      static_assert(THRUST_TRAIT(_THRUST_STD::is_copy_constructible, AdaptableUnaryFunction),
+      static_assert(_THRUST_STD::is_copy_constructible_v<AdaptableUnaryFunction>,
                     "Cannot use thrust::transform_iterator with a functor that is neither copy constructible nor "
                     "copy assignable");
     }
