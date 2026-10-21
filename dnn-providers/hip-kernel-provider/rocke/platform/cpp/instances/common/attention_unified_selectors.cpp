@@ -1306,6 +1306,7 @@ bool rocke_unified_attn_segm_descriptors(rocke_ir_builder_t* b,
 bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
                                                  const rocke_unified_attn_problem_t* p,
                                                  rocke_value_t* block_tables,
+                                                 rocke_value_t* bt_stride,
                                                  rocke_value_t* seq_idx,
                                                  rocke_value_t* kpos,
                                                  rocke_value_t** out_physical,
@@ -1313,19 +1314,17 @@ bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
 {
     rocke_value_t* block_idx = NULL;
     rocke_value_t* token_in_block = NULL;
-    int max_blocks;
     rocke_value_t* physical;
 
     if(!rocke_unified_attn_magic_div_mod(b, kpos, p->block_size, &block_idx, &token_in_block))
     {
         return false;
     }
-    max_blocks = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-    physical = rocke_b_global_load_i32(
-        b,
-        block_tables,
-        rocke_b_add(b, rocke_b_mul(b, seq_idx, rocke_b_const_i32(b, max_blocks)), block_idx),
-        0 /* align default */);
+    physical
+        = rocke_b_global_load_i32(b,
+                                  block_tables,
+                                  rocke_b_add(b, rocke_b_mul(b, seq_idx, bt_stride), block_idx),
+                                  0 /* align default */);
 
     if(out_physical != NULL)
     {
@@ -1344,6 +1343,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
                                                 rocke_value_t* query,
                                                 rocke_value_t* key,
                                                 rocke_value_t* block_tables,
+                                                rocke_value_t* bt_stride,
                                                 rocke_value_t* seq_idx,
                                                 rocke_value_t* q_tok,
                                                 rocke_value_t* q_head,
@@ -1365,7 +1365,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
     int d;
 
     if(!rocke_unified_attn_physical_block_and_token(
-           b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
+           b, p, block_tables, bt_stride, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }
@@ -1444,6 +1444,7 @@ rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
                                               const rocke_type_t* dtype,
                                               rocke_value_t* value,
                                               rocke_value_t* block_tables,
+                                              rocke_value_t* bt_stride,
                                               rocke_value_t* seq_idx,
                                               rocke_value_t* kv_head,
                                               rocke_value_t* kpos,
@@ -1455,7 +1456,7 @@ rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
     rocke_value_t* v_off;
 
     if(!rocke_unified_attn_physical_block_and_token(
-           b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
+           b, p, block_tables, bt_stride, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }
