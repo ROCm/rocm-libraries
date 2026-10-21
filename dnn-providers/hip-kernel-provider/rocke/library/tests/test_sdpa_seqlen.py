@@ -125,3 +125,37 @@ def test_cu_seqlens_non_integer_dtype_rejected():
     kv = np.array([4, 4], dtype=np.int32)
     with pytest.raises(ValueError, match="integer dtype"):
         sdpa_cu_seqlens(q, kv, batch=2)
+
+
+# --- validation hardening: overflow, pairing, no-op -----------------------
+
+
+def test_int64_length_out_of_int32_range_rejected():
+    # The range check must run on a widened copy BEFORE narrowing, or an int64
+    # length wraps to a small value and passes (2**32 + 3 -> 3).
+    q = np.array([2**32 + 3, 4], dtype=np.int64)
+    kv = np.array([4, 4], dtype=np.int64)
+    with pytest.raises(ValueError, match="int32"):
+        sdpa_cu_seqlens(q, kv, batch=2)
+
+
+def test_cu_seqlens_total_overflow_rejected():
+    # The packed token total must not silently wrap int32 in the prefix sum.
+    q = np.array([2**31 - 1, 4], dtype=np.int64)
+    kv = np.array([4, 4], dtype=np.int64)
+    with pytest.raises(ValueError, match="exceeds int32"):
+        sdpa_cu_seqlens(q, kv, batch=2)
+
+
+@pytest.mark.parametrize("q,kv", [(np.array([3, 2]), None), (None, np.array([4, 4]))])
+def test_one_sided_lengths_rejected(q, kv):
+    # Q and KV lengths must be both set or both unset, for both adapters.
+    with pytest.raises(ValueError, match="both be set or both unset"):
+        sdpa_cu_seqlens(q, kv, batch=2)
+    with pytest.raises(ValueError, match="both be set or both unset"):
+        sdpa_seqlens(q, kv, batch=2, s_q_max=8, s_kv_max=8)
+
+
+def test_both_unset_is_a_noop():
+    assert sdpa_cu_seqlens(None, None, batch=2) == (None, None)
+    assert sdpa_seqlens(None, None, batch=2, s_q_max=8, s_kv_max=8) == (None, None)
