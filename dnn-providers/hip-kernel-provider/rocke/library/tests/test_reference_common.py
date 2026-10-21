@@ -743,13 +743,42 @@ def test_reference_path_options_require_explicit_scope(options, message):
         start_reference_session(SimpleNamespace(getoption=options.get))
 
 
+def _relocate(monkeypatch, tmp_path, operation, layout):
+    """Place an operation's package in a source checkout or an installed test tree.
+
+    Recovery hints depend on the tree around the package, so a test that
+    relocates it checks each layout's hint from either layout.
+    """
+    from importlib import import_module
+
+    tests = tmp_path / (
+        "bin/hip_kernel_provider/tests/library/tests"
+        if layout == "installed"
+        else "rocke/library/tests"
+    )
+    contract = import_module(f"{operation}_reference.contract")
+    monkeypatch.setattr(
+        contract, "__file__", str(tests / f"{operation}_reference/contract.py")
+    )
+    return tests.resolve()
+
+
+def _track(tests, operation, architecture):
+    """Add the DVC pointer that a source checkout keeps for a published archive."""
+    pointer = tests / f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text("outs:\n")
+    return pointer
+
+
 @pytest.mark.parametrize(
     "operation,architecture",
     [("sdpa", "gfx942"), ("conv", "gfx942"), ("sdpa", "gfx1200")],
 )
+@pytest.mark.parametrize("layout", ["source", "installed"])
 @pytest.mark.parametrize("selected", [False, True])
 def test_reference_missing_bundle_fails_only_when_selected(
-    operation, architecture, selected, tmp_path, monkeypatch
+    operation, architecture, layout, selected, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -758,12 +787,20 @@ def test_reference_missing_bundle_fails_only_when_selected(
     from rocke.runtime import hip_module
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    spec = gpu_tests.OPERATION
     monkeypatch.setattr(
         hip_module, "get_device_target_id", lambda device=0: architecture
     )
     monkeypatch.setattr(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
     )
+    tests = _relocate(monkeypatch, tmp_path, operation, layout)
+    # A published pair has a committed lock and, in a source checkout, a DVC
+    # pointer beside the default bundle; gfx1200 SDPA is enrolled but unpublished.
+    published = spec.architectures.baseline_lock(architecture).is_file()
+    pointer = tests / f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
+    if layout == "source" and published:
+        _track(tests, operation, architecture)
     options = {"--rocke-reference-operation": operation if selected else None}
     config = SimpleNamespace(getoption=options.get)
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
@@ -778,16 +815,27 @@ def test_reference_missing_bundle_fails_only_when_selected(
         if selected
         else f"no extracted {architecture} {name} reference bundle at"
     ) in message
-    # A source checkout tracks each published archive beside the default bundle.
-    pointer = Path(__file__).parent / (
-        f"reference_bundles/{operation}/{architecture}.tar.gz.dvc"
-    )
-    if pointer.is_file():
+    if layout == "installed":
+        # Installation stages published bundles; there is nothing to fetch.
+        installed = tmp_path.resolve() / (
+            "bin/hip_kernel_provider/engines/test_arch_content/rocke/"
+            f"{operation}/{architecture}"
+        )
+        assert (
+            f"installed trees receive the published {architecture} {spec.label} "
+            f"bundle at {installed} only when built with "
+            "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON"
+        ) in message
+        assert "dvc pull" not in message
+    elif published:
         assert "fetch and extract it with dvc pull and artifact.py unpack" in message
-        assert f"reference_bundles/{operation}/{architecture}.tar.gz.dvc" in message
+        assert f"dvc pull {pointer}\n" in message
         assert f"artifact.py unpack --operation {operation} " in message
     else:
-        assert f"no published {architecture} {name} archive is tracked" in message
+        assert (
+            f"no published {architecture} {spec.label} archive is tracked at {pointer}"
+        ) in message
+        assert "installed trees" not in message
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -1577,6 +1625,8 @@ def test_verify_subset_runs_selected_cases_and_says_it_is_partial(
     ran = []
 
     def verify_case(self, case, **kwargs):
+        # A failure's rerun command repeats the lock that authenticated the bundle.
+        assert kwargs["lock"] == lock
         ran.append(case.id)
         return {"case": case.id}
 
@@ -1811,13 +1861,17 @@ if __name__ == "__main__":
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("layout", ["source", "installed"])
 @pytest.mark.parametrize(
     "problem", ["stale", "no-manifest", "modified", "archive", "candidate"]
 )
 def test_rejected_bundles_say_how_to_replace_them(
-    tmp_path, monkeypatch, operation, problem
+    tmp_path, monkeypatch, operation, layout, problem
 ):
     spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    tests = _relocate(monkeypatch, tmp_path, operation, layout)
+    if layout == "source":
+        pointer = _track(tests, operation, architecture)
     if problem != "candidate":
         # The committed lock authenticates the published bundle.
         monkeypatch.setattr(spec.architectures, "baseline_lock", lambda name: lock)
@@ -1857,13 +1911,27 @@ def test_rejected_bundles_say_how_to_replace_them(
         assert "dvc pull" not in message
     elif problem == "archive":
         assert f"artifact.py unpack --operation {operation} " in message
+    elif layout == "installed":
+        # Installation does not replace a directory either, and needs no fetch.
+        installed = tmp_path.resolve() / (
+            "bin/hip_kernel_provider/engines/test_arch_content/rocke/"
+            f"{operation}/{architecture}"
+        )
+        assert "stale (left from an earlier archive)" in message
+        assert (
+            f"delete {bundle.resolve()}, then reinstall the tests from one build; "
+            f"installation stages the published {architecture} {spec.label} bundle "
+            f"at {installed} from the archive that the installed lock pins"
+        ) in message
+        assert "dvc pull" not in message
+        assert message.endswith(_WORKFLOW_DOC)
     else:
         # Unpack does not replace a directory, so the stale one goes first.
         assert "stale (left from an earlier archive)" in message
         assert (
             f"delete {bundle.resolve()}, then re-run dvc pull and artifact.py unpack:"
         ) in message
-        assert f"reference_bundles/{operation}/{architecture}.tar.gz.dvc" in message
+        assert f"dvc pull {pointer}\n" in message
         assert f"artifact.py unpack --operation {operation} --archive " in message
         assert f"--bundle {bundle.resolve()} --lock {lock.resolve()}" in message
         assert message.endswith(_WORKFLOW_DOC)
@@ -1896,7 +1964,9 @@ def test_unpack_explains_a_stale_archive_or_extracted_bundle(tmp_path, operation
     assert (
         f"sha256 {old_digest[:12]}, newer-lock.json pins {new_digest[:12]}" in message
     )
-    assert f"fetch that archive with: dvc pull {archive}.dvc" in message
+    # An untracked archive cannot be fetched again; only the mismatch is stated.
+    assert f"{archive} is not the archive that {newer} pins" in message
+    assert "dvc pull" not in message
     current = tmp_path / "current.tar.gz"
     pack(bundle, current, newer, operation=operation)
     with pytest.raises(ValueError, match="does not match the pinned lock") as error:
@@ -1907,3 +1977,157 @@ def test_unpack_explains_a_stale_archive_or_extracted_bundle(tmp_path, operation
     shutil.rmtree(output)
     unpack(current, output, newer, operation=operation)
     validate_bundle(output, newer, operation=operation)
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(
+    "pairing",
+    ["published", "another-architecture", "candidate-archive", "candidate-lock"],
+)
+def test_unpack_suggests_a_fetch_only_for_a_published_pair(
+    tmp_path, operation, pairing
+):
+    """Fetching again repairs only a DVC-tracked archive and its committed lock.
+
+    The CLI runs from a tree whose archives the committed locks no longer pin,
+    as configuration does after a lock update without a fetch.
+    """
+    tests = tmp_path / "tests"
+    script = tests / "reference_common/artifact.py"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(_SCRIPT.read_bytes())
+    package = tests / f"{operation}_reference"
+    (package / "architectures").mkdir(parents=True)
+    (package / "architectures/registry.json").write_text('["gfx942", "gfx950"]\n')
+    (package / "operation.json").write_text(
+        json.dumps({"manifest_operation": manifest_operation(operation)})
+    )
+    bundle, lock = _fixture(tmp_path, operation)
+    newer = json.dumps(dict(json.loads(lock.read_text()), manifest_sha256="0" * 64))
+    archives = tests / "reference_bundles" / operation
+    archives.mkdir(parents=True)
+    for architecture in ("gfx942", "gfx950"):
+        pack(bundle, archives / f"{architecture}.tar.gz", lock, operation=operation)
+        (archives / f"{architecture}.tar.gz.dvc").write_text("outs:\n")
+        committed = package / "architectures" / architecture / "baseline_lock.json"
+        committed.parent.mkdir()
+        committed.write_text(newer)
+    candidate = tmp_path / "candidate.tar.gz"
+    pack(bundle, candidate, lock, operation=operation)
+    candidate_lock = tmp_path / "qualification-lock.json"
+    candidate_lock.write_text(newer)
+    gfx942_lock = package / "architectures/gfx942/baseline_lock.json"
+    archive, selected = {
+        "published": (archives / "gfx942.tar.gz", gfx942_lock),
+        "another-architecture": (archives / "gfx950.tar.gz", gfx942_lock),
+        "candidate-archive": (candidate, candidate_lock),
+        "candidate-lock": (archives / "gfx942.tar.gz", candidate_lock),
+    }[pairing]
+    output = tmp_path / "extracted"
+    result = _run(
+        "unpack",
+        "--operation",
+        operation,
+        "--archive",
+        archive,
+        "--bundle",
+        output,
+        "--lock",
+        selected,
+        script=script,
+    )
+    assert result.returncode != 0
+    assert "GPU reference manifest does not match the pinned lock" in result.stderr
+    assert f"{archive} is not the archive that {selected} pins" in result.stderr
+    fetch = f"; fetch that archive with: dvc pull {archive}.dvc"
+    assert (fetch in result.stderr) == (pairing == "published")
+    assert ("dvc pull" in result.stderr) == (pairing == "published")
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("lock", [None, "committed", "candidate"])
+def test_rerun_command_repeats_the_failing_bundle_and_lock(
+    tmp_path, monkeypatch, operation, lock
+):
+    """A failing candidate's rerun must not check it against the committed lock."""
+    import re
+    import shlex
+
+    from reference_common import cli as common_cli
+
+    spec, architecture, case, manifest, output = _verifiable_case(
+        monkeypatch, operation
+    )
+    entry = manifest["cases"][case.id]
+    changed = decode(output, case.dtype).copy()
+    changed.flat[0] += 100
+    changed = encode(changed, case.dtype)
+
+    def worker(request, **kwargs):
+        current = request["mode"] == "source"
+        return [output, changed if current else output], {
+            "device_target": entry["device_target"],
+            "launches": 2,
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    selected = {
+        None: None,
+        "committed": spec.architectures.baseline_lock(architecture),
+        "candidate": tmp_path / "qualification-lock.json",
+    }[lock]
+    bundle = tmp_path / "bundle"
+    with pytest.raises(AssertionError) as error:
+        spec.verify_case(
+            case,
+            bundle=bundle,
+            manifest=manifest,
+            lock=selected,
+            architecture=architecture,
+        )
+    (rerun,) = re.findall(r"rerun only this case with `([^`]+)`", str(error.value))
+    python, script, *arguments = shlex.split(rerun)
+    # The script is installed beside the tests, so the command runs in both layouts.
+    assert python == "python"
+    assert Path(script).is_file()
+    assert Path(script).resolve() == (
+        Path(__file__).with_name(f"run_{operation}_reference.py").resolve()
+    )
+    args = spec._parser().parse_args(arguments)
+    assert (args.command, args.arch, args.cases) == ("verify", architecture, [case.id])
+    assert args.bundle.resolve() == bundle.resolve()
+    # The committed lock is the default, so only a candidate lock is repeated.
+    if lock == "candidate":
+        assert args.lock.resolve() == selected.resolve()
+    else:
+        assert args.lock is None
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize("candidate", [False, True])
+def test_pinned_correctness_verifies_with_the_selected_lock(
+    tmp_path, monkeypatch, operation, candidate
+):
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from reference_common.cli import ReferenceOperation
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    registry = gpu_tests.OPERATION.architectures
+    architecture = registry.ARCHITECTURES[0]
+    target = registry.get_architecture(architecture)
+    lock = tmp_path / "qualification-lock.json" if candidate else None
+    locks = []
+
+    def verify_case(self, case, **kwargs):
+        locks.append(kwargs["lock"])
+        return {"torch_imported": False, "old_launches": 2, "current_launches": 2}
+
+    monkeypatch.setattr(ReferenceOperation, "verify_case", verify_case)
+    config = SimpleNamespace(getoption={"--rocke-reference-lock": lock}.get)
+    test = getattr(gpu_tests, f"test_{operation}_correctness_against_qualified_rocke")
+    test(architecture, target.CASES[0], (target, tmp_path, {}), config)
+    assert locks == [lock]

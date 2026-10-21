@@ -109,15 +109,23 @@ def pinned_reference_tests(
         cohort,
         ids=[f"{name}-{case.id}" for name, case in cohort],
     )
-    def test_correctness_against_qualified_rocke(architecture, case, reference_bundle):
+    def test_correctness_against_qualified_rocke(
+        architecture, case, reference_bundle, pytestconfig
+    ):
         target, bundle, manifest = reference_bundle
         if architecture != target.NAME:
             pytest.skip(
                 f"not selected: this {architecture} case runs only on a "
                 f"{architecture} GPU, and this GPU is {target.NAME}"
             )
+        # A failure's rerun command checks the bundle against the same lock.
+        lock = pytestconfig.getoption("--rocke-reference-lock")
         report = operation.verify_case(
-            case, bundle=bundle, manifest=manifest, architecture=architecture
+            case,
+            bundle=bundle,
+            manifest=manifest,
+            lock=Path(lock) if lock else None,
+            architecture=architecture,
         )
         assert not report["torch_imported"]
         assert report["old_launches"] == report["current_launches"] == 2

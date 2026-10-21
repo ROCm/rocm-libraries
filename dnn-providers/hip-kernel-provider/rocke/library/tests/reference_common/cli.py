@@ -42,7 +42,7 @@ from .numeric import (
     payload_digests,
     write_json,
 )
-from .paths import default_bundle_path
+from .paths import default_bundle_path, installed_test_root
 from .runner import run_worker
 from .session import reuse_workers
 from .source import snapshot
@@ -509,10 +509,11 @@ class ReferenceOperation:
         An archive passed in place of the directory gets the command that unpacks
         it. Otherwise a source checkout gets the commands that fetch and extract
         the published archive tracked by the DVC pointer beside the default
-        bundle; installed trees have no pointers because CMake stages their
-        bundles. ``stale`` asks for the directory's removal first, since unpack
-        does not replace an existing bundle. ``option`` names the setting that
-        selects a bundle.
+        bundle. An installed tree has no pointers or archives; installation
+        stages its published bundles, so it gets the installation's requirements
+        instead. ``stale`` asks for the directory's removal first, since neither
+        unpack nor installation replaces an existing bundle. ``option`` names the
+        setting that selects a bundle.
         """
         committed = self.architectures.baseline_lock(architecture)
         lock = lock or committed
@@ -523,19 +524,30 @@ class ReferenceOperation:
                 "pass a candidate bundle directory together with the "
                 "qualification-lock.json that qualification wrote with it"
             )
-        archive = (
-            self._package.parent
-            / "reference_bundles"
-            / self.name
-            / f"{architecture}.tar.gz"
-        )
+        tests = self._package.parent
+        published = default_bundle_path(tests, architecture, operation=self.name)
+        if installed_test_root(tests) is not None:
+            if stale:
+                return (
+                    f"delete {_shown(bundle)}, then reinstall the tests from one "
+                    f"build; installation stages the published {architecture} "
+                    f"{self.label} bundle at {_shown(published)} from the archive "
+                    "that the installed lock pins"
+                )
+            return (
+                f"installed trees receive the published {architecture} {self.label} "
+                f"bundle at {_shown(published)} only when built with "
+                "ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and assembled with its "
+                "architecture's test artifact; an unpublished architecture needs a "
+                "qualified candidate bundle and its lock"
+            )
+        archive = published.with_name(f"{published.name}.tar.gz")
         pointer = archive.with_name(f"{archive.name}.dvc")
         if not pointer.is_file():
             return (
                 f"no published {architecture} {self.label} archive is tracked at "
-                f"{_shown(pointer)}; installed trees receive published bundles when "
-                "built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON, and an unpublished "
-                "architecture needs a qualified candidate bundle and its lock"
+                f"{_shown(pointer)}; an unpublished architecture needs a qualified "
+                "candidate bundle and its lock"
             )
         lead = (
             f"delete {_shown(bundle)}, then re-run"
@@ -688,6 +700,7 @@ class ReferenceOperation:
         *,
         bundle: Path,
         manifest: dict,
+        lock: Path | None = None,
         current_root: Path | None = None,
         repetitions: int = 2,
         architecture: str = "gfx942",
@@ -697,7 +710,9 @@ class ReferenceOperation:
         Each failure names the side that failed, its measured values, the likely
         cause, and the next step. A changed frozen baseline output is a reference
         qualification failure, raised before the current kernel runs; only an
-        out-of-budget current output implicates the current kernel.
+        out-of-budget current output implicates the current kernel. ``lock`` is
+        the lock that authenticated ``manifest`` (default: the committed lock);
+        the command that reruns a failing case checks the bundle against it.
         """
         if repetitions < 1:
             raise ValueError("verification must execute at least once")
@@ -801,7 +816,9 @@ class ReferenceOperation:
             try:
                 budget.check(distance, metric=self.metric.name)
             except AssertionError as error:
-                rerun = self._rerun_command(case, architecture, bundle, current_root)
+                rerun = self._rerun_command(
+                    case, architecture, bundle, lock, current_root
+                )
                 raise AssertionError(
                     _triage(
                         f"{subject}: the {_CURRENT} output of repetition "
@@ -1108,6 +1125,7 @@ class ReferenceOperation:
                     case,
                     bundle=bundle,
                     manifest=manifest,
+                    lock=args.lock,
                     current_root=current,
                     repetitions=args.repetitions,
                     architecture=args.arch,
@@ -1128,9 +1146,26 @@ class ReferenceOperation:
             )
 
     def _rerun_command(
-        self, case: Any, architecture: str, bundle: Path, current_root: Path | None
+        self,
+        case: Any,
+        architecture: str,
+        bundle: Path,
+        lock: Path | None,
+        current_root: Path | None,
     ) -> str:
-        """Show the verify command that repeats one case's comparison."""
+        """Show the verify command that repeats one case's comparison.
+
+        The command checks the same bundle against the same lock, so a failing
+        candidate is not rerun against the committed lock. The script is
+        installed beside the operation package, so its path is valid in source
+        and installed trees.
+        """
+        committed = self.architectures.baseline_lock(architecture)
+        candidate = (
+            []
+            if lock is None or lock.resolve() == committed.resolve()
+            else ["--lock", _shown(lock)]
+        )
         current = (
             [] if current_root is None else ["--current-root", _shown(current_root)]
         )
@@ -1143,6 +1178,7 @@ class ReferenceOperation:
                 architecture,
                 "--bundle",
                 _shown(bundle),
+                *candidate,
                 *current,
                 "--case",
                 case.id,

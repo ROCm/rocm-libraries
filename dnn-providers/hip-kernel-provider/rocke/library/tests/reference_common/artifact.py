@@ -120,6 +120,29 @@ def pack(bundle: Path, archive: Path, lock: Path, *, operation: str) -> None:
                         tar.addfile(info, stream)
 
 
+def _is_published_pair(archive: Path, lock: Path, *, operation: str) -> bool:
+    """Whether ``archive`` is a DVC-tracked archive and ``lock`` is its committed lock.
+
+    Fetching the archive again repairs only that pairing. A candidate archive,
+    a candidate lock, or another architecture's lock does not belong with the
+    archive, and no fetch makes them agree.
+    """
+    architecture = archive.name.removesuffix(".tar.gz")
+    tracked = _TESTS / "reference_bundles" / operation / f"{architecture}.tar.gz"
+    committed = (
+        _TESTS
+        / f"{operation}_reference"
+        / "architectures"
+        / architecture
+        / "baseline_lock.json"
+    )
+    return (
+        tracked.with_name(f"{tracked.name}.dvc").is_file()
+        and archive.resolve() == tracked.resolve()
+        and lock.resolve() == committed.resolve()
+    )
+
+
 def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
     """Extract only regular bundle files, verify them, then expose the result."""
     _check_operation(operation)
@@ -154,10 +177,10 @@ def unpack(archive: Path, output: Path, lock: Path, *, operation: str) -> None:
         try:
             validate_bundle(bundle, lock, operation=operation)
         except ValueError as error:
-            raise ValueError(
-                f"{error}\n  {archive} is not the archive that {lock} pins; fetch "
-                f"that archive with: dvc pull {archive}.dvc"
-            ) from None
+            mismatch = f"{archive} is not the archive that {lock} pins"
+            if _is_published_pair(archive, lock, operation=operation):
+                mismatch += f"; fetch that archive with: dvc pull {archive}.dvc"
+            raise ValueError(f"{error}\n  {mismatch}") from None
         if output.exists():
             # Unpack never replaces an existing bundle; it must already match.
             try:
