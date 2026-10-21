@@ -19,7 +19,8 @@ Key differences vs gfx950 (MFMA) profiles:
   * No DirectToLds (absent on gfx12).
   * No MIArchVgpr (auto-forced True under WMMA).
   * PrefetchGlobalRead capped at [1,2] (PGR>=3 needs DirectToLds).
-  * Misc gfx1250 specific optimizations - ClusterDim, LDSSegmentInterleave 
+  * Misc gfx1250 specific optimizations - ClusterDim, LDSSegmentInterleave,
+    LDSSegmentBRotate (B-side LDS segment conflict elimination).
 """
 
 from typing import Optional
@@ -106,11 +107,13 @@ class GFX1250Params(BaseOptimizationParams):
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("CompactLoopStore", [True])
-    
-    @param
-    def tdm_plus_lds_buff(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TDMPlusLdsBuf", [-1, 0 , 1])
+        # MI455X reco: "Don't use it" — illegal mem access in corner cases.
+        # Tensile force-overrides to False anyway (Solution.py L3254).
+        return self._make_param("CompactLoopStore", [False])
+
+    # TDMPlusLdsBuf: DO NOT ENABLE (MI455X Sep-7 warning — illegal mem access,
+    # cross-wave RAW race). Tensile unconditionally forces it to 0
+    # (Solution.py L6246). Omitted so codegen uses the default (0 = off).
 
     # =================================================================
     # gfx1250-exclusive: TDM / cluster / schedule
@@ -131,9 +134,17 @@ class GFX1250Params(BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        # if self._gt.data_type == "F4":
-        #     return None
-        return self._make_param("LDSSegmentInterleave", [0, 1])
+        # MI455X latest reco: pin to 1 (paired with BRotate=1).
+        # Separates A/B operand halves into different 64K LDS segments to
+        # eliminate read-port conflicts. Codegen rejects incompatible MIs.
+        return self._make_param("LDSSegmentInterleave", [1])
+
+    @param
+    def lds_segment_b_rotate(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        # MI455X latest reco: pin to 1 (paired with LSI=1).
+        # SIMD pair 1 reads B vIdx rotated by half so both ports always hit
+        # different segments. Requires even MIWT1/VWB — codegen enforces.
+        return self._make_param("LDSSegmentBRotate", [1])
 
     @param
     def schedule_iter_alg(self, ctx: SizeContext) -> ForkParameter:
@@ -169,6 +180,17 @@ class GFX1250Params(BaseOptimizationParams):
     @param
     def prefetch_global_read(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("PrefetchGlobalRead", [2])
+
+    @param
+    def prefetch_global_read_a(self, ctx: SizeContext) -> ForkParameter:
+        # MI455X baseline: auto LDS-feasible PGR pair. With PGR=2, Tensile
+        # tries (2,2) first; if LDS is tight it falls back to (2,1)/(1,2)
+        # instead of rejecting. No downside — identical when LDS fits both.
+        return self._make_param("PrefetchGlobalReadA", [-1])
+
+    @param
+    def prefetch_global_read_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("PrefetchGlobalReadB", [-1])
 
     @param
     def prefetch_local_read(self, ctx: SizeContext) -> ForkParameter:
@@ -917,11 +939,17 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("LDSSegmentInterleave", [0, 1])
+        # MI455X latest reco: pin to 1 (paired with BRotate=1).
+        return self._make_param("LDSSegmentInterleave", [1])
 
     @param
-    def tdm_plus_lds_buff(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TDMPlusLdsBuf", [-1])
+    def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
+        # MI455X latest reco: pin to 1 (paired with LSI=1).
+        # Requires even MIWT1/VWB — codegen enforces.
+        return self._make_param("LDSSegmentBRotate", [1])
+
+    # TDMPlusLdsBuf: DO NOT ENABLE (MI455X Sep-7 warning — cross-wave RAW race).
+    # Tensile unconditionally forces to 0 (Solution.py L6246). Omitted.
 
     @param
     def init_c_iter_wmma(self, ctx: SizeContext) -> ForkParameter:
