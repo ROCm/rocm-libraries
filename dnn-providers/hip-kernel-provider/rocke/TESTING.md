@@ -805,6 +805,6 @@ cohort skips the other processors' suites; this records absent pinned-reference
 coverage. Explicit candidate requests still require their bundle and lock.
 See the [processor-selection rules](library/tests/reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 Adding a
-published architecture creates a separate CTest automatically. Add its exact
-test name to the provider category YAML; it also requires an adapter, qualified
+published architecture creates a separate CTest automatically, and the provider
+category YAML selects it by pattern; it also requires an adapter, qualified
 bundle, and matching CI hardware.

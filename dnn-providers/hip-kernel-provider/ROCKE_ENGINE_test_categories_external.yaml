@@ -21,6 +21,16 @@
 # Comprehensive* variant, so every tier runs the same coverage -- matching
 # HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
 # tiered coverage yet.
+#
+# The pinned GPU reference entries are regex patterns, unlike the other
+# entries here: rocke/platform/CMakeLists.txt registers
+# rocke_<operation>_reference_unit_pytest for each reference operation and
+# rocke_<operation>_gpu_<arch>_pytest for each published architecture, so a
+# new operation or architecture is labeled without an edit here. The parser
+# takes the regex path on seeing a metacharacter and anchors the pattern at
+# both ends; the build tree evaluates it with CMake's if(MATCHES), so use
+# only syntax CMake and Python share (no \d or {n}).
+# rocke_reference_common_pytest, shared by every operation, stays exact.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
@@ -46,14 +56,8 @@ test_categories:
       - "rocke_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
-      - "rocke_sdpa_reference_unit_pytest"
-      - "rocke_sdpa_gpu_gfx942_pytest"
-      - "rocke_sdpa_gpu_gfx950_pytest"
-      - "rocke_sdpa_gpu_gfx1151_pytest"
-      - "rocke_sdpa_gpu_gfx1201_pytest"
-      - "rocke_conv_reference_unit_pytest"
-      - "rocke_conv_gpu_gfx942_pytest"
-      - "rocke_conv_gpu_gfx950_pytest"
+      - "rocke_[a-z0-9_]+_reference_unit_pytest"
+      - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
     labels:
       - "quick"
       - "pre-commit"
@@ -83,13 +87,7 @@ test_categories:
       - "rocke_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
-      - "rocke_sdpa_reference_unit_pytest"
-      - "rocke_sdpa_gpu_gfx942_pytest"
-      - "rocke_sdpa_gpu_gfx950_pytest"
-      - "rocke_sdpa_gpu_gfx1151_pytest"
-      - "rocke_sdpa_gpu_gfx1201_pytest"
-      - "rocke_conv_reference_unit_pytest"
-      - "rocke_conv_gpu_gfx942_pytest"
-      - "rocke_conv_gpu_gfx950_pytest"
+      - "rocke_[a-z0-9_]+_reference_unit_pytest"
+      - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
     labels:
       - "ffm-full"

@@ -176,8 +176,7 @@ pinned CTest entry is absent. See [family CI selection](../../sdpa_reference/doc
 for the skip and failure rules. Do not install the payload under `gfx12-generic`: that name
 does not identify a processor artifact in the existing splitter. Enrollment in
 the qualification registry alone does not publish a processor's suite; add it
-to the CMake publication list and provider categories only after qualification
-and archive publication.
+to the CMake publication list only after qualification and archive publication.
 
 ## 3. Qualify against independent references
 
@@ -377,11 +376,14 @@ another processor or permit reuse of another processor's certificate.
 ### Enroll provider test selection
 
 New published pairs get separate `rocke_<operation>_gpu_<arch>_pytest` CTest
-entries. Add each new entry to the provider's
+entries, and a new operation also gets `rocke_<operation>_reference_unit_pytest`.
+The provider's
 [`ROCKE_ENGINE_test_categories_external.yaml`](../../../../../ROCKE_ENGINE_test_categories_external.yaml)
-and verify the real provider selector includes it. Adding cases to an existing
-pair uses its existing entry. Preserve explicit architecture selection and check
-that expected GPU cases did not skip; a passing empty selection proves nothing.
+selects both by pattern for a lowercase operation name and a `gfx` processor, so
+it needs no edit; verify that the real provider selector includes the new
+entries. Adding cases to an existing pair uses its existing entry. Preserve
+explicit architecture selection and check that expected GPU cases did not skip;
+a passing empty selection proves nothing.
 
 Update the operation's coverage description and the
 [test inventory](../../../../platform/tests/README.md#installed-pinned-reference-suites).

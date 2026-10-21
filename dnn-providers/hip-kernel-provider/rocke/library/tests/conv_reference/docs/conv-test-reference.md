@@ -136,7 +136,7 @@ test-only artifact packaging. The generic artifact contains the harness and trus
 lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entries
 `rocke_conv_gpu_gfx942_pytest` and `rocke_conv_gpu_gfx950_pytest` register only when
 reference installation is enabled and their published bundles pass validation.
-Both entries are in the provider category YAML.
+The provider category YAML selects these entries by pattern.
 
 Test a replacement candidate before publication with the offline CLI's `verify`
 command, passing explicit `--bundle` and `--lock` paths. CMake installs only the
