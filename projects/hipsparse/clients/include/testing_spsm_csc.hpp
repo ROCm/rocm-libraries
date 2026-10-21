@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -76,7 +77,6 @@ void testing_spsm_csc_bad_arg(const Arguments& argus)
 
     // SpSM structures
     hipsparseSpMatDescr_t A;
-    hipsparseDnMatDescr_t B, C;
 
     hipsparseSpSMDescr_t descr;
 
@@ -88,10 +88,8 @@ void testing_spsm_csc_bad_arg(const Arguments& argus)
     verify_hipsparse_status_success(
         hipsparseCreateCsc(&A, m, n, nnz, dptr, drow, dval, idxType, idxType, idxBase, dataType),
         "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&B, m, k, m, dB, dataType, order),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&C, m, k, m, dC, dataType, order),
-                                    "success");
+    hipsparseLocalDnMat B(m, k, m, dB, dataType, order);
+    hipsparseLocalDnMat C(m, k, m, dC, dataType, order);
 
     // SpSM buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpSM_bufferSize(
@@ -174,8 +172,6 @@ void testing_spsm_csc_bad_arg(const Arguments& argus)
     // Destruct
     verify_hipsparse_status_success(hipsparseSpSM_destroyDescr(descr), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(C), "success");
 #endif
 }
 
@@ -311,10 +307,9 @@ void testing_spsm_csc(Arguments argus)
         hipsparseCreateCsc(&A, m, m, nnz, dptr, drow, dval, typeI, typeJ, idx_base, typeT));
 
     // Create dense matrices
-    hipsparseDnMatDescr_t B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C1, C_m, C_n, ldc, dC_1, typeT, orderC));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C2, C_m, C_n, ldc, dC_2, typeT, orderC));
+    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
+    hipsparseLocalDnMat C1(C_m, C_n, ldc, dC_1, typeT, orderC);
+    hipsparseLocalDnMat C2(C_m, C_n, ldc, dC_2, typeT, orderC);
 
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(A, HIPSPARSE_SPMAT_FILL_MODE, &uplo, sizeof(uplo)));
@@ -466,9 +461,6 @@ void testing_spsm_csc(Arguments argus)
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 #endif
 }
 
