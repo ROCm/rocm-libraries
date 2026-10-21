@@ -70,7 +70,9 @@ const vector<vector<int>> large_size_range = {{192, 192, 192, 5, 15, 100, 170},
                                               {300, 300, 330, -15, -5, 200, 300}};
 
 // for weekly large batch tests
-const vector<vector<int>> large_batch_size_range = {{7, 7, 7, -10, 10, 1, 7}};
+// each size_range vector is a {n, lda, ldz, vl, vu, il, iu}
+const vector<vector<int>> large_batch_size_range
+    = {{7, 7, 7, -10, 10, 1, 7}, {17, 17, 17, -10, 10, 1, 17}};
 
 template <typename T>
 Arguments syevdx_heevdx_setup_arguments(syevdx_heevdx_tuple tup, bool inplace)
@@ -137,11 +139,7 @@ class HEEVDX : public SYEVDX_HEEVDX<>
 
 // large batch
 
-// TODO: there is a defect with batch variants with
-// medium size batch count (say 7000)
-// set BCOUNT to a low value for now
-// int constexpr BCOUNT = 64 * 1024 + 1;
-int constexpr BCOUNT = 3;
+int constexpr BCOUNT = 64 * 1024 + 1;
 
 class SYEVDX_LARGE_BATCH : public SYEVDX_HEEVDX<BCOUNT>
 {
