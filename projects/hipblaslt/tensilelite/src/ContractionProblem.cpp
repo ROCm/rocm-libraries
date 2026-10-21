@@ -696,7 +696,11 @@ namespace TensileLite
         calcArithmeticIntensity();
     }
 	
-    void ContractionProblemGemm::setMXScaleA(rocisa::DataType mxTypeA, int mxBlockA, std::vector<size_t> saStride, bool padScaleTensorFreeDim, int mxBlockFreeA)
+    void ContractionProblemGemm::setMXScaleA(rocisa::DataType    mxTypeA,
+                                             int                 mxBlockA,
+                                             std::vector<size_t> saStride,
+                                             MXScalePadding      padding,
+                                             int                 mxBlockFreeA)
     {
         m_mxBlockA = mxBlockA;
         m_mxTypeA = mxTypeA;
@@ -717,29 +721,33 @@ namespace TensileLite
                 auto freeIdx = m_freeIndicesA[0].i;
                 saSizes[freeIdx] = CeilDivide(saSizes[freeIdx], (size_t)m_mxBlockFreeA);
             }
-            if (padScaleTensorFreeDim)
+            saSizes[boundIdx] = CeilDivide(saSizes[boundIdx], (size_t)mxBlockA);
+            if (padding == MXScalePadding::Gfx950)
             {
-                saSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), (size_t)8);
+                saSizes[boundIdx] = RoundUpToMultiple(saSizes[boundIdx], (size_t)8);
                 auto freeIdx = m_freeIndicesA[0].i;
                 saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
             }
-            else
+            else if (padding == MXScalePadding::Gfx1250)
             {
-                // gfx1250 padding. A scale covers mxBlockA elements along K, and the
-                // scale tensor is padded so that K-blocks tile the 128-element K step of
-                // the scaled WMMA. At mxBlockA == 128 one scale already spans the whole
-                // step (dimk == 1, no padding); clamp so mxBlockA > 128 cannot yield 0.
+                // A scale covers mxBlockA elements along K, and the scale tensor is
+                // padded so that K-blocks tile the 128-element K step of the scaled
+                // WMMA. At mxBlockA == 128 one scale already spans the whole step
+                // (dimk == 1, no padding); clamp so mxBlockA > 128 cannot yield 0.
                 size_t dimk = std::max<size_t>(1, 128 / mxBlockA);
-                saSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), dimk);
+                saSizes[boundIdx] = RoundUpToMultiple(saSizes[boundIdx], dimk);
             }
+            // MXScalePadding::Packed keeps the bare ceil(K/mxBlock) K-block count.
             TensorDescriptor mxsa("mx-a", mxTypeA, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
         }
     }
 
-    void ContractionProblemGemm::setMXScaleB(rocisa::DataType mxTypeB, int mxBlockB, std::vector<size_t> sbStride, bool padScaleTensorFreeDim, int mxBlockFreeB)
+    void ContractionProblemGemm::setMXScaleB(rocisa::DataType    mxTypeB,
+                                             int                 mxBlockB,
+                                             std::vector<size_t> sbStride,
+                                             MXScalePadding      padding,
+                                             int                 mxBlockFreeB)
     {
         m_mxBlockB = mxBlockB;
         m_mxTypeB = mxTypeB;
@@ -755,20 +763,20 @@ namespace TensileLite
                 auto freeIdx = m_freeIndicesB[0].i;
                 sbSizes[freeIdx] = CeilDivide(sbSizes[freeIdx], (size_t)m_mxBlockFreeB);
             }
-            if (padScaleTensorFreeDim)
+            sbSizes[boundIdx] = CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB);
+            if (padding == MXScalePadding::Gfx950)
             {
-                sbSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), (size_t)8);
+                sbSizes[boundIdx] = RoundUpToMultiple(sbSizes[boundIdx], (size_t)8);
                 auto freeIdx = m_freeIndicesB[0].i;
                 sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
             }
-            else
+            else if (padding == MXScalePadding::Gfx1250)
             {
-                // gfx1250 padding. See setMXScaleA for the dimk rationale.
+                // See setMXScaleA for the dimk rationale.
                 size_t dimk = std::max<size_t>(1, 128 / mxBlockB);
-                sbSizes[boundIdx] = RoundUpToMultiple(
-                    CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), dimk);
+                sbSizes[boundIdx] = RoundUpToMultiple(sbSizes[boundIdx], dimk);
             }
+            // MXScalePadding::Packed keeps the bare ceil(K/mxBlock) K-block count.
             TensorDescriptor mxsb("mx-b", mxTypeB, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
             m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
         }

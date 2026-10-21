@@ -52,13 +52,13 @@ TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
     ASSERT_FALSE(problem.customKernelMXScaleAIsPacked());
     ASSERT_FALSE(problem.customKernelMXScaleBIsPacked());
 
-    rocblaslt::setHostMXScaleA(problem, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
+    rocblaslt::setHostMXScaleA(problem, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(problem.mxBlockA(), 32u);
     EXPECT_TRUE(problem.customKernelMXScaleAIsPacked());
     EXPECT_FALSE(problem.customKernelMXScaleBIsPacked());
 
     auto viaB = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleB(viaB, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
+    rocblaslt::setHostMXScaleB(viaB, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(viaB.mxBlockB(), 32u);
     EXPECT_TRUE(viaB.customKernelMXScaleBIsPacked());
     EXPECT_FALSE(viaB.customKernelMXScaleAIsPacked());
@@ -69,18 +69,30 @@ TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
 TEST(HostUnitMXScaleSetup, smoke_PreSwizzledDeclarationIsPerOperand)
 {
     auto swizzledA = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(
-        swizzledA, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ false);
-    rocblaslt::setHostMXScaleB(
-        swizzledA, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ true);
+    rocblaslt::setHostMXScaleA(swizzledA,
+                               rocisa::DataType::E8,
+                               32,
+                               TensileLite::MXScalePadding::Gfx950,
+                               /*packed*/ false);
+    rocblaslt::setHostMXScaleB(swizzledA,
+                               rocisa::DataType::E8,
+                               32,
+                               TensileLite::MXScalePadding::Gfx950,
+                               /*packed*/ true);
     EXPECT_FALSE(swizzledA.customKernelMXScaleAIsPacked());
     EXPECT_TRUE(swizzledA.customKernelMXScaleBIsPacked());
 
     auto swizzledB = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(
-        swizzledB, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ true);
-    rocblaslt::setHostMXScaleB(
-        swizzledB, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ false);
+    rocblaslt::setHostMXScaleA(swizzledB,
+                               rocisa::DataType::E8,
+                               32,
+                               TensileLite::MXScalePadding::Gfx950,
+                               /*packed*/ true);
+    rocblaslt::setHostMXScaleB(swizzledB,
+                               rocisa::DataType::E8,
+                               32,
+                               TensileLite::MXScalePadding::Gfx950,
+                               /*packed*/ false);
     EXPECT_TRUE(swizzledB.customKernelMXScaleAIsPacked());
     EXPECT_FALSE(swizzledB.customKernelMXScaleBIsPacked());
 }
@@ -89,8 +101,8 @@ TEST(HostUnitMXScaleSetup, smoke_PreSwizzledDeclarationIsPerOperand)
 TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
 {
     auto problem = mxProblem(64, 64, 128);
-    problem.setMXScaleA(rocisa::DataType::E8, 32, {}, /*padScaleTensorFreeDim*/ true);
-    problem.setMXScaleB(rocisa::DataType::E8, 32, {}, /*padScaleTensorFreeDim*/ true);
+    problem.setMXScaleA(rocisa::DataType::E8, 32, {}, TensileLite::MXScalePadding::Gfx950);
+    problem.setMXScaleB(rocisa::DataType::E8, 32, {}, TensileLite::MXScalePadding::Gfx950);
 
     EXPECT_EQ(problem.mxBlockA(), 32u);
     EXPECT_EQ(problem.mxBlockB(), 32u);
@@ -102,14 +114,14 @@ TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
 TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
 {
     auto padded = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(padded, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
-    rocblaslt::setHostMXScaleB(padded, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
+    rocblaslt::setHostMXScaleA(padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
+    rocblaslt::setHostMXScaleB(padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(padded.mxsa().strides()[1], 8u);
     EXPECT_EQ(padded.mxsb().strides()[1], 8u);
 
     auto unpadded = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(unpadded, rocisa::DataType::E8, 32, /*padFreeDim*/ false);
-    rocblaslt::setHostMXScaleB(unpadded, rocisa::DataType::E8, 32, /*padFreeDim*/ false);
+    rocblaslt::setHostMXScaleA(unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
+    rocblaslt::setHostMXScaleB(unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
     EXPECT_EQ(unpadded.mxsa().strides()[1], 4u);
     EXPECT_EQ(unpadded.mxsb().strides()[1], 4u);
     EXPECT_TRUE(unpadded.customKernelMXScaleAIsPacked());

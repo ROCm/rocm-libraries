@@ -99,7 +99,8 @@ namespace TensileLite
             , m_mxBlockB(args["mx-b-block"].as<int>())
             , m_mxBlockFreeA(args["mx-a-free-block"].as<int>())
             , m_mxBlockFreeB(args["mx-b-free-block"].as<int>())
-            , m_padMXScaleTensorFreeDim(false)
+            , m_mxScalePadding(MXScalePadding::Gfx1250)
+            , m_mxScalesPacked(args["mx-scales-packed"].as<bool>())
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
@@ -157,13 +158,23 @@ namespace TensileLite
                 throw std::invalid_argument(
                     "world and fused-a2a-extent apply only with fused-gemm-a2a");
 
+            // Which MX scale layout to allocate. Tensile's own generated gfx950
+            // kernels read a padded scale tensor, so the arch still picks the
+            // padding when nothing says otherwise. But when ClientWriter reports
+            // that every kernel in this run is an externally captured one, those
+            // kernels index the caller's buffer with the unpadded ceil(K/mxBlock)
+            // pitch, so allocate that instead of making them read a layout no
+            // real caller ever hands them.
             if(m_mxBlockA || m_mxBlockB)
             {
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
                 std::string archName(prop.gcnArchName);
-                m_padMXScaleTensorFreeDim = (archName.find("gfx950") != std::string::npos);
+                if(m_mxScalesPacked)
+                    m_mxScalePadding = MXScalePadding::Packed;
+                else if(archName.find("gfx950") != std::string::npos)
+                    m_mxScalePadding = MXScalePadding::Gfx950;
             }
 
             std::vector<bool> isComplex;
@@ -602,13 +613,17 @@ namespace TensileLite
                             rv.back().setF32XdlMathOp(m_f32XdlMathOp);
                             rv.back().setActivationComputeType(m_activationComputeType);
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
+                            // Tell ContractionSolution what was actually allocated
+                            // above, so the scale stride it hands a custom kernel
+                            // keeps matching this buffer.
+                            rv.back().setCustomKernelMXScalesArePacked(m_mxScalesPacked);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeA);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_mxScalePadding, m_mxBlockFreeA);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeB);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_mxScalePadding, m_mxBlockFreeB);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD

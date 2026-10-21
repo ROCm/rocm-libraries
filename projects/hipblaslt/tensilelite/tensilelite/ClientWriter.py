@@ -49,6 +49,7 @@ from .Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
+from .CustomKernels import mxScalesArePackedForSolutions
 from .Contractions import ProblemType as ContractionsProblemType
 
 class DataInitName(Enum):
@@ -665,7 +666,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, gateTypeArgs="", probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, gateTypeArgs="", probSolMap={}, mxScalesPacked=False):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
     # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
@@ -720,6 +721,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
             param('mx-b-block', problemType.mxBlockB)
             param('mx-b-free-block', problemType.mxBlockFreeB)
             param('mx-b-type', problemType.mxTypeB.toName())
+        if problemType.mxBlockA or problemType.mxBlockB:
+            # Allocate the MX scale layout the kernels in this run actually read
+            # rather than the one that happens to be convenient here; see
+            # CustomKernels.mxScalesArePackedForSolutions.
+            param('mx-scales-packed', mxScalesPacked)
 
         if biasTypeArgs:
           for btype in biasTypeArgs.biasTypes:
@@ -895,7 +901,8 @@ def writeClientConfig(
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, gateTypeArgs, probSolMap)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, gateTypeArgs, probSolMap,
+                         mxScalesPacked=mxScalesArePackedForSolutions(solutions))
 
     return filename
 

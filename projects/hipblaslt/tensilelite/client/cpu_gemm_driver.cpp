@@ -288,7 +288,7 @@ namespace
 
 #ifndef _WIN32
                 // MX scale tensor layout follows the ContractionProblem tensor
-                // descriptors. Even with padScaleTensor=false, setMXScaleA/B
+                // descriptors. Even under MXScalePadding::Gfx1250, setMXScaleA/B
                 // can pad the scale-K dimension, so using k/mxBlock as the
                 // free-dimension stride would address the wrong scale element.
                 //
@@ -709,13 +709,13 @@ int runGemm(size_t         m,
     {
         if(mxBlockA > 0 || mxBlockB > 0)
         {
-            // Use unpadded MX scale tensors so the columnMajorGemm reference
-            // indexing matches: mxsa = {m, k/mxBlockA} with m as leading
-            // stride (and analogous for B). Default padScaleTensor=true would
-            // round M up to next 32 and K/mxBlockA/B up to next 8, breaking
-            // the index math below.
-            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
-            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
+            // Keep the free dimension unpadded so the columnMajorGemm reference
+            // indexing matches: mxsa = {m, roundUp(k/mxBlockA, 128/mxBlockA)} with
+            // m as leading stride (and analogous for B). The default
+            // MXScalePadding::Gfx950 would round M up to the next 32 and the
+            // K-block count up to the next 8, breaking the index math below.
+            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, MXScalePadding::Gfx1250);
+            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, MXScalePadding::Gfx1250);
 
             size_t nmxsa = contraction.mxsa().totalLogicalElements();
             size_t nmxsb = contraction.mxsb().totalLogicalElements();

@@ -93,10 +93,10 @@ namespace
             0.0);                           // beta
         if(mxBlockA > 0)
             problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {},
-                                /*padScaleTensorFreeDim=*/true, mxBlockFreeA);
+                                TensileLite::MXScalePadding::Gfx950, mxBlockFreeA);
         if(mxBlockB > 0)
             problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {},
-                                /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
+                                TensileLite::MXScalePadding::Gfx950, mxBlockFreeB);
         return problem;
     }
 

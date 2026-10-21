@@ -47,9 +47,9 @@ namespace
                                                             0.0);
 
         problem.setMXScaleA(
-            rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false, mxBlockFree);
+            rocisa::DataType::E8, mxBlock, {}, MXScalePadding::Gfx1250, mxBlockFree);
         problem.setMXScaleB(
-            rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false, mxBlockFree);
+            rocisa::DataType::E8, mxBlock, {}, MXScalePadding::Gfx1250, mxBlockFree);
         problem.setComputeInputTypeA(typeA);
         problem.setComputeInputTypeB(typeB);
         problem.setAlphaType(rocisa::DataType::Float);
