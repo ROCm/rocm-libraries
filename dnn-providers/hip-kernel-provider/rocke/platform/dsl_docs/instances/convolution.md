@@ -368,7 +368,7 @@ DgradConvSpec.default_lds_k_outer(
 
 The dgrad deducer additionally takes `pipeline` and returns `False` for `pipeline == "wavelet"`: the wavelet loader does not implement the K-outer tile (the `validate()` gate rejects the pair), so the predicate keeps that combination off the sweep. A caller that omits the keyword gets the `"mem"` default and so never sees the exclusion — wavelet callers must pass their own pipeline.
 
-Both predicates are the single selection point for `library/dispatch/grouped_convolution.py` and the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, rather than each keeping its own copy: dispatch reaches wgrad's through `_wgrad_lds_k_outer` and dgrad's through `_dgrad_lds_k_outer`.
+Both predicates are the single selection point for the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, so no caller keeps its own copy. (The grouped-convolution dispatcher, `library/dispatch/grouped_convolution.py`, registers fixed lists of forward and dgrad AOT instances whose names already record `lds_k_outer`; it derives no layout itself.)
 
 The dgrad predicate is deliberately **asymmetric** — it keys on `dtype_b` / `warp_tile_n` only, never their A-side counterparts, because only B flips; copying wgrad's symmetric predicate would over-reject dgrad specs whose A side differs. It additionally carries `cpg`: the saving is proportional to the B load width, which collapses to 1 on an odd channel run. There `axis_b` is already `"col"`, there is no scatter to remove, and K-outer would be a small pure regression.
 
@@ -482,7 +482,10 @@ Note this layout is different from `ConvProblem`:
 
 - `H`/`W` are input spatial; `Ho`/`Wo` are derived output spatial;
 - `KH`/`KW` not `R`/`S`;
-- single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`/`dH`/`dW`); dilation is implicitly 1.
+- single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`);
+- dilation is `dil_h`/`dil_w` (default 1; `Ho`/`Wo` use the dilated extent
+  `(KH-1)*dil_h + 1`). Only the non-grouped forward kernel computes a dilated
+  convolution; every other variant rejects one (`dilation_reason`).
 
 ### 16c Kernel
 
@@ -647,6 +650,51 @@ Streams the input rows through the same runtime `scf_for_iter` as
 Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
 `tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
 
+### Depthwise Tiled Kernel (`DirectDepthwiseTiledSpec`)
+
+`DirectDepthwiseTiledSpec` / `build_direct_depthwise_tiled`. Output-stationary
+depthwise forward for any group count and filters up to 31x31.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseTiledSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_tiled"
+    block_w: int = 8        # output columns per block
+    block_h: int = 4        # output rows per block
+    block_waves: int = 1    # waves per block (64 channels each)
+    unroll_rows: bool = False
+    wave_size: int = 64
+```
+
+The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
+accumulator slots per column and unrolls `KH` rows per loop iteration: its
+registers and loop body grow with `KH^2 * KW`, so past 11x11 it spills heavily
+and compiles slowly. This kernel is linear in the filter width:
+
+- a block owns a `block_h x block_w` output tile; the grid also splits the
+  output rows: `(ceil(Wo/block_w), ceil(C/block_ch), N * ceil(Ho/block_h))`;
+- a runtime loop walks the filter rows `r`, holding one weight row (the next
+  one prefetched) and the input rows `ho*stride - PAD + r` of the tile;
+- with stride 1, iteration `r+1` reads the rows of iteration `r` shifted by
+  one, so `block_h - 1` rows are carried and one row is loaded per iteration;
+  stride `s` splits the filter rows into `s` phases with a window each;
+- `unroll_rows` unrolls the (baked) filter-row loop so the scheduler overlaps
+  rows; the validator caps the unrolled body at `_DW_TILED_UNROLL_MAX_FMAS`.
+
+Outputs are indexed directly, so it is not tied to "same" padding. Constraints
+(`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
+`cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
+and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
+(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+keep both rolled and unrolled configurations within a bounded register and
+code-size footprint.
+
+The sweeps skip a row-streaming config that would spill
+(`depthwise_stream_register_reason`) and leave its shape to this kernel.
+
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+
 ## Direct Non-grouped Convolution
 
 Source: `library/kernels/common/conv_direct_nongrouped.py`. Full write-up (every
@@ -710,9 +758,8 @@ derives the tile counts from its kernargs and decodes the block id through
 Candidates: `nongrouped_specs(problem, arch)`;
 `tile_w_candidates(Wo, atom_tile)` prefers widths that divide `Wo` exactly, and
 the 16-wide atoms exist for widths that are not a multiple of 32. The AOT cache
-(`benchmarks/common/direct_kernel_sweep.py`, variant `direct_nongrouped`) builds
-the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride 1/2
-and offers a problem only the widths `tile_w_candidates` would pick for it.
+builds the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride
+1/2 and offers a problem only the widths `tile_w_candidates` would pick for it.
 
 C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by

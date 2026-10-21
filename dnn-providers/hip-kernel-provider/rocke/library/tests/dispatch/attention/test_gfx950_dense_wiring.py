@@ -34,7 +34,10 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
-from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+from kernels.common.attention_dense_spec import (
+    DENSE_TILE_GEOMETRIES,
+    attention_dense_cache_key,
+)
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import (
     AttentionDenseSpec,
@@ -329,6 +332,108 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                     self.assertNotIn("persist", spec.kernel_name())
                     self.assertNotIn("wdma", spec.kernel_name())
 
+    def test_cross_length_top_left_ragged_is_unshifted(self):
+        for sq, sk in ((8180, 8230), (8230, 8180)):
+            with self.subTest(sq=sq, sk=sk):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.TOP_LEFT_CAUSAL,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                    )
+                )
+                self.assertTrue(spec.causal)
+                self.assertFalse(spec.causal_bottom_right)
+                self.assertTrue(spec.ragged)
+                br = _spec(
+                    self._moving_req(
+                        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                        seqlen_q=min(sq, sk),
+                        seqlen_k=max(sq, sk),
+                    )
+                )
+                self.assertNotEqual(spec.kernel_name(), br.kernel_name())
+                self.assertNotEqual(
+                    attention_dense_cache_key(spec, arch="gfx950"),
+                    attention_dense_cache_key(br, arch="gfx950"),
+                )
+
+    def test_no_mask_cross_length_unaligned_is_ragged_cross_attention(self):
+        # Full attention between different lengths (cross-attention) is standard; the
+        # ragged body handles it with the key-pad mask and the guarded store.
+        for sq, sk in ((8180, 8230), (8230, 8180)):
+            with self.subTest(sq=sq, sk=sk):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.NO_MASK,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                    )
+                )
+                self.assertFalse(spec.causal)
+                self.assertTrue(spec.ragged)
+
+    def test_band_requests_map_to_the_dense_band_fields(self):
+        cases = {
+            "left_only": (dict(sliding_window=256), False, 0),
+            "two_sided": (dict(sliding_window=256, right_bound=64), True, 64),
+            "lookahead": (dict(right_bound=16), True, 16),
+        }
+        for name, (kw, causal, right) in cases.items():
+            with self.subTest(band=name):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.NO_MASK,
+                        seqlen_q=2048,
+                        seqlen_k=2048,
+                        **kw,
+                    )
+                )
+                self.assertEqual((spec.causal, spec.right_bound), (causal, right))
+                self.assertFalse(spec.causal_bottom_right)
+                self.assertEqual(spec.sliding_window, kw.get("sliding_window", 0))
+
+    def test_band_names_are_distinct_and_default_names_unchanged(self):
+        base = dict(
+            seqlen_q=2048,
+            seqlen_k=2048,
+        )
+        names = {
+            label: _spec(
+                self._moving_req(AttentionMaskType.NO_MASK, **base, **kw)
+            ).kernel_name()
+            for label, kw in {
+                "full": {},
+                "left_only": dict(sliding_window=256),
+                "causal_window": dict(sliding_window=256, right_bound=0),
+                "two_sided": dict(sliding_window=256, right_bound=64),
+                "lookahead": dict(right_bound=64),
+            }.items()
+        }
+        self.assertEqual(len(set(names.values())), len(names), names)
+        causal = _spec(
+            self._moving_req(AttentionMaskType.TOP_LEFT_CAUSAL, **base)
+        ).kernel_name()
+        self.assertNotIn("_rb", causal)
+
+    def test_bottom_right_alignment_cross_length_with_a_band_is_rejected(self):
+        # The dense body anchors a window / lookahead on the top-left diagonal; a
+        # shifted (bottom-right) band would silently compute the wrong mask.
+        for kw in (
+            dict(sliding_window=256, diagonal_alignment=1),
+            dict(right_bound=16, diagonal_alignment=1),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "bottom-right alignment"):
+                    _spec(
+                        self._moving_req(
+                            AttentionMaskType.NO_MASK,
+                            seqlen_q=2048,
+                            seqlen_k=4096,
+                            **kw,
+                        )
+                    )
+
     def test_persistent_candidates_refuse_moving_bottom_right(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
             for spec_id in (_PERSIST, _WIDE):
@@ -525,6 +630,88 @@ class TestSWASinkComposition(unittest.TestCase):
         ).kernel_name()
         self.assertIn("swa128", kname)
         self.assertIn("sinks", kname)
+
+
+class TestScaleValidation(unittest.TestCase):
+    """run_attention_dense_torch rejects a non-finite softmax scale as invalid
+    and a finite one outside [2**-64, 2**4] as not yet supported."""
+
+    @staticmethod
+    def _launch(scale):
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        run_attention_dense_torch(
+            spec=spec,
+            q=SimpleNamespace(shape=qshape),
+            k=SimpleNamespace(shape=kvshape),
+            v=SimpleNamespace(shape=kvshape),
+            out=SimpleNamespace(shape=qshape),
+            scale=scale,
+        )
+
+    def test_bounds_match_hipdnn_matcher(self):
+        """The hipDNN matcher hardcodes the same range (0x1p-64F / 0x1p4F in
+        Gfx950AttentionDenseNative.cpp, pinned by its gtest). Changing the
+        Python bounds alone would make the two engines serve different scales."""
+        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
+
+        msg = "update Gfx950AttentionDenseNative.cpp and its gtest together"
+        self.assertEqual(_MIN_SCALE, 2.0**-64, msg)
+        self.assertEqual(_MAX_SCALE, 2.0**4, msg)
+        with self.assertRaises(NotImplementedError) as cm:
+            self._launch(_MAX_SCALE * 2)
+        self.assertIn("[2**-64, 2**4]", str(cm.exception))
+
+    def test_out_of_range_scale_rejected(self):
+        """The ordinary kernel takes the row max on unscaled scores (valid only
+        for scale > 0) and masks raw scores with a power-of-two sentinel that
+        must stay exact and finite after the scale; outside the supported range
+        it must raise rather than silently produce a wrong softmax. NaN and inf
+        are invalid input (ValueError); finite out-of-range scales are a
+        kernel limit (NotImplementedError)."""
+        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
+
+        cases = [
+            (float("nan"), ValueError, "scale must be finite"),
+            (float("inf"), ValueError, "scale must be finite"),
+            (float("-inf"), ValueError, "scale must be finite"),
+        ] + [
+            (scale, NotImplementedError, "NOT_YET_IMPLEMENTED")
+            for scale in (0.0, -0.0, -0.125, 1e-30, _MIN_SCALE / 2, _MAX_SCALE * 2)
+        ]
+        for scale, error, message in cases:
+            with self.subTest(scale=scale):
+                with self.assertRaises(error) as cm:
+                    self._launch(scale)
+                self.assertIn(message, str(cm.exception))
+
+    def test_inclusive_bounds_pass_the_scale_guard(self):
+        """Both bounds are served. Past the guard the fake tensors fail later;
+        only a scale rejection would mention the scale."""
+        from kernels.gfx950.attention_dense import _MAX_SCALE, _MIN_SCALE
+
+        for scale in (_MIN_SCALE, _MAX_SCALE):
+            with self.subTest(scale=scale):
+                try:
+                    self._launch(scale)
+                except Exception as exc:  # noqa: BLE001 - launch on fakes fails
+                    self.assertNotIn("scale", str(exc).lower(), repr(exc))
 
 
 class TestSinksValidation(unittest.TestCase):

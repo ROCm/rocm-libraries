@@ -1,0 +1,420 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Host-side custom-kernel plumbing coverage: the pure/near-pure helpers the
+custom-kernel path adds across Solution, Naming, BenchmarkProblems, and the
+Toolchain assembler.
+
+These live in a direct ``Tests/unit`` module (not under ``characterization/``)
+so the coverage lane credits them against the changed source lines.
+"""
+
+import pytest
+
+from Tensile.BenchmarkProblems import _hashableProblemTypeKV
+from Tensile.Common.DataType import DataType
+from Tensile.Common.Utilities import deriveWaveParams
+from Tensile.SolutionStructs.Naming import _getName, getKernelFileBase
+from Tensile.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
+from Tensile.Toolchain.Component import Assembler
+
+pytestmark = pytest.mark.unit
+
+
+# --------------------------------------------------------------------------- #
+# Solution._assignCustomKernelParameters
+# --------------------------------------------------------------------------- #
+
+
+def _ck_state(**over):
+    problem_type = {
+        "ComputeDataType": DataType("s"),
+        "DestDataType": DataType("s"),
+        "UseBias": False,
+        "Gradient": False,
+    }
+    problem_type.update(over.pop("ProblemType", {}))
+    state = {
+        # Workspace keys mirror the setdefaults getCustomKernelConfig applies.
+        "CustomKernel": {
+            "name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1],
+            "workspaceType": "None",
+            "workspaceSizePerElemC": 0,
+            "workspaceSizePerElemBias": 0,
+        },
+        "TileProcessingStrategy": "None",
+        "WorkAssignment": "StaticGrid",
+        "StreamKAtomic": 0,
+        "GlobalSplitUAlgorithm": "",
+        "ProblemType": problem_type,
+        "DirectToLds": 0,
+        "MatrixInstruction": [16, 16, 16, 1],
+        "WavefrontSize": 64,
+    }
+    state.update(over)
+    return state
+
+
+def test_assign_custom_kernel_params_basic_derivation():
+    state = _ck_state()
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["MacroTile0"] == 128
+    assert state["MacroTile1"] == 256
+    assert state["DepthU"] == 64
+    assert state["NumThreads"] == 256
+    assert state["NumElementsPerThread"] == (128 * 256) // 256
+    assert state["CUOccupancy"] == -1
+    assert state["MathClocksUnrolledLoop"] == 0
+    assert state["PackedC0IndicesX"] == []
+    assert state["ThreadTile0"] == 0 and state["ThreadTile1"] == 0
+    assert state["LocalSplitU"] == 1
+    assert state["GlobalReadVectorWidthA"] == 1
+    assert state["GlobalReadVectorWidthB"] == 1
+    assert state["StoreVectorWidth"] == 1
+    assert state["_GlobalAccumulation"] is None  # GlobalSplitUAlgorithm == ""
+
+
+def test_assign_custom_kernel_params_unset_macrotile_falls_back_to_logic_file():
+    # Any handwritten kernel without MI fields and without an MTxxx name token
+    # reaches here with macrotile [0, 0, 0]. Taking that zero over the logic-file tile put
+    # a 0 in sizeMapping.macroTile, and getNumTiles() then divided by it.
+    state = _ck_state(MacroTile0=256, MacroTile1=256, DepthU=128)
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["MacroTile0"] == 256
+    assert state["MacroTile1"] == 256
+    assert state["DepthU"] == 128
+    # The C++ runtime reads this block directly, so it must agree with the state.
+    assert state["CustomKernel"]["macrotile"] == [256, 256, 128]
+
+
+def test_assign_custom_kernel_params_macrotile_wins_over_logic_file():
+    # When the kernel does declare a tile it stays authoritative.
+    state = _ck_state(MacroTile0=64, MacroTile1=64, DepthU=16)
+    Solution._assignCustomKernelParameters(state)
+
+    assert [state["MacroTile0"], state["MacroTile1"], state["DepthU"]] == [128, 256, 64]
+
+
+def test_assign_custom_kernel_params_unresolvable_macrotile_raises():
+    # Neither source supplies a tile: fail the build rather than emit a library
+    # that divides by zero at solution-selection time.
+    state = _ck_state()
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    with pytest.raises(RuntimeError, match="no usable MacroTile0"):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_assign_custom_kernel_params_default_depthu_is_not_a_tile():
+    # Logic files default DepthU to -1; that must not be accepted as a tile.
+    state = _ck_state(MacroTile0=256, MacroTile1=256, DepthU=-1)
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    with pytest.raises(RuntimeError, match="no usable DepthU"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("grid", [
+    ["TilesX", "TilesYGSU", "Batch"],
+    ["TilesXYBatchGSU", "One", "One"],
+])
+def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
+    state = _ck_state(
+        GlobalSplitU=16,
+        GlobalSplitUAlgorithm="MultipleBufferSingleKernel",
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "MultipleBufferSingleKernel"
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+@pytest.mark.parametrize("over", [
+    {"GlobalSplitU": 16},
+    {"GlobalSplitU": -1},  # lets the runtime pick a split above 1
+    # generateCustomCall judges the grid alone, so a persistent kernel with a
+    # tile-count grid has to be rejected here too rather than at launch.
+    {"GlobalSplitU": 16, "TileProcessingStrategy": "StreamK"},
+])
+def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over):
+    # A split-K kernel reduces into D only once every GSU slice has arrived, so a
+    # grid without a GSU term would launch one slice and leave D unwritten.
+    state = _ck_state(GlobalSplitUAlgorithm="MultipleBufferSingleKernel", **over)
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    with pytest.raises(RuntimeError, match="launches one GSU slice per tile"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("gsu", [1, 0])  # 0: GSU disabled
+def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu):
+    # Such a grid launches one GSU slice per tile, so a runtime GSU override has to
+    # be turned away during solution selection rather than fail at launch.
+    state = _ck_state(GlobalSplitU=gsu, InternalSupportParams={"SupportUserGSU": True})
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is False
+
+
+@pytest.mark.parametrize("strategy,grid", [
+    ("StreamK", ["StreamKWithBatch", "One", "One"]),
+    ("DataParallel", ["PersistentGrid", "One", "One"]),
+    ("None", ["PersistentNoBatch", "One", "One"]),
+])
+def test_assign_custom_kernel_params_persistent_keeps_user_gsu(strategy, grid):
+    # Persistent kernels distribute work through their own grid, so neither the
+    # GSU check nor the override flag applies to them.
+    state = _ck_state(
+        GlobalSplitU=16,
+        TileProcessingStrategy=strategy,
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+def test_assign_custom_kernel_params_enable_mi_sets_wave_params():
+    state = _ck_state()
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["EnableMatrixInstruction"] is True
+    assert isinstance(state["MIWaveTile"], list)
+    assert isinstance(state["MIWaveGroup"], list)
+
+
+def test_assign_custom_kernel_params_no_mi_zeroes_wave_params():
+    state = _ck_state(MatrixInstruction=[])
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["EnableMatrixInstruction"] is False
+    assert state["MIWaveTile"] == [0, 0]
+    assert state["MIWaveGroup"] == [0, 0]
+
+
+@pytest.mark.parametrize("dtl,expect_a,expect_b", [
+    (0, False, False),
+    (1, True, True),
+    (2, True, False),
+    (3, False, True),
+])
+def test_assign_custom_kernel_params_direct_to_lds(dtl, expect_a, expect_b):
+    state = _ck_state(DirectToLds=dtl)
+    Solution._assignCustomKernelParameters(state)
+    assert state["DirectToLdsA"] is expect_a
+    assert state["DirectToLdsB"] is expect_b
+
+
+def test_assign_custom_kernel_params_streamk_partials_accumulation():
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "PartialsBuffer"
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace():
+    # Non-atomic Stream-K reduces partial tiles through the workspace, so a
+    # block that declares none must be sized from the compute type.
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
+    assert state["_WorkspaceSizePerElemC"] == 4
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type():
+    state = _ck_state(
+        TileProcessingStrategy="StreamK",
+        StreamKAtomic=0,
+        ProblemType={"ComputeDataType": DataType("d"), "DestDataType": DataType("d")},
+    )
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 8
+
+
+def test_assign_custom_kernel_params_keeps_declared_workspace():
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    state["CustomKernel"]["workspaceType"] = "StreamK"
+    state["CustomKernel"]["workspaceSizePerElemC"] = 2
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamK"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 2
+
+
+@pytest.mark.parametrize("over", [
+    {},                                # not Stream-K at all
+    {"TileProcessingStrategy": "StreamK", "StreamKAtomic": 1},  # atomic needs no reduction buffer
+])
+def test_assign_custom_kernel_params_no_workspace_without_partials(over):
+    state = _ck_state(**over)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "None"
+    assert state["_WorkspaceSizePerElemC"] == 0
+
+
+def test_assign_custom_kernel_params_single_buffer_accumulation():
+    # SingleBuffer only sets accumulation when compute dtype != dest dtype.
+    state = _ck_state(
+        GlobalSplitUAlgorithm="SingleBuffer",
+        ProblemType={"ComputeDataType": DataType("s"), "DestDataType": DataType("h")},
+    )
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "SingleBuffer"
+
+
+def test_assign_custom_kernel_params_multiple_buffer_accumulation():
+    state = _ck_state(GlobalSplitUAlgorithm="MultipleBuffer")
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "MultipleBuffer"
+
+
+def test_assign_custom_kernel_params_mbsk_accumulation():
+    state = _ck_state(GlobalSplitUAlgorithm="MultipleBufferSingleKernel")
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "MultipleBufferSingleKernel"
+
+
+def test_assign_custom_kernel_params_bias_gradient_workspace():
+    state = _ck_state(
+        ProblemType={
+            "ComputeDataType": DataType("s"), "DestDataType": DataType("s"),
+            "UseBias": True, "Gradient": True,
+        },
+    )
+    state["CustomKernel"]["workspaceSizePerElemBias"] = 4
+    Solution._assignCustomKernelParameters(state)
+    assert state["_WorkspaceSizePerElemBias"] == 4
+
+
+# --------------------------------------------------------------------------- #
+# Stream-K USO capability vs handwritten custom kernels
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        # GFA ordinary SK3/SK5: CustomKernelName is absent, not empty.
+        ({"StreamK": 3}, True),
+        ({"StreamK": 5}, True),
+        ({"StreamK": 4}, False),
+        ({"StreamK": 0}, False),
+        ({"StreamK": 3, "CustomKernelName": ""}, True),
+        ({"StreamK": 3, "CustomKernelName": "handwritten"}, False),
+        ({"StreamK": 3, "CustomKernel": {"name": "handwritten"}}, False),
+        ({"StreamK": 3, "CustomKernel": {"name": "gen", "generated": True}}, True),
+        ({"StreamK": 3, "CustomKernel": -1}, True),
+    ],
+)
+def test_uso_capability_does_not_require_custom_kernel_name(state, expected):
+    assert _supportStreamKPerTileExtraIters(state) is expected
+
+
+def test_uso_capability_assignment_survives_missing_custom_kernel_name():
+    # The merge-time KeyError was state["CustomKernelName"] inside
+    # assignDerivedParameters. Drive the same assignment the derivation uses.
+    state = {"StreamK": 3, "InternalSupportParams": {}}
+    state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = (
+        _supportStreamKPerTileExtraIters(state)
+    )
+    assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Naming: custom-kernel name short-circuits
+# --------------------------------------------------------------------------- #
+
+
+def test_get_kernel_file_base_custom_mapping_name():
+    assert getKernelFileBase(False, {"CustomKernel": {"name": "my_ck"}}) == "my_ck"
+
+
+def test_get_kernel_file_base_legacy_name():
+    assert getKernelFileBase(False, {"CustomKernelName": "legacy_ck"}) == "legacy_ck"
+
+
+def test_get_kernel_file_base_generated_falls_back_to_legacy():
+    # A "generated" CustomKernel mapping is not treated as handwritten, so the
+    # legacy CustomKernelName wins.
+    kernel = {"CustomKernel": {"name": "gen", "generated": True}, "CustomKernelName": "legacy"}
+    assert getKernelFileBase(False, kernel) == "legacy"
+
+
+def test_get_name_custom_mapping_name():
+    assert _getName({"CustomKernel": {"name": "ck_map"}}, frozenset(), False, False) == "ck_map"
+
+
+def test_get_name_legacy_name():
+    assert _getName({"CustomKernelName": "ck_legacy"}, frozenset(), False, False) == "ck_legacy"
+
+
+# --------------------------------------------------------------------------- #
+# BenchmarkProblems._hashableProblemTypeKV
+# --------------------------------------------------------------------------- #
+
+
+def test_hashable_kv_list_becomes_tuple():
+    assert _hashableProblemTypeKV("Index", [0, 1, 2]) == ("Index", (0, 1, 2))
+
+
+def test_hashable_kv_hashable_passthrough():
+    assert _hashableProblemTypeKV("DataType", "s") == ("DataType", "s")
+
+
+def test_hashable_kv_unhashable_uses_repr():
+    key, value = _hashableProblemTypeKV("Meta", {"a": 1})
+    assert key == "Meta"
+    assert value == repr({"a": 1})
+
+
+# --------------------------------------------------------------------------- #
+# Toolchain.Component.Assembler._retargetAssemblySource (direct-unit coverage)
+# --------------------------------------------------------------------------- #
+
+
+def test_retarget_rewrites_mismatched_target(tmp_path):
+    src = tmp_path / "k.s"
+    src.write_text(
+        '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-"\n'
+        "\tamdhsa.target: amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-\n"
+        "s_endpgm\n"
+    )
+    Assembler._retargetAssemblySource("gfx942", str(src))
+    updated = src.read_text()
+    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"' in updated
+    assert "amdhsa.target: amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-" in updated
+
+
+def test_retarget_leaves_matching_target_untouched(tmp_path):
+    src = tmp_path / "k.s"
+    original = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\ns_endpgm\n'
+    src.write_text(original)
+    mtime_before = src.stat().st_mtime_ns
+    Assembler._retargetAssemblySource("gfx942", str(src))
+    assert src.read_text() == original
+    assert src.stat().st_mtime_ns == mtime_before  # no rewrite -> no write
+
+
+def test_retarget_missing_source_does_not_raise():
+    # Opportunistic rewrite: an unreadable/missing source is left alone rather
+    # than crashing before the real assembler invocation.
+    Assembler._retargetAssemblySource("gfx942", "/no/such/file.s")
+
+
+# --------------------------------------------------------------------------- #
+# deriveWaveParams: non-perfect-square wave count exercises the wgM search loop
+# --------------------------------------------------------------------------- #
+
+
+def test_derive_wave_params_non_square_wave_count():
+    # num_threads=320, wavefront=64 -> num_waves=5 (not a perfect square), so
+    # the wgM-decrement loop runs until wgM divides num_waves (2 -> 1).
+    wave_group, wave_tile = deriveWaveParams([16, 16, 16, 1], 320, [256, 256], 64)
+    assert wave_group == [1, 5]
+    assert wave_tile == [max(1, 256 // (16 * 1)), max(1, 256 // (16 * 5))]
+
+
+def test_derive_wave_params_square_wave_count():
+    # num_threads=256, wavefront=64 -> num_waves=4 (perfect square) -> wgM=2.
+    wave_group, _ = deriveWaveParams([16, 16, 16, 1], 256, [256, 256], 64)
+    assert wave_group == [2, 2]

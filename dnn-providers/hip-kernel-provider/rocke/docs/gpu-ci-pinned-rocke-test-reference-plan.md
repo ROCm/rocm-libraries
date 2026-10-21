@@ -6,16 +6,33 @@ SPDX-License-Identifier: MIT
 # GPU CI with pinned rocKE reference kernels
 
 This is the methodology and extension guide. See the [SDPA](sdpa-test-reference.md)
-and [convolution](conv-test-reference.md) guides for commands and bundle status,
+and [convolution](conv-test-reference.md) guides for numerical contracts and bundle status,
+and the [reference workflow](gpu-reference-workflow.md) for all authoring and publication steps,
 and [GPU attention coverage](gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
-As of 2026-10-05, SDPA has eight published gfx942 configurations.
-Convolution has twelve qualified gfx942 forward cases with a published DVC
-bundle, enrolled for default installation. Both operations share
+SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
+each on gfx1151 and gfx1201. Convolution has sixteen qualified gfx942
+forward cases; the operation guides and DVC pointers record the current bundle
+identities. All five pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
-SDPA DVC delivery and architecture-specific packaging have been exercised in CI.
-Additional architectures, convolution gradients, KDA, and GDN remain future work.
+SDPA DVC delivery and architecture-specific packaging were validated in CI for
+gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
+verification, installed Python reference tests, and fresh-cache DVC download checks.
+The gfx1201 replacement compiles for `gfx12-generic` and passed qualification,
+source verification, installed tests, and anonymous download authentication
+against its published DVC pointer and committed lock.
+The gfx1200 adapter uses the same compiler target but
+awaits its own GPU qualification and installation enrollment. On a gfx1200
+runner requesting both gfx120X targets, the gfx1201 pinned CTest skips with code
+77; that result is not gfx1200 pinned coverage. See
+[family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
+Local packaging checks used TheRock's artifact descriptor, splitter, archive
+compression, and downloader selection to verify processor-specific payload routing
+and file-hash preservation for all five published pairs. These checks used the
+Python reference installation harness and local archive transport; native provider
+execution needs separate coverage.
+Further architectures, convolution gradients, KDA, and GDN remain future work.
 
 Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
@@ -260,15 +277,18 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | Component | Responsibility |
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
-| `architectures/registry.json` | Supported qualification cohorts; currently gfx942 for each operation |
+| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
+| `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
+| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
 | `worker.py` | Operation-specific HIP execution and replay |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
 | `cli.py` | Snapshot, qualification, and verification commands |
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
-| `paths.py` | Relocatable source and installed bundle lookup |
-| `../reference_common/published_bundles.json` | Published operation/architecture pairs installed by default; currently SDPA/gfx942 and convolution/gfx942 |
+| `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
+| `../reference_common/targets.py` / `pytest_support.py` | Physical processor identity and suite selection, independent of generic compiler/catalog targets |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
@@ -308,50 +328,15 @@ growth is kernel payload or introduce cross-bundle deduplication prematurely.
 
 ### Add another SDPA architecture
 
-The layout is ready for another target; enrollment is not just a directory rename.
-For gfx950 or gfx1151:
+Follow the [reference workflow](gpu-reference-workflow.md) for adapter enrollment,
+qualification, publication, and installed validation. Architecture availability
+alone does not establish production kernel support.
 
-1. Identify an actual supported production kernel and a small source-test cohort.
-   Confirm the target, dtype, mask, layout, launch ABI, and independent oracle.
-   Hardware availability or a similar architecture name does not establish kernel
-   support. Retain a mapping from each qualified case to its original test.
-2. Implement `architectures/<arch>/` with `NAME`, `FAMILIES`, `CASES`, `CASE_BY_ID`,
-   `prepare`, `launch`, and `exported_kernel`, following the gfx942 adapter.
-   Inspect worker and case-model assumptions before reuse: the current model is
-   dense, equal-length SDPA. Unequal lengths, paging, or new output contracts need
-   explicit model, schema, and runner support.
-3. Add the target to `registry.json` and create its independently reviewed
-   `baseline_lock.json` through qualification. Qualification requires enrollment,
-   so add qualification support first. The architecture registry alone does not
-   enable default installation; `reference_common/published_bundles.json` controls
-   publication enrollment.
-4. Qualify on the actual target in the intended ROCm/container environment. Verify
-   every case against the independent reference, authenticate repeated baseline
-   outputs, and run current-kernel verification and negative controls. Bounds and
-   output digests from gfx942 cannot be transferred to another architecture.
-5. Pack and publish `reference_bundles/sdpa/<arch>.tar.gz` through DVC. Review the
-   pointer, lock, adapter, case mapping, and evidence together, then add the target
-   to the operation in `reference_common/published_bundles.json`. Every published
-   pair is installed when `ROCKE_INSTALL_TEST_GPU_REFERENCES` is ON;
-   TheRock splits the payloads by target. Use
-   `ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_<arch>` to install an extracted
-   local bundle instead of staging that architecture's standard archive.
-6. Validate source and installed tests, then download and assemble the actual
-   generic plus target-specific CI artifacts. Check bundle hashes, absence from
-   release payloads, relocatable discovery, and required tests on that target.
-   Review category selection and worker availability before claiming a new CI
-   lane. New hardware lanes may need infrastructure coordination even though the
-   gfx942 implementation needs no new workflow.
-
-Each installed operation/architecture gets a separate CTest entry and explicit
-pytest architecture selection. Nonmatching GPU lanes return CTest's configured
-skip code before looking up an absent architecture artifact. The matching lane
-must fail on missing hardware, bundles, or invalid qualification.
-
-Keep the existing provider categories. Do not add `ex_gpu_<arch>` labels only to
-reference suites: the provider runner uses a matching label as an inclusion
-filter, which would omit unrelated tests. Architecture-specific CTest names and
-the reference lane gate provide isolation without changing global selection.
+For SDPA, inspect the case-model and worker assumptions before reuse: the current
+model is dense, equal-length attention. Unequal lengths, paging, new outputs, or
+new mask semantics need explicit contract and runner support. Retain a mapping
+from each qualified case to its original test and preserve structural assertions.
+The numerical requirements below supplement the common workflow.
 
 ### Add convolution or another operation
 
@@ -379,14 +364,11 @@ That harness has a published bounded gfx942 forward cohort. Further convolution 
    all required outputs. Multi-kernel operations need ordered replay and complete
    observable-state checks; the existing single-kernel SDPA worker is not a generic
    convolution runner.
-5. **Dedicated tests and enrollment.** Add the operation's contract, host checks,
-   GPU numerical and negative checks, lock, DVC pointer, CMake installation, and
-   provider category selection. Reuse `reference_common` for archives, worker
-   transport, numeric utilities,
-   and source snapshots; preserve library-to-platform dependency direction.
-6. **Independent qualification and artifact validation.** Apply the same promotion
-   and packaging checks as SDPA, with operation-specific failure injections such
-   as wrong padding, wrong strides, incorrect groups, or unwritten gradients.
+
+Use the [reference workflow](gpu-reference-workflow.md) for implementation
+integration, tests, qualification, and publication. Direction-specific failure
+controls should exercise risks such as wrong padding, wrong strides, incorrect
+groups, or unwritten gradients.
 
 Exact equality, dispatch/cache reuse, guard regions, indexing, and untouched state
 must remain explicit checks. A small numerical distance cannot replace them.
@@ -474,8 +456,8 @@ backend, target, source, and payload identities. The manifest captures the code
 and numerical provenance; retain the container identity and execution logs with
 the reviewed qualification evidence as well.
 
-Follow the guide's snapshot, qualification, verification, packing, and publication
-commands. Reproduce the installed CTest command and the real provider category
+Follow the [reference workflow](gpu-reference-workflow.md) for snapshot,
+qualification, verification, packing, and publication commands. Reproduce the installed CTest command and the real provider category
 selection. A successful host-only test run cannot establish GPU qualification.
 
 ## Source anchors
