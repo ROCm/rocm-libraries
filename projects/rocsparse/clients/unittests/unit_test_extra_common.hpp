@@ -498,7 +498,7 @@ namespace extra_ut
             else
                 EXPECT_EQ(hipMemset(ptr, 0, n * sizeof(T)), hipSuccess);
         }
-        DevBuf(const DevBuf&)            = delete;
+        DevBuf(const DevBuf&) = delete;
         DevBuf& operator=(const DevBuf&) = delete;
         DevBuf(DevBuf&& o) noexcept
             : ptr(o.ptr)
@@ -563,9 +563,9 @@ namespace extra_ut
     // ----- RAII descriptors -------------------------------------------------
     struct SpmatH
     {
-        rocsparse_spmat_descr p          = nullptr;
-        SpmatH()                         = default;
-        SpmatH(const SpmatH&)            = delete;
+        rocsparse_spmat_descr p = nullptr;
+        SpmatH()                = default;
+        SpmatH(const SpmatH&)   = delete;
         SpmatH& operator=(const SpmatH&) = delete;
         ~SpmatH()
         {
@@ -576,9 +576,9 @@ namespace extra_ut
 
     struct DnmatH
     {
-        rocsparse_dnmat_descr p          = nullptr;
-        DnmatH()                         = default;
-        DnmatH(const DnmatH&)            = delete;
+        rocsparse_dnmat_descr p = nullptr;
+        DnmatH()                = default;
+        DnmatH(const DnmatH&)   = delete;
         DnmatH& operator=(const DnmatH&) = delete;
         ~DnmatH()
         {
@@ -589,9 +589,9 @@ namespace extra_ut
 
     struct DnvecH
     {
-        rocsparse_dnvec_descr p          = nullptr;
-        DnvecH()                         = default;
-        DnvecH(const DnvecH&)            = delete;
+        rocsparse_dnvec_descr p = nullptr;
+        DnvecH()                = default;
+        DnvecH(const DnvecH&)   = delete;
         DnvecH& operator=(const DnvecH&) = delete;
         ~DnvecH()
         {
@@ -608,7 +608,7 @@ namespace extra_ut
             (void)rocsparse_create_mat_descr(&d);
             (void)rocsparse_set_mat_index_base(d, base);
         }
-        MatDescrH(const MatDescrH&)            = delete;
+        MatDescrH(const MatDescrH&) = delete;
         MatDescrH& operator=(const MatDescrH&) = delete;
         ~MatDescrH()
         {
@@ -624,7 +624,7 @@ namespace extra_ut
         {
             (void)rocsparse_create_mat_info(&i);
         }
-        MatInfoH(const MatInfoH&)            = delete;
+        MatInfoH(const MatInfoH&) = delete;
         MatInfoH& operator=(const MatInfoH&) = delete;
         ~MatInfoH()
         {
@@ -641,7 +641,7 @@ namespace extra_ut
         {
             (void)rocsparse_create_spgeam_descr(&d);
         }
-        SpgeamDescrH(const SpgeamDescrH&)            = delete;
+        SpgeamDescrH(const SpgeamDescrH&) = delete;
         SpgeamDescrH& operator=(const SpgeamDescrH&) = delete;
         ~SpgeamDescrH()
         {
@@ -754,7 +754,7 @@ namespace extra_ut
             (void)rocsparse_get_pointer_mode(handle, &prev);
             (void)rocsparse_set_pointer_mode(handle, mode);
         }
-        PointerModeGuard(const PointerModeGuard&)            = delete;
+        PointerModeGuard(const PointerModeGuard&) = delete;
         PointerModeGuard& operator=(const PointerModeGuard&) = delete;
         ~PointerModeGuard()
         {

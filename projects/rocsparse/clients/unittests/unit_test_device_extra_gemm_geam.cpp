@@ -31,8 +31,9 @@
 //
 // Public C API only, so the instrumented library (not a second copy of the
 // .cpp) is what runs. Matrices stay small: one output row whose nnz selects
-// the csrgemm numeric group, plus 2x2 products for the type / index / transpose
-// switches. gfx1201 is wavefront 32; the wavefront-64 arms cannot run here.
+// the csrgemm numeric group, plus 2x2 products for the type / index switches
+// and the legacy transpose rejection. gfx1201 is wavefront 32; the
+// wavefront-64 arms cannot run here.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -77,45 +78,43 @@ namespace rocsparse_ut
 
 namespace
 {
-    float as_float(const void* p, rocsparse_datatype dt)
+    using extra_ut::Bsr;
+    using extra_ut::bsr_from_csr;
+    using extra_ut::cplx;
+    using extra_ut::Csr;
+    using extra_ut::DevBuf;
+
+    // A = [1, 2; 0, 3] (first) or B = [4, 0; 5, 6]. Complex types get
+    // imaginary parts, so a dropped conjugation or imaginary part shows.
+    template <typename T>
+    Csr pair_operand(bool first)
     {
-        switch(dt)
-        {
-        case rocsparse_datatype_f32_r:
-            return *static_cast<const float*>(p);
-        case rocsparse_datatype_f64_r:
-            return static_cast<float>(*static_cast<const double*>(p));
-        case rocsparse_datatype_f16_r:
-            return static_cast<float>(*static_cast<const _Float16*>(p));
-        case rocsparse_datatype_bf16_r:
-            return static_cast<float>(*static_cast<const rocsparse_bfloat16*>(p));
-        case rocsparse_datatype_f32_c:
-            return std::real(*static_cast<const rocsparse_float_complex*>(p));
-        case rocsparse_datatype_f64_c:
-            return static_cast<float>(std::real(*static_cast<const rocsparse_double_complex*>(p)));
-        default:
-            return 0.f;
-        }
+        const double im = extra_ut::is_complex_t<T>::value ? 1.0 : 0.0;
+        Csr          M;
+        M.m = M.n = 2;
+        M.ptr     = first ? std::vector<int64_t>{0, 2, 3} : std::vector<int64_t>{0, 1, 3};
+        M.col     = first ? std::vector<int64_t>{0, 1, 1} : std::vector<int64_t>{0, 0, 1};
+        M.val     = first ? std::vector<cplx>{1.0, cplx(2.0, im), 3.0}
+                          : std::vector<cplx>{4.0, cplx(5.0, -2.0 * im), 6.0};
+        return M;
     }
 
     // One generic spgemm problem C = alpha * A * B + beta * D and the stages
     // that are issued on it.
     struct SpgemmFlow
     {
-        rocsparse_handle    handle;
-        rocsparse_datatype  dt;
-        rocsparse_operation op_A = rocsparse_operation_none;
-        rocsparse_operation op_B = rocsparse_operation_none;
-        const void*         alpha;
-        const void*         beta;
-        SpmatH              A, B, D, C;
-        size_t              bsz = 0;
+        rocsparse_handle   handle;
+        rocsparse_datatype dt;
+        const void*        alpha;
+        const void*        beta;
+        SpmatH             A, B, D, C;
+        size_t             bsz = 0;
 
         rocsparse_status stage(rocsparse_spgemm_stage s, void* buffer)
         {
             return rocsparse_spgemm(handle,
-                                    op_A,
-                                    op_B,
+                                    rocsparse_operation_none,
+                                    rocsparse_operation_none,
                                     alpha,
                                     A.p,
                                     B.p,
@@ -155,8 +154,8 @@ namespace
     };
 
     // C = alpha * A * B [+ beta * D]. A is 1 x n (dense, or empty), B is n x n
-    // (identity, or empty), so the single output row has exactly n non-zeros and
-    // lands in one csrgemm numeric group.
+    // (two entries per row, or empty), so the single output row has exactly n
+    // non-zeros and lands in one csrgemm numeric group.
     enum class WideKind
     {
         product,
@@ -177,71 +176,54 @@ namespace
         const bool    mul = kind != WideKind::add_only;
         const bool    add = kind != WideKind::product;
         const int64_t N   = n;
-        const I       b0  = static_cast<I>(base);
-        const J       jb0 = static_cast<J>(base);
-        const T       one = scalar<T>(1.f);
 
-        // A: a dense row of ones. B: the identity. D: a dense row of ones.
-        // When absent, the operand is empty (A, B) or 0x0 (D).
-        std::vector<J> cols(n);
-        for(int c = 0; c < n; ++c)
-            cols[c] = static_cast<J>(jb0 + c);
-        std::vector<I> b_ptr(static_cast<size_t>(n) + 1, b0);
-        if(mul)
-            for(int r = 0; r <= n; ++r)
-                b_ptr[r] = static_cast<I>(b0 + r);
-        const std::vector<J> no_col{J{}};
-        const std::vector<T> no_val{scalar<T>(0.f)};
-        device_vector<I>     dA_ptr{std::vector<I>{b0, static_cast<I>(b0 + (mul ? n : 0))}};
-        device_vector<I>     dB_ptr{b_ptr};
-        device_vector<J>     d_col{cols}, d_none{no_col};
-        device_vector<T>     d_ones{std::vector<T>(n, one)}, d_zero{no_val};
-        device_vector<I>     dD_ptr{std::vector<I>{b0, static_cast<I>(b0 + (add ? n : 0))}};
-        device_vector<I>     dC_ptr{size_t{2}};
-        ASSERT_TRUE(dA_ptr.ptr && dB_ptr.ptr && dD_ptr.ptr && dC_ptr.ptr && d_col.ptr
-                    && d_ones.ptr);
+        // A and D: one row of distinct small integers. B: entries (r, r) and
+        // (r, r + 1 mod n) in every row, so every entry of C sums two products.
+        // An absent term has no entries. The values keep f16 / bf16 exact.
+        Csr hA, hB, hD;
+        hA.m = hD.m = 1;
+        hA.n = hB.m = hB.n = hD.n = N;
+        hA.ptr                    = {0, mul ? N : 0};
+        hD.ptr                    = {0, add ? N : 0};
+        hB.ptr.assign(static_cast<size_t>(N) + 1, 0);
+        for(int64_t c = 0; c < N; ++c)
+        {
+            const int64_t next = (c + 1) % N;
+            if(mul)
+            {
+                hA.col.push_back(c);
+                hA.val.push_back(static_cast<double>(c % 4 + 1));
+                for(int64_t j : {std::min(c, next), std::max(c, next)})
+                {
+                    hB.col.push_back(j);
+                    hB.val.push_back(j == c ? static_cast<double>(c % 3 + 1)
+                                            : -static_cast<double>(c % 2 + 1));
+                }
+            }
+            hB.ptr[static_cast<size_t>(c) + 1] = static_cast<int64_t>(hB.col.size());
+            if(add)
+            {
+                hD.col.push_back(c);
+                hD.val.push_back(static_cast<double>(c % 3 + 1));
+            }
+        }
+        DevBuf<I>        dA_ptr, dB_ptr, dD_ptr;
+        DevBuf<J>        dA_col, dB_col, dD_col;
+        DevBuf<T>        dA_val, dB_val, dD_val;
+        device_vector<I> dC_ptr{size_t{2}};
+        ASSERT_TRUE(dC_ptr.ptr);
 
         const rocsparse_datatype  dt = dt_of<T>();
         const rocsparse_indextype it = it_of<I>();
         const rocsparse_indextype jt = it_of<J>();
 
         SpgemmFlow f{handle, dt};
-        ASSERT_EQ(rocsparse_create_csr_descr(&f.A.p,
-                                             1,
-                                             N,
-                                             mul ? N : 0,
-                                             dA_ptr.ptr,
-                                             mul ? d_col.ptr : d_none.ptr,
-                                             mul ? d_ones.ptr : d_zero.ptr,
-                                             it,
-                                             jt,
-                                             base,
-                                             dt),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_csr_descr(&f.B.p,
-                                             N,
-                                             N,
-                                             mul ? N : 0,
-                                             dB_ptr.ptr,
-                                             mul ? d_col.ptr : d_none.ptr,
-                                             mul ? d_ones.ptr : d_zero.ptr,
-                                             it,
-                                             jt,
-                                             base,
-                                             dt),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_csr_descr(&f.D.p,
-                                             1,
-                                             N,
-                                             add ? N : 0,
-                                             dD_ptr.ptr,
-                                             add ? d_col.ptr : d_none.ptr,
-                                             add ? d_ones.ptr : d_zero.ptr,
-                                             it,
-                                             jt,
-                                             base,
-                                             dt),
-                  rocsparse_status_success);
+        ASSERT_NO_FATAL_FAILURE(
+            (extra_ut::make_csr_descr<T, I, J>(f.A, hA, dA_ptr, dA_col, dA_val, base)));
+        ASSERT_NO_FATAL_FAILURE(
+            (extra_ut::make_csr_descr<T, I, J>(f.B, hB, dB_ptr, dB_col, dB_val, base)));
+        ASSERT_NO_FATAL_FAILURE(
+            (extra_ut::make_csr_descr<T, I, J>(f.D, hD, dD_ptr, dD_col, dD_val, base)));
         ASSERT_EQ(rocsparse_create_csr_descr(
                       &f.C.p, 1, N, 0, dC_ptr.ptr, nullptr, nullptr, it, jt, base, dt),
                   rocsparse_status_success);
@@ -267,46 +249,39 @@ namespace
         ASSERT_EQ(f.stage(rocsparse_spgemm_stage_compute, tmp->ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const float want = (kind == WideKind::product)    ? 2.f
-                           : (kind == WideKind::add_only) ? 3.f
-                                                          : 5.f;
-        // Every entry of this row is the same value. Checking the ends left
-        // a wrong middle undetected.
-        std::vector<char> raw(static_cast<size_t>(nnz) * sizeof(T));
-        ASSERT_EQ(hipMemcpy(raw.data(), dC_val->ptr, raw.size(), hipMemcpyDeviceToHost),
-                  hipSuccess);
-        for(int64_t i = 0; i < nnz; ++i)
-            EXPECT_NEAR(as_float(raw.data() + static_cast<size_t>(i) * sizeof(T), dt), want, 1.e-2f)
-                << "C[" << i << "]";
+        const Bsr want = extra_ut::bsr_gemm(
+            mul, 2.0, bsr_from_csr(hA), bsr_from_csr(hB), add, 3.0, bsr_from_csr(hD), 1, N);
+        extra_ut::expect_bsr_equal<T, I, J>(to_host(dC_ptr),
+                                            to_host(*dC_col),
+                                            to_host(*dC_val),
+                                            want,
+                                            rocsparse_direction_row,
+                                            static_cast<int64_t>(base));
     }
 
+    // C = 2 * A * B with the non-symmetric pair_operand matrices.
     template <typename I, typename J, typename T>
-    void run_identity_spgemm(rocsparse_handle    handle,
-                             rocsparse_operation trans_A,
-                             rocsparse_operation trans_B,
-                             bool                symbolic)
+    void run_pair_spgemm(rocsparse_handle handle, bool symbolic)
     {
         const rocsparse_datatype   dt   = dt_of<T>();
         const rocsparse_indextype  it   = it_of<I>();
         const rocsparse_indextype  jt   = it_of<J>();
         const rocsparse_index_base base = rocsparse_index_base_zero;
-        std::vector<I>             hptr{I{0}, I{1}, I{2}};
-        std::vector<J>             hcol{J{0}, J{1}};
-        std::vector<T>             hval{scalar<T>(1.f), scalar<T>(1.f)};
-        device_vector<I>           Ap{hptr}, Cp{size_t{3}};
-        device_vector<J>           Ac{hcol};
-        device_vector<T>           Av{hval};
-        ASSERT_TRUE(Ap.ptr && Cp.ptr && Ac.ptr && Av.ptr);
+        const Csr                  hA   = pair_operand<T>(true);
+        const Csr                  hB   = pair_operand<T>(false);
+        DevBuf<I>                  Ap, Bp;
+        DevBuf<J>                  Ac, Bc;
+        DevBuf<T>                  Av, Bv;
+        device_vector<I>           Cp{size_t{3}};
+        ASSERT_TRUE(Cp.ptr);
 
-        SpgemmFlow f{handle, dt, trans_A, trans_B};
-        const T    alpha = scalar<T>(1.f);
+        SpgemmFlow f{handle, dt};
+        const T    alpha = scalar<T>(2.f);
         const T    beta  = scalar<T>(0.f);
         f.alpha          = &alpha;
         f.beta           = &beta;
-        for(SpmatH* m : {&f.A, &f.B})
-            ASSERT_EQ(rocsparse_create_csr_descr(
-                          &m->p, 2, 2, 2, Ap.ptr, Ac.ptr, Av.ptr, it, jt, base, dt),
-                      rocsparse_status_success);
+        ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(f.A, hA, Ap, Ac, Av)));
+        ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(f.B, hB, Bp, Bc, Bv)));
         ASSERT_EQ(rocsparse_create_csr_descr(
                       &f.D.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, base, dt),
                   rocsparse_status_success);
@@ -317,19 +292,7 @@ namespace
         std::optional<device_vector<J>>    Cc;
         std::optional<device_vector<T>>    Cv;
         std::optional<device_vector<char>> tmp;
-        auto                               st = f.prepare<I, J, T>(Cp, Cc, Cv, tmp);
-        // Only operation none is documented; any other may succeed or return
-        // not_implemented, and its result is not checked.
-        if(trans_A != rocsparse_operation_none || trans_B != rocsparse_operation_none)
-        {
-            if(st == rocsparse_status_success)
-                st = f.stage(rocsparse_spgemm_stage_compute, tmp->ptr);
-            EXPECT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented)
-                << st;
-            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-            return;
-        }
-        ASSERT_EQ(st, rocsparse_status_success);
+        ASSERT_EQ((f.prepare<I, J, T>(Cp, Cc, Cv, tmp)), rocsparse_status_success);
         ASSERT_EQ(
             f.stage(symbolic ? rocsparse_spgemm_stage_symbolic : rocsparse_spgemm_stage_compute,
                     tmp->ptr),
@@ -338,12 +301,17 @@ namespace
             ASSERT_EQ(f.stage(rocsparse_spgemm_stage_numeric, tmp->ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        EXPECT_EQ(to_host(Cp), (std::vector<I>{I{0}, I{1}, I{2}}));
-        EXPECT_EQ(to_host(*Cc), (std::vector<J>{J{0}, J{1}}));
-        std::vector<char> raw(2 * sizeof(T));
-        ASSERT_EQ(hipMemcpy(raw.data(), Cv->ptr, raw.size(), hipMemcpyDeviceToHost), hipSuccess);
-        for(size_t i = 0; i < 2; ++i)
-            EXPECT_NEAR(as_float(raw.data() + i * sizeof(T), dt), 1.f, 1.e-2f) << "C[" << i << "]";
+        const Bsr want = extra_ut::bsr_gemm(true,
+                                            2.0,
+                                            bsr_from_csr(hA),
+                                            bsr_from_csr(hB),
+                                            false,
+                                            0.0,
+                                            extra_ut::empty_bsr(2, 2, 1),
+                                            2,
+                                            2);
+        extra_ut::expect_bsr_equal<T, I, J>(
+            to_host(Cp), to_host(*Cc), to_host(*Cv), want, rocsparse_direction_row, 0);
     }
 
     // Group 10 rejects unsorted B or D. A row with more than 32768 non-zeros
@@ -504,34 +472,22 @@ namespace
     }
 
     template <typename I, typename J, typename T>
-    void run_spgeam(rocsparse_handle    handle,
-                    rocsparse_operation op_A,
-                    rocsparse_operation op_B,
-                    bool                device_scalars)
+    void run_spgeam(rocsparse_handle handle, bool device_scalars)
     {
-        // A = [1, 2; 0, 3], B = [4, 0; 5, 6], C = 2 * A + 3 * B = [14, 4; 15, 24].
+        // C = 2 * A + 3 * B with the pair_operand matrices.
         const rocsparse_datatype   dt   = dt_of<T>();
         const rocsparse_indextype  it   = it_of<I>();
         const rocsparse_indextype  jt   = it_of<J>();
         const rocsparse_index_base base = rocsparse_index_base_zero;
-        std::vector<I>             a_ptr{I{0}, I{2}, I{3}};
-        std::vector<J>             a_col{J{0}, J{1}, J{1}};
-        std::vector<T>             a_val{scalar<T>(1.f), scalar<T>(2.f), scalar<T>(3.f)};
-        std::vector<I>             b_ptr{I{0}, I{1}, I{3}};
-        std::vector<J>             b_col{J{0}, J{0}, J{1}};
-        std::vector<T>             b_val{scalar<T>(4.f), scalar<T>(5.f), scalar<T>(6.f)};
-        device_vector<I>           dA_ptr{a_ptr}, dB_ptr{b_ptr};
-        device_vector<J>           dA_col{a_col}, dB_col{b_col};
-        device_vector<T>           dA_val{a_val}, dB_val{b_val};
-        ASSERT_TRUE(dA_ptr.ptr && dB_ptr.ptr && dA_val.ptr && dB_val.ptr);
-
-        SpmatH A, B;
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &A.p, 2, 2, 3, dA_ptr.ptr, dA_col.ptr, dA_val.ptr, it, jt, base, dt),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &B.p, 2, 2, 3, dB_ptr.ptr, dB_col.ptr, dB_val.ptr, it, jt, base, dt),
-                  rocsparse_status_success);
+        const Csr                  hA   = pair_operand<T>(true);
+        const Csr                  hB   = pair_operand<T>(false);
+        DevBuf<I>                  dA_ptr, dB_ptr;
+        DevBuf<J>                  dA_col, dB_col;
+        DevBuf<T>                  dA_val, dB_val;
+        SpmatH                     A, B;
+        ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(A, hA, dA_ptr, dA_col, dA_val)));
+        ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(B, hB, dB_ptr, dB_col, dB_val)));
+        const Bsr want = extra_ut::bsr_geam(2.0, bsr_from_csr(hA), 3.0, bsr_from_csr(hB));
 
         // The scalar type is the compute type: spgeam with a different scalar
         // type reads alpha / beta in the wrong precision (library bug).
@@ -550,49 +506,32 @@ namespace
                               dt,
                               dt,
                               device_scalars ? static_cast<const void*>(d_alpha.ptr) : &alpha,
-                              device_scalars ? static_cast<const void*>(d_beta.ptr) : &beta,
-                              op_A,
-                              op_B));
-
-        // Only operation none is documented; any other may succeed or return
-        // not_implemented, and its result is not checked.
-        const bool documented
-            = op_A == rocsparse_operation_none && op_B == rocsparse_operation_none;
-        auto proceed = [&](rocsparse_status st) {
-            if(documented)
-                EXPECT_EQ(st, rocsparse_status_success);
-            else
-                EXPECT_TRUE(st == rocsparse_status_success
-                            || st == rocsparse_status_not_implemented)
-                    << st;
-            return st == rocsparse_status_success;
-        };
+                              device_scalars ? static_cast<const void*>(d_beta.ptr) : &beta));
 
         size_t bsz = 0;
-        if(!proceed(rocsparse_spgeam_buffer_size(
-               handle, descr, A.p, B.p, nullptr, rocsparse_spgeam_stage_analysis, &bsz, nullptr)))
-            return;
+        ASSERT_EQ(
+            rocsparse_spgeam_buffer_size(
+                handle, descr, A.p, B.p, nullptr, rocsparse_spgeam_stage_analysis, &bsz, nullptr),
+            rocsparse_status_success);
         device_vector<char> tmp{bsz ? bsz : size_t{1}};
         ASSERT_TRUE(tmp.ptr);
         // mat_C == nullptr takes csrgeam_nnz_core_with_allocation.
-        if(!proceed(rocsparse_spgeam(handle,
-                                     descr,
-                                     A.p,
-                                     B.p,
-                                     nullptr,
-                                     rocsparse_spgeam_stage_analysis,
-                                     bsz,
-                                     tmp.ptr,
-                                     nullptr)))
-            return;
+        ASSERT_EQ(rocsparse_spgeam(handle,
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   nullptr,
+                                   rocsparse_spgeam_stage_analysis,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
+                  rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         int64_t nnz_C = 0;
         ASSERT_EQ(rocsparse_spgeam_get_output(
                       handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(nnz_C), nullptr),
                   rocsparse_status_success);
-        if(documented)
-            ASSERT_EQ(nnz_C, 4);
-        ASSERT_GE(nnz_C, 0);
+        ASSERT_EQ(nnz_C, want.nnzb());
 
         device_vector<I> dC_ptr{size_t{3}};
         device_vector<J> dC_col{static_cast<size_t>(std::max<int64_t>(nnz_C, 1))};
@@ -606,34 +545,22 @@ namespace
         PointerModeGuard mode(
             handle, device_scalars ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
         bsz = 0;
-        if(!proceed(rocsparse_spgeam_buffer_size(
-               handle, descr, A.p, B.p, C.p, rocsparse_spgeam_stage_compute, &bsz, nullptr)))
-            return;
-        if(!proceed(rocsparse_spgeam(handle,
-                                     descr,
-                                     A.p,
-                                     B.p,
-                                     C.p,
-                                     rocsparse_spgeam_stage_compute,
-                                     bsz,
-                                     tmp.ptr,
-                                     nullptr)))
-            return;
+        ASSERT_EQ(rocsparse_spgeam_buffer_size(
+                      handle, descr, A.p, B.p, C.p, rocsparse_spgeam_stage_compute, &bsz, nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_spgeam(handle,
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   C.p,
+                                   rocsparse_spgeam_stage_compute,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
+                  rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        if(!documented)
-            return;
-
-        auto hc = to_host(dC_val);
-        auto hi = to_host(dC_col);
-        ASSERT_EQ(hc.size(), 4u);
-        extra_ut::sort_rows(to_host(dC_ptr), 0, hi, hc);
-        EXPECT_EQ(hi[0], J{0});
-        EXPECT_EQ(hi[1], J{1});
-        EXPECT_EQ(hi[2], J{0});
-        EXPECT_EQ(hi[3], J{1});
-        const float want[] = {14.f, 4.f, 15.f, 24.f};
-        for(int i = 0; i < 4; ++i)
-            EXPECT_NEAR(as_float(reinterpret_cast<const char*>(&hc[i]), dt), want[i], 1.e-3f) << i;
+        extra_ut::expect_bsr_equal<T, I, J>(
+            to_host(dC_ptr), to_host(dC_col), to_host(dC_val), want, rocsparse_direction_row, 0);
     }
 
     class ExtraGemmGeam : public HandleTest
@@ -685,25 +612,20 @@ TEST_F(ExtraGemmGeam, spgemm_type_index_transpose)
     auto all_types = [&](auto i, auto j, int symbolic_type) {
         using I = decltype(i);
         using J = decltype(j);
-        run_identity_spgemm<I, J, float>(handle, N, N, symbolic_type == 0);
-        run_identity_spgemm<I, J, double>(handle, N, N, symbolic_type == 1);
-        run_identity_spgemm<I, J, rocsparse_float_complex>(handle, N, N, symbolic_type == 2);
-        run_identity_spgemm<I, J, rocsparse_double_complex>(handle, N, N, symbolic_type == 3);
-        run_identity_spgemm<I, J, _Float16>(handle, N, N, symbolic_type == 4);
-        run_identity_spgemm<I, J, rocsparse_bfloat16>(handle, N, N, symbolic_type == 5);
+        run_pair_spgemm<I, J, float>(handle, symbolic_type == 0);
+        run_pair_spgemm<I, J, double>(handle, symbolic_type == 1);
+        run_pair_spgemm<I, J, rocsparse_float_complex>(handle, symbolic_type == 2);
+        run_pair_spgemm<I, J, rocsparse_double_complex>(handle, symbolic_type == 3);
+        run_pair_spgemm<I, J, _Float16>(handle, symbolic_type == 4);
+        run_pair_spgemm<I, J, rocsparse_bfloat16>(handle, symbolic_type == 5);
     };
     all_types(int32_t{}, int32_t{}, 0);
     all_types(int64_t{}, int32_t{}, 4);
     all_types(int64_t{}, int64_t{}, 5);
-    run_identity_spgemm<int32_t, int32_t, float>(handle, N, N, true);
+    run_pair_spgemm<int32_t, int32_t, float>(handle, true);
 
-    // Transposed operands: success or not_implemented, nothing else checked.
-    run_identity_spgemm<int32_t, int32_t, float>(handle, T, N, false);
-    run_identity_spgemm<int32_t, int32_t, float>(handle, N, T, false);
-    run_identity_spgemm<int32_t, int32_t, float>(handle, T, T, false);
-    run_identity_spgemm<int32_t, int32_t, float>(handle, C, N, false);
-    run_identity_spgemm<int32_t, int32_t, rocsparse_float_complex>(handle, C, C, false);
-    run_identity_spgemm<int64_t, int64_t, double>(handle, T, C, false);
+    // Generic transposed operands are not run: rocsparse_spgemm returns success
+    // and computes A * B instead of not_implemented (library bug).
 
     // The legacy entry points reject transpose before any kernel runs.
     device_vector<rocsparse_int> rp{std::vector<rocsparse_int>{0, 1, 2}};
@@ -940,59 +862,56 @@ TEST_F(ExtraGemmGeam, spgemm_rejected_types_formats_and_bsr)
     }
 
     // BSR is implemented for buffer/nnz/compute; symbolic/numeric are CSR only.
-    auto bsr_case = [&](auto* tag, rocsparse_datatype dt, rocsparse_direction dir) {
+    // C = 2 * A * B with blocks of distinct values, so for bd = 2 the block
+    // direction changes the result (bd = 1 takes the csrgemm path). Transposed
+    // A is not run: rocsparse_spgemm returns success and computes A * B
+    // (library bug).
+    auto bsr_case = [&](auto* tag, rocsparse_datatype dt, rocsparse_direction dir, int64_t bd) {
         using V = std::remove_pointer_t<decltype(tag)>;
-        const V                one_v(1.f), zero_v(0.f);
-        device_vector<int32_t> bp{std::vector<int32_t>{0, 1, 2}};
-        device_vector<int32_t> bc{std::vector<int32_t>{0, 1}};
-        device_vector<V>       bv{std::vector<V>{one_v, one_v}};
+        SCOPED_TRACE("dir=" + std::to_string(dir) + " bd=" + std::to_string(bd));
+        Bsr hA, hB;
+        hA.mb = hA.nb = hB.mb = hB.nb = 2;
+        hA.bd = hB.bd = bd;
+        hA.ptr        = {0, 2, 3};
+        hA.col        = {0, 1, 1};
+        hB.ptr        = {0, 1, 3};
+        hB.col        = {0, 0, 1};
+        for(int64_t e = 0; e < 3 * bd * bd; ++e)
+        {
+            hA.val.push_back(static_cast<double>((e * 5) % 7 - 3));
+            hB.val.push_back(static_cast<double>((e * 3 + 1) % 7 - 3));
+        }
+        const Bsr want = extra_ut::bsr_gemm(
+            true, 2.0, hA, hB, false, 0.0, extra_ut::empty_bsr(2, 2, bd), 2, 2);
+        const V                alpha_v(2.f), zero_v(0.f);
+        auto                   Ap = extra_ut::up_idx<int32_t>(hA.ptr);
+        auto                   Ac = extra_ut::up_idx<int32_t>(hA.col);
+        auto                   Bp = extra_ut::up_idx<int32_t>(hB.ptr);
+        auto                   Bc = extra_ut::up_idx<int32_t>(hB.col);
+        DevBuf<V>              Av(extra_ut::bsr_pack<V>(hA, dir));
+        DevBuf<V>              Bv(extra_ut::bsr_pack<V>(hB, dir));
         device_vector<int32_t> cptr{size_t{3}};
-        Operands               o;
-        auto                   mk = [&](SpmatH& m, int64_t mb, bool empty) {
-            return rocsparse_create_bsr_descr(&m.p,
-                                              mb,
-                                              mb,
-                                              mb,
-                                              dir,
-                                              1,
-                                              empty ? nullptr : bp.ptr,
-                                              empty ? nullptr : bc.ptr,
-                                              empty ? nullptr : bv.ptr,
-                                              I32,
-                                              I32,
-                                              ZB,
-                                              dt);
+        ASSERT_TRUE(Ap.ptr && Ac.ptr && Bp.ptr && Bc.ptr && Av.ptr && Bv.ptr && cptr.ptr);
+        Operands o;
+        auto     mk = [&](SpmatH& m, const DevBuf<int32_t>& p, const DevBuf<int32_t>& c, V* v) {
+            return rocsparse_create_bsr_descr(
+                &m.p, 2, 2, 3, dir, bd, p.ptr, c.ptr, v, I32, I32, ZB, dt);
         };
-        ASSERT_EQ(mk(o.A, 2, false), rocsparse_status_success);
-        ASSERT_EQ(mk(o.B, 2, false), rocsparse_status_success);
-        ASSERT_EQ(mk(o.D, 0, true), rocsparse_status_success);
+        ASSERT_EQ(mk(o.A, Ap, Ac, Av.ptr), rocsparse_status_success);
+        ASSERT_EQ(mk(o.B, Bp, Bc, Bv.ptr), rocsparse_status_success);
         ASSERT_EQ(rocsparse_create_bsr_descr(
-                      &o.C.p, 2, 2, 0, dir, 1, cptr.ptr, nullptr, nullptr, I32, I32, ZB, dt),
+                      &o.D.p, 0, 0, 0, dir, bd, nullptr, nullptr, nullptr, I32, I32, ZB, dt),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_bsr_descr(
+                      &o.C.p, 2, 2, 0, dir, bd, cptr.ptr, nullptr, nullptr, I32, I32, ZB, dt),
                   rocsparse_status_success);
 
-        size_t bsz = 0;
-        ASSERT_EQ(rocsparse_spgemm(handle,
-                                   N,
-                                   N,
-                                   &one_v,
-                                   o.A.p,
-                                   o.B.p,
-                                   &zero_v,
-                                   o.D.p,
-                                   o.C.p,
-                                   dt,
-                                   DEF,
-                                   BUF,
-                                   &bsz,
-                                   nullptr),
-                  rocsparse_status_success);
-        device_vector<char> tmp{bsz ? bsz : size_t{1}};
-        ASSERT_TRUE(tmp.ptr);
-        auto call = [&](rocsparse_operation opA, rocsparse_spgemm_stage stage) {
+        size_t bsz  = 0;
+        auto   call = [&](rocsparse_spgemm_stage stage, void* buf) {
             return rocsparse_spgemm(handle,
-                                    opA,
                                     N,
-                                    &one_v,
+                                    N,
+                                    &alpha_v,
                                     o.A.p,
                                     o.B.p,
                                     &zero_v,
@@ -1002,34 +921,33 @@ TEST_F(ExtraGemmGeam, spgemm_rejected_types_formats_and_bsr)
                                     DEF,
                                     stage,
                                     &bsz,
-                                    tmp.ptr);
+                                    buf);
         };
-        ASSERT_EQ(call(N, rocsparse_spgemm_stage_nnz), rocsparse_status_success);
-        EXPECT_TRUE(status_is(call(N, rocsparse_spgemm_stage_symbolic), any_error));
+        ASSERT_EQ(call(BUF, nullptr), rocsparse_status_success);
+        device_vector<char> tmp{bsz ? bsz : size_t{1}};
+        ASSERT_TRUE(tmp.ptr);
+        ASSERT_EQ(call(rocsparse_spgemm_stage_nnz, tmp.ptr), rocsparse_status_success);
+        EXPECT_TRUE(status_is(call(rocsparse_spgemm_stage_symbolic, tmp.ptr), any_error));
         int64_t brows = 0, bcols = 0, bnnz = 0;
         ASSERT_EQ(rocsparse_spmat_get_size(o.C.p, &brows, &bcols, &bnnz), rocsparse_status_success);
-        device_vector<int32_t> ccol{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
-        device_vector<V>       cv{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
+        ASSERT_EQ(bnnz, want.nnzb());
+        device_vector<int32_t> ccol{static_cast<size_t>(bnnz)};
+        device_vector<V>       cv{static_cast<size_t>(bnnz * bd * bd)};
         ASSERT_TRUE(ccol.ptr && cv.ptr);
         ASSERT_EQ(rocsparse_bsr_set_pointers(o.C.p, cptr.ptr, ccol.ptr, cv.ptr),
                   rocsparse_status_success);
-        ASSERT_EQ(call(N, rocsparse_spgemm_stage_compute), rocsparse_status_success);
+        ASSERT_EQ(call(rocsparse_spgemm_stage_compute, tmp.ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        ASSERT_EQ(bnnz, 2);
-        for(const V& v : to_host(cv))
-            EXPECT_NEAR(as_float(&v, dt), 1.f, 1.e-2f);
-        // Transpose is undocumented: success or not_implemented, nothing else checked.
-        const rocsparse_status st
-            = call(rocsparse_operation_transpose, rocsparse_spgemm_stage_compute);
-        EXPECT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented) << st;
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        extra_ut::expect_bsr_equal<V, int32_t, int32_t>(
+            to_host(cptr), to_host(ccol), to_host(cv), want, dir, 0);
     };
     for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
-    {
-        bsr_case(static_cast<float*>(nullptr), F32, dir);
-        bsr_case(static_cast<_Float16*>(nullptr), rocsparse_datatype_f16_r, dir);
-        bsr_case(static_cast<rocsparse_bfloat16*>(nullptr), rocsparse_datatype_bf16_r, dir);
-    }
+        for(int64_t bd : {1, 2})
+        {
+            bsr_case(static_cast<float*>(nullptr), F32, dir, bd);
+            bsr_case(static_cast<_Float16*>(nullptr), rocsparse_datatype_f16_r, dir, bd);
+            bsr_case(static_cast<rocsparse_bfloat16*>(nullptr), rocsparse_datatype_bf16_r, dir, bd);
+        }
 }
 
 TEST_F(ExtraGemmGeam, csrgeam_nnz_branches)
@@ -1109,6 +1027,11 @@ TEST_F(ExtraGemmGeam, csrgeam_nnz_branches)
     nnz = -1;
     ASSERT_EQ(call(handle, 2, 2, row_C.ptr, &nnz), rocsparse_status_success);
     EXPECT_EQ(nnz, 2);
+    auto row_head = [&] {
+        const auto h = to_host(row_C);
+        return std::vector<rocsparse_int>(h.begin(), h.begin() + 3);
+    };
+    EXPECT_EQ(row_head(), (std::vector<rocsparse_int>{0, 1, 2}));
     ASSERT_EQ(rocsparse_set_mat_index_base(descr_C.d, rocsparse_index_base_one),
               rocsparse_status_success);
     {
@@ -1119,49 +1042,38 @@ TEST_F(ExtraGemmGeam, csrgeam_nnz_branches)
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_EQ(to_host(dnnz)[0], 2);
     }
+    EXPECT_EQ(row_head(), (std::vector<rocsparse_int>{1, 2, 3}));
 }
 
-TEST_F(ExtraGemmGeam, spgeam_type_index_transpose_scalars)
+TEST_F(ExtraGemmGeam, spgeam_type_index_scalars)
 {
-    const rocsparse_operation N = rocsparse_operation_none;
-    const rocsparse_operation T = rocsparse_operation_transpose;
-    const rocsparse_operation C = rocsparse_operation_conjugate_transpose;
+    // Transposed operands are not run: rocsparse_spgeam returns success and
+    // computes 2 * A + 3 * B, ignoring the operations (library bug).
+    run_spgeam<int32_t, int32_t, float>(handle, false);
+    run_spgeam<int32_t, int32_t, float>(handle, true);
+    run_spgeam<int32_t, int32_t, double>(handle, false);
+    run_spgeam<int32_t, int32_t, rocsparse_float_complex>(handle, false);
+    run_spgeam<int32_t, int32_t, rocsparse_double_complex>(handle, false);
+    run_spgeam<int64_t, int32_t, float>(handle, false);
+    run_spgeam<int64_t, int32_t, double>(handle, false);
+    run_spgeam<int64_t, int64_t, float>(handle, false);
+    run_spgeam<int64_t, int64_t, rocsparse_float_complex>(handle, false);
+    run_spgeam<int64_t, int32_t, rocsparse_double_complex>(handle, true);
 
-    run_spgeam<int32_t, int32_t, float>(handle, N, N, false);
-    run_spgeam<int32_t, int32_t, float>(handle, N, N, true);
-    run_spgeam<int32_t, int32_t, float>(handle, T, N, false);
-    run_spgeam<int32_t, int32_t, float>(handle, N, T, false);
-    run_spgeam<int32_t, int32_t, float>(handle, T, C, false);
-    run_spgeam<int32_t, int32_t, double>(handle, N, N, false);
-    run_spgeam<int32_t, int32_t, rocsparse_float_complex>(handle, C, C, false);
-    run_spgeam<int32_t, int32_t, rocsparse_double_complex>(handle, N, N, false);
-    run_spgeam<int64_t, int32_t, float>(handle, N, N, false);
-    run_spgeam<int64_t, int32_t, double>(handle, T, T, false);
-    run_spgeam<int64_t, int64_t, float>(handle, N, N, false);
-    run_spgeam<int64_t, int64_t, rocsparse_float_complex>(handle, N, C, false);
-    run_spgeam<int64_t, int32_t, rocsparse_double_complex>(handle, N, N, true);
-
-    // Split symbolic / numeric stages.
+    // Split symbolic / numeric stages: C = 2 * A + 3 * B.
     {
-        device_vector<int32_t> dp{std::vector<int32_t>{0, 1, 2}};
-        device_vector<int32_t> dc{std::vector<int32_t>{0, 1}};
-        device_vector<float>   dv{std::vector<float>{1.f, 2.f}};
-        SpmatH                 A, B;
-        for(SpmatH* m : {&A, &B})
-            ASSERT_EQ(rocsparse_create_csr_descr(&m->p,
-                                                 2,
-                                                 2,
-                                                 2,
-                                                 dp.ptr,
-                                                 dc.ptr,
-                                                 dv.ptr,
-                                                 rocsparse_indextype_i32,
-                                                 rocsparse_indextype_i32,
-                                                 rocsparse_index_base_zero,
-                                                 rocsparse_datatype_f32_r),
-                      rocsparse_status_success);
+        const Csr       hA = pair_operand<float>(true);
+        const Csr       hB = pair_operand<float>(false);
+        DevBuf<int32_t> dAp, dAc, dBp, dBc;
+        DevBuf<float>   dAv, dBv;
+        SpmatH          A, B;
+        ASSERT_NO_FATAL_FAILURE(
+            (extra_ut::make_csr_descr<float, int32_t, int32_t>(A, hA, dAp, dAc, dAv)));
+        ASSERT_NO_FATAL_FAILURE(
+            (extra_ut::make_csr_descr<float, int32_t, int32_t>(B, hB, dBp, dBc, dBv)));
+        const Bsr want = extra_ut::bsr_geam(2.0, bsr_from_csr(hA), 3.0, bsr_from_csr(hB));
         const rocsparse_datatype dt    = rocsparse_datatype_f32_r;
-        const float              alpha = 1.f, beta = 1.f;
+        const float              alpha = 2.f, beta = 3.f;
         SpgeamDescrH             holder;
         const auto               descr = holder.d;
         ASSERT_NO_FATAL_FAILURE(spgeam_set_inputs(handle, descr, dt, dt, &alpha, &beta));
@@ -1212,9 +1124,10 @@ TEST_F(ExtraGemmGeam, spgeam_type_index_transpose_scalars)
         ASSERT_EQ(rocsparse_spgeam_get_output(
                       handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(nnz_C), nullptr),
                   rocsparse_status_success);
+        ASSERT_EQ(nnz_C, want.nnzb());
         device_vector<int32_t> cptr{size_t{3}};
-        device_vector<int32_t> ccol{static_cast<size_t>(nnz_C > 0 ? nnz_C : 1)};
-        device_vector<float>   cval{static_cast<size_t>(nnz_C > 0 ? nnz_C : 1)};
+        device_vector<int32_t> ccol{static_cast<size_t>(nnz_C)};
+        device_vector<float>   cval{static_cast<size_t>(nnz_C)};
         SpmatH                 Cm;
         ASSERT_EQ(rocsparse_create_csr_descr(&Cm.p,
                                              2,
@@ -1232,6 +1145,9 @@ TEST_F(ExtraGemmGeam, spgeam_type_index_transpose_scalars)
                           rocsparse_spgeam_stage_numeric_analysis,
                           rocsparse_spgeam_stage_numeric_compute})
             ASSERT_EQ(run(stage, Cm.p), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        extra_ut::expect_bsr_equal<float, int32_t, int32_t>(
+            to_host(cptr), to_host(ccol), to_host(cval), want, rocsparse_direction_row, 0);
     }
 
     // An unsupported format (COO) on every analysis stage.

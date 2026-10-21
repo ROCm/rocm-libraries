@@ -47,7 +47,7 @@ namespace
         {
             (void)rocsparse_create_sptrsm_descr(&d);
         }
-        SptrsmDescrH(const SptrsmDescrH&)            = delete;
+        SptrsmDescrH(const SptrsmDescrH&) = delete;
         SptrsmDescrH& operator=(const SptrsmDescrH&) = delete;
         ~SptrsmDescrH()
         {

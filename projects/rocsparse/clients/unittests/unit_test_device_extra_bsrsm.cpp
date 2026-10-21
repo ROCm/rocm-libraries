@@ -248,7 +248,7 @@ namespace
         if(c.singular_block >= 0)
         {
             EXPECT_EQ(st, rocsparse_status_zero_pivot);
-            EXPECT_GE(position, 0);
+            EXPECT_EQ(position, c.singular_block);
             return;
         }
         EXPECT_EQ(st, rocsparse_status_success);
@@ -266,7 +266,7 @@ namespace
         // float and float complex
         constexpr bool single
             = std::is_same<T, float>::value || std::is_same<T, rocsparse_float_complex>::value;
-        const double tol = single ? 5e-4 : 1e-9;
+        const double tol = single ? 1e-5 : 1e-9;
         expect_dense_equal<T>(dX.host(),
                               apply_op(want, c.opX),
                               rocsparse_order_column,

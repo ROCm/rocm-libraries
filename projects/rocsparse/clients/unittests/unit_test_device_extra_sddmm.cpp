@@ -151,7 +151,7 @@ namespace
 
         // Pattern and initial values of C.
         Csr P = c.empty_C ? csr_with_row_lengths<T>(
-                                c.m, c.n, std::vector<int64_t>(static_cast<size_t>(c.m), 0), rng)
+                    c.m, c.n, std::vector<int64_t>(static_cast<size_t>(c.m), 0), rng)
                           : random_csr<T>(c.m, c.n, std::min<int64_t>(c.n, 4), rng);
         for(auto& v : P.val)
             v = round_to<T>(rand_val<T>(rng));
@@ -471,6 +471,15 @@ TEST_F(ExtraSddmm, inner_dimension_sweep)
                 if(HasFatalFailure())
                     return;
             }
+}
+
+TEST_F(ExtraSddmm, operations_and_orders)
+{
+    sddmm_grid<float, int32_t, int32_t>(handle, all_fmts, ops, ops, false, 700);
+    if(HasFatalFailure())
+        return;
+    sddmm_grid<rocsparse_double_complex, int64_t, int64_t>(
+        handle, {SddmmFmt::csr, SddmmFmt::ell}, ops, ops, true, 800);
 }
 
 TEST_F(ExtraSddmm, scalars_and_empty_pattern)

@@ -204,12 +204,7 @@ namespace
                                   bsz,
                                   buffer);
         };
-        // COO with a transposed A is not documented: success or
-        // not_implemented, and the result is not checked.
-        const bool documented = c.fmt != SFmt::coo || c.opA == rocsparse_operation_none;
-        auto       proceed    = [&](rocsparse_status st) {
-            if(!documented && st == rocsparse_status_not_implemented)
-                return false;
+        auto proceed = [&](rocsparse_status st) {
             EXPECT_EQ(st, rocsparse_status_success);
             return st == rocsparse_status_success;
         };
@@ -224,8 +219,6 @@ namespace
         if(!proceed(stage(rocsparse_spmm_stage_compute, &bsz, buffer.ptr)))
             return;
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        if(!documented)
-            return;
 
         const Dense want = axpby(to_c<T>(alpha.h),
                                  matmul(apply_op(dense_of(A), c.opA), opB_logical),
@@ -237,8 +230,8 @@ namespace
     }
 
     const rocsparse_operation all_ops[]    = {rocsparse_operation_none,
-                                              rocsparse_operation_transpose,
-                                              rocsparse_operation_conjugate_transpose};
+                                           rocsparse_operation_transpose,
+                                           rocsparse_operation_conjugate_transpose};
     const rocsparse_order     all_orders[] = {rocsparse_order_column, rocsparse_order_row};
 
     const rocsparse_spmm_alg csr_algs[] = {rocsparse_spmm_alg_default,

@@ -542,12 +542,40 @@ namespace
     }
 }
 
-TEST_F(ExtraSpgemm, long_rows_unsorted_B)
+TEST_F(ExtraSpgemm, long_rows_sorted_and_unsorted_B)
 {
     for(Mode m : kModes)
-    {
-        long_rows<float>(handle, m, false);
-        if(HasFatalFailure())
-            return;
-    }
+        for(bool sorted_B : {true, false})
+        {
+            long_rows<float>(handle, m, sorted_B);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+TEST_F(ExtraSpgemm, mixed_index_bases)
+{
+    const rocsparse_index_base Z = rocsparse_index_base_zero, O = rocsparse_index_base_one;
+    const rocsparse_index_base bases[][4] = {{O, Z, O, Z}, {Z, O, Z, O}, {O, O, O, Z}};
+    for(const auto& b : bases)
+        for(bool bsr : {false, true})
+            for(bool split : {false, true})
+            {
+                if(split && bsr)
+                    continue;
+                Case c;
+                c.bsr   = bsr;
+                c.bd    = 2;
+                c.split = split;
+                c.bA    = b[0];
+                c.bB    = b[1];
+                c.bC    = b[2];
+                c.bD    = b[3];
+                run<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+                run<double, int64_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
 }

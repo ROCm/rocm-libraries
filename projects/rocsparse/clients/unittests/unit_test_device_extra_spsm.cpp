@@ -34,8 +34,8 @@
 // right-hand sides. The complete solution C is compared with a host forward /
 // backward substitution and the input B and the padding of the leading
 // dimensions are checked to be untouched. Conjugate transpose is not
-// documented: it is run, but only success or not_implemented is accepted and
-// the result is not checked. The argument checks and the unsupported formats
+// documented: it may return not_implemented, and a solve that succeeds is
+// compared like the others. The argument checks and the unsupported formats
 // are exercised separately.
 //
 #include "unit_test_extra_common.hpp"
@@ -82,8 +82,9 @@ namespace
     }
 
     // Well conditioned triangular matrix: up to three off-diagonal entries of
-    // magnitude one and a diagonal of 4 or 8.
-    Csr triangular(int64_t m, bool lower, Rng& rng)
+    // magnitude one and a diagonal of 4 or 8. With `imag_off` the off-diagonal
+    // entries are imaginary, so conjugating A changes the solution.
+    Csr triangular(int64_t m, bool lower, Rng& rng, bool imag_off = false)
     {
         Csr A;
         A.m = A.n = m;
@@ -107,7 +108,10 @@ namespace
                 if(j == i)
                     A.val.push_back(cplx(rng.range(0, 1) == 0 ? 4.0 : 8.0, 0.0));
                 else
-                    A.val.push_back(cplx(rng.range(0, 1) == 0 ? -1.0 : 1.0, 0.0));
+                {
+                    const double s = rng.range(0, 1) == 0 ? -1.0 : 1.0;
+                    A.val.push_back(imag_off ? cplx(0.0, s) : cplx(s, 0.0));
+                }
             }
             A.ptr.push_back(static_cast<int64_t>(A.col.size()));
         }
@@ -136,7 +140,7 @@ namespace
             handle = h;
             c      = cs;
             Rng rng(c.seed * 977 + static_cast<uint64_t>(c.m * 13 + c.nrhs));
-            A = triangular(c.m, c.fill == rocsparse_fill_mode_lower, rng);
+            A = triangular(c.m, c.fill == rocsparse_fill_mode_lower, rng, is_complex_t<T>::value);
 
             B_logical = random_dense<T>(c.m, c.nrhs, rng);
             B_stored  = apply_op(B_logical, c.opB);
@@ -234,9 +238,9 @@ namespace
                     p.buffer = DevBuf<char>(p.bsz);
             }
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-            return;
         }
-        ASSERT_NO_FATAL_FAILURE(p.run_all());
+        else
+            ASSERT_NO_FATAL_FAILURE(p.run_all());
         ASSERT_NO_FATAL_FAILURE(p.check());
     }
 
