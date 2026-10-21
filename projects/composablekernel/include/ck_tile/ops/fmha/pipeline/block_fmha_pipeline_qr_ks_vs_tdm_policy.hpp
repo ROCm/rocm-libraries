@@ -565,6 +565,30 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                                             detail::kQrTdmLdsAccessBytes>();
     }
 
+    // V tile in LDS from a vectorized KV cache: [kN0/v][kN1][v] (v = 16 bytes of elements),
+    // as (hdim_v, seq), the coordinates of the transposed V read.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsVectorizedDescriptor()
+    {
+        using VDataType          = remove_cvref_t<typename Problem::VDataType>;
+        constexpr index_t kVec   = 16 / sizeof(VDataType);
+        constexpr index_t kSeq   = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kHdimV = Problem::BlockFmhaShape::kN1;
+        static_assert(kSeq % kVec == 0);
+
+        constexpr auto desc = make_naive_tensor_descriptor(
+            make_tuple(number<kSeq / kVec>{}, number<kHdimV>{}, number<kVec>{}),
+            make_tuple(number<kHdimV * kVec>{}, number<kVec>{}, number<1>{}),
+            number<kVec>{},
+            number<1>{});
+        return transform_tensor_descriptor(
+            desc,
+            make_tuple(make_pass_through_transform(number<kHdimV>{}),
+                       make_merge_transform(make_tuple(number<kSeq / kVec>{}, number<kVec>{}))),
+            make_tuple(sequence<1>{}, sequence<0, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
     {

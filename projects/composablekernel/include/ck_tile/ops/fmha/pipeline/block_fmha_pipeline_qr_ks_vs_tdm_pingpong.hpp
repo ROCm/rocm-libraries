@@ -402,6 +402,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         if constexpr(!kHasDropout)
             ignore = dropout_args;
+        static_assert(!KVRows::kIsVectorized, "qr_tdm_pingpong reads row-major K/V");
 
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&

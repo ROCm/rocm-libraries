@@ -1325,9 +1325,10 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     else
                         return position_encoding;
                 }();
-                static_assert(kKVMemoryLayout ==
-                                  BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
-                              "TDM batch_prefill supports linear KV");
+                // A vectorized KV cache: the page views below only bound the TDM boxes
+                // (see BlockFmhaPagedKVRows::load_vectorized).
+                constexpr bool kVectorizedKV =
+                    kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
                 // TDM needs affine views and clamps each box to the real lengths: each K/V
                 // tile is read through a view of its page that ends at seqlen_k.
                 const auto q_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
@@ -1379,17 +1380,20 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     FmhaPipeline::kN0 / (FmhaPipeline::kBlockSize / get_warp_size());
                 constexpr index_t kGatherWarpRows =
                     kPageBlockSize % kKVWarpRows != 0 ? kKVWarpRows : 0;
+                static_assert(!kVectorizedKV || kGatherWarpRows == 0,
+                              "a vectorized KV cache needs pages of whole warp K/V rows");
                 const auto kv_rows =
                     BlockFmhaPagedKVRows<kPageBlockSize,
                                          remove_cvref_t<decltype(make_k_view)>,
                                          remove_cvref_t<decltype(make_v_view)>,
-                                         kGatherWarpRows>{page_idx,
-                                                          max_page_table_idx,
-                                                          kargs.seqlen_k,
-                                                          make_k_view,
-                                                          make_v_view,
-                                                          kargs.batch_stride_k / kargs.stride_k,
-                                                          kargs.batch_stride_v / kargs.stride_v};
+                                         kGatherWarpRows,
+                                         kVectorizedKV>{page_idx,
+                                                        max_page_table_idx,
+                                                        kargs.seqlen_k,
+                                                        make_k_view,
+                                                        make_v_view,
+                                                        kargs.batch_stride_k / kargs.stride_k,
+                                                        kargs.batch_stride_v / kargs.stride_v};
                 // Q (and PERTENSOR K) descales are already in sm_scale.
                 const float* k_descale_tdm  = nullptr;
                 const float* v_descale_tdm  = nullptr;

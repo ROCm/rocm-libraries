@@ -910,8 +910,8 @@ class CustomFactory(KernelComponentFactory):
 class KernelComponentFactoryGfx125(KernelComponentFactory):
     # gfx125 runs the same async pipeline with WMMA warp tiles; K is copied with
     # global_load_async_to_lds instead of the gfx9 M0-based buffer_load...lds.
-    # Linear KV first tries the TDM pipelines of fmha_fwd (qr_tdm_sched and qr_tdm;
-    # qr_tdm only for fp8bf16 d128) on fmha_fwd's tiles of the same head dims.
+    # KV first tries the TDM pipelines of fmha_fwd (qr_tdm_sched and qr_tdm; qr_tdm only
+    # for fp8bf16 d128 and a vectorized KV cache) on fmha_fwd's tiles of the same head dims.
     supports_global_load_lds = False
 
     # Head dims in ascending order: the dispatcher takes the first hdim_q/hdim_v
@@ -1049,6 +1049,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
             if p.tag in ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong")
             and p.F_bias == "no"
             and p.F_qscale == "no"
+        ]
+        # aiter's vectorized KV cache on fp16/bf16 qr_tdm (qr_tdm_sched and qr_tdm_pingpong
+        # read K/V row-major only)
+        pipelines += [
+            replace(p, F_kv_memory_layout="vectorized")
+            for p in pipelines
+            if p.tag == "qr_tdm" and p.F_qscale == "no"
         ]
         return pipelines + KernelComponentFactory.get_pipelines(
             dtype, hdim, receipt, mask_impl

@@ -41,9 +41,9 @@ To speed up compile time, we instantiate the kernels into separate file. In this
 
 `qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
 Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
-or D192/V128, and row-major V. They use no bias, dropout, logits
-soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
-the existing pipeline candidates.
+or D192/V128, and row-major V. They use no bias, quantization, or sink tokens; dropout,
+a logits soft cap and LSE output are optional. Other configurations retain the existing
+pipeline candidates.
 Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
 logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
@@ -250,9 +250,9 @@ Note FA use bottom-right by default to express swa case, here we require you exp
 `-p_drop` sets the dropout probability, `-drop_seed`/`-drop_offset` the Philox seed and offset
 (`-drop_prefs=1` reads them from device memory). With validation on, the kernel also stores its
 random values and the check compares them with the reference. On gfx1250 fp16/bf16 dropout runs
-on `qr_tdm` for fmha_fwd and batch_prefill, also with sink or a logits soft cap (not
-`qr_tdm_sched`/`qr_tdm_pingpong`); split-KV and
-pagedkv_prefill take no dropout.
+on the TDM pipelines (`qr_tdm`, `qr_tdm_sched`, `qr_tdm_pingpong`) of fmha_fwd and
+batch_prefill, also with sink or a logits soft cap; split-KV and pagedkv_prefill take no
+dropout.
 
 ### sequence padding and variable length support
 We support sequence padding and variable-length processing in both batch and group modes fmha forward to handle real-world scenarios where sequences have different lengths.
@@ -268,7 +268,7 @@ Each attention API the forward example links can be run on its own, and within i
 
 | option | values |
 |---|---|
-| `-api` | `auto` (default: batch_prefill, pagedkv, splitkv, then fwd, as the arguments allow), `fwd`, `splitkv`, `pagedkv` or `batch_prefill`. A named API does not fall back to another one; its arguments are checked (splitkv: `-num_splits` > 1 or a KV cache; pagedkv: `-page_block_size` > 0; batch_prefill: `-mode=1` and `-page_block_size` > 0). |
+| `-api` | `auto` (default: batch_prefill, pagedkv, splitkv, then fwd, as the arguments allow), `fwd`, `splitkv`, `pagedkv` or `batch_prefill`. A named API does not fall back to another one; its arguments are checked (splitkv: `-num_splits` > 1 or a KV cache; pagedkv: `-page_block_size` > 0; batch_prefill: `-mode=1` and `-page_block_size` > 0). Each paged instance checks its page size (on gfx1250 the TDM pipelines take pages of a warp's K/V rows or, in pagedkv and batch_prefill, any size; the other pipelines pages of a multiple of 128). |
 | `-pipeline` | the pipeline tag of the kernel name within that API, e.g. `qr`, `qr_async`, `qr_tdm`, `qr_tdm_sched`, `qr_tdm_pingpong`, `qr_pagedkv`. The dispatch conditions that only choose between pipelines (grid and length thresholds) are skipped; the ones a kernel needs still apply, so a pipeline without a kernel for the arguments reports `not supported yet`. Not needed for an API with one pipeline. |
 | `-min_seqlen_q` | group mode, fwd/pagedkv: the `_skip` kernels leave the sequences of at most this many query rows unwritten (aiter's `mha_varlen_fwd`); the validation skips them too |
 
@@ -292,7 +292,7 @@ Use comma-separated `-s`/`-s_k` lists for fixed per-sequence lengths. For exampl
 ./bin/tile_example_fmha_fwd -prec=bf16 -mode=1 -b=3 -h=8 -h_k=2 -d=128 -s=300,300,300 -s_k=1000,1000,1000 \
     -page_block_size=1024 -kv_layout=linear -kv_lookup=sglang -iperm=0 -mask=b
 ```
-On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), all for linear KV, and otherwise the async pipeline (the only one on gfx9). Logits soft cap runs on `qr_tdm` and `qr_tdm_pingpong`; dropout on fp16/bf16 `qr_tdm` below hdim 256. Pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
+On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), all for linear KV, then the async pipeline (the only one on gfx9). A vectorized KV cache (`-kv_layout=vectorized`, fp16/bf16, pages of a multiple of 16) runs on `qr_tdm`: a 3D TDM box puts K row-major in LDS and V as `[rows/kVec][hdim][kVec]`, which plain LDS loads read for the PV gemm. Logits soft cap and dropout run on all of them. Pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
 
 ## FP8 support
 FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:

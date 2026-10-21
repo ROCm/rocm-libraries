@@ -183,6 +183,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                                           const DramWindow& dram_window,
                                           const KVRows& kv_rows)
     {
+        static_assert(!KVRows::kIsVectorized, "qr_tdm_sched reads row-major K/V");
         if constexpr(KVRows::kIsGather)
             kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
         else
