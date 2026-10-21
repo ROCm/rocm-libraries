@@ -65,10 +65,11 @@ picks the same degree as the exact occupancy on the measured corpus. One
 deterministic answer is what lets the dispatcher, the kernel builders and the
 benchmark agree.
 
-The constants are per arch: fitted on gfx950, carried to gfx942 by hardware
-ratios (see :class:`SplitKCostModel`). An arch without a model has no plan
-(:func:`split_k_cost_model` returns ``None``) and callers keep their previous
-heuristic there.
+The constants are per arch and fitted on that arch's measurements (see
+:class:`SplitKCostModel`); only gfx950 has been fitted. An arch without a model
+has no plan (:func:`split_k_cost_model` returns ``None``) and callers keep their
+previous heuristic there -- gfx942 included, until it is fitted on its own
+measurements and the device geometries it ships in are validated.
 """
 
 from __future__ import annotations
@@ -167,66 +168,15 @@ _COST_MODELS: dict[str, SplitKCostModel] = {
 }
 
 
-def _scaled_from_gfx950(
-    *,
-    num_cus: int,
-    flops: float,
-    load: float,
-    atomic: float,
-    fill: float,
-    cta: float,
-) -> SplitKCostModel:
-    """The gfx950 fit carried to another CDNA part by hardware ratios.
-
-    Each argument is the target-over-gfx950 ratio of the throughput the
-    constant stands for (per CU for ``flops``/``load``, device-wide for the
-    rest), taken at the same latency unit, so only the ratios have to be known.
-    Unvalidated until the part is fitted on its own measurements.
-    """
-    base = _COST_MODELS["gfx950"]
-    return replace(
-        base,
-        num_cus=num_cus,
-        flops_per_latency=base.flops_per_latency * flops,
-        load_bytes_per_latency=base.load_bytes_per_latency * load,
-        cta_cost=base.cta_cost * cta,
-        atomic_bytes_per_latency={
-            k: v * atomic for k, v in base.atomic_bytes_per_latency.items()
-        },
-        fill_bytes_per_latency=base.fill_bytes_per_latency * fill,
-    )
-
-
-# gfx942 against the gfx950 part the model was fitted on, by the ratio of
-# each throughput from public specs. Not fitted on gfx942 measurements. Other
-# gfx942 parts share the per-CU ratios but not the CU or XCD count: a caller
-# that knows its device passes ``num_cus``/``num_xcds`` to
-# :func:`split_k_cost_model`.
-_COST_MODELS["gfx942"] = _scaled_from_gfx950(
-    num_cus=304,
-    # Dense 16-bit MFMA throughput per CU.
-    flops=0.48,
-    # The fitted operand-load rate is L2-bound (its flop/byte matches L2, not
-    # HBM): L2 bandwidth per CU, with more CUs sharing each XCD's L2.
-    load=0.80,
-    # Atomics resolve in L2: the same L2 per XCD, scaled by clock.
-    atomic=0.95,
-    # Clearing and reading back memory is HBM-bound: HBM bandwidth.
-    fill=0.66,
-    # Per-CTA dispatch overhead is clock-bound, so it costs more latency units.
-    cta=1.05,
-)
-
-
 def split_k_cost_model(
     arch: str, num_cus: int | None = None, num_xcds: int | None = None
 ) -> SplitKCostModel | None:
     """The cost model for ``arch``, or ``None`` if it has none.
 
     ``num_cus`` and ``num_xcds`` replace the arch's defaults, for a part of the
-    arch built differently (other gfx942 parts). The per-CU
-    constants carry over exactly; the device-wide ones (atomic, fill and
-    per-CTA costs) are kept, an approximation on a part with fewer XCDs.
+    arch built differently. The per-CU constants carry over exactly; the
+    device-wide ones (atomic, fill and per-CTA costs) are kept, an
+    approximation on a part with fewer XCDs.
     """
     cost = _COST_MODELS.get(arch.split(":", 1)[0])
     if cost is None or (num_cus is None and num_xcds is None):
@@ -404,7 +354,7 @@ def _degrees(
     * a power of two -- the ladder the model was first fitted on;
     * a divisor or a multiple of the CU count -- one CTA tile then spreads
       evenly over the CUs, which matters on parts whose CU count is not a power
-      of two (gfx942);
+      of two (gfx942's 304, should it be fitted);
     * the smallest degree for its K iterations per CTA -- any larger degree
       with the same ``ceil(k_iters / s)`` only adds CTAs, so it is never
       cheaper, and the model's optimum always lies on this set;

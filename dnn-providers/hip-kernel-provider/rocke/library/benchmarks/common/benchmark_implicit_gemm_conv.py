@@ -104,6 +104,21 @@ _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 # The spec split_k that builds the wgrad split-K kernel. Any value > 1 builds
 # the same kernel (the degree is a kernarg); this one is only its label.
 _SPLIT_K_BUILD = 2
+# Forces the degree of auto (-1) wgrad/dgrad requests: auto | off | <n>. The
+# conv split-K resolver reads no environment; this benchmark maps the variable
+# onto its explicit ``override`` argument.
+_ENV_CONV_SPLIT_K = "ROCKE_CONV_SPLIT_K"
+
+
+def _conv_split_k_override() -> int | None:
+    """``ROCKE_CONV_SPLIT_K`` as the resolver's ``override`` (None = auto)."""
+    from kernels.common.conv_split_k import parse_split_k_override
+
+    try:
+        return parse_split_k_override(os.environ.get(_ENV_CONV_SPLIT_K))
+    except ValueError as e:
+        raise ValueError(f"{_ENV_CONV_SPLIT_K}: {e}") from None
+
 
 # Data types the benchmark accepts (--dtype) ...
 _DTYPES = ("fp16", "bf16", "fp32")
@@ -1542,6 +1557,13 @@ def main() -> int:
     if args.csv_top < 1:
         print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
         return 2
+    # Checked up front: the per-combo resolver calls skip a combo on
+    # ValueError, which would hide a bad value as an empty sweep.
+    try:
+        _conv_split_k_override()
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
 
     if args.ckprofiler is not None and args.ckprofiler_script is None:
         print("error: --ckprofiler requires --ckprofiler-script", file=sys.stderr)
@@ -2074,6 +2096,7 @@ def _build_wgrad_one(args_tuple):
             tile_n=tile_n,
             tile_k=tile_k,
             block_size=warp_m * warp_n * target.wave_size,
+            override=_conv_split_k_override(),
             group_merge=group_merge,
             split_k=split_k,
             reduction="atomic",
@@ -2203,6 +2226,7 @@ def _build_wgrad_two_stage_one(args_tuple):
             tile_n=tile_n,
             tile_k=tile_k,
             block_size=warp_m * warp_n * target.wave_size,
+            override=_conv_split_k_override(),
             group_merge=group_merge,
             ws_replicas=ws_replicas,
             split_k=split_k,
@@ -2377,6 +2401,7 @@ def _build_dgrad_one(args_tuple):
                 tile_n=tile_n,
                 tile_k=tile_k,
                 block_size=warp_m * warp_n * target.wave_size,
+                override=_conv_split_k_override(),
             ).split_k
     else:
         resolved_split_k = split_k
@@ -5346,6 +5371,7 @@ def _split_k_degrees(
                     tile_n=tile_n,
                     tile_k=tile_k,
                     block_size=block_size,
+                    override=_conv_split_k_override(),
                     group_merge=group_merge,
                     ws_replicas=ws_replicas,
                     reduction="workspace" if two_stage else "atomic",

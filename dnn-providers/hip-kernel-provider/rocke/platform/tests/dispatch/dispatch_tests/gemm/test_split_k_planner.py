@@ -42,9 +42,11 @@ def _plan(problem, kernel, reductions=(WORKSPACE,), **kw):
 def test_cost_model_lookup():
     assert GFX950 is not None
     assert split_k_cost_model("gfx950:sramecc+:xnack-") is GFX950
-    # No model: callers keep their previous heuristic.
+    # No model: callers keep their previous heuristic. gfx942 is unfitted.
     assert split_k_cost_model("gfx90a") is None
     assert split_k_cost_model("gfx90a", num_cus=104) is None
+    assert split_k_cost_model("gfx942") is None
+    assert split_k_cost_model("gfx942:sramecc+:xnack-", num_cus=228) is None
 
 
 @pytest.mark.parametrize(
@@ -98,19 +100,14 @@ def test_grouped_pool_contains_the_whole_ladder_under_a_tight_cap():
     assert _degrees(plan) == {2, 4}
 
 
-def test_gfx942_model_and_cu_override():
-    gfx942 = split_k_cost_model("gfx942")
-    assert gfx942.num_cus == 304
-    # Half the per-CU MFMA rate of gfx950, and a slower memory system.
-    assert gfx942.flops_per_latency < GFX950.flops_per_latency
-    assert gfx942.fill_bytes_per_latency < GFX950.fill_bytes_per_latency
-    assert gfx942.num_xcds == 8
-    mi300a = split_k_cost_model("gfx942:sramecc+:xnack-", num_cus=228, num_xcds=6)
-    assert mi300a == dataclasses.replace(gfx942, num_cus=228, num_xcds=6)
+def test_device_geometry_override():
+    assert (GFX950.num_cus, GFX950.num_xcds) == (256, 8)
+    other = split_k_cost_model("gfx950:sramecc+:xnack-", num_cus=228, num_xcds=6)
+    assert other == dataclasses.replace(GFX950, num_cus=228, num_xcds=6)
     with pytest.raises(ValueError, match="num_cus"):
-        split_k_cost_model("gfx942", num_cus=0)
+        split_k_cost_model("gfx950", num_cus=0)
     with pytest.raises(ValueError, match="num_xcds"):
-        split_k_cost_model("gfx942", num_xcds=0)
+        split_k_cost_model("gfx950", num_xcds=0)
 
 
 @pytest.mark.parametrize(
@@ -213,8 +210,8 @@ def test_candidates_include_unsplit_and_every_power_of_two():
 
 
 def test_candidates_include_the_cu_count_divisors_and_multiples():
-    gfx942 = split_k_cost_model("gfx942")
-    plan = select_split_k_plan(TINY_OUT_LONG_K, SMALL_TILE, (WORKSPACE,), gfx942)
+    cu304 = split_k_cost_model("gfx950", num_cus=304)
+    plan = select_split_k_plan(TINY_OUT_LONG_K, SMALL_TILE, (WORKSPACE,), cu304)
     assert {19, 38, 76, 152, 304, 608, 912} <= _degrees(plan)
 
 
@@ -237,12 +234,18 @@ def test_candidates_are_not_every_degree():
         (DENSE_SHORT_K, BIG_TILE),
     ],
 )
-@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
-def test_candidates_lose_nothing_against_every_degree(problem, kernel, arch):
+# CU counts off the power-of-two ladder, and another XCD count, exercise the
+# candidate rules beyond the ladder.
+@pytest.mark.parametrize(
+    "geometry", [{}, {"num_cus": 304}, {"num_cus": 228, "num_xcds": 6}]
+)
+def test_candidates_lose_nothing_against_every_degree(problem, kernel, geometry):
     # The pool only drops degrees the model can never prefer, so planning over
     # it matches planning over every integer up to the cap -- on a grouped
     # launch, every XCD-aligned one and the ladder. (No ladder margin: it trades cost on purpose.)
-    cost = dataclasses.replace(split_k_cost_model(arch), ladder_margin=0.0)
+    cost = dataclasses.replace(
+        split_k_cost_model("gfx950", **geometry), ladder_margin=0.0
+    )
     plan = select_split_k_plan(problem, kernel, (WORKSPACE, ATOMIC16), cost)
     cap = max(_degrees(plan))
     step = 1

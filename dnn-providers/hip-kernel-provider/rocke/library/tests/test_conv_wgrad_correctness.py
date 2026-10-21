@@ -274,7 +274,6 @@ def _make_spec(
             tile_k=tile_k,
             block_size=warp_m * warp_n * target.wave_size,
             reduction="atomic",
-            env={},
         ).split_k
     spec = WgradConvSpec(
         problem=problem,

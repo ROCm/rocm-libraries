@@ -23,8 +23,8 @@ from kernels.common.conv_implicit_gemm_wgrad import (
 from kernels.common.conv_implicit_gemm_wgrad_two_stage import wgrad_workspace_nbytes
 from kernels.common.conv_split_k import (
     ATOMIC_16BIT_MAX_SPLIT_K,
-    ENV_CONV_SPLIT_K,
     MAX_WGRAD_WS_BYTES,
+    parse_split_k_override,
     resolve_conv_split_k,
 )
 from rocke.helpers.split_k import select_split_k_wgrad
@@ -51,7 +51,6 @@ def _wgrad(problem, arch="gfx950", dtype="bf16", tile=(64, 32, 64, 512), **kw):
         tile_n=tn,
         tile_k=tk,
         block_size=bs,
-        env=kw.pop("env", {}),
         **kw,
     )
 
@@ -182,21 +181,70 @@ def test_explicit_degree_is_kept_and_clamped_to_grid_z():
 
 
 @pytest.mark.parametrize(
-    "value,expected", [("off", 1), ("1", 1), ("16", 16), ("auto", None), ("", None)]
+    "value,expected",
+    [
+        ("off", 1),
+        ("0", 1),
+        ("1", 1),
+        ("16", 16),
+        (" Auto ", None),
+        ("", None),
+        (None, None),
+    ],
 )
-def test_env_override(value, expected):
-    r = _wgrad(DENSE, env={ENV_CONV_SPLIT_K: value})
+def test_override_parses(value, expected):
+    assert parse_split_k_override(value) == expected
+
+
+@pytest.mark.parametrize("override", [1, 16])
+def test_override(override):
+    assert _wgrad(DENSE, override=override).split_k == override
+
+
+def test_override_never_touches_an_explicit_degree():
+    assert _wgrad(DENSE, split_k=8, override=1).split_k == 8
+
+
+@pytest.mark.parametrize("value", ["-1", "-8", "lots"])
+def test_override_parse_rejects_negative_and_garbage(value):
+    with pytest.raises(ValueError, match="split-K override"):
+        parse_split_k_override(value)
+
+
+def test_override_rejects_a_degree_below_one():
+    with pytest.raises(ValueError, match="override"):
+        _wgrad(DENSE, override=0)
+
+
+def test_resolution_ignores_the_environment(monkeypatch):
+    # The resolver reads no ambient state: the benchmark's variable reaches it
+    # only through ``override``.
     auto = _wgrad(DENSE)
-    assert r.split_k == (auto.split_k if expected is None else expected)
+    monkeypatch.setenv("ROCKE_CONV_SPLIT_K", "off")
+    assert _wgrad(DENSE) == auto
 
 
-def test_env_override_never_touches_an_explicit_degree():
-    assert _wgrad(DENSE, split_k=8, env={ENV_CONV_SPLIT_K: "off"}).split_k == 8
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_override_moves_a_16bit_atomic_past_its_limit_to_the_workspace(dtype):
+    over = 2 * ATOMIC_16BIT_MAX_SPLIT_K
+    assert wgrad_atomic_epilogue_available(DENSE, dtype, None)[0]
+    at_cap = _wgrad(DENSE, dtype=dtype, override=ATOMIC_16BIT_MAX_SPLIT_K)
+    assert (at_cap.split_k, at_cap.two_stage) == (ATOMIC_16BIT_MAX_SPLIT_K, False)
+    r = _wgrad(DENSE, dtype=dtype, override=over)
+    assert (r.split_k, r.two_stage, r.requested) == (over, True, over)
 
 
-def test_env_override_rejects_garbage():
-    with pytest.raises(ValueError, match=ENV_CONV_SPLIT_K):
-        _wgrad(DENSE, env={ENV_CONV_SPLIT_K: "lots"})
+def test_override_holds_a_fixed_16bit_atomic_to_its_limit():
+    over = 2 * ATOMIC_16BIT_MAX_SPLIT_K
+    r = _wgrad(DENSE, reduction="atomic", override=over)
+    assert (r.split_k, r.two_stage, r.requested) == (
+        ATOMIC_16BIT_MAX_SPLIT_K,
+        False,
+        over,
+    )
+    # fp32 has no such limit.
+    r32 = _wgrad(DENSE, dtype="fp32", reduction="atomic", override=over)
+    assert (r32.split_k, r32.two_stage) == (over, False)
 
 
 def test_dgrad_explicit_and_unfitted_arch_unchanged():
@@ -207,7 +255,6 @@ def test_dgrad_explicit_and_unfitted_arch_unchanged():
         "tile_n": 64,
         "tile_k": 32,
         "block_size": 256,
-        "env": {},
     }
     assert resolve_conv_split_k("dgrad", DENSE, split_k=4, **kw).split_k == 4
     legacy = select_split_k_wgrad(
@@ -233,7 +280,6 @@ def test_dgrad_with_a_full_device_does_not_split():
         tile_n=128,
         tile_k=32,
         block_size=256,
-        env={},
     )
     assert r.split_k == 1
 
@@ -276,7 +322,6 @@ def test_dgrad_auto_never_picks_a_split_the_builder_rejects(dtype):
         tile_n=16,
         tile_k=64,
         block_size=64,
-        env={},
     )
     assert r.split_k == 1
 
@@ -318,16 +363,6 @@ def test_atomic_request_on_a_merged_tile_does_not_raise():
     assert (r.split_k, r.two_stage) == (1, False)
 
 
-@pytest.mark.parametrize("value", ["-1", "-8", "lots"])
-def test_env_override_rejects_negative_and_garbage(value):
-    with pytest.raises(ValueError, match=ENV_CONV_SPLIT_K):
-        _wgrad(DENSE, env={ENV_CONV_SPLIT_K: value})
-
-
-def test_env_override_zero_means_off():
-    assert _wgrad(DENSE, env={ENV_CONV_SPLIT_K: "0"}).split_k == 1
-
-
 def _dgrad(problem, dtype="bf16", **kw):
     return resolve_conv_split_k(
         "dgrad",
@@ -345,9 +380,14 @@ def _dgrad(problem, dtype="bf16", **kw):
 ODD_CPG = ConvProblem(N=1, Hi=8, Wi=8, C=3, K=512, Y=7, X=7, pH=3, pW=3)
 
 
-def test_dgrad_env_override_is_held_to_what_the_kernel_can_build():
-    assert _dgrad(ODD_CPG, env={ENV_CONV_SPLIT_K: "8"}).split_k == 1
-    assert _dgrad(DENSE, env={ENV_CONV_SPLIT_K: "8"}).split_k == 8
+def test_dgrad_override_is_held_to_what_the_kernel_can_build():
+    assert _dgrad(ODD_CPG, override=8).split_k == 1
+    assert _dgrad(DENSE, override=8).split_k == 8
+    # The 16-bit atomic stays within its accuracy limit; fp32 does not have one.
+    over = 2 * ATOMIC_16BIT_MAX_SPLIT_K
+    r = _dgrad(DENSE, override=over)
+    assert (r.split_k, r.requested) == (ATOMIC_16BIT_MAX_SPLIT_K, over)
+    assert _dgrad(DENSE, dtype="fp32", override=over).split_k == over
 
 
 def test_dgrad_groups_do_not_share_the_grid_z_budget():
@@ -356,7 +396,7 @@ def test_dgrad_groups_do_not_share_the_grid_z_budget():
     many = ConvProblem(
         N=1, Hi=8, Wi=8, C=2048, K=2048, Y=3, X=3, pH=1, pW=1, groups=1024
     )
-    assert _dgrad(many, env={ENV_CONV_SPLIT_K: "128"}).split_k == 128
+    assert _dgrad(many, override=128).split_k == 128
 
 
 @pytest.mark.parametrize(
@@ -525,8 +565,10 @@ def test_cost_fit_round_trip_keeps_the_unsearched_fields():
     from benchmarks.common.split_k_cost_fit import _model_of, _x_of
     from rocke.helpers.split_k_planner import split_k_cost_model
 
-    for arch in ("gfx950", "gfx942"):
-        cost = split_k_cost_model(arch)
+    for cost in (
+        split_k_cost_model("gfx950"),
+        split_k_cost_model("gfx950", num_cus=304, num_xcds=6),
+    ):
         back = _model_of(_x_of(cost), cost.max_split_k)
         assert (back.num_xcds, back.ladder_margin) == (
             cost.num_xcds,
@@ -537,15 +579,14 @@ def test_cost_fit_round_trip_keeps_the_unsearched_fields():
 def test_default_epilogue_never_resolves_to_the_packed_atomic():
     # Only cshuffle emits the packed 16-bit atomic: a direct-store kernel must
     # split through the workspace or not at all.
-    kw = dict(
-        arch="gfx950",
-        dtype="bf16",
-        tile_m=64,
-        tile_n=64,
-        tile_k=64,
-        block_size=256,
-        env={},
-    )
+    kw = {
+        "arch": "gfx950",
+        "dtype": "bf16",
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 64,
+        "block_size": 256,
+    }
     p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
     for split_k in (-1, 8):
         assert resolve_conv_split_k(
@@ -563,16 +604,15 @@ def test_explicit_atomic_that_cannot_be_built_raises():
     # reduction="atomic" says the caller's binary is the packed-atomic one; a
     # problem it cannot serve must fail here, not come back with a degree the
     # builder then rejects. Degree 1 needs no reduction and still resolves.
-    kw = dict(
-        arch="gfx950",
-        dtype="bf16",
-        tile_m=64,
-        tile_n=64,
-        tile_k=64,
-        block_size=256,
-        env={},
-        reduction="atomic",
-    )
+    kw = {
+        "arch": "gfx950",
+        "dtype": "bf16",
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 64,
+        "block_size": 256,
+        "reduction": "atomic",
+    }
     p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
     assert resolve_conv_split_k("wgrad", p, split_k=8, **kw).split_k == 8
     with pytest.raises(ValueError, match="default epilogue"):

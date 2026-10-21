@@ -1278,5 +1278,104 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         self.assertLess(delta / ref.abs().max().item(), 2e-2)
 
 
+@unittest.skipUnless(
+    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
+)
+class TestConvDgradResolvedSplitK(unittest.TestCase):
+    """dX is accurate at the degree the split-K resolver picks, and at its cap.
+
+    A one-tile output over a long reduction (N*Hi*Wi = 64 rows, Y*X*K = 18432)
+    is where the cost model splits deepest: on gfx950 it resolves to about a
+    hundred slices for bf16, each rounding its partial into the 16-bit dX.
+    The override is held to the 16-bit atomic's accuracy limit, so a forced
+    degree past it must come back at the limit and still be accurate.
+    """
+
+    def _problem(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
+
+    def _spec(self, dtype, split_k):
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
+        return DgradConvSpec(
+            problem=self._problem(),
+            name="rocke_test_dgrad_resolved_split_k",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            wave_size=64,
+            epilogue="cshuffle",
+            split_k=split_k,
+        )
+
+    def _resolve(self, dtype, **kw):
+        from kernels.common.conv_split_k import resolve_conv_split_k
+
+        return resolve_conv_split_k(
+            "dgrad",
+            self._problem(),
+            arch=ARCH,
+            dtype=dtype,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            block_size=256,
+            **kw,
+        ).split_k
+
+    def _assert_accurate(self, dtype, split_k):
+        import torch
+
+        p = self._problem()
+        got = _dgrad_run_inprocess(self._spec(dtype, split_k), dtype)
+        # Same draws as _dgrad_run_inprocess.
+        td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+        torch.manual_seed(0)
+        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
+        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
+        ref = torch.nn.grad.conv2d_input(
+            (p.N, p.C, p.Hi, p.Wi),
+            W.float().permute(0, 3, 1, 2),
+            dY.float().permute(0, 3, 1, 2),
+            padding=1,
+        ).permute(0, 2, 3, 1)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        # The benchmark's verify gate: peak-normalised max error.
+        delta = (got.float() - ref).abs().max().item()
+        self.assertLess(
+            delta / max(ref.abs().max().item(), 1.0),
+            5e-2,
+            f"{dtype} split_k={split_k}",
+        )
+
+    def test_resolved_degree(self):
+        from rocke.helpers.split_k_planner import split_k_cost_model
+
+        for dtype in ("bf16", "fp16"):
+            with self.subTest(dtype=dtype):
+                split_k = self._resolve(dtype)
+                if split_k_cost_model(ARCH) is not None:
+                    self.assertGreater(split_k, 1, "the shape is meant to split")
+                self._assert_accurate(dtype, split_k)
+
+    def test_override_past_the_16bit_atomic_limit(self):
+        from kernels.common.conv_split_k import ATOMIC_16BIT_MAX_SPLIT_K
+
+        for dtype in ("bf16", "fp16"):
+            with self.subTest(dtype=dtype):
+                split_k = self._resolve(dtype, override=2 * ATOMIC_16BIT_MAX_SPLIT_K)
+                self.assertEqual(split_k, ATOMIC_16BIT_MAX_SPLIT_K)
+                self._assert_accurate(dtype, split_k)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

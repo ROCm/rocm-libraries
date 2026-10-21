@@ -97,7 +97,9 @@ dispatcher, the builders and the benchmark share. On arches with a fitted
 split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
 (degree, reduction) under that model; elsewhere it uses the CK formula
 (`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
-clamped to `[1, wg_K]`). `ROCKE_CONV_SPLIT_K` overrides it.
+clamped to `[1, wg_K]`). The resolver's `override` argument forces it (the
+benchmark sets it from `ROCKE_CONV_SPLIT_K`); the resolver itself reads no
+environment.
 
 ### Split-K cshuffle atomic epilogue
 

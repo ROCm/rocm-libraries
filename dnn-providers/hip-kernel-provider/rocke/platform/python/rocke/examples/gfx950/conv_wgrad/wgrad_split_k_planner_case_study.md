@@ -214,8 +214,10 @@ that degree against the torch reference, at the benchmark's declared dtype
 tolerance; failing points were never timed or ranked. The resolver itself is
 covered by CPU tests (`library/tests/test_conv_split_k.py`,
 `platform/tests/dispatch/dispatch_tests/gemm/test_split_k_planner.py`) and the
-GPU wgrad correctness test, which builds
-the packed-atomic kernel at the resolver's degree.
+GPU wgrad correctness test, which builds the packed-atomic kernel at the
+resolver's degree. The GPU dgrad correctness test does the same for a dgrad
+shape the model splits about a hundred ways, and at the 16-bit atomic cap a
+forced degree is held to.
 
 ## Results
 
@@ -255,9 +257,9 @@ slowest at 0.79x).
   ones inspected the optimum is a sharp point the smooth model misses (flat
   DRAM traffic across degrees on the profiled one).
 - The fit covers 16-bit operands on gfx950 only; fp32 reuses the constants.
-  gfx942 carries the gfx950 constants by public hardware ratios (MFMA rate per
-  CU, L2 per XCD, HBM bandwidth, clock) and is not validated on gfx942; other
-  arches keep the CK formula.
+  Every other arch, gfx942 included, keeps the CK formula: gfx950 constants
+  scaled by hardware ratios would be unvalidated, and gfx942 ships in more
+  than one CU/XCD geometry.
 - The ladder margin was measured on a 25-shape subset, not the full corpus.
 - Run-to-run noise of the end-to-end measurement: median 0.4%, 90th percentile
   1.9% between two full passes.
@@ -292,6 +294,6 @@ python -m benchmarks.common.split_k_cost_fit margin --logs offladder_logs
   for the builders and the benchmark, the 16-bit atomic cap, the benchmark
   timing the resolver's degree and both reductions.
 - **Keep, unchanged:** the CK formula on arches without a fitted model.
-- **Defer:** fitting gfx942 on gfx942 measurements (its constants are derived); a dgrad sweep before dgrad dispatch uses the
+- **Defer:** a gfx942 model, fitted on gfx942 measurements across the device geometries it ships in; a dgrad sweep before dgrad dispatch uses the
   planner (it keeps its pinned degree until then); modelling the sharp optima behind the remaining
   regressions; stream-K as a third reduction choice.
