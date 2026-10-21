@@ -51,7 +51,7 @@ change's **Options and guards**: a changed file whose flag no run enabled is une
 - Performance claims without method, baseline and hardware: `process` finding (SUGGESTION).
 
 Close each gap with the suite, arch and run that covers it. For a family PR CI does not test, that is a `workflow_dispatch` of
-`therock-multi-arch-ci.yml` (inputs `linux_amdgpu_families`, `linux_test_labels`; it runs the `quick` tier, so check the tests
+`therock-multi-arch-ci.yml` (inputs `linux_amdgpu_families` and `pr_labels`, e.g. `test:hipdnn,test_filter:quick`; it runs the `quick` tier, so check the tests
 carry it) or the PR labels `ci:<family>` and `ci:test:<family>`, not a PR rerun. Take supported families from TheRock's
 `build_tools/github_actions/amdgpu_family_matrix.py` at the pin, not the workflow's default build list. Fetch it without cloning
 TheRock (`AUTH` must not clone it):
