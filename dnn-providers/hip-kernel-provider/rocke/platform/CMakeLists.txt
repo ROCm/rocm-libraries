@@ -199,8 +199,11 @@ add_custom_command(
           ${_rocke_arch_domain_columns}
   COMMENT "Generating the C++ arch-domain table from the committed columns"
   VERBATIM)
-target_sources(rocke_core PRIVATE "${_rocke_arch_domain_inc}")
-target_include_directories(rocke_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+# The objects are compiled once in rocke_core_objects and shared by the static
+# and shared libraries, so the table belongs to that target.
+target_sources(rocke_core_objects PRIVATE "${_rocke_arch_domain_inc}")
+target_include_directories(rocke_core_objects PRIVATE
+                           "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 # --- Portable-IR bundle freshness / provenance stamp -------------------------
 # Generate a deterministic, git-independent provenance header from the engine
