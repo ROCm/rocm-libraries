@@ -1243,6 +1243,8 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, f"split_k must be -1 (auto), 1, or >1 (got {sk})"
     if sk > 1 and family != "mma":
         return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
+    if spec.patch and family != "mma":
+        return False, f"patch is CDNA-only (got family {family!r} on {arch})"
     if sk > 1 and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
         return False, (
             f"split_k > 1 requires dtype_d in fp32/bf16/fp16 for atomic accumulation "

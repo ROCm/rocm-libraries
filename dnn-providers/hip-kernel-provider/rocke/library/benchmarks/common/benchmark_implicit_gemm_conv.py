@@ -4494,15 +4494,21 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         case_direction = case[2] if len(case) > 2 else args.direction
 
         for direction in directions or (case_direction,):
+            # The problem the kernels launch on (dgrad runs width-folded, as
+            # the dispatcher launches it); the tensors, the reference and the
+            # FLOP count stay the case's own -- the fold keeps every byte.
+            run_problem = _launch_problem(direction, problem)
             candidates = [
                 (ident, path, meta)
-                for ident, path, meta in cache.compatible(problem, direction=direction)
+                for ident, path, meta in cache.compatible(
+                    run_problem, direction=direction
+                )
                 if ident.dtype_a == case_dtype
             ]
             if not candidates:
                 _, why = next(
                     (
-                        (i, cache.supports_problem(i, problem)[1])
+                        (i, cache.supports_problem(i, run_problem)[1])
                         for i, _ in cache.list_all(direction)
                     ),
                     (None, "cache has no kernels for this direction"),
@@ -4741,7 +4747,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     _free_extras(rt, live_extras)
                     bound = sk_bound or _cached_bind(
                         direction,
-                        problem,
+                        run_problem,
                         ident,
                         meta,
                         rt,
@@ -4873,6 +4879,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
 
     return overall_rc
+
+
+def _launch_problem(direction, problem):
+    """The problem the cached kernels of ``direction`` launch on for ``problem``.
+
+    A dgrad whose width folds into its channels runs folded
+    (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`) -- the same
+    bytes in all three tensors, in fewer and wider sub-GEMMs -- exactly as
+    ``dispatch.grouped_convolution`` launches it, so what is benchmarked here
+    is what dispatch runs. Every other problem launches as it is.
+    """
+    if direction != "dgrad":
+        return problem
+    from kernels.common.conv_implicit_gemm_dgrad import fold_width
+
+    return fold_width(problem)
 
 
 def _free_extras(rt, live_extras: list) -> None:
@@ -5420,30 +5442,14 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
 
     extras: dict = {}
     if direction == "dgrad":
-        from dataclasses import replace as dc_replace
-
         import numpy as np
 
-        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
-        from kernels.common.conv_implicit_gemm_dgrad import (
-            DgradConvSpec,
-            pack_sub_gemm_buffer,
-        )
+        from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+        from kernels.conv.kernel_identity import dgrad_sub_gemms
 
-        spec = DgradConvSpec(
-            problem=problem,
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=ident.tile_m,
-            tile_n=ident.tile_n,
-            tile_k=ident.tile_k,
-            warp_m=ident.warp_m,
-            warp_n=ident.warp_n,
-            warp_tile_m=ident.warp_tile_m,
-            warp_tile_n=ident.warp_tile_n,
-            warp_tile_k=ident.warp_tile_k,
-            max_sub_gemms=ident.max_sub_gemms or 64,
-        )
-        sub_gemms = spec.compute_sub_gemms()
+        # The records of the binary's own decomposition (a patch kernel's one
+        # record over the filter, say), as the dispatcher builds them.
+        sub_gemms = dgrad_sub_gemms(ident, problem)
         if len(sub_gemms) > (ident.max_sub_gemms or 64):
             raise ValueError(
                 f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel's "

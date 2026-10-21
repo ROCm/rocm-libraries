@@ -93,9 +93,25 @@ _SHAPES = {
 # Shapes that reach every registered dgrad family: implicit GEMM with one
 # tilde sub-GEMM and with several (stride 2, dilation 2), the depthwise dgrad
 # filters and strides, and every channel pair the MFMA dgrad instances bake.
+# The 2x2/s2 downsample and the 16x16/s16 stem run width-folded (fold_width).
 _DGRAD_SHAPES = {
     "dense3x3": dict(),
     "dense_stride2": dict(stride_h=2, stride_w=2, K=128),
+    "dense2x2_stride2_folds": dict(Y=2, X=2, pad_h=0, pad_w=0, stride_h=2, stride_w=2),
+    "patch16_stem_folds_bf16": dict(
+        N=2,
+        C=3,
+        K=768,
+        Hi=224,
+        Wi=224,
+        Y=16,
+        X=16,
+        pad_h=0,
+        pad_w=0,
+        stride_h=16,
+        stride_w=16,
+        dtype="bf16",
+    ),
     "dense_dilated2_bf16": dict(
         Hi=32, Wi=32, dilation_h=2, dilation_w=2, pad_h=2, pad_w=2, dtype="bf16"
     ),
@@ -390,7 +406,10 @@ def _cache_side_admits(spec, req) -> bool:
     if ident.dtype_a != req.dtype:
         return False
     if not ident.is_direct:
-        return KernelCache.supports_problem(ident, _implicit_problem(req))[0]
+        from benchmarks.common.benchmark_implicit_gemm_conv import _launch_problem
+
+        problem = _launch_problem(spec.direction, _implicit_problem(req))
+        return KernelCache.supports_problem(ident, problem)[0]
     if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
@@ -453,13 +472,14 @@ def _cache_side_plan(spec, req, ptrs, sizes):
     ``(identity, grid, block, signature names, buffers, values)``."""
     from benchmarks.common.benchmark_implicit_gemm_conv import (
         _extras_and_grid,
+        _launch_problem,
         _signature_for_identity,
     )
 
     ident = spec.identity
     direction = spec.direction
     if not ident.is_direct:
-        problem = _implicit_problem(req)
+        problem = _launch_problem(direction, _implicit_problem(req))
         rt = _UploadRecorder()
         extras, grid = _extras_and_grid(direction, problem, ident, rt, ident.dtype_a)
         buffers = gc._OPERANDS[direction]
@@ -577,6 +597,65 @@ def test_launch_plan_of_the_runtime_channel_mfma_dgrad():
     want, workspaces, _ = _cache_side_plan(spec, req, _PTRS, _SIZES)
     assert got == want
     assert dict(plan.workspaces) == workspaces
+
+
+@pytest.mark.parametrize(
+    "shape", [s for s in _DGRAD_SHAPES if s.endswith(("_folds", "_folds_bf16"))]
+)
+def test_the_folding_shapes_fold(shape):
+    from kernels.common.conv_implicit_gemm_dgrad import fold_width
+
+    p = _implicit_problem(_case_req(_ARCH, "dgrad", shape))
+    assert fold_width(p) != p
+
+
+# The patch-embedding dgrad (DgradConvSpec.patch) runs one record over the
+# filter's (y, x, c). No list registers one yet, so the parametrized tests
+# never meet it; the AOT run path must hand its binary that record too, not
+# the Y*X tilde records of C columns each.
+_PATCH_DGRAD = (
+    "dgrad-implicit_gemm-bf16-2d-t128x256x64-w2x4-a16x16x32-v8x8x8-mem-"
+    "cshuffle-kouter-ukd-patch-msg1024-wave64-gfx950-llvm22"
+)
+
+
+def test_launch_plan_of_the_patch_dgrad():
+    from kernels.common.conv_implicit_gemm_dgrad import (
+        fold_width,
+        pack_sub_gemm_buffer,
+        patch_sub_gemms,
+    )
+
+    identity = KernelIdentity.from_label(_PATCH_DGRAD)
+    spec = gc.ConvInstanceSpec(
+        name=_PATCH_DGRAD,
+        identity=identity,
+        block=gc._instance_block(identity),
+    )
+    req = _case_req("gfx950", "dgrad", "patch16_stem_folds_bf16")
+    ok, why = gc._admits(identity, req)
+    assert ok, why
+    assert _cache_side_admits(spec, req)
+    plan = gc.launch_plan_for(req, spec)
+    (step,) = plan.steps
+    got = (
+        step.identity,
+        step.grid,
+        step.block,
+        [a["name"] for a in step.signature],
+        step.buffers,
+        plan.values(step, _PTRS, _SIZES),
+    )
+    want, workspaces, table = _cache_side_plan(spec, req, _PTRS, _SIZES)
+    assert [got] == want
+    assert dict(plan.workspaces) == workspaces
+    assert plan.sub_gemm_table == table
+    # One record of all Y*X*C = 768 columns, on the folded problem.
+    p = fold_width(_implicit_problem(req))
+    (sg,) = patch_sub_gemms(p, identity.tile_m, identity.tile_n, identity.tile_k)
+    assert sg.gemm_n == req.Y * req.X * req.C
+    assert plan.num_sub_gemms == 1
+    assert table == tuple(pack_sub_gemm_buffer([sg], identity.tile_m, identity.tile_n))
 
 
 # ---------------------------------------------------------------------------

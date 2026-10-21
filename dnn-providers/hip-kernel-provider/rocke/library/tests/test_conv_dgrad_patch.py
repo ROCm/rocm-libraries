@@ -351,6 +351,41 @@ class TestPatchAotGrid(unittest.TestCase):
         )
         self.assertEqual(counted, generated)
 
+    def test_no_patch_jobs_on_wmma(self):
+        # The patch store is MFMA-only; the wave32 grids match the same
+        # geometries but must not yield jobs that cannot build.
+        from rocke.core.arch import ArchTarget
+
+        from kernels.conv import aot_jobs as aj
+
+        for arch in ("gfx1201", "gfx1250"):
+            with self.subTest(arch=arch):
+                target = ArchTarget.from_gfx(arch)
+                jobs = list(aj._dgrad_jobs(arch, "bf16", 32, "wmma", target, 1024))
+                self.assertTrue(jobs)
+                self.assertFalse([j for j in jobs if j.identity.patch])
+                counted = aj.count_jobs(
+                    dtype="bf16", target=target, directions=["dgrad"]
+                )
+                self.assertEqual(counted, len(jobs))
+
+    def test_validation_rejects_patch_on_wmma(self):
+        from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec
+
+        ok, why = is_valid_dgrad_spec(
+            _spec(
+                patch=True,
+                wave_size=32,
+                warp_tile_k=32,
+                lds_k_outer=False,
+                vector_size_b=None,
+                vector_size_c=None,
+            ),
+            "gfx1250",
+        )
+        self.assertFalse(ok)
+        self.assertIn("patch", why)
+
 
 class TestDispatchFold(unittest.TestCase):
     def _req(self, **kw):

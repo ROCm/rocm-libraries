@@ -421,6 +421,11 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             reason, reason_cap, "split_k > 1 is CDNA-only (got family %s on %s)", family, arch);
         return false;
     }
+    if(s->patch && strcmp(family, "mma") != 0)
+    {
+        snprintf(reason, reason_cap, "patch is CDNA-only (got family %s on %s)", family, arch);
+        return false;
+    }
     if(sk > 1)
     {
         /* Accept fp32, bf16, fp16 for atomic accumulation. */

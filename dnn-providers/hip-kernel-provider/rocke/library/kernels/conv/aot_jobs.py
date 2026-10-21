@@ -444,10 +444,14 @@ def _dgrad_caps() -> List[dict]:
 
 
 def _is_patch_geometry(geometry: tuple) -> bool:
-    """Is ``geometry`` (a :func:`_geometries` entry) one the patch dgrad builds?"""
-    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, _ = geometry
+    """Is ``geometry`` (a :func:`_geometries` entry) one the patch dgrad builds?
+
+    MFMA only: the patch store is not implemented for WMMA.
+    """
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
     return (
-        epilogue == "cshuffle"
+        atom.family == "mma"
+        and epilogue == "cshuffle"
         and (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline)
         in CACHE_DGRAD_PATCH_GEOMETRIES
     )
