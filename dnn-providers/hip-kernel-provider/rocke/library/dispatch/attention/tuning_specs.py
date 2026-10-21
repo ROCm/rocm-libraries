@@ -18,6 +18,7 @@ from kernels.common.attention_unified import (
     _num_segments,
     _tiled_2d_impl,
     _tiled_3d_impl,
+    kv_addr_width_for_builder,
 )
 
 TILE_POLICIES: Tuple[str, ...] = (
@@ -129,7 +130,9 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
     return fields
 
 
-def _semantic_fields(problem: UnifiedAttentionProblem) -> dict:
+def _semantic_fields(
+    problem: UnifiedAttentionProblem, builder_kind: str = "tiled"
+) -> dict:
     kv_storage_dtype = "fp8e4m3" if problem.use_fp8 else None
     elem_bytes = 1 if problem.use_fp8 else 2
     block_stride = (
@@ -138,9 +141,8 @@ def _semantic_fields(problem: UnifiedAttentionProblem) -> dict:
         * int(problem.head_size)
         * elem_bytes
     )
-    use_i64 = (
-        int(problem.num_kv_blocks) > 0
-        and int(problem.num_kv_blocks) * block_stride > 0x8000_0000
+    use_i64 = kv_addr_width_for_builder(
+        builder_kind, int(problem.num_kv_blocks), block_stride, elem_bytes
     )
     return {
         "head_size": int(problem.head_size),
@@ -226,7 +228,7 @@ def make_explicit_attention_2d_spec(
     tile_size = resolve_tile_policy(problem.block_size, config.tile_policy)
     knobs = _checked_knobs(config.knob_dict())
     spec = spec_type(
-        **_semantic_fields(problem),
+        **_semantic_fields(problem, config.builder_kind),
         **_mask_fields(problem, arch),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
