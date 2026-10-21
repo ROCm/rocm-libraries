@@ -662,12 +662,22 @@ TEST(MessagePackWritingTest, IndexedLibraryWritesAsItsEagerForm)
         return;
     }
 
-    auto eager   = MessagePackWriteLibraryData(*lib);
-    auto indexed = loadData(MessagePackWriteIndexedLibraryData(*lib));
+    auto eager        = MessagePackWriteLibraryData(*lib);
+    auto indexedBytes = MessagePackWriteIndexedLibraryData(*lib);
+    auto indexed      = loadData(indexedBytes);
     ASSERT_NE(indexed, nullptr) << "solution slices from the writer did not load as a blob";
     ASSERT_NE(indexed->blobCache, nullptr);
     EXPECT_EQ(indexed->blobCache->materializedCount(), 0u);
 
+    // The indexed writer copies the slices a blob cache already holds, so
+    // writing a lazily loaded library reproduces the document without parsing
+    // any of it. Check this before the eager write below, which must parse.
+    EXPECT_EQ(MessagePackWriteIndexedLibraryData(*indexed), indexedBytes)
+        << "copied slices must reproduce the document they came from";
+    EXPECT_EQ(indexed->blobCache->materializedCount(), 0u)
+        << "the indexed writer must not materialize a lazy library";
+
+    // The eager layout has nowhere to put unparsed bytes, so this one does.
     EXPECT_EQ(MessagePackWriteLibraryData(*indexed), eager)
         << "an indexed library must write the same document as its eager form";
     EXPECT_EQ(indexed->blobCache->materializedCount(), lib->solutions.size());

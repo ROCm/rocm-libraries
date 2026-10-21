@@ -4,10 +4,12 @@
 #include <Tensile/msgpack/Writing.hpp>
 
 #include <Tensile/CachingLibrary.hpp>
+#include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/msgpack/MessagePack.hpp>
 
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -54,31 +56,52 @@ namespace TensileLite
                                            Serialization::MessagePackOutput>::
                   IndexedFormatVersion;
 
-        std::map<int, std::shared_ptr<ContractionSolution>>
-            solutionsForIndex(MasterContractionLibrary& lib)
+        /// What to write for one solution index: either an object to encode,
+        /// or the bytes a blob cache already holds for it.
+        struct IndexedPayload
         {
-            std::map<int, std::shared_ptr<ContractionSolution>> written;
+            /// Null when this index is carried by the slice below.
+            std::shared_ptr<ContractionSolution> solution;
+            const uint8_t*                       data = nullptr;
+            size_t                               size = 0;
+        };
+
+        /// Every index the library can produce, in index order, paired with the
+        /// bytes to write. Objects in `lib.solutions` win over the blob, which
+        /// matches the eager path.
+        ///
+        /// A solution that is still only bytes stays bytes: the blob already
+        /// holds exactly what encoding it would produce, so parsing it would
+        /// fill the cache with every solution in the file -- the state the lazy
+        /// format exists to avoid -- and re-encoding could only drift from the
+        /// original. `cache` is held for the call so the slices stay alive.
+        std::map<int, IndexedPayload> payloadsForIndex(
+            MasterContractionLibrary&                               lib,
+            std::shared_ptr<SolutionBlobCache<ContractionSolution>> cache)
+        {
+            std::map<int, IndexedPayload> payloads;
             {
                 std::lock_guard<std::mutex> lock(lib.solutionsGuard);
-                written.insert(lib.solutions.begin(), lib.solutions.end());
+                for(auto const& entry : lib.solutions)
+                    payloads[entry.first] = IndexedPayload{entry.second, nullptr, 0};
             }
 
-            if(lib.blobCache)
+            if(cache)
             {
-                for(int index : lib.blobCache->indices())
+                for(int index : cache->indices())
                 {
-                    if(written.count(index))
+                    if(payloads.count(index))
                         continue;
 
-                    auto solution = lib.blobCache->get(index);
-                    if(solution == nullptr)
+                    auto slice = cache->rawSlice(index);
+                    if(slice.first == nullptr || slice.second == 0)
                         throw std::runtime_error(concatenate(
-                            "Solution ", index, " in solutions_blob does not parse."));
-                    written.emplace(index, std::move(solution));
+                            "Solution ", index, " has no bytes in solutions_blob."));
+                    payloads[index] = IndexedPayload{nullptr, slice.first, slice.second};
                 }
             }
 
-            return written;
+            return payloads;
         }
 
         std::vector<uint8_t> libraryTreeBytes(MasterContractionLibrary& lib)
@@ -138,19 +161,27 @@ namespace TensileLite
     {
         auto& lib = writableMaster(library);
 
+        auto cache = lib.blobCache;
+
         std::vector<int64_t> table;
         std::vector<uint8_t> blob;
-        for(auto const& entry : solutionsForIndex(lib))
+        for(auto const& entry : payloadsForIndex(lib, cache))
         {
-            auto bytes = MessagePackWriteSolutionData(*entry.second);
+            std::vector<uint8_t> encoded;
+            if(entry.second.solution)
+                encoded = MessagePackWriteSolutionData(*entry.second.solution);
+
+            auto   data = entry.second.solution ? encoded.data() : entry.second.data;
+            size_t size = entry.second.solution ? encoded.size() : entry.second.size;
+
             if(blob.size() > static_cast<size_t>(std::numeric_limits<int64_t>::max())
-               || bytes.size() > static_cast<size_t>(std::numeric_limits<int64_t>::max()))
+               || size > static_cast<size_t>(std::numeric_limits<int64_t>::max()))
                 throw std::runtime_error("solutions_blob exceeds indexed format offsets");
 
             table.push_back(entry.first);
             table.push_back(static_cast<int64_t>(blob.size()));
-            table.push_back(static_cast<int64_t>(bytes.size()));
-            blob.insert(blob.end(), bytes.begin(), bytes.end());
+            table.push_back(static_cast<int64_t>(size));
+            blob.insert(blob.end(), data, data + size);
         }
 
         if(blob.size() > std::numeric_limits<uint32_t>::max())
