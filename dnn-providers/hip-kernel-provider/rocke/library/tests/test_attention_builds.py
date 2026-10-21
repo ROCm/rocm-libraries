@@ -129,12 +129,12 @@ _KERNEL_RESOURCE_BUDGETS = {
     # gfx950 dense persistent prefill: the 512-thread (8-wave) workgroup pins VGPR
     # at the 256 ceiling independent of waves_per_eu; it needs a hair more -> 20 B.
     # Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
-    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256": {
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256_bthkvmin": {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
     # LSE retains the same persistent occupancy/scratch limits.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256": {
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256_bthkvmin": {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
