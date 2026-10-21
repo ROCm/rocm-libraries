@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "68d2b2b5-aa22-4011-bf15-40821382508f",
+  "name": "Gfx950AttentionUnified2D selector",
+  "kind": "native",
+  "payload": "hipkernel.gfx950_attention_unified_2d.score"
+}
