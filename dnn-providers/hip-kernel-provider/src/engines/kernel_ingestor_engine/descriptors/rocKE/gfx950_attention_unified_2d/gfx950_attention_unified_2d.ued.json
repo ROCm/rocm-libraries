@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "id": "3526b8c1-9a9e-43e8-8b7f-4a9764fe74b8",
+  "id": "42fd7326-1352-4d94-8296-5675ebfc88f0",
   "name": "hipkernel:Gfx950AttentionUnified2D",
   "sdk_version": "1.0.0",
   "graph_match": {
     "native": "hipkernel.gfx950_attention_unified_2d.graph_match"
   },
-  "metadata": "ebfd36fd-a0b8-4a9e-937a-b9282c176e09",
-  "heuristic": "68d2b2b5-aa22-4011-bf15-40821382508f",
+  "metadata": "a4196be2-6512-4c66-93dd-78730796af01",
+  "heuristic": "6fdb7055-1dc2-4d67-a8f5-919e1b06ae26",
   "knobs": [
     "tile_size",
     "num_warps",
