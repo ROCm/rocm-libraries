@@ -50,6 +50,11 @@
 // 4.50 GiB per group, over the 4 GiB window, while its activations stay small so the weight
 // term is isolated.
 //
+// GetFp32WeightsOverInt32ConvCase() pins the other half of that bound. The gfx950 window is for
+// the activations: fp32 NHWC weights of 8192x8192x3x3 are 2,415,919,104 bytes, over INT_MAX and
+// under the window, and backward-weights has to stay gated on every device while its 6 MiB
+// activations keep every other term out of the way.
+//
 // The fp32 pair crosses 0xffffffff with the same per-sample geometry (61,046,784 bytes):
 //     N=64 -> 3,906,994,176 bytes, inside the window
 //     N=71 -> 4,334,321,664 bytes, over it
@@ -112,6 +117,15 @@ auto GetWeightsOverBoundConvCase()
                         {miopenHalf, miopenTensorNHWC, {16384, 16384, 3, 3}},
                         miopenHalf,
                         {{0, 0}, {1, 1}, {1, 1}}};
+}
+
+auto GetFp32WeightsOverInt32ConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNHWC, {1, 8192, 14, 14}},
+                        {miopenFloat, miopenTensorNHWC, {8192, 8192, 3, 3}},
+                        miopenFloat,
+                        {{1, 1}, {1, 1}, {1, 1}}};
 }
 
 auto GetFp32InWindowConvCase()
@@ -314,6 +328,11 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwOverWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32NchwOverWindowConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(SmokeFp32WeightsOverInt32,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetGatedParams()),
+                                          testing::Values(GetFp32WeightsOverInt32ConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeBatchPaddingWrapsUnderInt32,

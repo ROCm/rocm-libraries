@@ -265,10 +265,12 @@ HeuristicInitMacroTileNoPadGemmK(size_t gemm_m,
 // bounds the tensors themselves.
 //
 // `max_wrw_bytes` is INT_MAX except on targets where the 4 GiB window was validated against a
-// GPU reference, and only FP32 with NCHW or NHWC on all three tensors may use it. FP16/BF16
-// keep INT_MAX: on some 2-4 GiB shapes their error was several times that of another solver on
-// the same data (cause not isolated), and none of those find-db rows was the fastest entry.
-// Mixed layouts keep INT_MAX (#13219).
+// GPU reference, and it applies to the activations only, and only when they are FP32 with NCHW
+// or NHWC on all three tensors. FP16/BF16 keep INT_MAX: on some 2-4 GiB shapes their error was
+// several times that of another solver on the same data (cause not isolated), and none of those
+// find-db rows was the fastest entry. Mixed layouts keep INT_MAX (#13219). The weight tensor
+// keeps INT_MAX everywhere: no 2-4 GiB backward-weights weight tensor has been run against a
+// GPU reference, and no shipped find-db row has one.
 static inline bool igemm_tensor_size_exceeds_asm_gtc_addressing(
     const miopen::conv::ProblemDescription& problem,
     std::size_t max_wrw_bytes = std::numeric_limits<int>::max())
@@ -283,7 +285,7 @@ static inline bool igemm_tensor_size_exceeds_asm_gtc_addressing(
         const auto max_bytes = std::min(max_wrw_bytes, window);
         return problem.GetIn().GetNumBytes() > max_bytes ||
                problem.GetOut().GetNumBytes() > max_bytes ||
-               problem.GetWeights().GetNumBytes() > max_bytes;
+               problem.GetWeights().GetNumBytes() > max_int32;
     }
 
     const auto group_count = static_cast<std::size_t>(problem.GetGroupCount());

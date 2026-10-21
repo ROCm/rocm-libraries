@@ -46,7 +46,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] On gfx950, `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC` again accepts FP32 NCHW or
   NHWC activations up to 4 GiB (previously 2 GiB), and the FP32 gfx950 find-db rows removed by
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
-  ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound.
+  ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
+  does the weight tensor in every case.
 
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
@@ -74,7 +75,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Large forward and backward-data convolutions are no longer gated off CK by tensor byte
   span. The 32-bit byte-offset overflow that motivated the gate is fixed in CK itself, so these
   problems can again use the faster int32 CK instances.
-* [Conv] Relaxed the ASM-GTC NHWC large-tensor guard for forward and backward-data. Those kernels address a full 4 GiB window per dispatch slice and advance the base pointer per batch-split, so the input and output bounds were redundant; what remains is a bound on the per-group weight size. Backward-weights keeps the stricter int32 bound, because 292 of its 900 kernels ignore the batch-split dimension (#11805). This restores 8,978 forward and backward-data entries across the six system find-databases that the guard's first revision removed.
+* [Conv] Relaxed the ASM-GTC NHWC large-tensor guard for forward and backward-data. Those kernels address a full 4 GiB window per dispatch slice and advance the base pointer per batch-split, so the input and output bounds were redundant; what remains is a bound on the per-group weight size. Backward-weights still cannot split, because 292 of its 900 kernels ignore the batch-split dimension (#11805), so it keeps the int32 bound everywhere except the gfx950 FP32 activation case in the Resolved Issues entry above. This restores 8,978 forward and backward-data entries across the six system find-databases that the guard's first revision removed.
 
 ### Optimized
 * [Conv] Optimized the `ConvDirectNaiveConv` solver with per-direction kernel files, float
