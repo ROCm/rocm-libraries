@@ -476,22 +476,35 @@ namespace TensileLite
                 if((start == nullptr) && (stop == nullptr))
                 {
                     float enqTime = 0.0f;
-                    HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-                    for(size_t i = 0; i < startEvents->size(); i++)
                     {
-                        HIP_CHECK_EXC(hipEventElapsedTime(
-                            &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
+                        ScopedTimer timer("benchmark_event_sync");
+                        HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
+                    }
+                    {
+                        ScopedTimer timer("benchmark_event_elapsed_time");
+                        for(size_t i = 0; i < startEvents->size(); i++)
+                        {
+                            HIP_CHECK_EXC(hipEventElapsedTime(&enqTime,
+                                                              startEvents->at(i).front(),
+                                                              stopEvents->at(i).back()));
 
-                        totalTime += double_millis(enqTime);
+                            totalTime += double_millis(enqTime);
+                        }
                     }
                 }
                 else
                 {
                     float eventMs = 0.0f;
-                    HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, start, stop));
+                    {
+                        ScopedTimer timer("benchmark_event_elapsed_time");
+                        HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, start, stop));
+                    }
                     totalTime = double_millis(eventMs);
-                    HIP_CHECK_EXC(hipEventDestroy(start));
-                    HIP_CHECK_EXC(hipEventDestroy(stop));
+                    {
+                        ScopedTimer timer("benchmark_event_destroy");
+                        HIP_CHECK_EXC(hipEventDestroy(start));
+                        HIP_CHECK_EXC(hipEventDestroy(stop));
+                    }
                 }
             }
             else
@@ -507,6 +520,8 @@ namespace TensileLite
             {
                 auto sleepTime = totalTime * (m_sleepPercent / 100.0);
 
+                // Deliberate idle time (--sleep-percent / SleepPercent), not work.
+                ScopedTimer timer("benchmark_sleep");
                 std::this_thread::sleep_for(sleepTime);
             }
         }

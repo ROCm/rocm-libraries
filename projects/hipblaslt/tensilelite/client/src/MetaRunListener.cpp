@@ -285,7 +285,15 @@ namespace TensileLite
                                                TimingEvents const&            stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateEnqueues(inputs, startEvents, stopEvents);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<2>("validate_enqueues_listener.", **iter));
+                    (*iter)->validateEnqueues(inputs, startEvents, stopEvents);
+                }
+                else
+                    (*iter)->validateEnqueues(inputs, startEvents, stopEvents);
+            }
         }
 
         void MetaRunListener::finalizeReport()
