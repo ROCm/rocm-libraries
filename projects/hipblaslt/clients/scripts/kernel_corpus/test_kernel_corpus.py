@@ -327,60 +327,91 @@ class ShardSelectionTests(unittest.TestCase):
         self.assertEqual((args.shard_index, args.total_shards), (2, 4))
 
 
-FAKE_TEST = textwrap.dedent(
-    """\
-    #!{python}
-    # Stands in for hipblaslt-test: passes every case except solution {bad}, which "faults".
-    import re, sys
+# Stands in for hipblaslt-test. Every case passes except those whose YAML name starts with BAD,
+# which fault the GPU or hang (MODE). With SICKEN set, the first bad case leaves the GPU unable
+# to run anything, so every later process fails at once, the runner's health check included.
+FAKE_TEST_BODY = textwrap.dedent(r"""
+    import os, re, sys, time
     print("hipBLASLt git version: fake123")
-    print("Device ID 0 : AMD Fake GPU gfx90a:sramecc+:xnack-")
+    if DEVICE_LINE:
+        print("Device ID 0 : AMD Fake GPU gfx90a:sramecc+:xnack-")
     args = sys.argv[1:]
     if "--yaml" not in args:
         sys.exit(0)
+    if os.path.exists(SICK_MARKER):
+        print("hipErrorNoDevice", flush=True)
+        sys.exit(1)
     text = open(args[args.index("--yaml") + 1]).read()
-    names = re.findall(r"^- name: (\\S+)", text, re.M)
+    names = re.findall(r"^- name: (\S+)", text, re.M)
     for name in names:
         test = "_/matmul_test.matmul/pre_checkin_" + name + "_f32_r_APIAlgoIndex"
         print("[ RUN      ] " + test, flush=True)
-        if name.startswith("kc_{bad}_"):
+        if name.startswith(BAD):
+            if SICKEN:
+                open(SICK_MARKER, "w").close()
+            if MODE == "hang":
+                # Long past the 1 s case timeout, but short enough that a runner which misses
+                # the hang fails the test instead of stalling it.
+                time.sleep(30)
             print("Warning: Queue error - HSA_STATUS_ERROR_MEMORY_FAULT", flush=True)
             sys.exit(134)
         print("[       OK ] " + test + " (1 ms)", flush=True)
     print("[  PASSED  ] %d test%s." % (len(names), "" if len(names) == 1 else "s"))
-    """
-)
+    """)
+
+
+def fake_rocm(
+    root: Path, bad: str = "kc_4_", mode: str = "fault", sicken: bool = False, device: bool = True
+) -> Path:
+    """An install tree with the fake hipblaslt-test and a 9-solution gfx90a library: solutions
+    0 to 7 plan 4 cases each, and solution 8 is a deferred grouped GEMM."""
+    rocm = root / "rocm"
+    (rocm / "bin").mkdir(parents=True)
+    fake = rocm / "bin" / "hipblaslt-test"
+    settings = (
+        f"BAD = {bad!r}\nMODE = {mode!r}\nSICKEN = {sicken!r}\nDEVICE_LINE = {device!r}\n"
+        f"SICK_MARKER = {str(root / 'gpu-is-sick')!r}\n"
+    )
+    fake.write_text(f"#!{sys.executable}\n{settings}{FAKE_TEST_BODY}")
+    fake.chmod(0o755)
+    (rocm / "bin" / "hipblaslt_common.yaml").write_text("---\n")
+    write_library(
+        rocm / "lib" / "hipblaslt" / "library" / "gfx90a",
+        [solution(i) for i in range(8)] + [solution(8, groupedGemm=True)],
+    )
+    return rocm
+
+
+def corpus_argv(rocm: Path, out: Path, *extra: str) -> list[str]:
+    # Explicit device facts keep the test from reading the real GPU through rocminfo.
+    return [
+        "--rocm-dir",
+        str(rocm),
+        "--out",
+        str(out),
+        "--chunk-cases",
+        "10",
+        "--cu-count",
+        "104",
+        "--pci-chip-id",
+        "0x740f",
+        *extra,
+    ]
 
 
 class EndToEndTests(unittest.TestCase):
     def test_a_faulting_kernel_ends_only_its_case_and_the_run_resumes(self):
         with tempfile.TemporaryDirectory() as d:
-            rocm = Path(d) / "rocm"
-            (rocm / "bin").mkdir(parents=True)
-            fake = rocm / "bin" / "hipblaslt-test"
-            fake.write_text(FAKE_TEST.format(python=sys.executable, bad=4))
-            fake.chmod(0o755)
-            (rocm / "bin" / "hipblaslt_common.yaml").write_text("---\n")
-            write_library(
-                rocm / "lib" / "hipblaslt" / "library" / "gfx90a",
-                [solution(i) for i in range(8)] + [solution(8, groupedGemm=True)],
-            )
+            rocm = fake_rocm(Path(d))
             out = Path(d) / "out"
-            argv = [
-                "--rocm-dir",
-                str(rocm),
-                "--out",
-                str(out),
-                "--chunk-cases",
-                "10",
-                "--cu-count",
-                "104",
-            ]
+            argv = corpus_argv(rocm, out)
             with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
                 code = run.main(argv)
             self.assertEqual(code, run.EXIT_FAILURES)
             summary = json.loads((out / "summary.json").read_text())
             self.assertEqual(summary["case_status"], {"pass": 28, "crash": 4, "deferred": 1})
             self.assertEqual({f["index"] for f in summary["failures"]}, {4})
+            self.assertEqual({f["reason"] for f in summary["failures"]}, {"GPU memory fault"})
             self.assertTrue((out / "repro" / "4_exact.yaml").exists())
 
             # A rerun has nothing left to do and reports the same results.
@@ -389,6 +420,64 @@ class EndToEndTests(unittest.TestCase):
             self.assertIn("0 cases to run", stdout.getvalue())
             again = json.loads((out / "summary.json").read_text())
             self.assertEqual(again["case_status"], summary["case_status"])
+
+    def test_a_hung_case_times_out_and_the_rest_still_run(self):
+        # The runner polls every 5 s, so a 1 s case timeout costs about 5 s of wall time.
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d), bad="kc_4_exact", mode="hang")
+            out = Path(d) / "out"
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
+                code = run.main(corpus_argv(rocm, out, "--case-timeout", "1"))
+            self.assertEqual(code, run.EXIT_FAILURES)
+            summary = json.loads((out / "summary.json").read_text())
+            self.assertEqual(summary["case_status"], {"pass": 31, "timeout": 1, "deferred": 1})
+            self.assertEqual([f["case_id"] for f in summary["failures"]], ["4:exact"])
+
+    def test_a_gpu_that_stops_working_stops_the_shard_and_shows_why(self):
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d), sicken=True)
+            out = Path(d) / "out"
+            stderr = io.StringIO()
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch(
+                "sys.stderr", stderr
+            ), mock.patch("time.sleep"):
+                code = run.main(corpus_argv(rocm, out))
+            self.assertEqual(code, run.EXIT_GPU_UNHEALTHY)
+            self.assertIn("hipErrorNoDevice", stderr.getvalue())
+            summary = json.loads((out / "summary.json").read_text())
+            # Solutions 0 to 3 ran before the fault; nothing ran on the sick GPU after it.
+            self.assertEqual(summary["case_status"], {"pass": 16, "crash": 1, "deferred": 1})
+
+    def test_a_device_query_that_never_names_a_gpu_is_retried_then_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d), device=False)
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr), mock.patch("time.sleep") as sleep:
+                code = run.main(corpus_argv(rocm, Path(d) / "out"))
+            self.assertEqual(code, run.EXIT_GPU_UNHEALTHY)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertIn("hipBLASLt git version: fake123", stderr.getvalue())
+
+
+class ReportTests(unittest.TestCase):
+    def test_rows_written_before_a_classification_rule_are_classified_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            (out / "shard-1-of-1").mkdir()
+            old = {
+                "case_id": "3:exact",
+                "index": 3,
+                "shape": "exact",
+                "status": "fail",
+                "message": "fast_check does not support data type 4",
+            }
+            (out / "shard-1-of-1" / "results.jsonl").write_text(json.dumps(old) + "\n")
+            self.assertEqual(report.load_results(out)["3:exact"]["status"], "unsupported")
+
+    def test_a_fault_is_a_kernel_failure_even_when_fast_check_complains(self):
+        message = "fast_check does not support data type 4"
+        self.assertEqual(report.classify_failure(message, fault=True), "fail")
+        self.assertEqual(report.classify_failure("NO solution found!"), "refused")
 
 
 if __name__ == "__main__":

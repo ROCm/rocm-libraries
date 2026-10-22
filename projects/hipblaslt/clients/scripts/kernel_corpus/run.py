@@ -122,8 +122,8 @@ class Tool:
 
     def gpu_agent(self) -> dict:
         """The first GPU agent's compute-unit count and PCI chip ID from rocminfo, if available.
-        Device-specific libraries (gfx950's ID75a0 and ID75a3-75a2, gfx942's CU variants) are
-        reachable only on a matching device."""
+        Some solutions require one: gfx950 solutions name PCI chip IDs, and gfx942 solutions
+        name CU counts. They are reachable only on a matching device."""
         for rocminfo in (self.rocm_dir / "bin" / "rocminfo", Path("/opt/rocm/bin/rocminfo")):
             if not rocminfo.exists():
                 continue
@@ -244,6 +244,10 @@ class ChunkRun:
         if len(self.message) < 200:
             self.message.append(line)
 
+    def _line(self, line: str) -> None:
+        self.log.write(line + "\n")
+        self.feed(line)
+
     def run(self, cmd: list[str], env: dict, cwd: Path) -> str:
         """Runs the process to completion. Returns how it ended: exit, crash, timeout or fault."""
         proc = subprocess.Popen(
@@ -252,33 +256,37 @@ class ChunkRun:
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
             start_new_session=True,
         )
+        # Raw reads: a buffered readline can hold a case's RUN line where select cannot see it,
+        # and a case that then hangs would never time out.
+        fd = proc.stdout.fileno()
         selector = selectors.DefaultSelector()
-        selector.register(proc.stdout, selectors.EVENT_READ)
+        selector.register(fd, selectors.EVENT_READ)
         last_output = time.monotonic()
+        pending = b""
         ending = "exit"
         try:
-            while True:
+            while ending == "exit":
                 if selector.select(timeout=5.0):
-                    line = proc.stdout.readline()
-                    if not line:
+                    data = os.read(fd, 65536)
+                    if not data:
+                        if pending:
+                            self._line(pending.decode(errors="replace"))
                         break
                     last_output = time.monotonic()
-                    self.log.write(line)
-                    self.feed(line)
-                    if self.fault and self.current is not None:
-                        # A memory fault poisons the process's GPU context; every later case in
-                        # it would fail for that reason, so stop here.
-                        ending = "fault"
-                        break
+                    *lines, pending = (pending + data).split(b"\n")
+                    for raw in lines:
+                        self._line(raw.decode(errors="replace"))
+                        if self.fault and self.current is not None:
+                            # A memory fault poisons the process's GPU context; every later
+                            # case in it would fail for that reason, so stop here.
+                            ending = "fault"
+                            break
                 elif (
                     self.current is not None and time.monotonic() - last_output > self.case_timeout
                 ):
                     ending = "timeout"
-                    break
         finally:
             if proc.poll() is None:
                 _kill_group(proc)
