@@ -219,33 +219,24 @@ struct UniversalGemmKernel
      * @brief Whether this epilogue can accumulate C across k_batch splits.
      *
      * With k_batch > 1 every split atomically adds into the same C tile. An epilogue that stores
-     * without honouring the atomic_add memory operation (TdmEpilogue) declares
-     * `SupportsSplitK = false`, whatever its output type. Otherwise the atomic store needs a
-     * vector width it can express: a half-precision epilogue with an odd GetVectorSizeC() has no
-     * such path and emits no store at all, leaving C untouched rather than partial. Both the host
-     * rejection in IsSupportedArgument and the device-side epilogue dispatch read this constant,
-     * so the two cannot drift apart.
+     * without honouring the atomic_add memory operation (e.g. TdmEpilogue) declares
+     * `SupportsSplitK = false`, whatever its output type: each split would replace C with its own
+     * partial sum. Otherwise the atomic store needs a vector width it can express: a
+     * half-precision epilogue with an odd GetVectorSizeC() has no such path and emits no store at
+     * all, leaving C untouched rather than partial. Both the host rejection in IsSupportedArgument
+     * and the device-side epilogue dispatch read this constant, so the two cannot drift apart.
      *
      * CK_TILE_FORCE_SINGLE_TAIL_HANDLER elides the atomic_add arm of that dispatch entirely, so in
      * that build no epilogue has a split-K store path. It belongs in this constant rather than in a
      * second #if at the use site, or the host answers "supported" for a device that cannot store.
      */
-    template <typename T>
-    using epilogue_supports_split_k_t = decltype(T::SupportsSplitK);
-
     static constexpr bool EpilogueSupportsSplitK = []() {
 #if defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
         return false;
 #else
-        if constexpr(is_detected<epilogue_supports_split_k_t, EpiloguePipeline>{})
-        {
-            if constexpr(!EpiloguePipeline::SupportsSplitK)
-            {
-                return false;
-            }
-        }
-        return EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
-               !is_any_of<EDataType, fp16_t, bf16_t>::value;
+        return epilogue_can_accumulate_v<EpiloguePipeline> &&
+               (EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
+                !is_any_of<EDataType, fp16_t, bf16_t>::value);
 #endif
     }();
 
