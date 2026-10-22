@@ -59,7 +59,7 @@ from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
-from .Components.TDMFuse import tdmWavePartition, tdmBFirstSplitSync
+from .Components.TDMFuse import tdmWavePartition, tdmBFirstSplitSync, tdmWaveSelectSide, tdmWaveSelectBit
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -837,17 +837,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     doubleTc, singleTc = self._dcpThickThinIssueOrder(kernel)
     # Wave assignment comes from the grouping table, not the tensor name.
     _, singleWaves = tdmWavePartition(kernel, singleTc)
-    singleIsEven = singleWaves[0] % 2 == 0
+    singleIsEven = tdmWaveSelectSide(kernel, singleWaves[0]) == 0
     # The parity check leaves SCC set on odd waves.
     skipEarly = SCBranchSCC0 if singleIsEven else SCBranchSCC1
     skipLate  = SCBranchSCC1 if singleIsEven else SCBranchSCC0
 
     def parityCheck(mod):
+      selBit = tdmWaveSelectBit(kernel)
       if self.isTdmWaveIdxLive(kernel):
-        self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+        self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity", bit=selBit)
       else:
         with self.allocTmpSgpr(1, tag="dcpLateFill_waveIdx") as tmp:
-          self._emitTdmWaveParitySCC(mod, kernel, tmp.idx, "check wave parity")
+          self._emitTdmWaveParitySCC(mod, kernel, tmp.idx, "check wave parity", selBit)
 
     late = Module("TDM decoupled late fill %s" % singleTc)
     pinThinFence = (self.tdmFusePaired(kernel)

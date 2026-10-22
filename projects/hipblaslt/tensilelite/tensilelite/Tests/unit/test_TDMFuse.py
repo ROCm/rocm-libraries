@@ -681,13 +681,24 @@ def test_b_first_split_sync_selects_its_own_row():
 
 
 @pytest.mark.parametrize(
-    "tc, waves",
-    [("B", (0, 2)), ("A", (0, 2)), ("MXSB", (1, 3)), ("MXSA", (1, 3))],
+    "tc, waves, comp",
+    [("B", (0, 1), 0), ("A", (0, 1), 0),
+     ("MXSB", (2, 3), TF.TdmCompMask(1)), ("MXSA", (2, 3), TF.TdmCompMask(1))],
 )
-def test_b_first_split_sync_puts_data_and_scales_on_opposite_parities(tc, waves):
+def test_b_first_split_sync_puts_data_low_and_scales_high(tc, waves, comp):
     kernel = _splitKernel()
     assert tdmWavePartition(kernel, tc) == (2, waves)
-    assert tdmWaveComponents(kernel, tc) == (2, 1)
+    assert tdmWaveComponents(kernel, tc) == (2, comp)
+    assert TF.tdmWaveSelectBit(kernel) == 1
+
+
+def test_b_first_split_sync_rejects_non_power_of_two_waves():
+    assert TF.tdmGroupingAccepted(_splitKernel(NumWaves=6)) is False
+
+
+def test_b_first_split_sync_increment_selects_on_bit_one():
+    text = _incrementText(_splitKernel())
+    assert "s_bitcmp1_b32 s[sgprWaveIdx], 1" in text, text
 
 
 def test_b_first_split_sync_sets_follow_their_data_tensor():
@@ -729,7 +740,7 @@ def test_set_members_by_parity_for_the_data_call(pair):
 
 @pytest.mark.parametrize("pair", [("MXSA", "MXSB"), ("MXSB", "MXSA")])
 def test_set_members_by_parity_for_the_scale_call(pair):
-    # The scale call advances B's set, where B rides the even waves.
+    # The scale call advances B's set, where B rides the low waves.
     assert _setMembers(_splitKernel(), *pair) == ("B", "MXSB")
 
 

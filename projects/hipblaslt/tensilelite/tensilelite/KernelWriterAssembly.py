@@ -84,7 +84,8 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
-                                tdmMemberIsLive, tdmPartitionDispatchActive
+                                tdmMemberIsLive, tdmPartitionDispatchActive, \
+                                tdmWaveSelectBit, tdmWaveSelectSide, TdmCompMask
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
@@ -465,6 +466,8 @@ class KernelWriterAssembly(KernelWriter):
       return SMovB32(sgpr(dstSgprIdx), 0, comment)
     if compShift == 0:
       return SMovB32(sgpr(dstSgprIdx), sgpr(waveIdxSgpr), comment)
+    if isinstance(compShift, TdmCompMask):
+      return SAndB32(sgpr(dstSgprIdx), sgpr(waveIdxSgpr), compShift.mask, comment)
     return SLShiftRightB32(sgpr(dstSgprIdx), compShift, sgpr(waveIdxSgpr), comment)
 
 
@@ -552,6 +555,8 @@ class KernelWriterAssembly(KernelWriter):
       comment = f"wId=0 (wave {compWaves[0]} alone carries {tc})"
     elif compShift == 0:
       comment = f"wId=WaveIdx ({tc} divided over {numComp} waves)"
+    elif isinstance(compShift, TdmCompMask):
+      comment = f"wId=WaveIdx & {compShift.mask} ({tc} on waves {compWaves[0]}-{compWaves[-1]})"
     else:
       comment = f"wId=WaveIdx >> {compShift} (covers {1 << compShift} waves each)"
     mod.add(self.tdmEmitWaveCompId(dstIdx, compShift, waveIdxSgpr, comment))
@@ -7030,9 +7035,10 @@ class KernelWriterAssembly(KernelWriter):
       skipLabel = Label(label=self.rapLabel(f"{labelName}{tc}"), comment="")
 
       self._emitTdmWaveParitySCCAuto(imod, kernel, comment="check wave parity",
-                                    tmpTag="_applyStaggerTDM_waveIdTmp")
+                                    tmpTag="_applyStaggerTDM_waveIdTmp",
+                                    bit=tdmWaveSelectBit(kernel))
       _, gateWaves = tdmWavePartition(kernel, tc)
-      if gateWaves[0] % 2 == 0:
+      if tdmWaveSelectSide(kernel, gateWaves[0]) == 0:
         imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=f"skip: odd waves do not carry {tc}"))
       else:
         imod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment=f"skip: even waves do not carry {tc}"))
@@ -12578,7 +12584,7 @@ class KernelWriterAssembly(KernelWriter):
       tmpSgprIdx = tmpSgprRes.idx
       lblEnd = Label(self.labels.getNameInc(f"TDMSwap{tcEven}{tcOdd}End"), "")
       module.addComment0(f"TDM decoupled swap: even waves={tcEven}({numBlkEven} blk), odd waves={tcOdd}({numBlkOdd} blk)")
-      module.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+      module.add(SBitcmp1B32(sgpr("WaveIdx"), tdmWaveSelectBit(kernel), "Check parity of wId"))
       if numBlkEven < 2:
         module.add(SCBranchSCC0(lblEnd.getLabelName(), f"even waves hold {tcEven}, single-buffered: skip"))
         module.add(self._tdmDecoupledSwapArm(kernel, tcOdd, ldsAddrSgprName, tmpSgprIdx))
@@ -20165,7 +20171,7 @@ class KernelWriterAssembly(KernelWriter):
     """Return the WaveIdx bit count packed into ArgType[8+]."""
     if tdmSharedScaleSetActive(kernel):
       return max(1, ceil(log2(kernel["NumWaves"])))
-    return 1
+    return tdmWaveSelectBit(kernel) + 1
 
   def _emitTdmWaveIdIntoSgpr(self, kernel, dstIdx: int, comment: str = "waveId") -> Module:
     """Materialise WaveIdx from packed ArgType bits or Serial."""
@@ -20190,6 +20196,10 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCmpLgU32(src0=waveIdOp, src1=waves[0],
                    comment=f"only wave {waves[0]} carries {tc}"))
         return
+      if tuple(waves) == tuple(range(kernel["NumWaves"] - len(waves), kernel["NumWaves"])):
+        module.add(SCmpLtU32(src0=waveIdOp, src1=waves[0],
+                   comment=f"waves {waves[0]}-{waves[-1]} carry {tc}"))
+        return
       assert tuple(waves) == tuple(range(len(waves))), \
              f"{tc}: expected a contiguous low wave run, got {waves}"
       module.add(SCmpGeU32(src0=waveIdOp, src1=len(waves),
@@ -20204,32 +20214,36 @@ class KernelWriterAssembly(KernelWriter):
       emitCmp(sgpr(waveIdTmp.idx))
 
   def _emitTdmWaveParitySCCAuto(self, module: Module, kernel: Mapping,
-                                comment: str = "wave parity", tmpTag: str = "tdmParityTmp"):
-    """Emit parity into SCC, allocating a 1-SGPR tmp only for Serial remat."""
+                                comment: str = "wave parity", tmpTag: str = "tdmParityTmp",
+                                bit: int = 0):
+    """Emit WaveId bit `bit` into SCC, allocating a 1-SGPR tmp only for Serial remat."""
     if self._tdmParityNeedsTmp(kernel):
       with self.allocTmpSgpr(1, tag=tmpTag) as waveIdTmp:
-        self._emitTdmWaveParitySCC(module, kernel, waveIdTmp.idx, comment)
+        self._emitTdmWaveParitySCC(module, kernel, waveIdTmp.idx, comment, bit)
     else:
-      self._emitTdmWaveParitySCC(module, kernel, comment=comment)
+      self._emitTdmWaveParitySCC(module, kernel, comment=comment, bit=bit)
 
   def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: Optional[int] = None,
-                            comment: str = "wave parity"):
-    """Leave this wave's parity (bit0 of WaveId) in SCC.
+                            comment: str = "wave parity", bit: int = 0):
+    """Leave WaveId bit `bit` in SCC: parity by default, tdmWaveSelectBit for set members.
 
-    Prefer live sgpr("WaveIdx") bit0. Else packed ArgType bit 8 (no tmp).
+    Prefer live sgpr("WaveIdx"). Else packed ArgType bit 8+ (no tmp).
     Else recompute from vgpr("Serial"), which clobbers sgpr(dstTmpIdx).
     """
+    selBit: int = bit
     if self.isTdmWaveIdxLive(kernel):
-      module.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=0, comment=comment))
+      module.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=selBit, comment=comment))
       return
     if self.states.tdmParityPackedInArgType:
-      module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=8, comment=comment))
+      assert selBit < self.states.tdmWaveIdBitsInArgType, \
+        f"WaveIdx bit {selBit} was not packed into ArgType"
+      module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=8 + selBit, comment=comment))
       return
     wavelen: int = kernel["WavefrontSize"]
     module.add(VReadfirstlaneB32(dst=sgpr(dstTmpIdx), src=vgpr("Serial"), comment="get tId"))
     module.add(SLShiftRightB32(dst=sgpr(dstTmpIdx), shiftHex=ceil(log2(wavelen)),
                                src=sgpr(dstTmpIdx), comment="waveId"))
-    module.add(SBitcmp1B32(src0=sgpr(dstTmpIdx), src1=0, comment=comment))
+    module.add(SBitcmp1B32(src0=sgpr(dstTmpIdx), src1=selBit, comment=comment))
 
   def tdmSplitLdsBoundary(self, kernel: Mapping, tP: Mapping) -> int:
     """LDS split boundary (bytes) for the second half of a TDMSplit tile. Assumes
@@ -20882,6 +20896,10 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, f"{'odd' if parity else 'even'} waves move {tc}"))
         branch = SCBranchSCC0 if parity else SCBranchSCC1
         mod.add(branch(skip.getLabelName(), f"skip {tc} on {'even' if parity else 'odd'} waves"))
+      elif tuple(waves) == tuple(range(numWaves - len(waves), numWaves)):
+        mod.add(SCmpLtU32(src0=sgpr(waveIdxSgpr), src1=waves[0],
+                comment=f"waves {waves[0]}-{waves[-1]} move {tc}"))
+        mod.add(SCBranchSCC1(skip.getLabelName(), f"skip {tc} on the lower waves"))
       else:
         # A contiguous low run of waves: waveIdx >= len(waves) skips.
         assert tuple(waves) == tuple(range(len(waves))), \
@@ -21522,7 +21540,8 @@ class KernelWriterAssembly(KernelWriter):
 
     tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tPA, tPB)
     self._emitTdmWaveParitySCCAuto(mod, kernel, comment="check wave parity",
-                                  tmpTag="hoistWaveParityWrapUSel_waveIdTmp")
+                                  tmpTag="hoistWaveParityWrapUSel_waveIdTmp",
+                                  bit=tdmWaveSelectBit(kernel))
     mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcEven}+0"), src0=sgpr(f"WrapU{tcOdd}+0"), src1=sgpr(f"WrapU{tcEven}+0"), \
             comment=f"hoist: WrapU{tcEven} = parity ? WrapU{tcOdd} : WrapU{tcEven} (lo)"))
     mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcEven}+1"), src0=sgpr(f"WrapU{tcOdd}+1"), src1=sgpr(f"WrapU{tcEven}+1"), \
@@ -21590,7 +21609,8 @@ class KernelWriterAssembly(KernelWriter):
           # Select WrapU by descriptor-set parity, not argument order.
           tcWrapEven, tcWrapOdd = self._tdmSetMembersByParity(kernel, tPA, tPB)
           self._emitTdmWaveParitySCCAuto(mod, kernel, comment="check wave parity",
-                                        tmpTag="tdmIncrementABWaveSperated_tmpSgprInfo2")
+                                        tmpTag="tdmIncrementABWaveSperated_tmpSgprInfo2",
+                                        bit=tdmWaveSelectBit(kernel))
           mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcWrapOdd}+0"), src1=sgpr(f"WrapU{tcWrapEven}+0"), \
                   comment="select WrapU based on wave parity (lo)"))
           mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcWrapOdd}+1"), src1=sgpr(f"WrapU{tcWrapEven}+1"), \
@@ -21718,7 +21738,7 @@ class KernelWriterAssembly(KernelWriter):
       # keeps the name of the call that advances its set.
       if tcA != "A":
         return mod
-      mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+      mod.add(SBitcmp1B32(sgpr("WaveIdx"), tdmWaveSelectBit(kernel), "Check parity of wId"))
       for owner, setIncName in (("A", "tdmABIncs"), ("B", "tdmMXSAMXSBIncs")):
         group = tdmSetGroup(kernel, owner)
         tcEven, tcOdd = self._tdmParityMembers(kernel, group[0], group[1])

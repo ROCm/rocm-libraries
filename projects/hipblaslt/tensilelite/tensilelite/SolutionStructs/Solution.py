@@ -3452,7 +3452,11 @@ class Solution(collections.abc.Mapping):
         rejectSplitSync("the TDM on both tensors (TDMInst=3); got TDMInst=%d" % state["TDMInst"])
         return
       if state["NumWaves"] <= 1:
-        rejectSplitSync("NumWaves > 1 for parity grouping; got %d" % state["NumWaves"])
+        rejectSplitSync("NumWaves > 1 for the data/scale wave halves; got %d" % state["NumWaves"])
+        return
+      if state["NumWaves"] & (state["NumWaves"] - 1):
+        rejectSplitSync("a power-of-two NumWaves for the data/scale wave halves; got %d"
+                        % state["NumWaves"])
         return
       if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
         rejectSplitSync("MX scales on both tensors")

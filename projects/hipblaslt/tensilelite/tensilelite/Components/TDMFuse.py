@@ -9,7 +9,8 @@
 
 TDM_FUSE_GROUPING maps stable, name-bearing integers to TDM_GROUPS rows.
 TDMBFirstSplitSync=1 selects the "BA_split" row instead of a TDMFuse row:
-{B,MXSB} + {A,MXSA}, even waves carry B then A, odd waves MXSB then MXSA.
+{B,MXSB} + {A,MXSA} in block layout, the low half of the waves carry B then A,
+the high half MXSB then MXSA.
 """
 
 
@@ -34,7 +35,7 @@ TDM_GROUPS = {
     "paired": TdmGrouping("paired", (("A", "MXSA"), ("MXSB", "B"))),
     "A_MX": TdmGrouping("A_MX", (("A", "MXSA", "MXSB"), ("B",)), layout="block"),
     "B_MX": TdmGrouping("B_MX", (("B", "MXSA", "MXSB"), ("A",)), layout="block"),
-    "BA_split": TdmGrouping("BA_split", (("B", "MXSB"), ("A", "MXSA"))),
+    "BA_split": TdmGrouping("BA_split", (("B", "MXSB"), ("A", "MXSA")), layout="block"),
 }
 
 # Baked into shipped solution names, so these integers cannot move.
@@ -49,6 +50,24 @@ TDM_B_FIRST_SPLIT_SYNC_GROUPING = "BA_split"
 def tdmBFirstSplitSync(ks):
     """True when TDMBFirstSplitSync asks for B-first loads and per-side LDS sync."""
     return bool(ks.get("TDMBFirstSplitSync", 0))
+
+
+class TdmCompMask:
+    """Component id `WaveIdx & mask`: a member on an aligned high block of waves."""
+
+    __slots__ = ("mask",)
+
+    def __init__(self, mask):
+        self.mask = mask
+
+    def __eq__(self, other):
+        return isinstance(other, TdmCompMask) and other.mask == self.mask
+
+    def __hash__(self):
+        return hash(("TdmCompMask", self.mask))
+
+    def __repr__(self):
+        return "TdmCompMask(%d)" % self.mask
 
 
 def tdmBothTensors(ks):
@@ -77,6 +96,12 @@ def _acceptPairedSets(ks):
     return _tdmFuseCanShareDescriptors(ks) and ks.get("NumWaves", 1) > 1
 
 
+def _acceptBFirstSplitSets(ks):
+    """Block halves need a power-of-two wave count so one WaveIdx bit picks the member."""
+    numWaves = ks.get("NumWaves", 1)
+    return _acceptPairedSets(ks) and numWaves & (numWaves - 1) == 0
+
+
 def _acceptAlways(ks):
     """The default row: defineTdmSgprs programs it for any solution."""
     return True
@@ -88,7 +113,7 @@ _GROUPING_ACCEPTED = {
     "paired": _acceptPairedSets,
     "A_MX": _acceptSharedScaleSet,
     "B_MX": _acceptSharedScaleSet,
-    "BA_split": _acceptPairedSets,
+    "BA_split": _acceptBFirstSplitSets,
 }
 
 # The row a declined grouping falls back to, which is also TDMFuse=0's row.
@@ -233,10 +258,22 @@ def tdmPartitionDispatchActive(ks):
     """True when descriptor setup must guard each tensor by its own wave share.
 
     The default setup sends the A/B (or MXSA/MXSB) pair to opposite parities, which
-    the shared-scale rows and BA_split (A and B both on even waves) break.
+    the shared-scale rows and BA_split (A and B both on the low waves) break.
     """
     return tdmSharedScaleSetActive(ks) or (
         tdmWaveSeparated(ks) and tdmGrouping(ks).name == TDM_B_FIRST_SPLIT_SYNC_GROUPING)
+
+
+def tdmWaveSelectBit(ks):
+    """WaveIdx bit that tells a two-member set's members apart (0 = parity)."""
+    if tdmWaveSeparated(ks) and tdmGrouping(ks).name == TDM_B_FIRST_SPLIT_SYNC_GROUPING:
+        return (ks["NumWaves"] // 2).bit_length() - 1
+    return 0
+
+
+def tdmWaveSelectSide(ks, wave):
+    """1 when `wave` has the member-select bit set (the "odd" member's side)."""
+    return (wave >> tdmWaveSelectBit(ks)) & 1
 
 
 def tdmPapRejectReason(ks):
@@ -312,6 +349,9 @@ def tdmWaveComponents(ks, tc):
         return numComp, 1
     if tuple(w >> 1 for w in waves) == tuple(range(numComp)):
         return numComp, 1
+    if tdmGrouping(ks).name == TDM_B_FIRST_SPLIT_SYNC_GROUPING and numComp & (numComp - 1) == 0 \
+       and waves[0] % numComp == 0 and waves == tuple(range(waves[0], waves[0] + numComp)):
+        return numComp, TdmCompMask(numComp - 1)
     raise TdmArrangementNotEmittable(
         "tensor %s rides waves %s over %d components, and no right-shift of WaveIdx maps "
         "that onto components 0..%d: shifting by one gives %s"

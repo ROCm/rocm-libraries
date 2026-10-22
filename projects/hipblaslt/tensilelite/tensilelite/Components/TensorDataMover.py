@@ -1,7 +1,7 @@
 from ..Component import TensorDataMover
 from ..Common.DataType import DataType
 from ..Common import INDEX_CHARS
-from .TDMFuse import tdmWaveComponents
+from .TDMFuse import tdmWaveComponents, TdmCompMask
 from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
@@ -222,6 +222,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMovB32(sgpr(waveOffsetSgprIdx), 0, "wCompId = 0 (one wave carries this tensor)"))
             elif compShift == 0:
                 mod.add(SMovB32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), f"wCompId = WaveIdx = fTid // wavelen({wavelen})"))
+            elif isinstance(compShift, TdmCompMask):
+                mod.add(SAndB32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), compShift.mask, f"wCompId = WaveIdx & {compShift.mask}"))
             else:
                 mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), compShift, sgpr(waveIdxSgpr), f"wCompId = WaveIdx >> {compShift}"))
             if ("MXS" in tc):
