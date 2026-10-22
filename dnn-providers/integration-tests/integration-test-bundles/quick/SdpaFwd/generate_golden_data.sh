@@ -275,6 +275,52 @@ if [[ "${GENERATE_PAGED:-0}" == "1" ]]; then
     echo ""
 fi
 
+# --- Paged K/V bundles with attention sinks (gpt-oss: one sink logit per query
+# head, N(0, 1), in the io dtype as vLLM keeps them). Generate in isolation with:
+#   GENERATE_SINKS=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_SINKS:-0}" == "1" ]]; then
+    echo "=== Generating paged bundles with attention sinks ==="
+
+    # Decode: dense Q (Sq=1), GQA 8 (16/2), an empty sequence (O = 0), one page
+    # table bound to K and V as vLLM passes it. No LSE, so the CDNA paged engine
+    # (which has no LSE output) can serve it too.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd64_causal_paged_sinks"
+    generate_paged_bundle "$OUTDIR" "Decode" --dtype bf16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 128 --seq-lens-kv 37 0 128 16 \
+        --shared-page-table --sinks --causal bottom_right --seed 42 \
+        --attn-scale "$SCALE_D64"
+
+    # The same decode with a FLOAT sink (cuDNN's dtype). Reference-only: the
+    # rocKE-backed engines take the sink in the io dtype.
+    generate_paged_bundle "$OUTDIR" "FloatSink" --dtype bf16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 128 --seq-lens-kv 37 0 128 16 \
+        --sinks --sink-dtype float --stats --causal bottom_right --seed 42 \
+        --attn-scale "$SCALE_D64"
+
+    # Mixed prefill/decode with gpt-oss's 128-token sliding window (left bound 127),
+    # ragged Q, a sequence with Q rows but no keys, interleaved K|V views of one
+    # cache and one shared page table (vLLM's layout).
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd64_window_ragged_paged_sinks"
+    generate_paged_bundle "$OUTDIR" "Mixed" --dtype bf16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 \
+        --ragged-q --seq-lens-q 5 1 2 3 1 \
+        --block-size 16 --max-seq-len-kv 256 --seq-lens-kv 200 33 0 3 150 \
+        --interleaved-kv --shared-page-table --sinks --causal bottom_right \
+        --window-left 127 --seed 42 --attn-scale "$SCALE_D64"
+
+    # fp16 decode with LSE (the sink is part of it; an empty sequence has LSE = sink).
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/fp16/hd64_causal_paged_sinks"
+    generate_paged_bundle "$OUTDIR" "Decode" --dtype fp16 \
+        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 128 --seq-lens-kv 37 0 128 16 \
+        --shared-page-table --sinks --stats --causal bottom_right --seed 7 \
+        --attn-scale "$SCALE_D64"
+
+    echo ""
+fi
+
 echo "=== Done ==="
 echo "Generated bundles:"
 find "$GOLDEN_ROOT/quick/SdpaFwd" "$GOLDEN_ROOT/standard/SdpaFwd" -name "*.json" ! -name "*.meta.json" 2>/dev/null | sort

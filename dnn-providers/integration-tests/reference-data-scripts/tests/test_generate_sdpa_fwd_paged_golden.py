@@ -21,6 +21,7 @@ NUMPY_MISSING = importlib.util.find_spec("numpy") is None
 UID_Q, UID_K, UID_V, UID_O, UID_LSE = 0, 1, 2, 3, 4
 UID_SEQ_LEN_Q, UID_SEQ_LEN_KV, UID_RAGGED_OFFSET_QO = 5, 6, 10
 UID_PAGE_TABLE_K, UID_PAGE_TABLE_V = 12, 13
+UID_SINK = 14
 
 CANONICAL_SUPPORT = '{\n  "claims": {},\n  "version": 1\n}\n'
 
@@ -81,8 +82,8 @@ class PagedBundle:
 def naive_paged_sdpa(bundle: PagedBundle):
     """Token-by-token paged attention in float64 straight from the bundle bytes.
 
-    Returns {(b, h, i): (o_row, lse)} for every live row; lse is -inf for a
-    fully masked row (whose o_row is zeros).
+    Returns {(b, h, i): (o_row, lse)} for every live row; a fully masked row has a
+    zero o_row and lse -inf, or lse = sink with an attention sink.
     """
     np = bundle.np
     inputs = bundle.node["inputs"]
@@ -107,6 +108,12 @@ def naive_paged_sdpa(bundle: PagedBundle):
     left = attrs["left_bound"] if attrs["left_bound"] is not None else -1
     right = attrs["right_bound"] if attrs["right_bound"] is not None else -1
     bottom_right = attrs["diagonal_alignment"] == "BOTTOM_RIGHT"
+    sink_uid = inputs.get("sink_token_tensor_uid")
+    sinks = (
+        bundle.strided(sink_uid).astype(np.float64).reshape(-1)
+        if sink_uid is not None
+        else None
+    )
 
     rows = {}
     for b in range(B):
@@ -122,8 +129,9 @@ def naive_paged_sdpa(bundle: PagedBundle):
                     if (right < 0 or t <= i + off + right)
                     and (left < 0 or t >= i + off - left)
                 ]
+                sink = sinks[h] if sinks is not None else -math.inf
                 if not keys:
-                    rows[(b, h, i)] = (np.zeros(v.shape[3]), -math.inf)
+                    rows[(b, h, i)] = (np.zeros(v.shape[3]), sink)
                     continue
                 scores = []
                 values = []
@@ -133,9 +141,10 @@ def naive_paged_sdpa(bundle: PagedBundle):
                     scores.append(float(q @ k[kb, hk, t % block_size]) * scale)
                     values.append(v[vb, hk, t % block_size])
                 scores = np.array(scores)
-                peak = scores.max()
+                # The sink joins the max and the denominator, unscaled, with no value row.
+                peak = max(scores.max(), sink)
                 weights = np.exp(scores - peak)
-                total = weights.sum()
+                total = weights.sum() + math.exp(sink - peak)
                 o_row = (weights[:, None] * np.array(values)).sum(axis=0) / total
                 rows[(b, h, i)] = (o_row, peak + math.log(total))
     return rows
@@ -496,6 +505,54 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
         self.assert_generator_rejects(
             "--ragged-q requires --seq-lens-q", "--ragged-q", "--seq-lens-kv", "4"
         )
+
+    def test_sink_tensor_graph_fields(self):
+        for sink_dtype, json_dtype in (("io", "half"), ("float", "float")):
+            bundle = self.dense("--sinks", "--sink-dtype", sink_dtype)
+            self.assertEqual(bundle.node["inputs"]["sink_token_tensor_uid"], UID_SINK)
+            spec = bundle.tensors[UID_SINK]
+            self.assertEqual(spec["dims"], [1, self.H_Q, 1, 1])
+            self.assertEqual(spec["strides"], [self.H_Q, 1, 1, 1])
+            self.assertEqual(spec["data_type"], json_dtype)
+            meta = json.loads(Path(f"{bundle.base}.meta.json").read_text())
+            self.assertEqual(meta["config"]["sink_dtype"], sink_dtype)
+            self.assertEqual(
+                meta["config"]["sinks"],
+                [float(x) for x in bundle.strided(UID_SINK).reshape(-1)],
+            )
+        self.assertIsNone(self.dense().node["inputs"]["sink_token_tensor_uid"])
+
+    def test_sinks_match_naive_paged_loop(self):
+        # Dense Q with an empty sequence and stats: keyless rows give LSE = sink.
+        dense = self.dense("--sinks", "--stats")
+        self.assert_matches_naive(dense)
+        sinks = dense.strided(UID_SINK).reshape(-1)
+        lse = dense.strided(UID_LSE)
+        for h in range(self.H_Q):
+            self.assertTrue((lse[1, h, :, 0] == sinks[h]).all())
+        self.assertTrue((dense.strided(UID_O)[1] == 0).all())
+        self.assert_matches_naive(self.ragged("--sinks", "--sink-dtype", "float"))
+
+    def test_sinks_keep_the_other_tensors(self):
+        # The sink is drawn last, so every other tensor matches the sink-free bundle.
+        plain = self.dense()
+        plain_bytes = {
+            uid: plain.bin_path(uid).read_bytes() for uid in (UID_Q, UID_K, UID_V)
+        }
+        with_sinks = self.dense("--sinks")
+        for uid, data in plain_bytes.items():
+            self.assertEqual(with_sinks.bin_path(uid).read_bytes(), data)
+
+    def test_sink_bundles_pass_the_verifier(self):
+        self.dense("--sinks", "--stats")
+        self.ragged("--sinks")
+        verified = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), "--require-data", str(self.root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
 
 
 if __name__ == "__main__":
