@@ -546,7 +546,7 @@ def analyze(
     df.loc[mask, "winner"] = "tuned"
     df = df.drop("valid", axis=1, errors="ignore")
     if mask.sum() == 0:
-        logger.info(f"No kernels improve over the base library")
+        logger.info(f"No kernels improved over the base library")
         return None, df
 
     final_enriched.drop(["valid", "lib"], axis=1, errors="ignore").to_csv(
