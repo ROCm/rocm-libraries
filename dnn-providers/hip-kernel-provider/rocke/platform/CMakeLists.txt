@@ -646,8 +646,8 @@ if(ROCKE_INSTALL_TESTS)
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
-    # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, and
-    # the 2D/3D mask_type spec fields.
+    # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+    # 2D/3D mask_type spec fields, and the 3D segment+reduce module's pairing.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -659,6 +659,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
