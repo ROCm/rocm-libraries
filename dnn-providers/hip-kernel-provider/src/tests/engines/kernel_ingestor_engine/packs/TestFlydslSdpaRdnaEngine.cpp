@@ -550,6 +550,13 @@ TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedTopLeftBooleanIsCausalAtTheStoredAl
     EXPECT_EQ(boundInt(bottomRight, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(boundInt(bottomRight, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
     EXPECT_EQ(boundInt(bottomRight, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 1);
+    // A right_bound the graph sets wins over the boolean's 0: a band, not plain causal.
+    spec.diagonalAlignment.reset();
+    spec.rightBound = 16;
+    const auto band = bindingsFor(spec);
+    EXPECT_EQ(boundInt(band, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
+    EXPECT_EQ(boundInt(band, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 16);
+    EXPECT_EQ(boundInt(band, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 0);
 }
 
 TEST(TestFlydslSdpaRdnaBinding, AWindowBindsItsLeftBoundAndClampsAnOversizedOne)

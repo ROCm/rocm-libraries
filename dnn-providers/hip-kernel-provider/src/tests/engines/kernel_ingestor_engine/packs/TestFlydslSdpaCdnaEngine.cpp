@@ -752,6 +752,19 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheDeprecatedBooleansAtTheirAlignment)
     EXPECT_EQ(tryGetBoundInt(*refined, CDNA_DIAG_OFFSET_TOKEN), 768);
     EXPECT_EQ(tryGetBoundInt(*bottomRight, CDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(tryGetBoundInt(*bottomRight, CDNA_DIAG_OFFSET_TOKEN), 768);
+
+    // A right_bound the graph sets wins over the boolean's 0: a band 16 keys to the right
+    // of the top-left diagonal, not plain causal.
+    auto band = cdnaSpec();
+    band.deprecatedCausalTopLeft = true;
+    band.diagonalAlignment = DiagonalAlignment::TOP_LEFT;
+    band.seqLenQ = 256;
+    band.seqLenKv = 1024;
+    band.rightBound = 16;
+    const auto banded = cdnaGraphMatch(band);
+    ASSERT_TRUE(banded.has_value());
+    EXPECT_EQ(tryGetBoundInt(*banded, CDNA_CAUSAL_TOKEN), 1);
+    EXPECT_EQ(tryGetBoundInt(*banded, CDNA_DIAG_OFFSET_TOKEN), 16);
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheBiasOrNone)
