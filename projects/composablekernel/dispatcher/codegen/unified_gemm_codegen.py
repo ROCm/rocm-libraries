@@ -909,6 +909,12 @@ using CLayout = {ns_name}::CLayout;
 
     def _launch_function_standard(self, config: KernelConfig) -> str:
         """Generate launch function for standard GEMM"""
+        traits_tail = self._vector_size_tails(config)[1]
+        vector = traits_tail[2:] if traits_tail else "16"
+        large_tail = (
+            f", {vector}, DataCachePrefetchKind::None, "
+            f"DataCachePrefetchKind::None, false, LargeTensors"
+        )
         return f"""
     // Shared with the registry so support checks use the launched kernel's widths.
     static constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
@@ -927,34 +933,77 @@ using CLayout = {ns_name}::CLayout;
     using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
     static constexpr index_t VectorSizeC = {self._registry_c_vector_size(config)};
 
-    static float launch(const GemmHostArgs& args, const stream_config& stream) {{
+    // LargeTensors selects 64-bit global addressing and is a compile-time
+    // pipeline argument, so the two instantiations are distinct types.
+    // LargeTensors=false passes the same defaults as the alias above.
+    template <bool LargeTensors>
+    static float launch_impl(const GemmHostArgs& args, const stream_config& stream) {{
+        using UniversalGemmProblem = UniversalGemmPipelineProblem<
+            ADataType, BDataType, AccDataType, TileShape,
+            TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
+                                            ALayout, BLayout, CLayout, TransposeC,
+                                            UseStructuredSparsity, UsePersistentKernel,
+                                            NumWaveGroups, Preshuffle{large_tail}>,
+            scheduler{self._vector_size_tails(config)[0]}>;
+        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
+        using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+
         const index_t k_grain = args.k_batch * TileK;
         const index_t K_split = (args.K + k_grain - 1) / k_grain * TileK;
         const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
         const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-        
+
         float ave_time{{0}};
-        
+
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(config, "            ")}
-            
+
             if (!GemmKernel::IsSupportedArgument(kargs)) {{
                 throw std::runtime_error("Arguments not supported!");
             }}
-            
+
             const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if config.trait.persistent else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
             const dim3 blocks = GemmKernel::BlockSize();
-            
+
             constexpr int kBlockPerCu = {config.k_block_per_cu};
             ave_time = launch_kernel(stream,
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-            
+
             return ave_time;
         }};
 
         BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
         return ave_time;
+    }}
+
+    // Same byte test as UniversalGemmKernel::IsSupportedArgument. PackedSize
+    // divides last so packed fp4 matches the kernel.
+    template <typename Layout, typename T>
+    static bool tensor_reaches_2gib(index_t rows, index_t cols, index_t stride) {{
+        constexpr size_t kSizeLimit = size_t{{1}} << 31;
+        constexpr size_t kPackedSize = numeric_traits<T>::PackedSize;
+        const size_t n = std::is_same_v<Layout, tensor_layout::gemm::RowMajor>
+                             ? static_cast<size_t>(rows)
+                             : static_cast<size_t>(cols);
+        return n * static_cast<size_t>(stride) * sizeof(T) / kPackedSize >= kSizeLimit;
+    }}
+
+    static bool operand_reaches_2gib(const GemmHostArgs& args) {{
+        // GemmKernel checks the full matrices. It does not clamp A or C to one M tile.
+        return tensor_reaches_2gib<ALayout, ADataType>(args.M, args.K, args.stride_A) ||
+               tensor_reaches_2gib<BLayout, BDataType>(args.K, args.N, args.stride_B) ||
+               tensor_reaches_2gib<CLayout, CDataType>(args.M, args.N, args.stride_E);
+    }}
+
+    static float launch(const GemmHostArgs& args, const stream_config& stream) {{
+        // PermuteB and Preshuffle cannot take the 64-bit global path.
+        if constexpr(!Preshuffle && !TileShape::PermuteB) {{
+            if(operand_reaches_2gib(args)) {{
+                return launch_impl<true>(args, stream);
+            }}
+        }}
+        return launch_impl<false>(args, stream);
     }}"""
 
     def _launch_function_batched(self, config: KernelConfig) -> str:

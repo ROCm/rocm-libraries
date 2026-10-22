@@ -205,6 +205,38 @@ def load_problems(path, variant):
     return DEFAULT_PROBLEMS
 
 
+# An operand at or above this size uses the large-tensor input path. Building
+# those inputs took about 91s for a 2 GiB fp8 B, so the normal 60s watchdog
+# expires before the kernel is launched.
+_LARGE_TENSOR_BYTES = 1 << 31
+_LARGE_TENSOR_KERNEL_TIMEOUT = 120
+
+
+def _mx_operand_bytes(dtype, rows, cols):
+    """Packed device bytes for one MX operand. C is fp16 and is counted by the caller."""
+    if dtype == "fp8":
+        return rows * cols
+    if dtype == "fp4":
+        return (rows * cols) // 2
+    return 0
+
+
+def _per_kernel_timeout(args, M, N, K, extra):
+    """Seconds allowed for one kernel. Large MX operands get a longer floor."""
+    timeout = args.kernel_timeout
+    dtype = (extra or {}).get("dtype")
+    if dtype not in ("fp4", "fp8"):
+        return timeout
+    largest = max(
+        _mx_operand_bytes(dtype, M, K),
+        _mx_operand_bytes(dtype, N, K),
+        M * N * 2,
+    )
+    if largest >= _LARGE_TENSOR_BYTES:
+        return max(timeout, _LARGE_TENSOR_KERNEL_TIMEOUT)
+    return timeout
+
+
 def _run_batch_on_device(device_id, unit, args, worker_path, base_env, extra=None):
     """Run one (problem, kernel-batch) unit in a device-pinned subprocess.
 
@@ -253,7 +285,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env, extra=Non
         )
         stdout_bytes, _ = proc.communicate(
             input=payload.encode("utf-8"),
-            timeout=args.kernel_timeout * len(batch),
+            timeout=_per_kernel_timeout(args, M, N, K, extra) * len(batch),
         )
 
         reported = set()
@@ -367,7 +399,13 @@ def benchmark_on_devices(problems, pairs, built_kernels, devices, args, worker_p
     print(f"{'=' * 80}")
     print(f"  Devices: {len(devices)} -> {', '.join(devices)}")
     print(f"  Batch size: {args.batch_size} kernels per subprocess")
-    print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
+    if (extra or {}).get("dtype") in ("fp4", "fp8"):
+        print(
+            f"  Timeout: {args.kernel_timeout}s per kernel "
+            f"(at least {_LARGE_TENSOR_KERNEL_TIMEOUT}s when an operand is >= 2 GiB)\n"
+        )
+    else:
+        print(f"  Timeout: {args.kernel_timeout}s per kernel\n")
 
     csv_file = open(csv_path, "w", newline="")
     writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)

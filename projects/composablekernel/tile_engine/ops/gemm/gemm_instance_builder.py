@@ -1088,6 +1088,69 @@ struct SelectedKernel {{
 
         return instance_code
 
+    def _large_tensor_launch_tail(self, host_args_type: str, *, offset_m: bool) -> str:
+        """Close launch_impl and add the shape check that selects LargeTensors.
+
+        offset_m mirrors MxGemmKernel: row-major A and C are checked against one
+        M tile. Standard GemmKernel checks the full matrices.
+        """
+        if offset_m:
+            stride_a = "args.stride_As[0]"
+            stride_b = "args.stride_Bs[0]"
+            m_extent = """constexpr bool kOffsetM =
+            std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor> &&
+            std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
+            TileShape::kclusterM * TileShape::kclusterN * TileShape::kclusterK == 1;
+        const ck_tile::index_t m_extent =
+            kOffsetM ? (args.M < TilePartitioner::MPerBlock ? args.M
+                                                            : TilePartitioner::MPerBlock)
+                     : args.M;"""
+        else:
+            stride_a = "args.stride_A"
+            stride_b = "args.stride_B"
+            m_extent = "const ck_tile::index_t m_extent = args.M;"
+        return f"""
+        return ave_time;
+    }}
+
+    // Same byte test as UniversalGemmKernel::IsSupportedArgument. PackedSize
+    // divides last so packed fp4 matches the kernel.
+    template <typename Layout, typename T>
+    static bool tensor_reaches_2gib(ck_tile::index_t rows,
+                                     ck_tile::index_t cols,
+                                     ck_tile::index_t stride)
+    {{
+        constexpr size_t kSizeLimit = size_t{{1}} << 31;
+        constexpr size_t kPackedSize = ck_tile::numeric_traits<T>::PackedSize;
+        const size_t n = std::is_same_v<Layout, ck_tile::tensor_layout::gemm::RowMajor>
+                             ? static_cast<size_t>(rows)
+                             : static_cast<size_t>(cols);
+        return n * static_cast<size_t>(stride) * sizeof(T) / kPackedSize >= kSizeLimit;
+    }}
+
+    static bool operand_reaches_2gib(const {host_args_type}& args)
+    {{
+        {m_extent}
+        return tensor_reaches_2gib<ALayout, ADataType>(m_extent, args.K, {stride_a}) ||
+               tensor_reaches_2gib<BLayout, BDataType>(args.K, args.N, {stride_b}) ||
+               tensor_reaches_2gib<CLayout, CDataType>(m_extent, args.N, args.stride_E);
+    }}
+
+    static float launch(const {host_args_type}& args, const ck_tile::stream_config& stream)
+    {{
+        // PermuteB and Preshuffle cannot take the 64-bit global path.
+        if constexpr(!Preshuffle && !TileShape::PermuteB)
+        {{
+            if(operand_reaches_2gib(args))
+            {{
+                return launch_impl<true>(args, stream);
+            }}
+        }}
+        return launch_impl<false>(args, stream);
+    }}
+}};
+"""
+
     def populate_launch(
         self,
         scheduler_type_map,
@@ -1124,11 +1187,18 @@ struct SelectedKernel {{
 
     // Launch function
     static float launch(const ck_tile::GemmMultiDHostArgs<DsDataType::size()>&  args, const ck_tile::stream_config& stream) {"""
-        elif self.kernel_name_prefix in ["gemm_universal", "gemm_preshuffle"]:
+        elif self.kernel_name_prefix == "gemm_preshuffle":
             instance_code = """
 
     // Launch function
     static float launch(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& stream) {"""
+        elif self.kernel_name_prefix == "gemm_universal":
+            instance_code = """
+
+    // LargeTensors is chosen from the operand byte extent. Shapes under 2 GiB
+    // stay on the 32-bit kernel.
+    template <bool LargeTensors>
+    static float launch_impl(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& stream) {"""
         elif self.kernel_name_prefix == "batched_gemm":
             instance_code = """
 
@@ -1144,8 +1214,10 @@ struct SelectedKernel {{
         elif self.kernel_name_prefix == "mx_gemm":
             instance_code = """
 
-    // Launch function
-    static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
+    // LargeTensors is chosen from the operand byte extent. Shapes under 2 GiB
+    // stay on the 32-bit kernel. A and C use one M tile when MX offsets them.
+    template <bool LargeTensors>
+    static float launch_impl(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
 
         # Scheduler initialization
         if self.kernel_name_prefix in [
@@ -1225,6 +1297,15 @@ struct SelectedKernel {{
                 if self.kernel_name_prefix == "mx_gemm"
                 else "UniversalGemmPipelineProblem"
             )
+            # VectorSize 16, prefetch None, and Async false are the trait defaults.
+            # Spelling them lets LargeTensors be the last argument. Grouped GEMM
+            # keeps the defaulted tail: its launch is not templated on the flag.
+            large_tail = ""
+            if self.kernel_name_prefix in ("gemm_universal", "mx_gemm"):
+                large_tail = (
+                    ", 16, ck_tile::DataCachePrefetchKind::None, "
+                    "ck_tile::DataCachePrefetchKind::None, false, LargeTensors"
+                )
             instance_code += f"""
 
         using UniversalGemmProblem = ck_tile::{problem_type}<
@@ -1235,7 +1316,7 @@ struct SelectedKernel {{
             ck_tile::TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                             ALayout, BLayout, CLayout, TransposeC,
                                             UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>,
+                                            NumWaveGroups, Preshuffle{large_tail}>,
             scheduler>;"""
 
         # GemmPipeline
@@ -1314,10 +1395,16 @@ struct SelectedKernel {{
         float ave_time = ck_tile::launch_kernel(
             stream,
             ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-
+"""
+            if self.kernel_name_prefix == "gemm_universal":
+                instance_code += self._large_tensor_launch_tail(
+                    "ck_tile::GemmHostArgs", offset_m=False
+                )
+            else:
+                instance_code += """
         return ave_time;
-    }}
-}};
+    }
+};
 """
 
         elif self.kernel_name_prefix == "batched_gemm":
@@ -1428,11 +1515,10 @@ struct SelectedKernel {{
         float ave_time = ck_tile::launch_kernel(
             stream,
             ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
-
-        return ave_time;
-    }}
-}};
 """
+            instance_code += self._large_tensor_launch_tail(
+                "MxGemmHostArgs", offset_m=True
+            )
         return instance_code
 
     def _populate_launch_aquant(
