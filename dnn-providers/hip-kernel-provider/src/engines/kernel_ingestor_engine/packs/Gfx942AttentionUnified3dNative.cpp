@@ -921,7 +921,7 @@ constexpr double UNSUPPORTED_SCORE = 0.0;
  *  3. ties to the smaller num_segments, then the smaller block_size.
  *
  * Every (block_size, num_segments) pair gets a distinct score. rocKE's split rule is often
- * not the fastest choice; a better selection is AICK-2545's, not this scorer's.
+ * not the fastest choice; a tuned selection, not this scorer, is the place for that.
  */
 double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,

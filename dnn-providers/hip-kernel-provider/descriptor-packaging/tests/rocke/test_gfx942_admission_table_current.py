@@ -9,10 +9,11 @@ library. This test re-runs the generator in memory and requires the committed
 table byte-for-byte, so a change to the candidate's admission fails CI even
 when nobody regenerates the table.
 
-CI lane: the ``hip-kernel-provider-hkp-pack`` CTest (quick pass), which runs
-``pytest descriptor-packaging/tests`` from the source tree on builds with
-``HIPKERNELPROVIDER_ENABLE_ROCKE=ON``. ``conftest.py`` puts the rocKE library on
-``sys.path`` for the generator's imports.
+CI lane: the ``hip-kernel-provider-hkp-pack-quick`` CTest, which runs
+``pytest descriptor-packaging/tests -m quick`` from the source tree; it is
+registered only on builds with ``HIPKERNELPROVIDER_ENABLE_ROCKE=ON``.
+``conftest.py`` puts the rocKE library on ``sys.path`` for the generator's
+imports.
 
 Fix a failure by regenerating the table (command in the generator docstring)
 and updating the engine's graph match in ``Gfx942AttentionUnified3dNative.cpp``.
