@@ -20,8 +20,12 @@ target_compile_features(tensilelite-codegen PUBLIC cxx_std_20)
 
 target_sources(tensilelite-codegen
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Arith.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Gfx9Legality.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IRBuilder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Kernel.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Move.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/OperandUtils.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target.cpp"
 )

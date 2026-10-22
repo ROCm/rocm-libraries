@@ -18,6 +18,20 @@ namespace rocm::tensilelite::codegen {
 /// follow the arch VGPRs in the unified register file.
 enum class RegisterKind { sgpr, vgpr, agpr };
 
+/// Non-owning reference to count registers of kind starting at index start,
+/// such as one half of a register pair. It does not keep the registers
+/// allocated, so it must not be used after the range it came from is released.
+struct RegisterRef {
+  RegisterKind kind;
+  int start;
+  int count;
+
+  /// Returns a container naming the registers, such as v[4:7], s2 or acc5.
+  std::shared_ptr<rocisa::RegisterContainer> container() const;
+
+  bool operator==(const RegisterRef &) const = default;
+};
+
 class RegisterAllocator;
 
 /// Move-only RAII handle on a contiguous range of registers of one kind; a
@@ -42,11 +56,15 @@ public:
   /// Returns a container naming the whole range, such as v[4:7], s2 or
   /// acc[0:3].
   std::shared_ptr<rocisa::RegisterContainer> container() const;
-  /// Returns a container naming count registers starting offset registers
-  /// into the range. The container does not own the registers, so it must
-  /// not be used after the range is released.
+  /// Same as ref(offset, count).container(), so it throws the same exception.
   std::shared_ptr<rocisa::RegisterContainer> sub(int offset,
                                                  int count = 1) const;
+
+  /// Returns a reference to the whole range.
+  RegisterRef ref() const;
+  /// Returns a reference to count registers starting offset registers into
+  /// the range. Throws std::out_of_range if they are not inside the range.
+  RegisterRef ref(int offset, int count = 1) const;
 
   /// Returns the registers to the allocator before the handle goes out of
   /// scope. Does nothing on a handle that owns nothing.

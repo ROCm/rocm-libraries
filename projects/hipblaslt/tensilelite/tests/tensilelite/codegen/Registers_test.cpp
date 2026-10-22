@@ -216,9 +216,36 @@ TEST_F(Registers, ContainerText) {
   EXPECT_EQ(single.container()->toString(), "s2");
 }
 
-TEST_F(Registers, SubRangeOutOfBoundsAsserts) {
+TEST_F(Registers, SubRangeOutOfBoundsThrows) {
   RegisterRange range = allocator.allocate(vgpr, 4);
-  EXPECT_DEBUG_DEATH(range.sub(3, 2), "sub-range out of bounds");
+  EXPECT_THROW(range.sub(3, 2), std::out_of_range);
+}
+
+TEST_F(Registers, RefCoversRange) {
+  RegisterRange range = allocator.reserve(vgpr, 4, 4);
+  EXPECT_EQ(range.ref(), (RegisterRef{vgpr, 4, 4}));
+  EXPECT_EQ(range.ref(1, 2), (RegisterRef{vgpr, 5, 2}));
+  EXPECT_EQ(range.ref(3), (RegisterRef{vgpr, 7, 1}));
+  EXPECT_EQ(range.ref(1, 2).container()->toString(), "v[5:6]");
+  EXPECT_EQ(range.ref().container()->toString(), "v[4:7]");
+}
+
+TEST_F(Registers, RefContainerTextPerKind) {
+  RegisterRange scalars = allocator.reserve(sgpr, 2, 4);
+  RegisterRange accumulators = allocator.reserve(agpr, 4, 4);
+  EXPECT_EQ(scalars.ref(1, 2).container()->toString(), "s[3:4]");
+  EXPECT_EQ(scalars.ref(2).container()->toString(), "s4");
+  EXPECT_EQ(accumulators.ref(1, 2).container()->toString(), "acc[5:6]");
+  EXPECT_EQ(accumulators.ref(1).container()->toString(), "acc5");
+}
+
+TEST_F(Registers, RefOutOfBoundsThrows) {
+  RegisterRange range = allocator.allocate(vgpr, 4);
+  EXPECT_THROW(range.ref(-1, 1), std::out_of_range);
+  EXPECT_THROW(range.ref(0, 0), std::out_of_range);
+  EXPECT_THROW(range.ref(3, 2), std::out_of_range);
+  EXPECT_THROW(range.ref(4, 1), std::out_of_range);
+  EXPECT_NO_THROW(range.ref(3, 1));
 }
 
 } // namespace

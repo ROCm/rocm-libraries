@@ -4,6 +4,7 @@
 #ifndef ROCM_TENSILELITE_CODEGEN_IRBUILDER_HPP
 #define ROCM_TENSILELITE_CODEGEN_IRBUILDER_HPP
 
+#include <tensilelite/codegen/Operand.hpp>
 #include <tensilelite/codegen/Registers.hpp>
 #include <tensilelite/codegen/Target.hpp>
 
@@ -119,6 +120,55 @@ public:
   /// RegisterAllocator::allocate.
   RegisterRange allocateAgpr(int count, int alignment = 1,
                              std::string_view tag = {});
+
+  // The moves below copy one value into a register.
+  //
+  // movb32 and movb64 pick the instruction from the register kinds: s_mov_b32
+  // and s_mov_b64 for an SGPR dst, v_mov_b32 and v_mov_b64 for a VGPR dst,
+  // v_accvgpr_write_b32 for an AGPR dst and v_accvgpr_read_b32 for an AGPR src.
+  // There is no implicit readfirstlane, so an SGPR dst rejects a VGPR or AGPR
+  // src. An AGPR dst takes a VGPR, an SGPR or an inline constant, but no
+  // literal (copy it to a VGPR first) and no AGPR (rocisa has no
+  // v_accvgpr_mov_b32). Throws std::invalid_argument, before emitting
+  // anything, if the combination is not supported, if dst or a register src
+  // has the wrong number of registers, or if an immediate does not fit.
+
+  /// Emits dst = src for one register. An immediate must lie in
+  /// [INT32_MIN, UINT32_MAX] and is used as a 32-bit pattern.
+  void movb32(RegisterRef dst, Operand src);
+  /// Emits dst = src for a register pair; an immediate is the full 64-bit
+  /// value. One 64-bit mov is used when both pairs are even-aligned and the
+  /// kinds allow it, and an immediate is an inline constant or in
+  /// [0, UINT32_MAX]; otherwise two movb32 on the halves, which covers
+  /// misaligned pairs, AGPRs and other immediates. Overlapping pairs are
+  /// copied correctly.
+  void movb64(RegisterRef dst, Operand src);
+
+  // The 32-bit integer ops below share these rules. Results wrap modulo 2^32,
+  // so the ops are sign-agnostic.
+  //
+  // The op is a SALU instruction (s_add_u32, s_sub_u32, s_mul_i32) iff dst and
+  // every register operand are SGPRs; SALU add and sub write SCC. A VGPR dst
+  // gives a VALU instruction (v_add_u32, v_sub_u32, v_mul_lo_u32). SGPR and
+  // immediate operands are legalized for gfx9 (one SGPR or literal per
+  // instruction, no literals in VOP3, VOP2 src1 a VGPR) by swapping
+  // commutative operands or copying an operand into a temporary register,
+  // which is released after the op.
+  //
+  // Immediates must lie in [INT32_MIN, UINT32_MAX] and are used as 32-bit
+  // patterns. dst may alias an operand.
+  //
+  // Throws std::invalid_argument, before emitting anything, if dst or a
+  // register operand is not exactly one register or is an AGPR, if an
+  // immediate does not fit 32 bits, or if dst is an SGPR and an operand is a
+  // VGPR.
+
+  /// Emits dst = a + b.
+  void addi32(RegisterRef dst, Operand a, Operand b);
+  /// Emits dst = a - b.
+  void subi32(RegisterRef dst, Operand a, Operand b);
+  /// Emits dst = the low 32 bits of a * b.
+  void muli32(RegisterRef dst, Operand a, Operand b);
 
 private:
   void insertItem(const std::shared_ptr<rocisa::Item> &item);
