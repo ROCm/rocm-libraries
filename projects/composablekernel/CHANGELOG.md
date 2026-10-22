@@ -20,6 +20,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 * Omitted redundant output/workspace clears for packed, completely overwritten split-1 grouped convolution backward paths.
 * Capped automatic split-K of gfx1250 two-stage WMMA grouped backward-weight at the squared per-CU occupancy.
+* Use gfx1250 Tensor Data Mover loads for packed, unmerged FP16/BF16/FP32 weights in the wavelet grouped-convolution forward pipeline; preserve LDS layout, tail zero filling, and the existing paths on other architectures.
 
 ### Fixed
 

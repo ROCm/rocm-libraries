@@ -5,6 +5,7 @@
 
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/scheduler_enum.hpp"
+#include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_tdm.hpp"
 
 namespace ck {
 
@@ -181,6 +182,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         __builtin_amdgcn_sched_barrier(0);
 
         wait_dscnt();
+        wait_tdm_transfer<ABlockTransfer>();
+        wait_tdm_transfer<BBlockTransfer>();
         block_sync_lds_direct_load();
 
         // Second prefetch buffer A1, B1
@@ -207,6 +210,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
             do
             {
                 wait_dscnt();
+                wait_tdm_transfer<ABlockTransfer>();
+                wait_tdm_transfer<BBlockTransfer>();
                 block_sync_lds_direct_load();
 
                 // Load A0, B0. Precompute indices for A1, B1
@@ -222,6 +227,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 __builtin_amdgcn_sched_barrier(0);
 
                 wait_dscnt();
+                wait_tdm_transfer<ABlockTransfer>();
+                wait_tdm_transfer<BBlockTransfer>();
                 block_sync_lds_direct_load();
 
                 // Load A1, B1. Precompute indices for A0, B0
@@ -245,6 +252,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         {
             // Wait for last load of A1, B1 (to be processed by math waves)
             wait_dscnt();
+            wait_tdm_transfer<ABlockTransfer>();
+            wait_tdm_transfer<BBlockTransfer>();
             block_sync_lds_direct_load();
         }
     }

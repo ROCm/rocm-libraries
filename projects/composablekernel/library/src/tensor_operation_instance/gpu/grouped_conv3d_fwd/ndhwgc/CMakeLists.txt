@@ -105,4 +105,13 @@ if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
     APPEND PROPERTY COMPILE_OPTIONS "-mllvm" "-amdgpu-early-inline-all=false")
 endif()
 
+# Source-level options also reach AMDGPU link/codegen in fat builds.
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+  set_property(SOURCE
+    xdl/wavelet/device_grouped_conv3d_fwd_xdl_wavelet_ndhwgc_gkzyxc_ndhwgk_f16_instance.cpp
+    xdl/wavelet/device_grouped_conv3d_fwd_xdl_wavelet_ndhwgc_gkzyxc_ndhwgk_bf16_instance.cpp
+    xdl/wavelet/device_grouped_conv3d_fwd_xdl_wavelet_ndhwgc_gkzyxc_ndhwgk_f32_instance.cpp
+    APPEND PROPERTY COMPILE_OPTIONS "-mllvm" "-enable-post-misched=1")
+endif()
+
 add_instance_library(device_grouped_conv3d_fwd_ndhwgc_instance ${GROUPED_CONV3D_FWD_NDHWGC})

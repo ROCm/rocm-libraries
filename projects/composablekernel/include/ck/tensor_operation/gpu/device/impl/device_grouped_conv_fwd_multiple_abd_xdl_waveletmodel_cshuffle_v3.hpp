@@ -506,6 +506,18 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
 
     static constexpr index_t NumGemmKPrefetchStage = 1;
 
+    // The unmerged GK[Z][Y]XC GEMM weight view is a packed [N, K] tensor.
+    // The native-channel-first branch transposes its weights to this same packed view.
+    static constexpr bool UseTdmB =
+        DirectLoad && NumGroupsToMerge == 1 &&
+        (is_same_v<BDataType, half_t> || is_same_v<BDataType, bhalf_t> ||
+         is_same_v<BDataType, float>) &&
+        (is_same_v<BLayout, tensor_layout::convolution::GKXC> ||
+         is_same_v<BLayout, tensor_layout::convolution::GKYXC> ||
+         is_same_v<BLayout, tensor_layout::convolution::GKZYXC> ||
+         is_NGCHW_GKCYX_NGKHW<ALayout, BLayout, ELayout>() ||
+         is_NGCDHW_GKCZYX_NGKDHW<ALayout, BLayout, ELayout>());
+
     // Use appropriate gridwise gemm
     template <index_t NXdlPerWave_>
     using GridwiseGemmBase = GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3<
@@ -554,7 +566,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         CDEBlockTransferScalarPerVector_NPerBlock,
         AComputeDataType,
         BComputeDataType,
-        DirectLoad>;
+        DirectLoad,
+        UseTdmB>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 

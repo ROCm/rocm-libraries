@@ -84,6 +84,16 @@ if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
 set_source_files_properties(wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instance_large_tiles.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
 endif()
 
+# Disabling post-RA scheduling miscompiles the gfx1250 TDM descriptor/load.
+# Apply at the source level so the AMDGPU link/codegen step receives it too.
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+  set_property(SOURCE
+    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_f16_instance.cpp
+    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
+    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_f32_instance.cpp
+    APPEND PROPERTY COMPILE_OPTIONS "-mllvm" "-enable-post-misched=1")
+endif()
+
 # Generate sharded instances from templates
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 generate_sharded_instantiations(

@@ -13,6 +13,7 @@
 #include "ck/tensor_operation/gpu/block/blockwise_gemm_xdlops.hpp"
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v4r1.hpp"
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_direct_load.hpp"
+#include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_tdm.hpp"
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
@@ -79,7 +80,9 @@ template <typename ALayout,
           index_t CShuffleBlockTransferScalarPerVector_NPerBlock,
           typename ComputeTypeA = CDataType,
           typename ComputeTypeB = ComputeTypeA,
-          bool DirectLoad       = false>
+          bool DirectLoad       = false,
+          // The device op guarantees an unmerged packed [N, K] weight view.
+          bool PackedTdmB = false>
 struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -926,23 +929,57 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                       a_block_desc_ak0_m_ak1,
                       make_multi_index(0, 0, 0));
 
-            auto b_blockwise_copy = ThreadGroupTensorSliceTransfer_DirectLoad<
-                TileLoadThreadGroup,
-                Sequence<BK0Number, NPerBlock, BK1Number>,
-                BBlockTransferThreadClusterLengths_BK0_N_BK1,
-                BBlockTransferThreadClusterArrangeOrder,
-                BDataType,
-                BDataType,
-                decltype(b_grid_desc_bk0_n_bk1),
-                decltype(b_block_desc_bk0_n_bk1),
-                BBlockTransferSrcAccessOrder,
-                BBlockTransferSrcVectorDim,
-                2,
-                BBlockTransferSrcScalarPerVector,
-                true>(b_grid_desc_bk0_n_bk1,
-                      make_multi_index(0, n_block_data_idx_on_grid, 0),
-                      b_block_desc_bk0_n_bk1,
-                      make_multi_index(0, 0, 0));
+            constexpr auto b_tdm_layout = DeduceTdmLdsTileLayout<decltype(b_block_desc_bk0_n_bk1),
+                                                                 BK0Number,
+                                                                 NPerBlock,
+                                                                 BK1Number>();
+            constexpr bool UseTdmB =
+#if defined(__gfx125__)
+                PackedTdmB &&
+                IsTdmLdsTileLayoutSupported<BDataType, NPerBlock, KPerBlock>(b_tdm_layout);
+#else
+                false;
+#endif
+            auto b_blockwise_copy = [&]() {
+                if constexpr(UseTdmB)
+                {
+                    // Right padding changes visible lengths, not the packed backing space.
+                    // Offset(0,1,0) is raw reduction K; backing space is raw N * raw K.
+                    const index_t k_raw = __builtin_amdgcn_readfirstlane(
+                        b_grid_desc_bk0_n_bk1.CalculateOffset(make_multi_index(0, 1, 0)));
+                    const index_t n_raw = __builtin_amdgcn_readfirstlane(
+                        b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / k_raw);
+                    return ThreadGroupTensorSliceTransfer_Tdm2D<TileLoadThreadGroup,
+                                                                BDataType,
+                                                                NPerBlock,
+                                                                BK0Number,
+                                                                BK1Number,
+                                                                b_tdm_layout.rows_per_pad_group,
+                                                                b_tdm_layout.pad_elems,
+                                                                1>(
+                        p_b_grid, n_raw, k_raw, k_raw, n_block_data_idx_on_grid, 0);
+                }
+                else
+                {
+                    return ThreadGroupTensorSliceTransfer_DirectLoad<
+                        TileLoadThreadGroup,
+                        Sequence<BK0Number, NPerBlock, BK1Number>,
+                        BBlockTransferThreadClusterLengths_BK0_N_BK1,
+                        BBlockTransferThreadClusterArrangeOrder,
+                        BDataType,
+                        BDataType,
+                        decltype(b_grid_desc_bk0_n_bk1),
+                        decltype(b_block_desc_bk0_n_bk1),
+                        BBlockTransferSrcAccessOrder,
+                        BBlockTransferSrcVectorDim,
+                        2,
+                        BBlockTransferSrcScalarPerVector,
+                        true>(b_grid_desc_bk0_n_bk1,
+                              make_multi_index(0, n_block_data_idx_on_grid, 0),
+                              b_block_desc_bk0_n_bk1,
+                              make_multi_index(0, 0, 0));
+                }
+            }();
 
             GridwiseGemmLoad::template RunLoadWavePipeline<HasMainKBlockLoop, TailNum>(
                 a_grid_desc_ak0_m_ak1,
@@ -972,6 +1009,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             constexpr index_t num_access = (MXdlPerWave / CShuffleMXdlPerWavePerShuffle) *
                                            (NXdlPerWave / CShuffleNXdlPerWavePerShuffle);
             static_for<0, 2 * num_access, 1>{}([&](auto) { block_sync_lds(); });
+            // Odd tails leave an unused pong tile in flight. The epilogue reuses ping only;
+            // drain TDM before retiring the wave and releasing its LDS allocation.
+            wait_tdm_transfer<decltype(b_blockwise_copy)>();
         }
         else if(TileMathThreadGroup::IsBelong())
         {

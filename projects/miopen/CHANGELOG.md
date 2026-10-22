@@ -23,6 +23,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Validate ranked grouped CK backward-weights defaults against CK argument support at split-K 1, preserving the untuned split-1 default independently of ranked tuning hints.
 * [Conv] Omit old-dW staging for selected packed 2D FP16/BF16 grouped CK WMMA-v3 backward-weights at explicit split one on gfx1250; preserve kernel arithmetic, native clears, scratch reservations, and alias/scalar fallbacks.
 * [Conv] Omit redundant old-output staging for selected unmerged 3D grouped CK XDL-v3 forward convolutions on gfx1250 in FP32/FP16/BF16; preserve precision, workspace reservations, and staged alias/nondefault-scalar fallbacks.
+* [Conv] Use CK's gfx1250 packed-weight Tensor Data Mover forward path for eligible 2D/3D FP16/BF16/FP32 convolutions; keep the existing layout conversion, precision, kernel IDs, and workspace contracts.
 
 ### Resolved Issues
 * [BatchNorm] Honor configured BF16 output rounding in all batchnorm kernel builds, including explicit truncation mode, and fix scalar fallback indexing for recomputed spatial backward statistics on spatial extents not divisible by four.
