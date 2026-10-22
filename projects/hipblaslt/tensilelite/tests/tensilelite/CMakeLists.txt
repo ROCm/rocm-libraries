@@ -8,6 +8,8 @@ target_sources(tensilelite-tests
 
 target_link_libraries(tensilelite-tests PRIVATE roc::tensilelite-jit)
 
+add_subdirectory(codegen)
+
 if(TENSILELITE_ENABLE_JIT_PYTHON)
     # Bytecode and cache writes are disabled so the run leaves the source tree clean.
     add_test(NAME tensilelite-jit-python

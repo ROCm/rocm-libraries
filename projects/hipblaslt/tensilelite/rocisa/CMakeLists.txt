@@ -60,6 +60,62 @@ target_include_directories(rocisa-cpp
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
+# Origami and _rocisa need HIP. Set the search prefix so find_package works both in
+# developer environments and in the temporary build sandbox created by scikit-build-core / uv.
+if(ROCM_PATH)
+    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+endif()
+list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
+
+if(ROCISA_STANDALONE)
+    # The standalone wheel owns a private static Origami copy. Nested
+    # builds receive roc::origami from their parent provider.
+    block()
+        set(ORIGAMI_BUILD_SHARED_LIBS OFF)
+        add_subdirectory(
+            "${ROCM_LIBRARIES_ROOT}/shared/origami"
+            origami
+            EXCLUDE_FROM_ALL
+        )
+    endblock()
+endif()
+
+# Nanobind-free rocisa logic, shared by the _rocisa module and C++ consumers (build tree only).
+set(ROCISA_CORE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/code.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/container.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/helper.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mfma.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_branch.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_cast.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_math.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/composite.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/cycle.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/remove.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/macro_inline.cpp")
+# STATIC explicitly: the standalone build defaults BUILD_SHARED_LIBS to ON.
+add_library(rocisa-core STATIC ${ROCISA_CORE_SOURCES})
+add_library(rocisa::rocisa-core ALIAS rocisa-core)
+target_include_directories(rocisa-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include")
+target_compile_features(rocisa-core PUBLIC cxx_std_20)
+# PIC for linking into _rocisa; hidden visibility keeps _rocisa's exported symbols unchanged.
+set_target_properties(rocisa-core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden)
+# Mirrors the per-symbol sections that libnanobind-static propagates to _rocisa sources, so its link can drop unused code.
+target_compile_options(rocisa-core PRIVATE
+    $<$<NOT:$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>:-ffunction-sections>
+    $<$<NOT:$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>:-fdata-sections>)
+# Only pass/cycle.cpp uses Origami; its headers are not part of rocisa's interface.
+target_link_libraries(rocisa-core PRIVATE roc::origami)
+if(ROCISA_ENABLE_COVERAGE)
+    target_compile_options(rocisa-core PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 block()
     # nanobind requires Python to be found first.
     if(ROCISA_USE_STABLE_ABI)
@@ -82,27 +138,8 @@ block()
         FetchContent_MakeAvailable(nanobind)
     endif()
 
-    # HIP is required to build _rocisa (via hip::host).  Set the search prefix
-    # so find_package works both in developer environments and in the temporary
-    # build sandbox created by scikit-build-core / uv.
-    if(ROCM_PATH)
-        list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
-    endif()
-    list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
+    # HIP is required to build _rocisa (via hip::host).
     find_package(hip REQUIRED)
-
-    if(ROCISA_STANDALONE)
-        # The standalone wheel owns a private static Origami copy. Nested
-        # builds receive roc::origami from their parent provider.
-        block()
-            set(ORIGAMI_BUILD_SHARED_LIBS OFF)
-            add_subdirectory(
-                "${ROCM_LIBRARIES_ROOT}/shared/origami"
-                origami
-                EXCLUDE_FROM_ALL
-            )
-        endblock()
-    endif()
 
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp"
@@ -110,20 +147,14 @@ block()
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/cmp.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/cvt.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mem.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mfma.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mfma_bindings.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/extension.cpp")
     set(ROCISAFUNC_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/functions.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/argument.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_math.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_branch.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_cast.cpp")
-    set(ROCISAPASS_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/composite.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/cycle.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/remove.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp"
-                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/macro_inline.cpp")
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_math_bindings.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_branch_bindings.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_cast_bindings.cpp")
+    set(ROCISAPASS_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass_bindings.cpp")
 
     set(_rocisa_nb_flags NOMINSIZE NB_SUPPRESS_WARNINGS)
     if(ROCISA_USE_STABLE_ABI)
@@ -132,12 +163,11 @@ block()
 
     nanobind_add_module(_rocisa ${_rocisa_nb_flags}
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp"
-                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base.cpp"
-                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/code.cpp"
-                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/container.cpp"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base_bindings.cpp"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/code_bindings.cpp"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/container_bindings.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/count.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/enum.cpp"
-                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/helper.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/label.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/macro.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/register.cpp"
@@ -195,6 +225,7 @@ block()
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
+    target_link_libraries(_rocisa PRIVATE rocisa::rocisa-core)
     target_link_libraries(_rocisa PRIVATE hip::host stinkytofu::stinkytofu)
 
     # rocisa<->stinkytofu conversion glue. These sources live in the stinkytofu
