@@ -1020,6 +1020,14 @@ def _fwd_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
         yield knobs
 
 
+def _dw_fwd_cpl_arch(arch: str) -> bool:
+    """Channel-packed depthwise forward is tuned and register-budgeted for the
+    wave32 (gfx1250-class) register file only."""
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).wave_size == 32
+
+
 def _knob_grid(
     variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
 ) -> Iterator[dict]:
@@ -1046,9 +1054,10 @@ def _knob_grid(
         for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
         # Channel-packed lanes (cpl > 1); cpl == 1 keeps the knob-less identity.
-        for cpl, bws, waves_list in DW_FWD_CPL_GRID:
-            for bw, waves in itertools.product(bws, waves_list):
-                yield dict(block_w=bw, block_waves=waves, cpl=cpl)
+        if _dw_fwd_cpl_arch(arch):
+            for cpl, bws, waves_list in DW_FWD_CPL_GRID:
+                for bw, waves in itertools.product(bws, waves_list):
+                    yield dict(block_w=bw, block_waves=waves, cpl=cpl)
     elif variant == "direct_depthwise_spatial":
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
@@ -1057,10 +1066,11 @@ def _knob_grid(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
         ):
             yield dict(block_w=bw, block_h=bh, block_waves=waves, unroll_rows=unroll)
-        for bw, bh, waves in itertools.product(
-            DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES
-        ):
-            yield dict(block_w=bw, block_h=bh, block_waves=waves, cpl=DW_TILED_CPL)
+        if _dw_fwd_cpl_arch(arch):
+            for bw, bh, waves in itertools.product(
+                DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES
+            ):
+                yield dict(block_w=bw, block_h=bh, block_waves=waves, cpl=DW_TILED_CPL)
     elif variant == "direct_depthwise_dgrad":
         for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
