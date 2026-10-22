@@ -207,7 +207,7 @@ endif()
 enable_testing()
 
 # After enable_testing() so the JIT Python test gets a CTestTestfile.
-if(TENSILELITE_ENABLE_JIT)
+if(TENSILELITE_ENABLE_JIT OR TENSILELITE_ENABLE_CODEGEN)
     add_subdirectory(tensilelite)
 endif()
 

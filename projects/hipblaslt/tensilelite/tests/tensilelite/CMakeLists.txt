@@ -1,14 +1,18 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-target_sources(tensilelite-tests
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/JitCompiler_test.cpp"
-)
+if(TENSILELITE_ENABLE_JIT)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/JitCompiler_test.cpp"
+    )
 
-target_link_libraries(tensilelite-tests PRIVATE roc::tensilelite-jit)
+    target_link_libraries(tensilelite-tests PRIVATE roc::tensilelite-jit)
+endif()
 
-add_subdirectory(codegen)
+if(TENSILELITE_ENABLE_CODEGEN)
+    add_subdirectory(codegen)
+endif()
 
 if(TENSILELITE_ENABLE_JIT_PYTHON)
     # Bytecode and cache writes are disabled so the run leaves the source tree clean.
